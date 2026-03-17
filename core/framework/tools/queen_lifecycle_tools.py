@@ -36,8 +36,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass, field
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -45,6 +46,13 @@ from framework.credentials.models import CredentialError
 from framework.runner.preload_validation import credential_errors_to_json, validate_credentials
 from framework.runtime.event_bus import AgentEvent, EventType
 from framework.server.app import validate_agent_path
+from framework.tools.flowchart_utils import (
+    FLOWCHART_TYPES,
+    classify_flowchart_node,
+    load_flowchart_file,
+    save_flowchart_file,
+    synthesize_draft_from_runtime,
+)
 
 if TYPE_CHECKING:
     from framework.runner.tool_registry import ToolRegistry
@@ -84,11 +92,32 @@ class QueenPhaseState:
     inject_notification: Any = None  # async (str) -> None
     event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
 
+    # Draft graph created during planning phase (lightweight, loose-validation).
+    # Stored here so it persists across turns and can be consumed by building.
+    draft_graph: dict | None = None
+    # Whether the user has confirmed the draft and approved moving to building.
+    build_confirmed: bool = False
+    # Original draft preserved for flowchart display during runtime (pre-dissolution).
+    original_draft_graph: dict | None = None
+    # Mapping from runtime node IDs → list of original draft flowchart node IDs.
+    # Built during decision-node dissolution at confirm_and_build().
+    flowchart_map: dict[str, list[str]] | None = None
+
+    # Counter for ask_user / ask_user_multiple rounds during planning phase.
+    # Incremented via event bus subscription in queen_orchestrator.
+    planning_ask_rounds: int = 0
+
+    # Agent path — set after scaffolding so the frontend can query credentials
+    agent_path: str | None = None
+
     # Phase-specific prompts (set by session_manager after construction)
     prompt_planning: str = ""
     prompt_building: str = ""
     prompt_staging: str = ""
     prompt_running: str = ""
+
+    # Default skill operational protocols — appended to every phase prompt
+    protocols_prompt: str = ""
 
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
@@ -101,23 +130,37 @@ class QueenPhaseState:
         return list(self.building_tools)
 
     def get_current_prompt(self) -> str:
-        """Return the system prompt for the current phase."""
+        """Return the system prompt for the current phase, with fresh memory appended."""
         if self.phase == "planning":
-            return self.prompt_planning
-        if self.phase == "running":
-            return self.prompt_running
-        if self.phase == "staging":
-            return self.prompt_staging
-        return self.prompt_building
+            base = self.prompt_planning
+        elif self.phase == "running":
+            base = self.prompt_running
+        elif self.phase == "staging":
+            base = self.prompt_staging
+        else:
+            base = self.prompt_building
+
+        from framework.agents.queen.queen_memory import format_for_injection
+
+        memory = format_for_injection()
+        parts = [base]
+        if self.protocols_prompt:
+            parts.append(self.protocols_prompt)
+        if memory:
+            parts.append(memory)
+        return "\n\n".join(parts)
 
     async def _emit_phase_event(self) -> None:
         """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""
         if self.event_bus is not None:
+            data: dict = {"phase": self.phase}
+            if self.agent_path:
+                data["agent_path"] = self.agent_path
             await self.event_bus.publish(
                 AgentEvent(
                     type=EventType.QUEEN_PHASE_CHANGED,
                     stream_id="queen",
-                    data={"phase": self.phase},
+                    data=data,
                 )
             )
 
@@ -256,6 +299,432 @@ def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = 
 
     lines.append("\nStatus at session start: idle (not started).")
     return "\n".join(lines)
+
+
+# FLOWCHART_TYPES is imported from framework.tools.flowchart_utils
+
+
+def _read_agent_triggers_json(agent_path: Path) -> list[dict]:
+    """Read triggers.json from the agent's export directory."""
+    triggers_path = agent_path / "triggers.json"
+    if not triggers_path.exists():
+        return []
+    try:
+        data = json.loads(triggers_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _write_agent_triggers_json(agent_path: Path, triggers: list[dict]) -> None:
+    """Write triggers.json to the agent's export directory."""
+    triggers_path = agent_path / "triggers.json"
+    triggers_path.write_text(
+        json.dumps(triggers, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _save_trigger_to_agent(session: Any, trigger_id: str, tdef: Any) -> None:
+    """Persist a trigger definition to the agent's triggers.json."""
+    agent_path = getattr(session, "worker_path", None)
+    if agent_path is None:
+        return
+    triggers = _read_agent_triggers_json(agent_path)
+    triggers = [t for t in triggers if t.get("id") != trigger_id]
+    triggers.append(
+        {
+            "id": tdef.id,
+            "name": tdef.description or tdef.id,
+            "trigger_type": tdef.trigger_type,
+            "trigger_config": tdef.trigger_config,
+            "task": tdef.task or "",
+        }
+    )
+    _write_agent_triggers_json(agent_path, triggers)
+    logger.info("Saved trigger '%s' to %s/triggers.json", trigger_id, agent_path)
+
+
+def _remove_trigger_from_agent(session: Any, trigger_id: str) -> None:
+    """Remove a trigger definition from the agent's triggers.json."""
+    agent_path = getattr(session, "worker_path", None)
+    if agent_path is None:
+        return
+    triggers = _read_agent_triggers_json(agent_path)
+    updated = [t for t in triggers if t.get("id") != trigger_id]
+    if len(updated) != len(triggers):
+        _write_agent_triggers_json(agent_path, updated)
+        logger.info("Removed trigger '%s' from %s/triggers.json", trigger_id, agent_path)
+
+
+async def _persist_active_triggers(session: Any, session_id: str) -> None:
+    """Persist the set of active trigger IDs (and their tasks) to SessionState."""
+    runtime = getattr(session, "worker_runtime", None)
+    if runtime is None:
+        return
+    store = getattr(runtime, "_session_store", None)
+    if store is None:
+        return
+    try:
+        state = await store.read_state(session_id)
+        if state is None:
+            return
+        active_ids = list(getattr(session, "active_trigger_ids", set()))
+        state.active_triggers = active_ids
+        # Persist per-trigger task overrides
+        available = getattr(session, "available_triggers", {})
+        state.trigger_tasks = {
+            tid: available[tid].task
+            for tid in active_ids
+            if tid in available and available[tid].task
+        }
+        await store.write_state(session_id, state)
+    except Exception:
+        logger.warning(
+            "Failed to persist active triggers for session %s", session_id, exc_info=True
+        )
+
+
+async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None:
+    """Start an asyncio background task that fires the trigger on a timer."""
+    from framework.graph.event_loop_node import TriggerEvent
+
+    cron_expr = tdef.trigger_config.get("cron")
+    interval_minutes = tdef.trigger_config.get("interval_minutes")
+
+    async def _timer_loop() -> None:
+        if cron_expr:
+            from croniter import croniter
+
+            cron = croniter(cron_expr, datetime.now(tz=UTC))
+
+        while True:
+            try:
+                if cron_expr:
+                    next_fire = cron.get_next(datetime)
+                    delay = (next_fire - datetime.now(tz=UTC)).total_seconds()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                else:
+                    await asyncio.sleep(float(interval_minutes) * 60)
+
+                # Record next fire time for introspection (monotonic, matches routes)
+                fire_times = getattr(session, "trigger_next_fire", None)
+                if fire_times is not None:
+                    _next_delay = float(interval_minutes) * 60 if interval_minutes else 60
+                    fire_times[trigger_id] = time.monotonic() + _next_delay
+
+                # Gate on worker being loaded
+                if getattr(session, "worker_runtime", None) is None:
+                    continue
+
+                # Fire into queen node
+                executor = getattr(session, "queen_executor", None)
+                if executor is None:
+                    continue
+                queen_node = getattr(executor, "node_registry", {}).get("queen")
+                if queen_node is None:
+                    continue
+
+                event = TriggerEvent(
+                    trigger_type="timer",
+                    source_id=trigger_id,
+                    payload={
+                        "task": tdef.task or "",
+                        "trigger_config": tdef.trigger_config,
+                    },
+                )
+                await queen_node.inject_trigger(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("Timer trigger '%s' tick failed", trigger_id, exc_info=True)
+
+    task = asyncio.create_task(_timer_loop(), name=f"trigger_timer_{trigger_id}")
+    if not hasattr(session, "active_timer_tasks"):
+        session.active_timer_tasks = {}
+    session.active_timer_tasks[trigger_id] = task
+
+
+async def _start_trigger_webhook(session: Any, trigger_id: str, tdef: Any) -> None:
+    """Subscribe to WEBHOOK_RECEIVED events and route matching ones to the queen."""
+    from framework.graph.event_loop_node import TriggerEvent
+    from framework.runtime.webhook_server import WebhookRoute, WebhookServer, WebhookServerConfig
+
+    bus = session.event_bus
+    path = tdef.trigger_config.get("path", "")
+    methods = [m.upper() for m in tdef.trigger_config.get("methods", ["POST"])]
+
+    async def _on_webhook(event: AgentEvent) -> None:
+        data = event.data or {}
+        if data.get("path") != path:
+            return
+        if data.get("method", "").upper() not in methods:
+            return
+        # Gate on worker being loaded
+        if getattr(session, "worker_runtime", None) is None:
+            return
+        executor = getattr(session, "queen_executor", None)
+        if executor is None:
+            return
+        queen_node = getattr(executor, "node_registry", {}).get("queen")
+        if queen_node is None:
+            return
+
+        trigger_event = TriggerEvent(
+            trigger_type="webhook",
+            source_id=trigger_id,
+            payload={
+                "task": tdef.task or "",
+                "path": data.get("path", ""),
+                "method": data.get("method", ""),
+                "headers": data.get("headers", {}),
+                "payload": data.get("payload", {}),
+                "query_params": data.get("query_params", {}),
+            },
+        )
+        await queen_node.inject_trigger(trigger_event)
+
+    sub_id = bus.subscribe(
+        event_types=[EventType.WEBHOOK_RECEIVED],
+        handler=_on_webhook,
+        filter_stream=trigger_id,
+    )
+    if not hasattr(session, "active_webhook_subs"):
+        session.active_webhook_subs = {}
+    session.active_webhook_subs[trigger_id] = sub_id
+
+    # Ensure the webhook HTTP server is running
+    if getattr(session, "queen_webhook_server", None) is None:
+        port = int(tdef.trigger_config.get("port", 8090))
+        config = WebhookServerConfig(host="127.0.0.1", port=port)
+        server = WebhookServer(bus, config)
+        session.queen_webhook_server = server
+
+    server = session.queen_webhook_server
+    route = WebhookRoute(source_id=trigger_id, path=path, methods=methods)
+    server.add_route(route)
+    if not getattr(server, "is_running", False):
+        await server.start()
+        server.is_running = True
+
+
+def _dissolve_planning_nodes(
+    draft: dict,
+) -> tuple[dict, dict[str, list[str]]]:
+    """Convert planning-only nodes into runtime-compatible structures.
+
+    Two kinds of planning-only nodes are dissolved:
+
+    **Decision nodes** (flowchart diamonds):
+    1. Merging the decision clause into the predecessor node's success_criteria.
+    2. Rewiring the decision's yes/no outgoing edges as on_success/on_failure
+       edges from the predecessor.
+    3. Removing the decision node from the graph.
+
+    If a decision node has no predecessor (i.e. it's the first node), it is
+    converted to a regular process node instead of being dissolved.
+
+    **Sub-agent nodes** (flowchart subroutines):
+    1. Adding the sub-agent's ID to the predecessor's sub_agents list.
+    2. Removing the sub-agent node and its edges.
+
+    Returns (converted_draft, flowchart_map) where flowchart_map maps each
+    surviving runtime node ID to the list of original draft node IDs it absorbed.
+    """
+    import copy as _copy
+
+    nodes: list[dict] = _copy.deepcopy(draft.get("nodes", []))
+    edges: list[dict] = _copy.deepcopy(draft.get("edges", []))
+
+    # Index helpers
+    node_by_id: dict[str, dict] = {n["id"]: n for n in nodes}
+
+    def _incoming(nid: str) -> list[dict]:
+        return [e for e in edges if e["target"] == nid]
+
+    def _outgoing(nid: str) -> list[dict]:
+        return [e for e in edges if e["source"] == nid]
+
+    # Identify decision nodes
+    decision_ids = [n["id"] for n in nodes if n.get("flowchart_type") == "decision"]
+
+    # Track which draft nodes each runtime node absorbed
+    absorbed: dict[str, list[str]] = {}  # runtime_id -> [draft_ids...]
+
+    # Process decisions in node-list order (topological for linear graphs)
+    for d_id in decision_ids:
+        d_node = node_by_id.get(d_id)
+        if d_node is None:
+            continue  # already removed by a prior dissolution
+
+        in_edges = _incoming(d_id)
+        out_edges = _outgoing(d_id)
+
+        # Classify outgoing edges into yes/no branches
+        yes_edge: dict | None = None
+        no_edge: dict | None = None
+
+        for oe in out_edges:
+            lbl = (oe.get("label") or "").lower().strip()
+            cond = (oe.get("condition") or "").lower().strip()
+
+            if lbl in ("yes", "true", "pass") or cond == "on_success":
+                yes_edge = oe
+            elif lbl in ("no", "false", "fail") or cond == "on_failure":
+                no_edge = oe
+
+        # Fallback: if exactly 2 outgoing and couldn't classify, assign by order
+        if len(out_edges) == 2 and (yes_edge is None or no_edge is None):
+            if yes_edge is None and no_edge is None:
+                yes_edge, no_edge = out_edges[0], out_edges[1]
+            elif yes_edge is None:
+                yes_edge = [e for e in out_edges if e is not no_edge][0]
+            else:
+                no_edge = [e for e in out_edges if e is not yes_edge][0]
+
+        # Decision clause: prefer decision_clause, fall back to description/name
+        clause = (
+            d_node.get("decision_clause") or d_node.get("description") or d_node.get("name") or d_id
+        ).strip()
+
+        predecessors = [node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id]
+
+        if not predecessors:
+            # Decision at start: convert to regular process node
+            d_node["flowchart_type"] = "process"
+            fc_meta = FLOWCHART_TYPES["process"]
+            d_node["flowchart_shape"] = fc_meta["shape"]
+            d_node["flowchart_color"] = fc_meta["color"]
+            if not d_node.get("success_criteria"):
+                d_node["success_criteria"] = clause
+            # Rewire outgoing edges to on_success/on_failure
+            if yes_edge:
+                yes_edge["condition"] = "on_success"
+            if no_edge:
+                no_edge["condition"] = "on_failure"
+            absorbed[d_id] = absorbed.get(d_id, [d_id])
+            continue
+
+        # Dissolve: merge into each predecessor
+        for pred in predecessors:
+            pid = pred["id"]
+
+            # Merge decision clause into predecessor's success_criteria
+            existing = (pred.get("success_criteria") or "").strip()
+            if existing:
+                pred["success_criteria"] = f"{existing}; then evaluate: {clause}"
+            else:
+                pred["success_criteria"] = clause
+
+            # Remove the edge from predecessor -> decision
+            edges[:] = [e for e in edges if not (e["source"] == pid and e["target"] == d_id)]
+
+            # Wire predecessor -> yes/no targets
+            edge_counter = len(edges)
+            if yes_edge:
+                edges.append(
+                    {
+                        "id": f"edge-dissolved-{edge_counter}",
+                        "source": pid,
+                        "target": yes_edge["target"],
+                        "condition": "on_success",
+                        "description": yes_edge.get("description", ""),
+                        "label": yes_edge.get("label", "Yes"),
+                    }
+                )
+                edge_counter += 1
+            if no_edge:
+                edges.append(
+                    {
+                        "id": f"edge-dissolved-{edge_counter}",
+                        "source": pid,
+                        "target": no_edge["target"],
+                        "condition": "on_failure",
+                        "description": no_edge.get("description", ""),
+                        "label": no_edge.get("label", "No"),
+                    }
+                )
+
+            # Record absorption
+            prev_absorbed = absorbed.get(pid, [pid])
+            if d_id not in prev_absorbed:
+                prev_absorbed.append(d_id)
+            absorbed[pid] = prev_absorbed
+
+        # Remove decision node and all its edges
+        edges[:] = [e for e in edges if e["source"] != d_id and e["target"] != d_id]
+        nodes[:] = [n for n in nodes if n["id"] != d_id]
+        del node_by_id[d_id]
+
+    # ── Dissolve sub-agent nodes ──────────────────────────────
+    # Sub-agent nodes are leaf delegates: parent -> subagent (no outgoing).
+    # Dissolution adds the subagent's ID to parent's sub_agents list.
+    subagent_ids = [
+        n["id"]
+        for n in nodes
+        if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
+    ]
+
+    for sa_id in subagent_ids:
+        sa_node = node_by_id.get(sa_id)
+        if sa_node is None:
+            continue
+
+        in_edges = _incoming(sa_id)
+        out_edges = _outgoing(sa_id)
+
+        # Validate: sub-agent nodes must be leaves (no outgoing edges)
+        if out_edges:
+            logger.warning(
+                "Sub-agent node '%s' has outgoing edges — they will be dropped "
+                "during dissolution. Sub-agent nodes should be leaf nodes.",
+                sa_id,
+            )
+
+        # Attach to each predecessor's sub_agents list
+        for ie in in_edges:
+            pred_id = ie["source"]
+            pred = node_by_id.get(pred_id)
+            if pred is None:
+                continue
+
+            existing_subs = pred.get("sub_agents") or []
+            if sa_id not in existing_subs:
+                existing_subs.append(sa_id)
+            pred["sub_agents"] = existing_subs
+
+            # Record absorption
+            prev_absorbed = absorbed.get(pred_id, [pred_id])
+            if sa_id not in prev_absorbed:
+                prev_absorbed.append(sa_id)
+            absorbed[pred_id] = prev_absorbed
+
+        # Remove sub-agent node and all its edges
+        edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
+        nodes[:] = [n for n in nodes if n["id"] != sa_id]
+        del node_by_id[sa_id]
+
+    # Build complete flowchart_map (identity for non-absorbed nodes)
+    flowchart_map: dict[str, list[str]] = {}
+    for n in nodes:
+        nid = n["id"]
+        flowchart_map[nid] = absorbed.get(nid, [nid])
+
+    # Rebuild terminal_nodes (decision targets may have changed)
+    sources = {e["source"] for e in edges}
+    all_ids = {n["id"] for n in nodes}
+    terminal_ids = all_ids - sources
+    if not terminal_ids and nodes:
+        terminal_ids = {nodes[-1]["id"]}
+
+    converted = dict(draft)
+    converted["nodes"] = nodes
+    converted["edges"] = edges
+    converted["terminal_nodes"] = sorted(terminal_ids)
+    converted["entry_node"] = nodes[0]["id"] if nodes else ""
+
+    return converted, flowchart_map
 
 
 def register_queen_lifecycle_tools(
@@ -579,14 +1048,47 @@ def register_queen_lifecycle_tools(
                 return json.dumps(
                     {"error": f"Cannot replan: currently in {phase_state.phase} phase."}
                 )
+
+            # Carry forward the current draft: restore original (pre-dissolution)
+            # draft so the queen can edit it in planning, rather than starting
+            # from scratch.
+            if phase_state.original_draft_graph is not None:
+                phase_state.draft_graph = phase_state.original_draft_graph
+                phase_state.original_draft_graph = None
+                phase_state.flowchart_map = None
+            phase_state.build_confirmed = False
+
             await phase_state.switch_to_planning(source="tool")
+
+            # Re-emit draft so frontend shows the flowchart in planning mode
+            bus = phase_state.event_bus
+            if bus is not None and phase_state.draft_graph is not None:
+                try:
+                    await bus.publish(
+                        AgentEvent(
+                            type=EventType.DRAFT_GRAPH_UPDATED,
+                            stream_id="queen",
+                            data=phase_state.draft_graph,
+                        )
+                    )
+                except Exception:
+                    logger.warning("Failed to re-emit draft during replan", exc_info=True)
+
+        has_draft = phase_state is not None and phase_state.draft_graph is not None
         return json.dumps(
             {
                 "status": "replanning",
                 "phase": "planning",
+                "has_previous_draft": has_draft,
                 "message": (
                     "Switched to PLANNING phase. Coding tools removed. "
-                    "Discuss the new design with the user."
+                    + (
+                        "The previous draft flowchart has been restored (with "
+                        "decision and sub-agent nodes intact). Call save_agent_draft() "
+                        "to update the design, then confirm_and_build() when ready."
+                        if has_draft
+                        else "Discuss the new design with the user."
+                    )
                 ),
             }
         )
@@ -595,11 +1097,1057 @@ def register_queen_lifecycle_tools(
         name="replan_agent",
         description=(
             "Switch from building back to planning phase. "
-            "Only use when the user explicitly asks to re-plan or redesign the agent."
+            "Use when the user wants to change integrations, swap tools, "
+            "rethink the flow, or discuss design changes before building them."
         ),
         parameters={"type": "object", "properties": {}},
     )
     registry.register("replan_agent", _replan_tool, lambda inputs: replan_agent())
+    tools_registered += 1
+
+    # --- Flowchart utilities ---------------------------------------------------
+    # Flowchart persistence, classification, and synthesis functions are now in
+    # framework.tools.flowchart_utils. Local aliases for backward compatibility
+    # within this closure:
+    _save_flowchart_file = save_flowchart_file
+    _load_flowchart_file = load_flowchart_file
+    _synthesize_draft_from_runtime = synthesize_draft_from_runtime
+    _classify_flowchart_node = classify_flowchart_node
+
+    # --- save_agent_draft (Planning phase — declarative graph preview) ---------
+    # Creates a lightweight draft graph with nodes, edges, and business metadata.
+    # Loose validation: only requires names and descriptions. Emits an event
+    # so the frontend can render the graph during planning (before any code).
+
+    def _dissolve_planning_nodes(
+        draft: dict,
+    ) -> tuple[dict, dict[str, list[str]]]:
+        """Convert planning-only nodes into runtime-compatible structures.
+
+        Two kinds of planning-only nodes are dissolved:
+
+        **Decision nodes** (flowchart diamonds):
+        1. Merging the decision clause into the predecessor node's success_criteria.
+        2. Rewiring the decision's yes/no outgoing edges as on_success/on_failure
+           edges from the predecessor.
+        3. Removing the decision node from the graph.
+
+        **Sub-agent / browser nodes** (node_type == "gcu" or flowchart_type == "browser"):
+        1. Adding the sub-agent node's ID to the predecessor's sub_agents list.
+        2. Removing the sub-agent node and its connecting edge.
+        3. Sub-agent nodes must not have outgoing edges (they are leaf delegates).
+
+        Returns (converted_draft, flowchart_map) where flowchart_map maps
+        runtime node IDs → list of original draft node IDs they absorbed.
+        """
+        import copy as _copy
+
+        nodes: list[dict] = _copy.deepcopy(draft.get("nodes", []))
+        edges: list[dict] = _copy.deepcopy(draft.get("edges", []))
+
+        # Index helpers
+        node_by_id: dict[str, dict] = {n["id"]: n for n in nodes}
+
+        def _incoming(nid: str) -> list[dict]:
+            return [e for e in edges if e["target"] == nid]
+
+        def _outgoing(nid: str) -> list[dict]:
+            return [e for e in edges if e["source"] == nid]
+
+        # Identify decision nodes
+        decision_ids = [n["id"] for n in nodes if n.get("flowchart_type") == "decision"]
+
+        # Track which draft nodes each runtime node absorbed
+        absorbed: dict[str, list[str]] = {}  # runtime_id → [draft_ids...]
+
+        # Process decisions in node-list order (topological for linear graphs)
+        for d_id in decision_ids:
+            d_node = node_by_id.get(d_id)
+            if d_node is None:
+                continue  # already removed by a prior dissolution
+
+            in_edges = _incoming(d_id)
+            out_edges = _outgoing(d_id)
+
+            # Classify outgoing edges into yes/no branches
+            yes_edge: dict | None = None
+            no_edge: dict | None = None
+
+            for oe in out_edges:
+                lbl = (oe.get("label") or "").lower().strip()
+                cond = (oe.get("condition") or "").lower().strip()
+
+                if lbl in ("yes", "true", "pass") or cond == "on_success":
+                    yes_edge = oe
+                elif lbl in ("no", "false", "fail") or cond == "on_failure":
+                    no_edge = oe
+
+            # Fallback: if exactly 2 outgoing and couldn't classify, assign by order
+            if len(out_edges) == 2 and (yes_edge is None or no_edge is None):
+                if yes_edge is None and no_edge is None:
+                    yes_edge, no_edge = out_edges[0], out_edges[1]
+                elif yes_edge is None:
+                    yes_edge = [e for e in out_edges if e is not no_edge][0]
+                else:
+                    no_edge = [e for e in out_edges if e is not yes_edge][0]
+
+            # Decision clause: prefer decision_clause, fall back to description/name
+            clause = (
+                d_node.get("decision_clause")
+                or d_node.get("description")
+                or d_node.get("name")
+                or d_id
+            ).strip()
+
+            predecessors = [node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id]
+
+            if not predecessors:
+                # Decision at start: convert to regular process node
+                d_node["flowchart_type"] = "process"
+                fc_meta = FLOWCHART_TYPES["process"]
+                d_node["flowchart_shape"] = fc_meta["shape"]
+                d_node["flowchart_color"] = fc_meta["color"]
+                if not d_node.get("success_criteria"):
+                    d_node["success_criteria"] = clause
+                # Rewire outgoing edges to on_success/on_failure
+                if yes_edge:
+                    yes_edge["condition"] = "on_success"
+                if no_edge:
+                    no_edge["condition"] = "on_failure"
+                absorbed[d_id] = absorbed.get(d_id, [d_id])
+                continue
+
+            # Dissolve: merge into each predecessor
+            for pred in predecessors:
+                pid = pred["id"]
+
+                # Merge decision clause into predecessor's success_criteria
+                existing = (pred.get("success_criteria") or "").strip()
+                if existing:
+                    pred["success_criteria"] = f"{existing}; then evaluate: {clause}"
+                else:
+                    pred["success_criteria"] = clause
+
+                # Remove the edge from predecessor → decision
+                edges[:] = [e for e in edges if not (e["source"] == pid and e["target"] == d_id)]
+
+                # Wire predecessor → yes/no targets
+                edge_counter = len(edges)
+                if yes_edge:
+                    edges.append(
+                        {
+                            "id": f"edge-dissolved-{edge_counter}",
+                            "source": pid,
+                            "target": yes_edge["target"],
+                            "condition": "on_success",
+                            "description": yes_edge.get("description", ""),
+                            "label": yes_edge.get("label", "Yes"),
+                        }
+                    )
+                    edge_counter += 1
+                if no_edge:
+                    edges.append(
+                        {
+                            "id": f"edge-dissolved-{edge_counter}",
+                            "source": pid,
+                            "target": no_edge["target"],
+                            "condition": "on_failure",
+                            "description": no_edge.get("description", ""),
+                            "label": no_edge.get("label", "No"),
+                        }
+                    )
+
+                # Record absorption
+                prev_absorbed = absorbed.get(pid, [pid])
+                if d_id not in prev_absorbed:
+                    prev_absorbed.append(d_id)
+                absorbed[pid] = prev_absorbed
+
+            # Remove decision node and all its edges
+            edges[:] = [e for e in edges if e["source"] != d_id and e["target"] != d_id]
+            nodes[:] = [n for n in nodes if n["id"] != d_id]
+            del node_by_id[d_id]
+
+        # ── Dissolve sub-agent nodes ──────────────────────────────
+        # Sub-agent nodes are leaf delegates: parent → subagent (no outgoing).
+        # Dissolution adds the subagent's ID to parent's sub_agents list.
+        subagent_ids = [
+            n["id"]
+            for n in nodes
+            if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
+        ]
+
+        for sa_id in subagent_ids:
+            sa_node = node_by_id.get(sa_id)
+            if sa_node is None:
+                continue
+
+            in_edges = _incoming(sa_id)
+            out_edges = _outgoing(sa_id)
+
+            # Validate: sub-agent nodes must be leaves (no outgoing edges)
+            if out_edges:
+                logger.warning(
+                    "Sub-agent node '%s' has outgoing edges — they will be dropped "
+                    "during dissolution. Sub-agent nodes should be leaf nodes.",
+                    sa_id,
+                )
+
+            # Attach to each predecessor's sub_agents list
+            for ie in in_edges:
+                pred_id = ie["source"]
+                pred = node_by_id.get(pred_id)
+                if pred is None:
+                    continue
+
+                existing_subs = pred.get("sub_agents") or []
+                if sa_id not in existing_subs:
+                    existing_subs.append(sa_id)
+                pred["sub_agents"] = existing_subs
+
+                # Record absorption
+                prev_absorbed = absorbed.get(pred_id, [pred_id])
+                if sa_id not in prev_absorbed:
+                    prev_absorbed.append(sa_id)
+                absorbed[pred_id] = prev_absorbed
+
+            # Remove sub-agent node and all its edges
+            edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
+            nodes[:] = [n for n in nodes if n["id"] != sa_id]
+            del node_by_id[sa_id]
+
+        # ── Dissolve implicit sub-agents ─────────────────────────
+        # Nodes that appear in another node's sub_agents list but weren't
+        # caught above (e.g. GCU nodes with flowchart_type="browser" where
+        # the queen set sub_agents directly on the parent).
+        implicit_sa_ids: list[str] = []
+        for n in nodes:
+            for sa_id in n.get("sub_agents") or []:
+                if sa_id in node_by_id and sa_id != n["id"]:
+                    implicit_sa_ids.append(sa_id)
+
+        for sa_id in implicit_sa_ids:
+            if sa_id not in node_by_id:
+                continue  # already removed
+
+            # Find which parent(s) reference this sub-agent
+            for n in nodes:
+                if sa_id in (n.get("sub_agents") or []) and n["id"] != sa_id:
+                    prev_absorbed = absorbed.get(n["id"], [n["id"]])
+                    if sa_id not in prev_absorbed:
+                        prev_absorbed.append(sa_id)
+                    absorbed[n["id"]] = prev_absorbed
+
+            # Remove the sub-agent node and its edges
+            edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
+            nodes[:] = [n for n in nodes if n["id"] != sa_id]
+            del node_by_id[sa_id]
+
+        # Build complete flowchart_map (identity for non-absorbed nodes)
+        flowchart_map: dict[str, list[str]] = {}
+        for n in nodes:
+            nid = n["id"]
+            flowchart_map[nid] = absorbed.get(nid, [nid])
+
+        # Rebuild terminal_nodes (decision targets may have changed).
+        # Sub-agent nodes are leaf helpers, not endpoints — exclude them.
+        post_sa_ids: set[str] = set()
+        for n in nodes:
+            for sa_id in n.get("sub_agents") or []:
+                post_sa_ids.add(sa_id)
+        sources = {e["source"] for e in edges}
+        all_ids = {n["id"] for n in nodes}
+        terminal_ids = all_ids - sources - post_sa_ids
+        if not terminal_ids and nodes:
+            terminal_ids = {nodes[-1]["id"]}
+
+        converted = dict(draft)
+        converted["nodes"] = nodes
+        converted["edges"] = edges
+        converted["terminal_nodes"] = sorted(terminal_ids)
+        converted["entry_node"] = nodes[0]["id"] if nodes else ""
+
+        return converted, flowchart_map
+
+    async def save_agent_draft(
+        *,
+        agent_name: str,
+        goal: str,
+        nodes: list[dict],
+        edges: list[dict] | None = None,
+        description: str = "",
+        success_criteria: list[str] | None = None,
+        constraints: list[str] | None = None,
+        terminal_nodes: list[str] | None = None,
+    ) -> str:
+        """Save a declarative draft of the agent graph during planning.
+
+        This creates a lightweight, visual-only graph for the user to review.
+        No executable code is generated. Nodes need only an id, name, and
+        description. Tools, input/output keys, and system prompts are optional
+        metadata hints — they will be fully specified during the building phase.
+
+        Each node is classified into a classical flowchart component type
+        (start, terminal, process, decision, io, subprocess, browser, manual)
+        with a unique color. The queen can override auto-detection by setting
+        flowchart_type explicitly on a node.
+        """
+        # ── Gate: require at least 2 rounds of user questions ─────────
+        if (
+            phase_state is not None
+            and phase_state.phase == "planning"
+            and phase_state.planning_ask_rounds < 2
+        ):
+            return json.dumps(
+                {
+                    "error": (
+                        "You haven't asked enough questions yet. You have only "
+                        f"asked {phase_state.planning_ask_rounds} round(s) of "
+                        "questions — at least 2 are required before saving a "
+                        "draft. Think deeper and ask more practical questions "
+                        "to fully understand the user's requirements before "
+                        "designing the agent graph."
+                    )
+                }
+            )
+
+        # ── Gate: require at least 5 nodes for a meaningful graph ─────
+        if len(nodes) < 5:
+            return json.dumps(
+                {
+                    "error": (
+                        f"Draft only has {len(nodes)} node(s) — at least 5 are "
+                        "required for a meaningful agent graph. Think deeper and "
+                        "ask more practical questions to fully understand the "
+                        "user's requirements, then design a more thorough graph."
+                    )
+                }
+            )
+
+        # Loose validation: each node needs at minimum an id
+        validated_nodes = []
+        for i, n in enumerate(nodes):
+            if not isinstance(n, dict):
+                return json.dumps({"error": f"Node {i} must be a dict, got {type(n).__name__}"})
+            node_id = n.get("id", "").strip()
+            if not node_id:
+                return json.dumps({"error": f"Node {i} is missing 'id'"})
+            validated_nodes.append(
+                {
+                    "id": node_id,
+                    "name": n.get("name", node_id.replace("-", " ").replace("_", " ").title()),
+                    "description": n.get("description", ""),
+                    "node_type": n.get("node_type", "event_loop"),
+                    # Optional business-logic hints (not validated yet)
+                    "tools": n.get("tools", []),
+                    "input_keys": n.get("input_keys", []),
+                    "output_keys": n.get("output_keys", []),
+                    "success_criteria": n.get("success_criteria", ""),
+                    "sub_agents": n.get("sub_agents", []),
+                    # Decision nodes: the yes/no question to evaluate
+                    "decision_clause": n.get("decision_clause", ""),
+                    # Explicit flowchart override (preserved for classification)
+                    "flowchart_type": n.get("flowchart_type", ""),
+                }
+            )
+
+        # Check for duplicate node IDs
+        seen_ids: set[str] = set()
+        for n in validated_nodes:
+            if n["id"] in seen_ids:
+                return json.dumps({"error": f"Duplicate node id '{n['id']}'"})
+            seen_ids.add(n["id"])
+
+        validated_edges = []
+        if edges:
+            node_ids = {n["id"] for n in validated_nodes}
+            for i, e in enumerate(edges):
+                if not isinstance(e, dict):
+                    return json.dumps({"error": f"Edge {i} must be a dict"})
+                src = e.get("source", "")
+                tgt = e.get("target", "")
+                if src and src not in node_ids:
+                    return json.dumps({"error": f"Edge {i} source '{src}' references unknown node"})
+                if tgt and tgt not in node_ids:
+                    return json.dumps({"error": f"Edge {i} target '{tgt}' references unknown node"})
+                validated_edges.append(
+                    {
+                        "id": e.get("id", f"edge-{i}"),
+                        "source": src,
+                        "target": tgt,
+                        "condition": e.get("condition", "on_success"),
+                        "description": e.get("description", ""),
+                        "label": e.get("label", ""),
+                    }
+                )
+
+        # ── GCU nodes cannot be children of decision nodes ─────────
+        # Decision nodes dissolve into their predecessor. If a GCU node
+        # is a decision child, after dissolution it would become a
+        # conditional workflow step — violating the leaf sub-agent rule.
+        # Rewire: move the GCU to the decision's predecessor as a
+        # sub-agent and remove the decision → GCU edge.
+        node_by_id_v = {n["id"]: n for n in validated_nodes}
+        decision_node_ids = {
+            n["id"] for n in validated_nodes if n.get("flowchart_type") == "decision"
+        }
+        gcu_node_ids = {
+            n["id"]
+            for n in validated_nodes
+            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "browser"
+        }
+        topology_corrections: list[str] = []
+        if decision_node_ids and gcu_node_ids:
+            for d_id in decision_node_ids:
+                gcu_children = [
+                    e
+                    for e in validated_edges
+                    if e["source"] == d_id and e["target"] in gcu_node_ids
+                ]
+                if not gcu_children:
+                    continue
+                d_parents = [e["source"] for e in validated_edges if e["target"] == d_id]
+                for gc_edge in gcu_children:
+                    gc_id = gc_edge["target"]
+                    logger.warning(
+                        "GCU node '%s' is a child of decision node '%s' "
+                        "— moving it to the decision's predecessor.",
+                        gc_id,
+                        d_id,
+                    )
+                    topology_corrections.append(
+                        f"GCU node '{gc_id}' was a child of decision "
+                        f"node '{d_id}' — invalid because decision "
+                        f"nodes dissolve at build time. Moved "
+                        f"'{gc_id}' to predecessor as a sub-agent."
+                    )
+                    # Remove the decision → GCU edge
+                    validated_edges[:] = [
+                        e
+                        for e in validated_edges
+                        if not (e["source"] == d_id and e["target"] == gc_id)
+                    ]
+                    # Remove any outgoing edges from the GCU node
+                    # (keep report edges back to predecessors)
+                    validated_edges[:] = [
+                        e
+                        for e in validated_edges
+                        if e["source"] != gc_id or e["target"] in set(d_parents)
+                    ]
+                    # Assign GCU as sub-agent of predecessor(s)
+                    for pid in d_parents:
+                        parent = node_by_id_v.get(pid)
+                        if parent is None:
+                            continue
+                        existing = parent.get("sub_agents") or []
+                        if gc_id not in existing:
+                            existing.append(gc_id)
+                        parent["sub_agents"] = existing
+
+        # ── Enforce GCU / subagent leaf constraint ────────────────
+        # GCU nodes and nodes with flowchart_type "subagent" are leaf
+        # delegates: they can only receive a delegate edge IN from
+        # their parent and send a report edge OUT back to that parent.
+        # Any other outgoing edges are design errors — strip them and
+        # auto-assign the node as a sub-agent of its predecessor.
+        leaf_node_ids: set[str] = set()
+        for n in validated_nodes:
+            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "browser":
+                leaf_node_ids.add(n["id"])
+        if leaf_node_ids:
+            for leaf_id in leaf_node_ids:
+                # Find edges where this leaf node is the source
+                out_edges = [e for e in validated_edges if e["source"] == leaf_id]
+                in_edges = [e for e in validated_edges if e["target"] == leaf_id]
+                if not out_edges:
+                    continue  # already a proper leaf
+
+                # Identify the parent (predecessor that connects IN)
+                parent_ids = [e["source"] for e in in_edges]
+
+                # Strip all outgoing edges from the leaf node that
+                # don't go back to a parent (report edges are OK)
+                illegal_targets: list[str] = []
+                for oe in out_edges:
+                    if oe["target"] not in parent_ids:
+                        illegal_targets.append(oe["target"])
+
+                if illegal_targets:
+                    logger.warning(
+                        "GCU/subagent node '%s' has illegal outgoing "
+                        "edges to %s — stripping them. GCU nodes "
+                        "must be leaf sub-agents.",
+                        leaf_id,
+                        illegal_targets,
+                    )
+                    topology_corrections.append(
+                        f"GCU node '{leaf_id}' had illegal edges to "
+                        f"{illegal_targets} — stripped. GCU nodes MUST "
+                        f"be leaf sub-agents, never in the linear flow."
+                    )
+                    # Rewire: predecessor → leaf's targets (skip leaf)
+                    for parent_id in parent_ids:
+                        for tgt_id in illegal_targets:
+                            validated_edges.append(
+                                {
+                                    "id": f"edge-rewire-{len(validated_edges)}",
+                                    "source": parent_id,
+                                    "target": tgt_id,
+                                    "condition": "on_success",
+                                    "description": "",
+                                    "label": "",
+                                }
+                            )
+                    # Remove the illegal edges
+                    validated_edges[:] = [
+                        e
+                        for e in validated_edges
+                        if not (e["source"] == leaf_id and e["target"] in set(illegal_targets))
+                    ]
+
+                # Ensure the leaf is in its parent's sub_agents list
+                for pid in parent_ids:
+                    parent = node_by_id_v.get(pid)
+                    if parent is None:
+                        continue
+                    existing = parent.get("sub_agents") or []
+                    if leaf_id not in existing:
+                        existing.append(leaf_id)
+                    parent["sub_agents"] = existing
+
+        # ── Remove orphaned GCU / subagent nodes ──────────────────
+        # After enforcing the leaf constraint, any GCU/subagent node
+        # that has zero edges AND is not in any parent's sub_agents
+        # list is orphaned — remove it and warn the queen.
+        all_edge_node_ids = set()
+        for e in validated_edges:
+            all_edge_node_ids.add(e["source"])
+            all_edge_node_ids.add(e["target"])
+        all_sa_refs: set[str] = set()
+        for n in validated_nodes:
+            for sa_id in n.get("sub_agents") or []:
+                all_sa_refs.add(sa_id)
+
+        orphaned_ids: list[str] = []
+        for lid in leaf_node_ids:
+            if lid not in all_edge_node_ids and lid not in all_sa_refs:
+                orphaned_ids.append(lid)
+
+        if orphaned_ids:
+            for oid in orphaned_ids:
+                logger.warning(
+                    "GCU/subagent node '%s' is orphaned (no edges, "
+                    "not in any parent's sub_agents) — removing it.",
+                    oid,
+                )
+                topology_corrections.append(
+                    f"GCU node '{oid}' was orphaned (no edges, not "
+                    f"assigned as a sub-agent of any parent node) — "
+                    f"removed. Add it to a parent node's sub_agents "
+                    f"list and re-save the draft."
+                )
+            validated_nodes[:] = [n for n in validated_nodes if n["id"] not in set(orphaned_ids)]
+            node_by_id_v = {n["id"]: n for n in validated_nodes}
+
+        # Synthesize visual edges for sub-agents that are referenced in
+        # a parent's sub_agents list but have no connecting edge yet.
+        node_id_set = {n["id"] for n in validated_nodes}
+        existing_edge_pairs = {(e["source"], e["target"]) for e in validated_edges}
+        edge_counter = len(validated_edges)
+        for n in validated_nodes:
+            for sa_id in n.get("sub_agents") or []:
+                if sa_id not in node_id_set:
+                    continue
+                if (n["id"], sa_id) not in existing_edge_pairs:
+                    validated_edges.append(
+                        {
+                            "id": f"edge-subagent-{edge_counter}",
+                            "source": n["id"],
+                            "target": sa_id,
+                            "condition": "always",
+                            "description": "sub-agent delegation",
+                            "label": "delegate",
+                        }
+                    )
+                    edge_counter += 1
+                    existing_edge_pairs.add((n["id"], sa_id))
+                if (sa_id, n["id"]) not in existing_edge_pairs:
+                    validated_edges.append(
+                        {
+                            "id": f"edge-subagent-{edge_counter}",
+                            "source": sa_id,
+                            "target": n["id"],
+                            "condition": "always",
+                            "description": "sub-agent report back",
+                            "label": "report",
+                        }
+                    )
+                    edge_counter += 1
+                    existing_edge_pairs.add((sa_id, n["id"]))
+
+        # ── Validate graph connectivity ─────────────────────────────
+        # Every node must be reachable from the entry node. Disconnected
+        # subgraphs indicate a broken design — remove unreachable nodes
+        # and report them so the queen can fix the draft.
+        if validated_nodes:
+            entry_id = validated_nodes[0]["id"]
+            # Build undirected adjacency from edges
+            _adj: dict[str, set[str]] = {n["id"]: set() for n in validated_nodes}
+            for e in validated_edges:
+                s, t = e["source"], e["target"]
+                if s in _adj and t in _adj:
+                    _adj[s].add(t)
+                    _adj[t].add(s)
+            # BFS from entry
+            visited: set[str] = set()
+            queue = [entry_id]
+            while queue:
+                cur = queue.pop()
+                if cur in visited:
+                    continue
+                visited.add(cur)
+                for nb in _adj.get(cur, ()):
+                    if nb not in visited:
+                        queue.append(nb)
+            unreachable = {n["id"] for n in validated_nodes} - visited
+            if unreachable:
+                for uid in sorted(unreachable):
+                    logger.warning(
+                        "Node '%s' is unreachable from entry node '%s' "
+                        "— removing it from the draft.",
+                        uid,
+                        entry_id,
+                    )
+                    topology_corrections.append(
+                        f"Node '{uid}' is disconnected from the graph "
+                        f"(unreachable from entry node '{entry_id}') — "
+                        f"removed. Connect it to the flow or assign it "
+                        f"as a sub-agent of an existing node."
+                    )
+                validated_edges[:] = [
+                    e
+                    for e in validated_edges
+                    if e["source"] not in unreachable and e["target"] not in unreachable
+                ]
+                validated_nodes[:] = [n for n in validated_nodes if n["id"] not in unreachable]
+
+        # Determine terminal nodes: explicit list, or nodes with no outgoing edges.
+        # Sub-agent nodes are leaf helpers, not endpoints — exclude them.
+        sa_ids: set[str] = set()
+        for n in validated_nodes:
+            for sa_id in n.get("sub_agents") or []:
+                sa_ids.add(sa_id)
+        terminal_ids: set[str] = set(terminal_nodes or []) - sa_ids
+        if not terminal_ids:
+            sources = {e["source"] for e in validated_edges}
+            all_ids = {n["id"] for n in validated_nodes}
+            terminal_ids = all_ids - sources - sa_ids
+            # If all nodes have outgoing edges (loop graph), mark the last as terminal
+            if not terminal_ids and validated_nodes:
+                terminal_ids = {validated_nodes[-1]["id"]}
+
+        # Classify each node into a flowchart component type with color
+        total = len(validated_nodes)
+        for i, node in enumerate(validated_nodes):
+            fc_type = _classify_flowchart_node(
+                node,
+                i,
+                total,
+                validated_edges,
+                terminal_ids,
+            )
+            fc_meta = FLOWCHART_TYPES[fc_type]
+            node["flowchart_type"] = fc_type
+            node["flowchart_shape"] = fc_meta["shape"]
+            node["flowchart_color"] = fc_meta["color"]
+
+        draft = {
+            "agent_name": agent_name.strip(),
+            "goal": goal.strip(),
+            "description": description.strip(),
+            "success_criteria": success_criteria or [],
+            "constraints": constraints or [],
+            "nodes": validated_nodes,
+            "edges": validated_edges,
+            "entry_node": validated_nodes[0]["id"] if validated_nodes else "",
+            "terminal_nodes": sorted(terminal_ids),
+            # Color legend for the frontend
+            "flowchart_legend": {
+                fc_type: {"shape": meta["shape"], "color": meta["color"]}
+                for fc_type, meta in FLOWCHART_TYPES.items()
+            },
+        }
+
+        bus = getattr(session, "event_bus", None)
+        is_building = phase_state is not None and phase_state.phase == "building"
+
+        if phase_state is not None:
+            if is_building:
+                # During building: re-draft updates the flowchart in place.
+                # Dissolve planning-only nodes immediately (no confirm gate).
+                import copy as _copy
+
+                phase_state.original_draft_graph = _copy.deepcopy(draft)
+                converted, fmap = _dissolve_planning_nodes(draft)
+                phase_state.draft_graph = converted
+                phase_state.flowchart_map = fmap
+                # Do NOT reset build_confirmed — we're already building.
+                # Persist to agent folder
+                save_path = getattr(session, "worker_path", None)
+                if save_path is None:
+                    # Worker not loaded yet — resolve from draft name
+                    draft_name = draft.get("agent_name", "")
+                    if draft_name:
+                        candidate = Path("exports") / draft_name
+                        if candidate.is_dir():
+                            save_path = candidate
+                _save_flowchart_file(
+                    save_path,
+                    phase_state.original_draft_graph,
+                    fmap,
+                )
+            else:
+                # During planning: store raw draft, await user confirmation.
+                phase_state.draft_graph = draft
+                phase_state.build_confirmed = False
+
+        # Emit events so the frontend can render
+        if bus is not None:
+            if is_building:
+                # Send dissolved draft for runtime display
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.DRAFT_GRAPH_UPDATED,
+                        stream_id="queen",
+                        data=phase_state.draft_graph if phase_state else draft,
+                    )
+                )
+                # Send original draft + map for flowchart overlay
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.FLOWCHART_MAP_UPDATED,
+                        stream_id="queen",
+                        data={
+                            "map": phase_state.flowchart_map if phase_state else None,
+                            "original_draft": phase_state.original_draft_graph
+                            if phase_state
+                            else draft,
+                        },
+                    )
+                )
+            else:
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.DRAFT_GRAPH_UPDATED,
+                        stream_id="queen",
+                        data=draft,
+                    )
+                )
+
+        dissolution_info = {}
+        if is_building and phase_state is not None and phase_state.original_draft_graph:
+            orig_count = len(phase_state.original_draft_graph.get("nodes", []))
+            conv_count = len(phase_state.draft_graph.get("nodes", []))
+            dissolution_info = {
+                "planning_nodes_dissolved": orig_count - conv_count,
+                "flowchart_map": phase_state.flowchart_map,
+            }
+
+        correction_warning = ""
+        if topology_corrections:
+            correction_warning = (
+                " WARNING — your draft had topology errors that were "
+                "auto-corrected: "
+                + "; ".join(topology_corrections)
+                + " Review the corrected flowchart and do NOT repeat "
+                "this pattern. GCU nodes are ALWAYS leaf sub-agents."
+            )
+
+        if is_building:
+            msg = (
+                "Draft flowchart updated during building. "
+                "Planning-only nodes dissolved automatically. "
+                "The user can see the updated flowchart. "
+                "Continue building — no re-confirmation needed." + correction_warning
+            )
+        else:
+            msg = (
+                "Draft graph saved and sent to the visualizer. "
+                "The user can now see the color-coded flowchart. "
+                "Present this design to the user and get their approval. "
+                "When the user confirms, call confirm_and_build() to proceed." + correction_warning
+            )
+
+        result: dict = {
+            "status": "draft_saved",
+            "agent_name": draft["agent_name"],
+            "node_count": len(validated_nodes),
+            "edge_count": len(validated_edges),
+            "node_types": {n["id"]: n["flowchart_type"] for n in validated_nodes},
+            **dissolution_info,
+            "message": msg,
+        }
+        if topology_corrections:
+            result["topology_corrections"] = topology_corrections
+        return json.dumps(result)
+
+    _draft_tool = Tool(
+        name="save_agent_draft",
+        description=(
+            "Save a declarative draft of the agent graph as a color-coded flowchart. "
+            "Usable in PLANNING (creates draft for user review) and BUILDING "
+            "(updates the flowchart in place — planning-only nodes are dissolved "
+            "automatically without re-confirmation). "
+            "Each node is auto-classified into a classical flowchart type "
+            "(start, terminal, process, decision, io, subprocess, browser, manual) "
+            "with unique colors. No code is generated. "
+            "Planning-only types (decision, browser/GCU) are dissolved at confirm/build time: "
+            "decision nodes merge into predecessor's success_criteria with yes/no edges; "
+            "browser/GCU nodes merge into predecessor's sub_agents list as leaf delegates."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_name": {
+                    "type": "string",
+                    "description": "Snake_case name for the agent (e.g. 'research_agent')",
+                },
+                "goal": {
+                    "type": "string",
+                    "description": "High-level goal description for the agent",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Brief description of what the agent does",
+                },
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string", "description": "Kebab-case node identifier"},
+                            "name": {"type": "string", "description": "Human-readable name"},
+                            "description": {
+                                "type": "string",
+                                "description": "What this node does (business logic)",
+                            },
+                            "node_type": {
+                                "type": "string",
+                                "enum": ["event_loop", "gcu"],
+                                "description": "Node type (default: event_loop)",
+                            },
+                            "flowchart_type": {
+                                "type": "string",
+                                "enum": [
+                                    "start",
+                                    "terminal",
+                                    "process",
+                                    "decision",
+                                    "io",
+                                    "document",
+                                    "database",
+                                    "subprocess",
+                                    "browser",
+                                ],
+                                "description": (
+                                    "Flowchart symbol type. Auto-detected if omitted. "
+                                    "start (sage green stadium), terminal (dusty red stadium), "
+                                    "process (blue-gray rect), decision (amber diamond), "
+                                    "io (purple parallelogram), document (steel blue wavy rect), "
+                                    "database (teal cylinder), subprocess (cyan subroutine), "
+                                    "browser (deep blue hexagon — for GCU/browser "
+                                    "sub-agents; must be a leaf node)"
+                                ),
+                            },
+                            "tools": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Planned tools (hints, not validated yet)",
+                            },
+                            "input_keys": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Expected input memory keys (hints)",
+                            },
+                            "output_keys": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Expected output memory keys (hints)",
+                            },
+                            "success_criteria": {
+                                "type": "string",
+                                "description": "What success looks like for this node",
+                            },
+                            "decision_clause": {
+                                "type": "string",
+                                "description": (
+                                    "For decision nodes only: the yes/no question to "
+                                    "evaluate (e.g. 'Is amount > $100?'). Used during "
+                                    "dissolution to set the predecessor's success_criteria."
+                                ),
+                            },
+                        },
+                        "required": ["id"],
+                    },
+                    "description": "List of nodes with at minimum an id",
+                },
+                "edges": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string"},
+                            "target": {"type": "string"},
+                            "condition": {
+                                "type": "string",
+                                "enum": [
+                                    "always",
+                                    "on_success",
+                                    "on_failure",
+                                    "conditional",
+                                    "llm_decide",
+                                ],
+                            },
+                            "description": {"type": "string"},
+                            "label": {
+                                "type": "string",
+                                "description": (
+                                    "Short edge label shown on the flowchart "
+                                    "(e.g. 'Yes', 'No', 'Retry')"
+                                ),
+                            },
+                        },
+                        "required": ["source", "target"],
+                    },
+                    "description": "Connections between nodes",
+                },
+                "terminal_nodes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Node IDs that are terminal (end) nodes. "
+                        "Auto-detected from edges if omitted."
+                    ),
+                },
+                "success_criteria": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Agent-level success criteria",
+                },
+                "constraints": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Agent-level constraints",
+                },
+            },
+            "required": ["agent_name", "goal", "nodes"],
+        },
+    )
+    registry.register(
+        "save_agent_draft",
+        _draft_tool,
+        lambda inputs: save_agent_draft(**inputs),
+    )
+    tools_registered += 1
+
+    # --- confirm_and_build (Planning → Building gate) -------------------------
+    # Explicit user confirmation is required before transitioning from planning
+    # to building. This tool records that confirmation and proceeds.
+
+    async def confirm_and_build() -> str:
+        """Confirm the draft and transition from planning to building phase.
+
+        This tool should ONLY be called after the user has explicitly approved
+        the draft graph design via ask_user. It gates the planning→building
+        transition so the user always has a chance to review before code is written.
+        """
+        if phase_state is None:
+            return json.dumps({"error": "Phase state not available."})
+
+        if phase_state.phase != "planning":
+            return json.dumps(
+                {"error": f"Cannot confirm_and_build: currently in {phase_state.phase} phase."}
+            )
+
+        if phase_state.draft_graph is None:
+            return json.dumps(
+                {
+                    "error": (
+                        "No draft graph saved. Call save_agent_draft() first to create "
+                        "a draft, present it to the user, and get their approval."
+                    )
+                }
+            )
+
+        phase_state.build_confirmed = True
+
+        # Preserve original draft for flowchart display during runtime,
+        # then dissolve planning-only nodes (decision + browser/GCU) into
+        # runtime-compatible structures.
+        import copy as _copy
+
+        original_nodes = phase_state.draft_graph.get("nodes", [])
+        # Compute dissolution first, then assign all three atomically so that
+        # a failure in _dissolve_planning_nodes doesn't leave partial state.
+        original_copy = _copy.deepcopy(phase_state.draft_graph)
+        converted, fmap = _dissolve_planning_nodes(phase_state.draft_graph)
+        phase_state.original_draft_graph = original_copy
+        phase_state.draft_graph = converted
+        phase_state.flowchart_map = fmap
+
+        # Note: flowchart file is persisted later, in initialize_and_build_agent
+        # (after the agent folder is scaffolded) or in load_built_agent.
+
+        dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
+        decision_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "decision")
+        subagent_count = sum(
+            1
+            for n in original_nodes
+            if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
+        )
+
+        dissolution_parts = []
+        if decision_count:
+            dissolution_parts.append(
+                f"{decision_count} decision node(s) dissolved into predecessor criteria"
+            )
+        if subagent_count:
+            dissolution_parts.append(
+                f"{subagent_count} sub-agent node(s) dissolved into predecessor sub_agents"
+            )
+
+        return json.dumps(
+            {
+                "status": "confirmed",
+                "agent_name": phase_state.draft_graph.get("agent_name", ""),
+                "planning_nodes_dissolved": dissolved_count,
+                "decision_nodes_dissolved": decision_count,
+                "subagent_nodes_dissolved": subagent_count,
+                "flowchart_map": fmap,
+                "message": (
+                    "User has confirmed the design. "
+                    + ("; ".join(dissolution_parts) + ". " if dissolution_parts else "")
+                    + "Now call initialize_and_build_agent(agent_name, nodes) to scaffold the "
+                    "agent package and start building. The draft metadata will be "
+                    "used to pre-populate the generated files."
+                ),
+            }
+        )
+
+    _confirm_tool = Tool(
+        name="confirm_and_build",
+        description=(
+            "Confirm the draft graph design and approve transition to building phase. "
+            "ONLY call this after the user has explicitly approved the design via ask_user. "
+            "After confirmation, call initialize_and_build_agent() to scaffold and build."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "confirm_and_build",
+        _confirm_tool,
+        lambda inputs: confirm_and_build(),
+    )
     tools_registered += 1
 
     # --- initialize_and_build_agent wrapper (Planning → Building) -------------
@@ -613,6 +2161,36 @@ def register_queen_lifecycle_tools(
         async def initialize_and_build_agent_wrapper(inputs: dict) -> str:
             """Wrapper: scaffold or just switch to building phase."""
             agent_name = (inputs.get("agent_name") or "").strip()
+
+            # Gate: when in planning phase and creating a new agent,
+            # require the user to have confirmed the draft first.
+            if (
+                agent_name
+                and phase_state is not None
+                and phase_state.phase == "planning"
+                and not phase_state.build_confirmed
+            ):
+                if phase_state.draft_graph is None:
+                    return json.dumps(
+                        {
+                            "error": (
+                                "Cannot transition to building without a draft. "
+                                "Call save_agent_draft() first to create a visual draft of the "
+                                "graph, present it to the user for review, then call "
+                                "confirm_and_build() after the user approves."
+                            )
+                        }
+                    )
+                return json.dumps(
+                    {
+                        "error": (
+                            "The user has not confirmed the draft design yet. "
+                            "Present the draft to the user and call ask_user() to get "
+                            "their approval. Then call confirm_and_build() before "
+                            "calling initialize_and_build_agent()."
+                        )
+                    }
+                )
 
             # No agent_name → try to fall back to the session's current agent,
             # or fail with actionable guidance.
@@ -647,6 +2225,8 @@ def register_queen_lifecycle_tools(
                     agent_name,
                 )
                 if phase_state is not None:
+                    if fallback_path:
+                        phase_state.agent_path = str(fallback_path)
                     await phase_state.switch_to_building(source="tool")
                     if phase_state.inject_notification:
                         await phase_state.inject_notification(
@@ -669,8 +2249,15 @@ def register_queen_lifecycle_tools(
                     }
                 )
 
-            # Has agent_name → scaffold via MCP tool
-            result = _orig_init_executor(inputs)
+            # Has agent_name → scaffold via MCP tool.
+            # If a draft exists, pass its metadata so the scaffolder can
+            # pre-populate descriptions, goals, and node metadata.
+            scaffold_inputs = dict(inputs)
+            draft = phase_state.draft_graph if phase_state else None
+            if draft and draft.get("agent_name") == agent_name:
+                scaffold_inputs["_draft"] = draft
+
+            result = _orig_init_executor(scaffold_inputs)
             # Handle both sync and async executors
             if asyncio.iscoroutine(result) or asyncio.isfuture(result):
                 result = await result
@@ -682,13 +2269,31 @@ def register_queen_lifecycle_tools(
                 parsed = json.loads(result_str)
                 if parsed.get("success", True):
                     if phase_state is not None:
+                        # Set agent_path so the frontend can query credentials
+                        phase_state.agent_path = str(Path("exports") / agent_name)
                         await phase_state.switch_to_building(source="tool")
+                        # Reset draft state after successful scaffolding
+                        phase_state.build_confirmed = False
+                        # Persist flowchart now that the agent folder exists
+                        if phase_state.original_draft_graph and phase_state.flowchart_map:
+                            _save_flowchart_file(
+                                Path("exports") / agent_name,
+                                phase_state.original_draft_graph,
+                                phase_state.flowchart_map,
+                            )
                         # Inject a continuation message so the queen starts
                         # building immediately instead of blocking for user input.
+                        draft_hint = ""
+                        if draft:
+                            draft_hint = (
+                                " The draft metadata has been used to pre-populate "
+                                "node descriptions, goal, and success criteria. "
+                                "Review and refine the generated files."
+                            )
                         if phase_state.inject_notification:
                             await phase_state.inject_notification(
                                 "[PHASE CHANGE] Agent scaffolded and switched to BUILDING phase. "
-                                "Start implementing the agent nodes now."
+                                "Start implementing the agent nodes now." + draft_hint
                             )
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass
@@ -760,7 +2365,6 @@ def register_queen_lifecycle_tools(
 
     def _format_time_ago(ts) -> str:
         """Format a datetime as relative time ago."""
-        from datetime import datetime
 
         now = datetime.now(UTC)
         if ts.tzinfo is None:
@@ -798,7 +2402,6 @@ def register_queen_lifecycle_tools(
         - pending_question (when waiting)
         - _active_execs (internal, stripped before return)
         """
-        from datetime import datetime
 
         graph_id = runtime.graph_id
         reg = runtime.get_graph_registration(graph_id)
@@ -897,6 +2500,16 @@ def register_queen_lifecycle_tools(
             parts.append(f"{red_flags} issue type(s) detected — use focus='issues' for details")
         else:
             parts.append("No issues detected")
+
+        # Latest subagent progress (if any delegation is in flight)
+        bus = _get_event_bus()
+        if bus:
+            sa_reports = bus.get_history(event_type=EventType.SUBAGENT_REPORT, limit=1)
+            if sa_reports:
+                latest = sa_reports[0]
+                sa_msg = str(latest.data.get("message", ""))[:200]
+                ago = _format_time_ago(latest.timestamp)
+                parts.append(f"Latest subagent update ({ago}): {sa_msg}")
 
         return ". ".join(parts) + "."
 
@@ -1025,6 +2638,10 @@ def register_queen_lifecycle_tools(
                 duration = evt.data.get("duration_s")
                 dur_str = f", {duration:.1f}s" if duration else ""
                 lines.append(f"  {name} ({node}) — {status}{dur_str}")
+                result_text = evt.data.get("result", "")
+                if result_text:
+                    preview = str(result_text)[:300].replace("\n", " ")
+                    lines.append(f"    Result: {preview}")
         else:
             lines.append("No recent tool calls.")
 
@@ -1191,15 +2808,19 @@ def register_queen_lifecycle_tools(
                 for evt in running
             ]
         if tool_completed:
-            result["recent_tool_calls"] = [
-                {
+            recent_calls = []
+            for evt in tool_completed[:last_n]:
+                entry: dict[str, Any] = {
                     "tool": evt.data.get("tool_name"),
                     "error": bool(evt.data.get("is_error")),
                     "node": evt.node_id,
                     "time": evt.timestamp.isoformat(),
                 }
-                for evt in tool_completed[:last_n]
-            ]
+                result_text = evt.data.get("result", "")
+                if result_text:
+                    entry["result_preview"] = str(result_text)[:300]
+                recent_calls.append(entry)
+            result["recent_tool_calls"] = recent_calls
 
         # Node transitions
         edges = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=last_n)
@@ -1251,6 +2872,18 @@ def register_queen_lifecycle_tools(
             )
         if issues:
             result["issues"] = issues
+
+        # Subagent activity (in-flight progress from delegated subagents)
+        sa_reports = bus.get_history(event_type=EventType.SUBAGENT_REPORT, limit=last_n)
+        if sa_reports:
+            result["subagent_activity"] = [
+                {
+                    "subagent": evt.data.get("subagent_id"),
+                    "message": str(evt.data.get("message", ""))[:300],
+                    "time": evt.timestamp.isoformat(),
+                }
+                for evt in sa_reports[:last_n]
+            ]
 
         # Constraint violations
         violations = bus.get_history(event_type=EventType.CONSTRAINT_VIOLATION, limit=5)
@@ -1446,7 +3079,23 @@ def register_queen_lifecycle_tools(
         if reg is None:
             return json.dumps({"error": "Worker graph not found"})
 
-        # Find an active node that can accept injected input
+        # Prefer nodes that are actively waiting (e.g. escalation receivers
+        # blocked on queen guidance) over the main event-loop node.
+        for stream in reg.streams.values():
+            waiting = stream.get_waiting_nodes()
+            if waiting:
+                target_node_id = waiting[0]["node_id"]
+                ok = await stream.inject_input(target_node_id, content, is_client_input=True)
+                if ok:
+                    return json.dumps(
+                        {
+                            "status": "delivered",
+                            "node_id": target_node_id,
+                            "content_preview": content[:100],
+                        }
+                    )
+
+        # Fallback: inject into any injectable node
         for stream in reg.streams.values():
             injectable = stream.get_injectable_nodes()
             if injectable:
@@ -1498,6 +3147,15 @@ def register_queen_lifecycle_tools(
         Returns credential IDs, aliases, status, and identity metadata.
         Never returns secret values. Optionally filter by credential_id.
         """
+        # Load shell config vars into os.environ — same first step as check-agent.
+        # Ensures keys set in ~/.zshrc/~/.bashrc are visible to is_available() checks.
+        try:
+            from framework.credentials.validation import ensure_credential_key_env
+
+            ensure_credential_key_env()
+        except Exception:
+            pass
+
         try:
             # Primary: CredentialStoreAdapter sees both Aden OAuth and local accounts
             from aden_tools.credentials import CredentialStoreAdapter
@@ -1505,13 +3163,24 @@ def register_queen_lifecycle_tools(
             store = CredentialStoreAdapter.default()
             all_accounts = store.get_all_account_info()
 
-            # Filter by credential_id / provider if requested
+            # Filter by credential_id / provider if requested.
+            # A spec name like "gmail_oauth" maps to provider "google" via
+            # credential_id field — resolve that alias before filtering.
             if credential_id:
+                try:
+                    from aden_tools.credentials import CREDENTIAL_SPECS
+
+                    spec = CREDENTIAL_SPECS.get(credential_id)
+                    resolved_provider = (
+                        (spec.credential_id or credential_id) if spec else credential_id
+                    )
+                except Exception:
+                    resolved_provider = credential_id
                 all_accounts = [
                     a
                     for a in all_accounts
                     if a.get("credential_id", "").startswith(credential_id)
-                    or a.get("provider", "") == credential_id
+                    or a.get("provider", "") in (credential_id, resolved_provider)
                 ]
 
             return json.dumps(
@@ -1528,12 +3197,42 @@ def register_queen_lifecycle_tools(
 
         # Fallback: local encrypted store only
         try:
+            from framework.credentials.local.models import LocalAccountInfo
             from framework.credentials.local.registry import LocalCredentialRegistry
+            from framework.credentials.storage import EncryptedFileStorage
 
             registry = LocalCredentialRegistry.default()
             accounts = registry.list_accounts(
                 credential_id=credential_id or None,
             )
+
+            # Also include flat-file credentials saved by the GUI (no "/" separator).
+            # LocalCredentialRegistry.list_accounts() skips these — read them directly.
+            seen_cred_ids = {info.credential_id for info in accounts}
+            storage = EncryptedFileStorage()
+            for storage_id in storage.list_all():
+                if "/" in storage_id:
+                    continue  # already handled by LocalCredentialRegistry above
+                if credential_id and storage_id != credential_id:
+                    continue
+                if storage_id in seen_cred_ids:
+                    continue
+                try:
+                    cred_obj = storage.load(storage_id)
+                except Exception:
+                    continue
+                if cred_obj is None:
+                    continue
+                accounts.append(
+                    LocalAccountInfo(
+                        credential_id=storage_id,
+                        alias="default",
+                        status="unknown",
+                        identity=cred_obj.identity,
+                        last_validated=cred_obj.last_refreshed,
+                        created_at=cred_obj.created_at,
+                    )
+                )
 
             credentials = []
             for info in accounts:
@@ -1696,8 +3395,56 @@ def register_queen_lifecycle_tools(
                             }
                         )
 
+                # Ensure we have a flowchart for this agent — try in order:
+                # 1. Already in phase_state (from planning workflow)
+                # 2. Load from flowchart.json in the agent folder
+                # 3. Synthesize from the runtime graph
+                if phase_state is not None:
+                    if phase_state.original_draft_graph is None:
+                        # Try loading from file
+                        file_draft, file_map = _load_flowchart_file(resolved_path)
+                        if file_draft is not None:
+                            phase_state.original_draft_graph = file_draft
+                            phase_state.flowchart_map = file_map
+                        elif loaded_runtime is not None:
+                            # Synthesize from runtime graph
+                            goal = loaded_runtime.goal
+                            synth_draft, synth_map = _synthesize_draft_from_runtime(
+                                list(loaded_runtime.graph.nodes),
+                                list(loaded_runtime.graph.edges),
+                                agent_name=resolved_path.name,
+                                goal_name=goal.name if goal else "",
+                            )
+                            phase_state.original_draft_graph = synth_draft
+                            phase_state.flowchart_map = synth_map
+                            # Persist the synthesized flowchart so it's
+                            # available on next load without re-synthesis
+                            _save_flowchart_file(resolved_path, synth_draft, synth_map)
+
+                    # Emit to frontend
+                    if (
+                        phase_state.original_draft_graph is not None
+                        and phase_state.flowchart_map is not None
+                    ):
+                        bus = phase_state.event_bus
+                        if bus is not None:
+                            try:
+                                await bus.publish(
+                                    AgentEvent(
+                                        type=EventType.FLOWCHART_MAP_UPDATED,
+                                        stream_id="queen",
+                                        data={
+                                            "map": phase_state.flowchart_map,
+                                            "original_draft": phase_state.original_draft_graph,
+                                        },
+                                    )
+                                )
+                            except Exception:
+                                logger.warning("Failed to emit flowchart map", exc_info=True)
+
                 # Switch to staging phase after successful load + validation
                 if phase_state is not None:
+                    phase_state.agent_path = str(resolved_path)
                     await phase_state.switch_to_staging()
 
                 worker_name = info.name if info else updated_session.worker_id
@@ -1865,6 +3612,320 @@ def register_queen_lifecycle_tools(
     registry.register(
         "run_agent_with_input", _run_input_tool, lambda inputs: run_agent_with_input(**inputs)
     )
+    tools_registered += 1
+
+    # --- set_trigger -----------------------------------------------------------
+
+    async def set_trigger(
+        trigger_id: str,
+        trigger_type: str | None = None,
+        trigger_config: dict | None = None,
+        task: str | None = None,
+    ) -> str:
+        """Activate a trigger so it fires periodically into the queen."""
+        if trigger_id in getattr(session, "active_trigger_ids", set()):
+            return json.dumps({"error": f"Trigger '{trigger_id}' is already active."})
+
+        # Look up existing or create new
+        available = getattr(session, "available_triggers", {})
+        tdef = available.get(trigger_id)
+
+        if tdef is None:
+            if trigger_type and trigger_config:
+                from framework.runtime.triggers import TriggerDefinition
+
+                tdef = TriggerDefinition(
+                    id=trigger_id,
+                    trigger_type=trigger_type,
+                    trigger_config=trigger_config,
+                )
+                available[trigger_id] = tdef
+            else:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"Trigger '{trigger_id}' not found. "
+                            "Provide trigger_type and trigger_config to create a custom trigger."
+                        )
+                    }
+                )
+
+        # Apply task override if provided
+        if task:
+            tdef.task = task
+
+        # Task is mandatory before activation
+        if not tdef.task:
+            return json.dumps(
+                {
+                    "error": f"Trigger '{trigger_id}' has no task configured. "
+                    "Set a task describing what the worker should do when this trigger fires."
+                }
+            )
+
+        # Use provided overrides if given
+        t_type = trigger_type or tdef.trigger_type
+        t_config = trigger_config or tdef.trigger_config
+        if trigger_type:
+            tdef.trigger_type = t_type
+        if trigger_config:
+            tdef.trigger_config = t_config
+
+        # Validate and activate by type
+        if t_type == "webhook":
+            path = t_config.get("path", "").strip()
+            if not path or not path.startswith("/"):
+                return json.dumps(
+                    {
+                        "error": (
+                            "Webhook trigger requires 'path' starting with '/'"
+                            " in trigger_config (e.g. '/hooks/github')."
+                        )
+                    }
+                )
+            valid_methods = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+            methods = t_config.get("methods", ["POST"])
+            invalid = [m.upper() for m in methods if m.upper() not in valid_methods]
+            if invalid:
+                return json.dumps(
+                    {"error": f"Invalid HTTP methods: {invalid}. Valid: {sorted(valid_methods)}"}
+                )
+
+            try:
+                await _start_trigger_webhook(session, trigger_id, tdef)
+            except Exception as e:
+                return json.dumps({"error": f"Failed to start webhook trigger: {e}"})
+
+            tdef.active = True
+            session.active_trigger_ids.add(trigger_id)
+            await _persist_active_triggers(session, session_id)
+            _save_trigger_to_agent(session, trigger_id, tdef)
+            bus = getattr(session, "event_bus", None)
+            if bus:
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.TRIGGER_ACTIVATED,
+                        stream_id="queen",
+                        data={
+                            "trigger_id": trigger_id,
+                            "trigger_type": t_type,
+                            "trigger_config": t_config,
+                        },
+                    )
+                )
+            port = int(t_config.get("port", 8090))
+            return json.dumps(
+                {
+                    "status": "activated",
+                    "trigger_id": trigger_id,
+                    "trigger_type": t_type,
+                    "webhook_url": f"http://127.0.0.1:{port}{path}",
+                }
+            )
+
+        if t_type != "timer":
+            return json.dumps({"error": f"Unsupported trigger type: {t_type}"})
+
+        cron_expr = t_config.get("cron")
+        interval = t_config.get("interval_minutes")
+        if cron_expr:
+            try:
+                from croniter import croniter
+
+                if not croniter.is_valid(cron_expr):
+                    return json.dumps({"error": f"Invalid cron expression: {cron_expr}"})
+            except ImportError:
+                return json.dumps(
+                    {"error": "croniter package not installed — cannot validate cron expression."}
+                )
+        elif interval:
+            if not isinstance(interval, (int, float)) or interval <= 0:
+                return json.dumps({"error": f"interval_minutes must be > 0, got {interval}"})
+        else:
+            return json.dumps(
+                {"error": "Timer trigger needs 'cron' or 'interval_minutes' in trigger_config."}
+            )
+
+        # Start timer
+        try:
+            await _start_trigger_timer(session, trigger_id, tdef)
+        except Exception as e:
+            return json.dumps({"error": f"Failed to start trigger timer: {e}"})
+
+        tdef.active = True
+        session.active_trigger_ids.add(trigger_id)
+
+        # Persist to session state and agent definition
+        await _persist_active_triggers(session, session_id)
+        _save_trigger_to_agent(session, trigger_id, tdef)
+
+        # Emit event
+        bus = getattr(session, "event_bus", None)
+        if bus:
+            await bus.publish(
+                AgentEvent(
+                    type=EventType.TRIGGER_ACTIVATED,
+                    stream_id="queen",
+                    data={
+                        "trigger_id": trigger_id,
+                        "trigger_type": t_type,
+                        "trigger_config": t_config,
+                    },
+                )
+            )
+
+        return json.dumps(
+            {
+                "status": "activated",
+                "trigger_id": trigger_id,
+                "trigger_type": t_type,
+                "trigger_config": t_config,
+            }
+        )
+
+    _set_trigger_tool = Tool(
+        name="set_trigger",
+        description=(
+            "Activate a trigger (timer) so it fires periodically. "
+            "Use trigger_id of an available trigger, or provide trigger_type + trigger_config"
+            " to create a custom one. "
+            "A task must be configured before activation —"
+            " either pre-set on the trigger or provided here."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "trigger_id": {
+                    "type": "string",
+                    "description": (
+                        "ID of the trigger to activate (from list_triggers) or a new custom ID"
+                    ),
+                },
+                "trigger_type": {
+                    "type": "string",
+                    "description": "Type of trigger ('timer'). Only needed for custom triggers.",
+                },
+                "trigger_config": {
+                    "type": "object",
+                    "description": (
+                        "Config for the trigger."
+                        " Timer: {cron: '*/5 * * * *'} or {interval_minutes: 5}."
+                        " Only needed for custom triggers."
+                    ),
+                },
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "The task/instructions for the worker when this trigger fires"
+                        " (e.g. 'Process inbox emails using saved rules')."
+                        " Required if not already configured on the trigger."
+                    ),
+                },
+            },
+            "required": ["trigger_id"],
+        },
+    )
+    registry.register("set_trigger", _set_trigger_tool, lambda inputs: set_trigger(**inputs))
+    tools_registered += 1
+
+    # --- remove_trigger --------------------------------------------------------
+
+    async def remove_trigger(trigger_id: str) -> str:
+        """Deactivate an active trigger."""
+        if trigger_id not in getattr(session, "active_trigger_ids", set()):
+            return json.dumps({"error": f"Trigger '{trigger_id}' is not active."})
+
+        # Cancel timer task (if timer trigger)
+        task = session.active_timer_tasks.pop(trigger_id, None)
+        if task and not task.done():
+            task.cancel()
+        getattr(session, "trigger_next_fire", {}).pop(trigger_id, None)
+
+        # Unsubscribe webhook handler (if webhook trigger)
+        webhook_subs = getattr(session, "active_webhook_subs", {})
+        if sub_id := webhook_subs.pop(trigger_id, None):
+            try:
+                session.event_bus.unsubscribe(sub_id)
+            except Exception:
+                pass
+
+        session.active_trigger_ids.discard(trigger_id)
+
+        # Mark inactive
+        available = getattr(session, "available_triggers", {})
+        tdef = available.get(trigger_id)
+        if tdef:
+            tdef.active = False
+
+        # Persist to session state and remove from agent definition
+        await _persist_active_triggers(session, session_id)
+        _remove_trigger_from_agent(session, trigger_id)
+
+        # Emit event
+        bus = getattr(session, "event_bus", None)
+        if bus:
+            await bus.publish(
+                AgentEvent(
+                    type=EventType.TRIGGER_DEACTIVATED,
+                    stream_id="queen",
+                    data={"trigger_id": trigger_id},
+                )
+            )
+
+        return json.dumps({"status": "deactivated", "trigger_id": trigger_id})
+
+    _remove_trigger_tool = Tool(
+        name="remove_trigger",
+        description=(
+            "Deactivate an active trigger."
+            " The trigger stops firing but remains available for re-activation."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "trigger_id": {
+                    "type": "string",
+                    "description": "ID of the trigger to deactivate",
+                },
+            },
+            "required": ["trigger_id"],
+        },
+    )
+    registry.register(
+        "remove_trigger", _remove_trigger_tool, lambda inputs: remove_trigger(**inputs)
+    )
+    tools_registered += 1
+
+    # --- list_triggers ---------------------------------------------------------
+
+    async def list_triggers() -> str:
+        """List all available triggers and their status."""
+        available = getattr(session, "available_triggers", {})
+        triggers = []
+        for tdef in available.values():
+            triggers.append(
+                {
+                    "id": tdef.id,
+                    "trigger_type": tdef.trigger_type,
+                    "trigger_config": tdef.trigger_config,
+                    "description": tdef.description,
+                    "task": tdef.task,
+                    "active": tdef.active,
+                }
+            )
+        return json.dumps({"triggers": triggers})
+
+    _list_triggers_tool = Tool(
+        name="list_triggers",
+        description=(
+            "List all available triggers (from the loaded worker) and their active/inactive status."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+        },
+    )
+    registry.register("list_triggers", _list_triggers_tool, lambda inputs: list_triggers())
     tools_registered += 1
 
     logger.info("Registered %d queen lifecycle tools", tools_registered)

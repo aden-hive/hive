@@ -1,0 +1,168 @@
+{
+  "original_draft": {
+    "agent_name": "email_reply_agent",
+    "goal": "Filter unreplied emails by user criteria, confirm recipients, send personalized replies.",
+    "description": "",
+    "success_criteria": [
+      "Accurately finds unreplied emails matching user criteria",
+      "User confirms recipient list before sending",
+      "Replies are personalized based on email content and tone guidance"
+    ],
+    "constraints": [
+      "Never send emails without explicit user confirmation; always present recipient list and get approval first",
+      "Process up to 50 emails per batch"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Gather email filter criteria from user",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "batch_complete",
+          "restart"
+        ],
+        "output_keys": [
+          "filter_criteria"
+        ],
+        "success_criteria": "Filter criteria is specific enough to search Gmail (sender, subject, date range, or keywords).",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "search",
+        "name": "Search Emails",
+        "description": "Search Gmail for unreplied emails matching filter criteria",
+        "node_type": "event_loop",
+        "tools": [
+          "gmail_list_messages",
+          "gmail_get_message",
+          "gmail_batch_get_messages"
+        ],
+        "input_keys": [
+          "filter_criteria"
+        ],
+        "output_keys": [
+          "email_list"
+        ],
+        "success_criteria": "Found unreplied emails matching criteria with sender, subject, snippet, message_id.",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "confirm-draft",
+        "name": "Confirm & Reply",
+        "description": "Present emails for confirmation, send personalized replies",
+        "node_type": "event_loop",
+        "tools": [
+          "gmail_reply_email"
+        ],
+        "input_keys": [
+          "email_list",
+          "filter_criteria"
+        ],
+        "output_keys": [
+          "batch_complete",
+          "restart"
+        ],
+        "success_criteria": "User confirmed recipients and personalized replies sent for each.",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "intake",
+        "target": "search",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "search",
+        "target": "confirm-draft",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "confirm-draft",
+        "target": "intake",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-3",
+        "source": "confirm-draft",
+        "target": "intake",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "intake",
+    "terminal_nodes": [
+      "confirm-draft"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "intake": [
+      "intake"
+    ],
+    "search": [
+      "search"
+    ],
+    "confirm-draft": [
+      "confirm-draft"
+    ]
+  }
+}

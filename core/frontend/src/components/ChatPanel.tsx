@@ -2,6 +2,7 @@ import { memo, useState, useRef, useEffect } from "react";
 import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
+import MultiQuestionWidget from "@/components/MultiQuestionWidget";
 
 export interface ChatMessage {
   id: string;
@@ -9,12 +10,14 @@ export interface ChatMessage {
   agentColor: string;
   content: string;
   timestamp: string;
-  type?: "system" | "agent" | "user" | "tool_status" | "worker_input_request";
+  type?: "system" | "agent" | "user" | "tool_status" | "worker_input_request" | "run_divider";
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
   thread?: string;
   /** Epoch ms when this message was first created — used for ordering queen/worker interleaving */
   createdAt?: number;
+  /** Queen phase active when this message was created */
+  phase?: "planning" | "building" | "staging" | "running";
 }
 
 interface ChatPanelProps {
@@ -34,8 +37,12 @@ interface ChatPanelProps {
   pendingQuestion?: string | null;
   /** Options for the pending question */
   pendingOptions?: string[] | null;
+  /** Multiple questions from ask_user_multiple */
+  pendingQuestions?: { id: string; prompt: string; options?: string[] }[] | null;
   /** Called when user submits an answer to the pending question */
   onQuestionSubmit?: (answer: string, isOther: boolean) => void;
+  /** Called when user submits answers to multiple questions */
+  onMultiQuestionSubmit?: (answers: Record<string, string>) => void;
   /** Called when user dismisses the pending question without answering */
   onQuestionDismiss?: () => void;
   /** Queen operating phase — shown as a tag on queen messages */
@@ -149,6 +156,18 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
   const isQueen = msg.role === "queen";
   const color = getColor(msg.agent, msg.role);
 
+  if (msg.type === "run_divider") {
+    return (
+      <div className="flex items-center gap-3 py-2 my-1">
+        <div className="flex-1 h-px bg-border/60" />
+        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+          {msg.content}
+        </span>
+        <div className="flex-1 h-px bg-border/60" />
+      </div>
+    );
+  }
+
   if (msg.type === "system") {
     return (
       <div className="flex justify-center py-1">
@@ -200,13 +219,13 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
             }`}
           >
             {isQueen
-              ? queenPhase === "running"
-                ? "running phase"
-                : queenPhase === "staging"
-                  ? "staging phase"
-                  : queenPhase === "planning"
-                    ? "planning phase"
-                    : "building phase"
+              ? ((msg.phase ?? queenPhase) === "running"
+                ? "running"
+                : (msg.phase ?? queenPhase) === "staging"
+                  ? "staging"
+                  : (msg.phase ?? queenPhase) === "planning"
+                    ? "planning"
+                    : "building")
               : "Worker"}
           </span>
         </div>
@@ -220,9 +239,9 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
       </div>
     </div>
   );
-}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.queenPhase === next.queenPhase);
+}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.msg.phase === next.msg.phase && prev.queenPhase === next.queenPhase);
 
-export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, onQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, pendingQuestions, onQuestionSubmit, onMultiQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -332,7 +351,13 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
       </div>
 
       {/* Input area — question widget replaces textarea when a question is pending */}
-      {pendingQuestion && pendingOptions && onQuestionSubmit ? (
+      {pendingQuestions && pendingQuestions.length >= 2 && onMultiQuestionSubmit ? (
+        <MultiQuestionWidget
+          questions={pendingQuestions}
+          onSubmit={onMultiQuestionSubmit}
+          onDismiss={onQuestionDismiss}
+        />
+      ) : pendingQuestion && pendingOptions && onQuestionSubmit ? (
         <QuestionWidget
           question={pendingQuestion}
           options={pendingOptions}

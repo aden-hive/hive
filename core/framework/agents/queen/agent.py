@@ -14,8 +14,7 @@ queen_goal = Goal(
     id="queen-manager",
     name="Queen Manager",
     description=(
-        "Manage the worker agent lifecycle and serve as the user's primary "
-        "interactive interface. Triage health escalations from the judge."
+        "Manage the worker agent lifecycle and serve as the user's primary interactive interface."
     ),
     success_criteria=[],
     constraints=[],
@@ -35,6 +34,5 @@ queen_graph = GraphSpec(
     loop_config={
         "max_iterations": 999_999,
         "max_tool_calls_per_turn": 30,
-        "max_history_tokens": 32000,
     },
 )

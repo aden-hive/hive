@@ -16,6 +16,9 @@ from aiohttp.test_utils import TestClient, TestServer
 from framework.server.app import create_app
 from framework.server.session_manager import Session
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
+EXAMPLE_AGENT_PATH = REPO_ROOT / "examples" / "templates" / "deep_research_agent"
+
 # ---------------------------------------------------------------------------
 # Mock helpers
 # ---------------------------------------------------------------------------
@@ -207,11 +210,8 @@ def tmp_agent_dir(tmp_path, monkeypatch):
     return tmp_path, agent_name, base
 
 
-@pytest.fixture
-def sample_session(tmp_agent_dir):
-    """Create a sample session with state.json, checkpoints, and conversations."""
-    tmp_path, agent_name, base = tmp_agent_dir
-    session_id = "session_20260220_120000_abc12345"
+def _write_sample_session(base: Path, session_id: str):
+    """Create a sample worker session on disk."""
     session_dir = base / "sessions" / session_id
 
     # state.json
@@ -292,6 +292,20 @@ def sample_session(tmp_agent_dir):
     return session_id, session_dir, state
 
 
+@pytest.fixture
+def sample_session(tmp_agent_dir):
+    """Create a sample session with state.json, checkpoints, and conversations."""
+    _tmp_path, _agent_name, base = tmp_agent_dir
+    return _write_sample_session(base, "session_20260220_120000_abc12345")
+
+
+@pytest.fixture
+def custom_id_session(tmp_agent_dir):
+    """Create a sample session that uses a custom non-session_* ID."""
+    _tmp_path, _agent_name, base = tmp_agent_dir
+    return _write_sample_session(base, "my-custom-session")
+
+
 def _make_app_with_session(session):
     """Create an aiohttp app with a pre-loaded session."""
     app = create_app()
@@ -347,6 +361,35 @@ class TestHealth:
 
 
 class TestSessionCRUD:
+    @pytest.mark.asyncio
+    async def test_create_session_with_worker_forwards_session_id(self):
+        app = create_app()
+        manager = app["manager"]
+        manager.create_session_with_worker = AsyncMock(
+            return_value=_make_session(agent_id="my-custom-session")
+        )
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions",
+                json={
+                    "session_id": "my-custom-session",
+                    "agent_path": str(EXAMPLE_AGENT_PATH),
+                },
+            )
+            data = await resp.json()
+
+        assert resp.status == 201
+        assert data["session_id"] == "my-custom-session"
+        manager.create_session_with_worker.assert_awaited_once_with(
+            str(EXAMPLE_AGENT_PATH.resolve()),
+            agent_id=None,
+            session_id="my-custom-session",
+            model=None,
+            initial_prompt=None,
+            queen_resume_from=None,
+        )
+
     @pytest.mark.asyncio
     async def test_list_sessions_empty(self):
         app = create_app()
@@ -766,6 +809,22 @@ class TestWorkerSessions:
             assert data["sessions"][0]["session_id"] == session_id
             assert data["sessions"][0]["status"] == "paused"
             assert data["sessions"][0]["steps"] == 5
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_includes_custom_id(self, custom_id_session, tmp_agent_dir):
+        session_id, session_dir, state = custom_id_session
+        tmp_path, agent_name, base = tmp_agent_dir
+
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/sessions/test_agent/worker-sessions")
+            assert resp.status == 200
+            data = await resp.json()
+            assert len(data["sessions"]) == 1
+            assert data["sessions"][0]["session_id"] == session_id
+            assert data["sessions"][0]["status"] == "paused"
 
     @pytest.mark.asyncio
     async def test_list_sessions_empty(self, tmp_agent_dir):
@@ -1265,6 +1324,28 @@ class TestLogs:
     @pytest.mark.asyncio
     async def test_logs_list_summaries(self, sample_session, tmp_agent_dir):
         session_id, session_dir, state = sample_session
+        tmp_path, agent_name, base = tmp_agent_dir
+
+        from framework.runtime.runtime_log_store import RuntimeLogStore
+
+        log_store = RuntimeLogStore(base)
+        session = _make_session(
+            tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
+            log_store=log_store,
+        )
+        app = _make_app_with_session(session)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/sessions/test_agent/logs")
+            assert resp.status == 200
+            data = await resp.json()
+            assert "logs" in data
+            assert len(data["logs"]) >= 1
+            assert data["logs"][0]["run_id"] == session_id
+
+    @pytest.mark.asyncio
+    async def test_logs_list_summaries_with_custom_id(self, custom_id_session, tmp_agent_dir):
+        session_id, session_dir, state = custom_id_session
         tmp_path, agent_name, base = tmp_agent_dir
 
         from framework.runtime.runtime_log_store import RuntimeLogStore

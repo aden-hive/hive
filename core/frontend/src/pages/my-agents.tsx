@@ -113,7 +113,7 @@ export default function MyAgents() {
                   <div className="flex items-center gap-1">
                     <Activity className="w-3 h-3" />
                     <span>
-                      {agent.session_count} session{agent.session_count !== 1 ? "s" : ""}
+                      {agent.run_count} run{agent.run_count !== 1 ? "s" : ""}
                     </span>
                   </div>
                   <span>{agent.last_active ? timeAgo(agent.last_active) : "Never run"}</span>

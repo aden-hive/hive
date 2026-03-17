@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Cpu, Zap, Clock, RotateCcw, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Copy, Check, Terminal, Wrench, BookOpen, GitBranch, Bot } from "lucide-react";
-import type { GraphNode, NodeStatus } from "./AgentGraph";
+import type { GraphNode, NodeStatus } from "./graph-types";
 import type { NodeSpec, ToolInfo, NodeCriteria } from "../api/types";
 import { graphsApi } from "../api/graphs";
 import { logsApi } from "../api/logs";
@@ -299,13 +299,13 @@ function SubagentsTab({ subAgentIds, allNodeSpecs, subagentReports }: { subAgent
   );
 }
 
-type Tab = "overview" | "tools" | "logs" | "prompt" | "subagents";
+type Tab = "overview" | "breakdown" | "tools" | "logs" | "subagents";
 
 const tabs: { id: Tab; label: string; Icon: React.FC<{ className?: string }> }[] = [
   { id: "overview", label: "Overview", Icon: ({ className }) => <GitBranch className={className} /> },
+  { id: "breakdown", label: "Breakdown", Icon: ({ className }) => <BookOpen className={className} /> },
   { id: "tools", label: "Tools", Icon: ({ className }) => <Wrench className={className} /> },
   { id: "logs", label: "Logs", Icon: ({ className }) => <Terminal className={className} /> },
-  { id: "prompt", label: "Prompt", Icon: ({ className }) => <BookOpen className={className} /> },
   { id: "subagents", label: "Subagents", Icon: ({ className }) => <Bot className={className} /> },
 ];
 
@@ -331,7 +331,7 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
 
   // Fetch real criteria when Overview tab is active and session is loaded
   useEffect(() => {
-    if (activeTab === "overview" && sessionId && graphId && node) {
+    if (activeTab === "breakdown" && sessionId && graphId && node) {
       graphsApi.nodeCriteria(sessionId, graphId, node.id, workerSessionId || undefined)
         .then(r => setRealCriteria(r))
         .catch(() => setRealCriteria(null));
@@ -410,6 +410,10 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
       {/* Tab content */}
       <div className="flex-1 overflow-auto px-4 py-4 flex flex-col gap-3">
         {activeTab === "overview" && (
+          <SystemPromptTab systemPrompt={nodeSpec?.system_prompt} />
+        )}
+
+        {activeTab === "breakdown" && (
           <>
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Action Plan</p>
             {actionPlan ? (
@@ -487,10 +491,6 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
 
         {activeTab === "logs" && (
           <LogsTab nodeId={node.id} isActive={isActive} sessionId={sessionId} graphId={graphId} workerSessionId={workerSessionId} nodeLogs={nodeLogs} />
-        )}
-
-        {activeTab === "prompt" && (
-          <SystemPromptTab systemPrompt={nodeSpec?.system_prompt} />
         )}
 
         {activeTab === "subagents" && nodeSpec?.sub_agents && (

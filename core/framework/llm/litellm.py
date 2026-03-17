@@ -24,6 +24,7 @@ except ImportError:
     litellm = None  # type: ignore[assignment]
     RateLimitError = Exception  # type: ignore[assignment, misc]
 
+from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import StreamEvent
 from framework.llm.provider_selector import interactive_fallback, quick_provider_check
@@ -44,6 +45,12 @@ def _patch_litellm_anthropic_oauth() -> None:
         from litellm.llms.anthropic.common_utils import AnthropicModelInfo
         from litellm.types.llms.anthropic import ANTHROPIC_OAUTH_TOKEN_PREFIX
     except ImportError:
+        logger.warning(
+            "Could not apply litellm Anthropic OAuth patch — litellm internals may have "
+            "changed. Anthropic OAuth tokens (Claude Code subscriptions) may fail with 401. "
+            "See BerriAI/litellm#19618. Current litellm version: %s",
+            getattr(litellm, "__version__", "unknown"),
+        )
         return
 
     original = AnthropicModelInfo.validate_environment
@@ -73,10 +80,12 @@ def _patch_litellm_metadata_nonetype() -> None:
     """Patch litellm entry points to prevent metadata=None TypeError."""
     import functools
 
+    patched_count = 0
     for fn_name in ("completion", "acompletion", "responses", "aresponses"):
         original = getattr(litellm, fn_name, None)
         if original is None:
             continue
+        patched_count += 1
         if asyncio.iscoroutinefunction(original):
 
             @functools.wraps(original)
@@ -96,6 +105,14 @@ def _patch_litellm_metadata_nonetype() -> None:
 
             setattr(litellm, fn_name, _sync_wrapper)
 
+    if patched_count == 0:
+        logger.warning(
+            "Could not apply litellm metadata=None patch — none of the expected entry "
+            "points (completion, acompletion, responses, aresponses) were found. "
+            "metadata=None TypeError may occur. Current litellm version: %s",
+            getattr(litellm, "__version__", "unknown"),
+        )
+
 
 if litellm is not None:
     _patch_litellm_anthropic_oauth()
@@ -106,10 +123,39 @@ RATE_LIMIT_BACKOFF_BASE = 2
 RATE_LIMIT_MAX_DELAY = 120
 MINIMAX_API_BASE = "https://api.minimax.io/v1"
 
+# Providers that accept cache_control on message content blocks.
+# Anthropic: native ephemeral caching. MiniMax & Z-AI/GLM: pass-through to their APIs.
+# (OpenAI caches automatically server-side; Groq/Gemini/etc. strip the header.)
+_CACHE_CONTROL_PREFIXES = (
+    "anthropic/",
+    "claude-",
+    "minimax/",
+    "minimax-",
+    "MiniMax-",
+    "zai-glm",
+    "glm-",
+)
+
+
+def _model_supports_cache_control(model: str) -> bool:
+    return any(model.startswith(p) for p in _CACHE_CONTROL_PREFIXES)
+
+
+# Kimi For Coding uses an Anthropic-compatible endpoint (no /v1 suffix).
+# Claude Code integration uses this format; the /v1 OpenAI-compatible endpoint
+# enforces a coding-agent whitelist that blocks unknown User-Agents.
+KIMI_API_BASE = "https://api.kimi.com/coding"
+
+# Empty-stream retries use a short fixed delay, not the rate-limit backoff.
+# Conversation-structure issues are deterministic — long waits don't help.
 EMPTY_STREAM_MAX_RETRIES = 3
 EMPTY_STREAM_RETRY_DELAY = 1.0
 
 FAILED_REQUESTS_DIR = Path.home() / ".hive" / "failed_requests"
+
+# Maximum number of dump files to retain in ~/.hive/failed_requests/.
+# Older files are pruned automatically to prevent unbounded disk growth.
+MAX_FAILED_REQUEST_DUMPS = 50
 
 
 def _estimate_tokens(model: str, messages: list[dict]) -> tuple[int, str]:
@@ -125,7 +171,34 @@ def _estimate_tokens(model: str, messages: list[dict]) -> tuple[int, str]:
     return total_chars // 4, "estimate"
 
 
+
 def _dump_failed_request(model: str, kwargs: dict[str, Any], error_type: str, attempt: int) -> str:
+
+def _prune_failed_request_dumps(max_files: int = MAX_FAILED_REQUEST_DUMPS) -> None:
+    """Remove oldest dump files when the count exceeds *max_files*.
+
+    Best-effort: never raises — a pruning failure must not break retry logic.
+    """
+    try:
+        all_dumps = sorted(
+            FAILED_REQUESTS_DIR.glob("*.json"),
+            key=lambda f: f.stat().st_mtime,
+        )
+        excess = len(all_dumps) - max_files
+        if excess > 0:
+            for old_file in all_dumps[:excess]:
+                old_file.unlink(missing_ok=True)
+    except Exception:
+        pass  # Best-effort — never block the caller
+
+
+def _dump_failed_request(
+    model: str,
+    kwargs: dict[str, Any],
+    error_type: str,
+    attempt: int,
+) -> str:
+
     """Dump failed request to a file for debugging. Returns the file path."""
     FAILED_REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -149,6 +222,9 @@ def _dump_failed_request(model: str, kwargs: dict[str, Any], error_type: str, at
 
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(dump_data, f, indent=2, default=str)
+
+    # Prune old dumps to prevent unbounded disk growth
+    _prune_failed_request_dumps()
 
     return str(filepath)
 
@@ -245,6 +321,7 @@ class LiteLLMProvider(LLMProvider):
             provider: Provider name (anthropic, openai, gemini, etc.)
             **kwargs: Additional arguments passed to litellm.completion()
         """
+
         # DEBUG: Print what's coming in
         print(f"🔍 DEBUG - __init__ called with model={model}, provider={provider}")
         
@@ -369,6 +446,27 @@ class LiteLLMProvider(LLMProvider):
         
         self.api_key = api_key
         self.api_base = api_base or self._default_api_base_for_model(self.model)
+
+        # Kimi For Coding exposes an Anthropic-compatible endpoint at
+        # https://api.kimi.com/coding (the same format Claude Code uses natively).
+        # Translate kimi/ prefix to anthropic/ so litellm uses the Anthropic
+        # Messages API handler and routes to that endpoint — no special headers needed.
+        _original_model = model
+        if model.lower().startswith("kimi/"):
+            model = "anthropic/" + model[len("kimi/") :]
+            # Normalise api_base: litellm's Anthropic handler appends /v1/messages,
+            # so the base must be https://api.kimi.com/coding (no /v1 suffix).
+            # Strip a trailing /v1 in case the user's saved config has the old value.
+            if api_base and api_base.rstrip("/").endswith("/v1"):
+                api_base = api_base.rstrip("/")[:-3]
+        elif model.lower().startswith("hive/"):
+            model = "anthropic/" + model[len("hive/") :]
+            if api_base and api_base.rstrip("/").endswith("/v1"):
+                api_base = api_base.rstrip("/")[:-3]
+        self.model = model
+        self.api_key = api_key
+        self.api_base = api_base or self._default_api_base_for_model(_original_model)
+
         self.extra_kwargs = kwargs
         self._codex_backend = bool(
             self.api_base and "chatgpt.com/backend-api/codex" in self.api_base
@@ -429,6 +527,10 @@ class LiteLLMProvider(LLMProvider):
         model_lower = model.lower()
         if model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
             return MINIMAX_API_BASE
+        if model_lower.startswith("kimi/"):
+            return KIMI_API_BASE
+        if model_lower.startswith("hive/"):
+            return HIVE_API_BASE
         return None
 
     def get_display_name(self) -> str:
@@ -750,7 +852,10 @@ class LiteLLMProvider(LLMProvider):
 
         full_messages = []
         if system:
-            full_messages.append({"role": "system", "content": system})
+            sys_msg: dict[str, Any] = {"role": "system", "content": system}
+            if _model_supports_cache_control(self.model):
+                sys_msg["cache_control"] = {"type": "ephemeral"}
+            full_messages.append(sys_msg)
         full_messages.extend(messages)
 
         if json_mode:
@@ -922,7 +1027,10 @@ class LiteLLMProvider(LLMProvider):
 
         full_messages = []
         if system:
-            full_messages.append({"role": "system", "content": system})
+            sys_msg: dict[str, Any] = {"role": "system", "content": system}
+            if _model_supports_cache_control(self.model):
+                sys_msg["cache_control"] = {"type": "ephemeral"}
+            full_messages.append(sys_msg)
         full_messages.extend(messages)
 
         if self._codex_backend and not any(m["role"] == "system" for m in full_messages):
@@ -981,9 +1089,26 @@ class LiteLLMProvider(LLMProvider):
                 response = await litellm.acompletion(**kwargs)
 
                 async for chunk in response:
-                    choice = chunk.choices[0] if chunk.choices else None
-                    if not choice:
+                    # Capture usage from the trailing usage-only chunk that
+                    # stream_options={"include_usage": True} sends with empty choices.
+                    if not chunk.choices:
+                        usage = getattr(chunk, "usage", None)
+                        if usage:
+                            input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                            output_tokens = getattr(usage, "completion_tokens", 0) or 0
+                            logger.debug(
+                                "[tokens] trailing usage chunk: input=%d output=%d model=%s",
+                                input_tokens,
+                                output_tokens,
+                                self.model,
+                            )
+                        else:
+                            logger.debug(
+                                "[tokens] empty-choices chunk with no usage (model=%s)",
+                                self.model,
+                            )
                         continue
+                    choice = chunk.choices[0]
 
                     delta = choice.delta
 
@@ -1043,18 +1168,94 @@ class LiteLLMProvider(LLMProvider):
                             tail_events.append(TextEndEvent(full_text=accumulated_text))
 
                         usage = getattr(chunk, "usage", None)
+                        logger.debug(
+                            "[tokens] finish-chunk raw usage: %r (type=%s)",
+                            usage,
+                            type(usage).__name__,
+                        )
+                        cached_tokens = 0
                         if usage:
                             input_tokens = getattr(usage, "prompt_tokens", 0) or 0
                             output_tokens = getattr(usage, "completion_tokens", 0) or 0
+                            _details = getattr(usage, "prompt_tokens_details", None)
+                            cached_tokens = (
+                                getattr(_details, "cached_tokens", 0) or 0
+                                if _details is not None
+                                else getattr(usage, "cache_read_input_tokens", 0) or 0
+                            )
+                            logger.debug(
+                                "[tokens] finish-chunk usage: "
+                                "input=%d output=%d cached=%d model=%s",
+                                input_tokens,
+                                output_tokens,
+                                cached_tokens,
+                                self.model,
+                            )
 
+                        logger.debug(
+                            "[tokens] finish event: input=%d output=%d cached=%d stop=%s model=%s",
+                            input_tokens,
+                            output_tokens,
+                            cached_tokens,
+                            choice.finish_reason,
+                            self.model,
+                        )
                         tail_events.append(
                             FinishEvent(
                                 stop_reason=choice.finish_reason,
                                 input_tokens=input_tokens,
                                 output_tokens=output_tokens,
+                                cached_tokens=cached_tokens,
                                 model=self.model,
                             )
                         )
+
+                # Fallback: LiteLLM strips usage from yielded chunks before
+                # returning them to us, but appends the original chunk (with
+                # usage intact) to response.chunks first.  Use LiteLLM's own
+                # calculate_total_usage() on that accumulated list.
+                if input_tokens == 0 and output_tokens == 0:
+                    try:
+                        from litellm.litellm_core_utils.streaming_handler import (
+                            calculate_total_usage,
+                        )
+
+                        _chunks = getattr(response, "chunks", None)
+                        if _chunks:
+                            _usage = calculate_total_usage(chunks=_chunks)
+                            input_tokens = _usage.prompt_tokens or 0
+                            output_tokens = _usage.completion_tokens or 0
+                            _details = getattr(_usage, "prompt_tokens_details", None)
+                            cached_tokens = (
+                                getattr(_details, "cached_tokens", 0) or 0
+                                if _details is not None
+                                else getattr(_usage, "cache_read_input_tokens", 0) or 0
+                            )
+                            logger.debug(
+                                "[tokens] post-loop chunks fallback:"
+                                " input=%d output=%d cached=%d model=%s",
+                                input_tokens,
+                                output_tokens,
+                                cached_tokens,
+                                self.model,
+                            )
+                            # Patch the FinishEvent already queued with 0 tokens
+                            for _i, _ev in enumerate(tail_events):
+                                if isinstance(_ev, FinishEvent) and _ev.input_tokens == 0:
+                                    tail_events[_i] = FinishEvent(
+                                        stop_reason=_ev.stop_reason,
+                                        input_tokens=input_tokens,
+                                        output_tokens=output_tokens,
+                                        cached_tokens=cached_tokens,
+                                        model=_ev.model,
+                                    )
+                                    break
+                    except Exception as _e:
+                        logger.debug("[tokens] chunks fallback failed: %s", _e)
+
+                # Check whether the stream produced any real content.
+                # (If text deltas were yielded above, has_content is True
+                # and we skip the retry path — nothing was yielded in vain.)
 
                 has_content = accumulated_text or tool_calls_acc
                 if not has_content:

@@ -36,6 +36,21 @@ from framework.runtime.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class TriggerEvent:
+    """A framework-level trigger signal (timer tick or webhook hit).
+
+    Triggers are queued separately from user messages / external events
+    and drained atomically so the LLM sees all pending triggers at once.
+    """
+
+    trigger_type: str  # "timer" | "webhook"
+    source_id: str  # entry point ID or webhook route ID
+    payload: dict[str, Any] = field(default_factory=dict)
+    timestamp: float = field(default_factory=time.time)
+
+
 # Pattern for detecting context-window-exceeded errors across LLM providers.
 _CONTEXT_TOO_LARGE_RE = re.compile(
     r"context.{0,20}(length|window|limit|size)|"
@@ -73,6 +88,7 @@ class _EscalationReceiver:
     def __init__(self) -> None:
         self._event = asyncio.Event()
         self._response: str | None = None
+        self._awaiting_input = True  # So inject_worker_message() can prefer us
 
     async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
         """Called by ExecutionStream.inject_input() when the user responds."""
@@ -169,7 +185,7 @@ class LoopConfig:
     judge_every_n_turns: int = 1
     stall_detection_threshold: int = 3
     stall_similarity_threshold: float = 0.85
-    max_history_tokens: int = 32_000
+    max_context_tokens: int = 32_000
     store_prefix: str = ""
 
     # Overflow margin for max_tool_calls_per_turn.  Tool calls are only
@@ -185,6 +201,14 @@ class LoopConfig:
     # ``None`` the result is simply truncated with an explanatory note.
     max_tool_result_chars: int = 30_000
     spillover_dir: str | None = None  # Path string; created on first use
+
+    # --- set_output value spilling ---
+    # When a set_output value exceeds this character count it is auto-saved
+    # to a file in *spillover_dir* and the stored value is replaced with a
+    # lightweight file reference.  This keeps shared memory / adapt.md /
+    # transition markers small and forces the next node to load the full
+    # data from the file.  Set to 0 to disable.
+    max_output_value_chars: int = 2_000
 
     # --- Stream retry (transient error recovery within EventLoopNode) ---
     # When _run_single_turn() raises a transient error (network, rate limit,
@@ -208,6 +232,18 @@ class LoopConfig:
     # always skip the judge regardless of this setting.
     cf_grace_turns: int = 1
     tool_doom_loop_enabled: bool = True
+
+    # --- Per-tool-call timeout ---
+    # Maximum seconds a single tool call may take before being killed.
+    # Prevents hung MCP servers (especially browser/GCU tools) from
+    # blocking the entire event loop indefinitely.  0 = no timeout.
+    tool_call_timeout_seconds: float = 60.0
+
+    # --- Subagent delegation timeout ---
+    # Maximum seconds a delegate_to_sub_agent call may run before being
+    # killed.  Subagents run a full event-loop so they naturally take
+    # longer than a single tool call — default is 10 minutes.  0 = no timeout.
+    subagent_timeout_seconds: float = 300.0
 
     # --- Lifecycle hooks ---
     # Hooks are async callables keyed by event name.  Supported events:
@@ -345,6 +381,7 @@ class EventLoopNode(NodeProtocol):
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
         self._injection_queue: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
+        self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Client-facing input blocking state
         self._input_ready = asyncio.Event()
         self._awaiting_input = False
@@ -456,6 +493,8 @@ class EventLoopNode(NodeProtocol):
                     focus_prompt=ctx.node_spec.system_prompt,
                     narrative=ctx.narrative or None,
                     accounts_prompt=ctx.accounts_prompt or None,
+                    skills_catalog_prompt=ctx.skills_catalog_prompt or None,
+                    protocols_prompt=ctx.protocols_prompt or None,
                 )
                 if conversation.system_prompt != _current_prompt:
                     conversation.update_system_prompt(_current_prompt)
@@ -476,6 +515,22 @@ class EventLoopNode(NodeProtocol):
                 # Append connected accounts info if available
                 if ctx.accounts_prompt:
                     system_prompt = f"{system_prompt}\n\n{ctx.accounts_prompt}"
+
+                # Append skill catalog and operational protocols
+                if ctx.skills_catalog_prompt:
+                    system_prompt = f"{system_prompt}\n\n{ctx.skills_catalog_prompt}"
+                    logger.info(
+                        "[%s] Injected skills catalog (%d chars)",
+                        node_id,
+                        len(ctx.skills_catalog_prompt),
+                    )
+                if ctx.protocols_prompt:
+                    system_prompt = f"{system_prompt}\n\n{ctx.protocols_prompt}"
+                    logger.info(
+                        "[%s] Injected operational protocols (%d chars)",
+                        node_id,
+                        len(ctx.protocols_prompt),
+                    )
 
                 # Inject agent working memory (adapt.md).
                 # If it doesn't exist yet, seed it with available context.
@@ -511,7 +566,7 @@ class EventLoopNode(NodeProtocol):
 
                 conversation = NodeConversation(
                     system_prompt=system_prompt,
-                    max_history_tokens=self._config.max_history_tokens,
+                    max_context_tokens=self._config.max_context_tokens,
                     output_keys=ctx.node_spec.output_keys or None,
                     store=self._conversation_store,
                 )
@@ -548,6 +603,8 @@ class EventLoopNode(NodeProtocol):
             tools.append(set_output_tool)
         if ctx.node_spec.client_facing and not ctx.event_triggered:
             tools.append(self._build_ask_user_tool())
+            if stream_id == "queen":
+                tools.append(self._build_ask_user_multiple_tool())
         # Workers/subagents can escalate blockers to the queen.
         if stream_id not in ("queen", "judge"):
             tools.append(self._build_escalate_tool())
@@ -556,10 +613,24 @@ class EventLoopNode(NodeProtocol):
         # - Node has sub_agents defined
         # - We are NOT in subagent mode (prevents nested delegation)
         if not ctx.is_subagent_mode:
-            sub_agents = getattr(ctx.node_spec, "sub_agents", [])
-            delegate_tool = self._build_delegate_tool(sub_agents, ctx.node_registry)
-            if delegate_tool:
-                tools.append(delegate_tool)
+            sub_agents = getattr(ctx.node_spec, "sub_agents", None) or []
+            if sub_agents:
+                delegate_tool = self._build_delegate_tool(sub_agents, ctx.node_registry)
+                if delegate_tool:
+                    tools.append(delegate_tool)
+                    logger.info(
+                        "[%s] delegate_to_sub_agent injected (sub_agents=%s)",
+                        node_id,
+                        sub_agents,
+                    )
+                else:
+                    logger.error(
+                        "[%s] _build_delegate_tool returned None for sub_agents=%s",
+                        node_id,
+                        sub_agents,
+                    )
+        else:
+            logger.debug("[%s] Skipped delegate tool (is_subagent_mode=True)", node_id)
 
         # Add report_to_parent tool for sub-agents with a report callback
         if ctx.is_subagent_mode and ctx.report_callback is not None:
@@ -628,12 +699,15 @@ class EventLoopNode(NodeProtocol):
 
             # 6b. Drain injection queue
             await self._drain_injection_queue(conversation)
+            # 6b1. Drain trigger queue (framework-level signals)
+            await self._drain_trigger_queue(conversation)
 
             # 6b2. Dynamic tool refresh (mode switching)
             if ctx.dynamic_tools_provider is not None:
                 _synthetic_names = {
                     "set_output",
                     "ask_user",
+                    "ask_user_multiple",
                     "escalate",
                     "delegate_to_sub_agent",
                     "report_to_parent",
@@ -652,8 +726,20 @@ class EventLoopNode(NodeProtocol):
                     conversation.update_system_prompt(_new_prompt)
                     logger.info("[%s] Dynamic prompt updated (phase switch)", node_id)
 
-            # 6c. Publish iteration event
-            await self._publish_iteration(stream_id, node_id, iteration, execution_id)
+            # 6c. Publish iteration event (with per-iteration metadata when available)
+            _iter_meta = None
+            if ctx.iteration_metadata_provider is not None:
+                try:
+                    _iter_meta = ctx.iteration_metadata_provider()
+                except Exception:
+                    pass
+            await self._publish_iteration(
+                stream_id,
+                node_id,
+                iteration,
+                execution_id,
+                extra_data=_iter_meta,
+            )
 
             # 6d. Pre-turn compaction check (tiered)
             _compacted_this_iter = False
@@ -711,6 +797,7 @@ class EventLoopNode(NodeProtocol):
                         model=turn_tokens.get("model", ""),
                         input_tokens=turn_tokens.get("input", 0),
                         output_tokens=turn_tokens.get("output", 0),
+                        cached_tokens=turn_tokens.get("cached", 0),
                         execution_id=execution_id,
                         iteration=iteration,
                     )
@@ -1057,7 +1144,13 @@ class EventLoopNode(NodeProtocol):
             mcp_tool_calls = [
                 tc
                 for tc in logged_tool_calls
-                if tc.get("tool_name") not in ("set_output", "ask_user", "escalate")
+                if tc.get("tool_name")
+                not in (
+                    "set_output",
+                    "ask_user",
+                    "ask_user_multiple",
+                    "escalate",
+                )
             ]
             if mcp_tool_calls:
                 fps = self._fingerprint_tool_calls(mcp_tool_calls)
@@ -1251,9 +1344,28 @@ class EventLoopNode(NodeProtocol):
                     iteration,
                     _cf_auto,
                 )
+                # Check for multi-question batch from ask_user_multiple
+                multi_qs = getattr(self, "_pending_multi_questions", None)
+                self._pending_multi_questions = None
                 got_input = await self._await_user_input(
-                    ctx, prompt=_cf_prompt, options=ask_user_options
+                    ctx,
+                    prompt=_cf_prompt,
+                    options=ask_user_options,
+                    questions=multi_qs,
                 )
+                # Emit deferred tool_call_completed for ask_user / ask_user_multiple
+                deferred = getattr(self, "_deferred_tool_complete", None)
+                if deferred:
+                    self._deferred_tool_complete = None
+                    await self._publish_tool_completed(
+                        deferred["stream_id"],
+                        deferred["node_id"],
+                        deferred["tool_use_id"],
+                        deferred["tool_name"],
+                        deferred["content"],
+                        deferred["is_error"],
+                        deferred["execution_id"],
+                    )
                 logger.info("[%s] iter=%d: unblocked, got_input=%s", node_id, iteration, got_input)
                 if not got_input:
                     await self._publish_loop_completed(
@@ -1708,6 +1820,15 @@ class EventLoopNode(NodeProtocol):
         await self._injection_queue.put((content, is_client_input))
         self._input_ready.set()
 
+    async def inject_trigger(self, trigger: TriggerEvent) -> None:
+        """Inject a framework-level trigger into the running queen loop.
+
+        Triggers are queued separately from user messages and drained
+        atomically via _drain_trigger_queue().
+        """
+        await self._trigger_queue.put(trigger)
+        self._input_ready.set()
+
     def signal_shutdown(self) -> None:
         """Signal the node to exit its loop cleanly.
 
@@ -1735,6 +1856,7 @@ class EventLoopNode(NodeProtocol):
         prompt: str = "",
         *,
         options: list[str] | None = None,
+        questions: list[dict] | None = None,
         emit_client_request: bool = True,
     ) -> bool:
         """Block until user input arrives or shutdown is signaled.
@@ -1749,15 +1871,17 @@ class EventLoopNode(NodeProtocol):
             options: Optional predefined choices for the user (from ask_user).
                 Passed through to the CLIENT_INPUT_REQUESTED event so the
                 frontend can render a QuestionWidget with buttons.
+            questions: Optional list of question dicts for ask_user_multiple.
+                Each dict has id, prompt, and optional options.
             emit_client_request: When False, wait silently without publishing
                 CLIENT_INPUT_REQUESTED. Used for worker waits where input is
                 expected from the queen via inject_worker_message().
 
         Returns True if input arrived, False if shutdown was signaled.
         """
-        # If messages arrived while the LLM was processing, skip blocking
-        # entirely — the next _drain_injection_queue() will pick them up.
-        if not self._injection_queue.empty():
+        # If messages or triggers arrived while the LLM was processing, skip
+        # blocking — the next drain pass will pick them up.
+        if not self._injection_queue.empty() or not self._trigger_queue.empty():
             return True
 
         # Clear BEFORE emitting so that synchronous handlers (e.g. the
@@ -1773,6 +1897,7 @@ class EventLoopNode(NodeProtocol):
                 prompt=prompt,
                 execution_id=ctx.execution_id or "",
                 options=options,
+                questions=questions,
             )
 
         self._awaiting_input = True
@@ -1832,7 +1957,7 @@ class EventLoopNode(NodeProtocol):
         stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
         execution_id = ctx.execution_id or ""
-        token_counts: dict[str, int] = {"input": 0, "output": 0}
+        token_counts: dict[str, int] = {"input": 0, "output": 0, "cached": 0}
         tool_call_count = 0
         final_text = ""
         final_system_prompt = conversation.system_prompt
@@ -1847,6 +1972,11 @@ class EventLoopNode(NodeProtocol):
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
+        # Counter for LLM calls within a single iteration.  Each pass through
+        # the inner tool loop starts a fresh LLM stream whose snapshot resets
+        # to "".  Without this, all calls share the same message ID on the
+        # frontend and the second call's text silently replaces the first.
+        inner_turn = 0
 
         # Inner tool loop: stream may produce tool calls requiring re-invocation
         while True:
@@ -1887,6 +2017,7 @@ class EventLoopNode(NodeProtocol):
             async def _do_stream(
                 _msgs: list = messages,  # noqa: B006
                 _tc: list[ToolCallEvent] = tool_calls,  # noqa: B006
+                inner_turn: int = inner_turn,
             ) -> None:
                 nonlocal accumulated_text, _stream_error
                 async for event in ctx.llm.stream(
@@ -1905,6 +2036,7 @@ class EventLoopNode(NodeProtocol):
                             ctx,
                             execution_id,
                             iteration=iteration,
+                            inner_turn=inner_turn,
                         )
 
                     elif isinstance(event, ToolCallEvent):
@@ -1913,6 +2045,7 @@ class EventLoopNode(NodeProtocol):
                     elif isinstance(event, FinishEvent):
                         token_counts["input"] += event.input_tokens
                         token_counts["output"] += event.output_tokens
+                        token_counts["cached"] += event.cached_tokens
                         token_counts["stop_reason"] = event.stop_reason
                         token_counts["model"] = event.model
 
@@ -2063,6 +2196,57 @@ class EventLoopNode(NodeProtocol):
                             except (json.JSONDecodeError, TypeError):
                                 pass
                         key = tc.tool_input.get("key", "")
+
+                        # Auto-spill: save large values to data files and
+                        # replace with a lightweight file reference so shared
+                        # memory / adapt.md / transition markers stay small.
+                        spill_dir = self._config.spillover_dir
+                        max_val = self._config.max_output_value_chars
+                        if max_val > 0 and spill_dir:
+                            val_str = (
+                                json.dumps(value, ensure_ascii=False)
+                                if not isinstance(value, str)
+                                else value
+                            )
+                            if len(val_str) > max_val:
+                                spill_path = Path(spill_dir)
+                                spill_path.mkdir(parents=True, exist_ok=True)
+                                ext = ".json" if isinstance(value, (dict, list)) else ".txt"
+                                filename = f"output_{key}{ext}"
+                                write_content = (
+                                    json.dumps(value, indent=2, ensure_ascii=False)
+                                    if isinstance(value, (dict, list))
+                                    else str(value)
+                                )
+                                (spill_path / filename).write_text(write_content, encoding="utf-8")
+                                file_size = (spill_path / filename).stat().st_size
+                                logger.info(
+                                    "set_output value auto-spilled: key=%s, "
+                                    "%d chars → %s (%d bytes)",
+                                    key,
+                                    len(val_str),
+                                    filename,
+                                    file_size,
+                                )
+                                # Replace value with reference
+                                value = (
+                                    f"[Saved to '{filename}' ({file_size:,} bytes). "
+                                    f"Use load_data(filename='{filename}') "
+                                    f"to access full data.]"
+                                )
+                                # Update tool result to inform the LLM
+                                result = ToolResult(
+                                    tool_use_id=tc.tool_use_id,
+                                    content=(
+                                        f"Output '{key}' was large "
+                                        f"({len(val_str):,} chars) — data saved "
+                                        f"to '{filename}' ({file_size:,} bytes). "
+                                        f"The next phase will see the file "
+                                        f"reference and can load full data."
+                                    ),
+                                    is_error=False,
+                                )
+
                         await accumulator.set(key, value)
                         self._record_learning(key, value)
                         outputs_set_this_turn.append(key)
@@ -2132,7 +2316,63 @@ class EventLoopNode(NodeProtocol):
                             ctx=ctx,
                             execution_id=execution_id,
                             iteration=iteration,
+                            inner_turn=inner_turn,
                         )
+
+                    result = ToolResult(
+                        tool_use_id=tc.tool_use_id,
+                        content="Waiting for user input...",
+                        is_error=False,
+                    )
+                    results_by_id[tc.tool_use_id] = result
+
+                elif tc.tool_name == "ask_user_multiple":
+                    # --- Framework-level ask_user_multiple ---
+                    user_input_requested = True
+                    raw_questions = tc.tool_input.get("questions", [])
+                    if not isinstance(raw_questions, list) or len(raw_questions) < 2:
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: questions must be an array of at "
+                                "least 2 question objects. Use ask_user "
+                                "for single questions."
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                        user_input_requested = False
+                        continue
+
+                    # Normalize each question entry
+                    questions: list[dict] = []
+                    for i, q in enumerate(raw_questions):
+                        if not isinstance(q, dict):
+                            continue
+                        qid = str(q.get("id", f"q{i + 1}"))
+                        prompt = str(q.get("prompt", ""))
+                        opts = q.get("options", None)
+                        if isinstance(opts, list):
+                            opts = [str(o) for o in opts if o]
+                            if len(opts) < 2:
+                                opts = None
+                        else:
+                            opts = None
+                        questions.append(
+                            {
+                                "id": qid,
+                                "prompt": prompt,
+                                **({"options": opts} if opts else {}),
+                            }
+                        )
+
+                    # Store as multi-question prompt/options for
+                    # the event emission path
+                    ask_user_prompt = ""
+                    ask_user_options = None
+                    # Pass the full questions list via a special
+                    # key that the event emitter picks up
+                    self._pending_multi_questions = questions
 
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
@@ -2310,20 +2550,43 @@ class EventLoopNode(NodeProtocol):
 
             # Phase 2b: execute subagent delegations in parallel.
             if pending_subagent:
+                _subagent_timeout = self._config.subagent_timeout_seconds
 
                 async def _timed_subagent(
                     _ctx: NodeContext,
                     _tc: ToolCallEvent,
                     _acc: OutputAccumulator = accumulator,
+                    _timeout: float = _subagent_timeout,
                 ) -> tuple[ToolResult | BaseException, str, float]:
                     _s = time.time()
                     _iso = datetime.now(UTC).isoformat()
                     try:
-                        _r = await self._execute_subagent(
+                        _coro = self._execute_subagent(
                             _ctx,
                             _tc.tool_input.get("agent_id", ""),
                             _tc.tool_input.get("task", ""),
                             accumulator=_acc,
+                        )
+                        if _timeout > 0:
+                            _r = await asyncio.wait_for(_coro, timeout=_timeout)
+                        else:
+                            _r = await _coro
+                    except TimeoutError:
+                        _agent_id = _tc.tool_input.get("agent_id", "unknown")
+                        logger.warning(
+                            "Subagent '%s' timed out after %.0fs",
+                            _agent_id,
+                            _timeout,
+                        )
+                        _r = ToolResult(
+                            tool_use_id=_tc.tool_use_id,
+                            content=(
+                                f"Subagent '{_agent_id}' timed out after "
+                                f"{_timeout:.0f}s. The delegation took "
+                                "too long and was cancelled. Try a simpler task "
+                                "or break it into smaller pieces."
+                            ),
+                            is_error=True,
                         )
                     except BaseException as _exc:
                         _r = _exc
@@ -2387,6 +2650,7 @@ class EventLoopNode(NodeProtocol):
                 if tc.tool_name not in (
                     "set_output",
                     "ask_user",
+                    "ask_user_multiple",
                     "escalate",
                     "delegate_to_sub_agent",
                     "report_to_parent",
@@ -2407,15 +2671,27 @@ class EventLoopNode(NodeProtocol):
                     content=result.content,
                     is_error=result.is_error,
                 )
-                await self._publish_tool_completed(
-                    stream_id,
-                    node_id,
-                    tc.tool_use_id,
-                    tc.tool_name,
-                    result.content,
-                    result.is_error,
-                    execution_id,
-                )
+                if tc.tool_name in ("ask_user", "ask_user_multiple"):
+                    # Defer tool_call_completed until after user responds
+                    self._deferred_tool_complete = {
+                        "stream_id": stream_id,
+                        "node_id": node_id,
+                        "tool_use_id": tc.tool_use_id,
+                        "tool_name": tc.tool_name,
+                        "content": result.content,
+                        "is_error": result.is_error,
+                        "execution_id": execution_id,
+                    }
+                else:
+                    await self._publish_tool_completed(
+                        stream_id,
+                        node_id,
+                        tc.tool_use_id,
+                        tc.tool_name,
+                        result.content,
+                        result.is_error,
+                        execution_id,
+                    )
 
             # If the limit was hit, add error results for every remaining
             # tool call so the conversation stays consistent.  Without this,
@@ -2456,7 +2732,7 @@ class EventLoopNode(NodeProtocol):
                 # next turn.  The char-based token estimator underestimates
                 # actual API tokens, so the standard compaction check in the
                 # outer loop may not trigger in time.
-                protect = max(2000, self._config.max_history_tokens // 12)
+                protect = max(2000, self._config.max_context_tokens // 12)
                 pruned = await conversation.prune_old_tool_results(
                     protect_tokens=protect,
                     min_prune_tokens=max(1000, protect // 3),
@@ -2465,7 +2741,7 @@ class EventLoopNode(NodeProtocol):
                     logger.info(
                         "Post-limit pruning: cleared %d old tool results (budget: %d)",
                         pruned,
-                        self._config.max_history_tokens,
+                        self._config.max_context_tokens,
                     )
                 # Limit hit — return from this turn so the judge can
                 # evaluate instead of looping back for another stream.
@@ -2486,7 +2762,7 @@ class EventLoopNode(NodeProtocol):
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
             if conversation.usage_ratio() >= 0.6:
-                protect = max(2000, self._config.max_history_tokens // 12)
+                protect = max(2000, self._config.max_context_tokens // 12)
                 pruned = await conversation.prune_old_tool_results(
                     protect_tokens=protect,
                     min_prune_tokens=max(1000, protect // 3),
@@ -2517,6 +2793,7 @@ class EventLoopNode(NodeProtocol):
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation
+            inner_turn += 1
 
     # -------------------------------------------------------------------
     # Synthetic tools: set_output, ask_user, escalate
@@ -2579,6 +2856,72 @@ class EventLoopNode(NodeProtocol):
             },
         )
 
+    def _build_ask_user_multiple_tool(self) -> Tool:
+        """Build the synthetic ask_user_multiple tool for batched questions.
+
+        Queen-only tool that presents multiple questions at once so the user
+        can answer them all in a single interaction rather than one at a time.
+        """
+        return Tool(
+            name="ask_user_multiple",
+            description=(
+                "Ask the user multiple questions at once. Use this instead of "
+                "ask_user when you have 2 or more questions to ask in the same "
+                "turn — it lets the user answer everything in one go rather than "
+                "going back and forth. Each question can have its own predefined "
+                "options (2-3 choices) or be free-form. The UI renders all "
+                "questions together with a single Submit button. "
+                "ALWAYS prefer this over ask_user when you have multiple things "
+                "to clarify. "
+                "IMPORTANT: Do NOT repeat the questions in your text response — "
+                "the widget renders them. Keep your text to a brief intro only. "
+                'Example: {"questions": ['
+                '  {"id": "scope", "prompt": "What scope?", "options": ["Full", "Partial"]},'
+                '  {"id": "format", "prompt": "Output format?", "options": ["PDF", "CSV", "JSON"]},'
+                '  {"id": "details", "prompt": "Any special requirements?"}'
+                "]}"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "questions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "description": (
+                                        "Short identifier for this question (used in the response)."
+                                    ),
+                                },
+                                "prompt": {
+                                    "type": "string",
+                                    "description": "The question text shown to the user.",
+                                },
+                                "options": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        "2-3 predefined choices. The UI appends an "
+                                        "'Other' free-text input automatically. "
+                                        "Omit only when the user must type a free-form answer."
+                                    ),
+                                    "minItems": 2,
+                                    "maxItems": 3,
+                                },
+                            },
+                            "required": ["id", "prompt"],
+                        },
+                        "minItems": 2,
+                        "maxItems": 8,
+                        "description": "List of questions to present to the user.",
+                    },
+                },
+                "required": ["questions"],
+            },
+        )
+
     def _build_set_output_tool(self, output_keys: list[str] | None) -> Tool | None:
         """Build the synthetic set_output tool for explicit output declaration."""
         if not output_keys:
@@ -2587,6 +2930,12 @@ class EventLoopNode(NodeProtocol):
             name="set_output",
             description=(
                 "Set an output value for this node. Call once per output key. "
+                "Use this for brief notes, counts, status, and file references — "
+                "NOT for large data payloads. When a tool result was saved to a "
+                "data file, pass the filename as the value "
+                "(e.g. 'google_sheets_get_values_1.txt') so the next phase can "
+                "load the full data. Values exceeding ~2000 characters are "
+                "auto-saved to data files. "
                 f"Valid keys: {output_keys}"
             ),
             parameters={
@@ -2599,7 +2948,10 @@ class EventLoopNode(NodeProtocol):
                     },
                     "value": {
                         "type": "string",
-                        "description": "The output value to store.",
+                        "description": (
+                            "The output value — a brief note, count, status, "
+                            "or data filename reference."
+                        ),
                     },
                 },
                 "required": ["key", "value"],
@@ -2913,7 +3265,7 @@ class EventLoopNode(NodeProtocol):
                 phase_description=ctx.node_spec.description,
                 success_criteria=ctx.node_spec.success_criteria,
                 accumulator_state=accumulator.to_dict(),
-                max_history_tokens=self._config.max_history_tokens,
+                max_context_tokens=self._config.max_context_tokens,
             )
             if verdict.action != "ACCEPT":
                 return JudgeVerdict(
@@ -3123,7 +3475,14 @@ class EventLoopNode(NodeProtocol):
         return False, ""
 
     async def _execute_tool(self, tc: ToolCallEvent) -> ToolResult:
-        """Execute a tool call, handling both sync and async executors."""
+        """Execute a tool call, handling both sync and async executors.
+
+        Applies ``tool_call_timeout_seconds`` from LoopConfig to prevent
+        hung MCP servers from blocking the event loop indefinitely.
+        The initial executor call is offloaded to a thread pool so that
+        sync executors (MCP STDIO tools that block on ``future.result()``)
+        don't freeze the event loop.
+        """
         if self._tool_executor is None:
             return ToolResult(
                 tool_use_id=tc.tool_use_id,
@@ -3131,9 +3490,35 @@ class EventLoopNode(NodeProtocol):
                 is_error=True,
             )
         tool_use = ToolUse(id=tc.tool_use_id, name=tc.tool_name, input=tc.tool_input)
-        result = self._tool_executor(tool_use)
-        if asyncio.iscoroutine(result) or asyncio.isfuture(result):
-            result = await result
+        timeout = self._config.tool_call_timeout_seconds
+
+        async def _run() -> ToolResult:
+            # Offload the executor call to a thread.  Sync MCP executors
+            # block on future.result() — running in a thread keeps the
+            # event loop free so asyncio.wait_for can fire the timeout.
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, self._tool_executor, tool_use)
+            # Async executors return a coroutine — await it on the loop
+            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+                result = await result
+            return result
+
+        try:
+            if timeout > 0:
+                result = await asyncio.wait_for(_run(), timeout=timeout)
+            else:
+                result = await _run()
+        except TimeoutError:
+            logger.warning("Tool '%s' timed out after %.0fs", tc.tool_name, timeout)
+            return ToolResult(
+                tool_use_id=tc.tool_use_id,
+                content=(
+                    f"Tool '{tc.tool_name}' timed out after {timeout:.0f}s. "
+                    "The operation took too long and was cancelled. "
+                    "Try a simpler request or a different approach."
+                ),
+                is_error=True,
+            )
         return result
 
     def _record_learning(self, key: str, value: Any) -> None:
@@ -3204,6 +3589,125 @@ class EventLoopNode(NodeProtocol):
             self._spill_counter = max_n
             logger.info("Restored spill counter to %d from existing files", max_n)
 
+    # ------------------------------------------------------------------
+    # JSON metadata / smart preview helpers for truncation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_json_metadata(parsed: Any, *, _depth: int = 0, _max_depth: int = 3) -> str:
+        """Return a concise structural summary of parsed JSON.
+
+        Reports key names, value types, and — crucially — array lengths so
+        the LLM knows how much data exists beyond the preview.
+
+        Returns an empty string for simple scalars.
+        """
+        if _depth >= _max_depth:
+            if isinstance(parsed, dict):
+                return f"dict with {len(parsed)} keys"
+            if isinstance(parsed, list):
+                return f"list of {len(parsed)} items"
+            return type(parsed).__name__
+
+        if isinstance(parsed, dict):
+            if not parsed:
+                return "empty dict"
+            lines: list[str] = []
+            indent = "  " * (_depth + 1)
+            for key, value in list(parsed.items())[:20]:
+                if isinstance(value, list):
+                    line = f'{indent}"{key}": list of {len(value)} items'
+                    if value:
+                        first = value[0]
+                        if isinstance(first, dict):
+                            sample_keys = list(first.keys())[:10]
+                            line += f" (each item: dict with keys {sample_keys})"
+                        elif isinstance(first, list):
+                            line += f" (each item: list of {len(first)} elements)"
+                    lines.append(line)
+                elif isinstance(value, dict):
+                    child = EventLoopNode._extract_json_metadata(
+                        value, _depth=_depth + 1, _max_depth=_max_depth
+                    )
+                    lines.append(f'{indent}"{key}": {child}')
+                else:
+                    lines.append(f'{indent}"{key}": {type(value).__name__}')
+            if len(parsed) > 20:
+                lines.append(f"{indent}... and {len(parsed) - 20} more keys")
+            return "\n".join(lines)
+
+        if isinstance(parsed, list):
+            if not parsed:
+                return "empty list"
+            desc = f"list of {len(parsed)} items"
+            first = parsed[0]
+            if isinstance(first, dict):
+                sample_keys = list(first.keys())[:10]
+                desc += f" (each item: dict with keys {sample_keys})"
+            elif isinstance(first, list):
+                desc += f" (each item: list of {len(first)} elements)"
+            return desc
+
+        return ""
+
+    @staticmethod
+    def _build_json_preview(parsed: Any, *, max_chars: int = 5000) -> str | None:
+        """Build a smart preview of parsed JSON, truncating large arrays.
+
+        Shows first 3 + last 1 items of large arrays with explicit count
+        markers so the LLM cannot mistake the preview for the full dataset.
+
+        Returns ``None`` if no truncation was needed (no large arrays).
+        """
+        _LARGE_ARRAY_THRESHOLD = 10
+
+        def _truncate_arrays(obj: Any) -> tuple[Any, bool]:
+            """Return (truncated_copy, was_truncated)."""
+            if isinstance(obj, list) and len(obj) > _LARGE_ARRAY_THRESHOLD:
+                n = len(obj)
+                head = obj[:3]
+                tail = obj[-1:]
+                marker = f"... ({n - 4} more items omitted, {n} total) ..."
+                return head + [marker] + tail, True
+            if isinstance(obj, dict):
+                changed = False
+                out: dict[str, Any] = {}
+                for k, v in obj.items():
+                    new_v, did = _truncate_arrays(v)
+                    out[k] = new_v
+                    changed = changed or did
+                return (out, True) if changed else (obj, False)
+            return obj, False
+
+        preview_obj, was_truncated = _truncate_arrays(parsed)
+        if not was_truncated:
+            return None  # No large arrays — caller should use raw slicing
+
+        try:
+            result = json.dumps(preview_obj, indent=2, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return None
+
+        if len(result) > max_chars:
+            # Even 3+1 items too big — try just 1 item
+            def _minimal_arrays(obj: Any) -> Any:
+                if isinstance(obj, list) and len(obj) > _LARGE_ARRAY_THRESHOLD:
+                    n = len(obj)
+                    return obj[:1] + [f"... ({n - 1} more items omitted, {n} total) ..."]
+                if isinstance(obj, dict):
+                    return {k: _minimal_arrays(v) for k, v in obj.items()}
+                return obj
+
+            preview_obj = _minimal_arrays(parsed)
+            try:
+                result = json.dumps(preview_obj, indent=2, ensure_ascii=False)
+            except (TypeError, ValueError):
+                return None
+            if len(result) > max_chars:
+                result = result[:max_chars] + "…"
+
+        return result
+
     def _truncate_tool_result(
         self,
         result: ToolResult,
@@ -3232,15 +3736,36 @@ class EventLoopNode(NodeProtocol):
         if tool_name == "load_data":
             if limit <= 0 or len(result.content) <= limit:
                 return result  # Small load_data result — pass through as-is
-            # Large load_data result — truncate with pagination hint
-            preview_chars = max(limit - 300, limit // 2)
-            preview = result.content[:preview_chars]
-            truncated = (
-                f"[{tool_name} result: {len(result.content)} chars — "
-                f"too large for context. Use offset/limit parameters "
-                f"to read smaller chunks.]\n\n"
-                f"Preview:\n{preview}…"
+            # Large load_data result — truncate with smart preview
+            PREVIEW_CAP = min(5000, max(limit - 500, limit // 2))
+
+            metadata_str = ""
+            smart_preview: str | None = None
+            try:
+                parsed_ld = json.loads(result.content)
+                metadata_str = self._extract_json_metadata(parsed_ld)
+                smart_preview = self._build_json_preview(parsed_ld, max_chars=PREVIEW_CAP)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
+            if smart_preview is not None:
+                preview_block = smart_preview
+            else:
+                preview_block = result.content[:PREVIEW_CAP] + "…"
+
+            header = (
+                f"[{tool_name} result: {len(result.content):,} chars — "
+                f"too large for context. Use offset_bytes/limit_bytes "
+                f"parameters to read smaller chunks.]"
             )
+            if metadata_str:
+                header += f"\n\nData structure:\n{metadata_str}"
+            header += (
+                "\n\nWARNING: This is an INCOMPLETE preview. "
+                "Do NOT draw conclusions or counts from it."
+            )
+
+            truncated = f"{header}\n\nPreview (small sample only):\n{preview_block}"
             logger.info(
                 "%s result truncated: %d → %d chars (use offset/limit to paginate)",
                 tool_name,
@@ -3262,25 +3787,47 @@ class EventLoopNode(NodeProtocol):
             # Pretty-print JSON content so load_data's line-based
             # pagination works correctly.
             write_content = result.content
+            parsed_json: Any = None  # track for metadata extraction
             try:
-                parsed = json.loads(result.content)
-                write_content = json.dumps(parsed, indent=2, ensure_ascii=False)
+                parsed_json = json.loads(result.content)
+                write_content = json.dumps(parsed_json, indent=2, ensure_ascii=False)
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass  # Not JSON — write as-is
 
             (spill_path / filename).write_text(write_content, encoding="utf-8")
 
             if limit > 0 and len(result.content) > limit:
-                # Large result: preview + file reference
-                preview_chars = max(limit - 300, limit // 2)
-                preview = result.content[:preview_chars]
-                content = (
-                    f"[Result from {tool_name}: {len(result.content)} chars — "
-                    f"too large for context, saved to '{filename}'. "
-                    f"Use load_data(filename='{filename}') "
-                    f"to read the full result.]\n\n"
-                    f"Preview:\n{preview}…"
+                # Large result: build a small, metadata-rich preview so the
+                # LLM cannot mistake it for the complete dataset.
+                PREVIEW_CAP = 5000
+
+                # Extract structural metadata (array lengths, key names)
+                metadata_str = ""
+                smart_preview: str | None = None
+                if parsed_json is not None:
+                    metadata_str = self._extract_json_metadata(parsed_json)
+                    smart_preview = self._build_json_preview(parsed_json, max_chars=PREVIEW_CAP)
+
+                if smart_preview is not None:
+                    preview_block = smart_preview
+                else:
+                    preview_block = result.content[:PREVIEW_CAP] + "…"
+
+                # Assemble header with structural info + warning
+                header = (
+                    f"[Result from {tool_name}: {len(result.content):,} chars — "
+                    f"too large for context, saved to '{filename}'.]"
                 )
+                if metadata_str:
+                    header += f"\n\nData structure:\n{metadata_str}"
+                header += (
+                    f"\n\nWARNING: The preview below is INCOMPLETE. "
+                    f"Do NOT draw conclusions or counts from it. "
+                    f"Use load_data(filename='{filename}') to read the "
+                    f"full data before analysis."
+                )
+
+                content = f"{header}\n\nPreview (small sample only):\n{preview_block}"
                 logger.info(
                     "Tool result spilled to file: %s (%d chars → %s)",
                     tool_name,
@@ -3305,13 +3852,34 @@ class EventLoopNode(NodeProtocol):
 
         # No spillover_dir — truncate in-place if needed
         if limit > 0 and len(result.content) > limit:
-            preview_chars = max(limit - 300, limit // 2)
-            preview = result.content[:preview_chars]
-            truncated = (
-                f"[Result from {tool_name}: {len(result.content)} chars — "
-                f"truncated to fit context budget. Only the first "
-                f"{preview_chars} chars are shown.]\n\n{preview}…"
+            PREVIEW_CAP = min(5000, max(limit - 500, limit // 2))
+
+            metadata_str = ""
+            smart_preview: str | None = None
+            try:
+                parsed_inline = json.loads(result.content)
+                metadata_str = self._extract_json_metadata(parsed_inline)
+                smart_preview = self._build_json_preview(parsed_inline, max_chars=PREVIEW_CAP)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
+            if smart_preview is not None:
+                preview_block = smart_preview
+            else:
+                preview_block = result.content[:PREVIEW_CAP] + "…"
+
+            header = (
+                f"[Result from {tool_name}: {len(result.content):,} chars — "
+                f"truncated to fit context budget.]"
             )
+            if metadata_str:
+                header += f"\n\nData structure:\n{metadata_str}"
+            header += (
+                "\n\nWARNING: This is an INCOMPLETE preview. "
+                "Do NOT draw conclusions or counts from the preview alone."
+            )
+
+            truncated = f"{header}\n\n{preview_block}"
             logger.info(
                 "Tool result truncated in-place: %s (%d → %d chars)",
                 tool_name,
@@ -3353,7 +3921,7 @@ class EventLoopNode(NodeProtocol):
         phase_grad = getattr(ctx, "continuous_mode", False)
 
         # --- Step 1: Prune old tool results (free, no LLM) ---
-        protect = max(2000, self._config.max_history_tokens // 12)
+        protect = max(2000, self._config.max_context_tokens // 12)
         pruned = await conversation.prune_old_tool_results(
             protect_tokens=protect,
             min_prune_tokens=max(1000, protect // 3),
@@ -3459,7 +4027,7 @@ class EventLoopNode(NodeProtocol):
                 accumulator,
                 formatted,
             )
-            summary_budget = max(1024, self._config.max_history_tokens // 2)
+            summary_budget = max(1024, self._config.max_context_tokens // 2)
             try:
                 response = await ctx.llm.acomplete(
                     messages=[{"role": "user", "content": prompt}],
@@ -3562,7 +4130,7 @@ class EventLoopNode(NodeProtocol):
         elif spec.output_keys:
             ctx_lines.append(f"OUTPUTS STILL NEEDED: {', '.join(spec.output_keys)}")
 
-        target_tokens = self._config.max_history_tokens // 2
+        target_tokens = self._config.max_context_tokens // 2
         target_chars = target_tokens * 4
         node_ctx = "\n".join(ctx_lines)
 
@@ -3878,6 +4446,34 @@ class EventLoopNode(NodeProtocol):
                 break
         return count
 
+    async def _drain_trigger_queue(self, conversation: NodeConversation) -> int:
+        """Drain all pending trigger events as a single batched user message.
+
+        Multiple triggers are merged so the LLM sees them atomically and can
+        reason about all pending triggers before acting.
+        """
+        triggers: list[TriggerEvent] = []
+        while not self._trigger_queue.empty():
+            try:
+                triggers.append(self._trigger_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+
+        if not triggers:
+            return 0
+
+        parts: list[str] = []
+        for t in triggers:
+            task = t.payload.get("task", "")
+            task_line = f"\nTask: {task}" if task else ""
+            payload_str = json.dumps(t.payload, default=str)
+            parts.append(f"[TRIGGER: {t.trigger_type}/{t.source_id}]{task_line}\n{payload_str}")
+
+        combined = "\n\n".join(parts)
+        logger.info("[drain] %d trigger(s): %s", len(triggers), combined[:200])
+        await conversation.add_user_message(combined)
+        return len(triggers)
+
     async def _check_pause(
         self,
         ctx: NodeContext,
@@ -4012,7 +4608,12 @@ class EventLoopNode(NodeProtocol):
                 await conversation.add_user_message(result.inject)
 
     async def _publish_iteration(
-        self, stream_id: str, node_id: str, iteration: int, execution_id: str = ""
+        self,
+        stream_id: str,
+        node_id: str,
+        iteration: int,
+        execution_id: str = "",
+        extra_data: dict | None = None,
     ) -> None:
         if self._event_bus:
             await self._event_bus.emit_node_loop_iteration(
@@ -4020,6 +4621,7 @@ class EventLoopNode(NodeProtocol):
                 node_id=node_id,
                 iteration=iteration,
                 execution_id=execution_id,
+                extra_data=extra_data,
             )
 
     async def _publish_llm_turn_complete(
@@ -4030,6 +4632,7 @@ class EventLoopNode(NodeProtocol):
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_tokens: int = 0,
         execution_id: str = "",
         iteration: int | None = None,
     ) -> None:
@@ -4041,6 +4644,7 @@ class EventLoopNode(NodeProtocol):
                 model=model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cached_tokens=cached_tokens,
                 execution_id=execution_id,
                 iteration=iteration,
             )
@@ -4100,6 +4704,7 @@ class EventLoopNode(NodeProtocol):
         ctx: NodeContext,
         execution_id: str = "",
         iteration: int | None = None,
+        inner_turn: int = 0,
     ) -> None:
         if self._event_bus:
             if ctx.node_spec.client_facing:
@@ -4110,6 +4715,7 @@ class EventLoopNode(NodeProtocol):
                     snapshot=snapshot,
                     execution_id=execution_id,
                     iteration=iteration,
+                    inner_turn=inner_turn,
                 )
             else:
                 await self._event_bus.emit_llm_text_delta(
@@ -4118,6 +4724,7 @@ class EventLoopNode(NodeProtocol):
                     content=content,
                     snapshot=snapshot,
                     execution_id=execution_id,
+                    inner_turn=inner_turn,
                 )
 
     async def _publish_tool_started(
@@ -4323,22 +4930,18 @@ class EventLoopNode(NodeProtocol):
 
             registry[escalation_id] = receiver
             try:
-                # Stream message to user (parent's node_id so TUI shows parent talking)
-                await self._event_bus.emit_client_output_delta(
-                    stream_id=ctx.node_id,
-                    node_id=ctx.node_id,
-                    content=message,
-                    snapshot=message,
-                    execution_id=ctx.execution_id,
-                )
-                # Request input (escalation_id for routing response back)
-                await self._event_bus.emit_client_input_requested(
-                    stream_id=ctx.node_id,
+                # Escalate to the queen instead of asking the user directly.
+                # The queen handles the request and injects the response via
+                # inject_worker_message(), which finds this receiver through
+                # its _awaiting_input flag.
+                await self._event_bus.emit_escalation_requested(
+                    stream_id=ctx.stream_id or ctx.node_id,
                     node_id=escalation_id,
-                    prompt=message,
+                    reason=f"Subagent report (wait_for_response) from {agent_id}",
+                    context=message,
                     execution_id=ctx.execution_id,
                 )
-                # Block until user responds
+                # Block until queen responds
                 return await receiver.wait()
             finally:
                 registry.pop(escalation_id, None)
@@ -4351,11 +4954,19 @@ class EventLoopNode(NodeProtocol):
         subagent_tool_names = set(subagent_spec.tools or [])
         tool_source = ctx.all_tools if ctx.all_tools else ctx.available_tools
 
-        subagent_tools = [
-            t
-            for t in tool_source
-            if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
-        ]
+        # GCU auto-population: GCU nodes declare tools=[] because the runner
+        # auto-populates them at setup time.  But that expansion doesn't reach
+        # subagents invoked via delegate_to_sub_agent — the subagent spec still
+        # has the original empty list.  When a GCU subagent has no declared
+        # tools, include all catalog tools so browser tools are available.
+        if subagent_spec.node_type == "gcu" and not subagent_tool_names:
+            subagent_tools = [t for t in tool_source if t.name != "delegate_to_sub_agent"]
+        else:
+            subagent_tools = [
+                t
+                for t in tool_source
+                if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
+            ]
 
         missing = subagent_tool_names - {t.name for t in subagent_tools}
         if missing:
@@ -4439,13 +5050,13 @@ class EventLoopNode(NodeProtocol):
             )
 
         subagent_node = EventLoopNode(
-            event_bus=None,  # Subagents don't emit events to parent's bus
+            event_bus=self._event_bus,  # Subagent events visible to Queen via shared bus
             judge=SubagentJudge(task=task, max_iterations=max_iter),
             config=LoopConfig(
                 max_iterations=max_iter,  # Tighter budget
                 max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
                 tool_call_overflow_margin=self._config.tool_call_overflow_margin,
-                max_history_tokens=self._config.max_history_tokens,
+                max_context_tokens=self._config.max_context_tokens,
                 stall_detection_threshold=self._config.stall_detection_threshold,
                 max_tool_result_chars=self._config.max_tool_result_chars,
                 spillover_dir=subagent_spillover,
@@ -4454,25 +5065,42 @@ class EventLoopNode(NodeProtocol):
             conversation_store=subagent_conv_store,
         )
 
+        # Inject a unique GCU browser profile for this subagent so that
+        # concurrent GCU subagents (run via asyncio.gather) each get their own
+        # isolated BrowserContext.  asyncio.gather copies the current context
+        # for each coroutine, so the reset token is safe to call in finally.
+        _profile_token = None
+        try:
+            from gcu.browser.session import set_active_profile as _set_gcu_profile
+
+            _profile_token = _set_gcu_profile(f"{agent_id}-{subagent_instance}")
+        except ImportError:
+            pass  # GCU tools not installed; no-op
+
         try:
             logger.info("🚀 Starting subagent '%s' execution...", agent_id)
             start_time = time.time()
             result = await subagent_node.execute(subagent_ctx)
             latency_ms = int((time.time() - start_time) * 1000)
 
+            separator = "-" * 60
             logger.info(
-                "\n" + "-" * 60 + "\n"
+                "\n%s\n"
                 "✅ SUBAGENT '%s' COMPLETED\n"
-                "-" * 60 + "\n"
+                "%s\n"
                 "Success: %s\n"
                 "Latency: %dms\n"
                 "Tokens used: %s\n"
-                "Output keys: %s\n" + "-" * 60,
+                "Output keys: %s\n"
+                "%s",
+                separator,
                 agent_id,
+                separator,
                 result.success,
                 latency_ms,
                 result.tokens_used,
                 list(result.output.keys()) if result.output else [],
+                separator,
             )
 
             result_json = {
@@ -4518,3 +5146,29 @@ class EventLoopNode(NodeProtocol):
                 content=json.dumps(result_json, indent=2),
                 is_error=True,
             )
+        finally:
+            # Restore the GCU profile context that was set before this subagent ran.
+            if _profile_token is not None:
+                from gcu.browser.session import _active_profile as _gcu_profile_var
+
+                _gcu_profile_var.reset(_profile_token)
+
+                # Stop the browser session for this subagent's profile so tabs are
+                # closed immediately rather than accumulating until server shutdown.
+                if self._tool_executor is not None:
+                    _subagent_profile = f"{agent_id}-{subagent_instance}"
+                    try:
+                        _stop_use = ToolUse(
+                            id="gcu-cleanup",
+                            name="browser_stop",
+                            input={"profile": _subagent_profile},
+                        )
+                        _stop_result = self._tool_executor(_stop_use)
+                        if asyncio.iscoroutine(_stop_result) or asyncio.isfuture(_stop_result):
+                            await _stop_result
+                    except Exception as _gcu_exc:
+                        logger.warning(
+                            "GCU browser_stop failed for profile %r: %s",
+                            _subagent_profile,
+                            _gcu_exc,
+                        )

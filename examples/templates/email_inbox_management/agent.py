@@ -4,7 +4,7 @@ from pathlib import Path
 
 from framework.graph import EdgeCondition, EdgeSpec, Goal, SuccessCriterion, Constraint
 from framework.graph.checkpoint_config import CheckpointConfig
-from framework.graph.edge import AsyncEntryPointSpec, GraphSpec
+from framework.graph.edge import GraphSpec
 from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
@@ -152,17 +152,6 @@ edges = [
 # Graph configuration
 entry_node = "intake"
 entry_points = {"start": "intake"}
-async_entry_points = [
-    AsyncEntryPointSpec(
-        id="email-timer",
-        name="Scheduled Inbox Check",
-        entry_node="fetch-emails",
-        trigger_type="timer",
-        trigger_config={"interval_minutes": 5},
-        isolation_level="shared",
-        max_concurrent=1,
-    ),
-]
 pause_nodes = []
 terminal_nodes = []
 loop_config = {
@@ -224,7 +213,6 @@ class EmailInboxManagementAgent:
             loop_config=loop_config,
             conversation_mode=conversation_mode,
             identity_prompt=identity_prompt,
-            async_entry_points=async_entry_points,
         )
 
     def _setup(self, mock_mode=False) -> None:
@@ -274,16 +262,6 @@ class EmailInboxManagementAgent:
                 entry_node=self.entry_node,
                 trigger_type="manual",
                 isolation_level="shared",
-            ),
-            # Timer-driven entry point
-            EntryPointSpec(
-                id="email-timer",
-                name="Scheduled Inbox Check",
-                entry_node="fetch-emails",
-                trigger_type="timer",
-                trigger_config={"interval_minutes": 5},
-                isolation_level="shared",
-                max_concurrent=1,
             ),
         ]
 
@@ -360,10 +338,6 @@ class EmailInboxManagementAgent:
             "pause_nodes": self.pause_nodes,
             "terminal_nodes": self.terminal_nodes,
             "client_facing_nodes": [n.id for n in self.nodes if n.client_facing],
-            "async_entry_points": [
-                {"id": ep.id, "name": ep.name, "entry_node": ep.entry_node}
-                for ep in async_entry_points
-            ],
         }
 
     def validate(self):
@@ -389,13 +363,6 @@ class EmailInboxManagementAgent:
             if node_id not in node_ids:
                 errors.append(
                     f"Entry point '{ep_id}' references unknown node '{node_id}'"
-                )
-
-        # Validate async entry points
-        for ep in async_entry_points:
-            if ep.entry_node not in node_ids:
-                errors.append(
-                    f"Async entry point '{ep.id}' references unknown node '{ep.entry_node}'"
                 )
 
         return {

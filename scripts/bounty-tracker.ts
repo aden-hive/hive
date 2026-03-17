@@ -68,10 +68,16 @@ interface LeaderboardEntry {
 // ---------------------------------------------------------------------------
 
 const POINTS: Record<string, number> = {
+  // Integration bounties
   "bounty:test": 20,
   "bounty:docs": 20,
   "bounty:code": 30,
   "bounty:new-tool": 75,
+  // Standard bounties
+  "bounty:small": 10,
+  "bounty:medium": 30,
+  "bounty:large": 75,
+  "bounty:extreme": 150,
 };
 
 // ---------------------------------------------------------------------------
@@ -276,6 +282,10 @@ function formatBountyNotification(bounty: BountyResult): string {
     docs: "\u{1F4DD}",
     code: "\u{1F527}",
     "new-tool": "\u{2B50}",
+    small: "\u{1F4A1}",
+    medium: "\u{1F6E0}",
+    large: "\u{1F680}",
+    extreme: "\u{1F525}",
   };
 
   const emoji = typeEmoji[bounty.bountyType] ?? "\u{1F3AF}";
@@ -301,7 +311,7 @@ function formatLeaderboard(entries: LeaderboardEntry[]): string {
 
   const medals = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
 
-  let msg = "**\u{1F3C6} Integration Bounty Leaderboard**\n\n";
+  let msg = "**\u{1F3C6} Bounty Leaderboard**\n\n";
 
   for (let i = 0; i < top10.length; i++) {
     const entry = top10[i];
