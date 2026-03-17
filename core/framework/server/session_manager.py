@@ -868,6 +868,10 @@ class SessionManager:
         event_type = (
             EventType.TRIGGER_AVAILABLE if kind == "available" else EventType.TRIGGER_REMOVED
         )
+        # Resolve graph entry node for trigger target
+        runner = getattr(session, "runner", None)
+        graph_entry = runner.graph.entry_node if runner else None
+
         for t in triggers.values():
             await session.event_bus.publish(
                 AgentEvent(
@@ -877,6 +881,8 @@ class SessionManager:
                         "trigger_id": t.id,
                         "trigger_type": t.trigger_type,
                         "trigger_config": t.trigger_config,
+                        "name": t.description or t.id,
+                        **({"entry_node": graph_entry} if graph_entry else {}),
                     },
                 )
             )
