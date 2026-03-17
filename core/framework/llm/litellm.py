@@ -23,6 +23,7 @@ except ImportError:
     litellm = None  # type: ignore[assignment]
     RateLimitError = Exception  # type: ignore[assignment, misc]
 
+from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import StreamEvent
 
@@ -157,8 +158,6 @@ def _model_supports_cache_control(model: str) -> bool:
 # Claude Code integration uses this format; the /v1 OpenAI-compatible endpoint
 # enforces a coding-agent whitelist that blocks unknown User-Agents.
 KIMI_API_BASE = "https://api.kimi.com/coding"
-
-from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE
 
 # Empty-stream retries use a short fixed delay, not the rate-limit backoff.
 # Conversation-structure issues are deterministic — long waits don't help.
@@ -402,7 +401,7 @@ class LiteLLMProvider(LLMProvider):
             if api_base and api_base.rstrip("/").endswith("/v1"):
                 api_base = api_base.rstrip("/")[:-3]
         elif model.lower().startswith("hive/"):
-            model = "anthropic/" + model[len("hive/"):]
+            model = "anthropic/" + model[len("hive/") :]
             if api_base and api_base.rstrip("/").endswith("/v1"):
                 api_base = api_base.rstrip("/")[:-3]
         self.model = model
