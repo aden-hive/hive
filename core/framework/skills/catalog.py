@@ -65,9 +65,7 @@ class SkillCatalog:
         """
         # Filter out framework-scope skills (default skills) — they're
         # injected via the protocols prompt, not the catalog
-        community_skills = [
-            s for s in self._skills.values() if s.source_scope != "framework"
-        ]
+        community_skills = [s for s in self._skills.values() if s.source_scope != "framework"]
 
         if not community_skills:
             return ""

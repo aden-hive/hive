@@ -1,20 +1,23 @@
 """Tests for SKILL.md parser."""
 
-import pytest
 from pathlib import Path
 
-from framework.skills.parser import parse_skill_md, ParsedSkill
+import pytest
+
+from framework.skills.parser import parse_skill_md
 
 
 @pytest.fixture
 def tmp_skill(tmp_path):
     """Helper to create a SKILL.md file and return its path."""
+
     def _create(content: str, dir_name: str = "my-skill") -> Path:
         skill_dir = tmp_path / dir_name
         skill_dir.mkdir(parents=True, exist_ok=True)
         skill_md = skill_dir / "SKILL.md"
         skill_md.write_text(content, encoding="utf-8")
         return skill_md
+
     return _create
 
 

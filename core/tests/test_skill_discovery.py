@@ -1,9 +1,8 @@
 """Tests for skill discovery."""
 
-import pytest
 from pathlib import Path
 
-from framework.skills.discovery import SkillDiscovery, DiscoveryConfig
+from framework.skills.discovery import DiscoveryConfig, SkillDiscovery
 
 
 def _write_skill(base: Path, name: str, description: str = "A test skill.") -> Path:
@@ -24,11 +23,13 @@ class TestSkillDiscovery:
         _write_skill(agents_skills, "skill-a")
         _write_skill(agents_skills, "skill-b")
 
-        discovery = SkillDiscovery(DiscoveryConfig(
-            project_root=tmp_path,
-            skip_user_scope=True,
-            skip_framework_scope=True,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=tmp_path,
+                skip_user_scope=True,
+                skip_framework_scope=True,
+            )
+        )
         skills = discovery.discover()
 
         names = {s.name for s in skills}
@@ -40,11 +41,13 @@ class TestSkillDiscovery:
         hive_skills = tmp_path / ".hive" / "skills"
         _write_skill(hive_skills, "hive-skill")
 
-        discovery = SkillDiscovery(DiscoveryConfig(
-            project_root=tmp_path,
-            skip_user_scope=True,
-            skip_framework_scope=True,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=tmp_path,
+                skip_user_scope=True,
+                skip_framework_scope=True,
+            )
+        )
         skills = discovery.discover()
 
         assert len(skills) == 1
@@ -61,10 +64,12 @@ class TestSkillDiscovery:
 
         monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
 
-        discovery = SkillDiscovery(DiscoveryConfig(
-            project_root=tmp_path / "project",
-            skip_framework_scope=True,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=tmp_path / "project",
+                skip_framework_scope=True,
+            )
+        )
         skills = discovery.discover()
 
         matching = [s for s in skills if s.name == "shared-skill"]
@@ -80,11 +85,13 @@ class TestSkillDiscovery:
         hive_skills = tmp_path / ".hive" / "skills"
         _write_skill(hive_skills, "override-test", "Hive version")
 
-        discovery = SkillDiscovery(DiscoveryConfig(
-            project_root=tmp_path,
-            skip_user_scope=True,
-            skip_framework_scope=True,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=tmp_path,
+                skip_user_scope=True,
+                skip_framework_scope=True,
+            )
+        )
         skills = discovery.discover()
 
         matching = [s for s in skills if s.name == "override-test"]
@@ -97,11 +104,13 @@ class TestSkillDiscovery:
         _write_skill(skills_dir / "node_modules", "npm-skill")
         _write_skill(skills_dir, "real-skill")
 
-        discovery = SkillDiscovery(DiscoveryConfig(
-            project_root=tmp_path,
-            skip_user_scope=True,
-            skip_framework_scope=True,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=tmp_path,
+                skip_user_scope=True,
+                skip_framework_scope=True,
+            )
+        )
         skills = discovery.discover()
 
         names = {s.name for s in skills}
@@ -110,19 +119,23 @@ class TestSkillDiscovery:
         assert "npm-skill" not in names
 
     def test_empty_scan(self, tmp_path):
-        discovery = SkillDiscovery(DiscoveryConfig(
-            project_root=tmp_path,
-            skip_user_scope=True,
-            skip_framework_scope=True,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=tmp_path,
+                skip_user_scope=True,
+                skip_framework_scope=True,
+            )
+        )
         skills = discovery.discover()
         assert skills == []
 
     def test_framework_scope_loads_defaults(self):
         """Framework scope should find the built-in default skills."""
-        discovery = SkillDiscovery(DiscoveryConfig(
-            skip_user_scope=True,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                skip_user_scope=True,
+            )
+        )
         skills = discovery.discover()
 
         framework_skills = [s for s in skills if s.source_scope == "framework"]
@@ -135,11 +148,13 @@ class TestSkillDiscovery:
         deep = tmp_path / ".agents" / "skills" / "a" / "b" / "c" / "d" / "e"
         _write_skill(deep, "too-deep")
 
-        discovery = SkillDiscovery(DiscoveryConfig(
-            project_root=tmp_path,
-            skip_user_scope=True,
-            skip_framework_scope=True,
-            max_depth=2,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=tmp_path,
+                skip_user_scope=True,
+                skip_framework_scope=True,
+                max_depth=2,
+            )
+        )
         skills = discovery.discover()
         assert not any(s.name == "too-deep" for s in skills)
