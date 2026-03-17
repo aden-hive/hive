@@ -428,8 +428,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["anthropic:3"]="claude-opus-4-6"
         ["openai:0"]="gpt-5-mini"
         ["openai:1"]="gpt-5.2"
-        ["gemini:0"]="gemini-3-flash-preview"
-        ["gemini:1"]="gemini-3.1-pro-preview"
+        ["gemini:0"]="gemini/gemini-2.5-flash"  
+        ["gemini:1"]="gemini/gemini-3-flash-preview"
+        ["gemini:2"]="gemini/gemini-3.1-pro-preview"    
         ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
         ["groq:1"]="openai/gpt-oss-120b"
         ["cerebras:0"]="zai-glm-4.7"
@@ -443,8 +444,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["anthropic:3"]="Opus 4.6 - Most capable"
         ["openai:0"]="GPT-5 Mini - Fast + cheap (recommended)"
         ["openai:1"]="GPT-5.2 - Most capable"
-        ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
-        ["gemini:1"]="Gemini 3.1 Pro - Best quality"
+        ["gemini:0"]="Gemini 2.5 Flash - Newer, faster"
+        ["gemini:1"]="Gemini 3 Flash - Fast (recommended)"
+        ["gemini:2"]="Gemini 3.1 Pro - Best quality"
         ["groq:0"]="Kimi K2 - Best quality (recommended)"
         ["groq:1"]="GPT-OSS 120B - Fast reasoning"
         ["cerebras:0"]="ZAI-GLM 4.7 - Best quality (recommended)"
@@ -460,6 +462,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["openai:1"]=16384
         ["gemini:0"]=8192
         ["gemini:1"]=8192
+        ["gemini:2"]=8192
         ["groq:0"]=8192
         ["groq:1"]=8192
         ["cerebras:0"]=8192
@@ -469,7 +472,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     declare -A MODEL_CHOICES_COUNT=(
         ["anthropic"]=4
         ["openai"]=2
-        ["gemini"]=2
+        ["gemini"]=3
         ["groq"]=2
         ["cerebras"]=2
     )
@@ -553,24 +556,57 @@ else
 
     # Model choices per provider - flat parallel arrays with provider offsets
     # Provider order: anthropic(4), openai(2), gemini(2), groq(2), cerebras(2)
-    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-haiku-4-5-20251001" "claude-sonnet-4-20250514" "claude-sonnet-4-5-20250929" "claude-opus-4-6" "gpt-5-mini" "gpt-5.2" "gemini-3-flash-preview" "gemini-3.1-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Haiku 4.5 - Fast + cheap (recommended)" "Sonnet 4 - Fast + capable" "Sonnet 4.5 - Best balance" "Opus 4.6 - Most capable" "GPT-5 Mini - Fast + cheap (recommended)" "GPT-5.2 - Most capable" "Gemini 3 Flash - Fast (recommended)" "Gemini 3.1 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
-    MC_MAXTOKENS=(8192 8192 16384 32768 16384 16384 8192 8192 8192 8192 8192 8192)
+    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini gemini groq groq cerebras cerebras)
+MC_IDS=(
+    "claude-haiku-4-5-20251001" 
+    "claude-sonnet-4-20250514" 
+    "claude-sonnet-4-5-20250929" 
+    "claude-opus-4-6" 
+    "gpt-5-mini" 
+    "gpt-5.2" 
+    "gemini/gemini-2.5-flash"    
+    "gemini/gemini-3-flash-preview"       
+    "gemini/gemini-3.1-pro-preview"         
+    "moonshotai/kimi-k2-instruct-0905" 
+    "openai/gpt-oss-120b" 
+    "zai-glm-4.7" 
+    "qwen3-235b-a22b-instruct-2507"
+)
+MC_LABELS=(
+    "Haiku 4.5 - Fast + cheap (recommended)" 
+    "Sonnet 4 - Fast + capable" 
+    "Sonnet 4.5 - Best balance" 
+    "Opus 4.6 - Most capable" 
+    "GPT-5 Mini - Fast + cheap (recommended)" 
+    "GPT-5.2 - Most capable" 
+    "gemini-2.5-flash - Newer, faster"
+    "Gemini 3 Flash - Fast (recommended)"
+    "Gemini 3.1 Pro - Best quality"          
+    "Kimi K2 - Best quality (recommended)" 
+    "GPT-OSS 120B - Fast reasoning" 
+    "ZAI-GLM 4.7 - Best quality (recommended)" 
+    "Qwen3 235B - Frontier reasoning"
+)
+MC_MAXTOKENS=(
+    8192 8192 16384 32768 
+    16384 16384 
+    8192 8192 8192   
+    8192 8192 8192 8192
+)
 
     # Helper: get number of model choices for a provider
     get_model_choice_count() {
-        local provider_id="$1"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-        echo "$count"
-    }
+    local provider_id="$1"
+    local count=0
+    local i=0
+    while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
+        if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
+            count=$((count + 1))
+        fi
+        i=$((i + 1))
+    done
+    echo "$count"
+}
 
     # Helper: get model choice id by provider and index (0-based within provider)
     get_model_choice_id() {
@@ -681,6 +717,7 @@ prompt_model_selection() {
         # Only one choice — auto-select
         SELECTED_MODEL="$(get_model_choice_id "$provider_id" 0)"
         SELECTED_MAX_TOKENS="$(get_model_choice_maxtokens "$provider_id" 0)"
+        SELECTED_MODEL_DISPLAY="$(get_model_choice_label "$provider_id" 0)"
         return
     fi
 
@@ -726,6 +763,7 @@ prompt_model_selection() {
             local idx=$((choice - 1))
             SELECTED_MODEL="$(get_model_choice_id "$provider_id" "$idx")"
             SELECTED_MAX_TOKENS="$(get_model_choice_maxtokens "$provider_id" "$idx")"
+            SELECTED_MODEL_DISPLAY="$(get_model_choice_label "$provider_id" "$idx")"
             echo ""
             echo -e "${GREEN}⬢${NC} Model: ${DIM}$SELECTED_MODEL${NC}"
             return
@@ -736,50 +774,68 @@ prompt_model_selection() {
 
 # Function to save configuration
 # Args: provider_id env_var model max_tokens [use_claude_code_sub] [api_base] [use_codex_sub]
+# Function to save configuration with model display name
+echo "🔍 DEBUG - HIVE_CONFIG_DIR: $HIVE_CONFIG_DIR"
+echo "🔍 DEBUG - HIVE_CONFIG_FILE: $HIVE_CONFIG_FILE"
 save_configuration() {
     local provider_id="$1"
     local env_var="$2"
     local model="$3"
     local max_tokens="$4"
-    local use_claude_code_sub="${5:-}"
-    local api_base="${6:-}"
-    local use_codex_sub="${7:-}"
-
-    # Fallbacks if not provided
-    if [ -z "$model" ]; then
-        model="$(get_default_model "$provider_id")"
-    fi
-    if [ -z "$max_tokens" ]; then
-        max_tokens=8192
-    fi
+    local model_display="$5"
+    local use_claude_code_sub="${6:-}"
+    local api_base="${7:-}"
+    local use_codex_sub="${8:-}"
 
     mkdir -p "$HIVE_CONFIG_DIR"
+    
+    # Debug: Show what we're trying to save
+    echo "🔍 DEBUG - Saving config to: $HIVE_CONFIG_FILE"
+    echo "🔍 DEBUG - Provider: $provider_id"
+    echo "🔍 DEBUG - Model: $model"
+    echo "🔍 DEBUG - Model display: $model_display"
 
     $PYTHON_CMD -c "
 import json
-config = {
-    'llm': {
-        'provider': '$provider_id',
-        'model': '$model',
-        'max_tokens': $max_tokens,
-        'api_key_env_var': '$env_var'
-    },
-    'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'
-}
-if '$use_claude_code_sub' == 'true':
-    config['llm']['use_claude_code_subscription'] = True
-    # No api_key_env_var needed for Claude Code subscription
-    config['llm'].pop('api_key_env_var', None)
-if '$use_codex_sub' == 'true':
-    config['llm']['use_codex_subscription'] = True
-    # No api_key_env_var needed for Codex subscription
-    config['llm'].pop('api_key_env_var', None)
-if '$api_base':
-    config['llm']['api_base'] = '$api_base'
-with open('$HIVE_CONFIG_FILE', 'w') as f:
-    json.dump(config, f, indent=2)
-print(json.dumps(config, indent=2))
-" 2>/dev/null
+import os
+from pathlib import Path
+
+try:
+    config = {
+        'llm': {
+            'provider': '$provider_id',
+            'model': '$model',
+            'model_display': '$model_display',
+            'max_tokens': $max_tokens,
+            'api_key_env_var': '$env_var'
+        },
+        'gcu_enabled': True,
+        'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'
+    }
+
+    # Handle subscription modes
+    if '$use_claude_code_sub' == 'true':
+        config['llm']['use_claude_code_subscription'] = True
+        config['llm'].pop('api_key_env_var', None)
+    if '$use_codex_sub' == 'true':
+        config['llm']['use_codex_subscription'] = True
+        config['llm'].pop('api_key_env_var', None)
+    if '$api_base':
+        config['llm']['api_base'] = '$api_base'
+
+    # Create directory if it doesn't exist
+    os.makedirs('$HIVE_CONFIG_DIR', exist_ok=True)
+    
+    # Save to file
+    with open('$HIVE_CONFIG_FILE', 'w') as f:
+        json.dump(config, f, indent=2)
+    
+    print(f'✅ Configuration saved to {HIVE_CONFIG_FILE}')
+    print(json.dumps(config, indent=2))
+except Exception as e:
+    print(f'❌ Error saving configuration: {e}')
+    sys.exit(1)
+" || echo "❌ Python script failed"
 }
 
 # Source shell rc file to pick up existing env vars (temporarily disable set -e)
@@ -1052,30 +1108,40 @@ case $choice in
         SELECTED_PROVIDER_ID="anthropic"
         PROVIDER_NAME="Anthropic"
         SIGNUP_URL="https://console.anthropic.com/settings/keys"
+        # Select model FIRST
+        prompt_model_selection "$SELECTED_PROVIDER_ID"
         ;;
     6)
         SELECTED_ENV_VAR="OPENAI_API_KEY"
         SELECTED_PROVIDER_ID="openai"
         PROVIDER_NAME="OpenAI"
         SIGNUP_URL="https://platform.openai.com/api-keys"
+        # Select model FIRST
+        prompt_model_selection "$SELECTED_PROVIDER_ID"
         ;;
     7)
         SELECTED_ENV_VAR="GEMINI_API_KEY"
         SELECTED_PROVIDER_ID="gemini"
         PROVIDER_NAME="Google Gemini"
         SIGNUP_URL="https://aistudio.google.com/apikey"
+        # Select model FIRST
+        prompt_model_selection "$SELECTED_PROVIDER_ID"
         ;;
     8)
         SELECTED_ENV_VAR="GROQ_API_KEY"
         SELECTED_PROVIDER_ID="groq"
         PROVIDER_NAME="Groq"
         SIGNUP_URL="https://console.groq.com/keys"
+        # Select model FIRST
+        prompt_model_selection "$SELECTED_PROVIDER_ID"
         ;;
     9)
         SELECTED_ENV_VAR="CEREBRAS_API_KEY"
         SELECTED_PROVIDER_ID="cerebras"
         PROVIDER_NAME="Cerebras"
         SIGNUP_URL="https://cloud.cerebras.ai/"
+        # Select model FIRST
+        prompt_model_selection "$SELECTED_PROVIDER_ID"
         ;;
     10)
         echo ""
@@ -1231,20 +1297,19 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     echo ""
     echo -n "  Saving configuration... "
     if [ "$SUBSCRIPTION_MODE" = "claude_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "true" "" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MODEL_DISPLAY" "true" "" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "codex" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "" "true" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MODEL_DISPLAY" "" "" "true" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MODEL_DISPLAY" "" "$SELECTED_API_BASE" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MODEL_DISPLAY" "" "$SELECTED_API_BASE" > /dev/null
     else
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MODEL_DISPLAY" > /dev/null
     fi
     echo -e "${GREEN}⬢${NC}"
     echo -e "  ${DIM}~/.hive/configuration.json${NC}"
 fi
-
 echo ""
 
 # ============================================================

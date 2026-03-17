@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-"""LLM provider abstraction."""
-
 import logging
-
 from framework.llm.provider import LLMProvider, LLMResponse
 from framework.llm.stream_events import (
     FinishEvent,
@@ -120,7 +116,7 @@ def get_available_providers() -> dict:
     """Get all available LLM providers based on environment variables."""
     from framework.config import get_available_providers as _get_providers
     return _get_providers()
-=======
+
 """LLM provider abstraction."""
 
 import logging
@@ -240,4 +236,4 @@ def get_available_providers() -> dict:
     from framework.config import get_available_providers as _get_providers
 
     return _get_providers()
->>>>>>> b3daa379bd2f7ddad5520b8ef9d232e3fbb47e05
+

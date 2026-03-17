@@ -1,11 +1,12 @@
-"""
-LLM providers for the Hive framework.
-"""
-
 from framework.llm.provider import LLMProvider
-from framework.llm.anthropic import AnthropicProvider
-from framework.llm.provider_selector import interactive_fallback
-from framework.llm.stream_events import StreamEvent
+
+# Suppress deprecation warnings for these imports
+import warnings
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    from framework.llm.anthropic import AnthropicProvider
+    from framework.llm.provider_selector import interactive_fallback
+    from framework.llm.stream_events import StreamEvent
 
 __all__ = [
     "LLMProvider",

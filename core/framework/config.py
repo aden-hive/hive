@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """Shared Hive configuration utilities.
 
 Centralises reading of ~/.hive/configuration.json so that the runner
@@ -11,9 +10,10 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
-
+from typing import Any, Dict
+from framework.llm.provider_models import get_model_display_name, get_model_info
 from framework.graph.edge import DEFAULT_MAX_TOKENS
+from framework.llm.provider_models import get_model_capabilities
 
 # ---------------------------------------------------------------------------
 # Low-level config file access
@@ -168,7 +168,6 @@ class RuntimeConfig:
     api_key: str | None = field(default_factory=get_api_key)
     api_base: str | None = field(default_factory=get_api_base)
     extra_kwargs: dict[str, Any] = field(default_factory=get_llm_extra_kwargs)
-=======
 import json
 import logging
 import os
@@ -529,4 +528,88 @@ def validate_llm_config() -> tuple[bool, list[str]]:
         for issue in issues:
             logger.warning(f"  - {issue}")
     return is_valid, issues
->>>>>>> b3daa379bd2f7ddad5520b8ef9d232e3fbb47e05
+def get_model_display_name_from_config() -> str:
+    """Get the user-friendly model display name from config."""
+    config = get_hive_config().get("llm", {})
+    provider = config.get("provider", "")
+    model_api_name = config.get("model", "")
+    
+    if provider and model_api_name:
+        return get_model_display_name(provider, model_api_name)
+    return model_api_name or "Unknown"
+
+def get_model_api_name_from_config() -> str:
+    """Get the API model name from config."""
+    config = get_hive_config().get("llm", {})
+    return config.get("model", "")
+
+def get_model_capabilities_from_config() -> Dict[str, bool]:
+    """Get model capabilities from config."""
+    config = get_hive_config().get("llm", {})
+    provider = config.get("provider", "")
+    model = config.get("model", "")
+    
+    if provider and model:
+        return get_model_capabilities(provider, model)
+    
+    # Default capabilities
+    return {
+        "streaming": True,
+        "tools": True,
+        "json_mode": True
+    }
+
+def get_model_max_tokens() -> int:
+    """Get the max tokens for the configured model."""
+    config = get_hive_config().get("llm", {})
+    provider = config.get("provider", "")
+    model = config.get("model", "")
+    
+    if provider and model:
+        model_info = get_model_info(provider, model)
+        if model_info:
+            return model_info["max_tokens"]
+    
+    # Fall back to configured max_tokens or default
+    return config.get("max_tokens", DEFAULT_MAX_TOKENS)
+
+def get_provider_from_config() -> str:
+    """Get the configured provider."""
+    config = get_hive_config().get("llm", {})
+    provider = config.get("provider", "")
+    # If it's empty, try to detect from environment
+    if not provider:
+        if os.environ.get("GEMINI_API_KEY"):
+            return "gemini"
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            return "anthropic"
+        if os.environ.get("OPENAI_API_KEY"):
+            return "openai"
+    return provider
+
+def format_model_info_for_display() -> str:
+    """Format model information for display in UI."""
+    provider = get_provider_from_config()
+    model_api = get_model_api_name_from_config()
+    model_display = get_model_display_name_from_config()
+    
+    if not provider or not model_api:
+        return "No model configured"
+    
+    model_info = get_model_info(provider, model_api)
+    if model_info:
+        tier_icon = "🆓" if model_info["tier"] == "free" else "💰"
+        return f"{provider.title()}: {model_display} {tier_icon}"
+    
+    return f"{provider.title()}: {model_api}"
+
+def save_config(config: dict) -> bool:
+    """Save configuration to ~/.hive/configuration.json."""
+    try:
+        with open(HIVE_CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=2)
+        logger.info(f"Configuration saved to {HIVE_CONFIG_FILE}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save config: {e}")
+        return False
