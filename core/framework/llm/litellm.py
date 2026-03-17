@@ -23,6 +23,7 @@ except ImportError:
     litellm = None  # type: ignore[assignment]
     RateLimitError = Exception  # type: ignore[assignment, misc]
 
+from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import StreamEvent
 
@@ -399,6 +400,10 @@ class LiteLLMProvider(LLMProvider):
             # Strip a trailing /v1 in case the user's saved config has the old value.
             if api_base and api_base.rstrip("/").endswith("/v1"):
                 api_base = api_base.rstrip("/")[:-3]
+        elif model.lower().startswith("hive/"):
+            model = "anthropic/" + model[len("hive/") :]
+            if api_base and api_base.rstrip("/").endswith("/v1"):
+                api_base = api_base.rstrip("/")[:-3]
         self.model = model
         self.api_key = api_key
         self.api_base = api_base or self._default_api_base_for_model(_original_model)
@@ -428,6 +433,8 @@ class LiteLLMProvider(LLMProvider):
             return MINIMAX_API_BASE
         if model_lower.startswith("kimi/"):
             return KIMI_API_BASE
+        if model_lower.startswith("hive/"):
+            return HIVE_API_BASE
         return None
 
     def _completion_with_rate_limit_retry(

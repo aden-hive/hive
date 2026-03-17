@@ -287,44 +287,28 @@ visible to the user immediately. The draft captures business logic \
 Include in each node: id, name, description, planned tools, \
 input/output keys, and success criteria as high-level hints.
 
-Each node is auto-classified into an ISO 5807 flowchart symbol type \
-with a unique color. You can override auto-detection by setting \
-`flowchart_type` explicitly on a node. Common types:
+Each node is auto-classified into a flowchart symbol type with a unique \
+color. You can override auto-detection by setting `flowchart_type` \
+explicitly on a node. Available types:
 
-**Core symbols:**
-- **start** (green, stadium): Entry point / trigger
-- **terminal** (red, stadium): End of flow
-- **process** (blue, rectangle): Standard processing step
-- **decision** (amber, diamond): Conditional branching
-- **io** (purple, parallelogram): External data input/output
-- **document** (blue-grey, wavy rect): Report or document generation
-- **subprocess** (teal, subroutine): Delegated sub-agent / predefined process
-- **preparation** (brown, hexagon): Setup / initialization step
-- **manual_operation** (pink, trapezoid): Human-in-the-loop / manual review
-- **delay** (orange, D-shape): Wait / throttle / cooldown
-- **display** (cyan): Present results to user
-
-**Data storage:**
-- **database** (light green, cylinder): Database or data store
-- **stored_data** (lime): Generic persistent data
-- **internal_storage** (amber): In-memory / cache
-
-**Flow operations:**
-- **merge** (indigo, inv. triangle): Combine multiple inputs
-- **extract** (indigo, triangle): Split or filter data
-- **connector** (grey, circle): On-page link
-- **offpage_connector** (dark grey, pentagon): Cross-page link
-
-**Domain-specific:**
-- **browser** (dark indigo, hexagon): GCU browser automation / sub-agent \
+- **start** (sage green, stadium): Entry point / trigger
+- **terminal** (dusty red, stadium): End of flow
+- **process** (blue-gray, rectangle): Standard processing step
+- **decision** (warm amber, diamond): Conditional branching
+- **io** (dusty purple, parallelogram): External data input/output
+- **document** (steel blue, wavy rect): Report or document generation
+- **database** (muted teal, cylinder): Database or data store
+- **subprocess** (dark cyan, subroutine): Delegated sub-agent / predefined process
+- **browser** (deep blue, hexagon): GCU browser automation / sub-agent \
 delegation. At build time, browser nodes are dissolved into the parent \
 node's sub_agents list. Use for any GCU or sub-agent leaf node.
 
 Auto-detection works well for most cases: first node → start, nodes with \
 no outgoing edges → terminal, nodes with multiple conditional outgoing \
 edges → decision, GCU nodes → browser, nodes mentioning "database" → \
-database, nodes mentioning "report/document" → document, etc. Set \
-flowchart_type explicitly only when auto-detection would be wrong.
+database, nodes mentioning "report/document" → document, I/O tools like \
+send_email → io. Everything else defaults to process. Set flowchart_type \
+explicitly only when auto-detection would be wrong.
 
 ## Decision Nodes — Planning-Only Conditional Branching
 

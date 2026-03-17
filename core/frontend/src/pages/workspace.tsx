@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff, X } from "lucide-react";
-import AgentGraph, { type GraphNode, type NodeStatus } from "@/components/AgentGraph";
+import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import DraftGraph from "@/components/DraftGraph";
 import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
 import TopBar from "@/components/TopBar";
@@ -327,6 +327,8 @@ interface AgentBackendState {
   workerIsTyping: boolean;
   llmSnapshots: Record<string, string>;
   activeToolCalls: Record<string, { name: string; done: boolean; streamId: string }>;
+  /** True while save_agent_draft tool is running (between tool_call_started and draft_graph_updated) */
+  designingDraft: boolean;
   /** Agent folder path — set after scaffolding, used for credential queries */
   agentPath: string | null;
   /** Structured question text from ask_user with options */
@@ -353,6 +355,7 @@ function defaultAgentState(): AgentBackendState {
     workerInputMessageId: null,
     queenBuilding: false,
     queenPhase: "planning",
+    designingDraft: false,
     draftGraph: null,
     originalDraft: null,
     flowchartMap: null,
@@ -557,6 +560,39 @@ export default function Workspace() {
   const [triggerTaskSaving, setTriggerTaskSaving] = useState(false);
   const [newTabOpen, setNewTabOpen] = useState(false);
   const newTabBtnRef = useRef<HTMLButtonElement>(null);
+  const [graphPanelPct, setGraphPanelPct] = useState(30);
+  const savedGraphPanelPct = useRef(30);
+  const resizing = useRef(false);
+
+  // Drag-to-resize the graph panel
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!resizing.current) return;
+      const pct = (e.clientX / window.innerWidth) * 100;
+      setGraphPanelPct(Math.max(15, Math.min(50, pct)));
+    };
+    const onMouseUp = () => {
+      resizing.current = false;
+      document.body.style.cursor = "";
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  // Shrink graph panel when node detail opens, restore when it closes
+  const nodeIsSelected = selectedNode !== null;
+  useEffect(() => {
+    if (nodeIsSelected) {
+      savedGraphPanelPct.current = graphPanelPct;
+      setGraphPanelPct(prev => Math.min(prev, 30));
+    } else {
+      setGraphPanelPct(savedGraphPanelPct.current);
+    }
+  }, [nodeIsSelected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ref mirror of sessionsByAgent so SSE callback can read current graph
   // state without adding sessionsByAgent to its dependency array.
@@ -577,6 +613,9 @@ export default function Workspace() {
   // it was created in (avoids stale-closure when phase change and message
   // events arrive in the same React batch).
   const queenPhaseRef = useRef<Record<string, string>>({});
+  // Timestamp when designingDraft was set — used to enforce minimum spinner duration.
+  const designingDraftSinceRef = useRef<Record<string, number>>({});
+  const designingDraftTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   // Synchronous ref to suppress the queen's auto-intro SSE messages
   // after a cold-restore (where we already restored the conversation from disk).
@@ -1186,8 +1225,8 @@ export default function Workspace() {
         graphsApi.draftGraph(state.sessionId).then(({ draft }) => {
           if (draft) updateAgentState(agentType, { draftGraph: draft });
         }).catch(() => {});
-      } else {
-        // Fetch flowchart map for non-planning phases (staging, running, building)
+      } else if (state.queenPhase !== "building") {
+        // Fetch flowchart map for non-building phases (staging, running)
         if (state.originalDraft) continue; // already have it
         if (fetchedFlowchartMapSessionsRef.current.has(state.sessionId)) continue;
         fetchedFlowchartMapSessionsRef.current.add(state.sessionId);
@@ -1196,6 +1235,7 @@ export default function Workspace() {
             updateAgentState(agentType, {
               flowchartMap: map,
               originalDraft: original_draft,
+              draftGraph: null,
             });
           }
         }).catch(() => {});
@@ -1839,6 +1879,15 @@ export default function Workspace() {
             const toolName = (event.data?.tool_name as string) || "unknown";
             const toolUseId = (event.data?.tool_use_id as string) || "";
 
+            // Flag when the queen starts designing/updating the flowchart
+            if (isQueen && toolName === "save_agent_draft") {
+              designingDraftSinceRef.current[agentType] = Date.now();
+              // Clear any pending delayed-clear timer from a previous call
+              const prev = designingDraftTimerRef.current[agentType];
+              if (prev) clearTimeout(prev);
+              updateAgentState(agentType, { designingDraft: true });
+            }
+
             // Track active (in-flight) tools and upsert activity row into chat
             const sid = event.stream_id;
             setAgentStates(prev => {
@@ -2046,20 +2095,19 @@ export default function Workspace() {
             queenBuilding: newPhase === "building",
             // Sync workerRunState so the RunButton reflects the phase
             workerRunState: newPhase === "running" ? "running" : "idle",
-            // Clear draft graph once we leave planning/building; keep it during
-            // building so the DraftGraph can show a loading overlay.
-            ...(newPhase !== "planning" && newPhase !== "building"
-              ? { draftGraph: null }
-              : newPhase === "planning"
-                ? { originalDraft: null, flowchartMap: null }
-                : {}),
+            // Clear originalDraft/flowchartMap when re-entering planning.
+            // draftGraph is cleared later when originalDraft arrives, so the
+            // entrance animation has data to render during the handoff.
+            ...(newPhase === "planning"
+              ? { originalDraft: null, flowchartMap: null }
+              : {}),
             // Store agent path for credential queries
             ...(eventAgentPath ? { agentPath: eventAgentPath } : {}),
           });
           {
             const sid = agentStates[agentType]?.sessionId;
             if (sid) {
-              if (newPhase !== "planning") {
+              if (newPhase !== "planning" && newPhase !== "building") {
                 fetchedDraftSessionsRef.current.delete(sid);
                 fetchedFlowchartMapSessionsRef.current.delete(sid);
                 // Fetch the flowchart map (original draft + dissolution mapping)
@@ -2069,7 +2117,8 @@ export default function Workspace() {
                     originalDraft: original_draft,
                   });
                 }).catch(() => {});
-              } else {
+              } else if (newPhase === "planning") {
+                // Only clear dedup sets when re-entering planning (not building)
                 fetchedDraftSessionsRef.current.delete(sid);
                 fetchedFlowchartMapSessionsRef.current.delete(sid);
               }
@@ -2082,7 +2131,28 @@ export default function Workspace() {
           // The draft dict is published directly as event.data (not nested under a key)
           const draft = event.data as unknown as DraftGraphData | undefined;
           if (draft?.nodes) {
-            updateAgentState(agentType, { draftGraph: draft });
+            // Ensure the "Designing flowchart…" spinner stays visible for a
+            // minimum duration so users see feedback before the draft appears.
+            const MIN_SPINNER_MS = 600;
+            const since = designingDraftSinceRef.current[agentType] || 0;
+            const elapsed = Date.now() - since;
+            const remaining = Math.max(0, MIN_SPINNER_MS - elapsed);
+
+            const applyDraft = () => {
+              delete designingDraftTimerRef.current[agentType];
+              updateAgentState(agentType, { draftGraph: draft, designingDraft: false });
+            };
+
+            if (remaining > 0 && since > 0) {
+              // Update draftGraph now (so data is ready) but keep spinner visible
+              updateAgentState(agentType, { draftGraph: draft });
+              designingDraftTimerRef.current[agentType] = setTimeout(() => {
+                updateAgentState(agentType, { designingDraft: false });
+                delete designingDraftTimerRef.current[agentType];
+              }, remaining);
+            } else {
+              applyDraft();
+            }
           }
           break;
         }
@@ -2093,6 +2163,7 @@ export default function Workspace() {
             updateAgentState(agentType, {
               flowchartMap: mapData.map ?? null,
               originalDraft: mapData.original_draft ?? null,
+              draftGraph: null,
             });
           }
           break;
@@ -2827,38 +2898,40 @@ export default function Workspace() {
       {/* Main content area */}
       <div className="flex flex-1 min-h-0">
 
-        {/* ── Pipeline graph + chat ──────────────────────────────────── */}
-        <div className={`${activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
+        {/* ── Draft flowchart + chat ─────────────────────────────────── */}
+        <div
+          className="bg-card/30 flex flex-col border-r border-border/30 relative"
+          style={{ width: `${graphPanelPct}%`, minWidth: 240, flexShrink: 0 }}
+        >
           <div className="flex-1 min-h-0">
-            {activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" ? (
-              <DraftGraph draft={activeAgentState?.draftGraph ?? null} loading={!activeAgentState?.draftGraph} building={activeAgentState?.queenBuilding} onRun={handleRun} onPause={handlePause} runState={activeAgentState?.workerRunState ?? "idle"} />
-            ) : activeAgentState?.originalDraft ? (
-              <DraftGraph
-                draft={activeAgentState.originalDraft}
-                building={activeAgentState?.queenBuilding}
-                onRun={handleRun}
-                onPause={handlePause}
-                runState={activeAgentState?.workerRunState ?? "idle"}
-                flowchartMap={activeAgentState.flowchartMap ?? undefined}
-                runtimeNodes={currentGraph.nodes}
-                onRuntimeNodeClick={(runtimeNodeId) => {
-                  const node = currentGraph.nodes.find(n => n.id === runtimeNodeId);
-                  if (node) setSelectedNode(prev => prev?.id === node.id ? null : node);
-                }}
-              />
-            ) : (
-              <AgentGraph
-                nodes={currentGraph.nodes}
-                title={currentGraph.title}
-                onNodeClick={(node) => setSelectedNode(prev => prev?.id === node.id ? null : node)}
-                onRun={handleRun}
-                onPause={handlePause}
-                runState={activeAgentState?.workerRunState ?? "idle"}
-                building={activeAgentState?.queenBuilding ?? false}
-                queenPhase={activeAgentState?.queenPhase ?? "building"}
-              />
-            )}
+            <DraftGraph
+              key={activeWorker}
+              draft={activeAgentState?.originalDraft ?? activeAgentState?.draftGraph ?? null}
+              originalDraft={activeAgentState?.originalDraft ?? null}
+              loadingMessage={
+                activeAgentState?.designingDraft
+                  ? "Designing flowchart…"
+                  : !activeAgentState?.originalDraft && !activeAgentState?.draftGraph && activeAgentState?.queenPhase !== "planning"
+                    ? "Loading flowchart…"
+                    : null
+              }
+              building={activeAgentState?.queenBuilding}
+              onRun={handleRun}
+              onPause={handlePause}
+              runState={activeAgentState?.workerRunState ?? "idle"}
+              flowchartMap={activeAgentState?.flowchartMap ?? undefined}
+              runtimeNodes={currentGraph.nodes}
+              onRuntimeNodeClick={(runtimeNodeId) => {
+                const node = currentGraph.nodes.find(n => n.id === runtimeNodeId);
+                if (node) setSelectedNode(prev => prev?.id === node.id ? null : node);
+              }}
+            />
           </div>
+          {/* Resize handle */}
+          <div
+            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/40 transition-colors z-10"
+            onMouseDown={() => { resizing.current = true; document.body.style.cursor = "col-resize"; }}
+          />
         </div>
         <div className="flex-1 min-w-0 flex">
           <div className="flex-1 min-w-0 relative">

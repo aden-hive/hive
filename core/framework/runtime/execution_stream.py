@@ -186,6 +186,8 @@ class ExecutionStream:
         accounts_prompt: str = "",
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
+        skills_catalog_prompt: str = "",
+        protocols_prompt: str = "",
     ):
         """
         Initialize execution stream.
@@ -209,6 +211,8 @@ class ExecutionStream:
             accounts_prompt: Connected accounts block for system prompt injection
             accounts_data: Raw account data for per-node prompt generation
             tool_provider_map: Tool name to provider name mapping for account routing
+            skills_catalog_prompt: Available skills catalog for system prompt
+            protocols_prompt: Default skill operational protocols for system prompt
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -230,6 +234,21 @@ class ExecutionStream:
         self._accounts_prompt = accounts_prompt
         self._accounts_data = accounts_data
         self._tool_provider_map = tool_provider_map
+        self._skills_catalog_prompt = skills_catalog_prompt
+        self._protocols_prompt = protocols_prompt
+
+        _es_logger = logging.getLogger(__name__)
+        if protocols_prompt:
+            _es_logger.info(
+                "ExecutionStream[%s] received protocols_prompt (%d chars)",
+                stream_id,
+                len(protocols_prompt),
+            )
+        else:
+            _es_logger.warning(
+                "ExecutionStream[%s] received EMPTY protocols_prompt",
+                stream_id,
+            )
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -675,6 +694,8 @@ class ExecutionStream:
                         accounts_prompt=self._accounts_prompt,
                         accounts_data=self._accounts_data,
                         tool_provider_map=self._tool_provider_map,
+                        skills_catalog_prompt=self._skills_catalog_prompt,
+                        protocols_prompt=self._protocols_prompt,
                     )
                     # Track executor so inject_input() can reach EventLoopNode instances
                     self._active_executors[execution_id] = executor

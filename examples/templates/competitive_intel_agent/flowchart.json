@@ -1,0 +1,307 @@
+{
+  "original_draft": {
+    "agent_name": "competitive_intel_agent",
+    "goal": "Monitor competitor websites, news sources, and GitHub repositories to produce a structured weekly digest with key insights, detailed findings per competitor, and 30-day trend analysis.",
+    "description": "",
+    "success_criteria": [
+      "Check multiple source types per competitor (website, news, GitHub)",
+      "All findings structured with competitor, category, update, source, and date",
+      "Uses stored data to compare with previous reports for trend analysis",
+      "User receives a formatted, readable competitive intelligence digest"
+    ],
+    "constraints": [
+      "Never fabricate findings, news, or data \u2014 only report what was found",
+      "Every finding must include a source URL",
+      "Prioritize findings from the past 7 days; include up to 30 days"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Competitor Intake",
+        "description": "Collect competitor list, focus areas, and report preferences from the user",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "competitors_input"
+        ],
+        "output_keys": [
+          "competitors",
+          "focus_areas",
+          "report_frequency",
+          "has_github_competitors"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "web-scraper",
+        "name": "Website Monitor",
+        "description": "Scrape competitor websites for pricing, features, and announcements",
+        "node_type": "event_loop",
+        "tools": [
+          "web_search",
+          "web_scrape"
+        ],
+        "input_keys": [
+          "competitors",
+          "focus_areas"
+        ],
+        "output_keys": [
+          "web_findings"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "news-search",
+        "name": "News & Press Monitor",
+        "description": "Search for competitor mentions in news, press releases, and industry publications",
+        "node_type": "event_loop",
+        "tools": [
+          "web_search",
+          "web_scrape"
+        ],
+        "input_keys": [
+          "competitors",
+          "focus_areas"
+        ],
+        "output_keys": [
+          "news_findings"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "decision",
+        "flowchart_shape": "diamond",
+        "flowchart_color": "#d89d26"
+      },
+      {
+        "id": "github-monitor",
+        "name": "GitHub Activity Monitor",
+        "description": "Track public GitHub repository activity for competitors with GitHub presence",
+        "node_type": "event_loop",
+        "tools": [
+          "github_list_repos",
+          "github_get_repo",
+          "github_search_repos"
+        ],
+        "input_keys": [
+          "competitors"
+        ],
+        "output_keys": [
+          "github_findings"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "aggregator",
+        "name": "Data Aggregator",
+        "description": "Combine findings from all sources, deduplicate, and structure for analysis",
+        "node_type": "event_loop",
+        "tools": [
+          "save_data",
+          "load_data",
+          "list_data_files"
+        ],
+        "input_keys": [
+          "competitors",
+          "web_findings",
+          "news_findings",
+          "github_findings"
+        ],
+        "output_keys": [
+          "aggregated_findings"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "database",
+        "flowchart_shape": "cylinder",
+        "flowchart_color": "#508878"
+      },
+      {
+        "id": "analysis",
+        "name": "Insight Analysis",
+        "description": "Extract key insights, detect trends, and compare with historical data",
+        "node_type": "event_loop",
+        "tools": [
+          "load_data",
+          "save_data",
+          "list_data_files"
+        ],
+        "input_keys": [
+          "aggregated_findings",
+          "competitors",
+          "focus_areas"
+        ],
+        "output_keys": [
+          "key_highlights",
+          "trend_analysis",
+          "detailed_findings"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "database",
+        "flowchart_shape": "cylinder",
+        "flowchart_color": "#508878"
+      },
+      {
+        "id": "report",
+        "name": "Report Generator",
+        "description": "Generate and deliver the competitive intelligence digest as an HTML report",
+        "node_type": "event_loop",
+        "tools": [
+          "save_data",
+          "load_data",
+          "serve_file_to_user",
+          "list_data_files"
+        ],
+        "input_keys": [
+          "key_highlights",
+          "trend_analysis",
+          "detailed_findings",
+          "competitors"
+        ],
+        "output_keys": [
+          "delivery_status"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "intake",
+        "target": "web-scraper",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "web-scraper",
+        "target": "news-search",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "news-search",
+        "target": "github-monitor",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-3",
+        "source": "news-search",
+        "target": "aggregator",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-4",
+        "source": "github-monitor",
+        "target": "aggregator",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-5",
+        "source": "aggregator",
+        "target": "analysis",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-6",
+        "source": "analysis",
+        "target": "report",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "intake",
+    "terminal_nodes": [
+      "report"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "intake": [
+      "intake"
+    ],
+    "web-scraper": [
+      "web-scraper"
+    ],
+    "news-search": [
+      "news-search"
+    ],
+    "github-monitor": [
+      "github-monitor"
+    ],
+    "aggregator": [
+      "aggregator"
+    ],
+    "analysis": [
+      "analysis"
+    ],
+    "report": [
+      "report"
+    ]
+  }
+}

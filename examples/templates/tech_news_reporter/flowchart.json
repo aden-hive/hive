@@ -1,0 +1,150 @@
+{
+  "original_draft": {
+    "agent_name": "tech_news_reporter",
+    "goal": "Research the latest technology and AI news from the web, summarize key stories, and produce a well-organized report for the user to read.",
+    "description": "",
+    "success_criteria": [
+      "Finds recent, relevant tech/AI news articles",
+      "Covers diverse topics, not just one story",
+      "Produces a structured, readable report with sections, summaries, and links",
+      "Includes source attribution with URLs for every story",
+      "Delivers the report to the user in a viewable format"
+    ],
+    "constraints": [
+      "Never fabricate news stories or URLs",
+      "Always attribute sources with links",
+      "Only include news from the past week"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Greet the user and ask if they have specific tech/AI topics to focus on, or if they want a general news roundup.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [],
+        "output_keys": [
+          "research_brief"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "research",
+        "name": "Research",
+        "description": "Scrape well-known tech news sites for recent articles and extract key information including titles, summaries, sources, and topics.",
+        "node_type": "event_loop",
+        "tools": [
+          "web_scrape"
+        ],
+        "input_keys": [
+          "research_brief"
+        ],
+        "output_keys": [
+          "articles_data"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "compile-report",
+        "name": "Compile Report",
+        "description": "Organize the researched articles into a structured HTML report, save it, and deliver a clickable link to the user.",
+        "node_type": "event_loop",
+        "tools": [
+          "save_data",
+          "append_data",
+          "serve_file_to_user"
+        ],
+        "input_keys": [
+          "articles_data"
+        ],
+        "output_keys": [
+          "report_file"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "intake",
+        "target": "research",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "research",
+        "target": "compile-report",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "intake",
+    "terminal_nodes": [
+      "compile-report"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "intake": [
+      "intake"
+    ],
+    "research": [
+      "research"
+    ],
+    "compile-report": [
+      "compile-report"
+    ]
+  }
+}

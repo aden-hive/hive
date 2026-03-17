@@ -6,7 +6,7 @@ import logging
 from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionResetError as _AiohttpConnReset
 
-from framework.runtime.event_bus import EventType
+from framework.runtime.event_bus import AgentEvent, EventType
 from framework.server.app import resolve_session
 
 logger = logging.getLogger(__name__)
@@ -164,6 +164,54 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
                 break
     if replayed:
         logger.info("SSE replayed %d buffered events for session='%s'", replayed, session.id)
+
+    # Inject a live-status snapshot so the frontend knows which nodes are
+    # currently running.  This covers the case where the user navigated away
+    # and back — the localStorage snapshot is stale, and the ring-buffer
+    # replay may not include the original node_loop_started events.
+    worker_runtime = getattr(session, "worker_runtime", None)
+    if worker_runtime and getattr(worker_runtime, "is_running", False):
+        try:
+            for stream_info in worker_runtime.get_active_streams():
+                graph_id = stream_info.get("graph_id")
+                stream_id = stream_info.get("stream_id", "default")
+                for exec_id in stream_info.get("active_execution_ids", []):
+                    # Synthesize execution_started so frontend sets workerRunState
+                    synth_exec = AgentEvent(
+                        type=EventType.EXECUTION_STARTED,
+                        stream_id=stream_id,
+                        execution_id=exec_id,
+                        graph_id=graph_id,
+                        data={"synthetic": True},
+                    ).to_dict()
+                    try:
+                        queue.put_nowait(synth_exec)
+                    except asyncio.QueueFull:
+                        pass
+
+                # Find the currently executing node via the executor
+                for _gid, reg in worker_runtime._graphs.items():
+                    if _gid != graph_id:
+                        continue
+                    for _ep_id, stream in reg.streams.items():
+                        for exec_id, executor in stream._active_executors.items():
+                            current = getattr(executor, "current_node_id", None)
+                            if current:
+                                synth_node = AgentEvent(
+                                    type=EventType.NODE_LOOP_STARTED,
+                                    stream_id=stream_id,
+                                    node_id=current,
+                                    execution_id=exec_id,
+                                    graph_id=graph_id,
+                                    data={"synthetic": True},
+                                ).to_dict()
+                                try:
+                                    queue.put_nowait(synth_node)
+                                except asyncio.QueueFull:
+                                    pass
+            logger.info("SSE injected live-status snapshot for session='%s'", session.id)
+        except Exception:
+            logger.debug("Failed to inject live-status snapshot", exc_info=True)
 
     event_count = 0
     close_reason = "unknown"

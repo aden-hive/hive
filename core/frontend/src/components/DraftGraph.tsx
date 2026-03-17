@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Loader2 } from "lucide-react";
 import type { DraftGraph as DraftGraphData, DraftNode } from "@/api/types";
-import { RunButton } from "./AgentGraph";
-import type { GraphNode, RunState } from "./AgentGraph";
+import { RunButton } from "./RunButton";
+import type { GraphNode, RunState } from "./graph-types";
 
 // Read a CSS custom property value (space-separated HSL components)
 function cssVar(name: string): string {
@@ -74,6 +74,8 @@ type DraftNodeStatus = "pending" | "running" | "complete" | "error";
 
 interface DraftGraphProps {
   draft: DraftGraphData | null;
+  /** The post-build originalDraft — animation fires when this changes to a new non-null value. */
+  originalDraft?: DraftGraphData | null;
   onNodeClick?: (node: DraftNode) => void;
   /** Runtime node ID → list of original draft node IDs (post-dissolution mapping). */
   flowchartMap?: Record<string, string[]>;
@@ -83,8 +85,8 @@ interface DraftGraphProps {
   onRuntimeNodeClick?: (runtimeNodeId: string) => void;
   /** True while the queen is building the agent from the draft. */
   building?: boolean;
-  /** True while the queen is designing the draft (no draft yet). Shows a spinner. */
-  loading?: boolean;
+  /** Message to show with a spinner while loading/designing. Null = no spinner. */
+  loadingMessage?: string | null;
   /** Called when the user clicks Run. */
   onRun?: () => void;
   /** Called when the user clicks Pause. */
@@ -144,13 +146,9 @@ function FlowchartShape({
     case "rectangle":
       return <rect x={x} y={y} width={w} height={h} rx={4} {...common} />;
 
-    case "rounded_rect":
-      return <rect x={x} y={y} width={w} height={h} rx={12} {...common} />;
-
     case "diamond": {
       const cx = x + w / 2;
       const cy = y + h / 2;
-      // Keep diamond within bounding box
       return (
         <polygon
           points={`${cx},${y} ${x + w},${cy} ${cx},${y + h} ${x},${cy}`}
@@ -174,18 +172,6 @@ function FlowchartShape({
       return <path d={d} {...common} />;
     }
 
-    case "multi_document": {
-      const off = 3;
-      const d = `M ${x} ${y + 4 + off} Q ${x} ${y + off}, ${x + 8} ${y + off} L ${x + w - 8 - off} ${y + off} Q ${x + w - off} ${y + off}, ${x + w - off} ${y + 4 + off} L ${x + w - off} ${y + h - 8} C ${x + (w - off) * 0.75} ${y + h + 2}, ${x + (w - off) * 0.25} ${y + h - 10}, ${x} ${y + h - 4} Z`;
-      return (
-        <g>
-          <rect x={x + off * 2} y={y} width={w - off * 2} height={h - off} rx={4} fill={fill} stroke={stroke} strokeWidth={1.2} opacity={0.4} />
-          <rect x={x + off} y={y + off / 2} width={w - off} height={h - off} rx={4} fill={fill} stroke={stroke} strokeWidth={1.2} opacity={0.6} />
-          <path d={d} {...common} />
-        </g>
-      );
-    }
-
     case "subroutine": {
       const inset = 7;
       return (
@@ -207,34 +193,6 @@ function FlowchartShape({
       );
     }
 
-    case "manual_input":
-      return (
-        <polygon
-          points={`${x},${y + 10} ${x + w},${y} ${x + w},${y + h} ${x},${y + h}`}
-          {...common}
-        />
-      );
-
-    case "trapezoid": {
-      const inset = 12;
-      return (
-        <polygon
-          points={`${x},${y} ${x + w},${y} ${x + w - inset},${y + h} ${x + inset},${y + h}`}
-          {...common}
-        />
-      );
-    }
-
-    case "delay": {
-      const d = `M ${x} ${y + 4} Q ${x} ${y}, ${x + 4} ${y} L ${x + w * 0.65} ${y} A ${w * 0.35} ${h / 2} 0 0 1 ${x + w * 0.65} ${y + h} L ${x + 4} ${y + h} Q ${x} ${y + h}, ${x} ${y + h - 4} Z`;
-      return <path d={d} {...common} />;
-    }
-
-    case "display": {
-      const d = `M ${x + 16} ${y} L ${x + w * 0.65} ${y} A ${w * 0.35} ${h / 2} 0 0 1 ${x + w * 0.65} ${y + h} L ${x + 16} ${y + h} L ${x} ${y + h / 2} Z`;
-      return <path d={d} {...common} />;
-    }
-
     case "cylinder": {
       const ry = 7;
       return (
@@ -247,88 +205,6 @@ function FlowchartShape({
           <ellipse cx={x + w / 2} cy={y + h - ry} rx={w / 2} ry={ry} fill={fill} stroke={stroke} strokeWidth={1.2} />
         </g>
       );
-    }
-
-    case "stored_data": {
-      const d = `M ${x + 14} ${y} L ${x + w} ${y} A 10 ${h / 2} 0 0 0 ${x + w} ${y + h} L ${x + 14} ${y + h} A 10 ${h / 2} 0 0 1 ${x + 14} ${y} Z`;
-      return <path d={d} {...common} />;
-    }
-
-    case "internal_storage":
-      return (
-        <g>
-          <rect x={x} y={y} width={w} height={h} rx={4} {...common} />
-          <line x1={x + 10} y1={y} x2={x + 10} y2={y + h} stroke={stroke} strokeWidth={0.8} opacity={0.5} />
-          <line x1={x} y1={y + 10} x2={x + w} y2={y + 10} stroke={stroke} strokeWidth={0.8} opacity={0.5} />
-        </g>
-      );
-
-    case "circle": {
-      const r = Math.min(w, h) / 2 - 2;
-      return <circle cx={x + w / 2} cy={y + h / 2} r={r} {...common} />;
-    }
-
-    case "pentagon":
-      return (
-        <polygon
-          points={`${x},${y} ${x + w},${y} ${x + w},${y + h * 0.6} ${x + w / 2},${y + h} ${x},${y + h * 0.6}`}
-          {...common}
-        />
-      );
-
-    case "triangle_inv":
-      return (
-        <polygon
-          points={`${x},${y} ${x + w},${y} ${x + w / 2},${y + h}`}
-          {...common}
-        />
-      );
-
-    case "triangle":
-      return (
-        <polygon
-          points={`${x + w / 2},${y} ${x + w},${y + h} ${x},${y + h}`}
-          {...common}
-        />
-      );
-
-    case "hourglass":
-      return (
-        <polygon
-          points={`${x},${y} ${x + w},${y} ${x + w / 2},${y + h / 2} ${x + w},${y + h} ${x},${y + h} ${x + w / 2},${y + h / 2}`}
-          {...common}
-        />
-      );
-
-    case "circle_cross": {
-      const r = Math.min(w, h) / 2 - 2;
-      const cx = x + w / 2;
-      const cy = y + h / 2;
-      return (
-        <g>
-          <circle cx={cx} cy={cy} r={r} {...common} />
-          <line x1={cx - r * 0.7} y1={cy - r * 0.7} x2={cx + r * 0.7} y2={cy + r * 0.7} stroke={stroke} strokeWidth={1} />
-          <line x1={cx + r * 0.7} y1={cy - r * 0.7} x2={cx - r * 0.7} y2={cy + r * 0.7} stroke={stroke} strokeWidth={1} />
-        </g>
-      );
-    }
-
-    case "circle_bar": {
-      const r = Math.min(w, h) / 2 - 2;
-      const cx = x + w / 2;
-      const cy = y + h / 2;
-      return (
-        <g>
-          <circle cx={cx} cy={cy} r={r} {...common} />
-          <line x1={cx} y1={cy - r} x2={cx} y2={cy + r} stroke={stroke} strokeWidth={1} />
-          <line x1={cx - r} y1={cy} x2={cx + r} y2={cy} stroke={stroke} strokeWidth={1} />
-        </g>
-      );
-    }
-
-    case "flag": {
-      const d = `M ${x} ${y} L ${x + w} ${y} L ${x + w - 8} ${y + h / 2} L ${x + w} ${y + h} L ${x} ${y + h} Z`;
-      return <path d={d} {...common} />;
     }
 
     default:
@@ -357,13 +233,44 @@ function Tooltip({ node, style }: { node: DraftNode; style: React.CSSProperties 
   );
 }
 
-export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick, building, loading, onRun, onPause, runState = "idle" }: DraftGraphProps) {
+export default function DraftGraph({ draft, originalDraft, onNodeClick, flowchartMap, runtimeNodes, onRuntimeNodeClick, building, loadingMessage, onRun, onPause, runState = "idle" }: DraftGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const runBtnRef = useRef<HTMLButtonElement>(null);
   const [containerW, setContainerW] = useState(484);
   const chrome = useDraftChromeColors();
+
+  // ── Entrance animation — fires when originalDraft becomes a new non-null value ──
+  // This covers: agent loaded, build finished, queen modifies flowchart.
+  // Tab switches remount via React key={activeWorker}, resetting all refs.
+  const prevOriginalDraft = useRef<DraftGraphData | null>(null);
+  const pendingAnimation = useRef(false);
+  const [entrancePhase, setEntrancePhase] = useState<"idle" | "hidden" | "visible">("idle");
+
+  const nodes = draft?.nodes ?? [];
+
+  useLayoutEffect(() => {
+    const prev = prevOriginalDraft.current;
+    prevOriginalDraft.current = originalDraft ?? null;
+
+    // Detect a new non-null originalDraft (object identity — each API/SSE response is a fresh object)
+    if (originalDraft && originalDraft !== prev) {
+      pendingAnimation.current = true;
+    }
+
+    // Fire when we have a pending animation, nodes are ready, and not mid-build
+    if (pendingAnimation.current && nodes.length > 0 && !building) {
+      pendingAnimation.current = false;
+      setEntrancePhase("hidden");
+      let raf1 = 0, raf2 = 0;
+      raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => setEntrancePhase("visible"));
+      });
+      const t = setTimeout(() => setEntrancePhase("idle"), nodes.length * 120 + 1000);
+      return () => { clearTimeout(t); cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
+    }
+  }, [originalDraft, nodes.length, building]);
 
   // Shift-to-pin tooltip
   const shiftHeld = useRef(false);
@@ -465,7 +372,6 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
 
   const hasStatusOverlay = Object.keys(nodeStatuses).length > 0;
 
-  const nodes = draft?.nodes ?? [];
   const edges = draft?.edges ?? [];
 
   const idxMap = useMemo(
@@ -538,6 +444,11 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
     let maxCols = 1;
     layerGroups.forEach((group) => {
       maxCols = Math.max(maxCols, group.length);
+    });
+    // Ensure maxCols accommodates any parent's children fan-out
+    // (prevents fan-out scaling from collapsing to zero)
+    children.forEach((kids) => {
+      maxCols = Math.max(maxCols, kids.length);
     });
 
     // Compute node width — keep back-edge overflow out of node sizing so nodes
@@ -640,6 +551,17 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
         const shift = maxPos - (maxCols - 1);
         for (const item of ideals) {
           colPos[item.idx] = Math.max(0, colPos[item.idx] - shift);
+        }
+      }
+    }
+
+    // Post-process: enforce minimum spacing within each layer
+    for (const [, group] of layerGroups) {
+      if (group.length <= 1) continue;
+      const sorted = [...group].sort((a, b) => colPos[a] - colPos[b]);
+      for (let j = 1; j < sorted.length; j++) {
+        if (colPos[sorted[j]] < colPos[sorted[j - 1]] + 1) {
+          colPos[sorted[j]] = colPos[sorted[j - 1]] + 1;
         }
       }
     }
@@ -796,13 +718,13 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
 
   // Compute group areas for runtime node boundaries on the draft
   const groupAreas = useMemo(() => {
-    if (!flowchartMap || !runtimeNodes?.length) return [];
+    if (!flowchartMap) return [];
     const groups: { runtimeId: string; label: string; draftIds: string[] }[] = [];
     for (const [runtimeId, draftIds] of Object.entries(flowchartMap)) {
       groups.push({ runtimeId, label: formatNodeId(runtimeId), draftIds });
     }
     return groups;
-  }, [flowchartMap, runtimeNodes]);
+  }, [flowchartMap]);
 
   // Legend
   const usedTypes = (() => {
@@ -840,12 +762,27 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
       ? `M ${startX} ${y1} L ${toCenterX} ${y2}`
       : `M ${startX} ${y1} L ${startX} ${midY} L ${toCenterX} ${midY} L ${toCenterX} ${y2}`;
 
+    // Edge draw-in animation (stroke-dashoffset)
+    const isAnimating = entrancePhase !== "idle";
+    const pathLength = Math.abs(y2 - y1) + Math.abs(startX - toCenterX) + 1;
+    const edgeDelay = 200 + i * 80;
+    const edgeStyle: React.CSSProperties | undefined = isAnimating ? {
+      strokeDasharray: pathLength,
+      strokeDashoffset: entrancePhase === "hidden" ? pathLength : 0,
+      transition: `stroke-dashoffset 400ms ease-in-out ${edgeDelay}ms`,
+    } : undefined;
+    const edgeEndStyle: React.CSSProperties | undefined = isAnimating ? {
+      opacity: entrancePhase === "hidden" ? 0 : 1,
+      transition: `opacity 100ms ease-out ${edgeDelay + 350}ms`,
+    } : undefined;
+
     return (
       <g key={`fwd-${i}`}>
-        <path d={d} fill="none" stroke={chrome.edge} strokeWidth={1.2} />
+        <path d={d} fill="none" stroke={chrome.edge} strokeWidth={1.2} style={edgeStyle} />
         <polygon
           points={`${toCenterX - 3},${y2 - 5} ${toCenterX + 3},${y2 - 5} ${toCenterX},${y2 - 1}`}
           fill={chrome.edgeArrow}
+          style={edgeEndStyle}
         />
         {edge.label && (
           <text
@@ -855,6 +792,7 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
             fontSize={9}
             fontStyle="italic"
             textAnchor="middle"
+            style={edgeEndStyle}
           >
             {truncateLabel(edge.label, 80, 9)}
           </text>
@@ -877,12 +815,26 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
 
     const path = `M ${startX} ${startY} C ${startX + r} ${startY}, ${curveX} ${startY}, ${curveX} ${startY - r} L ${curveX} ${endY + r} C ${curveX} ${endY}, ${endX + r} ${endY}, ${endX + 5} ${endY}`;
 
+    // Back-edge draw-in animation (starts after forward edges)
+    const isAnimating = entrancePhase !== "idle";
+    const backPathLength = Math.abs(curveX - startX) + Math.abs(startY - endY) + Math.abs(curveX - endX) + 20;
+    const backDelay = nodes.length * 120 + 300 + i * 80;
+    const backEdgeStyle: React.CSSProperties | undefined = isAnimating ? {
+      strokeDashoffset: entrancePhase === "hidden" ? backPathLength : 0,
+      transition: `stroke-dashoffset 400ms ease-in-out ${backDelay}ms`,
+    } : undefined;
+    const backEndStyle: React.CSSProperties | undefined = isAnimating ? {
+      opacity: entrancePhase === "hidden" ? 0 : 1,
+      transition: `opacity 100ms ease-out ${backDelay + 350}ms`,
+    } : undefined;
+
     return (
       <g key={`back-${i}`}>
-        <path d={path} fill="none" stroke={chrome.backEdge} strokeWidth={1.2} strokeDasharray="4 3" />
+        <path d={path} fill="none" stroke={chrome.backEdge} strokeWidth={1.2} strokeDasharray={isAnimating ? backPathLength : "4 3"} style={backEdgeStyle} />
         <polygon
           points={`${endX + 5},${endY - 2.5} ${endX + 5},${endY + 2.5} ${endX},${endY}`}
           fill={chrome.edge}
+          style={backEndStyle}
         />
       </g>
     );
@@ -926,7 +878,13 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
           if (rect) setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
         }}
         onMouseLeave={() => { if (!shiftHeld.current) { setHoveredNode(null); setMousePos(null); } }}
-        style={{ cursor: "pointer" }}
+        style={{
+          cursor: "pointer",
+          ...(entrancePhase !== "idle" ? {
+            opacity: entrancePhase === "hidden" ? 0 : 1,
+            transition: `opacity 300ms ease-out ${i * 120}ms`,
+          } : {}),
+        }}
       >
 
         <FlowchartShape
@@ -966,18 +924,17 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
     );
   };
 
-  if (loading || !draft || nodes.length === 0) {
+  if (!draft || nodes.length === 0) {
     return (
       <div className="flex flex-col h-full">
         <div className="px-4 pt-3 pb-1.5 flex items-center gap-2">
           <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Draft</p>
-          <span className="text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border text-amber-500/60 border-amber-500/20">planning</span>
         </div>
         <div className="flex-1 flex flex-col items-center justify-center gap-3">
-          {loading || !draft ? (
+          {loadingMessage ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin text-muted-foreground/40" />
-              <p className="text-xs text-muted-foreground/50">Designing flowchart…</p>
+              <p className="text-xs text-muted-foreground/50">{loadingMessage}</p>
             </>
           ) : (
             <p className="text-xs text-muted-foreground/60 text-center italic">
@@ -1004,6 +961,11 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
               <Loader2 className="w-2.5 h-2.5 animate-spin" />
               building
             </span>
+          ) : loadingMessage ? (
+            <span className="text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border text-amber-500/60 border-amber-500/20 flex items-center gap-1">
+              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+              updating
+            </span>
           ) : (
             <span className={`text-[9px] font-mono font-medium rounded px-1 py-0.5 leading-none border ${hasStatusOverlay ? "text-emerald-500/60 border-emerald-500/20" : "text-amber-500/60 border-amber-500/20"}`}>
               {hasStatusOverlay ? "live" : "planning"}
@@ -1023,8 +985,12 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          className={`w-full h-full${building ? " opacity-30" : ""}`}
-          style={{ cursor: dragging ? "grabbing" : "grab" }}
+          className="w-full h-full"
+          style={{
+            opacity: building || loadingMessage ? 0.3 : 1,
+            transition: building || loadingMessage ? "none" : "opacity 300ms ease-out",
+            cursor: dragging ? "grabbing" : "grab",
+          }}
         >
         <svg
           width="100%"
@@ -1146,6 +1112,15 @@ export default function DraftGraph({ draft, onNodeClick, flowchartMap, runtimeNo
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="w-6 h-6 animate-spin text-primary/60" />
               <p className="text-xs text-muted-foreground/80">Building agent...</p>
+            </div>
+          </div>
+        )}
+
+        {!building && loadingMessage && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/40" />
+              <p className="text-xs text-muted-foreground/50">{loadingMessage}</p>
             </div>
           </div>
         )}
