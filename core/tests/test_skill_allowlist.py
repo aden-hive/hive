@@ -1,9 +1,6 @@
 """Tests for AS-9: Skill directory allowlisting in file-read tool interception."""
 
-import os
-import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -23,9 +20,8 @@ def _make_node(skill_dirs: list[str]):
     """Build a minimal EventLoopNode with skill_dirs set."""
     from framework.graph.event_loop_node import EventLoopNode
 
-    node = EventLoopNode(
-        tool_executor=MagicMock(return_value=ToolResult(tool_use_id="tc-1", content="from-executor"))
-    )
+    mock_result = ToolResult(tool_use_id="tc-1", content="from-executor")
+    node = EventLoopNode(tool_executor=MagicMock(return_value=mock_result))
     node._skill_dirs = skill_dirs
     return node
 

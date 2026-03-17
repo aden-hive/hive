@@ -43,12 +43,13 @@ class TestSkillContentProtection:
         conv = _make_conversation()
 
         # Add many regular tool results to push over prune threshold
-        for i in range(30):
+        for _ in range(30):
             await _add_tool_msg(conv, "x" * 500)  # ~125 tokens each
 
         # Add a skill content message
         skill_msg = await _add_tool_msg(
-            conv, "## Deep Research\n" + "instructions " * 200,
+            conv,
+            "## Deep Research\n" + "instructions " * 200,
             is_skill_content=True,
         )
 
@@ -65,7 +66,7 @@ class TestSkillContentProtection:
         """Regular tool results are still pruned when over threshold."""
         conv = _make_conversation()
 
-        for i in range(20):
+        for _ in range(20):
             await _add_tool_msg(conv, "regular tool output " * 50)
 
         pruned = await conv.prune_old_tool_results(protect_tokens=500, min_prune_tokens=100)
