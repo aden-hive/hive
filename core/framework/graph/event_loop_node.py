@@ -202,6 +202,14 @@ class LoopConfig:
     max_tool_result_chars: int = 30_000
     spillover_dir: str | None = None  # Path string; created on first use
 
+    # --- set_output value spilling ---
+    # When a set_output value exceeds this character count it is auto-saved
+    # to a file in *spillover_dir* and the stored value is replaced with a
+    # lightweight file reference.  This keeps shared memory / adapt.md /
+    # transition markers small and forces the next node to load the full
+    # data from the file.  Set to 0 to disable.
+    max_output_value_chars: int = 2_000
+
     # --- Stream retry (transient error recovery within EventLoopNode) ---
     # When _run_single_turn() raises a transient error (network, rate limit,
     # server error), retry up to this many times with exponential backoff
@@ -230,6 +238,12 @@ class LoopConfig:
     # Prevents hung MCP servers (especially browser/GCU tools) from
     # blocking the entire event loop indefinitely.  0 = no timeout.
     tool_call_timeout_seconds: float = 60.0
+
+    # --- Subagent delegation timeout ---
+    # Maximum seconds a delegate_to_sub_agent call may run before being
+    # killed.  Subagents run a full event-loop so they naturally take
+    # longer than a single tool call — default is 10 minutes.  0 = no timeout.
+    subagent_timeout_seconds: float = 300.0
 
     # --- Lifecycle hooks ---
     # Hooks are async callables keyed by event name.  Supported events:
@@ -2182,6 +2196,57 @@ class EventLoopNode(NodeProtocol):
                             except (json.JSONDecodeError, TypeError):
                                 pass
                         key = tc.tool_input.get("key", "")
+
+                        # Auto-spill: save large values to data files and
+                        # replace with a lightweight file reference so shared
+                        # memory / adapt.md / transition markers stay small.
+                        spill_dir = self._config.spillover_dir
+                        max_val = self._config.max_output_value_chars
+                        if max_val > 0 and spill_dir:
+                            val_str = (
+                                json.dumps(value, ensure_ascii=False)
+                                if not isinstance(value, str)
+                                else value
+                            )
+                            if len(val_str) > max_val:
+                                spill_path = Path(spill_dir)
+                                spill_path.mkdir(parents=True, exist_ok=True)
+                                ext = ".json" if isinstance(value, (dict, list)) else ".txt"
+                                filename = f"output_{key}{ext}"
+                                write_content = (
+                                    json.dumps(value, indent=2, ensure_ascii=False)
+                                    if isinstance(value, (dict, list))
+                                    else str(value)
+                                )
+                                (spill_path / filename).write_text(write_content, encoding="utf-8")
+                                file_size = (spill_path / filename).stat().st_size
+                                logger.info(
+                                    "set_output value auto-spilled: key=%s, "
+                                    "%d chars → %s (%d bytes)",
+                                    key,
+                                    len(val_str),
+                                    filename,
+                                    file_size,
+                                )
+                                # Replace value with reference
+                                value = (
+                                    f"[Saved to '{filename}' ({file_size:,} bytes). "
+                                    f"Use load_data(filename='{filename}') "
+                                    f"to access full data.]"
+                                )
+                                # Update tool result to inform the LLM
+                                result = ToolResult(
+                                    tool_use_id=tc.tool_use_id,
+                                    content=(
+                                        f"Output '{key}' was large "
+                                        f"({len(val_str):,} chars) — data saved "
+                                        f"to '{filename}' ({file_size:,} bytes). "
+                                        f"The next phase will see the file "
+                                        f"reference and can load full data."
+                                    ),
+                                    is_error=False,
+                                )
+
                         await accumulator.set(key, value)
                         self._record_learning(key, value)
                         outputs_set_this_turn.append(key)
@@ -2485,20 +2550,43 @@ class EventLoopNode(NodeProtocol):
 
             # Phase 2b: execute subagent delegations in parallel.
             if pending_subagent:
+                _subagent_timeout = self._config.subagent_timeout_seconds
 
                 async def _timed_subagent(
                     _ctx: NodeContext,
                     _tc: ToolCallEvent,
                     _acc: OutputAccumulator = accumulator,
+                    _timeout: float = _subagent_timeout,
                 ) -> tuple[ToolResult | BaseException, str, float]:
                     _s = time.time()
                     _iso = datetime.now(UTC).isoformat()
                     try:
-                        _r = await self._execute_subagent(
+                        _coro = self._execute_subagent(
                             _ctx,
                             _tc.tool_input.get("agent_id", ""),
                             _tc.tool_input.get("task", ""),
                             accumulator=_acc,
+                        )
+                        if _timeout > 0:
+                            _r = await asyncio.wait_for(_coro, timeout=_timeout)
+                        else:
+                            _r = await _coro
+                    except TimeoutError:
+                        _agent_id = _tc.tool_input.get("agent_id", "unknown")
+                        logger.warning(
+                            "Subagent '%s' timed out after %.0fs",
+                            _agent_id,
+                            _timeout,
+                        )
+                        _r = ToolResult(
+                            tool_use_id=_tc.tool_use_id,
+                            content=(
+                                f"Subagent '{_agent_id}' timed out after "
+                                f"{_timeout:.0f}s. The delegation took "
+                                "too long and was cancelled. Try a simpler task "
+                                "or break it into smaller pieces."
+                            ),
+                            is_error=True,
                         )
                     except BaseException as _exc:
                         _r = _exc
@@ -2842,6 +2930,12 @@ class EventLoopNode(NodeProtocol):
             name="set_output",
             description=(
                 "Set an output value for this node. Call once per output key. "
+                "Use this for brief notes, counts, status, and file references — "
+                "NOT for large data payloads. When a tool result was saved to a "
+                "data file, pass the filename as the value "
+                "(e.g. 'google_sheets_get_values_1.txt') so the next phase can "
+                "load the full data. Values exceeding ~2000 characters are "
+                "auto-saved to data files. "
                 f"Valid keys: {output_keys}"
             ),
             parameters={
@@ -2854,7 +2948,10 @@ class EventLoopNode(NodeProtocol):
                     },
                     "value": {
                         "type": "string",
-                        "description": "The output value to store.",
+                        "description": (
+                            "The output value — a brief note, count, status, "
+                            "or data filename reference."
+                        ),
                     },
                 },
                 "required": ["key", "value"],
@@ -3492,6 +3589,125 @@ class EventLoopNode(NodeProtocol):
             self._spill_counter = max_n
             logger.info("Restored spill counter to %d from existing files", max_n)
 
+    # ------------------------------------------------------------------
+    # JSON metadata / smart preview helpers for truncation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_json_metadata(parsed: Any, *, _depth: int = 0, _max_depth: int = 3) -> str:
+        """Return a concise structural summary of parsed JSON.
+
+        Reports key names, value types, and — crucially — array lengths so
+        the LLM knows how much data exists beyond the preview.
+
+        Returns an empty string for simple scalars.
+        """
+        if _depth >= _max_depth:
+            if isinstance(parsed, dict):
+                return f"dict with {len(parsed)} keys"
+            if isinstance(parsed, list):
+                return f"list of {len(parsed)} items"
+            return type(parsed).__name__
+
+        if isinstance(parsed, dict):
+            if not parsed:
+                return "empty dict"
+            lines: list[str] = []
+            indent = "  " * (_depth + 1)
+            for key, value in list(parsed.items())[:20]:
+                if isinstance(value, list):
+                    line = f'{indent}"{key}": list of {len(value)} items'
+                    if value:
+                        first = value[0]
+                        if isinstance(first, dict):
+                            sample_keys = list(first.keys())[:10]
+                            line += f" (each item: dict with keys {sample_keys})"
+                        elif isinstance(first, list):
+                            line += f" (each item: list of {len(first)} elements)"
+                    lines.append(line)
+                elif isinstance(value, dict):
+                    child = EventLoopNode._extract_json_metadata(
+                        value, _depth=_depth + 1, _max_depth=_max_depth
+                    )
+                    lines.append(f'{indent}"{key}": {child}')
+                else:
+                    lines.append(f'{indent}"{key}": {type(value).__name__}')
+            if len(parsed) > 20:
+                lines.append(f"{indent}... and {len(parsed) - 20} more keys")
+            return "\n".join(lines)
+
+        if isinstance(parsed, list):
+            if not parsed:
+                return "empty list"
+            desc = f"list of {len(parsed)} items"
+            first = parsed[0]
+            if isinstance(first, dict):
+                sample_keys = list(first.keys())[:10]
+                desc += f" (each item: dict with keys {sample_keys})"
+            elif isinstance(first, list):
+                desc += f" (each item: list of {len(first)} elements)"
+            return desc
+
+        return ""
+
+    @staticmethod
+    def _build_json_preview(parsed: Any, *, max_chars: int = 5000) -> str | None:
+        """Build a smart preview of parsed JSON, truncating large arrays.
+
+        Shows first 3 + last 1 items of large arrays with explicit count
+        markers so the LLM cannot mistake the preview for the full dataset.
+
+        Returns ``None`` if no truncation was needed (no large arrays).
+        """
+        _LARGE_ARRAY_THRESHOLD = 10
+
+        def _truncate_arrays(obj: Any) -> tuple[Any, bool]:
+            """Return (truncated_copy, was_truncated)."""
+            if isinstance(obj, list) and len(obj) > _LARGE_ARRAY_THRESHOLD:
+                n = len(obj)
+                head = obj[:3]
+                tail = obj[-1:]
+                marker = f"... ({n - 4} more items omitted, {n} total) ..."
+                return head + [marker] + tail, True
+            if isinstance(obj, dict):
+                changed = False
+                out: dict[str, Any] = {}
+                for k, v in obj.items():
+                    new_v, did = _truncate_arrays(v)
+                    out[k] = new_v
+                    changed = changed or did
+                return (out, True) if changed else (obj, False)
+            return obj, False
+
+        preview_obj, was_truncated = _truncate_arrays(parsed)
+        if not was_truncated:
+            return None  # No large arrays — caller should use raw slicing
+
+        try:
+            result = json.dumps(preview_obj, indent=2, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return None
+
+        if len(result) > max_chars:
+            # Even 3+1 items too big — try just 1 item
+            def _minimal_arrays(obj: Any) -> Any:
+                if isinstance(obj, list) and len(obj) > _LARGE_ARRAY_THRESHOLD:
+                    n = len(obj)
+                    return obj[:1] + [f"... ({n - 1} more items omitted, {n} total) ..."]
+                if isinstance(obj, dict):
+                    return {k: _minimal_arrays(v) for k, v in obj.items()}
+                return obj
+
+            preview_obj = _minimal_arrays(parsed)
+            try:
+                result = json.dumps(preview_obj, indent=2, ensure_ascii=False)
+            except (TypeError, ValueError):
+                return None
+            if len(result) > max_chars:
+                result = result[:max_chars] + "…"
+
+        return result
+
     def _truncate_tool_result(
         self,
         result: ToolResult,
@@ -3520,15 +3736,36 @@ class EventLoopNode(NodeProtocol):
         if tool_name == "load_data":
             if limit <= 0 or len(result.content) <= limit:
                 return result  # Small load_data result — pass through as-is
-            # Large load_data result — truncate with pagination hint
-            preview_chars = max(limit - 300, limit // 2)
-            preview = result.content[:preview_chars]
-            truncated = (
-                f"[{tool_name} result: {len(result.content)} chars — "
-                f"too large for context. Use offset/limit parameters "
-                f"to read smaller chunks.]\n\n"
-                f"Preview:\n{preview}…"
+            # Large load_data result — truncate with smart preview
+            PREVIEW_CAP = min(5000, max(limit - 500, limit // 2))
+
+            metadata_str = ""
+            smart_preview: str | None = None
+            try:
+                parsed_ld = json.loads(result.content)
+                metadata_str = self._extract_json_metadata(parsed_ld)
+                smart_preview = self._build_json_preview(parsed_ld, max_chars=PREVIEW_CAP)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
+            if smart_preview is not None:
+                preview_block = smart_preview
+            else:
+                preview_block = result.content[:PREVIEW_CAP] + "…"
+
+            header = (
+                f"[{tool_name} result: {len(result.content):,} chars — "
+                f"too large for context. Use offset_bytes/limit_bytes "
+                f"parameters to read smaller chunks.]"
             )
+            if metadata_str:
+                header += f"\n\nData structure:\n{metadata_str}"
+            header += (
+                "\n\nWARNING: This is an INCOMPLETE preview. "
+                "Do NOT draw conclusions or counts from it."
+            )
+
+            truncated = f"{header}\n\nPreview (small sample only):\n{preview_block}"
             logger.info(
                 "%s result truncated: %d → %d chars (use offset/limit to paginate)",
                 tool_name,
@@ -3550,25 +3787,47 @@ class EventLoopNode(NodeProtocol):
             # Pretty-print JSON content so load_data's line-based
             # pagination works correctly.
             write_content = result.content
+            parsed_json: Any = None  # track for metadata extraction
             try:
-                parsed = json.loads(result.content)
-                write_content = json.dumps(parsed, indent=2, ensure_ascii=False)
+                parsed_json = json.loads(result.content)
+                write_content = json.dumps(parsed_json, indent=2, ensure_ascii=False)
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass  # Not JSON — write as-is
 
             (spill_path / filename).write_text(write_content, encoding="utf-8")
 
             if limit > 0 and len(result.content) > limit:
-                # Large result: preview + file reference
-                preview_chars = max(limit - 300, limit // 2)
-                preview = result.content[:preview_chars]
-                content = (
-                    f"[Result from {tool_name}: {len(result.content)} chars — "
-                    f"too large for context, saved to '{filename}'. "
-                    f"Use load_data(filename='{filename}') "
-                    f"to read the full result.]\n\n"
-                    f"Preview:\n{preview}…"
+                # Large result: build a small, metadata-rich preview so the
+                # LLM cannot mistake it for the complete dataset.
+                PREVIEW_CAP = 5000
+
+                # Extract structural metadata (array lengths, key names)
+                metadata_str = ""
+                smart_preview: str | None = None
+                if parsed_json is not None:
+                    metadata_str = self._extract_json_metadata(parsed_json)
+                    smart_preview = self._build_json_preview(parsed_json, max_chars=PREVIEW_CAP)
+
+                if smart_preview is not None:
+                    preview_block = smart_preview
+                else:
+                    preview_block = result.content[:PREVIEW_CAP] + "…"
+
+                # Assemble header with structural info + warning
+                header = (
+                    f"[Result from {tool_name}: {len(result.content):,} chars — "
+                    f"too large for context, saved to '{filename}'.]"
                 )
+                if metadata_str:
+                    header += f"\n\nData structure:\n{metadata_str}"
+                header += (
+                    f"\n\nWARNING: The preview below is INCOMPLETE. "
+                    f"Do NOT draw conclusions or counts from it. "
+                    f"Use load_data(filename='{filename}') to read the "
+                    f"full data before analysis."
+                )
+
+                content = f"{header}\n\nPreview (small sample only):\n{preview_block}"
                 logger.info(
                     "Tool result spilled to file: %s (%d chars → %s)",
                     tool_name,
@@ -3593,13 +3852,34 @@ class EventLoopNode(NodeProtocol):
 
         # No spillover_dir — truncate in-place if needed
         if limit > 0 and len(result.content) > limit:
-            preview_chars = max(limit - 300, limit // 2)
-            preview = result.content[:preview_chars]
-            truncated = (
-                f"[Result from {tool_name}: {len(result.content)} chars — "
-                f"truncated to fit context budget. Only the first "
-                f"{preview_chars} chars are shown.]\n\n{preview}…"
+            PREVIEW_CAP = min(5000, max(limit - 500, limit // 2))
+
+            metadata_str = ""
+            smart_preview: str | None = None
+            try:
+                parsed_inline = json.loads(result.content)
+                metadata_str = self._extract_json_metadata(parsed_inline)
+                smart_preview = self._build_json_preview(parsed_inline, max_chars=PREVIEW_CAP)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
+            if smart_preview is not None:
+                preview_block = smart_preview
+            else:
+                preview_block = result.content[:PREVIEW_CAP] + "…"
+
+            header = (
+                f"[Result from {tool_name}: {len(result.content):,} chars — "
+                f"truncated to fit context budget.]"
             )
+            if metadata_str:
+                header += f"\n\nData structure:\n{metadata_str}"
+            header += (
+                "\n\nWARNING: This is an INCOMPLETE preview. "
+                "Do NOT draw conclusions or counts from the preview alone."
+            )
+
+            truncated = f"{header}\n\n{preview_block}"
             logger.info(
                 "Tool result truncated in-place: %s (%d → %d chars)",
                 tool_name,
