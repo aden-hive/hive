@@ -2218,9 +2218,7 @@ class EventLoopNode(NodeProtocol):
                                     if isinstance(value, (dict, list))
                                     else str(value)
                                 )
-                                (spill_path / filename).write_text(
-                                    write_content, encoding="utf-8"
-                                )
+                                (spill_path / filename).write_text(write_content, encoding="utf-8")
                                 file_size = (spill_path / filename).stat().st_size
                                 logger.info(
                                     "set_output value auto-spilled: key=%s, "
@@ -2552,7 +2550,6 @@ class EventLoopNode(NodeProtocol):
 
             # Phase 2b: execute subagent delegations in parallel.
             if pending_subagent:
-
                 _subagent_timeout = self._config.subagent_timeout_seconds
 
                 async def _timed_subagent(
@@ -3597,9 +3594,7 @@ class EventLoopNode(NodeProtocol):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_json_metadata(
-        parsed: Any, *, _depth: int = 0, _max_depth: int = 3
-    ) -> str:
+    def _extract_json_metadata(parsed: Any, *, _depth: int = 0, _max_depth: int = 3) -> str:
         """Return a concise structural summary of parsed JSON.
 
         Reports key names, value types, and — crucially — array lengths so
@@ -3749,9 +3744,7 @@ class EventLoopNode(NodeProtocol):
             try:
                 parsed_ld = json.loads(result.content)
                 metadata_str = self._extract_json_metadata(parsed_ld)
-                smart_preview = self._build_json_preview(
-                    parsed_ld, max_chars=PREVIEW_CAP
-                )
+                smart_preview = self._build_json_preview(parsed_ld, max_chars=PREVIEW_CAP)
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 
@@ -3813,9 +3806,7 @@ class EventLoopNode(NodeProtocol):
                 smart_preview: str | None = None
                 if parsed_json is not None:
                     metadata_str = self._extract_json_metadata(parsed_json)
-                    smart_preview = self._build_json_preview(
-                        parsed_json, max_chars=PREVIEW_CAP
-                    )
+                    smart_preview = self._build_json_preview(parsed_json, max_chars=PREVIEW_CAP)
 
                 if smart_preview is not None:
                     preview_block = smart_preview
@@ -3868,9 +3859,7 @@ class EventLoopNode(NodeProtocol):
             try:
                 parsed_inline = json.loads(result.content)
                 metadata_str = self._extract_json_metadata(parsed_inline)
-                smart_preview = self._build_json_preview(
-                    parsed_inline, max_chars=PREVIEW_CAP
-                )
+                smart_preview = self._build_json_preview(parsed_inline, max_chars=PREVIEW_CAP)
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 
