@@ -51,7 +51,7 @@ export const TRIGGER_ICONS: Record<string, string> = {
 /** Format a cron expression into a human-readable schedule label. */
 export function cronToLabel(cron: string): string {
   const parts = cron.trim().split(/\s+/);
-  if (parts.length < 5) return cron;
+  if (parts.length !== 5) return cron;
   const [min, hour, dom, mon, dow] = parts;
 
   // */N * * * * -> "Every Nm"

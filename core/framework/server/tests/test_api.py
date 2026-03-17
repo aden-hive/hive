@@ -174,6 +174,7 @@ def _make_session(
     runner.intro_message = "Test intro"
 
     mock_event_bus = MagicMock()
+    mock_event_bus.publish = AsyncMock()
     mock_llm = MagicMock()
 
     queen_executor = _make_queen_executor() if with_queen else None

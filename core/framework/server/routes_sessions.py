@@ -544,6 +544,12 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
                     "task": tdef.task,
                     "trigger_config": tdef.trigger_config,
                     "trigger_type": tdef.trigger_type,
+                    "name": tdef.description or trigger_id,
+                    "entry_node": getattr(
+                        getattr(getattr(session, "runner", None), "graph", None),
+                        "entry_node",
+                        None,
+                    ),
                 },
             )
         )

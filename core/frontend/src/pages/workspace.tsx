@@ -1265,12 +1265,28 @@ export default function Workspace() {
 
           const fireMap = new Map<string, number>();
           const taskMap = new Map<string, string>();
+          const labelMap = new Map<string, string>();
+          const targetMap = new Map<string, string>();
           for (const ep of triggerEps) {
+            const nodeId = `__trigger_${ep.id}`;
             if (ep.next_fire_in != null) {
-              fireMap.set(`__trigger_${ep.id}`, ep.next_fire_in);
+              fireMap.set(nodeId, ep.next_fire_in);
             }
             if (ep.task != null) {
-              taskMap.set(`__trigger_${ep.id}`, ep.task);
+              taskMap.set(nodeId, ep.task);
+            }
+            const cron = ep.trigger_config?.cron as string | undefined;
+            const interval = ep.trigger_config?.interval_minutes as number | undefined;
+            const epLabel = cron
+              ? cronToLabel(cron)
+              : interval
+                ? `Every ${interval >= 60 ? `${interval / 60}h` : `${interval}m`}`
+                : ep.name || undefined;
+            if (epLabel) {
+              labelMap.set(nodeId, epLabel);
+            }
+            if (ep.entry_node) {
+              targetMap.set(nodeId, ep.entry_node);
             }
           }
 
@@ -1279,14 +1295,18 @@ export default function Workspace() {
             if (!ss?.length) return prev;
             const existingIds = new Set(ss[0].graphNodes.map(n => n.id));
 
-            // Update existing trigger nodes
+            // Update existing trigger nodes (countdown, task, label, target)
             let updated = ss[0].graphNodes.map((n) => {
               if (n.nodeType !== "trigger") return n;
               const nfi = fireMap.get(n.id);
               const task = taskMap.get(n.id);
-              if (nfi == null && task == null) return n;
+              const label = labelMap.get(n.id);
+              const target = targetMap.get(n.id);
+              if (nfi == null && task == null && !label && !target) return n;
               return {
                 ...n,
+                ...(label && label !== n.label ? { label } : {}),
+                ...(target ? { next: [target] } : {}),
                 triggerConfig: {
                   ...n.triggerConfig,
                   ...(nfi != null ? { next_fire_in: nfi } : {}),
@@ -1296,14 +1316,15 @@ export default function Workspace() {
             });
 
             // Discover new triggers not yet in the graph
-            const entryNode = ss[0].graphNodes.find(n => n.nodeType !== "trigger")?.id;
+            const fallbackEntry = ss[0].graphNodes.find(n => n.nodeType !== "trigger")?.id;
             const newNodes: GraphNode[] = [];
             for (const ep of triggerEps) {
               const nodeId = `__trigger_${ep.id}`;
               if (existingIds.has(nodeId)) continue;
+              const target = ep.entry_node || fallbackEntry;
               newNodes.push({
                 id: nodeId,
-                label: ep.name || ep.id,
+                label: labelMap.get(nodeId) || ep.name || ep.id,
                 status: "pending",
                 nodeType: "trigger",
                 triggerType: ep.trigger_type,
@@ -1312,7 +1333,7 @@ export default function Workspace() {
                   ...(ep.next_fire_in != null ? { next_fire_in: ep.next_fire_in } : {}),
                   ...(ep.task ? { task: ep.task } : {}),
                 },
-                ...(entryNode ? { next: [entryNode] } : {}),
+                ...(target ? { next: [target] } : {}),
               });
             }
             if (newNodes.length > 0) {
@@ -2242,10 +2263,18 @@ export default function Workspace() {
                   // Synthesize new trigger node at the front of the graph
                   const triggerType = (event.data?.trigger_type as string) || "timer";
                   const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
-                  const entryNode = s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const entryNode = (event.data?.entry_node as string) || s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const triggerName = (event.data?.name as string) || triggerId;
+                  const _cron = triggerConfig.cron as string | undefined;
+                  const _interval = triggerConfig.interval_minutes as number | undefined;
+                  const computedLabel = _cron
+                    ? cronToLabel(_cron)
+                    : _interval
+                      ? `Every ${_interval >= 60 ? `${_interval / 60}h` : `${_interval}m`}`
+                      : triggerName;
                   const newNode: GraphNode = {
                     id: nodeId,
-                    label: triggerId,
+                    label: computedLabel,
                     status: "running",
                     nodeType: "trigger",
                     triggerType,
@@ -2310,10 +2339,18 @@ export default function Workspace() {
                   if (s.graphNodes.some(n => n.id === nodeId)) return s;
                   const triggerType = (event.data?.trigger_type as string) || "timer";
                   const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
-                  const entryNode = s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const entryNode = (event.data?.entry_node as string) || s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const triggerName = (event.data?.name as string) || triggerId;
+                  const _cron2 = triggerConfig.cron as string | undefined;
+                  const _interval2 = triggerConfig.interval_minutes as number | undefined;
+                  const computedLabel2 = _cron2
+                    ? cronToLabel(_cron2)
+                    : _interval2
+                      ? `Every ${_interval2 >= 60 ? `${_interval2 / 60}h` : `${_interval2}m`}`
+                      : triggerName;
                   const newNode: GraphNode = {
                     id: nodeId,
-                    label: triggerId,
+                    label: computedLabel2,
                     status: "pending",
                     nodeType: "trigger",
                     triggerType,
@@ -2441,7 +2478,7 @@ export default function Workspace() {
               if (n.id !== triggerNodeId) return n;
               return {
                 ...n,
-                ...(patch.label ? { label: patch.label } : {}),
+                ...(patch.label !== undefined ? { label: patch.label } : {}),
                 triggerConfig: {
                   ...n.triggerConfig,
                   ...(patch.trigger_config || {}),
@@ -3150,9 +3187,9 @@ export default function Workspace() {
                               <p className="text-[10px] text-muted-foreground/60 mt-1">
                                 Edit the cron expression for this timer trigger.
                               </p>
-                              {cronChanged && (
+                              {(cronChanged || triggerCronSaved) && (
                                 <button
-                                  disabled={triggerScheduleSaving || !triggerCronDraft.trim()}
+                                  disabled={triggerScheduleSaving || !cronChanged}
                                   onClick={async () => {
                                     const sessionId = activeAgentState?.sessionId;
                                     const triggerId = resolvedSelectedNode.id.replace("__trigger_", "");
@@ -3207,10 +3244,10 @@ export default function Workspace() {
                       {(() => {
                         const currentTask = (resolvedSelectedNode.triggerConfig as Record<string, unknown> | undefined)?.task as string || "";
                         const hasChanged = triggerTaskDraft !== currentTask;
-                        if (!hasChanged) return null;
+                        if (!hasChanged && !triggerTaskSaved) return null;
                         return (
                           <button
-                            disabled={triggerTaskSaving}
+                            disabled={triggerTaskSaving || !hasChanged}
                             onClick={async () => {
                               const sessionId = activeAgentState?.sessionId;
                               const triggerId = resolvedSelectedNode.id.replace("__trigger_", "");
