@@ -3,11 +3,23 @@ import { Loader2 } from "lucide-react";
 import type { DraftGraph as DraftGraphData, DraftNode } from "@/api/types";
 import { RunButton } from "./RunButton";
 import type { GraphNode, RunState } from "./graph-types";
+import {
+  cssVar,
+  truncateLabel,
+  TRIGGER_ICONS,
+  ACTIVE_TRIGGER_COLORS,
+  useTriggerColors,
+} from "@/lib/graphUtils";
 
-// Read a CSS custom property value (space-separated HSL components)
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
+// ── Trigger layout constants ──
+const TRIGGER_H = 38;             // pill height
+const TRIGGER_PILL_GAP_X = 16;    // horizontal gap between multiple trigger pills
+const TRIGGER_ICON_X = 16;        // icon center offset from pill left edge
+const TRIGGER_LABEL_X = 30;       // label start offset from pill left edge
+const TRIGGER_LABEL_INSET = 38;   // icon + padding subtracted from pill width for label space
+const TRIGGER_TEXT_Y = 11;        // y-offset below pill for first text line (countdown or status)
+const TRIGGER_TEXT_STEP = 11;     // additional y-offset for second text line when countdown present
+const TRIGGER_CLEARANCE = 30;     // vertical space below pill for countdown + status text
 
 interface DraftChromeColors {
   edge: string;
@@ -105,13 +117,6 @@ const GROUP_GAP_COLS = 1; // extra column spacing between different groups
 
 function formatNodeId(id: string): string {
   return id.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-}
-
-function truncateLabel(label: string, availablePx: number, fontSize: number): string {
-  const avgCharW = fontSize * 0.58;
-  const maxChars = Math.floor(availablePx / avgCharW);
-  if (label.length <= maxChars) return label;
-  return label.slice(0, Math.max(maxChars - 1, 1)) + "\u2026";
 }
 
 /** Return the bounding-rect corner radius for a given flowchart shape. */
@@ -240,6 +245,13 @@ export default function DraftGraph({ draft, originalDraft, onNodeClick, flowchar
   const runBtnRef = useRef<HTMLButtonElement>(null);
   const [containerW, setContainerW] = useState(484);
   const chrome = useDraftChromeColors();
+  const triggerColors = useTriggerColors();
+
+  // Extract trigger nodes from runtimeNodes
+  const triggerNodes = useMemo(
+    () => (runtimeNodes ?? []).filter(n => n.nodeType === "trigger"),
+    [runtimeNodes],
+  );
 
   // ── Entrance animation — fires when originalDraft becomes a new non-null value ──
   // This covers: agent loaded, build finished, queen modifies flowchart.
@@ -709,12 +721,17 @@ export default function DraftGraph({ draft, originalDraft, onNodeClick, flowchar
     return { nodeYOffset: offsets, totalExtraY: totalExtra, groupBoxMaxX: maxGroupX };
   }, [nodes, maxLayer, flowchartMap, idxMap, layers, nodeXPositions, nodeW]);
 
+  // When triggers are present, push the entire draft graph down to make room
+  const triggerOffsetY = triggerNodes.length > 0
+    ? TRIGGER_H + TRIGGER_TEXT_Y + TRIGGER_TEXT_STEP + TRIGGER_CLEARANCE
+    : 0;
+
   const nodePos = (i: number) => ({
     x: nodeXPositions[i],
-    y: TOP_Y + layers[i] * (NODE_H + GAP_Y) + nodeYOffset[i],
+    y: TOP_Y + triggerOffsetY + layers[i] * (NODE_H + GAP_Y) + nodeYOffset[i],
   });
 
-  const svgHeight = TOP_Y + (maxLayer + 1) * NODE_H + maxLayer * GAP_Y + totalExtraY + 16;
+  const svgHeight = TOP_Y + triggerOffsetY + (maxLayer + 1) * NODE_H + maxLayer * GAP_Y + totalExtraY + 16;
 
   // Compute group areas for runtime node boundaries on the draft
   const groupAreas = useMemo(() => {
@@ -845,6 +862,131 @@ export default function DraftGraph({ draft, originalDraft, onNodeClick, flowchar
     complete: chrome.statusComplete,
     error: chrome.statusError,
     pending: "",
+  };
+
+  // ── Trigger node rendering ──
+
+  const triggerW = Math.min(nodeW, 180);
+
+  // Shared trigger pill X position (used by both node and edge renderers)
+  const triggerPillX = (idx: number) => {
+    const totalW = triggerNodes.length * triggerW + (triggerNodes.length - 1) * TRIGGER_PILL_GAP_X;
+    return (containerW - totalW) / 2 + idx * (triggerW + TRIGGER_PILL_GAP_X);
+  };
+
+  const renderTriggerNode = (node: GraphNode, triggerIdx: number) => {
+    const icon = TRIGGER_ICONS[node.triggerType || ""] || "\u26A1";
+    const isActive = node.status === "running" || node.status === "complete";
+    const colors = isActive ? ACTIVE_TRIGGER_COLORS : triggerColors;
+    const nextFireIn = node.triggerConfig?.next_fire_in as number | undefined;
+
+    const tx = triggerPillX(triggerIdx);
+    const ty = TOP_Y;
+
+    const fontSize = triggerW < 140 ? 10.5 : 11.5;
+    const displayLabel = truncateLabel(node.label, triggerW - TRIGGER_LABEL_INSET, fontSize);
+
+    // Countdown
+    let countdownLabel: string | null = null;
+    if (isActive && nextFireIn != null && nextFireIn > 0) {
+      const h = Math.floor(nextFireIn / 3600);
+      const m = Math.floor((nextFireIn % 3600) / 60);
+      const s = Math.floor(nextFireIn % 60);
+      countdownLabel = h > 0
+        ? `next in ${h}h ${String(m).padStart(2, "0")}m`
+        : `next in ${m}m ${String(s).padStart(2, "0")}s`;
+    }
+
+    const statusLabel = isActive ? "active" : "inactive";
+    const statusColor = isActive ? "hsl(140,40%,50%)" : "hsl(210,20%,40%)";
+
+    return (
+      <g
+        key={node.id}
+        onClick={() => onRuntimeNodeClick?.(node.id)}
+        style={{ cursor: onRuntimeNodeClick ? "pointer" : "default" }}
+      >
+        <title>{node.label}</title>
+        {/* Pill-shaped background */}
+        <rect
+          x={tx} y={ty}
+          width={triggerW} height={TRIGGER_H}
+          rx={TRIGGER_H / 2}
+          fill={colors.bg}
+          stroke={colors.border}
+          strokeWidth={isActive ? 1.5 : 1}
+          strokeDasharray={isActive ? undefined : "4 2"}
+        />
+        {/* Icon */}
+        <text
+          x={tx + TRIGGER_ICON_X} y={ty + TRIGGER_H / 2}
+          fill={colors.icon} fontSize={13}
+          textAnchor="middle" dominantBaseline="middle"
+        >
+          {icon}
+        </text>
+        {/* Label */}
+        <text
+          x={tx + TRIGGER_LABEL_X} y={ty + TRIGGER_H / 2}
+          fill={colors.text}
+          fontSize={fontSize}
+          fontWeight={500}
+          dominantBaseline="middle"
+          letterSpacing="0.01em"
+        >
+          {displayLabel}
+        </text>
+        {/* Countdown */}
+        {countdownLabel && (
+          <text
+            x={tx + triggerW / 2} y={ty + TRIGGER_H + TRIGGER_TEXT_Y}
+            fill={colors.text} fontSize={9}
+            textAnchor="middle" fontStyle="italic" opacity={0.7}
+          >
+            {countdownLabel}
+          </text>
+        )}
+        {/* Status */}
+        <text
+          x={tx + triggerW / 2} y={ty + TRIGGER_H + (countdownLabel ? TRIGGER_TEXT_Y + TRIGGER_TEXT_STEP : TRIGGER_TEXT_Y)}
+          fill={statusColor} fontSize={8.5}
+          textAnchor="middle" opacity={0.8}
+        >
+          {statusLabel}
+        </text>
+      </g>
+    );
+  };
+
+  const renderTriggerEdge = (triggerIdx: number) => {
+    if (nodes.length === 0) return null;
+    const triggerNode = triggerNodes[triggerIdx];
+    const runtimeTargetId = triggerNode?.next?.[0];
+    const targetDraftId = runtimeTargetId
+      ? flowchartMap?.[runtimeTargetId]?.[0] ?? runtimeTargetId
+      : draft?.entry_node;
+    const targetIdx = targetDraftId ? idxMap[targetDraftId] ?? 0 : 0;
+    const targetPos = nodePos(targetIdx);
+    const targetX = targetPos.x + nodeW / 2;
+    const targetY = targetPos.y;
+
+    const tx = triggerPillX(triggerIdx) + triggerW / 2;
+    const ty = TOP_Y + TRIGGER_H + TRIGGER_TEXT_Y + TRIGGER_TEXT_STEP + 4;
+
+    const midY = (ty + targetY) / 2;
+    const d = Math.abs(tx - targetX) < 2
+      ? `M ${tx} ${ty} L ${targetX} ${targetY}`
+      : `M ${tx} ${ty} L ${tx} ${midY} L ${targetX} ${midY} L ${targetX} ${targetY}`;
+
+    return (
+      <g key={`trigger-edge-${triggerIdx}`}>
+        <path d={d} fill="none" stroke={chrome.edge} strokeWidth={1.2} strokeDasharray="4 3" />
+        <polygon
+          points={`${targetX - 3},${targetY - 5} ${targetX + 3},${targetY - 5} ${targetX},${targetY - 1}`}
+          fill={chrome.edgeArrow}
+        />
+      </g>
+    );
   };
 
   const renderNode = (node: DraftNode, i: number) => {
@@ -994,7 +1136,7 @@ export default function DraftGraph({ draft, originalDraft, onNodeClick, flowchar
         >
         <svg
           width="100%"
-          viewBox={`0 0 ${Math.max((maxContentRight ?? 0), groupBoxMaxX) + (backEdgeOverflow ?? 0)} ${totalH}`}
+          viewBox={`0 0 ${Math.max((maxContentRight ?? 0), groupBoxMaxX, triggerNodes.length > 0 ? triggerPillX(triggerNodes.length - 1) + triggerW : 0) + (backEdgeOverflow ?? 0)} ${totalH}`}
           preserveAspectRatio="xMidYMin meet"
           className="select-none"
           style={{
@@ -1077,6 +1219,11 @@ export default function DraftGraph({ draft, originalDraft, onNodeClick, flowchar
               </g>
             );
           })}
+
+          {/* Trigger edges (dashed lines from trigger pills to first draft node) */}
+          {triggerNodes.map((_, i) => renderTriggerEdge(i))}
+          {/* Trigger pill nodes */}
+          {triggerNodes.map((tn, i) => renderTriggerNode(tn, i))}
 
           {forwardEdges.map((e, i) => renderEdge(e, i))}
           {backEdges.map((e, i) => renderBackEdge(e, i))}

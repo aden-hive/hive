@@ -64,10 +64,14 @@ export const sessionsApi = {
       `/sessions/${sessionId}/entry-points`,
     ),
 
-  updateTriggerTask: (sessionId: string, triggerId: string, task: string) =>
-    api.patch<{ trigger_id: string; task: string }>(
+  updateTrigger: (
+    sessionId: string,
+    triggerId: string,
+    patch: { task?: string; trigger_config?: Record<string, unknown> },
+  ) =>
+    api.patch<{ trigger_id: string; task: string; trigger_config: Record<string, unknown> }>(
       `/sessions/${sessionId}/triggers/${triggerId}`,
-      { task },
+      patch,
     ),
 
   graphs: (sessionId: string) =>
