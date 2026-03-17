@@ -70,8 +70,11 @@ class TestSkillCatalog:
     def test_to_prompt_xml_generation(self):
         skills = [
             _make_skill(
-                "alpha", "Alpha skill", "project",
-                location="/p/alpha/SKILL.md", base_dir="/p/alpha",
+                "alpha",
+                "Alpha skill",
+                "project",
+                location="/p/alpha/SKILL.md",
+                base_dir="/p/alpha",
             ),
             _make_skill("beta", "Beta skill", "user", location="/u/beta/SKILL.md"),
         ]

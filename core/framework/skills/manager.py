@@ -117,21 +117,16 @@ class SkillsManager:
 
         # 1. Community skill discovery (when project_root is available)
         catalog_prompt = ""
-        if (
-            self._config.project_root is not None
-            and not self._config.skip_community_discovery
-        ):
+        if self._config.project_root is not None and not self._config.skip_community_discovery:
             from framework.skills.trust import TrustGate
 
-            discovery = SkillDiscovery(
-                DiscoveryConfig(project_root=self._config.project_root)
-            )
+            discovery = SkillDiscovery(DiscoveryConfig(project_root=self._config.project_root))
             discovered = discovery.discover()
 
             # Trust-gate project-scope skills (AS-13)
-            discovered = TrustGate(
-                interactive=self._config.interactive
-            ).filter_and_gate(discovered, project_dir=self._config.project_root)
+            discovered = TrustGate(interactive=self._config.interactive).filter_and_gate(
+                discovered, project_dir=self._config.project_root
+            )
 
             catalog = SkillCatalog(discovered)
             self._allowlisted_dirs = catalog.allowlisted_dirs
