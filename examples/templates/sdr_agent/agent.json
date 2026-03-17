@@ -14,7 +14,7 @@
             "start": "intake"
         },
         "pause_nodes": [],
-        "terminal_nodes": [],
+        "terminal_nodes": ["complete"],
         "conversation_mode": "continuous",
         "identity_prompt": "You are an SDR (Sales Development Representative) assistant. You help users automate their outreach by scoring contacts, filtering suspicious profiles, generating personalized messages, and creating Gmail drafts — all with human review before anything is sent.",
         "nodes": [
@@ -193,7 +193,7 @@
                 "nullable_output_keys": [],
                 "input_schema": {},
                 "output_schema": {},
-                "system_prompt": "You are an SDR assistant. Generate a clear campaign summary report and present it to the user.\n\n**STEP 1 — Load draft records:**\nCall load_data(filename=<the \"drafts_created\" value from context>) to read the draft records.\nIf has_more=true, load additional chunks until all records are loaded.\n\n**STEP 2 — Present the report (text only, NO tool calls):**\n\nPresent a clean summary:\n\n📊 **SDR Campaign Summary — [outreach_goal]**\n\n**Overview:**\n- Total contacts processed: [N]\n- Contacts filtered (suspicious profiles): [filtered_count]\n- Safe contacts messaged: [N - filtered_count]\n- Gmail drafts created: [N]\n\n**Drafts Created:**\nList each draft: Contact Name | Company | Subject\n\n**Next Steps:**\n\"Your Gmail drafts are ready for review. Please:\n1. Open Gmail and review each draft\n2. Personalize further if needed\n3. Send when ready\n\nWould you like to run another outreach batch or adjust the strategy?\"\n\n**STEP 3 — After the user responds, call set_output:**\n- set_output(\"summary_report\", <the formatted report text>)",
+                "system_prompt": "You are an SDR assistant. Generate a clear campaign summary report and present it to the user.\n\n**STEP 1 — Load draft records:**\nCall load_data(filename=<the \"drafts_created\" value from context>) to read the draft records.\nIf has_more=true, load additional chunks until all records are loaded.\n\n**STEP 2 — Present the report (text only, NO tool calls):**\n\nPresent a clean summary:\n\n📊 **SDR Campaign Summary — [outreach_goal]**\n\n**Overview:**\n- Total contacts processed: [N]\n- Contacts filtered (suspicious profiles): [filtered_count]\n- Safe contacts messaged: [N - filtered_count]\n- Gmail drafts created: [N]\n\n**Drafts Created:**\nList each draft: Contact Name | Company | Subject\n\n**Next Steps:**\n\"Your Gmail drafts are ready for review. Please:\n1. Open Gmail and review each draft\n2. Personalize further if needed\n3. Send when ready\n\nCampaign complete!\"\n\n**STEP 3 — After the user responds, call set_output:**\n- set_output(\"summary_report\", <the formatted report text>)",
                 "tools": [
                     "load_data"
                 ],
@@ -206,6 +206,33 @@
                 "output_model": null,
                 "max_validation_retries": 2,
                 "client_facing": true,
+                "success_criteria": null
+            },
+            {
+                "id": "complete",
+                "name": "Complete",
+                "description": "Terminal node - campaign complete.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "summary_report"
+                ],
+                "output_keys": [
+                    "final_report"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "system_prompt": "Campaign is complete. Set the final output.\n\nCall set_output(\"final_report\", <summary_report value from context>)",
+                "tools": [],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 1,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false,
                 "success_criteria": null
             }
         ],
@@ -256,9 +283,9 @@
                 "input_mapping": {}
             },
             {
-                "id": "report-to-intake",
+                "id": "report-to-complete",
                 "source": "report",
-                "target": "intake",
+                "target": "complete",
                 "condition": "on_success",
                 "condition_expr": null,
                 "priority": 1,
@@ -345,7 +372,7 @@
         "append_data"
     ],
     "metadata": {
-        "node_count": 6,
+        "node_count": 7,
         "edge_count": 6
     }
 }
