@@ -158,6 +158,8 @@ def _model_supports_cache_control(model: str) -> bool:
 # enforces a coding-agent whitelist that blocks unknown User-Agents.
 KIMI_API_BASE = "https://api.kimi.com/coding"
 
+from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE
+
 # Empty-stream retries use a short fixed delay, not the rate-limit backoff.
 # Conversation-structure issues are deterministic — long waits don't help.
 EMPTY_STREAM_MAX_RETRIES = 3
@@ -399,6 +401,10 @@ class LiteLLMProvider(LLMProvider):
             # Strip a trailing /v1 in case the user's saved config has the old value.
             if api_base and api_base.rstrip("/").endswith("/v1"):
                 api_base = api_base.rstrip("/")[:-3]
+        elif model.lower().startswith("hive/"):
+            model = "anthropic/" + model[len("hive/"):]
+            if api_base and api_base.rstrip("/").endswith("/v1"):
+                api_base = api_base.rstrip("/")[:-3]
         self.model = model
         self.api_key = api_key
         self.api_base = api_base or self._default_api_base_for_model(_original_model)
@@ -428,6 +434,8 @@ class LiteLLMProvider(LLMProvider):
             return MINIMAX_API_BASE
         if model_lower.startswith("kimi/"):
             return KIMI_API_BASE
+        if model_lower.startswith("hive/"):
+            return HIVE_API_BASE
         return None
 
     def _completion_with_rate_limit_retry(
