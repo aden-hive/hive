@@ -1,183 +1,227 @@
-"""CLI entry point for Document Intelligence Agent Team.
+"""
+CLI entry point for Document Intelligence Agent Team.
 
-Usage:
-    python -m document_intelligence_agent_team run --document "your document text"
-    python -m document_intelligence_agent_team tui
-    python -m document_intelligence_agent_team info
-    python -m document_intelligence_agent_team validate
-    python -m document_intelligence_agent_team shell
+Coordinates three specialist Worker Bee agents (Researcher, Analyst, Strategist)
+via a Queen Bee coordinator to produce a cross-referenced document intelligence report.
 """
 
-import argparse
 import asyncio
 import json
 import logging
-import os
 import sys
+import click
 
-# ---------------------------------------------------------------------------
-# Path setup — ensure framework imports work from examples/templates/
-# ---------------------------------------------------------------------------
-
-_TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
-_EXAMPLES_DIR = os.path.dirname(os.path.dirname(_TEMPLATE_DIR))
-_CORE_DIR = os.path.join(os.path.dirname(_EXAMPLES_DIR), "core")
-
-for _p in (_CORE_DIR, os.path.dirname(_TEMPLATE_DIR)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+from .agent import default_agent, DocumentIntelligenceAgentTeam
 
 
-def _setup_logging(verbose: bool = False) -> None:
-    """Configure logging."""
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
-
-
-def cmd_info() -> None:
-    """Display agent information."""
-    from document_intelligence_agent_team import default_agent
-
-    print(default_agent.info())
-
-
-def cmd_validate() -> None:
-    """Validate agent graph structure."""
-    from document_intelligence_agent_team import default_agent
-
-    result = default_agent.validate()
-    print(json.dumps(result, indent=2, default=str))
-    if result["valid"]:
-        print("\n✅ Agent graph is valid.")
+def setup_logging(verbose=False, debug=False):
+    """Configure logging for execution visibility."""
+    if debug:
+        level, fmt = logging.DEBUG, "%(asctime)s %(name)s: %(message)s"
+    elif verbose:
+        level, fmt = logging.INFO, "%(message)s"
     else:
-        print("\n❌ Agent graph has issues:")
-        for issue in result["issues"]:
-            print(f"  - {issue}")
-        sys.exit(1)
+        level, fmt = logging.WARNING, "%(levelname)s: %(message)s"
+    logging.basicConfig(level=level, format=fmt, stream=sys.stderr)
+    logging.getLogger("framework").setLevel(level)
 
 
-def cmd_run(document: str, verbose: bool = False) -> None:
-    """Run the agent with a document."""
-    _setup_logging(verbose)
-    from document_intelligence_agent_team import default_agent
-
-    runtime = default_agent.build_runtime()
-
-    async def _run():
-        await runtime.start()
-        try:
-            exec_id = await runtime.trigger(
-                "start",
-                {"document_text": document, "analysis_brief": "Comprehensive analysis"},
-            )
-            print(f"Execution started: {exec_id}")
-            # Wait for user to interact via TUI or API
-        except KeyboardInterrupt:
-            pass
-        finally:
-            await runtime.stop()
-
-    asyncio.run(_run())
+@click.group()
+@click.version_option(version="1.0.0")
+def cli():
+    """Document Intelligence Agent Team - Multi-perspective A2A document analysis."""
+    pass
 
 
-def cmd_tui(verbose: bool = False) -> None:
-    """Launch the TUI dashboard."""
-    _setup_logging(verbose)
+@cli.command()
+@click.option("--document", "-d", type=str, required=True, help="Document text to analyze")
+@click.option("--brief", "-b", type=str, default="Comprehensive analysis", help="Analysis focus (optional)")
+@click.option("--quiet", "-q", is_flag=True, help="Only output result JSON")
+@click.option("--verbose", "-v", is_flag=True, help="Show execution details")
+@click.option("--debug", is_flag=True, help="Show debug logging")
+def run(document, brief, quiet, verbose, debug):
+    """Run multi-perspective analysis on a document."""
+    if not quiet:
+        setup_logging(verbose=verbose, debug=debug)
+
+    context = {
+        "document_text": document,
+        "analysis_brief": brief,
+    }
+
+    result = asyncio.run(default_agent.run(context))
+
+    output_data = {
+        "success": result.success,
+        "steps_executed": result.steps_executed,
+        "output": result.output,
+    }
+    if result.error:
+        output_data["error"] = result.error
+
+    click.echo(json.dumps(output_data, indent=2, default=str))
+    sys.exit(0 if result.success else 1)
+
+
+@cli.command()
+@click.option("--verbose", "-v", is_flag=True, help="Show execution details")
+@click.option("--debug", is_flag=True, help="Show debug logging")
+def tui(verbose, debug):
+    """Launch the TUI dashboard for interactive document analysis."""
+    setup_logging(verbose=verbose, debug=debug)
 
     try:
-        from framework.tui.app import HiveApp
+        from framework.tui.app import AdenTUI
     except ImportError:
-        print("Error: TUI requires the 'textual' package.")
-        print("Install with: pip install textual")
+        click.echo(
+            "TUI requires the 'textual' package. Install with: pip install textual"
+        )
         sys.exit(1)
 
-    from document_intelligence_agent_team import default_agent
+    from pathlib import Path
 
-    runtime = default_agent.build_runtime()
-    app = HiveApp(runtime=runtime)
-    app.run()
+    from framework.llm import LiteLLMProvider
+    from framework.runner.tool_registry import ToolRegistry
+    from framework.runtime.agent_runtime import create_agent_runtime
+    from framework.runtime.event_bus import EventBus
+    from framework.runtime.execution_stream import EntryPointSpec
 
+    async def run_with_tui():
+        agent = DocumentIntelligenceAgentTeam()
 
-def cmd_shell(verbose: bool = False) -> None:
-    """Start an interactive shell session."""
-    _setup_logging(verbose)
-    from document_intelligence_agent_team import default_agent
+        agent._event_bus = EventBus()
+        agent._tool_registry = ToolRegistry()
 
-    runtime = default_agent.build_runtime()
+        storage_path = Path.home() / ".hive" / "agents" / "document_intelligence_agent_team"
+        storage_path.mkdir(parents=True, exist_ok=True)
 
-    async def _shell():
+        mcp_config_path = Path(__file__).parent / "mcp_servers.json"
+        if mcp_config_path.exists():
+            agent._tool_registry.load_mcp_config(mcp_config_path)
+
+        llm = LiteLLMProvider(
+            model=agent.config.model,
+            api_key=agent.config.api_key,
+            api_base=agent.config.api_base,
+        )
+
+        tools = list(agent._tool_registry.get_tools().values())
+        tool_executor = agent._tool_registry.get_executor()
+        graph = agent._build_graph()
+
+        runtime = create_agent_runtime(
+            graph=graph,
+            goal=agent.goal,
+            storage_path=storage_path,
+            entry_points=[
+                EntryPointSpec(
+                    id="start",
+                    name="Start Analysis",
+                    entry_node="intake",
+                    trigger_type="manual",
+                    isolation_level="isolated",
+                ),
+            ],
+            llm=llm,
+            tools=tools,
+            tool_executor=tool_executor,
+        )
+
         await runtime.start()
-        print(default_agent.metadata.intro_message)
-        print("\nType your document text or 'quit' to exit.\n")
-        try:
-            while True:
-                user_input = input("You: ").strip()
-                if user_input.lower() in ("quit", "exit", "q"):
-                    break
-                if not user_input:
-                    continue
 
-                exec_id = await runtime.trigger(
-                    "start",
-                    {"document_text": user_input},
-                )
-                print(f"\n[Execution {exec_id} started]\n")
-        except (KeyboardInterrupt, EOFError):
-            print("\nGoodbye!")
+        try:
+            app = AdenTUI(runtime)
+            await app.run_async()
         finally:
             await runtime.stop()
 
-    asyncio.run(_shell())
+    asyncio.run(run_with_tui())
 
 
-def main() -> None:
-    """Main CLI entry point."""
-    parser = argparse.ArgumentParser(
-        prog="document_intelligence_agent_team",
-        description="Document Intelligence Agent Team — A2A multi-agent analysis",
-    )
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+@cli.command()
+@click.option("--json", "output_json", is_flag=True)
+def info(output_json):
+    """Show agent information."""
+    info_data = default_agent.info()
+    if output_json:
+        click.echo(json.dumps(info_data, indent=2))
+    else:
+        click.echo(f"Agent: {info_data['name']}")
+        click.echo(f"Version: {info_data['version']}")
+        click.echo(f"Description: {info_data['description']}")
+        click.echo(f"\nNodes: {', '.join(info_data['nodes'])}")
+        click.echo(f"Client-facing: {', '.join(info_data['client_facing_nodes'])}")
+        click.echo(f"Entry: {info_data['entry_node']}")
+        click.echo(f"Terminal: {', '.join(info_data['terminal_nodes'])}")
 
-    # info
-    subparsers.add_parser("info", help="Show agent information")
 
-    # validate
-    subparsers.add_parser("validate", help="Validate agent graph structure")
+@cli.command()
+def validate():
+    """Validate agent structure."""
+    validation = default_agent.validate()
+    if validation["valid"]:
+        click.echo("Agent is valid")
+        if validation["warnings"]:
+            for warning in validation["warnings"]:
+                click.echo(f"  WARNING: {warning}")
+    else:
+        click.echo("Agent has errors:")
+        for error in validation["errors"]:
+            click.echo(f"  ERROR: {error}")
+    sys.exit(0 if validation["valid"] else 1)
 
-    # run
-    run_parser = subparsers.add_parser("run", help="Run analysis on a document")
-    run_parser.add_argument("--document", "-d", required=True, help="Document text to analyze")
-    run_parser.add_argument("--verbose", "-v", action="store_true")
 
-    # tui
-    tui_parser = subparsers.add_parser("tui", help="Launch TUI dashboard")
-    tui_parser.add_argument("--verbose", "-v", action="store_true")
+@cli.command()
+@click.option("--verbose", "-v", is_flag=True)
+def shell(verbose):
+    """Interactive document analysis session (CLI, no TUI)."""
+    asyncio.run(_interactive_shell(verbose))
 
-    # shell
-    shell_parser = subparsers.add_parser("shell", help="Interactive shell session")
-    shell_parser.add_argument("--verbose", "-v", action="store_true")
 
-    args = parser.parse_args()
+async def _interactive_shell(verbose=False):
+    """Async interactive shell."""
+    setup_logging(verbose=verbose)
 
-    if args.command is None:
-        parser.print_help()
-        sys.exit(0)
+    click.echo("=== Document Intelligence Agent Team ===")
+    click.echo("Paste your document, then press Enter twice to submit.")
+    click.echo("Type 'quit' to exit.\n")
 
-    if args.command == "info":
-        cmd_info()
-    elif args.command == "validate":
-        cmd_validate()
-    elif args.command == "run":
-        cmd_run(args.document, args.verbose)
-    elif args.command == "tui":
-        cmd_tui(getattr(args, "verbose", False))
-    elif args.command == "shell":
-        cmd_shell(getattr(args, "verbose", False))
+    agent = DocumentIntelligenceAgentTeam()
+    await agent.start()
+
+    try:
+        while True:
+            lines = []
+            try:
+                while True:
+                    line = await asyncio.get_event_loop().run_in_executor(None, input, "")
+                    if line.lower() in ["quit", "exit", "q"]:
+                        click.echo("Goodbye!")
+                        return
+                    if line == "" and lines:
+                        break
+                    lines.append(line)
+            except (KeyboardInterrupt, EOFError):
+                click.echo("\nGoodbye!")
+                break
+
+            document = "\n".join(lines).strip()
+            if not document:
+                continue
+
+            click.echo("\nAnalyzing...\n")
+            result = await agent.trigger_and_wait("start", {"document_text": document})
+
+            if result is None:
+                click.echo("\n[Execution timed out]\n")
+            elif result.success:
+                click.echo("\nAnalysis complete.\n")
+            else:
+                click.echo(f"\nAnalysis failed: {result.error}\n")
+
+    finally:
+        await agent.stop()
 
 
 if __name__ == "__main__":
-    main()
+    cli()
