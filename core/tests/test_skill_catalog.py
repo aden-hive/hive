@@ -1,7 +1,5 @@
 """Tests for the skill catalog and prompt generation."""
 
-import pytest
-
 from framework.skills.catalog import SkillCatalog
 from framework.skills.parser import ParsedSkill
 

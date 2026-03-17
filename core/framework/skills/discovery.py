@@ -7,25 +7,26 @@ locations. Resolves name collisions deterministically.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from framework.skills.parser import ParsedSkill, parse_skill_md
 
 logger = logging.getLogger(__name__)
 
 # Directories to skip during scanning
-_SKIP_DIRS = frozenset({
-    ".git",
-    "node_modules",
-    "__pycache__",
-    ".venv",
-    "venv",
-    ".mypy_cache",
-    ".pytest_cache",
-    ".ruff_cache",
-})
+_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+    }
+)
 
 # Scope priority (higher = takes precedence)
 _SCOPE_PRIORITY = {

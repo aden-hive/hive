@@ -241,7 +241,8 @@ class ExecutionStream:
         if protocols_prompt:
             _es_logger.info(
                 "ExecutionStream[%s] received protocols_prompt (%d chars)",
-                stream_id, len(protocols_prompt),
+                stream_id,
+                len(protocols_prompt),
             )
         else:
             _es_logger.warning(

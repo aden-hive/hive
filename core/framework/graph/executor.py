@@ -208,7 +208,8 @@ class GraphExecutor:
         if protocols_prompt:
             self.logger.info(
                 "GraphExecutor[%s] received protocols_prompt (%d chars)",
-                stream_id, len(protocols_prompt),
+                stream_id,
+                len(protocols_prompt),
             )
         else:
             self.logger.warning(

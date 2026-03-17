@@ -112,22 +112,15 @@ class SkillsManager:
 
         # 1. Community skill discovery (when project_root is available)
         catalog_prompt = ""
-        if (
-            self._config.project_root is not None
-            and not self._config.skip_community_discovery
-        ):
-            discovery = SkillDiscovery(
-                DiscoveryConfig(project_root=self._config.project_root)
-            )
+        if self._config.project_root is not None and not self._config.skip_community_discovery:
+            discovery = SkillDiscovery(DiscoveryConfig(project_root=self._config.project_root))
             discovered = discovery.discover()
             catalog = SkillCatalog(discovered)
             catalog_prompt = catalog.to_prompt()
 
             # Pre-activated community skills
             if skills_config.skills:
-                pre_activated = catalog.build_pre_activated_prompt(
-                    skills_config.skills
-                )
+                pre_activated = catalog.build_pre_activated_prompt(skills_config.skills)
                 if pre_activated:
                     if catalog_prompt:
                         catalog_prompt = f"{catalog_prompt}\n\n{pre_activated}"

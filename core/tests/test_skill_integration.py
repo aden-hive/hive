@@ -1,7 +1,5 @@
 """Integration tests for the skill system — prompt composition and backward compatibility."""
 
-import pytest
-
 from framework.graph.prompt_composer import compose_system_prompt
 from framework.skills.catalog import SkillCatalog
 from framework.skills.config import SkillsConfig
@@ -129,11 +127,13 @@ class TestEndToEndPipeline:
         )
 
         # Discovery
-        discovery = SkillDiscovery(DiscoveryConfig(
-            project_root=tmp_path,
-            skip_user_scope=True,
-            skip_framework_scope=True,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=tmp_path,
+                skip_user_scope=True,
+                skip_framework_scope=True,
+            )
+        )
         skills = discovery.discover()
         assert len(skills) == 1
 
@@ -162,11 +162,13 @@ class TestEndToEndPipeline:
         )
 
         # Discover community skills
-        discovery = SkillDiscovery(DiscoveryConfig(
-            project_root=tmp_path,
-            skip_user_scope=True,
-            skip_framework_scope=True,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=tmp_path,
+                skip_user_scope=True,
+                skip_framework_scope=True,
+            )
+        )
         community_skills = discovery.discover()
         catalog = SkillCatalog(community_skills)
         catalog_prompt = catalog.to_prompt()
@@ -199,11 +201,13 @@ class TestEndToEndPipeline:
         )
 
         # Community skills
-        discovery = SkillDiscovery(DiscoveryConfig(
-            project_root=tmp_path,
-            skip_user_scope=True,
-            skip_framework_scope=True,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=tmp_path,
+                skip_user_scope=True,
+                skip_framework_scope=True,
+            )
+        )
         catalog = SkillCatalog(discovery.discover())
 
         # Disabled defaults
