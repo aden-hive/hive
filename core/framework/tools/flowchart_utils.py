@@ -18,15 +18,15 @@ FLOWCHART_FILENAME = "flowchart.json"
 
 # ── Flowchart type catalogue (9 types) ───────────────────────────────────────
 FLOWCHART_TYPES = {
-    "start": {"shape": "stadium", "color": "#3fa66a"},  # sage green
-    "terminal": {"shape": "stadium", "color": "#a04444"},  # dusty red
-    "process": {"shape": "rectangle", "color": "#616d83"},  # blue-gray
-    "decision": {"shape": "diamond", "color": "#d89d26"},  # warm amber
-    "io": {"shape": "parallelogram", "color": "#7a4fa5"},  # dusty purple
-    "document": {"shape": "document", "color": "#507485"},  # steel blue
-    "database": {"shape": "cylinder", "color": "#459077"},  # muted teal
-    "subprocess": {"shape": "subroutine", "color": "#4c7f7f"},  # dark cyan
-    "browser": {"shape": "hexagon", "color": "#3a4a9b"},  # deep blue
+    "start": {"shape": "stadium", "color": "#8aad3f"},  # spring pollen
+    "terminal": {"shape": "stadium", "color": "#b5453a"},  # propolis red
+    "process": {"shape": "rectangle", "color": "#b5a575"},  # warm wheat
+    "decision": {"shape": "diamond", "color": "#d89d26"},  # royal honey
+    "io": {"shape": "parallelogram", "color": "#d06818"},  # burnt orange
+    "document": {"shape": "document", "color": "#c4b830"},  # goldenrod
+    "database": {"shape": "cylinder", "color": "#508878"},  # sage teal
+    "subprocess": {"shape": "subroutine", "color": "#887a48"},  # propolis gold
+    "browser": {"shape": "hexagon", "color": "#cc8850"},  # honey copper
 }
 
 # Backward-compat remap: old type names → canonical type

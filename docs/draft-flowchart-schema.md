@@ -206,7 +206,7 @@ After `save_agent_draft` processes the input, it stores and emits an enriched dr
       "sub_agents": [],
       "flowchart_type": "start",
       "flowchart_shape": "stadium",
-      "flowchart_color": "#3fa66a"
+      "flowchart_color": "#8aad3f"
     },
     {
       "id": "check-tier",
@@ -246,9 +246,9 @@ After `save_agent_draft` processes the input, it stores and emits an enriched dr
     }
   ],
   "flowchart_legend": {
-    "start":    { "shape": "stadium",    "color": "#3fa66a" },
-    "terminal": { "shape": "stadium",    "color": "#a04444" },
-    "process":  { "shape": "rectangle",  "color": "#616d83" },
+    "start":    { "shape": "stadium",    "color": "#8aad3f" },
+    "terminal": { "shape": "stadium",    "color": "#b5453a" },
+    "process":  { "shape": "rectangle",  "color": "#b5a575" },
     "decision": { "shape": "diamond",    "color": "#d89d26" }
   }
 }
@@ -287,15 +287,15 @@ Returned by `GET /api/sessions/{id}/flowchart-map` after `confirm_and_build()` d
 
 | Type | Shape | Color | SVG Primitive | Description |
 |---|---|---|---|---|
-| `start` | stadium | `#3fa66a` sage green | `<rect rx={h/2}>` | Entry point / start terminator |
-| `terminal` | stadium | `#a04444` dusty red | `<rect rx={h/2}>` | End point / stop terminator |
-| `process` | rectangle | `#616d83` blue-gray | `<rect rx={4}>` | General processing step (default) |
-| `decision` | diamond | `#d89d26` warm amber | `<polygon>` 4-point | Branching / conditional logic |
-| `io` | parallelogram | `#7a4fa5` dusty purple | `<polygon>` skewed | Data input or output |
-| `document` | document | `#507485` steel blue | `<path>` wavy bottom | Document / report generation |
-| `database` | cylinder | `#459077` muted teal | `<path>` + `<ellipse>` | Database / data store |
-| `subprocess` | subroutine | `#4c7f7f` dark cyan | `<rect>` + inner `<line>` | Predefined process / sub-agent |
-| `browser` | hexagon | `#3a4a9b` deep blue | `<polygon>` 6-point | Browser automation (GCU node) |
+| `start` | stadium | `#8aad3f` spring pollen | `<rect rx={h/2}>` | Entry point / start terminator |
+| `terminal` | stadium | `#b5453a` propolis red | `<rect rx={h/2}>` | End point / stop terminator |
+| `process` | rectangle | `#b5a575` warm wheat | `<rect rx={4}>` | General processing step (default) |
+| `decision` | diamond | `#d89d26` royal honey | `<polygon>` 4-point | Branching / conditional logic |
+| `io` | parallelogram | `#d06818` burnt orange | `<polygon>` skewed | Data input or output |
+| `document` | document | `#c4b830` goldenrod | `<path>` wavy bottom | Document / report generation |
+| `database` | cylinder | `#508878` sage teal | `<path>` + `<ellipse>` | Database / data store |
+| `subprocess` | subroutine | `#887a48` propolis gold | `<rect>` + inner `<line>` | Predefined process / sub-agent |
+| `browser` | hexagon | `#cc8850` honey copper | `<polygon>` 6-point | Browser automation (GCU node) |
 
 ---
 
