@@ -19,6 +19,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from aiohttp import web
+
 from framework.runtime.triggers import TriggerDefinition
 
 logger = logging.getLogger(__name__)
@@ -943,7 +945,17 @@ class SessionManager:
         Checks whether queen conversation files exist at
         ~/.hive/queen/session/{session_id}/conversations/.  Returns None when
         no data is found so callers can fall through to a 404.
+
+        Invalid path-like values are treated as absent rather than bubbling an
+        HTTP exception from this lower-level helper.
         """
+        from framework.server.app import safe_path_segment
+
+        try:
+            session_id = safe_path_segment(session_id)
+        except web.HTTPBadRequest:
+            return None
+
         queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
         convs_dir = queen_dir / "conversations"
         if not convs_dir.exists():

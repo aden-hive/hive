@@ -101,6 +101,8 @@ def cold_sessions_dir(session_id: str) -> Path | None:
     then returns ~/.hive/agents/{agent_name}/sessions/.
     Returns None if meta.json is missing or has no agent_path.
     """
+    session_id = safe_path_segment(session_id)
+
     import json
 
     meta_path = Path.home() / ".hive" / "queen" / "session" / session_id / "meta.json"

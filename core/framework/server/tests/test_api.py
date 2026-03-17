@@ -11,10 +11,11 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from framework.server.app import create_app
-from framework.server.session_manager import Session
+from framework.server.app import cold_sessions_dir, create_app
+from framework.server.session_manager import Session, SessionManager
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 EXAMPLE_AGENT_PATH = REPO_ROOT / "examples" / "templates" / "deep_research_agent"
@@ -1745,3 +1746,58 @@ class TestCleanupStaleActiveSessions:
 
         state = self._read_state(session_dir)
         assert state["status"] == "paused", "Paused sessions must remain untouched"
+
+
+class TestSessionHistoryPathValidation:
+    @pytest.mark.asyncio
+    async def test_queen_messages_rejects_invalid_session_id(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        app = _make_app_with_session(_make_session(
+            tmp_dir=tmp_path / ".hive" / "agents" / "test_agent"))
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/sessions/..%2Fescape/queen-messages")
+            assert resp.status == 400
+            assert "Invalid path parameter" in await resp.text()
+
+    @pytest.mark.asyncio
+    async def test_events_history_rejects_invalid_session_id(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        app = _make_app_with_session(_make_session(
+            tmp_dir=tmp_path / ".hive" / "agents" / "test_agent"))
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/sessions/..%2Fescape/events/history")
+            assert resp.status == 400
+            assert "Invalid path parameter" in await resp.text()
+
+    @pytest.mark.asyncio
+    async def test_delete_history_rejects_invalid_session_id_and_does_not_delete(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        target = tmp_path / ".hive" / "queen" / "session" / "keepme"
+        target.mkdir(parents=True)
+        (target /
+         "meta.json").write_text('{"agent_path": "/tmp/agent"}', encoding="utf-8")
+
+        app = _make_app_with_session(_make_session(
+            tmp_dir=tmp_path / ".hive" / "agents" / "test_agent"))
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.delete("/api/sessions/history/..%2Fkeepme")
+            assert resp.status == 400
+
+        assert target.exists()
+
+
+class TestColdSessionHelperValidation:
+    def test_cold_sessions_dir_rejects_invalid_session_id(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        with pytest.raises(web.HTTPBadRequest):
+            cold_sessions_dir("../escape")
+
+    def test_get_cold_session_info_invalid_session_id_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        assert SessionManager.get_cold_session_info("../escape") is None
