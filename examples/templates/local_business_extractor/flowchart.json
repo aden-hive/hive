@@ -27,7 +27,7 @@
         "sub_agents": [],
         "flowchart_type": "browser",
         "flowchart_shape": "hexagon",
-        "flowchart_color": "#3a4a9b"
+        "flowchart_color": "#cc8850"
       },
       {
         "id": "extract-contacts",
@@ -50,7 +50,7 @@
         ],
         "flowchart_type": "subprocess",
         "flowchart_shape": "subroutine",
-        "flowchart_color": "#4c7f7f"
+        "flowchart_color": "#887a48"
       },
       {
         "id": "sheets-sync",
@@ -73,7 +73,7 @@
         "sub_agents": [],
         "flowchart_type": "terminal",
         "flowchart_shape": "stadium",
-        "flowchart_color": "#a04444"
+        "flowchart_color": "#b5453a"
       }
     ],
     "edges": [
@@ -117,15 +117,15 @@
     "flowchart_legend": {
       "start": {
         "shape": "stadium",
-        "color": "#3fa66a"
+        "color": "#8aad3f"
       },
       "terminal": {
         "shape": "stadium",
-        "color": "#a04444"
+        "color": "#b5453a"
       },
       "process": {
         "shape": "rectangle",
-        "color": "#616d83"
+        "color": "#b5a575"
       },
       "decision": {
         "shape": "diamond",
@@ -133,23 +133,23 @@
       },
       "io": {
         "shape": "parallelogram",
-        "color": "#7a4fa5"
+        "color": "#d06818"
       },
       "document": {
         "shape": "document",
-        "color": "#507485"
+        "color": "#c4b830"
       },
       "database": {
         "shape": "cylinder",
-        "color": "#459077"
+        "color": "#508878"
       },
       "subprocess": {
         "shape": "subroutine",
-        "color": "#4c7f7f"
+        "color": "#887a48"
       },
       "browser": {
         "shape": "hexagon",
-        "color": "#3a4a9b"
+        "color": "#cc8850"
       }
     }
   },
