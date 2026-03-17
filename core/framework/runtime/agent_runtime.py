@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
     from framework.graph.goal import Goal
     from framework.llm.provider import LLMProvider, Tool
+    from framework.skills.manager import SkillsManagerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +133,8 @@ class AgentRuntime:
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         event_bus: "EventBus | None" = None,
+        skills_manager_config: "SkillsManagerConfig | None" = None,
+        # Deprecated — pass skills_manager_config instead.
         skills_catalog_prompt: str = "",
         protocols_prompt: str = "",
         skill_dirs: list[str] | None = None,
@@ -159,16 +162,44 @@ class AgentRuntime:
             skills_catalog_prompt: Available skills catalog for system prompt
             protocols_prompt: Default skill operational protocols for system prompt
             skill_dirs: Skill base directories for Tier 3 resource access
+            skills_manager_config: Skill configuration — the runtime owns
+                discovery, loading, and prompt renderation internally.
+            skills_catalog_prompt: Deprecated. Pre-rendered skills catalog.
+            protocols_prompt: Deprecated. Pre-rendered operational protocols.
         """
+        from framework.skills.manager import SkillsManager
+
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
         self._runtime_log_store = runtime_log_store
         self._checkpoint_config = checkpoint_config
         self.accounts_prompt = accounts_prompt
-        self.skills_catalog_prompt = skills_catalog_prompt
-        self.protocols_prompt = protocols_prompt
-        self.skill_dirs: list[str] = skill_dirs or []
+
+        # --- Skill lifecycle: runtime owns the SkillsManager ---
+        if skills_manager_config is not None:
+            # New path: config-driven, runtime handles loading
+            self._skills_manager = SkillsManager(skills_manager_config)
+            self._skills_manager.load()
+        elif skills_catalog_prompt or protocols_prompt:
+            # Legacy path: caller passed pre-rendered strings
+            import warnings
+
+            warnings.warn(
+                "Passing pre-rendered skills_catalog_prompt/protocols_prompt "
+                "is deprecated. Pass skills_manager_config instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self._skills_manager = SkillsManager.from_precomputed(
+                skills_catalog_prompt, protocols_prompt
+            )
+        else:
+            # Bare constructor: auto-load defaults
+            self._skills_manager = SkillsManager()
+            self._skills_manager.load()
+
+        self.skill_dirs: list[str] = self._skills_manager.allowlisted_dirs
 
         # Primary graph identity
         self._graph_id: str = graph_id or "primary"
@@ -224,6 +255,18 @@ class AgentRuntime:
 
         # Optional greeting shown to user on TUI load (set by AgentRunner)
         self.intro_message: str = ""
+
+    # ------------------------------------------------------------------
+    # Skill prompt accessors (read by ExecutionStream constructors)
+    # ------------------------------------------------------------------
+
+    @property
+    def skills_catalog_prompt(self) -> str:
+        return self._skills_manager.skills_catalog_prompt
+
+    @property
+    def protocols_prompt(self) -> str:
+        return self._skills_manager.protocols_prompt
 
     def register_entry_point(self, spec: EntryPointSpec) -> None:
         """
@@ -1721,6 +1764,8 @@ def create_agent_runtime(
     accounts_data: list[dict] | None = None,
     tool_provider_map: dict[str, str] | None = None,
     event_bus: "EventBus | None" = None,
+    skills_manager_config: "SkillsManagerConfig | None" = None,
+    # Deprecated — pass skills_manager_config instead.
     skills_catalog_prompt: str = "",
     protocols_prompt: str = "",
     skill_dirs: list[str] | None = None,
@@ -1753,6 +1798,10 @@ def create_agent_runtime(
         skills_catalog_prompt: Available skills catalog for system prompt.
         protocols_prompt: Default skill operational protocols for system prompt.
         skill_dirs: Skill base directories for Tier 3 resource access.
+        skills_manager_config: Skill configuration — the runtime owns
+            discovery, loading, and prompt renderation internally.
+        skills_catalog_prompt: Deprecated. Pre-rendered skills catalog.
+        protocols_prompt: Deprecated. Pre-rendered operational protocols.
 
     Returns:
         Configured AgentRuntime (not yet started)
@@ -1779,6 +1828,7 @@ def create_agent_runtime(
         accounts_data=accounts_data,
         tool_provider_map=tool_provider_map,
         event_bus=event_bus,
+        skills_manager_config=skills_manager_config,
         skills_catalog_prompt=skills_catalog_prompt,
         protocols_prompt=protocols_prompt,
         skill_dirs=skill_dirs,
