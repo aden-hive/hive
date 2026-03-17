@@ -756,6 +756,7 @@ class EventLoopNode(NodeProtocol):
             )
             _stream_retry_count = 0
             _turn_cancelled = False
+            turn_tokens: dict[str, int] = {}  # set before try so except-break path can use it
             while True:
                 try:
                     (

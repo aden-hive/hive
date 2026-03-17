@@ -9,6 +9,10 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 - **git** - Version control
 - **Claude Code** ([Install](https://docs.anthropic.com/claude/docs/claude-code)) - Optional, for using building skills
 
+## Installation (step-by-step)
+
+For a full, step-by-step installation guide (including manual setup and troubleshooting), see **[Installation Guide](installation-guide.md)**.
+
 ## Quick Start
 
 The fastest way to get started:
