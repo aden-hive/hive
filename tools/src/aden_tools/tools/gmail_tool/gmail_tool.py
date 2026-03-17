@@ -488,29 +488,36 @@ def register_tools(
 
     @mcp.tool()
     def gmail_create_draft(
-        to: str,
-        subject: str,
         html: str,
+        to: str = "",
+        subject: str = "",
         account: str = "",
+        reply_to_message_id: str = "",
     ) -> dict:
         """
         Create a draft email in the user's Gmail Drafts folder.
 
         The draft can be reviewed and sent manually from Gmail.
 
+        To create a real threaded reply (not a new thread), provide
+        reply_to_message_id. The tool will fetch the original message,
+        derive recipient and subject automatically, and set the correct
+        In-Reply-To/References headers so the draft appears in the same thread.
+
         Args:
-            to: Recipient email address.
-            subject: Email subject line.
             html: Email body as HTML string.
+            to: Recipient email address. Required when reply_to_message_id is not set.
+                Ignored when reply_to_message_id is set (derived from original message).
+            subject: Email subject line. Required when reply_to_message_id is not set.
+                     Ignored when reply_to_message_id is set (derived from original message).
+            account: Account alias for multi-account routing. Optional.
+            reply_to_message_id: Gmail message ID to reply to. When provided, creates
+                                  the draft as a threaded reply with proper headers.
 
         Returns:
-            Dict with "success", "draft_id", and "message_id",
+            Dict with "success", "draft_id", "message_id", and optionally "thread_id",
             or error dict with "error" and optional "help" keys.
         """
-        if not to or not to.strip():
-            return {"error": "Recipient email (to) is required"}
-        if not subject or not subject.strip():
-            return {"error": "Subject is required"}
         if not html:
             return {"error": "Email body (html) is required"}
 
@@ -518,20 +525,101 @@ def register_tools(
         if isinstance(token, dict):
             return token
 
+        import html as html_module
+        from email.mime.multipart import MIMEMultipart
         from email.mime.text import MIMEText
 
-        msg = MIMEText(html, "html")
-        msg["To"] = to
-        msg["Subject"] = subject
+        thread_id: str | None = None
+        in_reply_to: str | None = None
+        full_html = html
+
+        if reply_to_message_id:
+            # Fetch original message with full body for threading + quoted content
+            try:
+                orig_response = _gmail_request(
+                    "GET",
+                    f"messages/{_sanitize_path_param(reply_to_message_id, 'reply_to_message_id')}",
+                    token,
+                    params={"format": "full"},
+                )
+            except httpx.HTTPError as e:
+                return {"error": f"Failed to fetch original message: {e}"}
+
+            orig_error = _handle_error(orig_response)
+            if orig_error:
+                return orig_error
+
+            orig_data = orig_response.json()
+            thread_id = orig_data.get("threadId", "")
+            payload = orig_data.get("payload", {})
+            orig_headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+
+            in_reply_to = orig_headers.get("Message-ID") or orig_headers.get("Message-Id", "")
+            orig_subject = orig_headers.get("Subject", "")
+            orig_from = orig_headers.get("From", "")
+            orig_date = orig_headers.get("Date", "")
+            to = orig_from or to
+            subject = (
+                orig_subject if orig_subject.lower().startswith("re:") else f"Re: {orig_subject}"
+            )
+
+            # Extract body recursively (prefer HTML, fall back to plain text)
+            def _extract_body(part: dict, mime_type: str) -> str | None:
+                if part.get("mimeType") == mime_type:
+                    body_data = part.get("body", {}).get("data", "")
+                    if body_data:
+                        return base64.urlsafe_b64decode(body_data).decode("utf-8", errors="replace")
+                for sub in part.get("parts", []):
+                    result = _extract_body(sub, mime_type)
+                    if result:
+                        return result
+                return None
+
+            orig_body_html = _extract_body(payload, "text/html")
+            if not orig_body_html:
+                orig_body_text = _extract_body(payload, "text/plain") or ""
+                orig_body_html = f"<pre>{html_module.escape(orig_body_text)}</pre>"
+
+            quoted = (
+                f"<br><br>"
+                f'<div class="gmail_quote">'
+                f"<div>On {orig_date}, {orig_from} wrote:</div>"
+                "<blockquote"
+                ' style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex">'
+                f"{orig_body_html}"
+                f"</blockquote>"
+                f"</div>"
+            )
+            full_html = html + quoted
+        else:
+            if not to or not to.strip():
+                return {"error": "Recipient email (to) is required"}
+            if not subject or not subject.strip():
+                return {"error": "Subject is required"}
+
+        if in_reply_to:
+            msg: MIMEMultipart | MIMEText = MIMEMultipart("alternative")
+            msg["To"] = to
+            msg["Subject"] = subject
+            msg["In-Reply-To"] = in_reply_to
+            msg["References"] = in_reply_to
+            msg.attach(MIMEText(full_html, "html"))  # type: ignore[attr-defined]
+        else:
+            msg = MIMEText(full_html, "html")
+            msg["To"] = to
+            msg["Subject"] = subject
 
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+        message_body: dict = {"raw": raw}
+        if thread_id:
+            message_body["threadId"] = thread_id
 
         try:
             response = _gmail_request(
                 "POST",
                 "drafts",
                 token,
-                json={"message": {"raw": raw}},
+                json={"message": message_body},
             )
         except httpx.HTTPError as e:
             return {"error": f"Request failed: {e}"}
@@ -541,11 +629,14 @@ def register_tools(
             return error
 
         data = response.json()
-        return {
+        result: dict = {
             "success": True,
             "draft_id": data.get("id", ""),
             "message_id": data.get("message", {}).get("id", ""),
         }
+        if thread_id:
+            result["thread_id"] = thread_id
+        return result
 
     @mcp.tool()
     def gmail_list_labels(account: str = "") -> dict:

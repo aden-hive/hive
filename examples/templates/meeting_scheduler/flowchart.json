@@ -1,0 +1,172 @@
+{
+  "original_draft": {
+    "agent_name": "meeting_scheduler",
+    "goal": "Check calendar availability, find optimal meeting times, record meetings, and send reminders.",
+    "description": "",
+    "success_criteria": [
+      "Meeting time found within requested duration",
+      "Meeting recorded in spreadsheet accurately",
+      "Attendee email reminder sent",
+      "User confirms meeting details"
+    ],
+    "constraints": [
+      "Must use Google Calendar API for availability check",
+      "Meeting duration must match requested time",
+      "Spreadsheet record must include date, time, attendee, title"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Gather meeting details from the user",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "attendee_email",
+          "meeting_duration_minutes"
+        ],
+        "output_keys": [
+          "attendee_email",
+          "meeting_duration_minutes",
+          "meeting_title"
+        ],
+        "success_criteria": "User has provided attendee email, meeting duration, and title.",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "schedule",
+        "name": "Schedule",
+        "description": "Find available time on calendar, book meeting with Google Meet, and log to Google Sheet",
+        "node_type": "event_loop",
+        "tools": [
+          "calendar_check_availability",
+          "calendar_create_event",
+          "calendar_list_events",
+          "google_sheets_create_spreadsheet",
+          "google_sheets_get_spreadsheet",
+          "google_sheets_append_values",
+          "send_email"
+        ],
+        "input_keys": [
+          "attendee_email",
+          "meeting_duration_minutes",
+          "meeting_title"
+        ],
+        "output_keys": [
+          "meeting_time",
+          "booking_confirmed",
+          "spreadsheet_recorded",
+          "email_sent",
+          "meet_link"
+        ],
+        "success_criteria": "Meeting time found, Google Meet created, Google Sheet 'Meeting Scheduler' updated with date/time/attendee/title/meet_link, and confirmation email sent.",
+        "sub_agents": [],
+        "flowchart_type": "io",
+        "flowchart_shape": "parallelogram",
+        "flowchart_color": "#d06818"
+      },
+      {
+        "id": "confirm",
+        "name": "Confirm",
+        "description": "Present booking confirmation to user with Google Meet link",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "meeting_time",
+          "booking_confirmed",
+          "meet_link"
+        ],
+        "output_keys": [
+          "next_action"
+        ],
+        "success_criteria": "User has acknowledged the booking and received the Google Meet link.",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "intake",
+        "target": "schedule",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "schedule",
+        "target": "confirm",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "confirm",
+        "target": "intake",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "intake",
+    "terminal_nodes": [
+      "confirm"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "intake": [
+      "intake"
+    ],
+    "schedule": [
+      "schedule"
+    ],
+    "confirm": [
+      "confirm"
+    ]
+  }
+}

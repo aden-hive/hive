@@ -73,6 +73,7 @@ from .provider import (
     TokenExpiredError,
     TokenPlacement,
 )
+from .zoho_provider import ZohoOAuth2Provider
 
 __all__ = [
     # Types
@@ -82,6 +83,7 @@ __all__ = [
     # Providers
     "BaseOAuth2Provider",
     "HubSpotOAuth2Provider",
+    "ZohoOAuth2Provider",
     # Lifecycle
     "TokenLifecycleManager",
     "TokenRefreshResult",

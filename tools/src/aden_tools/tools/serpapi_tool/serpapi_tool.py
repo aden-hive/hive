@@ -135,6 +135,38 @@ class _SerpAPIClient:
         """Get details for a specific patent by searching its ID."""
         return self._request({"engine": "google_patents", "q": patent_id})
 
+    def scholar_cited_by(self, cites_id: str, num: int = 10, start: int = 0) -> dict[str, Any]:
+        """Get papers that cite a given paper using its cites_id."""
+        return self._request(
+            {
+                "engine": "google_scholar",
+                "cites": cites_id,
+                "num": min(num, 20),
+                "start": start,
+            }
+        )
+
+    def scholar_profiles(self, query: str, num: int = 10) -> dict[str, Any]:
+        """Search for Google Scholar author profiles."""
+        return self._request(
+            {
+                "engine": "google_scholar_profiles",
+                "mauthors": query,
+                "num": min(num, 20),
+            }
+        )
+
+    def google_search(self, query: str, num: int = 10, gl: str | None = None) -> dict[str, Any]:
+        """Run a standard Google web search."""
+        params: dict[str, Any] = {
+            "engine": "google",
+            "q": query,
+            "num": min(num, 20),
+        }
+        if gl:
+            params["gl"] = gl
+        return self._request(params)
+
 
 def register_tools(
     mcp: FastMCP,
@@ -507,3 +539,200 @@ def register_tools(
             return {"error": f"Network error: {e}"}
         except Exception as e:
             return {"error": f"Patent detail lookup failed: {e}"}
+
+    @mcp.tool()
+    def scholar_cited_by(
+        cites_id: str,
+        num_results: int = 10,
+        start: int = 0,
+    ) -> dict:
+        """
+        Get papers that cite a specific Google Scholar paper.
+
+        Uses the cites_id from a scholar_search result to find all papers
+        that reference the original paper.
+
+        Args:
+            cites_id: The cites_id from a scholar_search result's cited_by field
+            num_results: Number of citing papers to return (1-20, default 10)
+            start: Pagination offset (default 0)
+
+        Returns:
+            Dict with citing papers including titles, authors, and citation counts
+        """
+        if not cites_id:
+            return {"error": "cites_id is required"}
+
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+
+        try:
+            data = client.scholar_cited_by(cites_id=cites_id, num=num_results, start=start)
+            if "error" in data:
+                return data
+
+            results = []
+            for item in data.get("organic_results", []):
+                result = {
+                    "title": item.get("title", ""),
+                    "link": item.get("link", ""),
+                    "snippet": item.get("snippet", ""),
+                    "result_id": item.get("result_id", ""),
+                    "publication_info": item.get("publication_info", {}).get("summary", ""),
+                    "cited_by_count": (
+                        item.get("inline_links", {}).get("cited_by", {}).get("total", 0)
+                    ),
+                }
+                authors = item.get("publication_info", {}).get("authors", [])
+                if authors:
+                    result["authors"] = [
+                        {"name": a.get("name", ""), "author_id": a.get("author_id", "")}
+                        for a in authors
+                    ]
+                results.append(result)
+
+            return {
+                "cites_id": cites_id,
+                "results": results,
+                "count": len(results),
+            }
+
+        except httpx.TimeoutException:
+            return {"error": "Cited-by request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+        except Exception as e:
+            return {"error": f"Cited-by lookup failed: {e}"}
+
+    @mcp.tool()
+    def scholar_search_profiles(
+        query: str,
+        num_results: int = 10,
+    ) -> dict:
+        """
+        Search for Google Scholar author profiles by name or affiliation.
+
+        Returns author profiles with names, affiliations, citation counts,
+        and author IDs that can be used with scholar_get_author.
+
+        Args:
+            query: Author name or affiliation to search (e.g. "Geoffrey Hinton")
+            num_results: Number of profiles to return (1-20, default 10)
+
+        Returns:
+            Dict with author profiles including name, affiliation, and cited_by count
+        """
+        if not query:
+            return {"error": "query is required"}
+
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+
+        try:
+            data = client.scholar_profiles(query=query, num=num_results)
+            if "error" in data:
+                return data
+
+            profiles = []
+            for p in data.get("profiles", []):
+                profiles.append(
+                    {
+                        "name": p.get("name", ""),
+                        "author_id": p.get("author_id", ""),
+                        "affiliations": p.get("affiliations", ""),
+                        "email": p.get("email", ""),
+                        "cited_by": p.get("cited_by", 0),
+                        "interests": [i.get("title", "") for i in p.get("interests", [])],
+                        "thumbnail": p.get("thumbnail", ""),
+                    }
+                )
+
+            return {
+                "query": query,
+                "profiles": profiles,
+                "count": len(profiles),
+            }
+
+        except httpx.TimeoutException:
+            return {"error": "Profile search timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+        except Exception as e:
+            return {"error": f"Profile search failed: {e}"}
+
+    @mcp.tool()
+    def serpapi_google_search(
+        query: str,
+        num_results: int = 10,
+        country: str | None = None,
+    ) -> dict:
+        """
+        Search Google web results via SerpAPI.
+
+        Returns structured Google search results with titles, snippets, links,
+        and optional knowledge graph and answer box data.
+
+        Args:
+            query: Google search query (1-500 chars)
+            num_results: Number of results (1-20, default 10)
+            country: Country code for localized results (e.g. 'us', 'uk')
+
+        Returns:
+            Dict with organic results and optional answer_box/knowledge_graph
+        """
+        if not query or len(query) > 500:
+            return {"error": "Query must be 1-500 characters"}
+
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+
+        try:
+            data = client.google_search(query=query, num=num_results, gl=country)
+            if "error" in data:
+                return data
+
+            results = []
+            for item in data.get("organic_results", []):
+                results.append(
+                    {
+                        "title": item.get("title", ""),
+                        "link": item.get("link", ""),
+                        "snippet": item.get("snippet", ""),
+                        "displayed_link": item.get("displayed_link", ""),
+                        "position": item.get("position"),
+                    }
+                )
+
+            output: dict = {
+                "query": query,
+                "results": results,
+                "count": len(results),
+            }
+
+            answer_box = data.get("answer_box")
+            if answer_box:
+                output["answer_box"] = {
+                    "type": answer_box.get("type", ""),
+                    "title": answer_box.get("title", ""),
+                    "answer": answer_box.get("answer", answer_box.get("snippet", "")),
+                }
+
+            knowledge_graph = data.get("knowledge_graph")
+            if knowledge_graph:
+                output["knowledge_graph"] = {
+                    "title": knowledge_graph.get("title", ""),
+                    "type": knowledge_graph.get("type", ""),
+                    "description": knowledge_graph.get("description", ""),
+                }
+
+            return output
+
+        except httpx.TimeoutException:
+            return {"error": "Google search timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+        except Exception as e:
+            return {"error": f"Google search failed: {e}"}

@@ -97,6 +97,7 @@ class EventType(StrEnum):
     # Client I/O (client_facing=True nodes only)
     CLIENT_OUTPUT_DELTA = "client_output_delta"
     CLIENT_INPUT_REQUESTED = "client_input_requested"
+    CLIENT_INPUT_RECEIVED = "client_input_received"
 
     # Internal node observability (client_facing=False nodes)
     NODE_INTERNAL_OUTPUT = "node_internal_output"
@@ -104,7 +105,7 @@ class EventType(StrEnum):
     NODE_STALLED = "node_stalled"
     NODE_TOOL_DOOM_LOOP = "node_tool_doom_loop"
 
-    # Judge decisions
+    # Judge decisions (implicit judge in event loop nodes)
     JUDGE_VERDICT = "judge_verdict"
 
     # Output tracking
@@ -123,16 +124,42 @@ class EventType(StrEnum):
     # Custom events
     CUSTOM = "custom"
 
-    # Escalation (agent requests handoff to hive_coder)
+    # Escalation (agent requests handoff to queen)
     ESCALATION_REQUESTED = "escalation_requested"
 
-    # Worker health monitoring (judge → queen → operator)
+    # Worker health monitoring
     WORKER_ESCALATION_TICKET = "worker_escalation_ticket"
     QUEEN_INTERVENTION_REQUESTED = "queen_intervention_requested"
+
+    # Execution resurrection (auto-restart on non-fatal failure)
+    EXECUTION_RESURRECTED = "execution_resurrected"
 
     # Worker lifecycle (session manager → frontend)
     WORKER_LOADED = "worker_loaded"
     CREDENTIALS_REQUIRED = "credentials_required"
+
+    # Draft graph (planning phase — lightweight graph preview)
+    DRAFT_GRAPH_UPDATED = "draft_graph_updated"
+
+    # Flowchart map updated (after reconciliation with runtime graph)
+    FLOWCHART_MAP_UPDATED = "flowchart_map_updated"
+
+    # Queen phase changes (building <-> staging <-> running)
+    QUEEN_PHASE_CHANGED = "queen_phase_changed"
+
+    # Queen thinking hook — persona selected for the current building session
+    QUEEN_PERSONA_SELECTED = "queen_persona_selected"
+
+    # Subagent reports (one-way progress updates from sub-agents)
+    SUBAGENT_REPORT = "subagent_report"
+
+    # Trigger lifecycle (queen-level triggers / heartbeats)
+    TRIGGER_AVAILABLE = "trigger_available"
+    TRIGGER_ACTIVATED = "trigger_activated"
+    TRIGGER_DEACTIVATED = "trigger_deactivated"
+    TRIGGER_FIRED = "trigger_fired"
+    TRIGGER_REMOVED = "trigger_removed"
+    TRIGGER_UPDATED = "trigger_updated"
 
 
 @dataclass
@@ -147,10 +174,11 @@ class AgentEvent:
     timestamp: datetime = field(default_factory=datetime.now)
     correlation_id: str | None = None  # For tracking related events
     graph_id: str | None = None  # Which graph emitted this event (multi-graph sessions)
+    run_id: str | None = None  # Unique ID per trigger() invocation — used for run dividers
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
-        return {
+        d = {
             "type": self.type.value,
             "stream_id": self.stream_id,
             "node_id": self.node_id,
@@ -160,6 +188,9 @@ class AgentEvent:
             "correlation_id": self.correlation_id,
             "graph_id": self.graph_id,
         }
+        if self.run_id is not None:
+            d["run_id"] = self.run_id
+        return d
 
 
 # Type for event handlers
@@ -228,6 +259,128 @@ class EventBus:
         self._semaphore = asyncio.Semaphore(max_concurrent_handlers)
         self._subscription_counter = 0
         self._lock = asyncio.Lock()
+        # Per-session persistent event log (always-on, survives restarts)
+        self._session_log: IO[str] | None = None
+        self._session_log_iteration_offset: int = 0
+        # Accumulator for client_output_delta snapshots — flushed on llm_turn_complete.
+        # Key: (stream_id, node_id, execution_id, iteration, inner_turn) → latest AgentEvent
+        self._pending_output_snapshots: dict[tuple, AgentEvent] = {}
+
+    def set_session_log(self, path: Path, *, iteration_offset: int = 0) -> None:
+        """Enable per-session event persistence to a JSONL file.
+
+        Called once when the queen starts so that all events survive server
+        restarts and can be replayed to reconstruct the frontend state.
+
+        ``iteration_offset`` is added to the ``iteration`` field in logged
+        events so that cold-resumed sessions produce monotonically increasing
+        iteration values — preventing frontend message ID collisions between
+        the original run and resumed runs.
+        """
+        if self._session_log is not None:
+            try:
+                self._session_log.close()
+            except Exception:
+                pass
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._session_log = open(path, "a", encoding="utf-8")  # noqa: SIM115
+        self._session_log_iteration_offset = iteration_offset
+        logger.info("Session event log → %s (iteration_offset=%d)", path, iteration_offset)
+
+    def close_session_log(self) -> None:
+        """Close the per-session event log file."""
+        # Flush any pending output snapshots before closing
+        self._flush_pending_snapshots()
+        if self._session_log is not None:
+            try:
+                self._session_log.close()
+            except Exception:
+                pass
+            self._session_log = None
+
+    # Event types that are high-frequency streaming deltas — accumulated rather
+    # than written individually to the session log.
+    _STREAMING_DELTA_TYPES = frozenset(
+        {
+            EventType.CLIENT_OUTPUT_DELTA,
+            EventType.LLM_TEXT_DELTA,
+            EventType.LLM_REASONING_DELTA,
+        }
+    )
+
+    def _write_session_log_event(self, event: AgentEvent) -> None:
+        """Write an event to the per-session log with streaming coalescing.
+
+        Streaming deltas (client_output_delta, llm_text_delta) are accumulated
+        in memory.  When llm_turn_complete fires, any pending snapshots for that
+        (stream_id, node_id, execution_id) are flushed as single consolidated
+        events before the turn-complete event itself is written.
+
+        Note: iteration offset is already applied in publish() before this is
+        called, so events here already have correct iteration values.
+        """
+        if self._session_log is None:
+            return
+
+        if event.type in self._STREAMING_DELTA_TYPES:
+            # Accumulate — keep only the latest event (which carries the full snapshot)
+            key = (
+                event.stream_id,
+                event.node_id,
+                event.execution_id,
+                event.data.get("iteration"),
+                event.data.get("inner_turn", 0),
+            )
+            self._pending_output_snapshots[key] = event
+            return
+
+        # On turn-complete, flush accumulated snapshots for this stream first
+        if event.type == EventType.LLM_TURN_COMPLETE:
+            self._flush_pending_snapshots(
+                stream_id=event.stream_id,
+                node_id=event.node_id,
+                execution_id=event.execution_id,
+            )
+
+        line = json.dumps(event.to_dict(), default=str)
+        self._session_log.write(line + "\n")
+        self._session_log.flush()
+
+    def _flush_pending_snapshots(
+        self,
+        stream_id: str | None = None,
+        node_id: str | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Flush accumulated streaming snapshots to the session log.
+
+        When called with filters, only matching entries are flushed.
+        When called without filters (e.g. on close), everything is flushed.
+        """
+        if self._session_log is None or not self._pending_output_snapshots:
+            return
+
+        to_flush: list[tuple] = []
+        for key, _evt in self._pending_output_snapshots.items():
+            if stream_id is not None:
+                k_stream, k_node, k_exec, _, _ = key
+                if k_stream != stream_id or k_node != node_id or k_exec != execution_id:
+                    continue
+            to_flush.append(key)
+
+        for key in to_flush:
+            evt = self._pending_output_snapshots.pop(key)
+            try:
+                line = json.dumps(evt.to_dict(), default=str)
+                self._session_log.write(line + "\n")
+            except Exception:
+                pass
+
+        if to_flush:
+            try:
+                self._session_log.flush()
+            except Exception:
+                pass
 
     def subscribe(
         self,
@@ -293,6 +446,19 @@ class EventBus:
         Args:
             event: Event to publish
         """
+        # Apply iteration offset at the source so ALL consumers (SSE subscribers,
+        # event history, session log) see the same monotonically increasing
+        # iteration values.  Without this, live SSE would use raw iterations
+        # while events.jsonl would use offset iterations, causing ID collisions
+        # on the frontend when replaying after cold resume.
+        if (
+            self._session_log_iteration_offset
+            and isinstance(event.data, dict)
+            and "iteration" in event.data
+        ):
+            offset = self._session_log_iteration_offset
+            event.data = {**event.data, "iteration": event.data["iteration"] + offset}
+
         # Add to history
         async with self._lock:
             self._event_history.append(event)
@@ -312,6 +478,15 @@ class EventBus:
                     _event_log_file.flush()
                 except Exception:
                     pass  # never break event delivery
+
+        # Per-session persistent log (always-on when set_session_log was called).
+        # Streaming deltas are coalesced: client_output_delta and llm_text_delta
+        # are accumulated and flushed as a single snapshot event on llm_turn_complete.
+        if self._session_log is not None:
+            try:
+                self._write_session_log_event(event)
+            except Exception:
+                pass  # never break event delivery
 
         # Find matching subscriptions
         matching_handlers: list[EventHandler] = []
@@ -373,6 +548,7 @@ class EventBus:
         execution_id: str,
         input_data: dict[str, Any] | None = None,
         correlation_id: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Emit execution started event."""
         await self.publish(
@@ -382,6 +558,7 @@ class EventBus:
                 execution_id=execution_id,
                 data={"input": input_data or {}},
                 correlation_id=correlation_id,
+                run_id=run_id,
             )
         )
 
@@ -391,6 +568,7 @@ class EventBus:
         execution_id: str,
         output: dict[str, Any] | None = None,
         correlation_id: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Emit execution completed event."""
         await self.publish(
@@ -400,6 +578,7 @@ class EventBus:
                 execution_id=execution_id,
                 data={"output": output or {}},
                 correlation_id=correlation_id,
+                run_id=run_id,
             )
         )
 
@@ -409,6 +588,7 @@ class EventBus:
         execution_id: str,
         error: str,
         correlation_id: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         """Emit execution failed event."""
         await self.publish(
@@ -418,6 +598,7 @@ class EventBus:
                 execution_id=execution_id,
                 data={"error": error},
                 correlation_id=correlation_id,
+                run_id=run_id,
             )
         )
 
@@ -509,15 +690,19 @@ class EventBus:
         node_id: str,
         iteration: int,
         execution_id: str | None = None,
+        extra_data: dict[str, Any] | None = None,
     ) -> None:
         """Emit node loop iteration event."""
+        data: dict[str, Any] = {"iteration": iteration}
+        if extra_data:
+            data.update(extra_data)
         await self.publish(
             AgentEvent(
                 type=EventType.NODE_LOOP_ITERATION,
                 stream_id=stream_id,
                 node_id=node_id,
                 execution_id=execution_id,
-                data={"iteration": iteration},
+                data=data,
             )
         )
 
@@ -566,6 +751,7 @@ class EventBus:
         content: str,
         snapshot: str,
         execution_id: str | None = None,
+        inner_turn: int = 0,
     ) -> None:
         """Emit LLM text delta event."""
         await self.publish(
@@ -574,7 +760,7 @@ class EventBus:
                 stream_id=stream_id,
                 node_id=node_id,
                 execution_id=execution_id,
-                data={"content": content, "snapshot": snapshot},
+                data={"content": content, "snapshot": snapshot, "inner_turn": inner_turn},
             )
         )
 
@@ -604,6 +790,7 @@ class EventBus:
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_tokens: int = 0,
         execution_id: str | None = None,
         iteration: int | None = None,
     ) -> None:
@@ -613,6 +800,7 @@ class EventBus:
             "model": model,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "cached_tokens": cached_tokens,
         }
         if iteration is not None:
             data["iteration"] = iteration
@@ -688,9 +876,10 @@ class EventBus:
         snapshot: str,
         execution_id: str | None = None,
         iteration: int | None = None,
+        inner_turn: int = 0,
     ) -> None:
         """Emit client output delta event (client_facing=True nodes)."""
-        data: dict = {"content": content, "snapshot": snapshot}
+        data: dict = {"content": content, "snapshot": snapshot, "inner_turn": inner_turn}
         if iteration is not None:
             data["iteration"] = iteration
         await self.publish(
@@ -709,15 +898,31 @@ class EventBus:
         node_id: str,
         prompt: str = "",
         execution_id: str | None = None,
+        options: list[str] | None = None,
+        questions: list[dict] | None = None,
     ) -> None:
-        """Emit client input requested event (client_facing=True nodes)."""
+        """Emit client input requested event (client_facing=True nodes).
+
+        Args:
+            options: Optional predefined choices for the user (1-3 items).
+                     The frontend appends an "Other" free-text option
+                     automatically.
+            questions: Optional list of question dicts for multi-question
+                       batches (from ask_user_multiple). Each dict has id,
+                       prompt, and optional options.
+        """
+        data: dict[str, Any] = {"prompt": prompt}
+        if options:
+            data["options"] = options
+        if questions:
+            data["questions"] = questions
         await self.publish(
             AgentEvent(
                 type=EventType.CLIENT_INPUT_REQUESTED,
                 stream_id=stream_id,
                 node_id=node_id,
                 execution_id=execution_id,
-                data={"prompt": prompt},
+                data=data,
             )
         )
 
@@ -955,7 +1160,7 @@ class EventBus:
         context: str = "",
         execution_id: str | None = None,
     ) -> None:
-        """Emit escalation requested event (agent wants hive_coder)."""
+        """Emit escalation requested event (agent wants queen)."""
         await self.publish(
             AgentEvent(
                 type=EventType.ESCALATION_REQUESTED,
@@ -973,7 +1178,7 @@ class EventBus:
         ticket: dict,
         execution_id: str | None = None,
     ) -> None:
-        """Emitted by health judge when worker shows a degradation pattern."""
+        """Emitted when worker shows a degradation pattern."""
         await self.publish(
             AgentEvent(
                 type=EventType.WORKER_ESCALATION_TICKET,
@@ -1008,6 +1213,30 @@ class EventBus:
                     "severity": severity,
                     "queen_graph_id": queen_graph_id,
                     "queen_stream_id": queen_stream_id,
+                },
+            )
+        )
+
+    async def emit_subagent_report(
+        self,
+        stream_id: str,
+        node_id: str,
+        subagent_id: str,
+        message: str,
+        data: dict[str, Any] | None = None,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit a one-way progress report from a sub-agent."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.SUBAGENT_REPORT,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={
+                    "subagent_id": subagent_id,
+                    "message": message,
+                    "data": data,
                 },
             )
         )

@@ -6,6 +6,7 @@ helper functions.
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,11 @@ from framework.graph.edge import DEFAULT_MAX_TOKENS
 
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
 
+# Hive LLM router endpoint (Anthropic-compatible).
+# litellm's Anthropic handler appends /v1/messages, so this is just the base host.
+HIVE_LLM_ENDPOINT = "https://api.adenhq.com"
+logger = logging.getLogger(__name__)
+
 
 def get_hive_config() -> dict[str, Any]:
     """Load hive configuration from ~/.hive/configuration.json."""
@@ -27,7 +33,12 @@ def get_hive_config() -> dict[str, Any]:
     try:
         with open(HIVE_CONFIG_FILE, encoding="utf-8-sig") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(
+            "Failed to load Hive config %s: %s",
+            HIVE_CONFIG_FILE,
+            e,
+        )
         return {}
 
 
@@ -47,6 +58,14 @@ def get_preferred_model() -> str:
 def get_max_tokens() -> int:
     """Return the configured max_tokens, falling back to DEFAULT_MAX_TOKENS."""
     return get_hive_config().get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
+
+
+DEFAULT_MAX_CONTEXT_TOKENS = 32_000
+
+
+def get_max_context_tokens() -> int:
+    """Return the configured max_context_tokens, falling back to DEFAULT_MAX_CONTEXT_TOKENS."""
+    return get_hive_config().get("llm", {}).get("max_context_tokens", DEFAULT_MAX_CONTEXT_TOKENS)
 
 
 def get_api_key() -> str | None:
@@ -83,11 +102,35 @@ def get_api_key() -> str | None:
         except ImportError:
             pass
 
+    # Kimi Code subscription: read API key from ~/.kimi/config.toml
+    if llm.get("use_kimi_code_subscription"):
+        try:
+            from framework.runner.runner import get_kimi_code_token
+
+            token = get_kimi_code_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
         return os.environ.get(api_key_env_var)
     return None
+
+
+def get_gcu_enabled() -> bool:
+    """Return whether GCU (browser automation) is enabled in user config."""
+    return get_hive_config().get("gcu_enabled", True)
+
+
+def get_gcu_viewport_scale() -> float:
+    """Return GCU viewport scale factor (0.1-1.0), default 0.8."""
+    scale = get_hive_config().get("gcu_viewport_scale", 0.8)
+    if isinstance(scale, (int, float)) and 0.1 <= scale <= 1.0:
+        return float(scale)
+    return 0.8
 
 
 def get_api_base() -> str | None:
@@ -96,6 +139,9 @@ def get_api_base() -> str | None:
     if llm.get("use_codex_subscription"):
         # Codex subscription routes through the ChatGPT backend, not api.openai.com.
         return "https://chatgpt.com/backend-api/codex"
+    if llm.get("use_kimi_code_subscription"):
+        # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
+        return "https://api.kimi.com/coding"
     return llm.get("api_base")
 
 
@@ -152,6 +198,7 @@ class RuntimeConfig:
     model: str = field(default_factory=get_preferred_model)
     temperature: float = 0.7
     max_tokens: int = field(default_factory=get_max_tokens)
+    max_context_tokens: int = field(default_factory=get_max_context_tokens)
     api_key: str | None = field(default_factory=get_api_key)
     api_base: str | None = field(default_factory=get_api_base)
     extra_kwargs: dict[str, Any] = field(default_factory=get_llm_extra_kwargs)

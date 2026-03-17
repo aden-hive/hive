@@ -27,7 +27,7 @@
   <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
   <img src="https://img.shields.io/badge/Headless-Development-purple?style=flat-square" alt="Headless" />
   <img src="https://img.shields.io/badge/Human--in--the--Loop-orange?style=flat-square" alt="HITL" />
-  <img src="https://img.shields.io/badge/Production--Ready-red?style=flat-square" alt="Production" />
+  <img src="https://img.shields.io/badge/Browser-Use-red?style=flat-square" alt="Browser Use" />
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
@@ -37,20 +37,20 @@
 
 ## Overview
 
-Build autonomous, reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
+Generate a swarm of worker agents with a coding agent(queen) that control them. Define your goal through conversation with hive queen, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, browser use, credential management, and real-time monitoring give you control without sacrificing adaptability.
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
-https://github.com/user-attachments/assets/846c0cc7-ffd6-47fa-b4b7-495494857a55
+[![Hive Demo](https://img.youtube.com/vi/XDOG9fOaLjU/maxresdefault.jpg)](https://www.youtube.com/watch?v=XDOG9fOaLjU)
 
 ## Who Is Hive For?
 
-Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
+Hive is designed for developers and teams who want to build many **autonomous AI agents** fast without manually wiring complex workflows.
 
 Hive is a good fit if you:
 
 - Want AI agents that **execute real business processes**, not demos
-- Prefer **goal-driven development** over hardcoded workflows
+- Need **fast or high volume agent execution** over open workflow
 - Need **self-healing and adaptive agents** that improve over time
 - Require **human-in-the-loop control**, observability, and cost limits
 - Plan to run agents in **production environments**
@@ -81,9 +81,10 @@ Use Hive when you need:
 ### Prerequisites
 
 - Python 3.11+ for agent development
-- Claude Code, Codex CLI, or Cursor for utilizing agent skills
+- An LLM provider that powers the agents
+- **ripgrep (optional, recommended on Windows):** The `search_files` tool uses ripgrep for faster file search. If not installed, a Python fallback is used. On Windows: `winget install BurntSushi.ripgrep` or `scoop install ripgrep`
 
-> **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
+> **Windows Users:** Native Windows is supported via `quickstart.ps1` and `hive.ps1`. Run these in PowerShell 5.1+. WSL is also an option but not required.
 
 ### Installation
 
@@ -110,72 +111,36 @@ This sets up:
 - **LLM provider** - Interactive default model configuration
 - All required Python dependencies with `uv`
 
+- Finally, it will open the Hive interface in your browser
+
+> **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
+
 ### Build Your First Agent
 
-```bash
-# Build an agent using Claude Code
-claude> /hive
+Type the agent you want to build in the home input box. The queen is going to ask you questions and work out a solution with you.
 
-# Test your agent
-claude> /hive-debugger
+<img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/1ce19141-a78b-46f5-8d64-dbf987e048f4" />
 
-# (at separate terminal) Launch the interactive dashboard
-hive tui
+### Use Template Agents
 
-# Or run directly
-hive run exports/your_agent_name --input '{"key": "value"}'
-```
+Click "Try a sample agent" and check the templates. You can run a template directly or choose to build your version on top of the existing template.
 
-## Coding Agent Support
+### Run Agents
 
-### Codex CLI
+Now you can run an agent by selecting the agent (either an existing agent or example agent). You can click the Run button on the top left, or talk to the queen agent and it can run the agent for you.
 
-Hive includes native support for [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
-
-1. **Config:** `.codex/config.toml` with `agent-builder` MCP server (tracked in git)
-2. **Skills:** `.agents/skills/` symlinks to Hive skills (tracked in git)
-3. **Launch:** Run `codex` in the repo root, then type `use hive`
-
-Example:
-
-```
-codex> use hive
-```
-
-### Opencode
-
-Hive includes native support for [Opencode](https://github.com/opencode-ai/opencode).
-
-1. **Setup:** Run the quickstart script
-2. **Launch:** Open Opencode in the project root.
-3. **Activate:** Type `/hive` in the chat to switch to the Hive Agent.
-4. **Verify:** Ask the agent _"List your tools"_ to confirm the connection.
-
-The agent has access to all Hive skills and can scaffold agents, add tools, and debug workflows directly from the chat.
-
-**[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
-
-### Antigravity IDE Support
-
-Skills and MCP servers are also available in [Antigravity IDE](https://antigravity.google/) (Google's AI-powered IDE). **Easiest:** open a terminal in the hive repo folder and run (use `./` — the script is inside the repo):
-
-```bash
-./scripts/setup-antigravity-mcp.sh
-```
-
-**Important:** Always restart/refresh Antigravity IDE after running the setup script—MCP servers only load on startup. After restart, **agent-builder** and **tools** MCP servers should connect. Skills are under `.agent/skills/` (symlinks to `.claude/skills/`). See [docs/antigravity-setup.md](docs/antigravity-setup.md) for manual setup and troubleshooting.
+<img width="2549" height="1174" alt="Screenshot 2026-03-12 at 9 27 36 PM" src="https://github.com/user-attachments/assets/7c7d30fa-9ceb-4c23-95af-b1caa405547d" />
 
 ## Features
 
-- **[Goal-Driven Development](docs/key_concepts/goals_outcome.md)** - Define objectives in natural language; the coding agent generates the agent graph and connection code to achieve them
+- **Browser-Use** - Control the browser on your computer to achieve hard tasks
+- **Parallel Execution** - Execute the generated graph in parallel. This way you can have multiple agents completing the jobs for you
+- **[Goal-Driven Generation](docs/key_concepts/goals_outcome.md)** - Define objectives in natural language; the coding agent generates the agent graph and connection code to achieve them
 - **[Adaptiveness](docs/key_concepts/evolution.md)** - Framework captures failures, calibrates according to the objectives, and evolves the agent graph
 - **[Dynamic Node Connections](docs/key_concepts/graph.md)** - No predefined edges; connection code is generated by any capable LLM based on your goals
 - **SDK-Wrapped Nodes** - Every node gets shared memory, local RLM memory, monitoring, tools, and LLM access out of the box
 - **[Human-in-the-Loop](docs/key_concepts/graph.md#human-in-the-loop)** - Intervention nodes that pause execution for human input with configurable timeouts and escalation
 - **Real-time Observability** - WebSocket streaming for live monitoring of agent execution, decisions, and node-to-node communication
-- **Interactive TUI Dashboard** - Terminal-based dashboard with live graph view, event log, and chat interface for agent interaction
-- **Cost & Budget Control** - Set spending limits, throttles, and automatic model degradation policies
-- **Production-Ready** - Self-hostable, built for scale and reliability
 
 ## Integration
 
@@ -240,35 +205,10 @@ flowchart LR
 4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
 5. **[Adaptiveness](docs/key_concepts/evolution.md)** → On failure, the system evolves the graph and redeploys automatically
 
-## Run Agents
-
-The `hive` CLI is the primary interface for running agents.
-
-```bash
-# Browse and run agents interactively (Recommended)
-hive tui
-
-# Run a specific agent directly
-hive run exports/my_agent --input '{"task": "Your input here"}'
-
-# Run a specific agent with the TUI dashboard
-hive run exports/my_agent --tui
-
-# Interactive REPL
-hive shell
-```
-
-The TUI scans both `exports/` and `examples/templates/` for available agents.
-
-> **Using Python directly (alternative):** You can also run agents with `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
-
-See [environment-setup.md](docs/environment-setup.md) for complete setup instructions.
-
 ## Documentation
 
 - **[Developer Guide](docs/developer-guide.md)** - Comprehensive guide for developers
 - [Getting Started](docs/getting-started.md) - Quick setup instructions
-- [TUI Guide](docs/tui-selection-guide.md) - Interactive dashboard usage
 - [Configuration Guide](docs/configuration.md) - All configuration options
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
 
@@ -435,7 +375,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 **Q: What LLM providers does Hive support?**
 
-Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
+Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name. We recommend using Claude, GLM and Gemini as they have the best performance.
 
 **Q: Can I use Hive with local AI models like Ollama?**
 
@@ -448,10 +388,6 @@ Hive generates your entire agent system from natural language goals using a codi
 **Q: Is Hive open-source?**
 
 Yes, Hive is fully open-source under the Apache License 2.0. We actively encourage community contributions and collaboration.
-
-**Q: Can Hive handle complex, production-scale use cases?**
-
-Yes. Hive is explicitly designed for production environments with features like automatic failure recovery, real-time observability, cost controls, and horizontal scaling support. The framework handles both simple automations and complex multi-agent workflows.
 
 **Q: Does Hive support human-in-the-loop workflows?**
 
@@ -477,13 +413,15 @@ Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API refer
 
 Contributions are welcome! Fork the repository, create your feature branch, implement your changes, and submit a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
-**Q: When will my team start seeing results from Aden's adaptive agents?**
+## Star History
 
-Aden's adaptation loop begins working from the first execution. When an agent fails, the framework captures the failure data, helping developers evolve the agent graph through the coding agent. How quickly this translates to measurable results depends on the complexity of your use case, the quality of your goal definitions, and the volume of executions generating feedback.
-
-**Q: How does Hive compare to other agent frameworks?**
-
-Hive focuses on generating agents that run real business processes, rather than generic agents. This vision emphasizes outcome-driven design, adaptability, and an easy-to-use set of tools and integrations.
+<a href="https://star-history.com/#aden-hive/hive&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=aden-hive/hive&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=aden-hive/hive&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=aden-hive/hive&type=Date" />
+ </picture>
+</a>
 
 ---
 

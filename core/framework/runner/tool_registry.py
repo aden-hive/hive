@@ -61,6 +61,7 @@ class ToolRegistry:
         self._mcp_tool_names: set[str] = set()  # Tool names registered from MCP
         self._mcp_cred_snapshot: set[str] = set()  # Credential filenames at MCP load time
         self._mcp_aden_key_snapshot: str | None = None  # ADEN_API_KEY value at MCP load time
+        self._mcp_server_tools: dict[str, set[str]] = {}  # server name -> tool names
 
     def register(
         self,
@@ -294,6 +295,10 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return name in self._tools
 
+    def get_server_tool_names(self, server_name: str) -> set[str]:
+        """Return tool names registered from a specific MCP server."""
+        return set(self._mcp_server_tools.get(server_name, set()))
+
     def set_session_context(self, **context) -> None:
         """
         Set session context to auto-inject into tool calls.
@@ -321,6 +326,103 @@ class ToolRegistry:
         """Restore execution context to its previous state."""
         _execution_context.reset(token)
 
+    @staticmethod
+    def resolve_mcp_stdio_config(server_config: dict[str, Any], base_dir: Path) -> dict[str, Any]:
+        """Resolve cwd and script paths for MCP stdio config (Windows compatibility).
+
+        Use this when building MCPServerConfig from a config file (e.g. in
+        list_agent_tools, discover_mcp_tools) so hive-tools and other servers
+        work on Windows. Call with base_dir = directory containing the config.
+        """
+        registry = ToolRegistry()
+        return registry._resolve_mcp_server_config(server_config, base_dir)
+
+    def _resolve_mcp_server_config(
+        self, server_config: dict[str, Any], base_dir: Path
+    ) -> dict[str, Any]:
+        """Resolve cwd and script paths for MCP stdio servers (Windows compatibility).
+
+        On Windows, passing cwd to subprocess can cause WinError 267. We use cwd=None
+        and absolute script paths when the server runs a .py script from the tools dir.
+        If the resolved cwd doesn't exist (e.g. config from ~/.hive/agents/), fall back
+        to Path.cwd() / "tools".
+        """
+        config = dict(server_config)
+        if config.get("transport") != "stdio":
+            return config
+
+        cwd = config.get("cwd")
+        args = list(config.get("args", []))
+        if not cwd and not args:
+            return config
+
+        # Resolve cwd relative to base_dir
+        resolved_cwd: Path | None = None
+        if cwd:
+            if Path(cwd).is_absolute():
+                resolved_cwd = Path(cwd)
+            else:
+                resolved_cwd = (base_dir / cwd).resolve()
+
+        # Find .py script in args (e.g. coder_tools_server.py, files_server.py)
+        script_name = None
+        for i, arg in enumerate(args):
+            if isinstance(arg, str) and arg.endswith(".py"):
+                script_name = arg
+                script_idx = i
+                break
+
+        if resolved_cwd is None:
+            return config
+
+        # If resolved cwd doesn't exist or (when we have a script) doesn't contain it,
+        # try fallback
+        tools_fallback = Path.cwd() / "tools"
+        need_fallback = not resolved_cwd.is_dir()
+        if script_name and not need_fallback:
+            need_fallback = not (resolved_cwd / script_name).exists()
+        if need_fallback:
+            fallback_ok = tools_fallback.is_dir()
+            if script_name:
+                fallback_ok = fallback_ok and (tools_fallback / script_name).exists()
+            else:
+                # No script (e.g. GCU); just need tools dir to exist
+                pass
+            if fallback_ok:
+                resolved_cwd = tools_fallback
+                logger.debug(
+                    "MCP server '%s': using fallback tools dir %s",
+                    config.get("name", "?"),
+                    resolved_cwd,
+                )
+            else:
+                config["cwd"] = str(resolved_cwd)
+                return config
+
+        if not script_name:
+            # No .py script (e.g. GCU uses -m gcu.server); just set cwd
+            config["cwd"] = str(resolved_cwd)
+            return config
+
+        # For coder_tools_server, inject --project-root so writes go to the expected workspace
+        if script_name and "coder_tools" in script_name:
+            project_root = str(resolved_cwd.parent.resolve())
+            args = list(args)
+            if "--project-root" not in args:
+                args.extend(["--project-root", project_root])
+            config["args"] = args
+
+        if os.name == "nt":
+            # Windows: cwd=None avoids WinError 267; use absolute script path
+            config["cwd"] = None
+            abs_script = str((resolved_cwd / script_name).resolve())
+            args = list(config["args"])
+            args[script_idx] = abs_script
+            config["args"] = args
+        else:
+            config["cwd"] = str(resolved_cwd)
+        return config
+
     def load_mcp_config(self, config_path: Path) -> None:
         """
         Load and register MCP servers from a config file.
@@ -335,7 +437,7 @@ class ToolRegistry:
         self._mcp_config_path = Path(config_path)
 
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 config = json.load(f)
         except Exception as e:
             logger.warning(f"Failed to load MCP config from {config_path}: {e}")
@@ -352,14 +454,24 @@ class ToolRegistry:
             server_list = [{"name": name, **cfg} for name, cfg in config.items()]
 
         for server_config in server_list:
-            cwd = server_config.get("cwd")
-            if cwd and not Path(cwd).is_absolute():
-                server_config["cwd"] = str((base_dir / cwd).resolve())
-            try:
-                self.register_mcp_server(server_config)
-            except Exception as e:
-                name = server_config.get("name", "unknown")
-                logger.warning(f"Failed to register MCP server '{name}': {e}")
+            server_config = self._resolve_mcp_server_config(server_config, base_dir)
+            for _attempt in range(2):
+                try:
+                    self.register_mcp_server(server_config)
+                    break
+                except Exception as e:
+                    name = server_config.get("name", "unknown")
+                    if _attempt == 0:
+                        logger.warning(
+                            "MCP server '%s' failed to register, retrying in 2s: %s",
+                            name,
+                            e,
+                        )
+                        import time
+
+                        time.sleep(2)
+                    else:
+                        logger.warning("MCP server '%s' failed after retry: %s", name, e)
 
         # Snapshot credential files and ADEN_API_KEY so we can detect mid-session changes
         self._mcp_cred_snapshot = self._snapshot_credentials()
@@ -411,6 +523,9 @@ class ToolRegistry:
             self._mcp_clients.append(client)
 
             # Register each tool
+            server_name = server_config["name"]
+            if server_name not in self._mcp_server_tools:
+                self._mcp_server_tools[server_name] = set()
             count = 0
             for mcp_tool in client.list_tools():
                 # Convert MCP tool to framework Tool (strips context params from LLM schema)
@@ -464,6 +579,7 @@ class ToolRegistry:
                     make_mcp_executor(client, mcp_tool.name, self, tool_params),
                 )
                 self._mcp_tool_names.add(mcp_tool.name)
+                self._mcp_server_tools[server_name].add(mcp_tool.name)
                 count += 1
 
             logger.info(f"Registered {count} tools from MCP server '{config.name}'")
@@ -471,6 +587,11 @@ class ToolRegistry:
 
         except Exception as e:
             logger.error(f"Failed to register MCP server: {e}")
+            if "Connection closed" in str(e) and os.name == "nt":
+                logger.debug(
+                    "On Windows, check that the MCP subprocess starts (e.g. uv in PATH, "
+                    "script path correct). Worker config uses base_dir = mcp_servers.json parent."
+                )
             return 0
 
     def _convert_mcp_tool_to_framework_tool(self, mcp_tool: Any) -> Tool:

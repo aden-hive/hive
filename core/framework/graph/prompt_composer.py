@@ -140,14 +140,18 @@ def compose_system_prompt(
     focus_prompt: str | None,
     narrative: str | None = None,
     accounts_prompt: str | None = None,
+    skills_catalog_prompt: str | None = None,
+    protocols_prompt: str | None = None,
 ) -> str:
-    """Compose the three-layer system prompt.
+    """Compose the multi-layer system prompt.
 
     Args:
         identity_prompt: Layer 1 — static agent identity (from GraphSpec).
         focus_prompt: Layer 3 — per-node focus directive (from NodeSpec.system_prompt).
         narrative: Layer 2 — auto-generated from conversation state.
         accounts_prompt: Connected accounts block (sits between identity and narrative).
+        skills_catalog_prompt: Available skills catalog XML (Agent Skills standard).
+        protocols_prompt: Default skill operational protocols section.
 
     Returns:
         Composed system prompt with all layers present, plus current datetime.
@@ -161,6 +165,14 @@ def compose_system_prompt(
     # Accounts (semi-static, deployment-specific)
     if accounts_prompt:
         parts.append(f"\n{accounts_prompt}")
+
+    # Skills catalog (discovered skills available for activation)
+    if skills_catalog_prompt:
+        parts.append(f"\n{skills_catalog_prompt}")
+
+    # Operational protocols (default skill behavioral guidance)
+    if protocols_prompt:
+        parts.append(f"\n{protocols_prompt}")
 
     # Layer 2: Narrative (what's happened so far)
     if narrative:
@@ -280,7 +292,7 @@ def build_transition_marker(
                 ]
                 if file_lines:
                     sections.append(
-                        "\nData files (use load_data to access):\n" + "\n".join(file_lines)
+                        "\nData files (use read_file to access):\n" + "\n".join(file_lines)
                     )
 
     # Agent working memory

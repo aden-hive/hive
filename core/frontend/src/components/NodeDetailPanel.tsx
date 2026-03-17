@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Cpu, Zap, Clock, RotateCcw, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Copy, Check, Terminal, Wrench, BookOpen, GitBranch, Bot } from "lucide-react";
-import type { GraphNode, NodeStatus } from "./AgentGraph";
+import type { GraphNode, NodeStatus } from "./graph-types";
 import type { NodeSpec, ToolInfo, NodeCriteria } from "../api/types";
 import { graphsApi } from "../api/graphs";
 import { logsApi } from "../api/logs";
@@ -20,9 +20,19 @@ interface ToolCredential {
   value?: string;
 }
 
+export interface SubagentReport {
+  subagent_id: string;
+  message: string;
+  data?: Record<string, unknown>;
+  timestamp: string;
+  status?: "running" | "complete" | "error";
+}
+
 interface NodeDetailPanelProps {
   node: GraphNode | null;
   nodeSpec?: NodeSpec | null;
+  allNodeSpecs?: NodeSpec[];
+  subagentReports?: SubagentReport[];
   sessionId?: string;
   graphId?: string;
   workerSessionId?: string | null;
@@ -195,25 +205,111 @@ function SystemPromptTab({ systemPrompt }: { systemPrompt?: string }) {
   );
 }
 
-function SubagentsTab() {
+function SubagentStatusBadge({ status }: { status?: "running" | "complete" | "error" }) {
+  if (!status) return null;
+  if (status === "running") {
+    return (
+      <span className="ml-auto flex items-center gap-1 text-[10px] font-medium flex-shrink-0" style={{ color: "hsl(45,95%,58%)" }}>
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: "hsl(45,95%,58%)" }} />
+          <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ backgroundColor: "hsl(45,95%,58%)" }} />
+        </span>
+        Running
+      </span>
+    );
+  }
+  if (status === "complete") {
+    return (
+      <span className="ml-auto flex items-center gap-1 text-[10px] font-medium flex-shrink-0" style={{ color: "hsl(43,70%,45%)" }}>
+        <CheckCircle2 className="w-3 h-3" />
+        Complete
+      </span>
+    );
+  }
   return (
-    <div className="flex-1 flex items-center justify-center">
-      <p className="text-xs text-muted-foreground/60 italic text-center">No subagents assigned to this node.</p>
+    <span className="ml-auto flex items-center gap-1 text-[10px] font-medium flex-shrink-0" style={{ color: "hsl(0,65%,55%)" }}>
+      <AlertCircle className="w-3 h-3" />
+      Failed
+    </span>
+  );
+}
+
+function SubagentsTab({ subAgentIds, allNodeSpecs, subagentReports }: { subAgentIds: string[]; allNodeSpecs: NodeSpec[]; subagentReports: SubagentReport[] }) {
+  if (subAgentIds.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <p className="text-xs text-muted-foreground/60 italic text-center">No subagents assigned to this node.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Sub-agents ({subAgentIds.length})</p>
+      {subAgentIds.map(saId => {
+        const spec = allNodeSpecs.find(n => n.id === saId);
+        const reports = subagentReports.filter(r => r.subagent_id === saId);
+        // Derive status from latest report that has a status field
+        const latestStatus = [...reports].reverse().find(r => r.status)?.status;
+        // Progress messages are reports without a status field (from report_to_parent)
+        const progressReports = reports.filter(r => !r.status);
+
+        return (
+          <div key={saId} className="rounded-xl border border-border/20 overflow-hidden">
+            <div className="p-3 bg-muted/30">
+              <div className="flex items-center gap-2 mb-1">
+                <Bot className="w-3.5 h-3.5 text-primary/70 flex-shrink-0" />
+                <span className="text-xs font-medium text-foreground truncate">{spec?.name || saId}</span>
+                <SubagentStatusBadge status={latestStatus} />
+              </div>
+              {spec?.description && (
+                <p className="text-[11px] text-muted-foreground leading-relaxed mt-1">{spec.description}</p>
+              )}
+            </div>
+
+            {/* Static info: tools + output keys */}
+            <div className="px-3 py-2 border-t border-border/15 bg-muted/15">
+              {spec?.tools && spec.tools.length > 0 && (
+                <div className="mb-1.5">
+                  <span className="text-[10px] text-muted-foreground font-medium">Tools: </span>
+                  <span className="text-[10px] text-foreground/70">{spec.tools.join(", ")}</span>
+                </div>
+              )}
+              {spec?.output_keys && spec.output_keys.length > 0 && (
+                <div>
+                  <span className="text-[10px] text-muted-foreground font-medium">Outputs: </span>
+                  <span className="text-[10px] text-foreground/70 font-mono">{spec.output_keys.join(", ")}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Live progress reports (from report_to_parent) */}
+            {progressReports.length > 0 && (
+              <div className="px-3 py-2 border-t border-border/15 bg-background/60">
+                <p className="text-[10px] text-muted-foreground font-medium mb-1">Reports ({progressReports.length})</p>
+                {progressReports.map((r, i) => (
+                  <div key={i} className="text-[10.5px] text-foreground/70 leading-relaxed py-0.5">{r.message}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-type Tab = "overview" | "tools" | "logs" | "prompt" | "subagents";
+type Tab = "overview" | "breakdown" | "tools" | "logs" | "subagents";
 
 const tabs: { id: Tab; label: string; Icon: React.FC<{ className?: string }> }[] = [
   { id: "overview", label: "Overview", Icon: ({ className }) => <GitBranch className={className} /> },
+  { id: "breakdown", label: "Breakdown", Icon: ({ className }) => <BookOpen className={className} /> },
   { id: "tools", label: "Tools", Icon: ({ className }) => <Wrench className={className} /> },
   { id: "logs", label: "Logs", Icon: ({ className }) => <Terminal className={className} /> },
-  { id: "prompt", label: "Prompt", Icon: ({ className }) => <BookOpen className={className} /> },
   { id: "subagents", label: "Subagents", Icon: ({ className }) => <Bot className={className} /> },
 ];
 
-export default function NodeDetailPanel({ node, nodeSpec, sessionId, graphId, workerSessionId, nodeLogs, actionPlan, onClose }: NodeDetailPanelProps) {
+export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagentReports, sessionId, graphId, workerSessionId, nodeLogs, actionPlan, onClose }: NodeDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [realTools, setRealTools] = useState<ToolInfo[] | null>(null);
   const [realCriteria, setRealCriteria] = useState<NodeCriteria | null>(null);
@@ -235,7 +331,7 @@ export default function NodeDetailPanel({ node, nodeSpec, sessionId, graphId, wo
 
   // Fetch real criteria when Overview tab is active and session is loaded
   useEffect(() => {
-    if (activeTab === "overview" && sessionId && graphId && node) {
+    if (activeTab === "breakdown" && sessionId && graphId && node) {
       graphsApi.nodeCriteria(sessionId, graphId, node.id, workerSessionId || undefined)
         .then(r => setRealCriteria(r))
         .catch(() => setRealCriteria(null));
@@ -295,7 +391,7 @@ export default function NodeDetailPanel({ node, nodeSpec, sessionId, graphId, wo
 
       {/* Tab bar */}
       <div className="flex border-b border-border/30 flex-shrink-0 px-2 pt-1 overflow-x-auto scrollbar-hide">
-        {tabs.map(tab => (
+        {tabs.filter(t => t.id !== "subagents" || (nodeSpec?.sub_agents && nodeSpec.sub_agents.length > 0)).map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
@@ -314,6 +410,10 @@ export default function NodeDetailPanel({ node, nodeSpec, sessionId, graphId, wo
       {/* Tab content */}
       <div className="flex-1 overflow-auto px-4 py-4 flex flex-col gap-3">
         {activeTab === "overview" && (
+          <SystemPromptTab systemPrompt={nodeSpec?.system_prompt} />
+        )}
+
+        {activeTab === "breakdown" && (
           <>
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Action Plan</p>
             {actionPlan ? (
@@ -393,12 +493,12 @@ export default function NodeDetailPanel({ node, nodeSpec, sessionId, graphId, wo
           <LogsTab nodeId={node.id} isActive={isActive} sessionId={sessionId} graphId={graphId} workerSessionId={workerSessionId} nodeLogs={nodeLogs} />
         )}
 
-        {activeTab === "prompt" && (
-          <SystemPromptTab systemPrompt={nodeSpec?.system_prompt} />
-        )}
-
-        {activeTab === "subagents" && (
-          <SubagentsTab />
+        {activeTab === "subagents" && nodeSpec?.sub_agents && (
+          <SubagentsTab
+            subAgentIds={nodeSpec.sub_agents}
+            allNodeSpecs={allNodeSpecs || []}
+            subagentReports={subagentReports || []}
+          />
         )}
       </div>
     </div>

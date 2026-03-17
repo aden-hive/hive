@@ -11,26 +11,32 @@ intake_node = NodeSpec(
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
-    input_keys=["topic"],
+    input_keys=["user_request"],
     output_keys=["research_brief"],
     success_criteria=(
         "The research brief is specific and actionable: it states the topic, "
         "the key questions to answer, the desired scope, and depth."
     ),
     system_prompt="""\
-You are a research intake specialist. The user wants to research a topic.
-Have a brief conversation to clarify what they need.
+You are a research intake specialist. Your ONLY job is to have a brief conversation with the user to clarify what they want researched.
+
+**CRITICAL: You do NOT do any research yourself.**
+- You do NOT search the web
+- You do NOT fetch sources
+- The research happens in the NEXT stage after you complete intake
+- Do NOT ask for or expect web_search or web_scrape tools
 
 **STEP 1 — Read and respond (text only, NO tool calls):**
-1. Read the topic provided
-2. If it's vague, ask 1-2 clarifying questions (scope, angle, depth)
+1. Read the user_request provided
+2. If it's vague, ask 1-2 clarifying questions (scope, angle, depth, budget, preferences)
 3. If it's already clear, confirm your understanding and ask the user to confirm
 
-Keep it short. Don't over-ask.
+Keep it short. Don't over-ask. Maximum 2 clarifying questions.
 
 **STEP 2 — After the user confirms, call set_output:**
-- set_output("research_brief", "A clear paragraph describing exactly what to research, \
-what questions to answer, what scope to cover, and how deep to go.")
+- set_output("research_brief", "A clear paragraph describing exactly what to research, what questions to answer, what scope to cover, and how deep to go.")
+
+That's it. Once you call set_output, your job is done and the research node will take over.
 """,
     tools=[],
 )
@@ -59,6 +65,8 @@ If feedback is provided, this is a follow-up round — focus on the gaps identif
 Work in phases:
 1. **Search**: Use web_search with 3-5 diverse queries covering different angles.
    Prioritize authoritative sources (.edu, .gov, established publications).
+   For automotive research, target: caranddriver.com, motortrend.com, edmunds.com, 
+   consumerreports.org, jdpower.com, and enthusiast forums.
 2. **Fetch**: Use web_scrape on the most promising URLs (aim for 5-8 sources).
    Skip URLs that fail. Extract the substantive content.
 3. **Analyze**: Review what you've collected. Identify key findings, themes,

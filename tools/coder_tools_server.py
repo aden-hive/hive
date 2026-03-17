@@ -3,7 +3,7 @@
 Coder Tools MCP Server — OpenCode-inspired coding tools.
 
 Provides rich file I/O, fuzzy-match editing, git snapshots, and shell execution
-for the hive_coder agent. Modeled after opencode's tool architecture.
+for the queen agent. Modeled after opencode's tool architecture.
 
 All paths scoped to a configurable project root for safety.
 
@@ -13,76 +13,23 @@ Usage:
 """
 
 import argparse
-import difflib
-import fnmatch
 import json
 import logging
 import os
 import re
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ── Constants (inspired by opencode) ──────────────────────────────────────
-
-MAX_READ_LINES = 2000
-MAX_LINE_LENGTH = 2000
-MAX_OUTPUT_BYTES = 50 * 1024  # 50KB byte budget for read output
-MAX_COMMAND_OUTPUT = 30_000  # chars before truncation
-SEARCH_RESULT_LIMIT = 100
-
-BINARY_EXTENSIONS = frozenset(
-    {
-        ".zip",
-        ".tar",
-        ".gz",
-        ".bz2",
-        ".xz",
-        ".7z",
-        ".rar",
-        ".exe",
-        ".dll",
-        ".so",
-        ".dylib",
-        ".bin",
-        ".class",
-        ".jar",
-        ".war",
-        ".pyc",
-        ".pyo",
-        ".wasm",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".bmp",
-        ".ico",
-        ".webp",
-        ".svg",
-        ".mp3",
-        ".mp4",
-        ".avi",
-        ".mov",
-        ".mkv",
-        ".wav",
-        ".flac",
-        ".pdf",
-        ".doc",
-        ".docx",
-        ".xls",
-        ".xlsx",
-        ".ppt",
-        ".pptx",
-        ".sqlite",
-        ".db",
-        ".o",
-        ".a",
-        ".lib",
-    }
-)
+_TOOLS_SRC = Path(__file__).resolve().parent / "src"
+if _TOOLS_SRC.is_dir():
+    tools_src = str(_TOOLS_SRC)
+    if tools_src not in sys.path:
+        sys.path.insert(0, tools_src)
 
 
 def setup_logger():
@@ -111,6 +58,12 @@ if "--stdio" in sys.argv:
 
 from fastmcp import FastMCP  # noqa: E402
 
+# Import command sanitizer — shared module in aden_tools
+from aden_tools.tools.file_system_toolkits.command_sanitizer import (  # noqa: E402
+    CommandBlockedError,
+    validate_command,
+)
+
 mcp = FastMCP("coder-tools")
 
 PROJECT_ROOT: str = ""
@@ -131,8 +84,49 @@ def _find_project_root() -> str:
 
 def _resolve_path(path: str) -> str:
     """Resolve path relative to PROJECT_ROOT. Raises ValueError if outside."""
+    # Normalize slashes for cross-platform (e.g. exports/hi_agent from LLM)
+    path = path.replace("/", os.sep)
     if os.path.isabs(path):
         resolved = os.path.abspath(path)
+        try:
+            common = os.path.commonpath([resolved, PROJECT_ROOT])
+        except ValueError:
+            common = ""
+        if common != PROJECT_ROOT:
+            # LLM may emit wrong-root paths (/mnt/data, /workspace, etc.).
+            # Strip known prefixes and treat the remainder as relative to PROJECT_ROOT.
+            path_norm = path.replace("\\", "/")
+            for prefix in (
+                "/mnt/data/",
+                "/mnt/data",
+                "/workspace/",
+                "/workspace",
+                "/repo/",
+                "/repo",
+            ):
+                p = prefix.rstrip("/") + "/"
+                prefix_stripped = prefix.rstrip("/")
+                if path_norm.startswith(p) or (
+                    path_norm.startswith(prefix_stripped) and len(path_norm) > len(prefix)
+                ):
+                    suffix = path_norm[len(prefix_stripped) :].lstrip("/")
+                    if suffix:
+                        path = suffix.replace("/", os.sep)
+                        resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                        break
+            else:
+                # Try extracting exports/ or core/ subpath from the absolute path
+                parts = path.split(os.sep)
+                if "exports" in parts:
+                    idx = parts.index("exports")
+                    path = os.sep.join(parts[idx:])
+                    resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                elif "core" in parts:
+                    idx = parts.index("core")
+                    path = os.sep.join(parts[idx:])
+                    resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
+                else:
+                    raise ValueError(f"Access denied: '{path}' is outside the project root.")
     else:
         resolved = os.path.abspath(os.path.join(PROJECT_ROOT, path))
     try:
@@ -144,146 +138,15 @@ def _resolve_path(path: str) -> str:
     return resolved
 
 
-def _is_binary(filepath: str) -> bool:
-    """Detect binary files by extension and content sampling."""
-    _, ext = os.path.splitext(filepath)
-    if ext.lower() in BINARY_EXTENSIONS:
-        return True
-    try:
-        with open(filepath, "rb") as f:
-            chunk = f.read(4096)
-        if b"\x00" in chunk:
-            return True
-        non_printable = sum(1 for b in chunk if b < 9 or (13 < b < 32) or b > 126)
-        return non_printable / max(len(chunk), 1) > 0.3
-    except OSError:
-        return False
-
-
-# ── Fuzzy edit strategies (ported from opencode's 9-strategy cascade) ─────
-
-
-def _levenshtein(a: str, b: str) -> int:
-    """Standard Levenshtein distance."""
-    if not a:
-        return len(b)
-    if not b:
-        return len(a)
-    m, n = len(a), len(b)
-    dp = list(range(n + 1))
-    for i in range(1, m + 1):
-        prev = dp[0]
-        dp[0] = i
-        for j in range(1, n + 1):
-            temp = dp[j]
-            if a[i - 1] == b[j - 1]:
-                dp[j] = prev
-            else:
-                dp[j] = 1 + min(prev, dp[j], dp[j - 1])
-            prev = temp
-    return dp[n]
-
-
-def _similarity(a: str, b: str) -> float:
-    maxlen = max(len(a), len(b))
-    if maxlen == 0:
-        return 1.0
-    return 1.0 - _levenshtein(a, b) / maxlen
-
-
-def _fuzzy_find_candidates(content: str, old_text: str):
-    """
-    Yield candidate substrings from content that match old_text,
-    using a cascade of increasingly fuzzy strategies.
-    Ported from opencode's edit.ts replace() cascade.
-    """
-    # Strategy 1: Exact match
-    if old_text in content:
-        yield old_text
-
-    content_lines = content.split("\n")
-    search_lines = old_text.split("\n")
-    # Strip trailing empty line from search (common copy-paste artifact)
-    while search_lines and not search_lines[-1].strip():
-        search_lines = search_lines[:-1]
-    if not search_lines:
-        return
-
-    n_search = len(search_lines)
-
-    # Strategy 2: Line-trimmed match
-    # Each line trimmed; yields original content substring preserving indentation
-    for i in range(len(content_lines) - n_search + 1):
-        window = content_lines[i : i + n_search]
-        if all(cl.strip() == sl.strip() for cl, sl in zip(window, search_lines, strict=True)):
-            yield "\n".join(window)
-
-    # Strategy 3: Block-anchor match (first/last line as anchors, fuzzy middle)
-    if n_search >= 3:
-        first_trimmed = search_lines[0].strip()
-        last_trimmed = search_lines[-1].strip()
-        candidates = []
-        for i, line in enumerate(content_lines):
-            if line.strip() == first_trimmed:
-                end = i + n_search
-                if end <= len(content_lines) and content_lines[end - 1].strip() == last_trimmed:
-                    block = content_lines[i:end]
-                    # Score middle lines
-                    middle_content = "\n".join(block[1:-1])
-                    middle_search = "\n".join(search_lines[1:-1])
-                    sim = _similarity(middle_content, middle_search)
-                    candidates.append((sim, "\n".join(block)))
-        if candidates:
-            candidates.sort(key=lambda x: x[0], reverse=True)
-            if candidates[0][0] > 0.3:
-                yield candidates[0][1]
-
-    # Strategy 4: Whitespace-normalized match
-    normalized_search = re.sub(r"\s+", " ", old_text).strip()
-    for i in range(len(content_lines) - n_search + 1):
-        window = content_lines[i : i + n_search]
-        normalized_block = re.sub(r"\s+", " ", "\n".join(window)).strip()
-        if normalized_block == normalized_search:
-            yield "\n".join(window)
-
-    # Strategy 5: Indentation-flexible match
-    def _strip_indent(lines):
-        non_empty = [ln for ln in lines if ln.strip()]
-        if not non_empty:
-            return "\n".join(lines)
-        min_indent = min(len(ln) - len(ln.lstrip()) for ln in non_empty)
-        return "\n".join(ln[min_indent:] for ln in lines)
-
-    stripped_search = _strip_indent(search_lines)
-    for i in range(len(content_lines) - n_search + 1):
-        block = content_lines[i : i + n_search]
-        if _strip_indent(block) == stripped_search:
-            yield "\n".join(block)
-
-    # Strategy 6: Trimmed-boundary match
-    trimmed = old_text.strip()
-    if trimmed != old_text and trimmed in content:
-        yield trimmed
-
-
-def _compute_diff(old: str, new: str, path: str) -> str:
-    """Compute a unified diff for display."""
-    old_lines = old.splitlines(keepends=True)
-    new_lines = new.splitlines(keepends=True)
-    diff = difflib.unified_diff(old_lines, new_lines, fromfile=path, tofile=path, n=3)
-    result = "".join(diff)
-    if len(result) > 2000:
-        result = result[:2000] + "\n... (diff truncated)"
-    return result
-
-
 # ── Git snapshot system (ported from opencode's shadow git) ───────────────
 
 
 def _snapshot_git(*args: str) -> str:
     """Run a git command with the snapshot GIT_DIR and PROJECT_ROOT worktree."""
     cmd = ["git", "--git-dir", SNAPSHOT_DIR, "--work-tree", PROJECT_ROOT, *args]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=30, encoding="utf-8", stdin=subprocess.DEVNULL
+    )
     return result.stdout.strip()
 
 
@@ -297,360 +160,58 @@ def _ensure_snapshot_repo():
             ["git", "init", "--bare", SNAPSHOT_DIR],
             capture_output=True,
             timeout=10,
+            stdin=subprocess.DEVNULL,
+            encoding="utf-8",
         )
         _snapshot_git("config", "core.autocrlf", "false")
 
 
-# ── Tool: read_file ──────────────────────────────────────────────────────
-
-
-@mcp.tool()
-def read_file(path: str, offset: int = 1, limit: int = 0) -> str:
-    """Read file contents with line numbers and byte-budget truncation.
-
-    Returns numbered lines. Binary files are detected and rejected.
-    Large files are automatically truncated at 2000 lines or 50KB.
-
-    Args:
-        path: File path (relative to project root or absolute within project)
-        offset: Starting line number, 1-indexed (default: 1)
-        limit: Max lines to return, 0 = up to 2000 (default: 0)
-
-    Returns:
-        File contents with line numbers, or error message
-    """
-    resolved = _resolve_path(path)
-
-    if os.path.isdir(resolved):
-        # List directory contents instead
-        entries = []
-        for entry in sorted(os.listdir(resolved)):
-            full = os.path.join(resolved, entry)
-            suffix = "/" if os.path.isdir(full) else ""
-            entries.append(f"  {entry}{suffix}")
-        total = len(entries)
-        return f"Directory: {path} ({total} entries)\n" + "\n".join(entries[:200])
-
-    if not os.path.isfile(resolved):
-        return f"Error: File not found: {path}"
-
-    if _is_binary(resolved):
-        size = os.path.getsize(resolved)
-        return f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
-
+def _take_snapshot() -> str:
+    """Take a git snapshot and return the tree hash. Silent on failure."""
+    if not SNAPSHOT_DIR:
+        return ""
     try:
-        with open(resolved, encoding="utf-8", errors="replace") as f:
-            all_lines = f.readlines()
-
-        total_lines = len(all_lines)
-        start_idx = max(0, offset - 1)  # Convert 1-indexed to 0-indexed
-        effective_limit = limit if limit > 0 else MAX_READ_LINES
-        end_idx = min(start_idx + effective_limit, total_lines)
-
-        # Apply byte budget (like opencode)
-        output_lines = []
-        byte_count = 0
-        truncated_by_bytes = False
-        for i in range(start_idx, end_idx):
-            line = all_lines[i].rstrip("\n\r")
-            if len(line) > MAX_LINE_LENGTH:
-                line = line[:MAX_LINE_LENGTH] + "..."
-            formatted = f"{i + 1:>6}\t{line}"
-            line_bytes = len(formatted.encode("utf-8")) + 1  # +1 for newline
-            if byte_count + line_bytes > MAX_OUTPUT_BYTES:
-                truncated_by_bytes = True
-                break
-            output_lines.append(formatted)
-            byte_count += line_bytes
-
-        result = "\n".join(output_lines)
-
-        # Truncation notices
-        lines_shown = len(output_lines)
-        actual_end = start_idx + lines_shown
-        if actual_end < total_lines or truncated_by_bytes:
-            result += f"\n\n(Showing lines {start_idx + 1}-{actual_end} of {total_lines}."
-            if truncated_by_bytes:
-                result += " Truncated by byte budget."
-            result += f" Use offset={actual_end + 1} to continue reading.)"
-
-        return result
-    except Exception as e:
-        return f"Error reading file: {e}"
-
-
-# ── Tool: write_file ─────────────────────────────────────────────────────
-
-
-@mcp.tool()
-def write_file(path: str, content: str) -> str:
-    """Create or overwrite a file. Automatically creates parent directories.
-
-    Takes a snapshot before writing for undo capability.
-
-    Args:
-        path: File path relative to project root
-        content: Complete file content
-
-    Returns:
-        Success message with file stats, or error
-    """
-    resolved = _resolve_path(path)
-
-    try:
-        # Snapshot before write
-        _take_snapshot()
-
-        existed = os.path.isfile(resolved)
-        os.makedirs(os.path.dirname(resolved), exist_ok=True)
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
-        action = "Updated" if existed else "Created"
-        return f"{action} {path} ({len(content):,} bytes, {line_count} lines)"
-    except Exception as e:
-        return f"Error writing file: {e}"
-
-
-# ── Tool: edit_file (fuzzy-match cascade) ─────────────────────────────────
-
-
-@mcp.tool()
-def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
-    """Replace text in a file using a fuzzy-match cascade.
-
-    Tries exact match first, then falls back through increasingly fuzzy
-    strategies: line-trimmed, block-anchor, whitespace-normalized,
-    indentation-flexible, and trimmed-boundary matching.
-
-    Inspired by opencode's 9-strategy edit tool.
-
-    Args:
-        path: File path relative to project root
-        old_text: Text to find (fuzzy matching applied if exact fails)
-        new_text: Replacement text
-        replace_all: Replace all occurrences (default: first only)
-
-    Returns:
-        Success message with diff preview, or error with suggestions
-    """
-    resolved = _resolve_path(path)
-    if not os.path.isfile(resolved):
-        return f"Error: File not found: {path}"
-
-    try:
-        with open(resolved, encoding="utf-8") as f:
-            content = f.read()
-
-        # Snapshot before edit
-        _take_snapshot()
-
-        # Try fuzzy cascade
-        matched_text = None
-        strategy_used = None
-        strategies = [
-            "exact",
-            "line-trimmed",
-            "block-anchor",
-            "whitespace-normalized",
-            "indentation-flexible",
-            "trimmed-boundary",
-        ]
-
-        for i, candidate in enumerate(_fuzzy_find_candidates(content, old_text)):
-            idx = content.find(candidate)
-            if idx == -1:
-                continue
-
-            if replace_all:
-                matched_text = candidate
-                strategy_used = strategies[min(i, len(strategies) - 1)]
-                break
-
-            # Check uniqueness
-            last_idx = content.rfind(candidate)
-            if idx == last_idx:
-                matched_text = candidate
-                strategy_used = strategies[min(i, len(strategies) - 1)]
-                break
-            # Multiple matches — continue to next strategy
-
-        if matched_text is None:
-            # Generate helpful error
-            close = difflib.get_close_matches(old_text[:200], content.split("\n"), n=3, cutoff=0.4)
-            msg = f"Error: Could not find a unique match for old_text in {path}."
-            if close:
-                suggestions = "\n".join(f"  {line}" for line in close)
-                msg += f"\n\nDid you mean one of these lines?\n{suggestions}"
-            return msg
-
-        if replace_all:
-            count = content.count(matched_text)
-            new_content = content.replace(matched_text, new_text)
-        else:
-            count = 1
-            new_content = content.replace(matched_text, new_text, 1)
-
-        # Write
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(new_content)
-
-        # Build response with diff preview
-        diff = _compute_diff(content, new_content, path)
-        match_info = f" (matched via {strategy_used})" if strategy_used != "exact" else ""
-        result = f"Replaced {count} occurrence(s) in {path}{match_info}"
-        if diff:
-            result += f"\n\n{diff}"
-        return result
-    except Exception as e:
-        return f"Error editing file: {e}"
-
-
-# ── Tool: list_directory ──────────────────────────────────────────────────
-
-
-@mcp.tool()
-def list_directory(path: str = ".", recursive: bool = False) -> str:
-    """List directory contents with type indicators.
-
-    Args:
-        path: Directory path (relative to project root, default: root)
-        recursive: List recursively (default: False)
-
-    Returns:
-        Sorted directory listing with / suffix for directories
-    """
-    resolved = _resolve_path(path)
-    if not os.path.isdir(resolved):
-        return f"Error: Directory not found: {path}"
-
-    try:
-        skip = {
-            ".git",
-            "__pycache__",
-            "node_modules",
-            ".venv",
-            ".tox",
-            ".mypy_cache",
-            ".ruff_cache",
-        }
-        entries = []
-        if recursive:
-            for root, dirs, files in os.walk(resolved):
-                dirs[:] = sorted(d for d in dirs if d not in skip and not d.startswith("."))
-                rel_root = os.path.relpath(root, resolved)
-                if rel_root == ".":
-                    rel_root = ""
-                for f in sorted(files):
-                    if f.startswith("."):
-                        continue
-                    entries.append(os.path.join(rel_root, f) if rel_root else f)
-                    if len(entries) >= 500:
-                        entries.append("... (truncated at 500 entries)")
-                        return "\n".join(entries)
-        else:
-            for entry in sorted(os.listdir(resolved)):
-                if entry.startswith(".") or entry in skip:
-                    continue
-                full = os.path.join(resolved, entry)
-                suffix = "/" if os.path.isdir(full) else ""
-                entries.append(f"{entry}{suffix}")
-
-        return "\n".join(entries) if entries else "(empty directory)"
-    except Exception as e:
-        return f"Error listing directory: {e}"
-
-
-# ── Tool: search_files ───────────────────────────────────────────────────
-
-
-@mcp.tool()
-def search_files(pattern: str, path: str = ".", include: str = "") -> str:
-    """Search file contents using regex. Results sorted by modification time.
-
-    Uses ripgrep when available, falls back to Python regex.
-
-    Args:
-        pattern: Regex pattern to search for
-        path: Directory to search (relative to project root)
-        include: File glob filter (e.g. '*.py')
-
-    Returns:
-        Matching lines grouped by file with line numbers
-    """
-    resolved = _resolve_path(path)
-    if not os.path.isdir(resolved):
-        return f"Error: Directory not found: {path}"
-
-    try:
-        cmd = [
-            "rg",
-            "-nH",
-            "--no-messages",
-            "--hidden",
-            "--max-count=20",
-            "--glob=!.git/*",
-            pattern,
-        ]
-        if include:
-            cmd.extend(["--glob", include])
-        cmd.append(resolved)
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode <= 1:
-            output = result.stdout.strip()
-            if not output:
-                return "No matches found."
-
-            # Group by file, make paths relative
-            lines = []
-            for line in output.split("\n")[:SEARCH_RESULT_LIMIT]:
-                line = line.replace(PROJECT_ROOT + "/", "")
-                if len(line) > MAX_LINE_LENGTH:
-                    line = line[:MAX_LINE_LENGTH] + "..."
-                lines.append(line)
-            total = output.count("\n") + 1
-            result_str = "\n".join(lines)
-            if total > SEARCH_RESULT_LIMIT:
-                result_str += (
-                    f"\n\n... ({total} total matches, showing first {SEARCH_RESULT_LIMIT})"
-                )
-            return result_str
-    except FileNotFoundError:
-        pass
-    except subprocess.TimeoutExpired:
-        return "Error: Search timed out after 30 seconds"
-
-    # Fallback: Python regex
-    try:
-        compiled = re.compile(pattern)
-        matches = []
-        skip_dirs = {".git", "__pycache__", "node_modules", ".venv", ".tox"}
-
-        for root, dirs, files in os.walk(resolved):
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
-            for fname in files:
-                if include and not fnmatch.fnmatch(fname, include):
-                    continue
-                fpath = os.path.join(root, fname)
-                rel = os.path.relpath(fpath, PROJECT_ROOT)
-                try:
-                    with open(fpath, encoding="utf-8", errors="ignore") as f:
-                        for i, line in enumerate(f, 1):
-                            if compiled.search(line):
-                                matches.append(f"{rel}:{i}:{line.rstrip()[:MAX_LINE_LENGTH]}")
-                                if len(matches) >= SEARCH_RESULT_LIMIT:
-                                    return "\n".join(matches) + "\n... (truncated)"
-                except (OSError, UnicodeDecodeError):
-                    continue
-
-        return "\n".join(matches) if matches else "No matches found."
-    except re.error as e:
-        return f"Error: Invalid regex: {e}"
+        _ensure_snapshot_repo()
+        _snapshot_git("add", ".")
+        return _snapshot_git("write-tree")
+    except Exception:
+        return ""
 
 
 # ── Tool: run_command ─────────────────────────────────────────────────────
+
+MAX_COMMAND_OUTPUT = 30_000  # chars before truncation
+
+
+def _translate_command_for_windows(command: str) -> str:
+    """Translate common Unix commands to Windows equivalents."""
+    if os.name != "nt":
+        return command
+    cmd = command.strip()
+
+    # mkdir -p: Unix creates parents; Windows mkdir already does; -p becomes a dir name
+    if cmd.startswith("mkdir -p ") or cmd.startswith("mkdir -p\t"):
+        rest = cmd[9:].lstrip().replace("/", os.sep)
+        return "mkdir " + rest
+
+    # ls / pwd: cmd.exe uses dir and cd
+    # Order matters: replace longer patterns first
+    for unix, win in [
+        ("ls -la", "dir /a"),
+        ("ls -al", "dir /a"),
+        ("ls -l", "dir"),
+        ("ls -a", "dir /a"),
+        ("ls ", "dir "),
+        ("pwd", "cd"),
+    ]:
+        cmd = cmd.replace(unix, win)
+    # Standalone "ls" at end (e.g. "cd x && ls")
+    if cmd.endswith(" ls"):
+        cmd = cmd[:-3] + " dir"
+    elif cmd == "ls":
+        cmd = "dir"
+
+    return cmd
 
 
 @mcp.tool()
@@ -659,6 +220,8 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
 
     PYTHONPATH is automatically set to include core/ and exports/.
     Output is truncated at 30K chars with a notice.
+    Commands still execute with shell=True, so the sanitizer blocks
+    explicit nested shell executables but cannot remove shell parsing.
 
     Args:
         command: Shell command to execute
@@ -668,10 +231,16 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
     Returns:
         Combined stdout/stderr with exit code
     """
-    timeout = min(timeout, 300)  # Cap at 5 minutes
+    timeout = min(timeout, 300)
     work_dir = _resolve_path(cwd) if cwd else PROJECT_ROOT
 
     try:
+        command = _translate_command_for_windows(command)
+        # Validate command against safety blocklist before execution
+        try:
+            validate_command(command)
+        except CommandBlockedError as e:
+            return f"Error: {e}"
         start = time.monotonic()
         result = subprocess.run(
             command,
@@ -680,11 +249,16 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
             capture_output=True,
             text=True,
             timeout=timeout,
+            stdin=subprocess.DEVNULL,
+            encoding="utf-8",
             env={
                 **os.environ,
-                "PYTHONPATH": (
-                    f"{PROJECT_ROOT}/core:{PROJECT_ROOT}/exports"
-                    f":{PROJECT_ROOT}/core/framework/agents"
+                "PYTHONPATH": os.pathsep.join(
+                    [
+                        os.path.join(PROJECT_ROOT, "core"),
+                        os.path.join(PROJECT_ROOT, "exports"),
+                        os.path.join(PROJECT_ROOT, "core", "framework", "agents"),
+                    ]
                 ),
             },
         )
@@ -698,7 +272,6 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
 
         output = "\n".join(parts)
 
-        # Truncate large output (like opencode's MAX_METADATA_LENGTH)
         if len(output) > MAX_COMMAND_OUTPUT:
             output = (
                 output[:MAX_COMMAND_OUTPUT]
@@ -717,19 +290,7 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
         return f"Error executing command: {e}"
 
 
-# ── Tool: snapshot (git-based undo) ───────────────────────────────────────
-
-
-def _take_snapshot() -> str:
-    """Take a git snapshot and return the tree hash. Silent on failure."""
-    if not SNAPSHOT_DIR:
-        return ""
-    try:
-        _ensure_snapshot_repo()
-        _snapshot_git("add", ".")
-        return _snapshot_git("write-tree")
-    except Exception:
-        return ""
+# ── Tool: undo_changes (git-based undo) ──────────────────────────────────
 
 
 @mcp.tool()
@@ -769,6 +330,8 @@ def undo_changes(path: str = "") -> str:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                stdin=subprocess.DEVNULL,
+                encoding="utf-8",
             )
             return f"Restored: {path}"
         else:
@@ -788,121 +351,67 @@ def undo_changes(path: str = "") -> str:
 
 
 @mcp.tool()
-def discover_mcp_tools(server_config_path: str = "") -> str:
-    """Discover available MCP tools by connecting to servers defined in a config file.
+def list_agent_tools(
+    server_config_path: str = "",
+    output_schema: str = "summary",
+    group: str = "all",
+    credentials: str = "all",
+    service: str = "",
+) -> str:
+    """Discover tools available for agent building, grouped by provider.
 
-    Connects to each MCP server, lists all tools with full schemas, then
-    disconnects. Use this to see what tools are available before designing
-    an agent — never rely on static documentation.
+    Connects to each MCP server, lists tools, then disconnects. Use this
+    BEFORE designing an agent to know exactly which tools exist. Only use
+    tools from this list in node definitions — never guess or fabricate.
 
-    Args:
-        server_config_path: Path to mcp_servers.json (relative to project root).
-            Default: the hive-tools server config at tools/mcp_servers.json.
-            Can also point to any agent's mcp_servers.json.
-
-    Returns:
-        JSON listing of all tools with names, descriptions, and input schemas
-    """
-    # Resolve config path
-    if not server_config_path:
-        # Default: look for the main hive-tools mcp_servers.json
-        candidates = [
-            os.path.join(PROJECT_ROOT, "tools", "mcp_servers.json"),
-            os.path.join(PROJECT_ROOT, "mcp_servers.json"),
-        ]
-        config_path = None
-        for c in candidates:
-            if os.path.isfile(c):
-                config_path = c
-                break
-        if not config_path:
-            return "Error: No mcp_servers.json found. Provide server_config_path."
-    else:
-        config_path = _resolve_path(server_config_path)
-        if not os.path.isfile(config_path):
-            return f"Error: Config file not found: {server_config_path}"
-
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            servers_config = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        return f"Error reading config: {e}"
-
-    # Import MCPClient (deferred — needs PYTHONPATH to include core/)
-    try:
-        from framework.runner.mcp_client import MCPClient, MCPServerConfig
-    except ImportError:
-        return "Error: Cannot import MCPClient. Ensure PYTHONPATH includes the core/ directory."
-
-    all_tools = []
-    errors = []
-    config_dir = os.path.dirname(config_path)
-
-    for server_name, server_conf in servers_config.items():
-        # Resolve cwd relative to config file location
-        cwd = server_conf.get("cwd", "")
-        if cwd and not os.path.isabs(cwd):
-            cwd = os.path.abspath(os.path.join(config_dir, cwd))
-
-        try:
-            config = MCPServerConfig(
-                name=server_name,
-                transport=server_conf.get("transport", "stdio"),
-                command=server_conf.get("command"),
-                args=server_conf.get("args", []),
-                env=server_conf.get("env", {}),
-                cwd=cwd or None,
-                url=server_conf.get("url"),
-                headers=server_conf.get("headers", {}),
-            )
-            client = MCPClient(config)
-            client.connect()
-            tools = client.list_tools()
-
-            for tool in tools:
-                all_tools.append(
-                    {
-                        "server": server_name,
-                        "name": tool.name,
-                        "description": tool.description,
-                        "input_schema": tool.input_schema,
-                    }
-                )
-
-            client.disconnect()
-        except Exception as e:
-            errors.append({"server": server_name, "error": str(e)})
-
-    result = {
-        "tools": all_tools,
-        "total": len(all_tools),
-        "servers_queried": len(servers_config),
-    }
-    if errors:
-        result["errors"] = errors
-
-    return json.dumps(result, indent=2, default=str)
-
-
-# ── Meta-agent: Agent tool catalog ────────────────────────────────────────
-
-
-@mcp.tool()
-def list_agent_tools(server_config_path: str = "") -> str:
-    """List all tools available for agent building from the hive-tools MCP server.
-
-    Returns tool names grouped by category. Use this BEFORE designing an agent
-    to know exactly which tools exist. Only use tools from this list in node
-    definitions — never guess or fabricate tool names.
+    Progressive disclosure workflow (start narrow, drill in):
+        list_agent_tools()                                        # provider summary
+        list_agent_tools(group="google", output_schema="summary") # service breakdown
+        list_agent_tools(group="google", service="gmail")           # tool names for just gmail
+        list_agent_tools(group="google", service="gmail", output_schema="full")  # full detail
 
     Args:
         server_config_path: Path to mcp_servers.json. Default: tools/mcp_servers.json
             (the standard hive-tools server). Can also point to an agent's config
             to see what tools that specific agent has access to.
+        output_schema: Controls verbosity of the response.
+            "summary" (default) — provider list with tool counts + credential status. Very compact.
+                When group is specified, shows service-level breakdown within that provider.
+            "names" — tool names only (no descriptions), grouped by provider.
+            "simple" — names + truncated descriptions.
+            "full" — names + descriptions + server + input_schema.
+        group: "all" (default) returns all providers. A provider like "google"
+            returns only that provider's tools. Legacy prefix filters (e.g. "gmail")
+            are still supported.
+        credentials: Filter by credential availability.
+            "all" (default) — show every tool regardless of credential status.
+            "available" — only tools whose credentials are already configured.
+            "unavailable" — only tools that still need credential setup.
+        service: Filter to a specific service within a provider (e.g. service="gmail"
+            when group="google"). Matches tools whose name starts with "<service>_".
 
     Returns:
-        JSON with tool names grouped by prefix (e.g. gmail_*, slack_*, etc.)
+        JSON with tools grouped by provider.
     """
+    if output_schema not in ("summary", "names", "simple", "full"):
+        return json.dumps(
+            {
+                "error": (
+                    f"Invalid output_schema: {output_schema!r}. "
+                    "Use 'summary', 'names', 'simple', or 'full'."
+                )
+            }
+        )
+    if credentials not in ("all", "available", "unavailable"):
+        return json.dumps(
+            {
+                "error": (
+                    f"Invalid credentials: {credentials!r}. "
+                    "Use 'all', 'available', or 'unavailable'."
+                )
+            }
+        )
+
     # Resolve config path
     if not server_config_path:
         candidates = [
@@ -928,131 +437,387 @@ def list_agent_tools(server_config_path: str = "") -> str:
         return json.dumps({"error": f"Failed to read config: {e}"})
 
     try:
+        from pathlib import Path
+
         from framework.runner.mcp_client import MCPClient, MCPServerConfig
+        from framework.runner.tool_registry import ToolRegistry
     except ImportError:
         return json.dumps({"error": "Cannot import MCPClient"})
 
     all_tools: list[dict] = []
     errors = []
-    config_dir = os.path.dirname(config_path)
+    config_dir = Path(config_path).parent
 
     for server_name, server_conf in servers_config.items():
-        cwd = server_conf.get("cwd", "")
-        if cwd and not os.path.isabs(cwd):
-            cwd = os.path.abspath(os.path.join(config_dir, cwd))
+        resolved = ToolRegistry.resolve_mcp_stdio_config(
+            {"name": server_name, **server_conf}, config_dir
+        )
         try:
             config = MCPServerConfig(
                 name=server_name,
-                transport=server_conf.get("transport", "stdio"),
-                command=server_conf.get("command"),
-                args=server_conf.get("args", []),
-                env=server_conf.get("env", {}),
-                cwd=cwd or None,
-                url=server_conf.get("url"),
-                headers=server_conf.get("headers", {}),
+                transport=resolved.get("transport", "stdio"),
+                command=resolved.get("command"),
+                args=resolved.get("args", []),
+                env=resolved.get("env", {}),
+                cwd=resolved.get("cwd"),
+                url=resolved.get("url"),
+                headers=resolved.get("headers", {}),
             )
             client = MCPClient(config)
             client.connect()
             for tool in client.list_tools():
-                all_tools.append({"name": tool.name, "description": tool.description})
+                all_tools.append(
+                    {
+                        "server": server_name,
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.input_schema,
+                    }
+                )
             client.disconnect()
         except Exception as e:
             errors.append({"server": server_name, "error": str(e)})
 
-    # Group by prefix (e.g., gmail_, slack_, stripe_)
-    groups: dict[str, list[str]] = {}
-    for t in sorted(all_tools, key=lambda x: x["name"]):
-        parts = t["name"].split("_", 1)
-        prefix = parts[0] if len(parts) > 1 else "general"
-        groups.setdefault(prefix, []).append(t["name"])
+    def _normalize_provider_name(raw: str | None, fallback: str) -> str:
+        """Normalize provider names to stable top-level buckets."""
+        text = (raw or fallback or "unknown").strip().lower()
+        text = re.sub(r"[^a-z0-9]+", "_", text).strip("_")
+        if not text:
+            return "unknown"
+        head = text.split("_", 1)[0]
+        # Collapse Google families (google_docs/google_cloud/google-custom-search -> google)
+        if head == "google":
+            return "google"
+        return head
 
-    result: dict = {
-        "total": len(all_tools),
-        "tools_by_category": groups,
-        "all_tool_names": sorted(t["name"] for t in all_tools),
-    }
+    def _build_provider_metadata() -> tuple[
+        dict[str, dict[str, dict[str, dict]]], dict[str, set[str]]
+    ]:
+        """Build tool->provider->credential metadata index from CredentialSpecs."""
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+        except ImportError:
+            return {}, {}
+
+        tool_provider_auth: dict[str, dict[str, dict[str, dict]]] = {}
+        tool_providers: dict[str, set[str]] = {}
+
+        for cred_name, spec in CREDENTIAL_SPECS.items():
+            provider_hint = spec.aden_provider_name or spec.credential_group or spec.credential_id
+            provider = _normalize_provider_name(provider_hint, fallback=cred_name)
+            auth_entry = {
+                "env_var": spec.env_var,
+                "required": spec.required,
+                "description": spec.description,
+                "help_url": spec.help_url,
+                "credential_id": spec.credential_id,
+                "credential_key": spec.credential_key,
+            }
+            for tool_name in spec.tools:
+                tool_providers.setdefault(tool_name, set()).add(provider)
+                provider_map = tool_provider_auth.setdefault(tool_name, {})
+                credential_map = provider_map.setdefault(provider, {})
+                credential_map[cred_name] = auth_entry
+
+        return tool_provider_auth, tool_providers
+
+    tool_provider_auth, tool_providers = _build_provider_metadata()
+
+    def _get_available_credential_names() -> set[str]:
+        """Return set of credential spec keys whose env_var is set in the environment."""
+        try:
+            from framework.credentials.validation import ensure_credential_key_env
+
+            ensure_credential_key_env()
+        except Exception:
+            pass
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+        except ImportError:
+            return set()
+        return {
+            cred_name
+            for cred_name, spec in CREDENTIAL_SPECS.items()
+            if spec.env_var and os.environ.get(spec.env_var)
+        }
+
+    def _tool_credentials_available(tool_name: str, available_creds: set[str]) -> bool:
+        """True if all credentials required by tool_name are available (or tool needs none)."""
+        required = set()
+        for provider_creds in tool_provider_auth.get(tool_name, {}).values():
+            required.update(provider_creds.keys())
+        if not required:
+            return True  # no credentials needed
+        return required.issubset(available_creds)
+
+    def _group_by_provider(tools: list[dict]) -> dict[str, dict]:
+        """Group tools by provider, including auth metadata and providerless tools."""
+        groups: dict[str, dict] = {}
+
+        for t in sorted(tools, key=lambda x: (x["name"], x["server"])):
+            providers = sorted(tool_providers.get(t["name"], []))
+            if not providers:
+                providers = ["no_provider"]
+
+            if output_schema == "names":
+                # Store just the name string — will be collapsed to flat list below
+                tool_payload: dict | str = t["name"]
+            else:
+                desc = t["description"]
+                if output_schema == "simple" and desc and len(desc) > 200:
+                    desc = desc[:200].rsplit(" ", 1)[0] + "..."
+                tool_payload = {
+                    "name": t["name"],
+                    "description": desc,
+                }
+                if output_schema == "full":
+                    tool_payload["server"] = t["server"]
+                    tool_payload["input_schema"] = t["input_schema"]
+
+            for provider in providers:
+                bucket = groups.setdefault(
+                    provider,
+                    {
+                        "authorization": {},
+                        "tools": [],
+                    },
+                )
+                bucket["tools"].append(tool_payload)
+
+                # Only accumulate full auth metadata for simple/full schemas.
+                # summary/names use compact representations.
+                if output_schema not in ("summary", "names"):
+                    provider_auth = tool_provider_auth.get(t["name"], {}).get(provider, {})
+                    for cred_name, auth in provider_auth.items():
+                        bucket["authorization"][cred_name] = auth
+
+        for provider, bucket in groups.items():
+            if output_schema == "names":
+                # Collapse to compact structure: flat sorted name list + credential keys only
+                tool_names = sorted(set(bucket["tools"]))
+                cred_keys: set[str] = set()
+                for tn in tool_names:
+                    for prov_creds in tool_provider_auth.get(tn, {}).values():
+                        cred_keys.update(prov_creds.keys())
+                groups[provider] = {
+                    "tool_count": len(tool_names),
+                    "credentials_required": sorted(cred_keys),
+                    "tool_names": tool_names,
+                }
+            else:
+                bucket["tools"] = sorted(bucket["tools"], key=lambda x: x["name"])
+                bucket["authorization"] = dict(sorted(bucket["authorization"].items()))
+
+        return dict(sorted(groups.items()))
+
+    # Compute credential availability once (used for filtering and summary)
+    available_creds: set[str] = (
+        _get_available_credential_names()
+        if credentials != "all" or output_schema == "summary"
+        else set()
+    )
+
+    # Apply credentials filter before grouping (filter tool list)
+    filtered_tools = all_tools
+    if credentials != "all":
+        filtered_tools = [
+            t
+            for t in all_tools
+            if (credentials == "available")
+            == _tool_credentials_available(t["name"], available_creds)
+        ]
+
+    provider_groups = _group_by_provider(filtered_tools)
+
+    # Filter to a specific provider (preferred) or legacy prefix (fallback)
+    if group != "all":
+        if group in provider_groups:
+            provider_groups = {group: provider_groups[group]}
+        else:
+            prefixed_tools = []
+            for t in filtered_tools:
+                parts = t["name"].split("_", 1)
+                prefix = parts[0] if len(parts) > 1 else "general"
+                if prefix == group:
+                    prefixed_tools.append(t)
+            provider_groups = _group_by_provider(prefixed_tools)
+
+    # Apply service filter (tool name prefix within a provider, e.g. service="gmail")
+    if service:
+        service_prefix = service.rstrip("_") + "_"
+        service_filtered: list[dict] = []
+        for t in filtered_tools:
+            # Only include tools from the already-filtered provider set
+            tool_name = t["name"]
+            in_provider = any(
+                tool_name
+                in p.get(
+                    "tool_names", [tool_entry.get("name") for tool_entry in p.get("tools", [])]
+                )
+                for p in provider_groups.values()
+            )
+            if in_provider and tool_name.startswith(service_prefix):
+                service_filtered.append(t)
+        provider_groups = _group_by_provider(service_filtered)
+
+    def _infer_service(tool_name: str) -> str:
+        """Infer service name from tool name prefix (e.g. 'gmail' from 'gmail_send_message')."""
+        return tool_name.split("_", 1)[0]
+
+    # Summary mode: compact overview with counts + credential status
+    if output_schema == "summary":
+        if group == "all":
+            # Provider-level summary (default first call)
+            full_groups = _group_by_provider(all_tools) if credentials != "all" else provider_groups
+            summary_providers: dict = {}
+            for prov, bucket in full_groups.items():
+                cred_names = bucket.get(
+                    "credentials_required", sorted(bucket.get("authorization", {}).keys())
+                )
+                creds_ok = all(c in available_creds for c in cred_names) if cred_names else True
+                summary_providers[prov] = {
+                    "tool_count": len(bucket.get("tool_names", bucket.get("tools", []))),
+                    "credentials_required": cred_names,
+                    "credentials_available": creds_ok,
+                }
+            result: dict = {
+                "total_tools": sum(v["tool_count"] for v in summary_providers.values()),
+                "providers": summary_providers,
+                "hint": (
+                    "Use list_agent_tools(group='<provider>', "
+                    "output_schema='summary') for service breakdown, "
+                    "list_agent_tools(group='<provider>', service='<service>') for tool names. "
+                    "Filter by credentials='available' to see only ready-to-use tools."
+                ),
+            }
+        else:
+            # Service-level breakdown within a specific provider
+            # Re-build from all filtered tools for this provider (ignore service filter for summary)
+            provider_tool_names: list[str] = []
+            for bucket in provider_groups.values():
+                provider_tool_names.extend(
+                    bucket.get("tool_names", [e.get("name") for e in bucket.get("tools", [])])
+                )
+
+            services: dict = {}
+            for tn in sorted(set(provider_tool_names)):
+                svc = _infer_service(tn)
+                if svc not in services:
+                    svc_creds: set[str] = set()
+                    for prov_creds in tool_provider_auth.get(tn, {}).values():
+                        svc_creds.update(prov_creds.keys())
+                    services[svc] = {"tool_count": 0, "credentials_required": sorted(svc_creds)}
+                services[svc]["tool_count"] += 1
+                # Accumulate credentials for other tools in this service
+                for prov_creds in tool_provider_auth.get(tn, {}).values():
+                    existing = set(services[svc]["credentials_required"])
+                    existing.update(prov_creds.keys())
+                    services[svc]["credentials_required"] = sorted(existing)
+
+            result = {
+                "provider": group,
+                "total_tools": len(provider_tool_names),
+                "services": services,
+                "hint": (
+                    f"Use list_agent_tools(group='{group}', service='<service>') "
+                    "for tool names within a service."
+                ),
+            }
+        if errors:
+            result["errors"] = errors
+        return json.dumps(result, indent=2, default=str)
+
+    if output_schema == "names":
+        # Compact result: no duplication, no all_tool_names list
+        total = sum(p["tool_count"] for p in provider_groups.values())
+        result = {
+            "total": total,
+            "tools_by_provider": provider_groups,
+        }
+    else:
+        all_names = sorted({t["name"] for p in provider_groups.values() for t in p["tools"]})
+        result = {
+            "total": len(all_names),
+            "tools_by_provider": provider_groups,
+            "tools_by_category": provider_groups,  # backward-compat alias
+            "all_tool_names": all_names,
+        }
     if errors:
         result["errors"] = errors
 
-    return json.dumps(result, indent=2)
+    return json.dumps(result, indent=2, default=str)
 
 
 # ── Meta-agent: Agent tool validation ─────────────────────────────────────
 
 
-@mcp.tool()
-def validate_agent_tools(agent_path: str) -> str:
+def _validate_agent_tools_impl(agent_path: str) -> dict:
     """Validate that all tools declared in an agent's nodes exist in its MCP servers.
 
-    Connects to the agent's configured MCP servers, discovers available tools,
-    then checks every node's declared tools against what actually exists.
-    Use this after building an agent to catch hallucinated or misspelled tool names.
-
-    Args:
-        agent_path: Path to agent directory (e.g. "exports/my_agent")
-
-    Returns:
-        JSON with validation result: pass/fail, missing tools per node, available tools
+    Returns a dict with validation result: pass/fail, missing tools per node, available tools.
     """
     try:
         resolved = _resolve_path(agent_path)
     except ValueError:
-        return json.dumps({"error": "Access denied: path is outside the project root."})
+        return {"error": "Access denied: path is outside the project root."}
 
     # Restrict to allowed directories to prevent arbitrary code execution
     # via importlib.import_module() below.
     try:
         from framework.server.app import validate_agent_path
     except ImportError:
-        return json.dumps({"error": "Cannot validate agent path: framework package not available"})
+        return {"error": "Cannot validate agent path: framework package not available"}
 
     try:
         resolved = str(validate_agent_path(resolved))
     except ValueError:
-        return json.dumps(
-            {
-                "error": "agent_path must be inside an allowed directory "
-                "(exports/, examples/, or ~/.hive/agents/)"
-            }
-        )
+        return {
+            "error": "agent_path must be inside an allowed directory "
+            "(exports/, examples/, or ~/.hive/agents/)"
+        }
 
     if not os.path.isdir(resolved):
-        return json.dumps({"error": f"Agent directory not found: {agent_path}"})
+        return {"error": f"Agent directory not found: {agent_path}"}
+
+    agent_dir = resolved  # Keep path; 'resolved' is reused for MCP config in loop
 
     # --- Discover available tools from agent's MCP servers ---
-    mcp_config_path = os.path.join(resolved, "mcp_servers.json")
+    mcp_config_path = os.path.join(agent_dir, "mcp_servers.json")
     if not os.path.isfile(mcp_config_path):
-        return json.dumps({"error": f"No mcp_servers.json found in {agent_path}"})
+        return {"error": f"No mcp_servers.json found in {agent_path}"}
 
     try:
+        from pathlib import Path
+
         from framework.runner.mcp_client import MCPClient, MCPServerConfig
+        from framework.runner.tool_registry import ToolRegistry
     except ImportError:
-        return json.dumps({"error": "Cannot import MCPClient"})
+        return {"error": "Cannot import MCPClient"}
 
     available_tools: set[str] = set()
     discovery_errors = []
-    config_dir = os.path.dirname(mcp_config_path)
+    config_dir = Path(mcp_config_path).parent
 
     try:
         with open(mcp_config_path, encoding="utf-8") as f:
             servers_config = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
-        return json.dumps({"error": f"Failed to read mcp_servers.json: {e}"})
+        return {"error": f"Failed to read mcp_servers.json: {e}"}
 
     for server_name, server_conf in servers_config.items():
-        cwd = server_conf.get("cwd", "")
-        if cwd and not os.path.isabs(cwd):
-            cwd = os.path.abspath(os.path.join(config_dir, cwd))
+        resolved = ToolRegistry.resolve_mcp_stdio_config(
+            {"name": server_name, **server_conf}, config_dir
+        )
         try:
             config = MCPServerConfig(
                 name=server_name,
-                transport=server_conf.get("transport", "stdio"),
-                command=server_conf.get("command"),
-                args=server_conf.get("args", []),
-                env=server_conf.get("env", {}),
-                cwd=cwd or None,
-                url=server_conf.get("url"),
-                headers=server_conf.get("headers", {}),
+                transport=resolved.get("transport", "stdio"),
+                command=resolved.get("command"),
+                args=resolved.get("args", []),
+                env=resolved.get("env", {}),
+                cwd=resolved.get("cwd"),
+                url=resolved.get("url"),
+                headers=resolved.get("headers", {}),
             )
             client = MCPClient(config)
             client.connect()
@@ -1063,27 +828,27 @@ def validate_agent_tools(agent_path: str) -> str:
             discovery_errors.append({"server": server_name, "error": str(e)})
 
     # --- Load agent nodes and extract declared tools ---
-    agent_py = os.path.join(resolved, "agent.py")
+    agent_py = os.path.join(agent_dir, "agent.py")
     if not os.path.isfile(agent_py):
-        return json.dumps({"error": f"No agent.py found in {agent_path}"})
+        return {"error": f"No agent.py found in {agent_path}"}
 
     import importlib
     import importlib.util
     import sys
 
-    package_name = os.path.basename(resolved)
-    parent_dir = os.path.dirname(os.path.abspath(resolved))
+    package_name = os.path.basename(agent_dir)
+    parent_dir = os.path.dirname(os.path.abspath(agent_dir))
     if parent_dir not in sys.path:
         sys.path.insert(0, parent_dir)
 
     try:
         agent_module = importlib.import_module(package_name)
     except Exception as e:
-        return json.dumps({"error": f"Failed to import agent: {e}"})
+        return {"error": f"Failed to import agent: {e}"}
 
     nodes = getattr(agent_module, "nodes", None)
     if not nodes:
-        return json.dumps({"error": "Agent module has no 'nodes' attribute"})
+        return {"error": "Agent module has no 'nodes' attribute"}
 
     # --- Validate declared vs available ---
     missing_by_node: dict[str, list[str]] = {}
@@ -1105,7 +870,7 @@ def validate_agent_tools(agent_path: str) -> str:
         result["missing_tools"] = missing_by_node
         result["message"] = (
             f"FAIL: {sum(len(v) for v in missing_by_node.values())} tool(s) declared "
-            f"in nodes do not exist. Run discover_mcp_tools() to see available tools "
+            f"in nodes do not exist. Run list_agent_tools() to see available tools "
             f"and fix the node definitions."
         )
     else:
@@ -1114,7 +879,24 @@ def validate_agent_tools(agent_path: str) -> str:
     if discovery_errors:
         result["discovery_errors"] = discovery_errors
 
-    return json.dumps(result, indent=2)
+    return result
+
+
+@mcp.tool()
+def validate_agent_tools(agent_path: str) -> str:
+    """Validate that all tools declared in an agent's nodes exist in its MCP servers.
+
+    Connects to the agent's configured MCP servers, discovers available tools,
+    then checks every node's declared tools against what actually exists.
+    Use this after building an agent to catch hallucinated or misspelled tool names.
+
+    Args:
+        agent_path: Path to agent directory (e.g. "exports/my_agent")
+
+    Returns:
+        JSON with validation result: pass/fail, missing tools per node, available tools
+    """
+    return json.dumps(_validate_agent_tools_impl(agent_path), indent=2)
 
 
 # ── Meta-agent: Agent inventory ───────────────────────────────────────────
@@ -1327,94 +1109,6 @@ def list_agent_sessions(
 
 
 @mcp.tool()
-def get_agent_session_state(agent_name: str, session_id: str) -> str:
-    """Load full session state (excluding memory to prevent context bloat).
-
-    Returns status, progress, result, metrics, and checkpoint info.
-    Use get_agent_session_memory to read memory contents separately.
-
-    Args:
-        agent_name: Agent package name (e.g. 'deep_research_agent')
-        session_id: Session ID (e.g. 'session_20260208_143022_abc12345')
-
-    Returns:
-        JSON with full session state
-    """
-    agent_dir = _resolve_hive_agent_path(agent_name)
-    state_path = agent_dir / "sessions" / session_id / "state.json"
-    data = _read_session_json(state_path)
-    if data is None:
-        return json.dumps({"error": f"Session not found: {session_id}"})
-
-    # Exclude memory values but show keys
-    memory = data.get("memory", {})
-    data["memory_keys"] = list(memory.keys()) if isinstance(memory, dict) else []
-    data["memory_size"] = len(memory) if isinstance(memory, dict) else 0
-    data.pop("memory", None)
-
-    return json.dumps(data, indent=2, default=str)
-
-
-@mcp.tool()
-def get_agent_session_memory(
-    agent_name: str,
-    session_id: str,
-    key: str = "",
-) -> str:
-    """Read memory contents from a session.
-
-    Memory stores intermediate results passed between nodes. Use this
-    to inspect what data was produced during execution.
-
-    Args:
-        agent_name: Agent package name
-        session_id: Session ID
-        key: Specific memory key to retrieve. Empty for all keys.
-
-    Returns:
-        JSON with memory contents
-    """
-    agent_dir = _resolve_hive_agent_path(agent_name)
-    state_path = agent_dir / "sessions" / session_id / "state.json"
-    data = _read_session_json(state_path)
-    if data is None:
-        return json.dumps({"error": f"Session not found: {session_id}"})
-
-    memory = data.get("memory", {})
-    if not isinstance(memory, dict):
-        memory = {}
-
-    if key:
-        if key not in memory:
-            return json.dumps(
-                {
-                    "error": f"Memory key not found: '{key}'",
-                    "available_keys": list(memory.keys()),
-                }
-            )
-        return json.dumps(
-            {
-                "session_id": session_id,
-                "key": key,
-                "value": memory[key],
-                "value_type": type(memory[key]).__name__,
-            },
-            indent=2,
-            default=str,
-        )
-
-    return json.dumps(
-        {
-            "session_id": session_id,
-            "memory": memory,
-            "total_keys": len(memory),
-        },
-        indent=2,
-        default=str,
-    )
-
-
-@mcp.tool()
 def list_agent_checkpoints(
     agent_name: str,
     session_id: str,
@@ -1532,25 +1226,14 @@ def get_agent_checkpoint(
 # ── Meta-agent: Test execution ────────────────────────────────────────────
 
 
-@mcp.tool()
-def run_agent_tests(
+def _run_agent_tests_impl(
     agent_name: str,
     test_types: str = "all",
     fail_fast: bool = False,
-) -> str:
+) -> dict:
     """Run pytest on an agent's test suite with structured result parsing.
 
-    Automatically sets PYTHONPATH so framework and agent packages are
-    importable. Parses pytest output into structured pass/fail results.
-
-    Args:
-        agent_name: Agent package name (e.g. 'deep_research_agent')
-        test_types: Comma-separated test types: 'constraint', 'success',
-            'edge_case', 'all' (default: 'all')
-        fail_fast: Stop on first failure (default: False)
-
-    Returns:
-        JSON with summary counts, per-test results, and failure details
+    Returns a dict with summary counts, per-test results, and failure details.
     """
     agent_path = Path(PROJECT_ROOT) / "exports" / agent_name
     if not agent_path.is_dir():
@@ -1559,23 +1242,32 @@ def run_agent_tests(
     tests_dir = agent_path / "tests"
 
     if not agent_path.is_dir():
-        return json.dumps(
-            {
-                "error": f"Agent not found: {agent_name}",
-                "hint": "Use list_agents() to see available agents.",
-            }
-        )
+        return {
+            "error": f"Agent not found: {agent_name}",
+            "hint": "Use list_agents() to see available agents.",
+        }
 
     if not tests_dir.exists():
-        return json.dumps(
-            {
-                "error": f"No tests directory: exports/{agent_name}/tests/",
-                "hint": "Create test files in the tests/ directory first.",
-            }
-        )
+        return {
+            "error": f"No tests directory: exports/{agent_name}/tests/",
+            "hint": "Create test files in the tests/ directory first.",
+        }
 
     # Parse test types
     types_list = [t.strip() for t in test_types.split(",")]
+
+    # Guard: pytest must be available as a subprocess command.
+    import shutil
+
+    if shutil.which("pytest") is None:
+        return {
+            "error": (
+                "pytest is not installed or not on PATH. "
+                "Hive's test runner requires pytest at runtime. "
+                "Install it with: pip install 'framework[testing]' "
+                "or: uv pip install 'framework[testing]'"
+            ),
+        }
 
     # Build pytest command
     cmd = ["pytest"]
@@ -1599,13 +1291,16 @@ def run_agent_tests(
         cmd.append("-x")
     cmd.append("--tb=short")
 
-    # Set PYTHONPATH
+    # Set PYTHONPATH (use pathsep for Windows)
     env = os.environ.copy()
     pythonpath = env.get("PYTHONPATH", "")
     core_path = os.path.join(PROJECT_ROOT, "core")
     exports_path = os.path.join(PROJECT_ROOT, "exports")
     fw_agents_path = os.path.join(PROJECT_ROOT, "core", "framework", "agents")
-    env["PYTHONPATH"] = f"{core_path}:{exports_path}:{fw_agents_path}:{PROJECT_ROOT}:{pythonpath}"
+    path_parts = [core_path, exports_path, fw_agents_path, PROJECT_ROOT]
+    if pythonpath:
+        path_parts.append(pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(path_parts)
 
     try:
         result = subprocess.run(
@@ -1614,23 +1309,21 @@ def run_agent_tests(
             text=True,
             timeout=120,
             env=env,
+            stdin=subprocess.DEVNULL,
+            encoding="utf-8",
         )
     except subprocess.TimeoutExpired:
-        return json.dumps(
-            {
-                "error": "Tests timed out after 120 seconds. A test may be hanging "
-                "(e.g. a client-facing node waiting for stdin). Use mock mode "
-                "or add timeouts to async tests.",
-                "command": " ".join(cmd),
-            }
-        )
+        return {
+            "error": "Tests timed out after 120 seconds. A test may be hanging "
+            "(e.g. a client-facing node waiting for stdin). Use mock mode "
+            "or add timeouts to async tests.",
+            "command": " ".join(cmd),
+        }
     except Exception as e:
-        return json.dumps(
-            {
-                "error": f"Failed to run pytest: {e}",
-                "command": " ".join(cmd),
-            }
-        )
+        return {
+            "error": f"Failed to run pytest: {e}",
+            "command": " ".join(cmd),
+        }
 
     output = result.stdout + "\n" + result.stderr
 
@@ -1692,18 +1385,993 @@ def run_agent_tests(
                     }
                 )
 
+    return {
+        "agent_name": agent_name,
+        "summary": summary_text,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+        "errors": errors,
+        "total": total,
+        "test_results": test_results,
+        "failures": failures,
+        "exit_code": result.returncode,
+    }
+
+
+@mcp.tool()
+def run_agent_tests(
+    agent_name: str,
+    test_types: str = "all",
+    fail_fast: bool = False,
+) -> str:
+    """Run pytest on an agent's test suite with structured result parsing.
+
+    Automatically sets PYTHONPATH so framework and agent packages are
+    importable. Parses pytest output into structured pass/fail results.
+
+    Args:
+        agent_name: Agent package name (e.g. 'deep_research_agent')
+        test_types: Comma-separated test types: 'constraint', 'success',
+            'edge_case', 'all' (default: 'all')
+        fail_fast: Stop on first failure (default: False)
+
+    Returns:
+        JSON with summary counts, per-test results, and failure details
+    """
+    return json.dumps(_run_agent_tests_impl(agent_name, test_types, fail_fast), indent=2)
+
+
+# ── Meta-agent: Unified agent validation ───────────────────────────────────
+
+
+@mcp.tool()
+def validate_agent_package(agent_name: str) -> str:
+    """Run structural validation checks on a built agent package in one call.
+
+    Executes 5 steps and reports all results (does not stop on first failure):
+      1. Class validation — checks graph structure and entry_points contract
+      2. Node completeness — every NodeSpec in nodes/ must be in the nodes list,
+         and GCU nodes must be referenced in a parent's sub_agents
+      3. Graph validation — loads the agent graph without credential checks
+      4. Tool validation — checks declared tools exist in MCP servers
+      5. Tests — runs the agent's pytest suite
+
+    Note: Credential validation is intentionally skipped here (building phase).
+    Credentials are validated at run time by run_agent_with_input() preflight.
+
+    Args:
+        agent_name: Agent package name (e.g. 'my_agent'). Must exist in exports/.
+
+    Returns:
+        JSON with per-step results and overall pass/fail summary
+    """
+    agent_path = f"exports/{agent_name}"
+    steps: dict[str, dict] = {}
+
+    # Set up env for subprocess calls
+    env = os.environ.copy()
+    core_path = os.path.join(PROJECT_ROOT, "core")
+    exports_path = os.path.join(PROJECT_ROOT, "exports")
+    fw_agents_path = os.path.join(PROJECT_ROOT, "core", "framework", "agents")
+    pythonpath = env.get("PYTHONPATH", "")
+    path_parts = [core_path, exports_path, fw_agents_path, PROJECT_ROOT]
+    if pythonpath:
+        path_parts.append(pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(path_parts)
+
+    # Step 0: Module contract — __init__.py must expose goal, nodes, edges
+    try:
+        _contract_script = textwrap.dedent("""\
+            import importlib, json
+            mod = importlib.import_module('{agent_name}')
+            missing = [a for a in ('goal', 'nodes', 'edges') if getattr(mod, a, None) is None]
+            if missing:
+                print(json.dumps({{
+                    'valid': False,
+                    'error': (
+                        "Module '{agent_name}' is missing module-level attributes: "
+                        + ", ".join(missing) + ". "
+                        "Fix: in {agent_name}/__init__.py, add "
+                        "'from .agent import " + ", ".join(missing) + "' "
+                        "so that 'import {agent_name}' exposes them at package level."
+                    )
+                }}))
+            else:
+                print(json.dumps({{'valid': True}}))
+        """).format(agent_name=agent_name)
+        proc = subprocess.run(
+            ["uv", "run", "python", "-c", _contract_script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+        if proc.returncode == 0:
+            result = json.loads(proc.stdout.strip())
+            steps["module_contract"] = {
+                "passed": result["valid"],
+                "output": result.get("error", "goal, nodes, edges exported correctly"),
+            }
+        else:
+            steps["module_contract"] = {
+                "passed": False,
+                "error": (
+                    f"Failed to import '{agent_name}': {proc.stderr.strip()[:1000]}. "
+                    f"Fix: ensure {agent_name}/__init__.py exists and can be imported "
+                    f"without errors (check syntax, missing dependencies, relative imports)."
+                ),
+            }
+    except Exception as e:
+        steps["module_contract"] = {"passed": False, "error": str(e)}
+
+    # Step A: Class validation (subprocess for import isolation)
+    try:
+        proc = subprocess.run(
+            [
+                "uv",
+                "run",
+                "python",
+                "-c",
+                f"from {agent_name} import default_agent; print(default_agent.validate())",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+        passed = proc.returncode == 0
+        steps["class_validation"] = {
+            "passed": passed,
+            "output": (proc.stdout.strip() or proc.stderr.strip())[:2000],
+        }
+        if not passed:
+            steps["class_validation"]["error"] = proc.stderr.strip()[:2000]
+    except Exception as e:
+        steps["class_validation"] = {"passed": False, "error": str(e)}
+
+    # Step A2: Node completeness — every NodeSpec in nodes/ must be in the nodes list
+    try:
+        _check_template = textwrap.dedent("""\
+            import importlib, json
+            agent = importlib.import_module('{agent_name}')
+            nodes_mod = importlib.import_module('{agent_name}.nodes')
+            graph_ids = {{n.id for n in agent.nodes}}
+            defined = {{}}
+            for attr in dir(nodes_mod):
+                obj = getattr(nodes_mod, attr)
+                if hasattr(obj, 'id') and hasattr(obj, 'node_type'):
+                    defined[obj.id] = attr
+            orphaned = set(defined) - graph_ids
+            errors = [
+                f"Node '{{nid}}' ({{defined[nid]}}) defined in nodes/ but not in nodes list"
+                for nid in sorted(orphaned)
+            ]
+            sub_refs = set()
+            for n in agent.nodes:
+                for sa in getattr(n, 'sub_agents', []) or []:
+                    sub_refs.add(sa)
+            for n in agent.nodes:
+                if n.node_type == 'gcu' and n.id not in sub_refs:
+                    errors.append(
+                        f"GCU node '{{n.id}}' not referenced in any node's sub_agents list"
+                    )
+            print(json.dumps({{'valid': len(errors) == 0, 'errors': errors}}))
+        """)
+        check_script = _check_template.format(agent_name=agent_name)
+        proc = subprocess.run(
+            ["uv", "run", "python", "-c", check_script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+        if proc.returncode == 0:
+            result = json.loads(proc.stdout.strip())
+            steps["node_completeness"] = {
+                "passed": result["valid"],
+                "output": (
+                    "; ".join(result["errors"])
+                    if result["errors"]
+                    else "All defined nodes are in the graph"
+                ),
+            }
+            if not result["valid"]:
+                steps["node_completeness"]["errors"] = result["errors"]
+        else:
+            steps["node_completeness"] = {
+                "passed": False,
+                "error": proc.stderr.strip()[:2000],
+            }
+    except Exception as e:
+        steps["node_completeness"] = {"passed": False, "error": str(e)}
+
+    # Step B: Graph validation (subprocess for import isolation)
+    # Credentials are checked at run time (run_agent_with_input preflight),
+    # not at build time.
+    try:
+        proc = subprocess.run(
+            [
+                "uv",
+                "run",
+                "python",
+                "-c",
+                f"from framework.runner.runner import AgentRunner; "
+                f'r = AgentRunner.load("exports/{agent_name}", '
+                f"skip_credential_validation=True); "
+                f'print("AgentRunner.load (graph-only): OK")',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            cwd=PROJECT_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+        passed = proc.returncode == 0
+        steps["graph_validation"] = {
+            "passed": passed,
+            "output": (proc.stdout.strip() or proc.stderr.strip())[:2000],
+        }
+        if not passed:
+            steps["graph_validation"]["error"] = proc.stderr.strip()[:2000]
+    except Exception as e:
+        steps["graph_validation"] = {"passed": False, "error": str(e)}
+
+    # Step C: Tool validation (direct call)
+    try:
+        tool_result = _validate_agent_tools_impl(agent_path)
+        if "error" in tool_result:
+            steps["tool_validation"] = {"passed": False, "error": tool_result["error"]}
+        else:
+            steps["tool_validation"] = {
+                "passed": tool_result.get("valid", False),
+                "output": tool_result.get("message", ""),
+            }
+            if tool_result.get("missing_tools"):
+                steps["tool_validation"]["missing_tools"] = tool_result["missing_tools"]
+    except Exception as e:
+        steps["tool_validation"] = {"passed": False, "error": str(e)}
+
+    # Step D: Tests (direct call)
+    try:
+        test_result = _run_agent_tests_impl(agent_name)
+        if "error" in test_result:
+            steps["tests"] = {"passed": False, "error": test_result["error"]}
+        else:
+            all_passed = test_result.get("failed", 0) == 0 and test_result.get("errors", 0) == 0
+            steps["tests"] = {
+                "passed": all_passed,
+                "summary": test_result.get("summary", "unknown"),
+            }
+            if not all_passed and test_result.get("failures"):
+                steps["tests"]["failures"] = test_result["failures"]
+    except Exception as e:
+        steps["tests"] = {"passed": False, "error": str(e)}
+
+    # Build summary
+    failed_steps = [name for name, step in steps.items() if not step.get("passed")]
+    total = len(steps)
+    valid = len(failed_steps) == 0
+
+    if valid:
+        summary = f"PASS: All {total} steps passed"
+    else:
+        summary = f"FAIL: {len(failed_steps)} of {total} steps failed ({', '.join(failed_steps)})"
+
     return json.dumps(
         {
+            "valid": valid,
             "agent_name": agent_name,
-            "summary": summary_text,
-            "passed": passed,
-            "failed": failed,
-            "skipped": skipped,
-            "errors": errors,
-            "total": total,
-            "test_results": test_results,
-            "failures": failures,
-            "exit_code": result.returncode,
+            "steps": steps,
+            "summary": summary,
+        },
+        indent=2,
+        default=str,
+    )
+
+
+# ── Meta-agent: Package initialization ─────────────────────────────────────
+
+
+def _snake_to_camel(name: str) -> str:
+    """Convert snake_case to CamelCase."""
+    return "".join(word.capitalize() for word in name.split("_"))
+
+
+def _node_var_name(node_id: str) -> str:
+    """Convert node id to a Python variable name."""
+    return node_id.replace("-", "_") + "_node"
+
+
+@mcp.tool()
+def initialize_and_build_agent(
+    agent_name: str,
+    nodes: str | None = None,
+    _draft: dict | None = None,
+) -> str:
+    """Scaffold a new agent package with placeholder files.
+
+    Creates exports/{agent_name}/ with all files needed for a runnable agent:
+    config.py, nodes/__init__.py, agent.py, __init__.py, __main__.py,
+    mcp_servers.json, tests/conftest.py.
+
+    After initialization, customize the generated files:
+    - System prompts and node logic in nodes/__init__.py
+    - Goal and edges in agent.py
+    - CLI options in __main__.py
+
+    Args:
+        agent_name: Name for the agent package. Must be snake_case (e.g. 'my_agent').
+        nodes: Comma-separated node names (snake_case or kebab-case).
+               If omitted, a single 'start' node is created.
+               Example: 'intake,process,review'
+        _draft: Internal. Draft graph metadata from planning phase, used to
+                pre-populate descriptions, goals, and node metadata.
+
+    Returns:
+        JSON with files written and next steps.
+    """
+    import re
+
+    if not re.match(r"^[a-z][a-z0-9_]*$", agent_name):
+        return json.dumps(
+            {
+                "success": False,
+                "error": (
+                    f"Invalid agent_name '{agent_name}'. Must be snake_case: "
+                    "lowercase letters, numbers, underscores, starting with a letter."
+                ),
+            }
+        )
+
+    node_list = [n.strip() for n in nodes.split(",") if n.strip()] if nodes else ["start"]
+
+    # Build draft node lookup for pre-populating metadata from planning phase
+    _draft_nodes: dict[str, dict] = {}
+    if _draft and _draft.get("nodes"):
+        for dn in _draft["nodes"]:
+            _draft_nodes[dn.get("id", "")] = dn
+
+    # Extract top-level draft metadata early so it's available for all templates
+    _draft_desc = (_draft.get("description") or "") if _draft else ""
+
+    class_name = _snake_to_camel(agent_name)
+    human_name = agent_name.replace("_", " ").title()
+    entry_node = node_list[0]
+
+    exports_dir = os.path.join(PROJECT_ROOT, "exports", agent_name)
+    nodes_dir = os.path.join(exports_dir, "nodes")
+    tests_dir = os.path.join(exports_dir, "tests")
+    os.makedirs(nodes_dir, exist_ok=True)
+    os.makedirs(tests_dir, exist_ok=True)
+
+    files_written: dict[str, dict] = {}
+
+    def _write(rel_path: str, content: str) -> None:
+        full = os.path.join(exports_dir, rel_path)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w", encoding="utf-8") as f:
+            f.write(content)
+        files_written[rel_path] = {
+            "path": f"exports/{agent_name}/{rel_path}",
+            "size_bytes": os.path.getsize(full),
+        }
+
+    # -- config.py --
+    _write(
+        "config.py",
+        f'''\
+"""Runtime configuration."""
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+def _load_preferred_model() -> str:
+    """Load preferred model from ~/.hive/configuration.json."""
+    config_path = Path.home() / ".hive" / "configuration.json"
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+            llm = config.get("llm", {{}})
+            if llm.get("provider") and llm.get("model"):
+                return f"{{llm[\'provider\']}}/{{llm[\'model\']}}"
+        except Exception:
+            pass
+    return "anthropic/claude-sonnet-4-20250514"
+
+
+@dataclass
+class RuntimeConfig:
+    model: str = field(default_factory=_load_preferred_model)
+    temperature: float = 0.7
+    max_tokens: int = 40000
+    api_key: str | None = None
+    api_base: str | None = None
+
+
+default_config = RuntimeConfig()
+
+
+@dataclass
+class AgentMetadata:
+    name: str = "{human_name}"
+    version: str = "1.0.0"
+    description: str = "{_draft_desc or "TODO: Add agent description."}"
+    intro_message: str = "TODO: Add intro message."
+
+
+metadata = AgentMetadata()
+''',
+    )
+
+    # -- nodes/__init__.py --
+    node_specs = []
+    node_var_names = []
+    for node_id in node_list:
+        var = _node_var_name(node_id)
+        node_var_names.append(var)
+        is_first = node_id == entry_node
+
+        # Use draft metadata to pre-populate if available
+        dn = _draft_nodes.get(node_id, {})
+        node_name = dn.get("name") or node_id.replace("_", " ").replace("-", " ").title()
+        node_desc = dn.get("description") or "TODO: Describe what this node does."
+        node_type = dn.get("node_type") or "event_loop"
+        node_tools = dn.get("tools") or []
+        node_input_keys = dn.get("input_keys") or []
+        node_output_keys = dn.get("output_keys") or []
+        node_sc = dn.get("success_criteria") or "TODO: Define success criteria."
+
+        node_specs.append(f'''\
+{var} = NodeSpec(
+    id="{node_id}",
+    name="{node_name}",
+    description="{node_desc}",
+    node_type="{node_type}",
+    client_facing={is_first},
+    max_node_visits=0,
+    input_keys={node_input_keys!r},
+    output_keys={node_output_keys!r},
+    nullable_output_keys=[],
+    success_criteria="{node_sc}",
+    system_prompt="""\\
+TODO: Add system prompt for this node.
+""",
+    tools={node_tools!r},
+)''')
+
+    nodes_init = f'''\
+"""Node definitions for {human_name}."""
+
+from framework.graph import NodeSpec
+
+{chr(10).join(node_specs)}
+
+__all__ = {node_var_names!r}
+'''
+    _write("nodes/__init__.py", nodes_init)
+
+    # -- agent.py --
+    node_imports = ", ".join(node_var_names)
+    nodes_list = ", ".join(node_var_names)
+
+    # Use draft edges if available, otherwise generate linear edges
+    _draft_edges = _draft.get("edges", []) if _draft else []
+    edge_defs = []
+    if _draft_edges:
+        for de in _draft_edges:
+            eid = de.get("id", f"{de.get('source', '')}-to-{de.get('target', '')}")
+            src = de.get("source", "")
+            tgt = de.get("target", "")
+            cond = de.get("condition", "on_success").upper()
+            desc = de.get("description", "")
+            desc_line = f'\n        description="{desc}",' if desc else ""
+            edge_defs.append(f"""\
+    EdgeSpec(
+        id="{eid}",
+        source="{src}",
+        target="{tgt}",
+        condition=EdgeCondition.{cond},{desc_line}
+        priority=1,
+    ),""")
+    else:
+        for i in range(len(node_list) - 1):
+            src, tgt = node_list[i], node_list[i + 1]
+            edge_defs.append(f"""\
+    EdgeSpec(
+        id="{src}-to-{tgt}",
+        source="{src}",
+        target="{tgt}",
+        condition=EdgeCondition.ON_SUCCESS,
+        priority=1,
+    ),""")
+    edges_str = "\n".join(edge_defs) if edge_defs else "    # TODO: Add edges"
+
+    # Pre-populate goal from draft metadata
+    _draft_goal = (
+        (_draft.get("goal") or "TODO: Describe the agent's goal.")
+        if _draft
+        else "TODO: Describe the agent's goal."
+    )
+    _draft_sc = (_draft.get("success_criteria") or []) if _draft else []
+    _draft_constraints = (_draft.get("constraints") or []) if _draft else []
+
+    # Build success criteria entries
+    if _draft_sc:
+        sc_entries = "\n".join(
+            f"""\
+        SuccessCriterion(
+            id="sc-{i + 1}",
+            description="{sc}",
+            metric="TODO",
+            target="TODO",
+            weight=1.0,
+        ),"""
+            for i, sc in enumerate(_draft_sc)
+        )
+    else:
+        sc_entries = """\
+        SuccessCriterion(
+            id="sc-1",
+            description="TODO: Define success criterion.",
+            metric="TODO",
+            target="TODO",
+            weight=1.0,
+        ),"""
+
+    # Build constraint entries
+    if _draft_constraints:
+        constraint_entries = "\n".join(
+            f"""\
+        Constraint(
+            id="c-{i + 1}",
+            description="{c}",
+            constraint_type="hard",
+            category="functional",
+        ),"""
+            for i, c in enumerate(_draft_constraints)
+        )
+    else:
+        constraint_entries = """\
+        Constraint(
+            id="c-1",
+            description="TODO: Define constraint.",
+            constraint_type="hard",
+            category="functional",
+        ),"""
+
+    _write(
+        "agent.py",
+        f'''\
+"""Agent graph construction for {human_name}."""
+
+from pathlib import Path
+
+from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
+from framework.graph.edge import GraphSpec
+from framework.graph.executor import ExecutionResult
+from framework.graph.checkpoint_config import CheckpointConfig
+from framework.llm import LiteLLMProvider
+from framework.runner.tool_registry import ToolRegistry
+from framework.runtime.agent_runtime import create_agent_runtime
+from framework.runtime.execution_stream import EntryPointSpec
+
+from .config import default_config, metadata
+from .nodes import {node_imports}
+
+# Goal definition
+goal = Goal(
+    id="{agent_name}-goal",
+    name="{human_name}",
+    description="{_draft_goal}",
+    success_criteria=[
+{sc_entries}
+    ],
+    constraints=[
+{constraint_entries}
+    ],
+)
+
+# Node list
+nodes = [{nodes_list}]
+
+# Edge definitions
+edges = [
+{edges_str}
+]
+
+# Graph configuration
+entry_node = "{entry_node}"
+entry_points = {{"start": "{entry_node}"}}
+pause_nodes = []
+terminal_nodes = []
+
+conversation_mode = "continuous"
+identity_prompt = "TODO: Add identity prompt."
+loop_config = {{
+    "max_iterations": 100,
+    "max_tool_calls_per_turn": 30,
+    "max_history_tokens": 32000,
+}}
+
+
+class {class_name}:
+    def __init__(self, config=None):
+        self.config = config or default_config
+        self.goal = goal
+        self.nodes = nodes
+        self.edges = edges
+        self.entry_node = entry_node
+        self.entry_points = entry_points
+        self.pause_nodes = pause_nodes
+        self.terminal_nodes = terminal_nodes
+        self._graph = None
+        self._agent_runtime = None
+        self._tool_registry = None
+        self._storage_path = None
+
+    def _build_graph(self):
+        return GraphSpec(
+            id="{agent_name}-graph",
+            goal_id=self.goal.id,
+            version="1.0.0",
+            entry_node=self.entry_node,
+            entry_points=self.entry_points,
+            terminal_nodes=self.terminal_nodes,
+            pause_nodes=self.pause_nodes,
+            nodes=self.nodes,
+            edges=self.edges,
+            default_model=self.config.model,
+            max_tokens=self.config.max_tokens,
+            loop_config=loop_config,
+            conversation_mode=conversation_mode,
+            identity_prompt=identity_prompt,
+        )
+
+    def _setup(self):
+        self._storage_path = Path.home() / ".hive" / "agents" / "{agent_name}"
+        self._storage_path.mkdir(parents=True, exist_ok=True)
+        self._tool_registry = ToolRegistry()
+        mcp_config = Path(__file__).parent / "mcp_servers.json"
+        if mcp_config.exists():
+            self._tool_registry.load_mcp_config(mcp_config)
+        llm = LiteLLMProvider(
+            model=self.config.model,
+            api_key=self.config.api_key,
+            api_base=self.config.api_base,
+        )
+        tools = list(self._tool_registry.get_tools().values())
+        tool_executor = self._tool_registry.get_executor()
+        self._graph = self._build_graph()
+        self._agent_runtime = create_agent_runtime(
+            graph=self._graph,
+            goal=self.goal,
+            storage_path=self._storage_path,
+            entry_points=[
+                EntryPointSpec(
+                    id="default",
+                    name="Default",
+                    entry_node=self.entry_node,
+                    trigger_type="manual",
+                    isolation_level="shared",
+                ),
+            ],
+            llm=llm,
+            tools=tools,
+            tool_executor=tool_executor,
+            checkpoint_config=CheckpointConfig(
+                enabled=True,
+                checkpoint_on_node_complete=True,
+                checkpoint_max_age_days=7,
+                async_checkpoint=True,
+            ),
+        )
+
+    async def start(self):
+        if self._agent_runtime is None:
+            self._setup()
+        if not self._agent_runtime.is_running:
+            await self._agent_runtime.start()
+
+    async def stop(self):
+        if self._agent_runtime and self._agent_runtime.is_running:
+            await self._agent_runtime.stop()
+        self._agent_runtime = None
+
+    async def trigger_and_wait(
+        self,
+        entry_point="default",
+        input_data=None,
+        timeout=None,
+        session_state=None,
+    ):
+        if self._agent_runtime is None:
+            raise RuntimeError("Agent not started. Call start() first.")
+        return await self._agent_runtime.trigger_and_wait(
+            entry_point_id=entry_point,
+            input_data=input_data or {{}},
+            session_state=session_state,
+        )
+
+    async def run(self, context, session_state=None):
+        await self.start()
+        try:
+            result = await self.trigger_and_wait(
+                "default", context, session_state=session_state
+            )
+            return result or ExecutionResult(success=False, error="Execution timeout")
+        finally:
+            await self.stop()
+
+    def info(self):
+        return {{
+            "name": metadata.name,
+            "version": metadata.version,
+            "description": metadata.description,
+            "goal": {{
+                "name": self.goal.name,
+                "description": self.goal.description,
+            }},
+            "nodes": [n.id for n in self.nodes],
+            "edges": [e.id for e in self.edges],
+            "entry_node": self.entry_node,
+            "entry_points": self.entry_points,
+            "terminal_nodes": self.terminal_nodes,
+            "client_facing_nodes": [n.id for n in self.nodes if n.client_facing],
+        }}
+
+    def validate(self):
+        errors, warnings = [], []
+        node_ids = {{n.id for n in self.nodes}}
+        for e in self.edges:
+            if e.source not in node_ids:
+                errors.append(f"Edge {{e.id}}: source '{{e.source}}' not found")
+            if e.target not in node_ids:
+                errors.append(f"Edge {{e.id}}: target '{{e.target}}' not found")
+        if self.entry_node not in node_ids:
+            errors.append(f"Entry node '{{self.entry_node}}' not found")
+        for t in self.terminal_nodes:
+            if t not in node_ids:
+                errors.append(f"Terminal node '{{t}}' not found")
+        for ep_id, nid in self.entry_points.items():
+            if nid not in node_ids:
+                errors.append(f"Entry point '{{ep_id}}' references unknown node '{{nid}}'")
+
+        return {{"valid": len(errors) == 0, "errors": errors, "warnings": warnings}}
+
+
+default_agent = {class_name}()
+''',
+    )
+
+    # -- __init__.py --
+    _write(
+        "__init__.py",
+        f'''\
+"""{human_name} — TODO: Add description."""
+
+from .agent import (
+    {class_name},
+    default_agent,
+    goal,
+    nodes,
+    edges,
+    entry_node,
+    entry_points,
+    pause_nodes,
+    terminal_nodes,
+    conversation_mode,
+    identity_prompt,
+    loop_config,
+)
+from .config import default_config, metadata
+
+__all__ = [
+    "{class_name}",
+    "default_agent",
+    "goal",
+    "nodes",
+    "edges",
+    "entry_node",
+    "entry_points",
+    "pause_nodes",
+    "terminal_nodes",
+    "conversation_mode",
+    "identity_prompt",
+    "loop_config",
+    "default_config",
+    "metadata",
+]
+''',
+    )
+
+    # -- __main__.py --
+    _write(
+        "__main__.py",
+        f'''\
+"""CLI entry point for {human_name}."""
+
+import asyncio
+import json
+import logging
+import sys
+
+import click
+
+from .agent import default_agent, {class_name}
+
+
+def setup_logging(verbose=False, debug=False):
+    if debug:
+        level, fmt = logging.DEBUG, "%(asctime)s %(name)s: %(message)s"
+    elif verbose:
+        level, fmt = logging.INFO, "%(message)s"
+    else:
+        level, fmt = logging.WARNING, "%(levelname)s: %(message)s"
+    logging.basicConfig(level=level, format=fmt, stream=sys.stderr)
+
+
+@click.group()
+@click.version_option(version="1.0.0")
+def cli():
+    """{human_name}."""
+    pass
+
+
+@cli.command()
+@click.option("--verbose", "-v", is_flag=True)
+def run(verbose):
+    """Execute the agent."""
+    setup_logging(verbose=verbose)
+    result = asyncio.run(default_agent.run({{}}))
+    click.echo(
+        json.dumps(
+            {{"success": result.success, "output": result.output}},
+            indent=2,
+            default=str,
+        )
+    )
+    sys.exit(0 if result.success else 1)
+
+
+@cli.command()
+def info():
+    """Show agent info."""
+    data = default_agent.info()
+    click.echo(
+        f"Agent: {{data[\'name\']}}\n"
+        f"Version: {{data[\'version\']}}\n"
+        f"Description: {{data[\'description\']}}"
+    )
+    click.echo(f"Nodes: {{', '.join(data[\'nodes\'])}}")
+    click.echo(f"Client-facing: {{', '.join(data[\'client_facing_nodes\'])}}")
+
+
+@cli.command()
+def validate():
+    """Validate agent structure."""
+    v = default_agent.validate()
+    if v["valid"]:
+        click.echo("Agent is valid")
+    else:
+        click.echo("Errors:")
+        for e in v["errors"]:
+            click.echo(f"  {{e}}")
+    sys.exit(0 if v["valid"] else 1)
+
+
+if __name__ == "__main__":
+    cli()
+''',
+    )
+
+    # -- mcp_servers.json --
+    mcp_config: dict = {
+        "hive-tools": {
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "mcp_server.py", "--stdio"],
+            "cwd": "../../tools",
+            "description": "Hive tools MCP server",
+        },
+        "gcu-tools": {
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "-m", "gcu.server", "--stdio"],
+            "cwd": "../../tools",
+            "description": "GCU browser automation tools",
+        },
+    }
+
+    _write("mcp_servers.json", json.dumps(mcp_config, indent=2))
+
+    # -- tests/conftest.py --
+    _write(
+        "tests/conftest.py",
+        '''\
+"""Test fixtures."""
+
+import sys
+from pathlib import Path
+
+import pytest
+
+_repo_root = Path(__file__).resolve().parents[3]
+for _p in ["exports", "core"]:
+    _path = str(_repo_root / _p)
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
+AGENT_PATH = str(Path(__file__).resolve().parents[1])
+
+
+@pytest.fixture(scope="session")
+def agent_module():
+    """Import the agent package for structural validation."""
+    import importlib
+
+    return importlib.import_module(Path(AGENT_PATH).name)
+
+
+@pytest.fixture(scope="session")
+def runner_loaded():
+    """Load the agent through AgentRunner (structural only, no LLM needed)."""
+    from framework.runner.runner import AgentRunner
+
+    return AgentRunner.load(AGENT_PATH)
+''',
+    )
+
+    # Build list of all generated file paths for the caller.
+    all_file_paths = [info["path"] for info in files_written.values()]
+
+    return json.dumps(
+        {
+            "success": True,
+            "agent_name": agent_name,
+            "class_name": class_name,
+            "entry_node": entry_node,
+            "nodes": node_list,
+            "files_written": files_written,
+            "file_count": len(files_written),
+            "files": all_file_paths,
+            "next_steps": [
+                (
+                    "IMPORTANT: All generated files are structurally complete "
+                    "with correct imports, class definition, validate() method, "
+                    "and __init__.py exports. Use edit_file to customize TODO "
+                    "placeholders — do NOT use write_file to rewrite entire files, "
+                    "as this will break imports and structure."
+                ),
+                (
+                    f"Use edit_file to customize system prompts, tools, "
+                    f"input_keys, output_keys, and success_criteria in "
+                    f"exports/{agent_name}/nodes/__init__.py"
+                ),
+                (
+                    f"Use edit_file to customize goal description, "
+                    f"success_criteria values, constraint values, edge "
+                    f"definitions, and identity_prompt in "
+                    f"exports/{agent_name}/agent.py"
+                ),
+                (
+                    "Do NOT modify: imports at top of agent.py, the class "
+                    "definition, validate() method, _build_graph()/_setup()/"
+                    "lifecycle methods, or __init__.py exports — they are "
+                    "already correct."
+                ),
+                f'Run validate_agent_package("{agent_name}") to verify structure',
+            ],
         },
         indent=2,
     )
@@ -1714,6 +2382,8 @@ def run_agent_tests(
 
 def main() -> None:
     global PROJECT_ROOT, SNAPSHOT_DIR
+
+    from aden_tools.file_ops import register_file_tools
 
     parser = argparse.ArgumentParser(description="Coder Tools MCP Server")
     parser.add_argument("--project-root", default="")
@@ -1731,6 +2401,13 @@ def main() -> None:
     )
     logger.info(f"Project root: {PROJECT_ROOT}")
     logger.info(f"Snapshot dir: {SNAPSHOT_DIR}")
+
+    register_file_tools(
+        mcp,
+        resolve_path=_resolve_path,
+        before_write=None,  # Git snapshot causes stdio deadlock on Windows; undo_changes limited
+        project_root=PROJECT_ROOT,
+    )
 
     if args.stdio:
         mcp.run(transport="stdio")

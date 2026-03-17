@@ -1,7 +1,8 @@
 import { memo, useState, useRef, useEffect } from "react";
-import { Send, Square, Crown, Cpu, Check, ChevronRight, Loader2 } from "lucide-react";
-import { formatAgentDisplayName } from "@/lib/chat-helpers";
+import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
 import MarkdownContent from "@/components/MarkdownContent";
+import QuestionWidget from "@/components/QuestionWidget";
+import MultiQuestionWidget from "@/components/MultiQuestionWidget";
 
 export interface ChatMessage {
   id: string;
@@ -9,41 +10,77 @@ export interface ChatMessage {
   agentColor: string;
   content: string;
   timestamp: string;
-  type?: "system" | "agent" | "user" | "tool_status";
+  type?: "system" | "agent" | "user" | "tool_status" | "worker_input_request" | "run_divider";
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
   thread?: string;
+  /** Epoch ms when this message was first created — used for ordering queen/worker interleaving */
+  createdAt?: number;
+  /** Queen phase active when this message was created */
+  phase?: "planning" | "building" | "staging" | "running";
 }
 
 interface ChatPanelProps {
   messages: ChatMessage[];
   onSend: (message: string, thread: string) => void;
   isWaiting?: boolean;
+  /** When true a worker is thinking (not yet streaming) */
+  isWorkerWaiting?: boolean;
+  /** When true the queen is busy (typing or streaming) — shows the stop button */
+  isBusy?: boolean;
   activeThread: string;
-  /** When true, the agent is waiting for user input — changes placeholder text */
-  awaitingInput?: boolean;
   /** When true, the input is disabled (e.g. during loading) */
   disabled?: boolean;
   /** Called when user clicks the stop button to cancel the queen's current turn */
   onCancel?: () => void;
+  /** Pending question from ask_user — replaces textarea when present */
+  pendingQuestion?: string | null;
+  /** Options for the pending question */
+  pendingOptions?: string[] | null;
+  /** Multiple questions from ask_user_multiple */
+  pendingQuestions?: { id: string; prompt: string; options?: string[] }[] | null;
+  /** Called when user submits an answer to the pending question */
+  onQuestionSubmit?: (answer: string, isOther: boolean) => void;
+  /** Called when user submits answers to multiple questions */
+  onMultiQuestionSubmit?: (answers: Record<string, string>) => void;
+  /** Called when user dismisses the pending question without answering */
+  onQuestionDismiss?: () => void;
+  /** Queen operating phase — shown as a tag on queen messages */
+  queenPhase?: "planning" | "building" | "staging" | "running";
 }
 
 const queenColor = "hsl(45,95%,58%)";
+const workerColor = "hsl(220,60%,55%)";
 
 function getColor(_agent: string, role?: "queen" | "worker"): string {
   if (role === "queen") return queenColor;
-  return "hsl(220,60%,55%)";
+  return workerColor;
+}
+
+// Honey-drizzle palette — based on color-hex.com/color-palette/80116
+// #8e4200 · #db6f02 · #ff9624 · #ffb825 · #ffd69c + adjacent warm tones
+const TOOL_HEX = [
+  "#db6f02", // rich orange
+  "#ffb825", // golden yellow
+  "#ff9624", // bright orange
+  "#c48820", // warm bronze
+  "#e89530", // honey
+  "#d4a040", // goldenrod
+  "#cc7a10", // caramel
+  "#e5a820", // sunflower
+];
+
+function toolHex(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return TOOL_HEX[Math.abs(hash) % TOOL_HEX.length];
 }
 
 function ToolActivityRow({ content }: { content: string }) {
-  const [expanded, setExpanded] = useState(false);
-
   let tools: { name: string; done: boolean }[] = [];
-  let allDone = false;
   try {
     const parsed = JSON.parse(content);
     tools = parsed.tools || [];
-    allDone = parsed.allDone ?? false;
   } catch {
     // Legacy plain-text fallback
     return (
@@ -57,57 +94,79 @@ function ToolActivityRow({ content }: { content: string }) {
 
   if (tools.length === 0) return null;
 
-  const total = tools.length;
+  // Group by tool name → count done vs running
+  const grouped = new Map<string, { done: number; running: number }>();
+  for (const t of tools) {
+    const entry = grouped.get(t.name) || { done: 0, running: 0 };
+    if (t.done) entry.done++;
+    else entry.running++;
+    grouped.set(t.name, entry);
+  }
 
-  if (allDone && !expanded) {
-    return (
-      <div className="flex gap-3 pl-10">
-        <button
-          onClick={() => setExpanded(true)}
-          className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <ChevronRight className="w-3 h-3" />
-          <Check className="w-3 h-3 text-emerald-500" />
-          <span>{total} tool{total === 1 ? "" : "s"} used</span>
-        </button>
-      </div>
-    );
+  // Build pill list: running first, then done
+  const runningPills: { name: string; count: number }[] = [];
+  const donePills: { name: string; count: number }[] = [];
+  for (const [name, counts] of grouped) {
+    if (counts.running > 0) runningPills.push({ name, count: counts.running });
+    if (counts.done > 0) donePills.push({ name, count: counts.done });
   }
 
   return (
     <div className="flex gap-3 pl-10">
       <div className="flex flex-wrap items-center gap-1.5">
-        {allDone && (
-          <button onClick={() => setExpanded(false)} className="text-muted-foreground hover:text-foreground transition-colors">
-            <ChevronRight className="w-3 h-3 rotate-90" />
-          </button>
-        )}
-        {tools.map((t, i) => (
-          <span
-            key={i}
-            className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
-              t.done
-                ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20"
-                : "text-muted-foreground bg-muted/40 border-border/40"
-            }`}
-          >
-            {t.done ? (
-              <Check className="w-2.5 h-2.5" />
-            ) : (
+        {runningPills.map((p) => {
+          const hex = toolHex(p.name);
+          return (
+            <span
+              key={`run-${p.name}`}
+              className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full"
+              style={{ color: hex, backgroundColor: `${hex}18`, border: `1px solid ${hex}35` }}
+            >
               <Loader2 className="w-2.5 h-2.5 animate-spin" />
-            )}
-            {t.name}
-          </span>
-        ))}
+              {p.name}
+              {p.count > 1 && (
+                <span className="text-[10px] font-medium opacity-70">×{p.count}</span>
+              )}
+            </span>
+          );
+        })}
+        {donePills.map((p) => {
+          const hex = toolHex(p.name);
+          return (
+            <span
+              key={`done-${p.name}`}
+              className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full"
+              style={{ color: hex, backgroundColor: `${hex}18`, border: `1px solid ${hex}35` }}
+            >
+              <Check className="w-2.5 h-2.5" />
+              {p.name}
+              {p.count > 1 && (
+                <span className="text-[10px] opacity-80">×{p.count}</span>
+              )}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage }) {
+const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: ChatMessage; queenPhase?: "planning" | "building" | "staging" | "running" }) {
   const isUser = msg.type === "user";
   const isQueen = msg.role === "queen";
   const color = getColor(msg.agent, msg.role);
+
+  if (msg.type === "run_divider") {
+    return (
+      <div className="flex items-center gap-3 py-2 my-1">
+        <div className="flex-1 h-px bg-border/60" />
+        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+          {msg.content}
+        </span>
+        <div className="flex-1 h-px bg-border/60" />
+      </div>
+    );
+  }
 
   if (msg.type === "system") {
     return (
@@ -159,7 +218,15 @@ const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage })
               isQueen ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
             }`}
           >
-            {isQueen ? "Queen" : "Worker"}
+            {isQueen
+              ? ((msg.phase ?? queenPhase) === "running"
+                ? "running"
+                : (msg.phase ?? queenPhase) === "staging"
+                  ? "staging"
+                  : (msg.phase ?? queenPhase) === "planning"
+                    ? "planning"
+                    : "building")
+              : "Worker"}
           </span>
         </div>
         <div
@@ -172,12 +239,14 @@ const MessageBubble = memo(function MessageBubble({ msg }: { msg: ChatMessage })
       </div>
     </div>
   );
-}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content);
+}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.msg.phase === next.msg.phase && prev.queenPhase === next.queenPhase);
 
-export default function ChatPanel({ messages, onSend, isWaiting, activeThread, awaitingInput, disabled, onCancel }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, pendingQuestions, onQuestionSubmit, onMultiQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const threadMessages = messages.filter((m) => {
@@ -194,10 +263,24 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
   // Suppress unused var
   void readMap;
 
-  const lastMsg = threadMessages[threadMessages.length - 1];
+  // Autoscroll: only when user is already near the bottom
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottom.current = distFromBottom < 80;
+  };
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [threadMessages.length, lastMsg?.content]);
+    if (stickToBottom.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [threadMessages, pendingQuestion, isWaiting, isWorkerWaiting]);
+
+  // Always start pinned to bottom when switching threads
+  useEffect(() => {
+    stickToBottom.current = true;
+  }, [activeThread]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -207,8 +290,6 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
-  const activeWorkerLabel = formatAgentDisplayName(activeThread);
-
   return (
     <div className="flex flex-col h-full min-w-0">
       {/* Compact sub-header */}
@@ -217,15 +298,45 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto px-5 py-4 space-y-3">
         {threadMessages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
+          <div key={msg.id}>
+            <MessageBubble msg={msg} queenPhase={queenPhase} />
+          </div>
         ))}
 
-        {isWaiting && (
+        {/* Show typing indicator while waiting for first queen response (disabled + empty chat) */}
+        {(isWaiting || (disabled && threadMessages.length === 0)) && (
           <div className="flex gap-3">
-            <div className="w-7 h-7 rounded-xl bg-muted flex items-center justify-center">
-              <Cpu className="w-3.5 h-3.5 text-muted-foreground" />
+            <div
+              className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center"
+              style={{
+                backgroundColor: `${queenColor}18`,
+                border: `1.5px solid ${queenColor}35`,
+                boxShadow: `0 0 12px ${queenColor}20`,
+              }}
+            >
+              <Crown className="w-4 h-4" style={{ color: queenColor }} />
+            </div>
+            <div className="border border-primary/20 bg-primary/5 rounded-2xl rounded-tl-md px-4 py-3">
+              <div className="flex gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
+              </div>
+            </div>
+          </div>
+        )}
+        {isWorkerWaiting && !isWaiting && (
+          <div className="flex gap-3">
+            <div
+              className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center"
+              style={{
+                backgroundColor: `${workerColor}18`,
+                border: `1.5px solid ${workerColor}35`,
+              }}
+            >
+              <Cpu className="w-3.5 h-3.5" style={{ color: workerColor }} />
             </div>
             <div className="bg-muted/60 rounded-2xl rounded-tl-md px-4 py-3">
               <div className="flex gap-1.5">
@@ -239,54 +350,63 @@ export default function ChatPanel({ messages, onSend, isWaiting, activeThread, a
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
-      <form onSubmit={handleSubmit} className="p-4 border-t border-border">
-        <div className="flex items-center gap-3 bg-muted/40 rounded-xl px-4 py-2.5 border border-border focus-within:border-primary/40 transition-colors">
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              const ta = e.target;
-              ta.style.height = "auto";
-              ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit(e);
-              }
-            }}
-            placeholder={
-              disabled
-                ? "Connecting to agent..."
-                : awaitingInput
-                  ? "Agent is waiting for your response..."
-                  : `Message ${activeWorkerLabel}...`
-            }
-            disabled={disabled}
-            className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
-          />
-          {isWaiting && onCancel ? (
-            <button
-              type="button"
-              onClick={onCancel}
-              className="p-2 rounded-lg bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
-            >
-              <Square className="w-4 h-4" />
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!input.trim() || disabled}
-              className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-      </form>
+      {/* Input area — question widget replaces textarea when a question is pending */}
+      {pendingQuestions && pendingQuestions.length >= 2 && onMultiQuestionSubmit ? (
+        <MultiQuestionWidget
+          questions={pendingQuestions}
+          onSubmit={onMultiQuestionSubmit}
+          onDismiss={onQuestionDismiss}
+        />
+      ) : pendingQuestion && pendingOptions && onQuestionSubmit ? (
+        <QuestionWidget
+          question={pendingQuestion}
+          options={pendingOptions}
+          onSubmit={onQuestionSubmit}
+          onDismiss={onQuestionDismiss}
+        />
+      ) : (
+        <form onSubmit={handleSubmit} className="p-4">
+          <div className="flex items-center gap-3 bg-muted/40 rounded-xl px-4 py-2.5 border border-border focus-within:border-primary/40 transition-colors">
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value);
+                const ta = e.target;
+                ta.style.height = "auto";
+                ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
+              placeholder={disabled ? "Connecting to agent..." : "Message Queen Bee..."}
+              disabled={disabled}
+              className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
+            />
+            {isBusy && onCancel ? (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="p-2 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25 transition-colors"
+              >
+                <Square className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim() || disabled}
+                className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </form>
+      )}
     </div>
   );
 }

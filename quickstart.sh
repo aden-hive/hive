@@ -4,7 +4,7 @@
 #
 # An interactive setup wizard that:
 # 1. Installs Python dependencies
-# 2. Installs Playwright browser for web scraping
+# 2. Checks for Chrome/Edge browser for web automation
 # 3. Helps configure LLM API keys
 # 4. Verifies everything works
 #
@@ -31,6 +31,9 @@ NC='\033[0m' # No Color
 
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Hive LLM router endpoint
+HIVE_LLM_ENDPOINT="https://api.adenhq.com"
 
 # Helper function for prompts
 prompt_yes_no() {
@@ -253,16 +256,12 @@ else
     exit 1
 fi
 
-# Install Playwright browser
-echo -n "  Installing Playwright browser... "
-if uv run python -c "import playwright" > /dev/null 2>&1; then
-    if uv run python -m playwright install chromium > /dev/null 2>&1; then
-        echo -e "${GREEN}ok${NC}"
-    else
-        echo -e "${YELLOW}⏭${NC}"
-    fi
+# Check for Chrome/Edge (required for GCU browser tools)
+echo -n "  Checking for Chrome/Edge browser... "
+if uv run python -c "from gcu.browser.chrome_finder import find_chrome; assert find_chrome()" > /dev/null 2>&1; then
+    echo -e "${GREEN}ok${NC}"
 else
-    echo -e "${YELLOW}⏭${NC}"
+    echo -e "${YELLOW}not found — install Chrome or Edge for browser tools${NC}"
 fi
 
 cd "$SCRIPT_DIR"
@@ -286,6 +285,9 @@ if [ "$NODE_AVAILABLE" = true ]; then
         fi
 
         if [ "$NODE_AVAILABLE" = true ]; then
+            # Clean stale tsbuildinfo cache — tsc -b incremental builds fail
+            # silently when these are out of sync with source files
+            rm -f "$FRONTEND_DIR"/tsconfig*.tsbuildinfo
             echo -n "  Building frontend... "
             if (cd "$FRONTEND_DIR" && npm run build) > /dev/null 2>&1; then
                 echo -e "${GREEN}ok${NC}"
@@ -302,23 +304,16 @@ if [ "$NODE_AVAILABLE" = true ]; then
 fi
 
 # ============================================================
-# Step 3: Configure LLM API Key
-# ============================================================
-
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 3: Configuring LLM provider...${NC}"
-echo ""
-
-# ============================================================
 # Step 3: Verify Python Imports
 # ============================================================
 
-echo -e "${BLUE}Step 3: Verifying Python imports...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 3: Verifying Python imports...${NC}"
 echo ""
 
 IMPORT_ERRORS=0
 
 # Batch check all imports in single process (reduces subprocess spawning overhead)
-CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm framework.mcp.agent_builder_server 2>/dev/null)
+CHECK_RESULT=$(uv run python scripts/check_requirements.py framework aden_tools litellm 2>/dev/null)
 CHECK_EXIT=$?
 
 # Parse and display results
@@ -334,8 +329,7 @@ try:
     modules = [
         ('framework', 'framework imports OK', True),
         ('aden_tools', 'aden_tools imports OK', True),
-        ('litellm', 'litellm imports OK', False),
-        ('framework.mcp.agent_builder_server', 'MCP server module OK', True)
+        ('litellm', 'litellm imports OK', False)
     ]
     import_errors = 0
     for mod, label, required in modules:
@@ -369,19 +363,13 @@ fi
 
 echo ""
 
-# ============================================================
-# Step 4: Verify Claude Code Skills
-# ============================================================
-
-echo -e "${BLUE}Step 4: Verifying Claude Code skills...${NC}"
-echo ""
-
 # Provider configuration - use associative arrays (Bash 4+) or indexed arrays (Bash 3.2)
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     # Bash 4+ - use associative arrays (cleaner and more efficient)
     declare -A PROVIDER_NAMES=(
         ["ANTHROPIC_API_KEY"]="Anthropic (Claude)"
         ["OPENAI_API_KEY"]="OpenAI (GPT)"
+        ["MINIMAX_API_KEY"]="MiniMax"
         ["GEMINI_API_KEY"]="Google Gemini"
         ["GOOGLE_API_KEY"]="Google AI"
         ["GROQ_API_KEY"]="Groq"
@@ -394,6 +382,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     declare -A PROVIDER_IDS=(
         ["ANTHROPIC_API_KEY"]="anthropic"
         ["OPENAI_API_KEY"]="openai"
+        ["MINIMAX_API_KEY"]="minimax"
         ["GEMINI_API_KEY"]="gemini"
         ["GOOGLE_API_KEY"]="google"
         ["GROQ_API_KEY"]="groq"
@@ -404,8 +393,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     )
 
     declare -A DEFAULT_MODELS=(
-        ["anthropic"]="claude-haiku-4-5"
+        ["anthropic"]="claude-haiku-4-5-20251001"
         ["openai"]="gpt-5-mini"
+        ["minimax"]="MiniMax-M2.5"
         ["gemini"]="gemini-3-flash-preview"
         ["groq"]="moonshotai/kimi-k2-instruct-0905"
         ["cerebras"]="zai-glm-4.7"
@@ -417,12 +407,12 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     # Model choices per provider: composite-key associative arrays
     # Keys: "provider:index" -> value
     declare -A MODEL_CHOICES_ID=(
-        ["anthropic:0"]="claude-opus-4-6"
-        ["anthropic:1"]="claude-sonnet-4-5-20250929"
-        ["anthropic:2"]="claude-sonnet-4-20250514"
-        ["anthropic:3"]="claude-haiku-4-5-20251001"
-        ["openai:0"]="gpt-5.2"
-        ["openai:1"]="gpt-5-mini"
+        ["anthropic:0"]="claude-haiku-4-5-20251001"
+        ["anthropic:1"]="claude-sonnet-4-20250514"
+        ["anthropic:2"]="claude-sonnet-4-5-20250929"
+        ["anthropic:3"]="claude-opus-4-6"
+        ["openai:0"]="gpt-5-mini"
+        ["openai:1"]="gpt-5.2"
         ["gemini:0"]="gemini-3-flash-preview"
         ["gemini:1"]="gemini-3.1-pro-preview"
         ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
@@ -432,12 +422,12 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     )
 
     declare -A MODEL_CHOICES_LABEL=(
-        ["anthropic:0"]="Opus 4.6 - Most capable (recommended)"
-        ["anthropic:1"]="Sonnet 4.5 - Best balance"
-        ["anthropic:2"]="Sonnet 4 - Fast + capable"
-        ["anthropic:3"]="Haiku 4.5 - Fast + cheap"
-        ["openai:0"]="GPT-5.2 - Most capable (recommended)"
-        ["openai:1"]="GPT-5 Mini - Fast + cheap"
+        ["anthropic:0"]="Haiku 4.5 - Fast + cheap (recommended)"
+        ["anthropic:1"]="Sonnet 4 - Fast + capable"
+        ["anthropic:2"]="Sonnet 4.5 - Best balance"
+        ["anthropic:3"]="Opus 4.6 - Most capable"
+        ["openai:0"]="GPT-5 Mini - Fast + cheap (recommended)"
+        ["openai:1"]="GPT-5.2 - Most capable"
         ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
         ["gemini:1"]="Gemini 3.1 Pro - Best quality"
         ["groq:0"]="Kimi K2 - Best quality (recommended)"
@@ -447,10 +437,10 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     )
 
     declare -A MODEL_CHOICES_MAXTOKENS=(
-        ["anthropic:0"]=32768
-        ["anthropic:1"]=16384
-        ["anthropic:2"]=8192
-        ["anthropic:3"]=8192
+        ["anthropic:0"]=8192
+        ["anthropic:1"]=8192
+        ["anthropic:2"]=16384
+        ["anthropic:3"]=32768
         ["openai:0"]=16384
         ["openai:1"]=16384
         ["gemini:0"]=8192
@@ -459,6 +449,23 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["groq:1"]=8192
         ["cerebras:0"]=8192
         ["cerebras:1"]=8192
+    )
+
+    # Max context tokens (input history budget) per model, based on actual context windows.
+    # Leave ~10% headroom for system prompt and output tokens.
+    declare -A MODEL_CHOICES_MAXCONTEXTTOKENS=(
+        ["anthropic:0"]=180000   # Claude Haiku 4.5 — 200k context window
+        ["anthropic:1"]=180000   # Claude Sonnet 4 — 200k context window
+        ["anthropic:2"]=180000   # Claude Sonnet 4.5 — 200k context window
+        ["anthropic:3"]=180000   # Claude Opus 4.6 — 200k context window
+        ["openai:0"]=120000      # GPT-5 Mini — 128k context window
+        ["openai:1"]=120000      # GPT-5.2 — 128k context window
+        ["gemini:0"]=900000      # Gemini 3 Flash — 1M context window
+        ["gemini:1"]=900000      # Gemini 3.1 Pro — 1M context window
+        ["groq:0"]=120000        # Kimi K2 — 128k context window
+        ["groq:1"]=120000        # GPT-OSS 120B — 128k context window
+        ["cerebras:0"]=120000    # ZAI-GLM 4.7 — 128k context window
+        ["cerebras:1"]=120000    # Qwen3 235B — 128k context window
     )
 
     declare -A MODEL_CHOICES_COUNT=(
@@ -497,15 +504,19 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     get_model_choice_maxtokens() {
         echo "${MODEL_CHOICES_MAXTOKENS[$1:$2]}"
     }
+
+    get_model_choice_maxcontexttokens() {
+        echo "${MODEL_CHOICES_MAXCONTEXTTOKENS[$1:$2]}"
+    }
 else
     # Bash 3.2 - use parallel indexed arrays
-    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
-    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
-    PROVIDER_ID_LIST=(anthropic openai gemini google groq cerebras mistral together deepseek)
+    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
+    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "Mistral" "Together AI" "DeepSeek")
+    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras mistral together deepseek)
 
     # Default models by provider id (parallel arrays)
-    MODEL_PROVIDER_IDS=(anthropic openai gemini groq cerebras mistral together_ai deepseek)
-    MODEL_DEFAULTS=("claude-opus-4-6" "gpt-5.2" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+    MODEL_PROVIDER_IDS=(anthropic openai minimax gemini groq cerebras mistral together_ai deepseek)
+    MODEL_DEFAULTS=("claude-haiku-4-5-20251001" "gpt-5-mini" "MiniMax-M2.5" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
 
     # Helper: get provider display name for an env var
     get_provider_name() {
@@ -549,9 +560,12 @@ else
     # Model choices per provider - flat parallel arrays with provider offsets
     # Provider order: anthropic(4), openai(2), gemini(2), groq(2), cerebras(2)
     MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-opus-4-6" "claude-sonnet-4-5-20250929" "claude-sonnet-4-20250514" "claude-haiku-4-5-20251001" "gpt-5.2" "gpt-5-mini" "gemini-3-flash-preview" "gemini-3.1-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Opus 4.6 - Most capable (recommended)" "Sonnet 4.5 - Best balance" "Sonnet 4 - Fast + capable" "Haiku 4.5 - Fast + cheap" "GPT-5.2 - Most capable (recommended)" "GPT-5 Mini - Fast + cheap" "Gemini 3 Flash - Fast (recommended)" "Gemini 3.1 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
-    MC_MAXTOKENS=(32768 16384 8192 8192 16384 16384 8192 8192 8192 8192 8192 8192)
+    MC_IDS=("claude-haiku-4-5-20251001" "claude-sonnet-4-20250514" "claude-sonnet-4-5-20250929" "claude-opus-4-6" "gpt-5-mini" "gpt-5.2" "gemini-3-flash-preview" "gemini-3.1-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
+    MC_LABELS=("Haiku 4.5 - Fast + cheap (recommended)" "Sonnet 4 - Fast + capable" "Sonnet 4.5 - Best balance" "Opus 4.6 - Most capable" "GPT-5 Mini - Fast + cheap (recommended)" "GPT-5.2 - Most capable" "Gemini 3 Flash - Fast (recommended)" "Gemini 3.1 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
+    MC_MAXTOKENS=(8192 8192 16384 32768 16384 16384 8192 8192 8192 8192 8192 8192)
+    # Max context tokens per model (same order as MC_PROVIDERS/MC_IDS above)
+    # Based on actual context windows with ~10% headroom for system prompt + output.
+    MC_MAXCONTEXTTOKENS=(180000 180000 180000 180000 120000 120000 900000 900000 120000 120000 120000 120000)
 
     # Helper: get number of model choices for a provider
     get_model_choice_count() {
@@ -620,6 +634,24 @@ else
             i=$((i + 1))
         done
     }
+
+    # Helper: get model choice max_context_tokens by provider and index
+    get_model_choice_maxcontexttokens() {
+        local provider_id="$1"
+        local idx="$2"
+        local count=0
+        local i=0
+        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
+            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
+                if [ $count -eq "$idx" ]; then
+                    echo "${MC_MAXCONTEXTTOKENS[$i]}"
+                    return
+                fi
+                count=$((count + 1))
+            fi
+            i=$((i + 1))
+        done
+    }
 fi
 
 # Configuration directory
@@ -659,7 +691,7 @@ SHELL_RC_FILE=$(detect_shell_rc)
 SHELL_NAME=$(basename "$SHELL")
 
 # Prompt the user to choose a model for their selected provider.
-# Sets SELECTED_MODEL and SELECTED_MAX_TOKENS.
+# Sets SELECTED_MODEL, SELECTED_MAX_TOKENS, and SELECTED_MAX_CONTEXT_TOKENS.
 prompt_model_selection() {
     local provider_id="$1"
     local count
@@ -669,6 +701,7 @@ prompt_model_selection() {
         # No curated choices for this provider (e.g. Mistral, DeepSeek)
         SELECTED_MODEL="$(get_default_model "$provider_id")"
         SELECTED_MAX_TOKENS=8192
+        SELECTED_MAX_CONTEXT_TOKENS=120000  # 128k context window (Mistral, DeepSeek, etc.)
         return
     fi
 
@@ -676,6 +709,7 @@ prompt_model_selection() {
         # Only one choice — auto-select
         SELECTED_MODEL="$(get_model_choice_id "$provider_id" 0)"
         SELECTED_MAX_TOKENS="$(get_model_choice_maxtokens "$provider_id" 0)"
+        SELECTED_MAX_CONTEXT_TOKENS="$(get_model_choice_maxcontexttokens "$provider_id" 0)"
         return
     fi
 
@@ -683,6 +717,19 @@ prompt_model_selection() {
     echo ""
     echo -e "${BOLD}Select a model:${NC}"
     echo ""
+
+    # Find default index from previous model (if same provider)
+    local default_idx=""
+    if [ -n "$PREV_MODEL" ] && [ "$provider_id" = "$PREV_PROVIDER" ]; then
+        local j=0
+        while [ $j -lt "$count" ]; do
+            if [ "$(get_model_choice_id "$provider_id" "$j")" = "$PREV_MODEL" ]; then
+                default_idx=$((j + 1))
+                break
+            fi
+            j=$((j + 1))
+        done
+    fi
 
     local i=0
     while [ $i -lt "$count" ]; do
@@ -698,11 +745,17 @@ prompt_model_selection() {
 
     local choice
     while true; do
-        read -r -p "Enter choice (1-$count): " choice || true
+        if [ -n "$default_idx" ]; then
+            read -r -p "Enter choice (1-$count) [$default_idx]: " choice || true
+            choice="${choice:-$default_idx}"
+        else
+            read -r -p "Enter choice (1-$count): " choice || true
+        fi
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
             local idx=$((choice - 1))
             SELECTED_MODEL="$(get_model_choice_id "$provider_id" "$idx")"
             SELECTED_MAX_TOKENS="$(get_model_choice_maxtokens "$provider_id" "$idx")"
+            SELECTED_MAX_CONTEXT_TOKENS="$(get_model_choice_maxcontexttokens "$provider_id" "$idx")"
             echo ""
             echo -e "${GREEN}⬢${NC} Model: ${DIM}$SELECTED_MODEL${NC}"
             return
@@ -712,15 +765,16 @@ prompt_model_selection() {
 }
 
 # Function to save configuration
-# Args: provider_id env_var model max_tokens [use_claude_code_sub] [api_base] [use_codex_sub]
+# Args: provider_id env_var model max_tokens max_context_tokens [use_claude_code_sub] [api_base] [use_codex_sub]
 save_configuration() {
     local provider_id="$1"
     local env_var="$2"
     local model="$3"
     local max_tokens="$4"
-    local use_claude_code_sub="${5:-}"
-    local api_base="${6:-}"
-    local use_codex_sub="${7:-}"
+    local max_context_tokens="$5"
+    local use_claude_code_sub="${6:-}"
+    local api_base="${7:-}"
+    local use_codex_sub="${8:-}"
 
     # Fallbacks if not provided
     if [ -z "$model" ]; then
@@ -728,6 +782,9 @@ save_configuration() {
     fi
     if [ -z "$max_tokens" ]; then
         max_tokens=8192
+    fi
+    if [ -z "$max_context_tokens" ]; then
+        max_context_tokens=120000
     fi
 
     mkdir -p "$HIVE_CONFIG_DIR"
@@ -739,6 +796,7 @@ config = {
         'provider': '$provider_id',
         'model': '$model',
         'max_tokens': $max_tokens,
+        'max_context_tokens': $max_context_tokens,
         'api_key_env_var': '$env_var'
     },
     'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'
@@ -773,12 +831,15 @@ FOUND_ENV_VARS=()       # Corresponding env var names
 SELECTED_PROVIDER_ID="" # Will hold the chosen provider ID
 SELECTED_ENV_VAR=""     # Will hold the chosen env var
 SELECTED_MODEL=""       # Will hold the chosen model ID
-SELECTED_MAX_TOKENS=8192 # Will hold the chosen max_tokens
+SELECTED_MAX_TOKENS=8192 # Will hold the chosen max_tokens (output limit)
+SELECTED_MAX_CONTEXT_TOKENS=120000 # Will hold the chosen max_context_tokens (input history budget)
 SUBSCRIPTION_MODE=""    # "claude_code" | "codex" | "zai_code" | ""
 
 # ── Credential detection (silent — just set flags) ───────────
 CLAUDE_CRED_DETECTED=false
-if [ -f "$HOME/.claude/.credentials.json" ]; then
+if command -v security &>/dev/null && security find-generic-password -s "Claude Code-credentials" &>/dev/null 2>&1; then
+    CLAUDE_CRED_DETECTED=true
+elif [ -f "$HOME/.claude/.credentials.json" ]; then
     CLAUDE_CRED_DETECTED=true
 fi
 
@@ -792,6 +853,23 @@ fi
 ZAI_CRED_DETECTED=false
 if [ -n "${ZAI_API_KEY:-}" ]; then
     ZAI_CRED_DETECTED=true
+fi
+
+MINIMAX_CRED_DETECTED=false
+if [ -n "${MINIMAX_API_KEY:-}" ]; then
+    MINIMAX_CRED_DETECTED=true
+fi
+
+KIMI_CRED_DETECTED=false
+if [ -f "$HOME/.kimi/config.toml" ]; then
+    KIMI_CRED_DETECTED=true
+elif [ -n "${KIMI_API_KEY:-}" ]; then
+    KIMI_CRED_DETECTED=true
+fi
+
+HIVE_CRED_DETECTED=false
+if [ -n "${HIVE_API_KEY:-}" ]; then
+    HIVE_CRED_DETECTED=true
 fi
 
 # Detect API key providers
@@ -809,6 +887,76 @@ else
             FOUND_ENV_VARS+=("$env_var")
         fi
     done
+fi
+
+# ── Read previous configuration (if any) ──────────────────────
+PREV_PROVIDER=""
+PREV_MODEL=""
+PREV_ENV_VAR=""
+PREV_SUB_MODE=""
+if [ -f "$HIVE_CONFIG_FILE" ]; then
+    eval "$($PYTHON_CMD -c "
+import json, sys
+try:
+    with open('$HIVE_CONFIG_FILE') as f:
+        c = json.load(f)
+    llm = c.get('llm', {})
+    print(f'PREV_PROVIDER={llm.get(\"provider\", \"\")}')
+    print(f'PREV_MODEL={llm.get(\"model\", \"\")}')
+    print(f'PREV_ENV_VAR={llm.get(\"api_key_env_var\", \"\")}')
+    sub = ''
+    if llm.get('use_claude_code_subscription'): sub = 'claude_code'
+    elif llm.get('use_codex_subscription'): sub = 'codex'
+    elif llm.get('use_kimi_code_subscription'): sub = 'kimi_code'
+    elif llm.get('provider', '') == 'minimax' or 'api.minimax.io' in llm.get('api_base', ''): sub = 'minimax_code'
+    elif llm.get('provider', '') == 'hive' or 'adenhq.com' in llm.get('api_base', ''): sub = 'hive_llm'
+    elif 'api.z.ai' in llm.get('api_base', ''): sub = 'zai_code'
+    print(f'PREV_SUB_MODE={sub}')
+except Exception:
+    pass
+" 2>/dev/null)" || true
+fi
+
+# Compute default menu number from previous config (only if credential is still valid)
+DEFAULT_CHOICE=""
+if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
+    PREV_CRED_VALID=false
+    case "$PREV_SUB_MODE" in
+        claude_code) [ "$CLAUDE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        zai_code)    [ "$ZAI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        codex)       [ "$CODEX_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        kimi_code)   [ "$KIMI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        hive_llm)    [ "$HIVE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        *)
+            # API key provider — check if the env var is set
+            if [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
+                PREV_CRED_VALID=true
+            fi
+            ;;
+    esac
+
+    if [ "$PREV_CRED_VALID" = true ]; then
+        case "$PREV_SUB_MODE" in
+            claude_code) DEFAULT_CHOICE=1 ;;
+            zai_code)    DEFAULT_CHOICE=2 ;;
+            codex)       DEFAULT_CHOICE=3 ;;
+            minimax_code) DEFAULT_CHOICE=4 ;;
+            kimi_code)   DEFAULT_CHOICE=5 ;;
+            hive_llm)    DEFAULT_CHOICE=6 ;;
+        esac
+        if [ -z "$DEFAULT_CHOICE" ]; then
+            case "$PREV_PROVIDER" in
+                anthropic) DEFAULT_CHOICE=7 ;;
+                openai)    DEFAULT_CHOICE=8 ;;
+                gemini)    DEFAULT_CHOICE=9 ;;
+                groq)      DEFAULT_CHOICE=10 ;;
+                cerebras)  DEFAULT_CHOICE=11 ;;
+                minimax)   DEFAULT_CHOICE=4 ;;
+                kimi)      DEFAULT_CHOICE=5 ;;
+                hive)      DEFAULT_CHOICE=6 ;;
+            esac
+        fi
+    fi
 fi
 
 # ── Show unified provider selection menu ─────────────────────
@@ -837,30 +985,62 @@ else
     echo -e "  ${CYAN}3)${NC} OpenAI Codex Subscription  ${DIM}(use your Codex/ChatGPT Plus plan)${NC}"
 fi
 
+# 4) MiniMax
+if [ "$MINIMAX_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}4)${NC} MiniMax Coding Key         ${DIM}(use your MiniMax coding key)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}4)${NC} MiniMax Coding Key         ${DIM}(use your MiniMax coding key)${NC}"
+fi
+
+# 5) Kimi Code
+if [ "$KIMI_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}5)${NC} Kimi Code Subscription     ${DIM}(use your Kimi Code plan)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}5)${NC} Kimi Code Subscription     ${DIM}(use your Kimi Code plan)${NC}"
+fi
+
+# 6) Hive LLM
+if [ "$HIVE_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}"
+fi
+
 echo ""
 echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 
-# 4-8) API key providers — show (credential detected) if key already set
+# 7-11) API key providers — show (credential detected) if key already set
 PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY)
 PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier")
 for idx in 0 1 2 3 4; do
-    num=$((idx + 4))
-    if [ -n "${!PROVIDER_MENU_ENVS[$idx]}" ]; then
+    num=$((idx + 7))
+    env_var="${PROVIDER_MENU_ENVS[$idx]}"
+    if [ -n "${!env_var}" ]; then
         echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}  ${GREEN}(credential detected)${NC}"
     else
         echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}"
     fi
 done
 
-echo -e "  ${CYAN}9)${NC} Skip for now"
+echo -e "  ${CYAN}12)${NC} Skip for now"
 echo ""
 
+if [ -n "$DEFAULT_CHOICE" ]; then
+    echo -e "  ${DIM}Previously configured: ${PREV_PROVIDER}/${PREV_MODEL}. Press Enter to keep.${NC}"
+    echo ""
+fi
+
 while true; do
-    read -r -p "Enter choice (1-9): " choice || true
-    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 9 ]; then
+    if [ -n "$DEFAULT_CHOICE" ]; then
+        read -r -p "Enter choice (1-12) [$DEFAULT_CHOICE]: " choice || true
+        choice="${choice:-$DEFAULT_CHOICE}"
+    else
+        read -r -p "Enter choice (1-12): " choice || true
+    fi
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le 12 ]; then
         break
     fi
-    echo -e "${RED}Invalid choice. Please enter 1-9${NC}"
+    echo -e "${RED}Invalid choice. Please enter 1-12${NC}"
 done
 
 case $choice in
@@ -878,6 +1058,7 @@ case $choice in
             SELECTED_PROVIDER_ID="anthropic"
             SELECTED_MODEL="claude-opus-4-6"
             SELECTED_MAX_TOKENS=32768
+            SELECTED_MAX_CONTEXT_TOKENS=180000  # Claude — 200k context window
             echo ""
             echo -e "${GREEN}⬢${NC} Using Claude Code subscription"
         fi
@@ -889,6 +1070,7 @@ case $choice in
         SELECTED_ENV_VAR="ZAI_API_KEY"
         SELECTED_MODEL="glm-5"
         SELECTED_MAX_TOKENS=32768
+        SELECTED_MAX_CONTEXT_TOKENS=120000  # GLM-5 — 128k context window
         PROVIDER_NAME="ZAI"
         echo ""
         echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
@@ -919,41 +1101,99 @@ case $choice in
             SELECTED_PROVIDER_ID="openai"
             SELECTED_MODEL="gpt-5.3-codex"
             SELECTED_MAX_TOKENS=16384
+            SELECTED_MAX_CONTEXT_TOKENS=120000  # GPT Codex — 128k context window
             echo ""
             echo -e "${GREEN}⬢${NC} Using OpenAI Codex subscription"
         fi
         ;;
     4)
+        # MiniMax Coding Key
+        SUBSCRIPTION_MODE="minimax_code"
+        SELECTED_ENV_VAR="MINIMAX_API_KEY"
+        SELECTED_PROVIDER_ID="minimax"
+        SELECTED_MODEL="MiniMax-M2.5"
+        SELECTED_MAX_TOKENS=32768
+        SELECTED_MAX_CONTEXT_TOKENS=900000  # MiniMax M2.5 — 1M context window
+        SELECTED_API_BASE="https://api.minimax.io/v1"
+        PROVIDER_NAME="MiniMax"
+        SIGNUP_URL="https://platform.minimax.io/user-center/basic-information/interface-key"
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using MiniMax coding key"
+        echo -e "  ${DIM}Model: MiniMax-M2.5 | API: api.minimax.io${NC}"
+        ;;
+    5)
+        # Kimi Code Subscription
+        SUBSCRIPTION_MODE="kimi_code"
+        SELECTED_PROVIDER_ID="kimi"
+        SELECTED_ENV_VAR="KIMI_API_KEY"
+        SELECTED_MODEL="kimi-k2.5"
+        SELECTED_MAX_TOKENS=32768
+        SELECTED_MAX_CONTEXT_TOKENS=120000  # Kimi K2.5 — 128k context window
+        SELECTED_API_BASE="https://api.kimi.com/coding"
+        PROVIDER_NAME="Kimi"
+        SIGNUP_URL="https://www.kimi.com/code"
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using Kimi Code subscription"
+        echo -e "  ${DIM}Model: kimi-k2.5 | API: api.kimi.com/coding${NC}"
+        ;;
+    6)
+        # Hive LLM
+        SUBSCRIPTION_MODE="hive_llm"
+        SELECTED_PROVIDER_ID="hive"
+        SELECTED_ENV_VAR="HIVE_API_KEY"
+        SELECTED_MAX_TOKENS=32768
+        SELECTED_MAX_CONTEXT_TOKENS=120000
+        SELECTED_API_BASE="$HIVE_LLM_ENDPOINT"
+        PROVIDER_NAME="Hive"
+        SIGNUP_URL="https://discord.com/invite/hQdU7QDkgR"
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using Hive LLM"
+        echo ""
+        echo -e "  Select a model:"
+        echo -e "  ${CYAN}1)${NC} queen              ${DIM}(default — Hive flagship)${NC}"
+        echo -e "  ${CYAN}2)${NC} kimi-2.5"
+        echo -e "  ${CYAN}3)${NC} GLM-5"
+        echo ""
+        read -r -p "  Enter model choice (1-3) [1]: " hive_model_choice || true
+        hive_model_choice="${hive_model_choice:-1}"
+        case "$hive_model_choice" in
+            2) SELECTED_MODEL="kimi-2.5" ;;
+            3) SELECTED_MODEL="GLM-5" ;;
+            *) SELECTED_MODEL="queen" ;;
+        esac
+        echo -e "  ${DIM}Model: $SELECTED_MODEL | API: ${HIVE_LLM_ENDPOINT}${NC}"
+        ;;
+    7)
         SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
         SELECTED_PROVIDER_ID="anthropic"
         PROVIDER_NAME="Anthropic"
         SIGNUP_URL="https://console.anthropic.com/settings/keys"
         ;;
-    5)
+    8)
         SELECTED_ENV_VAR="OPENAI_API_KEY"
         SELECTED_PROVIDER_ID="openai"
         PROVIDER_NAME="OpenAI"
         SIGNUP_URL="https://platform.openai.com/api-keys"
         ;;
-    6)
+    9)
         SELECTED_ENV_VAR="GEMINI_API_KEY"
         SELECTED_PROVIDER_ID="gemini"
         PROVIDER_NAME="Google Gemini"
         SIGNUP_URL="https://aistudio.google.com/apikey"
         ;;
-    7)
+    10)
         SELECTED_ENV_VAR="GROQ_API_KEY"
         SELECTED_PROVIDER_ID="groq"
         PROVIDER_NAME="Groq"
         SIGNUP_URL="https://console.groq.com/keys"
         ;;
-    8)
+    11)
         SELECTED_ENV_VAR="CEREBRAS_API_KEY"
         SELECTED_PROVIDER_ID="cerebras"
         PROVIDER_NAME="Cerebras"
         SIGNUP_URL="https://cloud.cerebras.ai/"
         ;;
-    9)
+    12)
         echo ""
         echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
         echo -e "Add your API key later by running:"
@@ -965,48 +1205,136 @@ case $choice in
         ;;
 esac
 
-# For API-key providers: prompt for key if not already set
-if [ -z "$SUBSCRIPTION_MODE" ] && [ -n "$SELECTED_ENV_VAR" ] && [ -z "${!SELECTED_ENV_VAR}" ]; then
-    echo ""
-    echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
-    echo ""
-    read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
+# For API-key providers: prompt for key (allow replacement if already set)
+if { [ -z "$SUBSCRIPTION_MODE" ] || [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ] || [ "$SUBSCRIPTION_MODE" = "hive_llm" ]; } && [ -n "$SELECTED_ENV_VAR" ]; then
+    while true; do
+        CURRENT_KEY="${!SELECTED_ENV_VAR}"
+        if [ -n "$CURRENT_KEY" ]; then
+            # Key exists — offer to keep or replace
+            MASKED_KEY="${CURRENT_KEY:0:4}...${CURRENT_KEY: -4}"
+            echo ""
+            echo -e "  ${GREEN}⬢${NC} Current key: ${DIM}$MASKED_KEY${NC}"
+            read -r -p "  Press Enter to keep, or paste a new key to replace: " API_KEY
+        else
+            # No key — prompt for one
+            echo ""
+            echo -e "Get your API key from: ${CYAN}$SIGNUP_URL${NC}"
+            echo ""
+            read -r -p "Paste your $PROVIDER_NAME API key (or press Enter to skip): " API_KEY
+        fi
 
-    if [ -n "$API_KEY" ]; then
-        echo "" >> "$SHELL_RC_FILE"
-        echo "# Hive Agent Framework - $PROVIDER_NAME API key" >> "$SHELL_RC_FILE"
-        echo "export $SELECTED_ENV_VAR=\"$API_KEY\"" >> "$SHELL_RC_FILE"
-        export "$SELECTED_ENV_VAR=$API_KEY"
-        echo ""
-        echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
-    else
-        echo ""
-        echo -e "${YELLOW}Skipped.${NC} Add your API key to $SHELL_RC_FILE when ready."
-        SELECTED_ENV_VAR=""
-        SELECTED_PROVIDER_ID=""
-    fi
+        if [ -n "$API_KEY" ]; then
+            # Remove old export line(s) for this env var from shell rc, then append new
+            sed -i.bak "/^export ${SELECTED_ENV_VAR}=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+            echo "" >> "$SHELL_RC_FILE"
+            echo "# Hive Agent Framework - $PROVIDER_NAME API key" >> "$SHELL_RC_FILE"
+            echo "export $SELECTED_ENV_VAR=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+            export "$SELECTED_ENV_VAR=$API_KEY"
+            echo ""
+            echo -e "${GREEN}⬢${NC} API key saved to $SHELL_RC_FILE"
+            # Health check the new key
+            echo -n "  Verifying API key... "
+            if { [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ] || [ "$SUBSCRIPTION_MODE" = "hive_llm" ]; } && [ -n "${SELECTED_API_BASE:-}" ]; then
+                HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "$SELECTED_PROVIDER_ID" "$API_KEY" "$SELECTED_API_BASE" 2>/dev/null) || true
+            else
+                HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "$SELECTED_PROVIDER_ID" "$API_KEY" 2>/dev/null) || true
+            fi
+            HC_VALID=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null) || true
+            HC_MSG=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null) || true
+            if [ "$HC_VALID" = "True" ]; then
+                echo -e "${GREEN}ok${NC}"
+                break
+            elif [ "$HC_VALID" = "False" ]; then
+                echo -e "${RED}failed${NC}"
+                echo -e "  ${YELLOW}⚠ $HC_MSG${NC}"
+                # Undo the save so the user can retry cleanly
+                sed -i.bak "/^export ${SELECTED_ENV_VAR}=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+                # Remove the comment line we just added
+                sed -i.bak "/^# Hive Agent Framework - $PROVIDER_NAME API key$/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+                unset "$SELECTED_ENV_VAR"
+                echo ""
+                read -r -p "  Press Enter to try again: " _
+                # Loop back to key prompt
+            else
+                echo -e "${YELLOW}--${NC}"
+                echo -e "  ${DIM}Could not verify key (network issue). The key has been saved.${NC}"
+                break
+            fi
+        elif [ -z "$CURRENT_KEY" ]; then
+            # No existing key and user skipped — abort provider
+            echo ""
+            echo -e "${YELLOW}Skipped.${NC} Add your API key to $SHELL_RC_FILE when ready."
+            SELECTED_ENV_VAR=""
+            SELECTED_PROVIDER_ID=""
+            break
+        else
+            # User pressed Enter with existing key — keep it, proceed normally
+            break
+        fi
+    done
 fi
 
-# For ZAI subscription: always prompt for API key
+# For ZAI subscription: prompt for API key (allow replacement if already set)
 if [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
-    echo ""
-    read -r -p "Paste your ZAI API key (or press Enter to skip): " API_KEY
+    while true; do
+        if [ "$ZAI_CRED_DETECTED" = true ] && [ -n "$ZAI_API_KEY" ]; then
+            # Key exists — offer to keep or replace
+            MASKED_KEY="${ZAI_API_KEY:0:4}...${ZAI_API_KEY: -4}"
+            echo ""
+            echo -e "  ${GREEN}⬢${NC} Current ZAI key: ${DIM}$MASKED_KEY${NC}"
+            read -r -p "  Press Enter to keep, or paste a new key to replace: " API_KEY
+        else
+            # No key — prompt for one
+            echo ""
+            read -r -p "Paste your ZAI API key (or press Enter to skip): " API_KEY
+        fi
 
-    if [ -n "$API_KEY" ]; then
-        echo "" >> "$SHELL_RC_FILE"
-        echo "# Hive Agent Framework - ZAI Code subscription API key" >> "$SHELL_RC_FILE"
-        echo "export ZAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC_FILE"
-        export ZAI_API_KEY="$API_KEY"
-        echo ""
-        echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
-    else
-        echo ""
-        echo -e "${YELLOW}Skipped.${NC} Add your ZAI API key to $SHELL_RC_FILE when ready:"
-        echo -e "  ${CYAN}echo 'export ZAI_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
-        SELECTED_ENV_VAR=""
-        SELECTED_PROVIDER_ID=""
-        SUBSCRIPTION_MODE=""
-    fi
+        if [ -n "$API_KEY" ]; then
+            sed -i.bak "/^export ZAI_API_KEY=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+            echo "" >> "$SHELL_RC_FILE"
+            echo "# Hive Agent Framework - ZAI Code subscription API key" >> "$SHELL_RC_FILE"
+            echo "export ZAI_API_KEY=\"$API_KEY\"" >> "$SHELL_RC_FILE"
+            export ZAI_API_KEY="$API_KEY"
+            echo ""
+            echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
+            # Health check the new key
+            echo -n "  Verifying ZAI API key... "
+            HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "zai" "$API_KEY" "https://api.z.ai/api/coding/paas/v4" 2>/dev/null) || true
+            HC_VALID=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null) || true
+            HC_MSG=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null) || true
+            if [ "$HC_VALID" = "True" ]; then
+                echo -e "${GREEN}ok${NC}"
+                break
+            elif [ "$HC_VALID" = "False" ]; then
+                echo -e "${RED}failed${NC}"
+                echo -e "  ${YELLOW}⚠ $HC_MSG${NC}"
+                # Undo the save so the user can retry cleanly
+                sed -i.bak "/^export ZAI_API_KEY=/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+                sed -i.bak "/^# Hive Agent Framework - ZAI Code subscription API key$/d" "$SHELL_RC_FILE" && rm -f "${SHELL_RC_FILE}.bak"
+                unset ZAI_API_KEY
+                ZAI_CRED_DETECTED=false
+                echo ""
+                read -r -p "  Press Enter to try again: " _
+                # Loop back to key prompt
+            else
+                echo -e "${YELLOW}--${NC}"
+                echo -e "  ${DIM}Could not verify key (network issue). The key has been saved.${NC}"
+                break
+            fi
+        elif [ "$ZAI_CRED_DETECTED" = false ] || [ -z "$ZAI_API_KEY" ]; then
+            # No existing key and user skipped — abort provider
+            echo ""
+            echo -e "${YELLOW}Skipped.${NC} Add your ZAI API key to $SHELL_RC_FILE when ready:"
+            echo -e "  ${CYAN}echo 'export ZAI_API_KEY=\"your-key\"' >> $SHELL_RC_FILE${NC}"
+            SELECTED_ENV_VAR=""
+            SELECTED_PROVIDER_ID=""
+            SUBSCRIPTION_MODE=""
+            break
+        else
+            # User pressed Enter with existing key — keep it, proceed normally
+            break
+        fi
+    done
 fi
 
 # Prompt for model if not already selected (manual provider path)
@@ -1019,13 +1347,19 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     echo ""
     echo -n "  Saving configuration... "
     if [ "$SUBSCRIPTION_MODE" = "claude_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "true" "" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "true" "" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "codex" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "" "true" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "" "true" > /dev/null
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null
+    elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
+    elif [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
+    elif [ "$SUBSCRIPTION_MODE" = "hive_llm" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null
     else
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" > /dev/null
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null
     fi
     echo -e "${GREEN}⬢${NC}"
     echo -e "  ${DIM}~/.hive/configuration.json${NC}"
@@ -1034,10 +1368,38 @@ fi
 echo ""
 
 # ============================================================
-# Step 5: Initialize Credential Store
+# Browser Automation (GCU) — always enabled
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 5: Initializing credential store...${NC}"
+echo -e "${GREEN}⬢${NC} Browser automation enabled"
+
+# Patch gcu_enabled into configuration.json
+if [ -f "$HIVE_CONFIG_FILE" ]; then
+    uv run python -c "
+import json
+with open('$HIVE_CONFIG_FILE') as f:
+    config = json.load(f)
+config['gcu_enabled'] = True
+with open('$HIVE_CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+"
+else
+    mkdir -p "$HIVE_CONFIG_DIR"
+    uv run python -c "
+import json
+config = {'gcu_enabled': True, 'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'}
+with open('$HIVE_CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+"
+fi
+
+echo ""
+
+# ============================================================
+# Step 4: Initialize Credential Store
+# ============================================================
+
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 4: Initializing credential store...${NC}"
 echo ""
 echo -e "${DIM}The credential store encrypts API keys and secrets for your agents.${NC}"
 echo ""
@@ -1104,10 +1466,10 @@ fi
 echo ""
 
 # ============================================================
-# Step 6: Verify Setup
+# Step 5: Verify Setup
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Verifying installation...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 5: Verifying installation...${NC}"
 echo ""
 
 ERRORS=0
@@ -1143,41 +1505,7 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
-echo -n "  ⬡ skills... "
-if [ -d "$SCRIPT_DIR/.claude/skills" ]; then
-    SKILL_COUNT=$(ls -1d "$SCRIPT_DIR/.claude/skills"/*/ 2>/dev/null | wc -l)
-    echo -e "${GREEN}${SKILL_COUNT} found${NC}"
-else
-    echo -e "${YELLOW}--${NC}"
-fi
 
-echo -n "  ⬡ codex CLI... "
-if command -v codex > /dev/null 2>&1; then
-    CODEX_VERSION=$(codex --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "0.0.0")
-    # Compare version >= 0.101.0
-    CODEX_MAJOR=$(echo "$CODEX_VERSION" | cut -d. -f1)
-    CODEX_MINOR=$(echo "$CODEX_VERSION" | cut -d. -f2)
-    if [ "$CODEX_MAJOR" -gt 0 ] 2>/dev/null || { [ "$CODEX_MAJOR" -eq 0 ] && [ "$CODEX_MINOR" -ge 101 ]; } 2>/dev/null; then
-        echo -e "${GREEN}${CODEX_VERSION}${NC}"
-        CODEX_AVAILABLE=true
-    else
-        echo -e "${YELLOW}${CODEX_VERSION} (upgrade to 0.101.0+)${NC}"
-        CODEX_AVAILABLE=false
-    fi
-else
-    echo -e "${YELLOW}--${NC}"
-    CODEX_AVAILABLE=false
-fi
-
-echo -n "  ⬡ local settings... "
-if [ -f "$SCRIPT_DIR/.claude/settings.local.json" ]; then
-    echo -e "${GREEN}ok${NC}"
-elif [ -f "$SCRIPT_DIR/.claude/settings.local.json.example" ]; then
-    cp "$SCRIPT_DIR/.claude/settings.local.json.example" "$SCRIPT_DIR/.claude/settings.local.json"
-    echo -e "${GREEN}copied from example${NC}"
-else
-    echo -e "${YELLOW}--${NC}"
-fi
 
 echo -n "  ⬡ credential store... "
 if [ -n "$HIVE_CREDENTIAL_KEY" ] && [ -d "$HOME/.hive/credentials/credentials" ]; then
@@ -1202,10 +1530,10 @@ if [ $ERRORS -gt 0 ]; then
 fi
 
 # ============================================================
-# Step 7: Install hive CLI globally
+# Step 6: Install hive CLI globally
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 7: Installing hive CLI...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Step 6: Installing hive CLI...${NC}"
 echo ""
 
 # Ensure ~/.local/bin exists and is in PATH
@@ -1260,6 +1588,9 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
         echo -e "  ${GREEN}⬢${NC} ZAI Code Subscription → ${DIM}$SELECTED_MODEL${NC}"
         echo -e "  ${DIM}API: api.z.ai (OpenAI-compatible)${NC}"
+    elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
+        echo -e "  ${GREEN}⬢${NC} MiniMax Coding Key → ${DIM}$SELECTED_MODEL${NC}"
+        echo -e "  ${DIM}API: api.minimax.io/v1 (OpenAI-compatible)${NC}"
     else
         echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
     fi
@@ -1270,6 +1601,26 @@ fi
 if [ -n "$HIVE_CREDENTIAL_KEY" ]; then
     echo -e "${BOLD}Credential Store:${NC}"
     echo -e "  ${GREEN}⬢${NC} ${DIM}~/.hive/credentials/${NC}  (encrypted)"
+    echo ""
+fi
+
+# Show tool summary
+TOOL_COUNTS=$(uv run python -c "
+from fastmcp import FastMCP
+from aden_tools.tools import register_all_tools
+mv = FastMCP('v')
+v = register_all_tools(mv, include_unverified=False)
+ma = FastMCP('a')
+a = register_all_tools(ma, include_unverified=True)
+print(f'{len(v)}|{len(a) - len(v)}')
+" 2>/dev/null)
+if [ -n "$TOOL_COUNTS" ]; then
+    VERIFIED=$(echo "$TOOL_COUNTS" | cut -d'|' -f1)
+    UNVERIFIED=$(echo "$TOOL_COUNTS" | cut -d'|' -f2)
+    echo -e "${BOLD}Tools:${NC}"
+    echo -e "  ${GREEN}⬢${NC} ${VERIFIED} verified    ${DIM}${UNVERIFIED} unverified available${NC}"
+    echo -e "  ${DIM}Enable unverified: INCLUDE_UNVERIFIED_TOOLS=true${NC}"
+    echo -e "  ${DIM}Learn more: docs/tools.md${NC}"
     echo ""
 fi
 
@@ -1291,9 +1642,10 @@ if [ "$FRONTEND_BUILT" = true ]; then
     echo -e "  ${DIM}Starting server on http://localhost:8787${NC}"
     echo -e "  ${DIM}Press Ctrl+C to stop${NC}"
     echo ""
-    # exec replaces the quickstart process with hive serve
-    # --open tells it to auto-open the browser once the server is ready
-    exec "$SCRIPT_DIR/hive" serve --open
+    echo -e "  ${DIM}Tip: You can restart the dashboard anytime with:${NC} ${CYAN}hive open${NC}"
+    echo ""
+    # exec replaces the quickstart process with hive open
+    exec "$SCRIPT_DIR/hive" open
 else
     # No frontend — show manual instructions
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -1315,7 +1667,7 @@ else
     echo ""
     echo -e "  Launch the interactive dashboard to browse and run agents:"
     echo -e "  You can start an example agent or an agent built by yourself:"
-    echo -e "     ${CYAN}hive tui${NC}"
+    echo -e "     ${CYAN}hive open${NC}"
     echo ""
     echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
     echo ""

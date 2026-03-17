@@ -67,9 +67,8 @@ temp/
 
 exports/*
 
-.agent-builder-sessions/*
-
 .claude/settings.local.json
+.claude/skills/ship-it/
 
 .venv
 
@@ -78,3 +77,4 @@ core/tests/*dumps/*
 
 screenshots/*
 
+.gemini/*

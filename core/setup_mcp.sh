@@ -40,52 +40,22 @@ if [ -f ".mcp.json" ]; then
     echo "Configuration:"
     cat .mcp.json
 else
-    echo -e "${RED}✗ No .mcp.json found${NC}"
-    echo "Creating default MCP configuration..."
-
-    cat > .mcp.json <<EOF
-{
-  "mcpServers": {
-    "agent-builder": {
-      "command": "python",
-      "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "$SCRIPT_DIR"
-    }
-  }
-}
-EOF
-    echo -e "${GREEN}✓ Created .mcp.json${NC}"
+    echo -e "${GREEN}✓ No .mcp.json needed (MCP servers configured at repo root)${NC}"
 fi
 echo ""
 
-echo -e "${YELLOW}Step 4: Testing MCP server...${NC}"
-uv run python -c "from framework.mcp import agent_builder_server; print('✓ MCP server module loads successfully')" || {
-    echo -e "${RED}Failed to import MCP server module${NC}"
+echo -e "${YELLOW}Step 4: Testing framework import...${NC}"
+uv run python -c "import framework; print('✓ Framework module loads successfully')" || {
+    echo -e "${RED}Failed to import framework module${NC}"
     exit 1
 }
-echo -e "${GREEN}✓ MCP server module verified${NC}"
+echo -e "${GREEN}✓ Framework module verified${NC}"
 echo ""
 
 echo -e "${GREEN}=== Setup Complete ===${NC}"
 echo ""
-echo "The MCP server is now ready to use!"
-echo ""
-echo "To start the MCP server manually:"
-echo "  uv run python -m framework.mcp.agent_builder_server"
+echo "The framework is now ready to use!"
 echo ""
 echo "MCP Configuration location:"
 echo "  $SCRIPT_DIR/.mcp.json"
-echo ""
-echo "To use with Claude Desktop or other MCP clients,"
-echo "add the following to your MCP client configuration:"
-echo ""
-echo "{
-  \"mcpServers\": {
-    \"agent-builder\": {
-      \"command\": \"python\",
-      \"args\": [\"-m\", \"framework.mcp.agent_builder_server\"],
-      \"cwd\": \"$SCRIPT_DIR\"
-    }
-  }
-}"
 echo ""

@@ -1,0 +1,221 @@
+{
+  "original_draft": {
+    "agent_name": "deep_research_agent",
+    "goal": "Research any topic by searching diverse sources, analyzing findings, and producing a cited report \u2014 with user checkpoints to guide direction.",
+    "description": "",
+    "success_criteria": [
+      "Use multiple diverse, authoritative sources",
+      "Every factual claim in the report cites its source",
+      "User reviews findings before report generation",
+      "Final report answers the original research questions"
+    ],
+    "constraints": [
+      "Only include information found in fetched sources",
+      "Every claim must cite its source with a numbered reference",
+      "Present findings to the user before writing the final report"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Research Intake",
+        "description": "Discuss the research topic with the user, clarify scope, and confirm direction",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "user_request"
+        ],
+        "output_keys": [
+          "research_brief"
+        ],
+        "success_criteria": "The research brief is specific and actionable: it states the topic, the key questions to answer, the desired scope, and depth.",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "research",
+        "name": "Research",
+        "description": "Search the web, fetch source content, and compile findings",
+        "node_type": "event_loop",
+        "tools": [
+          "web_search",
+          "web_scrape",
+          "load_data",
+          "save_data",
+          "append_data",
+          "list_data_files"
+        ],
+        "input_keys": [
+          "research_brief",
+          "feedback"
+        ],
+        "output_keys": [
+          "findings",
+          "sources",
+          "gaps"
+        ],
+        "success_criteria": "Findings reference at least 3 distinct sources with URLs. Key claims are substantiated by fetched content, not generated.",
+        "sub_agents": [],
+        "flowchart_type": "database",
+        "flowchart_shape": "cylinder",
+        "flowchart_color": "#508878"
+      },
+      {
+        "id": "review",
+        "name": "Review Findings",
+        "description": "Present findings to user and decide whether to research more or write the report",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "findings",
+          "sources",
+          "gaps",
+          "research_brief"
+        ],
+        "output_keys": [
+          "needs_more_research",
+          "feedback"
+        ],
+        "success_criteria": "The user has been presented with findings and has explicitly indicated whether they want more research or are ready for the report.",
+        "sub_agents": [],
+        "flowchart_type": "decision",
+        "flowchart_shape": "diamond",
+        "flowchart_color": "#d89d26"
+      },
+      {
+        "id": "report",
+        "name": "Write & Deliver Report",
+        "description": "Write a cited HTML report from the findings and present it to the user",
+        "node_type": "event_loop",
+        "tools": [
+          "save_data",
+          "append_data",
+          "serve_file_to_user",
+          "load_data",
+          "list_data_files"
+        ],
+        "input_keys": [
+          "findings",
+          "sources",
+          "research_brief"
+        ],
+        "output_keys": [
+          "delivery_status",
+          "next_action"
+        ],
+        "success_criteria": "An HTML report has been saved, the file link has been presented to the user, and the user has indicated what they want to do next.",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "intake",
+        "target": "research",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "research",
+        "target": "review",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "review",
+        "target": "research",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-3",
+        "source": "review",
+        "target": "report",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-4",
+        "source": "report",
+        "target": "research",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-5",
+        "source": "report",
+        "target": "intake",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "intake",
+    "terminal_nodes": [
+      "report"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "intake": [
+      "intake"
+    ],
+    "research": [
+      "research"
+    ],
+    "review": [
+      "review"
+    ],
+    "report": [
+      "report"
+    ]
+  }
+}

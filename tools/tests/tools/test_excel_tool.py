@@ -280,7 +280,7 @@ class TestExcelRead:
         """Return error for non-Excel file extension."""
         # Create a text file
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name,age\nAlice,30\n")
+        txt_file.write_text("name,age\nAlice,30\n", encoding="utf-8")
 
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
@@ -602,7 +602,7 @@ class TestExcelAppend:
     def test_append_non_xlsx_extension_error(self, excel_tools, session_dir, tmp_path):
         """Return error for non-Excel file extension."""
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name\nAlice\n")
+        txt_file.write_text("name\nAlice\n", encoding="utf-8")
 
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_append"](
@@ -672,7 +672,7 @@ class TestExcelInfo:
     def test_get_info_non_xlsx_extension_error(self, excel_tools, session_dir, tmp_path):
         """Return error for non-Excel file extension."""
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name\nAlice\n")
+        txt_file.write_text("name\nAlice\n", encoding="utf-8")
 
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_info"](
@@ -735,7 +735,7 @@ class TestExcelSheetList:
     def test_list_sheets_non_xlsx_extension_error(self, excel_tools, session_dir, tmp_path):
         """Return error for non-Excel file extension."""
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name\nAlice\n")
+        txt_file.write_text("name\nAlice\n", encoding="utf-8")
 
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sheet_list"](
