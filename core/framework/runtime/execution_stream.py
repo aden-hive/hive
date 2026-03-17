@@ -240,6 +240,19 @@ class ExecutionStream:
         self._protocols_prompt = protocols_prompt
         self._skill_dirs: list[str] = skill_dirs or []
 
+        _es_logger = logging.getLogger(__name__)
+        if protocols_prompt:
+            _es_logger.info(
+                "ExecutionStream[%s] received protocols_prompt (%d chars)",
+                stream_id,
+                len(protocols_prompt),
+            )
+        else:
+            _es_logger.warning(
+                "ExecutionStream[%s] received EMPTY protocols_prompt",
+                stream_id,
+            )
+
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
             stream_id=stream_id,

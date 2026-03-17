@@ -1334,8 +1334,8 @@ class AgentRunner:
         except Exception:
             pass  # Best-effort — agent works without account info
 
-        # Skill configuration — the runtime handles discovery, trust-gating,
-        # loading, and prompt rasterization.  The runner just builds the config.
+        # Skill configuration — the runtime handles discovery, loading, trust-gating and
+        # prompt rasterization.  The runner just builds the config.
         from framework.skills.config import SkillsConfig
         from framework.skills.manager import SkillsManagerConfig
 

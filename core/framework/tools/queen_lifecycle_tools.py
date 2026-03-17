@@ -109,6 +109,9 @@ class QueenPhaseState:
     prompt_staging: str = ""
     prompt_running: str = ""
 
+    # Default skill operational protocols — appended to every phase prompt
+    protocols_prompt: str = ""
+
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
         if self.phase == "planning":
@@ -133,7 +136,12 @@ class QueenPhaseState:
         from framework.agents.queen.queen_memory import format_for_injection
 
         memory = format_for_injection()
-        return base + ("\n\n" + memory if memory else "")
+        parts = [base]
+        if self.protocols_prompt:
+            parts.append(self.protocols_prompt)
+        if memory:
+            parts.append(memory)
+        return "\n\n".join(parts)
 
     async def _emit_phase_event(self) -> None:
         """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""

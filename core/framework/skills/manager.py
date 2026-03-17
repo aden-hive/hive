@@ -42,9 +42,8 @@ class SkillsManagerConfig:
             When ``None``, community discovery is skipped.
         skip_community_discovery: Explicitly skip community scanning
             even when ``project_root`` is set.
-        interactive: Whether to show interactive consent prompts for
-            untrusted project-scope skills (AS-13). Set to False in
-            headless/non-TTY environments.
+        interactive: Whether trust gating can prompt the user interactively.
+            When ``False``, untrusted project skills are silently skipped.
     """
 
     skills_config: SkillsConfig = field(default_factory=SkillsConfig)
@@ -140,9 +139,7 @@ class SkillsManager:
 
             # Pre-activated community skills
             if skills_config.skills:
-                pre_activated = catalog.build_pre_activated_prompt(
-                    skills_config.skills
-                )
+                pre_activated = catalog.build_pre_activated_prompt(skills_config.skills)
                 if pre_activated:
                     if catalog_prompt:
                         catalog_prompt = f"{catalog_prompt}\n\n{pre_activated}"

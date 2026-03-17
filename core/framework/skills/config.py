@@ -75,8 +75,8 @@ class SkillsConfig:
         """Build config from agent module-level variables.
 
         Args:
-            default_skills: Dict from agent module
-            (e.g. ``{"hive.note-taking": {"enabled": True}}``)
+            default_skills: Dict from agent module, e.g.
+                ``{"hive.note-taking": {"enabled": True}}``
             skills: List of pre-activated skill names from agent module
         """
         all_disabled = False

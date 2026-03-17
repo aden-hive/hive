@@ -9,8 +9,8 @@ from framework.skills.catalog import SkillCatalog
 from framework.skills.config import DefaultSkillConfig, SkillsConfig
 from framework.skills.defaults import DefaultSkillManager
 from framework.skills.discovery import DiscoveryConfig, SkillDiscovery
-from framework.skills.models import TrustStatus
 from framework.skills.manager import SkillsManager, SkillsManagerConfig
+from framework.skills.models import TrustStatus
 from framework.skills.parser import ParsedSkill, parse_skill_md
 from framework.skills.trust import TrustedRepoStore, TrustGate
 
@@ -22,10 +22,10 @@ __all__ = [
     "SkillCatalog",
     "SkillDiscovery",
     "SkillsConfig",
+    "SkillsManager",
+    "SkillsManagerConfig",
     "TrustGate",
     "TrustedRepoStore",
     "TrustStatus",
-    "SkillsManager",
-    "SkillsManagerConfig",
     "parse_skill_md",
 ]

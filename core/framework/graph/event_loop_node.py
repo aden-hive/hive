@@ -229,7 +229,7 @@ class LoopConfig:
     # Maximum seconds a single tool call may take before being killed.
     # Prevents hung MCP servers (especially browser/GCU tools) from
     # blocking the entire event loop indefinitely.  0 = no timeout.
-    tool_call_timeout_seconds: float = 120.0
+    tool_call_timeout_seconds: float = 60.0
 
     # --- Lifecycle hooks ---
     # Hooks are async callables keyed by event name.  Supported events:
@@ -507,13 +507,15 @@ class EventLoopNode(NodeProtocol):
                     system_prompt = f"{system_prompt}\n\n{ctx.skills_catalog_prompt}"
                     logger.info(
                         "[%s] Injected skills catalog (%d chars)",
-                        node_id, len(ctx.skills_catalog_prompt),
+                        node_id,
+                        len(ctx.skills_catalog_prompt),
                     )
                 if ctx.protocols_prompt:
                     system_prompt = f"{system_prompt}\n\n{ctx.protocols_prompt}"
                     logger.info(
                         "[%s] Injected operational protocols (%d chars)",
-                        node_id, len(ctx.protocols_prompt),
+                        node_id,
+                        len(ctx.protocols_prompt),
                     )
 
                 # Inject agent working memory (adapt.md).
@@ -614,9 +616,7 @@ class EventLoopNode(NodeProtocol):
                         sub_agents,
                     )
         else:
-            logger.debug(
-                "[%s] Skipped delegate tool (is_subagent_mode=True)", node_id
-            )
+            logger.debug("[%s] Skipped delegate tool (is_subagent_mode=True)", node_id)
 
         # Add report_to_parent tool for sub-agents with a report callback
         if ctx.is_subagent_mode and ctx.report_callback is not None:
@@ -3400,9 +3400,7 @@ class EventLoopNode(NodeProtocol):
             # block on future.result() — running in a thread keeps the
             # event loop free so asyncio.wait_for can fire the timeout.
             loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                None, self._tool_executor, tool_use
-            )
+            result = await loop.run_in_executor(None, self._tool_executor, tool_use)
             # Async executors return a coroutine — await it on the loop
             if asyncio.iscoroutine(result) or asyncio.isfuture(result):
                 result = await result
@@ -3414,9 +3412,7 @@ class EventLoopNode(NodeProtocol):
             else:
                 result = await _run()
         except TimeoutError:
-            logger.warning(
-                "Tool '%s' timed out after %.0fs", tc.tool_name, timeout
-            )
+            logger.warning("Tool '%s' timed out after %.0fs", tc.tool_name, timeout)
             return ToolResult(
                 tool_use_id=tc.tool_use_id,
                 content=(
@@ -4684,9 +4680,7 @@ class EventLoopNode(NodeProtocol):
         # has the original empty list.  When a GCU subagent has no declared
         # tools, include all catalog tools so browser tools are available.
         if subagent_spec.node_type == "gcu" and not subagent_tool_names:
-            subagent_tools = [
-                t for t in tool_source if t.name != "delegate_to_sub_agent"
-            ]
+            subagent_tools = [t for t in tool_source if t.name != "delegate_to_sub_agent"]
         else:
             subagent_tools = [
                 t
