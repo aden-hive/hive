@@ -32,6 +32,9 @@ NC='\033[0m' # No Color
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+# Hive LLM router endpoint
+HIVE_LLM_ENDPOINT="https://api.adenhq.com"
+
 # Helper function for prompts
 prompt_yes_no() {
     local prompt="$1"
@@ -978,6 +981,11 @@ elif [ -n "${KIMI_API_KEY:-}" ]; then
     KIMI_CRED_DETECTED=true
 fi
 
+HIVE_CRED_DETECTED=false
+if [ -n "${HIVE_API_KEY:-}" ]; then
+    HIVE_CRED_DETECTED=true
+fi
+
 # Detect API key providers
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     for env_var in "${!PROVIDER_NAMES[@]}"; do
@@ -1017,6 +1025,7 @@ try:
     elif llm.get('use_codex_subscription'): sub = 'codex'
     elif llm.get('use_kimi_code_subscription'): sub = 'kimi_code'
     elif llm.get('provider', '') == 'minimax' or 'api.minimax.io' in llm.get('api_base', ''): sub = 'minimax_code'
+    elif llm.get('provider', '') == 'hive' or 'adenhq.com' in llm.get('api_base', ''): sub = 'hive_llm'
     elif 'api.z.ai' in llm.get('api_base', ''): sub = 'zai_code'
     print(f'PREV_SUB_MODE={sub}')
 except Exception:
@@ -1033,6 +1042,7 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
         zai_code)    [ "$ZAI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         codex)       [ "$CODEX_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         kimi_code)   [ "$KIMI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        hive_llm)    [ "$HIVE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         *)
             # API key provider — check if the env var is set
             if [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
@@ -1048,17 +1058,19 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
             codex)       DEFAULT_CHOICE=3 ;;
             minimax_code) DEFAULT_CHOICE=4 ;;
             kimi_code)   DEFAULT_CHOICE=5 ;;
+            hive_llm)    DEFAULT_CHOICE=6 ;;
         esac
         if [ -z "$DEFAULT_CHOICE" ]; then
             case "$PREV_PROVIDER" in
-                anthropic) DEFAULT_CHOICE=6 ;;
-                openai)    DEFAULT_CHOICE=7 ;;
-                gemini)    DEFAULT_CHOICE=8 ;;
-                groq)      DEFAULT_CHOICE=9 ;;
-                cerebras)  DEFAULT_CHOICE=10 ;;
-                openrouter) DEFAULT_CHOICE=11 ;;
+                anthropic) DEFAULT_CHOICE=7 ;;
+                openai)    DEFAULT_CHOICE=8 ;;
+                gemini)    DEFAULT_CHOICE=9 ;;
+                groq)      DEFAULT_CHOICE=10 ;;
+                cerebras)  DEFAULT_CHOICE=11 ;;
+                openrouter) DEFAULT_CHOICE=12 ;;
                 minimax)   DEFAULT_CHOICE=4 ;;
                 kimi)      DEFAULT_CHOICE=5 ;;
+                hive)      DEFAULT_CHOICE=6 ;;
             esac
         fi
     fi
@@ -1104,14 +1116,21 @@ else
     echo -e "  ${CYAN}5)${NC} Kimi Code Subscription     ${DIM}(use your Kimi Code plan)${NC}"
 fi
 
+# 6) Hive LLM
+if [ "$HIVE_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}"
+fi
+
 echo ""
 echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 
-# 6-11) API key providers — show (credential detected) if key already set
+# 7-12) API key providers — show (credential detected) if key already set
 PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY)
 PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model")
 for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
-    num=$((idx + 6))
+    num=$((idx + 7))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
     if [ -n "${!env_var}" ]; then
         echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}  ${GREEN}(credential detected)${NC}"
@@ -1120,7 +1139,7 @@ for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     fi
 done
 
-SKIP_CHOICE=$((6 + ${#PROVIDER_MENU_ENVS[@]}))
+SKIP_CHOICE=$((7 + ${#PROVIDER_MENU_ENVS[@]}))
 echo -e "  ${CYAN}$SKIP_CHOICE)${NC} Skip for now"
 echo ""
 
@@ -1236,36 +1255,63 @@ case $choice in
         echo -e "  ${DIM}Model: kimi-k2.5 | API: api.kimi.com/coding${NC}"
         ;;
     6)
+        # Hive LLM
+        SUBSCRIPTION_MODE="hive_llm"
+        SELECTED_PROVIDER_ID="hive"
+        SELECTED_ENV_VAR="HIVE_API_KEY"
+        SELECTED_MAX_TOKENS=32768
+        SELECTED_MAX_CONTEXT_TOKENS=120000
+        SELECTED_API_BASE="$HIVE_LLM_ENDPOINT"
+        PROVIDER_NAME="Hive"
+        SIGNUP_URL="https://discord.com/invite/hQdU7QDkgR"
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using Hive LLM"
+        echo ""
+        echo -e "  Select a model:"
+        echo -e "  ${CYAN}1)${NC} queen              ${DIM}(default — Hive flagship)${NC}"
+        echo -e "  ${CYAN}2)${NC} kimi-2.5"
+        echo -e "  ${CYAN}3)${NC} GLM-5"
+        echo ""
+        read -r -p "  Enter model choice (1-3) [1]: " hive_model_choice || true
+        hive_model_choice="${hive_model_choice:-1}"
+        case "$hive_model_choice" in
+            2) SELECTED_MODEL="kimi-2.5" ;;
+            3) SELECTED_MODEL="GLM-5" ;;
+            *) SELECTED_MODEL="queen" ;;
+        esac
+        echo -e "  ${DIM}Model: $SELECTED_MODEL | API: ${HIVE_LLM_ENDPOINT}${NC}"
+        ;;
+    7)
         SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
         SELECTED_PROVIDER_ID="anthropic"
         PROVIDER_NAME="Anthropic"
         SIGNUP_URL="https://console.anthropic.com/settings/keys"
         ;;
-    7)
+    8)
         SELECTED_ENV_VAR="OPENAI_API_KEY"
         SELECTED_PROVIDER_ID="openai"
         PROVIDER_NAME="OpenAI"
         SIGNUP_URL="https://platform.openai.com/api-keys"
         ;;
-    8)
+    9)
         SELECTED_ENV_VAR="GEMINI_API_KEY"
         SELECTED_PROVIDER_ID="gemini"
         PROVIDER_NAME="Google Gemini"
         SIGNUP_URL="https://aistudio.google.com/apikey"
         ;;
-    9)
+    10)
         SELECTED_ENV_VAR="GROQ_API_KEY"
         SELECTED_PROVIDER_ID="groq"
         PROVIDER_NAME="Groq"
         SIGNUP_URL="https://console.groq.com/keys"
         ;;
-    10)
+    11)
         SELECTED_ENV_VAR="CEREBRAS_API_KEY"
         SELECTED_PROVIDER_ID="cerebras"
         PROVIDER_NAME="Cerebras"
         SIGNUP_URL="https://cloud.cerebras.ai/"
         ;;
-    11)
+    12)
         SELECTED_ENV_VAR="OPENROUTER_API_KEY"
         SELECTED_PROVIDER_ID="openrouter"
         SELECTED_API_BASE="https://openrouter.ai/api/v1"
@@ -1285,7 +1331,7 @@ case $choice in
 esac
 
 # For API-key providers: prompt for key (allow replacement if already set)
-if { [ -z "$SUBSCRIPTION_MODE" ] || [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; } && [ -n "$SELECTED_ENV_VAR" ]; then
+if { [ -z "$SUBSCRIPTION_MODE" ] || [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ] || [ "$SUBSCRIPTION_MODE" = "hive_llm" ]; } && [ -n "$SELECTED_ENV_VAR" ]; then
     while true; do
         CURRENT_KEY="${!SELECTED_ENV_VAR}"
         if [ -n "$CURRENT_KEY" ]; then
@@ -1435,6 +1481,8 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+    elif [ "$SUBSCRIPTION_MODE" = "hive_llm" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false

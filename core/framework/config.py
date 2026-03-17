@@ -19,6 +19,10 @@ from framework.graph.edge import DEFAULT_MAX_TOKENS
 # ---------------------------------------------------------------------------
 
 HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
+
+# Hive LLM router endpoint (Anthropic-compatible).
+# litellm's Anthropic handler appends /v1/messages, so this is just the base host.
+HIVE_LLM_ENDPOINT = "https://api.adenhq.com"
 logger = logging.getLogger(__name__)
 
 

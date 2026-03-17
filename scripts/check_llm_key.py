@@ -16,6 +16,8 @@ import sys
 
 import httpx
 
+from framework.config import HIVE_LLM_ENDPOINT
+
 TIMEOUT = 10.0
 
 
@@ -220,6 +222,10 @@ PROVIDERS = {
     "kimi": lambda key, **kw: check_anthropic_compatible(
         key, "https://api.kimi.com/coding/v1/messages", "Kimi"
     ),
+    # Hive LLM uses an Anthropic-compatible endpoint
+    "hive": lambda key, **kw: check_anthropic_compatible(
+        key, f"{HIVE_LLM_ENDPOINT}/v1/messages", "Hive"
+    ),
 }
 
 
@@ -255,6 +261,10 @@ def main() -> None:
             # Kimi uses an Anthropic-compatible endpoint; check via /v1/messages
             result = check_anthropic_compatible(
                 api_key, api_base.rstrip("/") + "/v1/messages", "Kimi"
+            )
+        elif api_base and provider_id == "hive":
+            result = check_anthropic_compatible(
+                api_key, api_base.rstrip("/") + "/v1/messages", "Hive"
             )
         elif api_base:
             # Custom API base (ZAI or other OpenAI-compatible)

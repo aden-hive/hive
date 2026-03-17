@@ -21,6 +21,9 @@ $ErrorActionPreference = "Continue"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $UvHelperPath = Join-Path $ScriptDir "scripts\uv-discovery.ps1"
 
+# Hive LLM router endpoint
+$HiveLlmEndpoint = "https://api.adenhq.com"
+
 . $UvHelperPath
 
 # ============================================================
@@ -974,6 +977,11 @@ $kimiKey = [System.Environment]::GetEnvironmentVariable("KIMI_API_KEY", "User")
 if (-not $kimiKey) { $kimiKey = $env:KIMI_API_KEY }
 if ($kimiKey) { $KimiCredDetected = $true }
 
+$HiveCredDetected = $false
+$hiveKey = [System.Environment]::GetEnvironmentVariable("HIVE_API_KEY", "User")
+if (-not $hiveKey) { $hiveKey = $env:HIVE_API_KEY }
+if ($hiveKey) { $HiveCredDetected = $true }
+
 # Detect API key providers
 $ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY")
 $ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier", "OpenRouter - Bring any OpenRouter model")
@@ -1005,6 +1013,7 @@ if (Test-Path $HiveConfigFile) {
             elseif ($prevLlm.use_kimi_code_subscription) { $PrevSubMode = "kimi_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.z.ai*") { $PrevSubMode = "zai_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.kimi.com*") { $PrevSubMode = "kimi_code" }
+            elseif ($prevLlm.provider -eq "hive" -or ($prevLlm.api_base -and $prevLlm.api_base -like "*adenhq.com*")) { $PrevSubMode = "hive_llm" }
         }
     } catch { }
 }
@@ -1018,6 +1027,7 @@ if ($PrevSubMode -or $PrevProvider) {
         "zai_code"    { if ($ZaiCredDetected)    { $prevCredValid = $true } }
         "codex"       { if ($CodexCredDetected)  { $prevCredValid = $true } }
         "kimi_code"   { if ($KimiCredDetected)   { $prevCredValid = $true } }
+        "hive_llm"    { if ($HiveCredDetected)   { $prevCredValid = $true } }
         default {
             if ($PrevEnvVar) {
                 $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "Process")
@@ -1032,15 +1042,16 @@ if ($PrevSubMode -or $PrevProvider) {
             "zai_code"    { $DefaultChoice = "2" }
             "codex"       { $DefaultChoice = "3" }
             "kimi_code"   { $DefaultChoice = "4" }
+            "hive_llm"    { $DefaultChoice = "5" }
         }
         if (-not $DefaultChoice) {
             switch ($PrevProvider) {
-                "anthropic" { $DefaultChoice = "5" }
-                "openai"    { $DefaultChoice = "6" }
-                "gemini"    { $DefaultChoice = "7" }
-                "groq"      { $DefaultChoice = "8" }
-                "cerebras"  { $DefaultChoice = "9" }
-                "openrouter" { $DefaultChoice = "10" }
+                "anthropic" { $DefaultChoice = "6" }
+                "openai"    { $DefaultChoice = "7" }
+                "gemini"    { $DefaultChoice = "8" }
+                "groq"      { $DefaultChoice = "9" }
+                "cerebras"  { $DefaultChoice = "10" }
+                "openrouter" { $DefaultChoice = "11" }
                 "kimi"      { $DefaultChoice = "4" }
             }
         }
@@ -1080,12 +1091,19 @@ Write-Host ") Kimi Code Subscription     " -NoNewline
 Write-Color -Text "(use your Kimi Code plan)" -Color DarkGray -NoNewline
 if ($KimiCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 
+# 5) Hive LLM
+Write-Host "  " -NoNewline
+Write-Color -Text "5" -Color Cyan -NoNewline
+Write-Host ") Hive LLM                   " -NoNewline
+Write-Color -Text "(use your Hive API key)" -Color DarkGray -NoNewline
+if ($HiveCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
+
 Write-Host ""
 Write-Color -Text "  API key providers:" -Color Cyan
 
-# 5-10) API key providers
+# 6-11) API key providers
 for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
-    $num = $idx + 5
+    $num = $idx + 6
     $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "Process")
     if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "User") }
     Write-Host "  " -NoNewline
@@ -1094,7 +1112,7 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     if ($envVal) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 }
 
-$SkipChoice = 5 + $ProviderMenuEnvVars.Count
+$SkipChoice = 6 + $ProviderMenuEnvVars.Count
 Write-Host "  " -NoNewline
 Write-Color -Text "$SkipChoice" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
@@ -1195,9 +1213,33 @@ switch ($num) {
         Write-Ok "Using Kimi Code subscription"
         Write-Color -Text "  Model: kimi-k2.5 | API: api.kimi.com/coding" -Color DarkGray
     }
-    { $_ -ge 5 -and $_ -le 10 } {
+    5 {
+        # Hive LLM
+        $SubscriptionMode        = "hive_llm"
+        $SelectedProviderId      = "hive"
+        $SelectedEnvVar          = "HIVE_API_KEY"
+        $SelectedMaxTokens       = 32768
+        $SelectedMaxContextTokens = 120000
+        Write-Host ""
+        Write-Ok "Using Hive LLM"
+        Write-Host ""
+        Write-Host "  Select a model:"
+        Write-Host "  " -NoNewline; Write-Color -Text "1)" -Color Cyan -NoNewline; Write-Host " queen              " -NoNewline; Write-Color -Text "(default - Hive flagship)" -Color DarkGray
+        Write-Host "  " -NoNewline; Write-Color -Text "2)" -Color Cyan -NoNewline; Write-Host " kimi-2.5"
+        Write-Host "  " -NoNewline; Write-Color -Text "3)" -Color Cyan -NoNewline; Write-Host " GLM-5"
+        Write-Host ""
+        $hiveModelChoice = Read-Host "  Enter model choice (1-3) [1]"
+        if (-not $hiveModelChoice) { $hiveModelChoice = "1" }
+        switch ($hiveModelChoice) {
+            "2" { $SelectedModel = "kimi-2.5" }
+            "3" { $SelectedModel = "GLM-5" }
+            default { $SelectedModel = "queen" }
+        }
+        Write-Color -Text "  Model: $SelectedModel | API: $HiveLlmEndpoint" -Color DarkGray
+    }
+    { $_ -ge 6 -and $_ -le 11 } {
         # API key providers
-        $provIdx = $num - 5
+        $provIdx = $num - 6
         $SelectedEnvVar     = $ProviderMenuEnvVars[$provIdx]
         $SelectedProviderId = $ProviderMenuIds[$provIdx]
         $providerName       = $ProviderMenuNames[$provIdx] -replace ' - .*', ''  # strip description
@@ -1418,6 +1460,70 @@ if ($SubscriptionMode -eq "kimi_code") {
     }
 }
 
+# For Hive LLM: prompt for API key with verification + retry
+if ($SubscriptionMode -eq "hive_llm") {
+    while ($true) {
+        $existingHive = [System.Environment]::GetEnvironmentVariable("HIVE_API_KEY", "User")
+        if (-not $existingHive) { $existingHive = $env:HIVE_API_KEY }
+
+        if ($existingHive) {
+            $masked = $existingHive.Substring(0, [Math]::Min(4, $existingHive.Length)) + "..." + $existingHive.Substring([Math]::Max(0, $existingHive.Length - 4))
+            Write-Host ""
+            Write-Color -Text "  $([char]0x2B22) Current Hive key: $masked" -Color Green
+            Write-Host ""
+            $apiKey = Read-Host "Paste a new Hive API key (or press Enter to keep current)"
+        } else {
+            Write-Host ""
+            Write-Host "  Get your API key from: " -NoNewline
+            Write-Color -Text "https://discord.com/invite/hQdU7QDkgR" -Color Cyan
+            Write-Host ""
+            $apiKey = Read-Host "Paste your Hive API key (or press Enter to skip)"
+        }
+
+        if ($apiKey) {
+            [System.Environment]::SetEnvironmentVariable("HIVE_API_KEY", $apiKey, "User")
+            $env:HIVE_API_KEY = $apiKey
+            Write-Host ""
+            Write-Ok "Hive API key saved as User environment variable"
+
+            # Health check the new key
+            Write-Host "  Verifying Hive API key... " -NoNewline
+            try {
+                $hcOutput = & $PythonCmd scripts/check_llm_key.py hive $apiKey "$HiveLlmEndpoint" 2>&1
+                $hcJson = $hcOutput | ConvertFrom-Json
+                if ($hcJson.valid -eq $true) {
+                    Write-Color -Text "ok" -Color Green
+                    break
+                } elseif ($hcJson.valid -eq $false) {
+                    Write-Color -Text "failed" -Color Red
+                    Write-Warn $hcJson.message
+                    [System.Environment]::SetEnvironmentVariable("HIVE_API_KEY", $null, "User")
+                    Remove-Item -Path "Env:\HIVE_API_KEY" -ErrorAction SilentlyContinue
+                    Write-Host ""
+                    Read-Host "  Press Enter to try again"
+                } else {
+                    Write-Color -Text "--" -Color Yellow
+                    Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                    break
+                }
+            } catch {
+                Write-Color -Text "--" -Color Yellow
+                break
+            }
+        } elseif (-not $existingHive) {
+            Write-Host ""
+            Write-Warn "Skipped. Add your Hive API key later:"
+            Write-Color -Text "  [System.Environment]::SetEnvironmentVariable('HIVE_API_KEY', 'your-key', 'User')" -Color Cyan
+            $SelectedEnvVar     = ""
+            $SelectedProviderId = ""
+            $SubscriptionMode   = ""
+            break
+        } else {
+            break
+        }
+    }
+}
+
 # Prompt for model if not already selected (manual provider path)
 if ($SelectedProviderId -and -not $SelectedModel) {
     $modelSel = Get-ModelSelection $SelectedProviderId
@@ -1457,6 +1563,9 @@ if ($SelectedProviderId) {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } elseif ($SubscriptionMode -eq "kimi_code") {
         $config.llm["api_base"] = "https://api.kimi.com/coding"
+        $config.llm["api_key_env_var"] = $SelectedEnvVar
+    } elseif ($SubscriptionMode -eq "hive_llm") {
+        $config.llm["api_base"] = $HiveLlmEndpoint
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } elseif ($SelectedProviderId -eq "openrouter") {
         $config.llm["api_base"] = "https://openrouter.ai/api/v1"

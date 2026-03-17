@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff, X } from "lucide-react";
-import AgentGraph, { type GraphNode, type NodeStatus } from "@/components/AgentGraph";
+import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import DraftGraph from "@/components/DraftGraph";
 import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
 import TopBar from "@/components/TopBar";
@@ -17,6 +17,7 @@ import { useMultiSSE } from "@/hooks/use-sse";
 import type { LiveSession, AgentEvent, DiscoverEntry, NodeSpec, DraftGraph as DraftGraphData } from "@/api/types";
 import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
+import { cronToLabel } from "@/lib/graphUtils";
 import { ApiError } from "@/api/client";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
@@ -327,6 +328,8 @@ interface AgentBackendState {
   workerIsTyping: boolean;
   llmSnapshots: Record<string, string>;
   activeToolCalls: Record<string, { name: string; done: boolean; streamId: string }>;
+  /** True while save_agent_draft tool is running (between tool_call_started and draft_graph_updated) */
+  designingDraft: boolean;
   /** Agent folder path — set after scaffolding, used for credential queries */
   agentPath: string | null;
   /** Structured question text from ask_user with options */
@@ -353,6 +356,7 @@ function defaultAgentState(): AgentBackendState {
     workerInputMessageId: null,
     queenBuilding: false,
     queenPhase: "planning",
+    designingDraft: false,
     draftGraph: null,
     originalDraft: null,
     flowchartMap: null,
@@ -554,9 +558,46 @@ export default function Workspace() {
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [triggerTaskDraft, setTriggerTaskDraft] = useState("");
+  const [triggerCronDraft, setTriggerCronDraft] = useState("");
   const [triggerTaskSaving, setTriggerTaskSaving] = useState(false);
+  const [triggerScheduleSaving, setTriggerScheduleSaving] = useState(false);
+  const [triggerCronSaved, setTriggerCronSaved] = useState(false);
+  const [triggerTaskSaved, setTriggerTaskSaved] = useState(false);
   const [newTabOpen, setNewTabOpen] = useState(false);
   const newTabBtnRef = useRef<HTMLButtonElement>(null);
+  const [graphPanelPct, setGraphPanelPct] = useState(30);
+  const savedGraphPanelPct = useRef(30);
+  const resizing = useRef(false);
+
+  // Drag-to-resize the graph panel
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!resizing.current) return;
+      const pct = (e.clientX / window.innerWidth) * 100;
+      setGraphPanelPct(Math.max(15, Math.min(50, pct)));
+    };
+    const onMouseUp = () => {
+      resizing.current = false;
+      document.body.style.cursor = "";
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  // Shrink graph panel when node detail opens, restore when it closes
+  const nodeIsSelected = selectedNode !== null;
+  useEffect(() => {
+    if (nodeIsSelected) {
+      savedGraphPanelPct.current = graphPanelPct;
+      setGraphPanelPct(prev => Math.min(prev, 30));
+    } else {
+      setGraphPanelPct(savedGraphPanelPct.current);
+    }
+  }, [nodeIsSelected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ref mirror of sessionsByAgent so SSE callback can read current graph
   // state without adding sessionsByAgent to its dependency array.
@@ -577,6 +618,9 @@ export default function Workspace() {
   // it was created in (avoids stale-closure when phase change and message
   // events arrive in the same React batch).
   const queenPhaseRef = useRef<Record<string, string>>({});
+  // Timestamp when designingDraft was set — used to enforce minimum spinner duration.
+  const designingDraftSinceRef = useRef<Record<string, number>>({});
+  const designingDraftTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   // Synchronous ref to suppress the queen's auto-intro SSE messages
   // after a cold-restore (where we already restored the conversation from disk).
@@ -1186,8 +1230,8 @@ export default function Workspace() {
         graphsApi.draftGraph(state.sessionId).then(({ draft }) => {
           if (draft) updateAgentState(agentType, { draftGraph: draft });
         }).catch(() => {});
-      } else {
-        // Fetch flowchart map for non-planning phases (staging, running, building)
+      } else if (state.queenPhase !== "building") {
+        // Fetch flowchart map for non-building phases (staging, running)
         if (state.originalDraft) continue; // already have it
         if (fetchedFlowchartMapSessionsRef.current.has(state.sessionId)) continue;
         fetchedFlowchartMapSessionsRef.current.add(state.sessionId);
@@ -1196,6 +1240,7 @@ export default function Workspace() {
             updateAgentState(agentType, {
               flowchartMap: map,
               originalDraft: original_draft,
+              draftGraph: null,
             });
           }
         }).catch(() => {});
@@ -1220,12 +1265,28 @@ export default function Workspace() {
 
           const fireMap = new Map<string, number>();
           const taskMap = new Map<string, string>();
+          const labelMap = new Map<string, string>();
+          const targetMap = new Map<string, string>();
           for (const ep of triggerEps) {
+            const nodeId = `__trigger_${ep.id}`;
             if (ep.next_fire_in != null) {
-              fireMap.set(`__trigger_${ep.id}`, ep.next_fire_in);
+              fireMap.set(nodeId, ep.next_fire_in);
             }
             if (ep.task != null) {
-              taskMap.set(`__trigger_${ep.id}`, ep.task);
+              taskMap.set(nodeId, ep.task);
+            }
+            const cron = ep.trigger_config?.cron as string | undefined;
+            const interval = ep.trigger_config?.interval_minutes as number | undefined;
+            const epLabel = cron
+              ? cronToLabel(cron)
+              : interval
+                ? `Every ${interval >= 60 ? `${interval / 60}h` : `${interval}m`}`
+                : ep.name || undefined;
+            if (epLabel) {
+              labelMap.set(nodeId, epLabel);
+            }
+            if (ep.entry_node) {
+              targetMap.set(nodeId, ep.entry_node);
             }
           }
 
@@ -1234,14 +1295,18 @@ export default function Workspace() {
             if (!ss?.length) return prev;
             const existingIds = new Set(ss[0].graphNodes.map(n => n.id));
 
-            // Update existing trigger nodes
+            // Update existing trigger nodes (countdown, task, label, target)
             let updated = ss[0].graphNodes.map((n) => {
               if (n.nodeType !== "trigger") return n;
               const nfi = fireMap.get(n.id);
               const task = taskMap.get(n.id);
-              if (nfi == null && task == null) return n;
+              const label = labelMap.get(n.id);
+              const target = targetMap.get(n.id);
+              if (nfi == null && task == null && !label && !target) return n;
               return {
                 ...n,
+                ...(label && label !== n.label ? { label } : {}),
+                ...(target ? { next: [target] } : {}),
                 triggerConfig: {
                   ...n.triggerConfig,
                   ...(nfi != null ? { next_fire_in: nfi } : {}),
@@ -1251,14 +1316,15 @@ export default function Workspace() {
             });
 
             // Discover new triggers not yet in the graph
-            const entryNode = ss[0].graphNodes.find(n => n.nodeType !== "trigger")?.id;
+            const fallbackEntry = ss[0].graphNodes.find(n => n.nodeType !== "trigger")?.id;
             const newNodes: GraphNode[] = [];
             for (const ep of triggerEps) {
               const nodeId = `__trigger_${ep.id}`;
               if (existingIds.has(nodeId)) continue;
+              const target = ep.entry_node || fallbackEntry;
               newNodes.push({
                 id: nodeId,
-                label: ep.name || ep.id,
+                label: labelMap.get(nodeId) || ep.name || ep.id,
                 status: "pending",
                 nodeType: "trigger",
                 triggerType: ep.trigger_type,
@@ -1267,7 +1333,7 @@ export default function Workspace() {
                   ...(ep.next_fire_in != null ? { next_fire_in: ep.next_fire_in } : {}),
                   ...(ep.task ? { task: ep.task } : {}),
                 },
-                ...(entryNode ? { next: [entryNode] } : {}),
+                ...(target ? { next: [target] } : {}),
               });
             }
             if (newNodes.length > 0) {
@@ -1584,12 +1650,15 @@ export default function Workspace() {
           const chatMsg = sseEventToChatMessage(event, agentType, displayName, currentTurn);
           if (isQueen) console.log('[QUEEN] chatMsg:', chatMsg?.id, chatMsg?.content?.slice(0, 50), 'turn:', currentTurn);
           if (chatMsg && !suppressQueenMessages) {
-            // Queen may emit multiple client_output_delta / llm_text_delta snapshots
-            // for a single execution as it iterates internally. Use a stable ID so
-            // those snapshots collapse into a single bubble instead of rendering as
-            // multiple independent replies to the same user message.
+            // Queen emits multiple client_output_delta / llm_text_delta snapshots
+            // across iterations and inner tool-loop turns.  Build a stable ID that
+            // groups streaming deltas for the *same* output (same execution +
+            // iteration + inner_turn) into one bubble, while keeping distinct
+            // outputs as separate bubbles so earlier text isn't overwritten.
             if (isQueen && (event.type === "client_output_delta" || event.type === "llm_text_delta") && event.execution_id) {
-              chatMsg.id = `queen-stream-${event.execution_id}`;
+              const iter = event.data?.iteration ?? 0;
+              const inner = event.data?.inner_turn ?? 0;
+              chatMsg.id = `queen-stream-${event.execution_id}-${iter}-${inner}`;
             }
             if (isQueen) {
               chatMsg.role = role;
@@ -1836,6 +1905,15 @@ export default function Workspace() {
             const toolName = (event.data?.tool_name as string) || "unknown";
             const toolUseId = (event.data?.tool_use_id as string) || "";
 
+            // Flag when the queen starts designing/updating the flowchart
+            if (isQueen && toolName === "save_agent_draft") {
+              designingDraftSinceRef.current[agentType] = Date.now();
+              // Clear any pending delayed-clear timer from a previous call
+              const prev = designingDraftTimerRef.current[agentType];
+              if (prev) clearTimeout(prev);
+              updateAgentState(agentType, { designingDraft: true });
+            }
+
             // Track active (in-flight) tools and upsert activity row into chat
             const sid = event.stream_id;
             setAgentStates(prev => {
@@ -2043,20 +2121,19 @@ export default function Workspace() {
             queenBuilding: newPhase === "building",
             // Sync workerRunState so the RunButton reflects the phase
             workerRunState: newPhase === "running" ? "running" : "idle",
-            // Clear draft graph once we leave planning/building; keep it during
-            // building so the DraftGraph can show a loading overlay.
-            ...(newPhase !== "planning" && newPhase !== "building"
-              ? { draftGraph: null }
-              : newPhase === "planning"
-                ? { originalDraft: null, flowchartMap: null }
-                : {}),
+            // Clear originalDraft/flowchartMap when re-entering planning.
+            // draftGraph is cleared later when originalDraft arrives, so the
+            // entrance animation has data to render during the handoff.
+            ...(newPhase === "planning"
+              ? { originalDraft: null, flowchartMap: null }
+              : {}),
             // Store agent path for credential queries
             ...(eventAgentPath ? { agentPath: eventAgentPath } : {}),
           });
           {
             const sid = agentStates[agentType]?.sessionId;
             if (sid) {
-              if (newPhase !== "planning") {
+              if (newPhase !== "planning" && newPhase !== "building") {
                 fetchedDraftSessionsRef.current.delete(sid);
                 fetchedFlowchartMapSessionsRef.current.delete(sid);
                 // Fetch the flowchart map (original draft + dissolution mapping)
@@ -2066,7 +2143,8 @@ export default function Workspace() {
                     originalDraft: original_draft,
                   });
                 }).catch(() => {});
-              } else {
+              } else if (newPhase === "planning") {
+                // Only clear dedup sets when re-entering planning (not building)
                 fetchedDraftSessionsRef.current.delete(sid);
                 fetchedFlowchartMapSessionsRef.current.delete(sid);
               }
@@ -2079,7 +2157,28 @@ export default function Workspace() {
           // The draft dict is published directly as event.data (not nested under a key)
           const draft = event.data as unknown as DraftGraphData | undefined;
           if (draft?.nodes) {
-            updateAgentState(agentType, { draftGraph: draft });
+            // Ensure the "Designing flowchart…" spinner stays visible for a
+            // minimum duration so users see feedback before the draft appears.
+            const MIN_SPINNER_MS = 600;
+            const since = designingDraftSinceRef.current[agentType] || 0;
+            const elapsed = Date.now() - since;
+            const remaining = Math.max(0, MIN_SPINNER_MS - elapsed);
+
+            const applyDraft = () => {
+              delete designingDraftTimerRef.current[agentType];
+              updateAgentState(agentType, { draftGraph: draft, designingDraft: false });
+            };
+
+            if (remaining > 0 && since > 0) {
+              // Update draftGraph now (so data is ready) but keep spinner visible
+              updateAgentState(agentType, { draftGraph: draft });
+              designingDraftTimerRef.current[agentType] = setTimeout(() => {
+                updateAgentState(agentType, { designingDraft: false });
+                delete designingDraftTimerRef.current[agentType];
+              }, remaining);
+            } else {
+              applyDraft();
+            }
           }
           break;
         }
@@ -2090,6 +2189,7 @@ export default function Workspace() {
             updateAgentState(agentType, {
               flowchartMap: mapData.map ?? null,
               originalDraft: mapData.original_draft ?? null,
+              draftGraph: null,
             });
           }
           break;
@@ -2163,10 +2263,18 @@ export default function Workspace() {
                   // Synthesize new trigger node at the front of the graph
                   const triggerType = (event.data?.trigger_type as string) || "timer";
                   const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
-                  const entryNode = s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const entryNode = (event.data?.entry_node as string) || s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const triggerName = (event.data?.name as string) || triggerId;
+                  const _cron = triggerConfig.cron as string | undefined;
+                  const _interval = triggerConfig.interval_minutes as number | undefined;
+                  const computedLabel = _cron
+                    ? cronToLabel(_cron)
+                    : _interval
+                      ? `Every ${_interval >= 60 ? `${_interval / 60}h` : `${_interval}m`}`
+                      : triggerName;
                   const newNode: GraphNode = {
                     id: nodeId,
-                    label: triggerId,
+                    label: computedLabel,
                     status: "running",
                     nodeType: "trigger",
                     triggerType,
@@ -2231,10 +2339,18 @@ export default function Workspace() {
                   if (s.graphNodes.some(n => n.id === nodeId)) return s;
                   const triggerType = (event.data?.trigger_type as string) || "timer";
                   const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
-                  const entryNode = s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const entryNode = (event.data?.entry_node as string) || s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const triggerName = (event.data?.name as string) || triggerId;
+                  const _cron2 = triggerConfig.cron as string | undefined;
+                  const _interval2 = triggerConfig.interval_minutes as number | undefined;
+                  const computedLabel2 = _cron2
+                    ? cronToLabel(_cron2)
+                    : _interval2
+                      ? `Every ${_interval2 >= 60 ? `${_interval2 / 60}h` : `${_interval2}m`}`
+                      : triggerName;
                   const newNode: GraphNode = {
                     id: nodeId,
-                    label: triggerId,
+                    label: computedLabel2,
                     status: "pending",
                     nodeType: "trigger",
                     triggerType,
@@ -2242,6 +2358,43 @@ export default function Workspace() {
                     ...(entryNode ? { next: [entryNode] } : {}),
                   };
                   return { ...s, graphNodes: [newNode, ...s.graphNodes] };
+                }),
+              };
+            });
+          }
+          break;
+        }
+
+        case "trigger_updated": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            const nodeId = `__trigger_${triggerId}`;
+            const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
+            const cron = triggerConfig.cron as string | undefined;
+            const interval = triggerConfig.interval_minutes as number | undefined;
+            const newLabel = cron
+              ? cronToLabel(cron)
+              : interval
+                ? `Every ${interval >= 60 ? `${interval / 60}h` : `${interval}m`}`
+                : undefined;
+            setSessionsByAgent(prev => {
+              const sessions = prev[agentType] || [];
+              const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
+              return {
+                ...prev,
+                [agentType]: sessions.map(s => {
+                  if (s.id !== activeId) return s;
+                  return {
+                    ...s,
+                    graphNodes: s.graphNodes.map(n => {
+                      if (n.id !== nodeId) return n;
+                      return {
+                        ...n,
+                        ...(newLabel ? { label: newLabel } : {}),
+                        triggerConfig: { ...n.triggerConfig, ...triggerConfig },
+                      };
+                    }),
+                  };
                 }),
               };
             });
@@ -2302,13 +2455,42 @@ export default function Workspace() {
   const liveSelectedNode = selectedNode && currentGraph.nodes.find(n => n.id === selectedNode.id);
   const resolvedSelectedNode = liveSelectedNode || selectedNode;
 
-  // Sync trigger task draft when selected trigger node changes
+  // Sync trigger drafts when selected trigger node changes
   useEffect(() => {
     if (resolvedSelectedNode?.nodeType === "trigger") {
       const tc = resolvedSelectedNode.triggerConfig as Record<string, unknown> | undefined;
       setTriggerTaskDraft((tc?.task as string) || "");
+      setTriggerCronDraft((tc?.cron as string) || "");
     }
   }, [resolvedSelectedNode?.id]);
+
+  const patchTriggerNode = useCallback((agentType: string, triggerNodeId: string, patch: { task?: string; trigger_config?: Record<string, unknown>; label?: string }) => {
+    setSessionsByAgent(prev => {
+      const sessions = prev[agentType] || [];
+      const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
+      return {
+        ...prev,
+        [agentType]: sessions.map(s => {
+          if (s.id !== activeId) return s;
+          return {
+            ...s,
+            graphNodes: s.graphNodes.map(n => {
+              if (n.id !== triggerNodeId) return n;
+              return {
+                ...n,
+                ...(patch.label !== undefined ? { label: patch.label } : {}),
+                triggerConfig: {
+                  ...n.triggerConfig,
+                  ...(patch.trigger_config || {}),
+                  ...(patch.task !== undefined ? { task: patch.task } : {}),
+                },
+              };
+            }),
+          };
+        }),
+      };
+    });
+  }, []);
 
   // Build a flat list of all agent-type tabs for the tab bar
   const agentTabs = Object.entries(sessionsByAgent)
@@ -2824,39 +3006,40 @@ export default function Workspace() {
       {/* Main content area */}
       <div className="flex flex-1 min-h-0">
 
-        {/* ── Pipeline graph + chat ──────────────────────────────────── */}
-        <div className={`${activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" || activeAgentState?.originalDraft ? "w-[500px] min-w-[400px]" : "w-[300px] min-w-[240px]"} bg-card/30 flex flex-col border-r border-border/30 transition-[width] duration-200`}>
+        {/* ── Draft flowchart + chat ─────────────────────────────────── */}
+        <div
+          className="bg-card/30 flex flex-col border-r border-border/30 relative"
+          style={{ width: `${graphPanelPct}%`, minWidth: 240, flexShrink: 0 }}
+        >
           <div className="flex-1 min-h-0">
-            {activeAgentState?.queenPhase === "planning" || activeAgentState?.queenPhase === "building" ? (
-              <DraftGraph draft={activeAgentState?.draftGraph ?? null} loading={!activeAgentState?.draftGraph} building={activeAgentState?.queenBuilding} onRun={handleRun} onPause={handlePause} runState={activeAgentState?.workerRunState ?? "idle"} queenPhase={activeAgentState?.queenPhase ?? "building"} />
-            ) : activeAgentState?.originalDraft ? (
-              <DraftGraph
-                draft={activeAgentState.originalDraft}
-                building={activeAgentState?.queenBuilding}
-                onRun={handleRun}
-                onPause={handlePause}
-                runState={activeAgentState?.workerRunState ?? "idle"}
-                queenPhase={activeAgentState?.queenPhase ?? "building"}
-                flowchartMap={activeAgentState.flowchartMap ?? undefined}
-                runtimeNodes={currentGraph.nodes}
-                onRuntimeNodeClick={(runtimeNodeId) => {
-                  const node = currentGraph.nodes.find(n => n.id === runtimeNodeId);
-                  if (node) setSelectedNode(prev => prev?.id === node.id ? null : node);
-                }}
-              />
-            ) : (
-              <AgentGraph
-                nodes={currentGraph.nodes}
-                title={currentGraph.title}
-                onNodeClick={(node) => setSelectedNode(prev => prev?.id === node.id ? null : node)}
-                onRun={handleRun}
-                onPause={handlePause}
-                runState={activeAgentState?.workerRunState ?? "idle"}
-                building={activeAgentState?.queenBuilding ?? false}
-                queenPhase={activeAgentState?.queenPhase ?? "building"}
-              />
-            )}
+            <DraftGraph
+              key={activeWorker}
+              draft={activeAgentState?.originalDraft ?? activeAgentState?.draftGraph ?? null}
+              originalDraft={activeAgentState?.originalDraft ?? null}
+              loadingMessage={
+                activeAgentState?.designingDraft
+                  ? "Designing flowchart…"
+                  : !activeAgentState?.originalDraft && !activeAgentState?.draftGraph && activeAgentState?.queenPhase !== "planning"
+                    ? "Loading flowchart…"
+                    : null
+              }
+              building={activeAgentState?.queenBuilding}
+              onRun={handleRun}
+              onPause={handlePause}
+              runState={activeAgentState?.workerRunState ?? "idle"}
+              flowchartMap={activeAgentState?.flowchartMap ?? undefined}
+              runtimeNodes={currentGraph.nodes}
+              onRuntimeNodeClick={(runtimeNodeId) => {
+                const node = currentGraph.nodes.find(n => n.id === runtimeNodeId);
+                if (node) setSelectedNode(prev => prev?.id === node.id ? null : node);
+              }}
+            />
           </div>
+          {/* Resize handle */}
+          <div
+            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/40 transition-colors z-10"
+            onMouseDown={() => { resizing.current = true; document.body.style.cursor = "col-resize"; }}
+          />
         </div>
         <div className="flex-1 min-w-0 flex">
           <div className="flex-1 min-w-0 relative">
@@ -2977,18 +3160,64 @@ export default function Workspace() {
                       const interval = tc?.interval_minutes as number | undefined;
                       const eventTypes = tc?.event_types as string[] | undefined;
                       const scheduleLabel = cron
-                        ? `cron: ${cron}`
+                        ? cronToLabel(cron)
                         : interval
                           ? `Every ${interval >= 60 ? `${interval / 60}h` : `${interval}m`}`
                           : eventTypes?.length
                             ? eventTypes.join(", ")
                             : null;
-                      return scheduleLabel ? (
+                      const canEditCron = resolvedSelectedNode.triggerType === "timer";
+                      const cronChanged = canEditCron && triggerCronDraft.trim() !== (cron || "");
+                      return scheduleLabel || canEditCron ? (
                         <div>
                           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Schedule</p>
-                          <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
-                            {scheduleLabel}
-                          </p>
+                          {scheduleLabel && (
+                            <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
+                              {scheduleLabel}
+                            </p>
+                          )}
+                          {canEditCron && (
+                            <>
+                              <input
+                                value={triggerCronDraft}
+                                onChange={(e) => setTriggerCronDraft(e.target.value)}
+                                placeholder="0 5 * * *"
+                                className="mt-1.5 w-full text-xs text-foreground/80 bg-muted/30 rounded-lg px-3 py-2 border border-border/20 font-mono focus:outline-none focus:border-primary/40"
+                              />
+                              <p className="text-[10px] text-muted-foreground/60 mt-1">
+                                Edit the cron expression for this timer trigger.
+                              </p>
+                              {(cronChanged || triggerCronSaved) && (
+                                <button
+                                  disabled={triggerScheduleSaving || !cronChanged}
+                                  onClick={async () => {
+                                    const sessionId = activeAgentState?.sessionId;
+                                    const triggerId = resolvedSelectedNode.id.replace("__trigger_", "");
+                                    const nextCron = triggerCronDraft.trim();
+                                    if (!sessionId || !nextCron) return;
+                                    const nextTriggerConfig: Record<string, unknown> = { cron: nextCron };
+                                    setTriggerScheduleSaving(true);
+                                    try {
+                                      await sessionsApi.updateTrigger(sessionId, triggerId, {
+                                        trigger_config: nextTriggerConfig,
+                                      });
+                                      patchTriggerNode(activeWorker, resolvedSelectedNode.id, {
+                                        trigger_config: nextTriggerConfig,
+                                        label: cronToLabel(nextCron),
+                                      });
+                                      setTriggerCronSaved(true);
+                                      setTimeout(() => setTriggerCronSaved(false), 2000);
+                                    } finally {
+                                      setTriggerScheduleSaving(false);
+                                    }
+                                  }}
+                                  className="mt-1.5 w-full text-[11px] px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                                >
+                                  {triggerScheduleSaving ? "Saving..." : triggerCronSaved ? "Saved" : "Save Cron"}
+                                </button>
+                              )}
+                            </>
+                          )}
                         </div>
                       ) : null;
                     })()}
@@ -3015,24 +3244,27 @@ export default function Workspace() {
                       {(() => {
                         const currentTask = (resolvedSelectedNode.triggerConfig as Record<string, unknown> | undefined)?.task as string || "";
                         const hasChanged = triggerTaskDraft !== currentTask;
-                        if (!hasChanged) return null;
+                        if (!hasChanged && !triggerTaskSaved) return null;
                         return (
                           <button
-                            disabled={triggerTaskSaving}
+                            disabled={triggerTaskSaving || !hasChanged}
                             onClick={async () => {
                               const sessionId = activeAgentState?.sessionId;
                               const triggerId = resolvedSelectedNode.id.replace("__trigger_", "");
                               if (!sessionId) return;
                               setTriggerTaskSaving(true);
                               try {
-                                await sessionsApi.updateTriggerTask(sessionId, triggerId, triggerTaskDraft);
+                                await sessionsApi.updateTrigger(sessionId, triggerId, { task: triggerTaskDraft });
+                                patchTriggerNode(activeWorker, resolvedSelectedNode.id, { task: triggerTaskDraft });
+                                setTriggerTaskSaved(true);
+                                setTimeout(() => setTriggerTaskSaved(false), 2000);
                               } finally {
                                 setTriggerTaskSaving(false);
                               }
                             }}
                             className="mt-1.5 w-full text-[11px] px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
                           >
-                            {triggerTaskSaving ? "Saving..." : "Save Task"}
+                            {triggerTaskSaving ? "Saving..." : triggerTaskSaved ? "Saved" : "Save Task"}
                           </button>
                         );
                       })()}

@@ -223,6 +223,7 @@ def _register_verified(
     register_telegram(mcp, credentials=credentials)
     register_google_docs(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
+    register_notion(mcp, credentials=credentials)
     register_account_info(mcp, credentials=credentials)
 
 
@@ -272,7 +273,6 @@ def _register_unverified(
     register_microsoft_graph(mcp, credentials=credentials)
     register_mongodb(mcp, credentials=credentials)
     register_n8n(mcp, credentials=credentials)
-    register_notion(mcp, credentials=credentials)
     register_obsidian(mcp, credentials=credentials)
     register_pagerduty(mcp, credentials=credentials)
     register_pinecone(mcp, credentials=credentials)
