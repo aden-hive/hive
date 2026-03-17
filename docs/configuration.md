@@ -69,7 +69,7 @@ export MOCK_MODE=1
 # Fernet encryption key for credential store at ~/.hive/credentials
 export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
-# Custom agent storage path (default: /tmp)
+# Custom agent storage path (default: ~/.hive/agents/{agent_name}/)
 export AGENT_STORAGE_PATH="/custom/storage"
 ```
 
@@ -84,7 +84,7 @@ CONFIG = {
     "max_tokens": 8192,  # default: DEFAULT_MAX_TOKENS from framework.graph
     "temperature": 0.7,
     "tools": ["web_search", "pdf_read"],   # MCP tools to enable
-    "storage_path": "/tmp/my_agent",       # Runtime data location
+    "storage_path": "~/.hive/agents/my_agent/",  # Runtime data location (default)
 }
 ```
 
