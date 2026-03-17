@@ -3702,6 +3702,8 @@ def register_queen_lifecycle_tools(
             _save_trigger_to_agent(session, trigger_id, tdef)
             bus = getattr(session, "event_bus", None)
             if bus:
+                _runner = getattr(session, "runner", None)
+                _graph_entry = _runner.graph.entry_node if _runner else None
                 await bus.publish(
                     AgentEvent(
                         type=EventType.TRIGGER_ACTIVATED,
@@ -3710,6 +3712,8 @@ def register_queen_lifecycle_tools(
                             "trigger_id": trigger_id,
                             "trigger_type": t_type,
                             "trigger_config": t_config,
+                            "name": tdef.description or trigger_id,
+                            **({"entry_node": _graph_entry} if _graph_entry else {}),
                         },
                     )
                 )
@@ -3762,6 +3766,8 @@ def register_queen_lifecycle_tools(
         # Emit event
         bus = getattr(session, "event_bus", None)
         if bus:
+            _runner = getattr(session, "runner", None)
+            _graph_entry = _runner.graph.entry_node if _runner else None
             await bus.publish(
                 AgentEvent(
                     type=EventType.TRIGGER_ACTIVATED,
@@ -3770,6 +3776,8 @@ def register_queen_lifecycle_tools(
                         "trigger_id": trigger_id,
                         "trigger_type": t_type,
                         "trigger_config": t_config,
+                        "name": tdef.description or trigger_id,
+                        **({"entry_node": _graph_entry} if _graph_entry else {}),
                     },
                 )
             )
@@ -3868,7 +3876,10 @@ def register_queen_lifecycle_tools(
                 AgentEvent(
                     type=EventType.TRIGGER_DEACTIVATED,
                     stream_id="queen",
-                    data={"trigger_id": trigger_id},
+                    data={
+                        "trigger_id": trigger_id,
+                        "name": tdef.description or trigger_id if tdef else trigger_id,
+                    },
                 )
             )
 
