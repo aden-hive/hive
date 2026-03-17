@@ -464,14 +464,14 @@ class ToolRegistry:
                     if _attempt == 0:
                         logger.warning(
                             "MCP server '%s' failed to register, retrying in 2s: %s",
-                            name, e,
+                            name,
+                            e,
                         )
                         import time
+
                         time.sleep(2)
                     else:
-                        logger.warning(
-                            "MCP server '%s' failed after retry: %s", name, e
-                        )
+                        logger.warning("MCP server '%s' failed after retry: %s", name, e)
 
         # Snapshot credential files and ADEN_API_KEY so we can detect mid-session changes
         self._mcp_cred_snapshot = self._snapshot_credentials()
