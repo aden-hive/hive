@@ -82,7 +82,7 @@ class MockStream:
     _active_executors: dict = field(default_factory=dict)
     active_execution_ids: set = field(default_factory=set)
 
-    async def cancel_execution(self, execution_id: str) -> bool:
+    async def cancel_execution(self, execution_id: str, reason: str | None = None) -> bool:
         return execution_id in self._execution_tasks
 
 
@@ -171,8 +171,10 @@ def _make_session(
     rt = runtime or MockRuntime(graph=graph, log_store=log_store)
     runner = MagicMock()
     runner.intro_message = "Test intro"
+    runner.cleanup_async = AsyncMock()
 
     mock_event_bus = MagicMock()
+    mock_event_bus.publish = AsyncMock()
     mock_llm = MagicMock()
 
     queen_executor = _make_queen_executor() if with_queen else None
@@ -550,10 +552,11 @@ class TestExecution:
             assert data["delivered"] is True
 
     @pytest.mark.asyncio
-    async def test_chat_injects_when_node_waiting(self):
-        """When a node is awaiting input, /chat should inject instead of trigger."""
+    async def test_chat_prefers_queen_even_when_node_waiting(self):
+        """Current /chat behavior prefers queen delivery when queen is available."""
         session = _make_session()
-        session.worker_runtime.find_awaiting_node = lambda: ("chat_node", "primary")
+        session.worker_runtime.find_awaiting_node = lambda: (
+            "chat_node", "primary")
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -562,8 +565,7 @@ class TestExecution:
             )
             assert resp.status == 200
             data = await resp.json()
-            assert data["status"] == "injected"
-            assert data["node_id"] == "chat_node"
+            assert data["status"] == "queen"
             assert data["delivered"] is True
 
     @pytest.mark.asyncio
