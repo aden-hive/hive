@@ -205,6 +205,18 @@ class GraphExecutor:
         self.skills_catalog_prompt = skills_catalog_prompt
         self.protocols_prompt = protocols_prompt
 
+        if protocols_prompt:
+            self.logger.info(
+                "GraphExecutor[%s] received protocols_prompt (%d chars)",
+                stream_id,
+                len(protocols_prompt),
+            )
+        else:
+            self.logger.warning(
+                "GraphExecutor[%s] received EMPTY protocols_prompt",
+                stream_id,
+            )
+
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
         self._parallel_config = parallel_config or ParallelExecutionConfig()
@@ -1819,10 +1831,12 @@ class GraphExecutor:
         # unchanged — empty means "allow all".
         read_keys = list(node_spec.input_keys)
         write_keys = list(node_spec.output_keys)
+        # Only extend lists that were already restricted (non-empty).
+        # Empty means "allow all" — adding keys would accidentally
+        # activate the permission check and block legitimate reads/writes.
         if read_keys or write_keys:
             from framework.skills.defaults import SHARED_MEMORY_KEYS as _skill_keys
 
-            # Also include any _-prefixed keys already written to memory
             existing_underscore = [k for k in memory._data if k.startswith("_")]
             extra_keys = set(_skill_keys) | set(existing_underscore)
             # Only inject into read_keys when it was already non-empty — an empty
@@ -1831,7 +1845,7 @@ class GraphExecutor:
             for k in extra_keys:
                 if read_keys and k not in read_keys:
                     read_keys.append(k)
-                if k not in write_keys:
+                if write_keys and k not in write_keys:
                     write_keys.append(k)
 
         scoped_memory = memory.with_permissions(

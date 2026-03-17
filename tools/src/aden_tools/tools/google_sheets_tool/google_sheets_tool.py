@@ -296,6 +296,7 @@ def register_tools(
         include_grid_data: bool = False,
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -325,6 +326,7 @@ def register_tools(
         sheet_titles: list[str] | None = None,
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -357,6 +359,7 @@ def register_tools(
         value_render_option: str = "FORMATTED_VALUE",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -392,6 +395,7 @@ def register_tools(
         value_input_option: str = "USER_ENTERED",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -426,6 +430,7 @@ def register_tools(
         value_input_option: str = "USER_ENTERED",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -458,6 +463,7 @@ def register_tools(
         range_name: str,
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -490,6 +496,7 @@ def register_tools(
         value_input_option: str = "USER_ENTERED",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -521,6 +528,7 @@ def register_tools(
         ranges: list[str],
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -554,6 +562,7 @@ def register_tools(
         column_count: int = 26,
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -585,6 +594,7 @@ def register_tools(
         sheet_id: int,
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:

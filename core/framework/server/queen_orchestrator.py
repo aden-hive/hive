@@ -216,6 +216,16 @@ async def create_queen(
         + worker_identity
     )
 
+    # ---- Default skill protocols -------------------------------------
+    try:
+        from framework.skills.manager import SkillsManager
+
+        _queen_skills_mgr = SkillsManager()
+        _queen_skills_mgr.load()
+        phase_state.protocols_prompt = _queen_skills_mgr.protocols_prompt
+    except Exception:
+        logger.debug("Queen skill loading failed (non-fatal)", exc_info=True)
+
     # ---- Persona hook ------------------------------------------------
     _session_llm = session.llm
     _session_event_bus = session.event_bus
