@@ -518,9 +518,7 @@ class EventLoopNode(NodeProtocol):
                     and ctx.node_spec.node_type in ("event_loop", "gcu")
                     and ctx.node_spec.output_keys
                 ):
-                    system_prompt = (
-                        f"{EXECUTION_SCOPE_PREAMBLE}\n\n{system_prompt}"
-                    )
+                    system_prompt = f"{EXECUTION_SCOPE_PREAMBLE}\n\n{system_prompt}"
                 # Prepend GCU browser best-practices prompt for gcu nodes
                 if ctx.node_spec.node_type == "gcu":
                     from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
