@@ -32,6 +32,7 @@ def _runner_for_unit_test() -> AgentRunner:
 
 def _runner_for_setup_unit_test() -> AgentRunner:
     runner = _runner_for_unit_test()
+    runner.agent_path = None  # Not used in this test but required by _setup
     runner.graph = SimpleNamespace(id="test_graph", nodes=[])
     runner.mock_mode = False
     runner.model = "openai/gpt-4.1"
