@@ -152,6 +152,7 @@ class GraphExecutor:
         dynamic_tools_provider: Callable | None = None,
         dynamic_prompt_provider: Callable | None = None,
         iteration_metadata_provider: Callable | None = None,
+        node_evaluator: Any | None = None,
     ):
         """
         Initialize the executor.
@@ -177,6 +178,9 @@ class GraphExecutor:
                 tool list (for mode switching)
             dynamic_prompt_provider: Optional callback returning current
                 system prompt (for phase switching)
+            node_evaluator: Optional NodeEvaluator for execution-time quality
+                evaluation.  When set, called after each successful node and
+                the resulting EvalReport is attached to runtime logs.
         """
         self.runtime = runtime
         self.llm = llm
@@ -198,6 +202,7 @@ class GraphExecutor:
         self.dynamic_tools_provider = dynamic_tools_provider
         self.dynamic_prompt_provider = dynamic_prompt_provider
         self.iteration_metadata_provider = iteration_metadata_provider
+        self.node_evaluator = node_evaluator
 
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
@@ -1043,6 +1048,37 @@ class GraphExecutor:
                             if len(value_str) > 200:
                                 value_str = value_str[:200] + "..."
                             self.logger.info(f"      {key}: {value_str}")
+
+                    # Run NodeEvaluator if configured (non-blocking)
+                    if self.node_evaluator:
+                        try:
+                            eval_report = await self.node_evaluator.evaluate(
+                                node_spec=node_spec,
+                                node_result=result,
+                                memory=dict(memory.items()) if hasattr(memory, "items") else {},
+                            )
+                            self.logger.info(
+                                f"   📊 Eval: faithfulness={eval_report.faithfulness:.2f} "
+                                f"relevance={eval_report.relevance:.2f} "
+                                f"completeness={eval_report.completeness:.2f} "
+                                f"cost_efficiency={eval_report.cost_efficiency:.2f}"
+                            )
+                            if eval_report.weak_dimensions:
+                                self.logger.warning(
+                                    f"   ⚠ Weak dimensions: {eval_report.weak_dimensions}"
+                                )
+                            can_log = self.runtime_logger and hasattr(
+                                self.runtime_logger, "log_eval_report"
+                            )
+                            if can_log:
+                                self.runtime_logger.log_eval_report(
+                                    node_id=node_spec.id,
+                                    eval_report=eval_report,
+                                )
+                        except Exception as eval_err:
+                            self.logger.debug(
+                                f"   NodeEvaluator failed for {node_spec.id}: {eval_err}"
+                            )
 
                     # Write node outputs to memory BEFORE edge evaluation
                     # This enables direct key access in conditional expressions (e.g., "score > 80")

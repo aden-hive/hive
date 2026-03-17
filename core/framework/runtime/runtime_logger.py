@@ -267,6 +267,27 @@ class RuntimeLogger:
             latency_ms=latency_ms,
         )
 
+    def log_eval_report(self, node_id: str, eval_report: Any) -> None:
+        """Persist an EvalReport as a JSON file alongside L2 logs.
+
+        Best-effort: failures are silently ignored so evaluation never
+        blocks graph execution.
+        """
+        try:
+            import json
+
+            report_dict = (
+                eval_report.model_dump()
+                if hasattr(eval_report, "model_dump")
+                else vars(eval_report)
+            )
+            run_dir = self._store._get_run_dir(self._run_id)
+            eval_path = run_dir / "eval_reports.jsonl"
+            with open(eval_path, "a") as f:
+                f.write(json.dumps({"node_id": node_id, **report_dict}) + "\n")
+        except Exception:
+            pass  # Non-blocking; never fail the execution
+
     async def end_run(
         self,
         status: str,

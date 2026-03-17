@@ -9,6 +9,7 @@ from framework.graph.client_io import (
 from framework.graph.context_handoff import ContextHandoff, HandoffContext
 from framework.graph.conversation import ConversationStore, Message, NodeConversation
 from framework.graph.edge import DEFAULT_MAX_TOKENS, EdgeCondition, EdgeSpec, GraphSpec
+from framework.graph.evaluator import NodeEvaluator
 from framework.graph.event_loop_node import (
     EventLoopNode,
     JudgeProtocol,
@@ -36,6 +37,8 @@ __all__ = [
     "EdgeCondition",
     "GraphSpec",
     "DEFAULT_MAX_TOKENS",
+    # Evaluator
+    "NodeEvaluator",
     # Executor
     "GraphExecutor",
     # Conversation
