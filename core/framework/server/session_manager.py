@@ -195,6 +195,9 @@ class SessionManager:
                 model=model,
             )
 
+            # Restore active triggers from persisted state (cold restore)
+            await self._restore_active_triggers(session, session.id)
+
             # Start queen with worker profile + lifecycle + monitoring tools
             worker_identity = (
                 build_worker_profile(session.worker_runtime, agent_path=agent_path)
@@ -404,6 +407,51 @@ class SessionManager:
                 return False
             return True
 
+    async def _restore_active_triggers(self, session: "Session", session_id: str) -> None:
+        """Restore previously active triggers from persisted session state.
+
+        Called after worker loading to restart any timer/webhook triggers
+        that were active before a server restart.
+        """
+        if not session.available_triggers or not session.worker_runtime:
+            return
+        try:
+            store = session.worker_runtime._session_store
+            state = await store.read_state(session_id)
+            if state and state.active_triggers:
+                from framework.tools.queen_lifecycle_tools import (
+                    _start_trigger_timer,
+                    _start_trigger_webhook,
+                )
+
+                saved_tasks = getattr(state, "trigger_tasks", {}) or {}
+                for tid in state.active_triggers:
+                    tdef = session.available_triggers.get(tid)
+                    if tdef:
+                        # Restore user-configured task override
+                        saved_task = saved_tasks.get(tid, "")
+                        if saved_task:
+                            tdef.task = saved_task
+                        tdef.active = True
+                        session.active_trigger_ids.add(tid)
+                        if tdef.trigger_type == "timer":
+                            await _start_trigger_timer(session, tid, tdef)
+                            logger.info("Restored trigger timer '%s'", tid)
+                        elif tdef.trigger_type == "webhook":
+                            await _start_trigger_webhook(session, tid, tdef)
+                            logger.info("Restored webhook trigger '%s'", tid)
+                    else:
+                        logger.warning(
+                            "Saved trigger '%s' not found in worker entry points, skipping",
+                            tid,
+                        )
+
+            # Restore worker_configured flag
+            if state and getattr(state, "worker_configured", False):
+                session.worker_configured = True
+        except Exception as e:
+            logger.warning("Failed to restore active triggers: %s", e)
+
     async def load_worker(
         self,
         session_id: str,
@@ -452,44 +500,7 @@ class SessionManager:
         except OSError:
             pass
 
-        # Restore previously active triggers from persisted session state
-        if session.available_triggers and session.worker_runtime:
-            try:
-                store = session.worker_runtime._session_store
-                state = await store.read_state(session_id)
-                if state and state.active_triggers:
-                    from framework.tools.queen_lifecycle_tools import (
-                        _start_trigger_timer,
-                        _start_trigger_webhook,
-                    )
-
-                    saved_tasks = getattr(state, "trigger_tasks", {}) or {}
-                    for tid in state.active_triggers:
-                        tdef = session.available_triggers.get(tid)
-                        if tdef:
-                            # Restore user-configured task override
-                            saved_task = saved_tasks.get(tid, "")
-                            if saved_task:
-                                tdef.task = saved_task
-                            tdef.active = True
-                            session.active_trigger_ids.add(tid)
-                            if tdef.trigger_type == "timer":
-                                await _start_trigger_timer(session, tid, tdef)
-                                logger.info("Restored trigger timer '%s'", tid)
-                            elif tdef.trigger_type == "webhook":
-                                await _start_trigger_webhook(session, tid, tdef)
-                                logger.info("Restored webhook trigger '%s'", tid)
-                        else:
-                            logger.warning(
-                                "Saved trigger '%s' not found in worker entry points, skipping",
-                                tid,
-                            )
-
-                # Restore worker_configured flag
-                if state and getattr(state, "worker_configured", False):
-                    session.worker_configured = True
-            except Exception as e:
-                logger.warning("Failed to restore active triggers: %s", e)
+        await self._restore_active_triggers(session, session_id)
 
         # Emit SSE event so the frontend can update UI
         await self._emit_worker_loaded(session)
