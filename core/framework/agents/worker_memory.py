@@ -47,7 +47,7 @@ def digest_path(agent_name: str, run_id: str) -> Path:
     return _worker_runs_dir(agent_name) / run_id / "digest.md"
 
 
-def _collect_run_events(bus: "EventBus", run_id: str, limit: int = 2000) -> list["AgentEvent"]:
+def _collect_run_events(bus: EventBus, run_id: str, limit: int = 2000) -> list[AgentEvent]:
     """Collect all events belonging to *run_id* from the bus history.
 
     Strategy: find the EXECUTION_STARTED event that carries ``run_id``,
@@ -76,8 +76,8 @@ def _collect_run_events(bus: "EventBus", run_id: str, limit: int = 2000) -> list
 
 
 def _build_run_context(
-    events: list["AgentEvent"],
-    outcome_event: "AgentEvent | None",
+    events: list[AgentEvent],
+    outcome_event: AgentEvent | None,
 ) -> str:
     """Assemble a plain-text run context string for the digest LLM call."""
     from framework.runtime.event_bus import EventType
@@ -106,7 +106,8 @@ def _build_run_context(
         lines.append("Status: still running (mid-run snapshot)")
     elif outcome_event.type == EventType.EXECUTION_COMPLETED:
         out = outcome_event.data.get("output", {})
-        lines.append(f"Outcome: completed. Output: {str(out)[:300]}" if out else "Outcome: completed.")
+        out_str = f"Outcome: completed. Output: {str(out)[:300]}"
+        lines.append(out_str if out else "Outcome: completed.")
     else:
         err = outcome_event.data.get("error", "")
         lines.append(f"Outcome: failed. Error: {str(err)[:300]}" if err else "Outcome: failed.")
@@ -114,7 +115,10 @@ def _build_run_context(
     # Node path (edge traversals)
     edges = [e for e in events_chron if e.type == EventType.EDGE_TRAVERSED]
     if edges:
-        parts = [f"{e.data.get('source_node','?')}->{e.data.get('target_node','?')}" for e in edges[-20:]]
+        parts = [
+            f"{e.data.get('source_node', '?')}->{e.data.get('target_node', '?')}"
+            for e in edges[-20:]
+        ]
         lines.append(f"Node path: {', '.join(parts)}")
 
     # Tools used
@@ -167,8 +171,8 @@ def _build_run_context(
 async def consolidate_worker_run(
     agent_name: str,
     run_id: str,
-    outcome_event: "AgentEvent | None",
-    bus: "EventBus",
+    outcome_event: AgentEvent | None,
+    bus: EventBus,
     llm: Any,
 ) -> None:
     """Write (or overwrite) the digest for a worker run.
