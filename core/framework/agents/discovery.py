@@ -23,25 +23,56 @@ class AgentEntry:
     last_active: str | None = None
 
 
-def _get_last_active(agent_name: str) -> str | None:
-    """Return the most recent updated_at timestamp across all sessions."""
-    sessions_dir = Path.home() / ".hive" / "agents" / agent_name / "sessions"
-    if not sessions_dir.exists():
-        return None
+def _get_last_active(agent_path: Path) -> str | None:
+    """Return the most recent updated_at timestamp across all sessions.
+
+    Checks both worker sessions (``~/.hive/agents/{name}/sessions/``) and
+    queen sessions (``~/.hive/queen/session/``) whose ``meta.json`` references
+    the same *agent_path*.
+    """
+    from datetime import datetime
+
+    agent_name = agent_path.name
     latest: str | None = None
-    for session_dir in sessions_dir.iterdir():
-        if not session_dir.is_dir() or not session_dir.name.startswith("session_"):
-            continue
-        state_file = session_dir / "state.json"
-        if not state_file.exists():
-            continue
-        try:
-            data = json.loads(state_file.read_text(encoding="utf-8"))
-            ts = data.get("timestamps", {}).get("updated_at")
-            if ts and (latest is None or ts > latest):
-                latest = ts
-        except Exception:
-            continue
+
+    # 1. Worker sessions
+    sessions_dir = Path.home() / ".hive" / "agents" / agent_name / "sessions"
+    if sessions_dir.exists():
+        for session_dir in sessions_dir.iterdir():
+            if not session_dir.is_dir() or not session_dir.name.startswith("session_"):
+                continue
+            state_file = session_dir / "state.json"
+            if not state_file.exists():
+                continue
+            try:
+                data = json.loads(state_file.read_text(encoding="utf-8"))
+                ts = data.get("timestamps", {}).get("updated_at")
+                if ts and (latest is None or ts > latest):
+                    latest = ts
+            except Exception:
+                continue
+
+    # 2. Queen sessions
+    queen_sessions_dir = Path.home() / ".hive" / "queen" / "session"
+    if queen_sessions_dir.exists():
+        resolved = agent_path.resolve()
+        for d in queen_sessions_dir.iterdir():
+            if not d.is_dir():
+                continue
+            meta_file = d / "meta.json"
+            if not meta_file.exists():
+                continue
+            try:
+                meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                stored = meta.get("agent_path")
+                if not stored or Path(stored).resolve() != resolved:
+                    continue
+                ts = datetime.fromtimestamp(d.stat().st_mtime).isoformat()
+                if latest is None or ts > latest:
+                    latest = ts
+            except Exception:
+                continue
+
     return latest
 
 
@@ -169,7 +200,7 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                     node_count=node_count,
                     tool_count=tool_count,
                     tags=tags,
-                    last_active=_get_last_active(path.name),
+                    last_active=_get_last_active(path),
                 )
             )
         if entries:

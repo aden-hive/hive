@@ -1058,7 +1058,7 @@ case $choice in
             SELECTED_PROVIDER_ID="anthropic"
             SELECTED_MODEL="claude-opus-4-6"
             SELECTED_MAX_TOKENS=32768
-            SELECTED_MAX_CONTEXT_TOKENS=960000   # Claude — 1M context window
+            SELECTED_MAX_CONTEXT_TOKENS=960000  # Claude — 1M context window
             echo ""
             echo -e "${GREEN}⬢${NC} Using Claude Code subscription"
         fi

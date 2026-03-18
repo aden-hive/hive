@@ -612,6 +612,11 @@ class NodeConversation:
                 continue  # never prune errors
             if msg.content.startswith("[Pruned tool result"):
                 continue  # already pruned
+            # Tiny results (set_output acks, confirmations) — pruning
+            # saves negligible space but makes the LLM think the call
+            # failed, causing costly retries.
+            if len(msg.content) < 100:
+                continue
 
             # Phase-aware: protect current phase messages
             if self._current_phase and msg.phase_id == self._current_phase:
@@ -901,8 +906,7 @@ class NodeConversation:
             full_path = str((spill_path / conv_filename).resolve())
             ref_parts.append(
                 f"[Previous conversation saved to '{full_path}'. "
-                f"Use load_data('{conv_filename}'), read_file('{full_path}'), "
-                f"or run_command('cat \"{full_path}\"') to review if needed.]"
+                f"Use load_data('{conv_filename}') to review if needed.]"
             )
         elif not collapsed_msgs:
             ref_parts.append("[Previous freeform messages compacted.]")

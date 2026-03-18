@@ -277,7 +277,9 @@ def build_transition_marker(
     sections.append(f"\nCompleted: {previous_node.name}")
     sections.append(f"  {previous_node.description}")
 
-    # Outputs in memory
+    # Outputs in memory — use file references for large values so the
+    # next node loads full data from disk instead of seeing truncated
+    # inline previews that look deceptively complete.
     all_memory = memory.read_all()
     if all_memory:
         memory_lines: list[str] = []
@@ -285,7 +287,29 @@ def build_transition_marker(
             if value is None:
                 continue
             val_str = str(value)
-            if len(val_str) > 300:
+            if len(val_str) > 300 and data_dir:
+                # Auto-spill large transition values to data files
+                import json as _json
+
+                data_path = Path(data_dir)
+                data_path.mkdir(parents=True, exist_ok=True)
+                ext = ".json" if isinstance(value, (dict, list)) else ".txt"
+                filename = f"output_{key}{ext}"
+                try:
+                    write_content = (
+                        _json.dumps(value, indent=2, ensure_ascii=False)
+                        if isinstance(value, (dict, list))
+                        else str(value)
+                    )
+                    (data_path / filename).write_text(write_content, encoding="utf-8")
+                    file_size = (data_path / filename).stat().st_size
+                    val_str = (
+                        f"[Saved to '{filename}' ({file_size:,} bytes). "
+                        f"Use load_data(filename='{filename}') to access.]"
+                    )
+                except Exception:
+                    val_str = val_str[:300] + "..."
+            elif len(val_str) > 300:
                 val_str = val_str[:300] + "..."
             memory_lines.append(f"  {key}: {val_str}")
         if memory_lines:
@@ -302,7 +326,7 @@ def build_transition_marker(
                 ]
                 if file_lines:
                     sections.append(
-                        "\nData files (use read_file to access):\n" + "\n".join(file_lines)
+                        "\nData files (use load_data to access):\n" + "\n".join(file_lines)
                     )
 
     # Agent working memory
