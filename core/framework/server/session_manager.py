@@ -705,18 +705,41 @@ class SessionManager:
                     return e.run_id
             return None
 
+        async def _inject_digest_to_queen(run_id: str) -> None:
+            """Read the written digest and push it into the queen's conversation."""
+            from framework.agents.worker_memory import digest_path
+
+            try:
+                content = digest_path(_agent_name, run_id).read_text(encoding="utf-8").strip()
+            except OSError:
+                return
+            if not content:
+                return
+            executor = session.queen_executor
+            if executor is None:
+                return
+            node = executor.node_registry.get("queen")
+            if node is None or not hasattr(node, "inject_event"):
+                return
+            await node.inject_event(f"[WORKER_DIGEST]\n{content}")
+
+        async def _consolidate_and_notify(run_id: str, outcome_event: Any) -> None:
+            """Write the digest then push it to the queen."""
+            from framework.agents.worker_memory import consolidate_worker_run
+
+            await consolidate_worker_run(_agent_name, run_id, outcome_event, _bus, _llm)
+            await _inject_digest_to_queen(run_id)
+
         async def _on_worker_event(event: Any) -> None:
             if event.stream_id == "queen":
                 return
-
-            from framework.agents.worker_memory import consolidate_worker_run
 
             if event.type in (_ET.EXECUTION_COMPLETED, _ET.EXECUTION_FAILED):
                 # Final digest — always fire, ignore cooldown
                 run_id = getattr(event, "run_id", None)
                 if run_id:
                     asyncio.create_task(
-                        consolidate_worker_run(_agent_name, run_id, event, _bus, _llm),
+                        _consolidate_and_notify(run_id, event),
                         name=f"worker-digest-final-{run_id}",
                     )
 
@@ -732,7 +755,7 @@ class SessionManager:
                 run_id = _resolve_run_id(exec_id)
                 if run_id:
                     asyncio.create_task(
-                        consolidate_worker_run(_agent_name, run_id, None, _bus, _llm),
+                        _consolidate_and_notify(run_id, None),
                         name=f"worker-digest-{run_id}",
                     )
 
