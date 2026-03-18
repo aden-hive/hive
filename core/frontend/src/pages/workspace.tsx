@@ -252,6 +252,10 @@ function truncate(s: string, max: number): string {
 type SessionRestoreResult = {
   messages: ChatMessage[];
   restoredPhase: "planning" | "building" | "staging" | "running" | null;
+  /** Last flowchart map from events — used to restore flowchart overlay on cold resume. */
+  flowchartMap: Record<string, string[]> | null;
+  /** Last original draft from events — used to restore flowchart overlay on cold resume. */
+  originalDraft: DraftGraphData | null;
 };
 
 /**
@@ -268,6 +272,8 @@ async function restoreSessionMessages(
     if (events.length > 0) {
       const messages: ChatMessage[] = [];
       let runningPhase: ChatMessage["phase"] = undefined;
+      let flowchartMap: Record<string, string[]> | null = null;
+      let originalDraft: DraftGraphData | null = null;
       for (const evt of events) {
         // Track phase transitions so each message gets the phase it was created in
         const p = evt.type === "queen_phase_changed" ? evt.data?.phase as string
@@ -275,6 +281,12 @@ async function restoreSessionMessages(
           : undefined;
         if (p && ["planning", "building", "staging", "running"].includes(p)) {
           runningPhase = p as ChatMessage["phase"];
+        }
+        // Track last flowchart state for cold restore
+        if (evt.type === "flowchart_map_updated" && evt.data) {
+          const mapData = evt.data as { map?: Record<string, string[]>; original_draft?: DraftGraphData };
+          flowchartMap = mapData.map ?? null;
+          originalDraft = mapData.original_draft ?? null;
         }
         const msg = sseEventToChatMessage(evt, thread, agentDisplayName);
         if (!msg) continue;
@@ -284,12 +296,12 @@ async function restoreSessionMessages(
         }
         messages.push(msg);
       }
-      return { messages, restoredPhase: runningPhase ?? null };
+      return { messages, restoredPhase: runningPhase ?? null, flowchartMap, originalDraft };
     }
   } catch {
     // Event log not available — session will start fresh.
   }
-  return { messages: [], restoredPhase: null };
+  return { messages: [], restoredPhase: null, flowchartMap: null, originalDraft: null };
 }
 
 // --- Per-agent backend state (consolidated) ---
@@ -799,6 +811,8 @@ export default function Workspace() {
         }
 
         let restoredPhase: "planning" | "building" | "staging" | "running" | null = null;
+        let restoredFlowchartMap: Record<string, string[]> | null = null;
+        let restoredOriginalDraft: DraftGraphData | null = null;
         if (!liveSession) {
           // Fetch conversation history from disk BEFORE creating the new session.
           // SKIP if messages were already pre-populated by handleHistoryOpen.
@@ -810,8 +824,21 @@ export default function Workspace() {
               const restored = await restoreSessionMessages(restoreFrom, agentType, "Queen Bee");
               preRestoredMsgs.push(...restored.messages);
               restoredPhase = restored.restoredPhase;
+              restoredFlowchartMap = restored.flowchartMap;
+              restoredOriginalDraft = restored.originalDraft;
             } catch {
               // Not available — will start fresh
+            }
+          } else if (restoreFrom && alreadyHasMessages) {
+            // Messages already cached in localStorage — still fetch events for
+            // non-message state (phase, flowchart) that isn't cached.
+            try {
+              const restored = await restoreSessionMessages(restoreFrom, agentType, "Queen Bee");
+              restoredPhase = restored.restoredPhase;
+              restoredFlowchartMap = restored.flowchartMap;
+              restoredOriginalDraft = restored.originalDraft;
+            } catch {
+              // Not critical — UI will still show cached messages
             }
           }
 
@@ -835,7 +862,7 @@ export default function Workspace() {
               }));
             }
             restoredMessageCount = preRestoredMsgs.length;
-          } else if (restoreFrom && activeId) {
+          } else if (restoreFrom && activeId && !alreadyHasMessages) {
             // We had a stored session but no messages on disk — wipe stale localStorage cache
             setSessionsByAgent(prev => ({
               ...prev,
@@ -889,6 +916,9 @@ export default function Workspace() {
           queenReady: true,
           queenPhase: qPhase,
           queenBuilding: qPhase === "building",
+          // Restore flowchart overlay from persisted events
+          ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
+          ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -963,6 +993,8 @@ export default function Workspace() {
 
       // Track the last queen phase seen in the event log for cold restore
       let restoredPhase: "planning" | "building" | "staging" | "running" | null = null;
+      let restoredFlowchartMap: Record<string, string[]> | null = null;
+      let restoredOriginalDraft: DraftGraphData | null = null;
 
       if (!liveSession) {
         // Reconnect failed — clear stale cached messages from localStorage restore.
@@ -990,6 +1022,19 @@ export default function Workspace() {
           const restored = await restoreSessionMessages(coldRestoreId, agentType, displayNameTemp);
           preQueenMsgs = restored.messages;
           restoredPhase = restored.restoredPhase;
+          restoredFlowchartMap = restored.flowchartMap;
+          restoredOriginalDraft = restored.originalDraft;
+        } else if (coldRestoreId && alreadyHasMessages) {
+          // Messages already cached — still fetch events for non-message state (phase, flowchart)
+          try {
+            const displayNameTemp = formatAgentDisplayName(agentPath);
+            const restored = await restoreSessionMessages(coldRestoreId, agentType, displayNameTemp);
+            restoredPhase = restored.restoredPhase;
+            restoredFlowchartMap = restored.flowchartMap;
+            restoredOriginalDraft = restored.originalDraft;
+          } catch {
+            // Not critical — UI will still show cached messages
+          }
         }
 
         // Suppress intro whenever we are about to restore a previous conversation.
@@ -1070,6 +1115,9 @@ export default function Workspace() {
         displayName,
         queenPhase: initialPhase,
         queenBuilding: initialPhase === "building",
+        // Restore flowchart overlay from persisted events
+        ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
+        ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
       });
 
       // Update the session label + backendSessionId.  Also set historySourceId
@@ -1107,6 +1155,11 @@ export default function Workspace() {
       if (historyId && !coldRestoreId) {
         const restored = await restoreSessionMessages(historyId, agentType, displayName);
         restoredMsgs.push(...restored.messages);
+        // Use flowchart from event log if not already set
+        if (restored.flowchartMap && !restoredFlowchartMap) {
+          restoredFlowchartMap = restored.flowchartMap;
+          restoredOriginalDraft = restored.originalDraft;
+        }
 
         // Check worker status (needed for isWorkerRunning flag)
         try {
@@ -1149,6 +1202,9 @@ export default function Workspace() {
         loading: false,
         queenReady: !!(isResumedSession || hasRestoredContent),
         ...(isWorkerRunning ? { workerRunState: "running" } : {}),
+        // Restore flowchart overlay from persisted events
+        ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
+        ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

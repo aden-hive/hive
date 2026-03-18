@@ -727,6 +727,25 @@ def _dissolve_planning_nodes(
     return converted, flowchart_map
 
 
+def _update_meta_json(session_manager, manager_session_id, updates: dict) -> None:
+    """Merge updates into the queen session's meta.json."""
+    if session_manager is None or not manager_session_id:
+        return
+    srv_session = session_manager.get_session(manager_session_id)
+    if not srv_session:
+        return
+    storage_sid = getattr(srv_session, "queen_resume_from", None) or srv_session.id
+    meta_path = Path.home() / ".hive" / "queen" / "session" / storage_sid / "meta.json"
+    try:
+        existing = {}
+        if meta_path.exists():
+            existing = json.loads(meta_path.read_text(encoding="utf-8"))
+        existing.update(updates)
+        meta_path.write_text(json.dumps(existing), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def register_queen_lifecycle_tools(
     registry: ToolRegistry,
     session: Any = None,
@@ -975,6 +994,7 @@ def register_queen_lifecycle_tools(
         # Switch to building phase
         if phase_state is not None:
             await phase_state.switch_to_building()
+            _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
 
         result = json.loads(stop_result)
         result["phase"] = "building"
@@ -2095,8 +2115,18 @@ def register_queen_lifecycle_tools(
         phase_state.draft_graph = converted
         phase_state.flowchart_map = fmap
 
-        # Note: flowchart file is persisted later, in initialize_and_build_agent
-        # (after the agent folder is scaffolded) or in load_built_agent.
+        # Create agent folder early so flowchart and agent_path are available
+        # throughout the entire BUILDING phase.
+        _agent_name = phase_state.draft_graph.get("agent_name", "").strip()
+        if _agent_name:
+            _agent_folder = Path("exports") / _agent_name
+            _agent_folder.mkdir(parents=True, exist_ok=True)
+            _save_flowchart_file(_agent_folder, original_copy, fmap)
+            phase_state.agent_path = str(_agent_folder)
+            _update_meta_json(session_manager, manager_session_id, {
+                "agent_path": str(_agent_folder),
+                "agent_name": _agent_name.replace("_", " ").title(),
+            })
 
         dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
         decision_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "decision")
@@ -2228,6 +2258,7 @@ def register_queen_lifecycle_tools(
                     if fallback_path:
                         phase_state.agent_path = str(fallback_path)
                     await phase_state.switch_to_building(source="tool")
+                    _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
                     if phase_state.inject_notification:
                         await phase_state.inject_notification(
                             "[PHASE CHANGE] Switched to BUILDING phase. "
@@ -2270,8 +2301,9 @@ def register_queen_lifecycle_tools(
                 if parsed.get("success", True):
                     if phase_state is not None:
                         # Set agent_path so the frontend can query credentials
-                        phase_state.agent_path = str(Path("exports") / agent_name)
+                        phase_state.agent_path = phase_state.agent_path or str(Path("exports") / agent_name)
                         await phase_state.switch_to_building(source="tool")
+                        _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
                         # Reset draft state after successful scaffolding
                         phase_state.build_confirmed = False
                         # Persist flowchart now that the agent folder exists
@@ -2319,6 +2351,7 @@ def register_queen_lifecycle_tools(
         # Switch to staging phase
         if phase_state is not None:
             await phase_state.switch_to_staging()
+            _update_meta_json(session_manager, manager_session_id, {"phase": "staging"})
 
         result = json.loads(stop_result)
         result["phase"] = "staging"
@@ -3446,6 +3479,7 @@ def register_queen_lifecycle_tools(
                 if phase_state is not None:
                     phase_state.agent_path = str(resolved_path)
                     await phase_state.switch_to_staging()
+                    _update_meta_json(session_manager, manager_session_id, {"phase": "staging"})
 
                 worker_name = info.name if info else updated_session.worker_id
                 return json.dumps(
@@ -3565,6 +3599,7 @@ def register_queen_lifecycle_tools(
             # Switch to running phase
             if phase_state is not None:
                 await phase_state.switch_to_running()
+                _update_meta_json(session_manager, manager_session_id, {"phase": "running"})
 
             return json.dumps(
                 {
