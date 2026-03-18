@@ -680,9 +680,13 @@ class SessionManager:
     def _subscribe_worker_digest(self, session: Session) -> None:
         """Subscribe to worker events to write per-run digests.
 
-        Two triggers:
+        Three triggers:
         - NODE_LOOP_ITERATION: write a mid-run snapshot, throttled to at most
           once every _DIGEST_COOLDOWN seconds per execution.
+        - TOOL_CALL_COMPLETED for delegate_to_sub_agent: same throttled snapshot.
+          Orchestrator nodes often run all subagent calls in a single LLM turn,
+          so NODE_LOOP_ITERATION only fires once at the end.  Subagent
+          completions provide intermediate checkpoints.
         - EXECUTION_COMPLETED / EXECUTION_FAILED: always write the final digest,
           bypassing the cooldown.
         """
@@ -768,8 +772,14 @@ class SessionManager:
                         name=f"worker-digest-final-{run_id}",
                     )
 
-            elif event.type == _ET.NODE_LOOP_ITERATION:
+            elif event.type in (_ET.NODE_LOOP_ITERATION, _ET.TOOL_CALL_COMPLETED):
                 # Mid-run snapshot — respect 300 s cooldown per execution.
+                # TOOL_CALL_COMPLETED is only interesting for subagent calls;
+                # regular tool completions are too frequent and too cheap.
+                if event.type == _ET.TOOL_CALL_COMPLETED:
+                    tool_name = (event.data or {}).get("tool_name", "")
+                    if tool_name != "delegate_to_sub_agent":
+                        return
                 if not exec_id:
                     return
                 now = _time.monotonic()
@@ -787,6 +797,7 @@ class SessionManager:
             event_types=[
                 _ET.EXECUTION_STARTED,
                 _ET.NODE_LOOP_ITERATION,
+                _ET.TOOL_CALL_COMPLETED,
                 _ET.EXECUTION_COMPLETED,
                 _ET.EXECUTION_FAILED,
                 _ET.EXECUTION_PAUSED,
