@@ -1061,9 +1061,7 @@ class SessionManager:
             )
         )
 
-    async def _emit_flowchart_on_restore(
-        self, session: Session, agent_path: str | Path
-    ) -> None:
+    async def _emit_flowchart_on_restore(self, session: Session, agent_path: str | Path) -> None:
         """Emit FLOWCHART_MAP_UPDATED from persisted flowchart file on cold restore."""
         from framework.runtime.event_bus import AgentEvent, EventType
         from framework.tools.flowchart_utils import load_flowchart_file
