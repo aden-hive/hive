@@ -287,7 +287,11 @@ class SessionManager:
         try:
             # Blocking I/O — load in executor
             loop = asyncio.get_running_loop()
-            resolved_model = model or self._model
+
+            # Prioritize: explicit model arg > worker-specific model > session default
+            from framework.config import get_preferred_worker_model
+
+            resolved_model = model or get_preferred_worker_model() or self._model
             runner = await loop.run_in_executor(
                 None,
                 lambda: AgentRunner.load(

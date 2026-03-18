@@ -1767,6 +1767,8 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     else
         echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
     fi
+    echo -e "  ${DIM}To use a different model for worker agents, run:${NC}"
+    echo -e "     ${CYAN}./scripts/setup_worker_model.sh${NC}"
     echo ""
 fi
 

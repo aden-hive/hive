@@ -1880,6 +1880,9 @@ if ($SelectedProviderId) {
         Write-Host " -> " -NoNewline
         Write-Color -Text $SelectedModel -Color DarkGray
     }
+    Write-Color -Text "  To use a different model for worker agents, run:" -Color DarkGray
+    Write-Host "     " -NoNewline
+    Write-Color -Text ".\scripts\setup_worker_model.ps1" -Color Cyan
     Write-Host ""
 }
 
