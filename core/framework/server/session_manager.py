@@ -736,16 +736,21 @@ class SessionManager:
                     else None
                 )
             )
-            _meta_path.write_text(
-                json.dumps(
-                    {
-                        "agent_name": _agent_name,
-                        "agent_path": str(session.worker_path) if session.worker_path else None,
-                        "created_at": time.time(),
-                    }
-                ),
-                encoding="utf-8",
-            )
+            # Merge into existing meta.json to preserve fields written by
+            # _update_meta_json (e.g. phase, agent_path set during building).
+            _existing_meta: dict = {}
+            if _meta_path.exists():
+                try:
+                    _existing_meta = json.loads(_meta_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    pass
+            _new_meta: dict = {"created_at": time.time()}
+            if _agent_name is not None:
+                _new_meta["agent_name"] = _agent_name
+            if session.worker_path is not None:
+                _new_meta["agent_path"] = str(session.worker_path)
+            _existing_meta.update(_new_meta)
+            _meta_path.write_text(json.dumps(_existing_meta), encoding="utf-8")
         except OSError:
             pass
 
