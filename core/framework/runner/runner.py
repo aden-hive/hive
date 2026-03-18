@@ -9,7 +9,11 @@ from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from framework.config import get_hive_config, get_max_context_tokens, get_preferred_model
+from framework.config import (
+    get_hive_config,
+    get_max_context_tokens,
+    get_preferred_model,
+)
 from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
 )
@@ -25,7 +29,11 @@ from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.preload_validation import run_preload_validation
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
+from framework.runtime.agent_runtime import (
+    AgentRuntime,
+    AgentRuntimeConfig,
+    create_agent_runtime,
+)
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.tools.flowchart_utils import generate_fallback_flowchart
@@ -351,7 +359,9 @@ def _is_codex_token_expired(auth_data: dict) -> bool:
         # Codex stores last_refresh as an ISO 8601 timestamp string —
         # convert to Unix epoch float for arithmetic.
         try:
-            last_refresh = datetime.fromisoformat(last_refresh.replace("Z", "+00:00")).timestamp()
+            last_refresh = datetime.fromisoformat(
+                last_refresh.replace("Z", "+00:00")
+            ).timestamp()
         except (ValueError, TypeError):
             return True
 
@@ -633,9 +643,13 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         goal_id=graph_data.get("goal_id", ""),
         version=graph_data.get("version", "1.0.0"),
         entry_node=graph_data.get("entry_node", ""),
-        entry_points=graph_data.get("entry_points", {}),  # Support pause/resume architecture
+        entry_points=graph_data.get(
+            "entry_points", {}
+        ),  # Support pause/resume architecture
         terminal_nodes=graph_data.get("terminal_nodes", []),
-        pause_nodes=graph_data.get("pause_nodes", []),  # Support pause/resume architecture
+        pause_nodes=graph_data.get(
+            "pause_nodes", []
+        ),  # Support pause/resume architecture
         nodes=nodes,
         edges=edges,
         max_steps=graph_data.get("max_steps", 100),
@@ -804,9 +818,13 @@ class AgentRunner:
         os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)
 
         # Auto-discover MCP servers from mcp_servers.json
-        mcp_config_path = agent_path / "mcp_servers.json"
-        if mcp_config_path.exists():
-            self._load_mcp_servers_from_config(mcp_config_path)
+        mcp_config_paths = [
+            agent_path / "mcp_servers.json",
+            agent_path / "nodes" / "mcp_servers.json",
+        ]
+        for mcp_config_path in mcp_config_paths:
+            if mcp_config_path.exists():
+                self._load_mcp_servers_from_config(mcp_config_path)
 
     @staticmethod
     def _import_agent_module(agent_path: Path):
@@ -911,7 +929,9 @@ class AgentRunner:
                 )
             else:
                 hive_config = get_hive_config()
-                max_tokens = hive_config.get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
+                max_tokens = hive_config.get("llm", {}).get(
+                    "max_tokens", DEFAULT_MAX_TOKENS
+                )
 
             # Resolve max_context_tokens with priority:
             #   1. agent loop_config["max_context_tokens"] (explicit, wins silently)
@@ -921,7 +941,9 @@ class AgentRunner:
             agent_loop_config: dict = dict(getattr(agent_module, "loop_config", {}))
             if "max_context_tokens" not in agent_loop_config:
                 if agent_config and hasattr(agent_config, "max_context_tokens"):
-                    agent_loop_config["max_context_tokens"] = agent_config.max_context_tokens
+                    agent_loop_config["max_context_tokens"] = (
+                        agent_config.max_context_tokens
+                    )
                     logger.info(
                         "Agent default_config overrides max_context_tokens: %d"
                         " (configuration.json value ignored)",
@@ -1012,7 +1034,9 @@ class AgentRunner:
         try:
             graph, goal = load_agent_export(export_data)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid JSON in agent export file: {agent_json_path}") from exc
+            raise ValueError(
+                f"Invalid JSON in agent export file: {agent_json_path}"
+            ) from exc
 
         # Generate flowchart.json if missing (for legacy JSON-based agents)
         generate_fallback_flowchart(graph, goal, agent_path)
@@ -1162,7 +1186,9 @@ class AgentRunner:
                 # Get OAuth token from Claude Code subscription
                 api_key = get_claude_code_token()
                 if not api_key:
-                    print("Warning: Claude Code subscription configured but no token found.")
+                    print(
+                        "Warning: Claude Code subscription configured but no token found."
+                    )
                     print("Run 'claude' to authenticate, then try again.")
             elif use_codex:
                 # Get OAuth token from Codex subscription
@@ -1174,7 +1200,9 @@ class AgentRunner:
                 # Get API key from Kimi Code CLI config (~/.kimi/config.toml)
                 api_key = get_kimi_code_token()
                 if not api_key:
-                    print("Warning: Kimi Code subscription configured but no key found.")
+                    print(
+                        "Warning: Kimi Code subscription configured but no key found."
+                    )
                     print("Run 'kimi /login' to authenticate, then try again.")
 
             if api_key and use_claude_code:
@@ -1224,9 +1252,9 @@ class AgentRunner:
                 else:
                     # Fall back to environment variable
                     # First check api_key_env_var from config (set by quickstart)
-                    api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
-                        self.model
-                    )
+                    api_key_env = llm_config.get(
+                        "api_key_env_var"
+                    ) or self._get_api_key_env_var(self.model)
                     if api_key_env and os.environ.get(api_key_env):
                         self._llm = LiteLLMProvider(
                             model=self.model,
@@ -1245,7 +1273,9 @@ class AgentRunner:
                             if api_key_env:
                                 os.environ[api_key_env] = api_key
                         elif api_key_env:
-                            print(f"Warning: {api_key_env} not set. LLM calls will fail.")
+                            print(
+                                f"Warning: {api_key_env} not set. LLM calls will fail."
+                            )
                             print(f"Set it with: export {api_key_env}=your-api-key")
 
             # Fail fast if the agent needs an LLM but none was configured
@@ -1268,7 +1298,9 @@ class AgentRunner:
                         if api_key_env
                         else "Configure an API key for your LLM provider."
                     )
-                    raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
+                    raise CredentialError(
+                        f"LLM API key not found for model '{self.model}'. {hint}"
+                    )
 
         # For GCU nodes: auto-register GCU MCP server if needed, then expand tool lists
         has_gcu_nodes = any(node.node_type == "gcu" for node in self.graph.nodes)
@@ -1283,7 +1315,9 @@ class AgentRunner:
                 _repo_root = Path(__file__).resolve().parent.parent.parent.parent
                 gcu_config["cwd"] = str(_repo_root / "tools")
                 self._tool_registry.register_mcp_server(gcu_config)
-                gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
+                gcu_tool_names = self._tool_registry.get_server_tool_names(
+                    GCU_SERVER_NAME
+                )
 
             # Expand each GCU node's tools list to include all GCU server tools
             if gcu_tool_names:
@@ -1295,18 +1329,27 @@ class AgentRunner:
                                 node.tools.append(tool_name)
 
         # For event_loop/gcu nodes: auto-register file tools MCP server, then expand tool lists
-        has_loop_nodes = any(node.node_type in ("event_loop", "gcu") for node in self.graph.nodes)
+        has_loop_nodes = any(
+            node.node_type in ("event_loop", "gcu") for node in self.graph.nodes
+        )
         if has_loop_nodes:
-            from framework.graph.files import FILES_MCP_SERVER_CONFIG, FILES_MCP_SERVER_NAME
+            from framework.graph.files import (
+                FILES_MCP_SERVER_CONFIG,
+                FILES_MCP_SERVER_NAME,
+            )
 
-            files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
+            files_tool_names = self._tool_registry.get_server_tool_names(
+                FILES_MCP_SERVER_NAME
+            )
             if not files_tool_names:
                 # Resolve cwd to repo-level tools/ (not relative to agent_path)
                 files_config = dict(FILES_MCP_SERVER_CONFIG)
                 _repo_root = Path(__file__).resolve().parent.parent.parent.parent
                 files_config["cwd"] = str(_repo_root / "tools")
                 self._tool_registry.register_mcp_server(files_config)
-                files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
+                files_tool_names = self._tool_registry.get_server_tool_names(
+                    FILES_MCP_SERVER_NAME
+                )
 
             if files_tool_names:
                 for node in self.graph.nodes:
@@ -1336,7 +1379,9 @@ class AgentRunner:
             if accounts_data:
                 from framework.graph.prompt_composer import build_accounts_prompt
 
-                accounts_prompt = build_accounts_prompt(accounts_data, tool_provider_map)
+                accounts_prompt = build_accounts_prompt(
+                    accounts_data, tool_provider_map
+                )
         except Exception:
             pass  # Best-effort — agent works without account info
 
@@ -1568,7 +1613,9 @@ class AgentRunner:
             for warning in validation.warnings:
                 if "Missing " in warning:
                     error_lines.append(f"  {warning}")
-            error_lines.append("\nSet the required environment variables and re-run the agent.")
+            error_lines.append(
+                "\nSet the required environment variables and re-run the agent."
+            )
             error_msg = "\n".join(error_lines)
             return ExecutionResult(
                 success=False,
@@ -1852,7 +1899,9 @@ class AgentRunner:
             adapter = CredentialStoreAdapter.default()
 
             # Check tool credentials
-            for _cred_name, spec in adapter.get_missing_for_tools(list(info.required_tools)):
+            for _cred_name, spec in adapter.get_missing_for_tools(
+                list(info.required_tools)
+            ):
                 missing_credentials.append(spec.env_var)
                 affected_tools = [t for t in info.required_tools if t in spec.tools]
                 tools_str = ", ".join(affected_tools)
@@ -1977,7 +2026,9 @@ Respond with JSON only:
                 }
                 return CapabilityResponse(
                     agent_name=info.name,
-                    level=level_map.get(data.get("level", "uncertain"), CapabilityLevel.UNCERTAIN),
+                    level=level_map.get(
+                        data.get("level", "uncertain"), CapabilityLevel.UNCERTAIN
+                    ),
                     confidence=float(data.get("confidence", 0.5)),
                     reasoning=data.get("reasoning", ""),
                     estimated_steps=data.get("estimated_steps"),
@@ -2022,7 +2073,9 @@ Respond with JSON only:
             level=level,
             confidence=confidence,
             reasoning=f"Keyword match ratio: {match_ratio:.2f}",
-            estimated_steps=info.node_count if level != CapabilityLevel.CANNOT_HANDLE else None,
+            estimated_steps=(
+                info.node_count if level != CapabilityLevel.CANNOT_HANDLE else None
+            ),
         )
 
     async def receive_message(self, message: "AgentMessage") -> "AgentMessage":

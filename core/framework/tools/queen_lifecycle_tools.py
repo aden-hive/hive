@@ -43,7 +43,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from framework.credentials.models import CredentialError
-from framework.runner.preload_validation import credential_errors_to_json, validate_credentials
+from framework.runner.preload_validation import (
+    credential_errors_to_json,
+    validate_credentials,
+)
 from framework.runtime.event_bus import AgentEvent, EventType
 from framework.server.app import validate_agent_path
 from framework.tools.flowchart_utils import (
@@ -258,7 +261,9 @@ class QueenPhaseState:
             )
 
 
-def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = None) -> str:
+def build_worker_profile(
+    runtime: AgentRuntime, agent_path: Path | str | None = None
+) -> str:
     """Build a worker capability profile from its graph/goal definition.
 
     Injected into the queen's system prompt so it knows what the worker
@@ -291,11 +296,17 @@ def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = 
             lines.append(f"- {node.id}: {node.description or node.name}")
 
     all_tools: set[str] = set()
+    # 1. Static tools from graph definition
     for node in graph.nodes:
         if node.tools:
             all_tools.update(node.tools)
+    # 2. Dynamic/MCP tools from registry
+    if hasattr(runtime, "tool_registry") and runtime.tool_registry:
+        all_tools.update(runtime.tool_registry.list_tools())
+
     if all_tools:
-        lines.append(f"\n## Worker Tools\n{', '.join(sorted(all_tools))}")
+        tools_str = ", ".join(sorted(all_tools))
+        lines.append(f"\n## Worker Tools\n{tools_str}")
 
     lines.append("\nStatus at session start: idle (not started).")
     return "\n".join(lines)
@@ -354,7 +365,9 @@ def _remove_trigger_from_agent(session: Any, trigger_id: str) -> None:
     updated = [t for t in triggers if t.get("id") != trigger_id]
     if len(updated) != len(triggers):
         _write_agent_triggers_json(agent_path, updated)
-        logger.info("Removed trigger '%s' from %s/triggers.json", trigger_id, agent_path)
+        logger.info(
+            "Removed trigger '%s' from %s/triggers.json", trigger_id, agent_path
+        )
 
 
 async def _persist_active_triggers(session: Any, session_id: str) -> None:
@@ -381,7 +394,9 @@ async def _persist_active_triggers(session: Any, session_id: str) -> None:
         await store.write_state(session_id, state)
     except Exception:
         logger.warning(
-            "Failed to persist active triggers for session %s", session_id, exc_info=True
+            "Failed to persist active triggers for session %s",
+            session_id,
+            exc_info=True,
         )
 
 
@@ -411,7 +426,9 @@ async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None
                 # Record next fire time for introspection (monotonic, matches routes)
                 fire_times = getattr(session, "trigger_next_fire", None)
                 if fire_times is not None:
-                    _next_delay = float(interval_minutes) * 60 if interval_minutes else 60
+                    _next_delay = (
+                        float(interval_minutes) * 60 if interval_minutes else 60
+                    )
                     fire_times[trigger_id] = time.monotonic() + _next_delay
 
                 # Gate on worker being loaded
@@ -438,7 +455,9 @@ async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.warning("Timer trigger '%s' tick failed", trigger_id, exc_info=True)
+                logger.warning(
+                    "Timer trigger '%s' tick failed", trigger_id, exc_info=True
+                )
 
     task = asyncio.create_task(_timer_loop(), name=f"trigger_timer_{trigger_id}")
     if not hasattr(session, "active_timer_tasks"):
@@ -449,7 +468,11 @@ async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None
 async def _start_trigger_webhook(session: Any, trigger_id: str, tdef: Any) -> None:
     """Subscribe to WEBHOOK_RECEIVED events and route matching ones to the queen."""
     from framework.graph.event_loop_node import TriggerEvent
-    from framework.runtime.webhook_server import WebhookRoute, WebhookServer, WebhookServerConfig
+    from framework.runtime.webhook_server import (
+        WebhookRoute,
+        WebhookServer,
+        WebhookServerConfig,
+    )
 
     bus = session.event_bus
     path = tdef.trigger_config.get("path", "")
@@ -585,10 +608,15 @@ def _dissolve_planning_nodes(
 
         # Decision clause: prefer decision_clause, fall back to description/name
         clause = (
-            d_node.get("decision_clause") or d_node.get("description") or d_node.get("name") or d_id
+            d_node.get("decision_clause")
+            or d_node.get("description")
+            or d_node.get("name")
+            or d_id
         ).strip()
 
-        predecessors = [node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id]
+        predecessors = [
+            node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id
+        ]
 
         if not predecessors:
             # Decision at start: convert to regular process node
@@ -618,7 +646,9 @@ def _dissolve_planning_nodes(
                 pred["success_criteria"] = clause
 
             # Remove the edge from predecessor -> decision
-            edges[:] = [e for e in edges if not (e["source"] == pid and e["target"] == d_id)]
+            edges[:] = [
+                e for e in edges if not (e["source"] == pid and e["target"] == d_id)
+            ]
 
             # Wire predecessor -> yes/no targets
             edge_counter = len(edges)
@@ -922,7 +952,9 @@ def register_queen_lifecycle_tools(
             "required": ["task"],
         },
     )
-    registry.register("start_worker", _start_tool, lambda inputs: start_worker(**inputs))
+    registry.register(
+        "start_worker", _start_tool, lambda inputs: start_worker(**inputs)
+    )
     tools_registered += 1
 
     # --- stop_worker ----------------------------------------------------------
@@ -994,7 +1026,9 @@ def register_queen_lifecycle_tools(
         # Switch to building phase
         if phase_state is not None:
             await phase_state.switch_to_building()
-            _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
+            _update_meta_json(
+                session_manager, manager_session_id, {"phase": "building"}
+            )
 
         result = json.loads(stop_result)
         result["phase"] = "building"
@@ -1092,7 +1126,9 @@ def register_queen_lifecycle_tools(
                         )
                     )
                 except Exception:
-                    logger.warning("Failed to re-emit draft during replan", exc_info=True)
+                    logger.warning(
+                        "Failed to re-emit draft during replan", exc_info=True
+                    )
 
         has_draft = phase_state is not None and phase_state.draft_graph is not None
         return json.dumps(
@@ -1219,7 +1255,9 @@ def register_queen_lifecycle_tools(
                 or d_id
             ).strip()
 
-            predecessors = [node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id]
+            predecessors = [
+                node_by_id[e["source"]] for e in in_edges if e["source"] in node_by_id
+            ]
 
             if not predecessors:
                 # Decision at start: convert to regular process node
@@ -1249,7 +1287,9 @@ def register_queen_lifecycle_tools(
                     pred["success_criteria"] = clause
 
                 # Remove the edge from predecessor → decision
-                edges[:] = [e for e in edges if not (e["source"] == pid and e["target"] == d_id)]
+                edges[:] = [
+                    e for e in edges if not (e["source"] == pid and e["target"] == d_id)
+                ]
 
                 # Wire predecessor → yes/no targets
                 edge_counter = len(edges)
@@ -1332,7 +1372,9 @@ def register_queen_lifecycle_tools(
                 absorbed[pred_id] = prev_absorbed
 
             # Remove sub-agent node and all its edges
-            edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
+            edges[:] = [
+                e for e in edges if e["source"] != sa_id and e["target"] != sa_id
+            ]
             nodes[:] = [n for n in nodes if n["id"] != sa_id]
             del node_by_id[sa_id]
 
@@ -1359,7 +1401,9 @@ def register_queen_lifecycle_tools(
                     absorbed[n["id"]] = prev_absorbed
 
             # Remove the sub-agent node and its edges
-            edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
+            edges[:] = [
+                e for e in edges if e["source"] != sa_id and e["target"] != sa_id
+            ]
             nodes[:] = [n for n in nodes if n["id"] != sa_id]
             del node_by_id[sa_id]
 
@@ -1448,14 +1492,18 @@ def register_queen_lifecycle_tools(
         validated_nodes = []
         for i, n in enumerate(nodes):
             if not isinstance(n, dict):
-                return json.dumps({"error": f"Node {i} must be a dict, got {type(n).__name__}"})
+                return json.dumps(
+                    {"error": f"Node {i} must be a dict, got {type(n).__name__}"}
+                )
             node_id = n.get("id", "").strip()
             if not node_id:
                 return json.dumps({"error": f"Node {i} is missing 'id'"})
             validated_nodes.append(
                 {
                     "id": node_id,
-                    "name": n.get("name", node_id.replace("-", " ").replace("_", " ").title()),
+                    "name": n.get(
+                        "name", node_id.replace("-", " ").replace("_", " ").title()
+                    ),
                     "description": n.get("description", ""),
                     "node_type": n.get("node_type", "event_loop"),
                     # Optional business-logic hints (not validated yet)
@@ -1487,9 +1535,13 @@ def register_queen_lifecycle_tools(
                 src = e.get("source", "")
                 tgt = e.get("target", "")
                 if src and src not in node_ids:
-                    return json.dumps({"error": f"Edge {i} source '{src}' references unknown node"})
+                    return json.dumps(
+                        {"error": f"Edge {i} source '{src}' references unknown node"}
+                    )
                 if tgt and tgt not in node_ids:
-                    return json.dumps({"error": f"Edge {i} target '{tgt}' references unknown node"})
+                    return json.dumps(
+                        {"error": f"Edge {i} target '{tgt}' references unknown node"}
+                    )
                 validated_edges.append(
                     {
                         "id": e.get("id", f"edge-{i}"),
@@ -1526,7 +1578,9 @@ def register_queen_lifecycle_tools(
                 ]
                 if not gcu_children:
                     continue
-                d_parents = [e["source"] for e in validated_edges if e["target"] == d_id]
+                d_parents = [
+                    e["source"] for e in validated_edges if e["target"] == d_id
+                ]
                 for gc_edge in gcu_children:
                     gc_id = gc_edge["target"]
                     logger.warning(
@@ -1632,7 +1686,10 @@ def register_queen_lifecycle_tools(
                     validated_edges[:] = [
                         e
                         for e in validated_edges
-                        if not (e["source"] == leaf_id and e["target"] in set(illegal_targets))
+                        if not (
+                            e["source"] == leaf_id
+                            and e["target"] in set(illegal_targets)
+                        )
                     ]
 
                 # Ensure the leaf is in its parent's sub_agents list
@@ -1676,7 +1733,9 @@ def register_queen_lifecycle_tools(
                     f"removed. Add it to a parent node's sub_agents "
                     f"list and re-save the draft."
                 )
-            validated_nodes[:] = [n for n in validated_nodes if n["id"] not in set(orphaned_ids)]
+            validated_nodes[:] = [
+                n for n in validated_nodes if n["id"] not in set(orphaned_ids)
+            ]
             node_by_id_v = {n["id"]: n for n in validated_nodes}
 
         # Synthesize visual edges for sub-agents that are referenced in
@@ -1759,7 +1818,9 @@ def register_queen_lifecycle_tools(
                     for e in validated_edges
                     if e["source"] not in unreachable and e["target"] not in unreachable
                 ]
-                validated_nodes[:] = [n for n in validated_nodes if n["id"] not in unreachable]
+                validated_nodes[:] = [
+                    n for n in validated_nodes if n["id"] not in unreachable
+                ]
 
         # Determine terminal nodes: explicit list, or nodes with no outgoing edges.
         # Sub-agent nodes are leaf helpers, not endpoints — exclude them.
@@ -1859,9 +1920,11 @@ def register_queen_lifecycle_tools(
                         stream_id="queen",
                         data={
                             "map": phase_state.flowchart_map if phase_state else None,
-                            "original_draft": phase_state.original_draft_graph
-                            if phase_state
-                            else draft,
+                            "original_draft": (
+                                phase_state.original_draft_graph
+                                if phase_state
+                                else draft
+                            ),
                         },
                     )
                 )
@@ -1905,7 +1968,8 @@ def register_queen_lifecycle_tools(
                 "Draft graph saved and sent to the visualizer. "
                 "The user can now see the color-coded flowchart. "
                 "Present this design to the user and get their approval. "
-                "When the user confirms, call confirm_and_build() to proceed." + correction_warning
+                "When the user confirms, call confirm_and_build() to proceed."
+                + correction_warning
             )
 
         result: dict = {
@@ -1955,8 +2019,14 @@ def register_queen_lifecycle_tools(
                     "items": {
                         "type": "object",
                         "properties": {
-                            "id": {"type": "string", "description": "Kebab-case node identifier"},
-                            "name": {"type": "string", "description": "Human-readable name"},
+                            "id": {
+                                "type": "string",
+                                "description": "Kebab-case node identifier",
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "Human-readable name",
+                            },
                             "description": {
                                 "type": "string",
                                 "description": "What this node does (business logic)",
@@ -2107,7 +2177,9 @@ def register_queen_lifecycle_tools(
 
         if phase_state.phase != "planning":
             return json.dumps(
-                {"error": f"Cannot confirm_and_build: currently in {phase_state.phase} phase."}
+                {
+                    "error": f"Cannot confirm_and_build: currently in {phase_state.phase} phase."
+                }
             )
 
         if phase_state.draft_graph is None:
@@ -2154,7 +2226,9 @@ def register_queen_lifecycle_tools(
             )
 
         dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
-        decision_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "decision")
+        decision_count = sum(
+            1 for n in original_nodes if n.get("flowchart_type") == "decision"
+        )
         subagent_count = sum(
             1
             for n in original_nodes
@@ -2283,7 +2357,9 @@ def register_queen_lifecycle_tools(
                     if fallback_path:
                         phase_state.agent_path = str(fallback_path)
                     await phase_state.switch_to_building(source="tool")
-                    _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
+                    _update_meta_json(
+                        session_manager, manager_session_id, {"phase": "building"}
+                    )
                     if phase_state.inject_notification:
                         await phase_state.inject_notification(
                             "[PHASE CHANGE] Switched to BUILDING phase. "
@@ -2336,7 +2412,10 @@ def register_queen_lifecycle_tools(
                         # Reset draft state after successful scaffolding
                         phase_state.build_confirmed = False
                         # Persist flowchart now that the agent folder exists
-                        if phase_state.original_draft_graph and phase_state.flowchart_map:
+                        if (
+                            phase_state.original_draft_graph
+                            and phase_state.flowchart_map
+                        ):
                             _save_flowchart_file(
                                 Path("exports") / agent_name,
                                 phase_state.original_draft_graph,
@@ -2400,7 +2479,9 @@ def register_queen_lifecycle_tools(
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register("stop_worker", _stop_worker_tool, lambda inputs: stop_worker_to_staging())
+    registry.register(
+        "stop_worker", _stop_worker_tool, lambda inputs: stop_worker_to_staging()
+    )
     tools_registered += 1
 
     # --- get_worker_status ----------------------------------------------------
@@ -2525,7 +2606,9 @@ def register_queen_lifecycle_tools(
         bus = _get_event_bus()
         if bus:
             if preamble["status"] == "waiting_for_input":
-                input_events = bus.get_history(event_type=EventType.CLIENT_INPUT_REQUESTED, limit=1)
+                input_events = bus.get_history(
+                    event_type=EventType.CLIENT_INPUT_REQUESTED, limit=1
+                )
                 if input_events:
                     prompt = input_events[0].data.get("prompt", "")
                     if prompt:
@@ -2537,7 +2620,9 @@ def register_queen_lifecycle_tools(
                 if target:
                     preamble["current_node"] = target
 
-            iter_events = bus.get_history(event_type=EventType.NODE_LOOP_ITERATION, limit=1)
+            iter_events = bus.get_history(
+                event_type=EventType.NODE_LOOP_ITERATION, limit=1
+            )
             if iter_events:
                 preamble["current_iteration"] = iter_events[0].data.get("iteration")
 
@@ -2583,7 +2668,9 @@ def register_queen_lifecycle_tools(
             parts.append(node_part)
 
         if red_flags:
-            parts.append(f"{red_flags} issue type(s) detected — use focus='issues' for details")
+            parts.append(
+                f"{red_flags} issue type(s) detected — use focus='issues' for details"
+            )
         else:
             parts.append("No issues detected")
 
@@ -2654,7 +2741,9 @@ def register_queen_lifecycle_tools(
             return "No active execution found."
 
         exec_id = exec_ids[0]
-        memory = runtime.state_manager.create_memory(exec_id, stream_id, IsolationLevel.SHARED)
+        memory = runtime.state_manager.create_memory(
+            exec_id, stream_id, IsolationLevel.SHARED
+        )
         state = await memory.read_all()
 
         if not state:
@@ -2678,7 +2767,9 @@ def register_queen_lifecycle_tools(
                 else:
                     old_preview = _preview_value(change.old_value, 40)
                     new_preview = _preview_value(change.new_value, 40)
-                    lines.append(f"  {change.key}: {old_preview} -> {new_preview} ({ago})")
+                    lines.append(
+                        f"  {change.key}: {old_preview} -> {new_preview} ({ago})"
+                    )
 
         return "\n".join(lines)
 
@@ -2687,15 +2778,22 @@ def register_queen_lifecycle_tools(
         lines = []
 
         # Running tools (started but not yet completed)
-        tool_started = bus.get_history(event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2)
-        tool_completed = bus.get_history(event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2)
+        tool_started = bus.get_history(
+            event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2
+        )
+        tool_completed = bus.get_history(
+            event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2
+        )
         completed_ids = {
-            evt.data.get("tool_use_id") for evt in tool_completed if evt.data.get("tool_use_id")
+            evt.data.get("tool_use_id")
+            for evt in tool_completed
+            if evt.data.get("tool_use_id")
         }
         running = [
             evt
             for evt in tool_started
-            if evt.data.get("tool_use_id") and evt.data.get("tool_use_id") not in completed_ids
+            if evt.data.get("tool_use_id")
+            and evt.data.get("tool_use_id") not in completed_ids
         ]
 
         if running:
@@ -2827,7 +2925,9 @@ def register_queen_lifecycle_tools(
             )
 
         # Execution outcomes
-        exec_completed = bus.get_history(event_type=EventType.EXECUTION_COMPLETED, limit=5)
+        exec_completed = bus.get_history(
+            event_type=EventType.EXECUTION_COMPLETED, limit=5
+        )
         exec_failed = bus.get_history(event_type=EventType.EXECUTION_FAILED, limit=5)
         completed_n = len(exec_completed)
         failed_n = len(exec_failed)
@@ -2873,15 +2973,22 @@ def register_queen_lifecycle_tools(
                 result[key] = preamble[key]
 
         # Running + completed tool calls
-        tool_started = bus.get_history(event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2)
-        tool_completed = bus.get_history(event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2)
+        tool_started = bus.get_history(
+            event_type=EventType.TOOL_CALL_STARTED, limit=last_n * 2
+        )
+        tool_completed = bus.get_history(
+            event_type=EventType.TOOL_CALL_COMPLETED, limit=last_n * 2
+        )
         completed_ids = {
-            evt.data.get("tool_use_id") for evt in tool_completed if evt.data.get("tool_use_id")
+            evt.data.get("tool_use_id")
+            for evt in tool_completed
+            if evt.data.get("tool_use_id")
         }
         running = [
             evt
             for evt in tool_started
-            if evt.data.get("tool_use_id") and evt.data.get("tool_use_id") not in completed_ids
+            if evt.data.get("tool_use_id")
+            and evt.data.get("tool_use_id") not in completed_ids
         ]
         if running:
             result["running_tools"] = [
@@ -2996,7 +3103,9 @@ def register_queen_lifecycle_tools(
             }
 
         # Execution outcomes
-        exec_completed = bus.get_history(event_type=EventType.EXECUTION_COMPLETED, limit=5)
+        exec_completed = bus.get_history(
+            event_type=EventType.EXECUTION_COMPLETED, limit=5
+        )
         exec_failed = bus.get_history(event_type=EventType.EXECUTION_FAILED, limit=5)
         if exec_completed or exec_failed:
             result["execution_outcomes"] = []
@@ -3139,7 +3248,15 @@ def register_queen_lifecycle_tools(
             "properties": {
                 "focus": {
                     "type": "string",
-                    "enum": ["diary", "activity", "memory", "tools", "issues", "progress", "full"],
+                    "enum": [
+                        "diary",
+                        "activity",
+                        "memory",
+                        "tools",
+                        "issues",
+                        "progress",
+                        "full",
+                    ],
                     "description": (
                         "Aspect to inspect. Omit for a brief summary. "
                         "Use 'diary' to read persistent run history before checking live logs."
@@ -3155,7 +3272,9 @@ def register_queen_lifecycle_tools(
             "required": [],
         },
     )
-    registry.register("get_worker_status", _status_tool, lambda inputs: get_worker_status(**inputs))
+    registry.register(
+        "get_worker_status", _status_tool, lambda inputs: get_worker_status(**inputs)
+    )
     tools_registered += 1
 
     # --- inject_worker_message ------------------------------------------------
@@ -3181,7 +3300,9 @@ def register_queen_lifecycle_tools(
             waiting = stream.get_waiting_nodes()
             if waiting:
                 target_node_id = waiting[0]["node_id"]
-                ok = await stream.inject_input(target_node_id, content, is_client_input=True)
+                ok = await stream.inject_input(
+                    target_node_id, content, is_client_input=True
+                )
                 if ok:
                     return json.dumps(
                         {
@@ -3196,7 +3317,9 @@ def register_queen_lifecycle_tools(
             injectable = stream.get_injectable_nodes()
             if injectable:
                 target_node_id = injectable[0]["node_id"]
-                ok = await stream.inject_input(target_node_id, content, is_client_input=True)
+                ok = await stream.inject_input(
+                    target_node_id, content, is_client_input=True
+                )
                 if ok:
                     return json.dumps(
                         {
@@ -3231,7 +3354,9 @@ def register_queen_lifecycle_tools(
         },
     )
     registry.register(
-        "inject_worker_message", _inject_tool, lambda inputs: inject_worker_message(**inputs)
+        "inject_worker_message",
+        _inject_tool,
+        lambda inputs: inject_worker_message(**inputs),
     )
     tools_registered += 1
 
@@ -3337,7 +3462,9 @@ def register_queen_lifecycle_tools(
                     "alias": info.alias,
                     "storage_id": info.storage_id,
                     "status": info.status,
-                    "created_at": info.created_at.isoformat() if info.created_at else None,
+                    "created_at": (
+                        info.created_at.isoformat() if info.created_at else None
+                    ),
                     "last_validated": (
                         info.last_validated.isoformat() if info.last_validated else None
                     ),
@@ -3400,8 +3527,12 @@ def register_queen_lifecycle_tools(
                 try:
                     await session_manager.unload_worker(manager_session_id)
                 except Exception as e:
-                    logger.error("Failed to unload existing worker: %s", e, exc_info=True)
-                    return json.dumps({"error": f"Failed to unload existing worker: {e}"})
+                    logger.error(
+                        "Failed to unload existing worker: %s", e, exc_info=True
+                    )
+                    return json.dumps(
+                        {"error": f"Failed to unload existing worker: {e}"}
+                    )
 
             try:
                 resolved_path = validate_agent_path(agent_path)
@@ -3423,13 +3554,19 @@ def register_queen_lifecycle_tools(
                 if parent_dir not in _sys.path:
                     _sys.path.insert(0, parent_dir)
                 # Evict stale cached modules
-                stale = [n for n in _sys.modules if n == pkg_name or n.startswith(f"{pkg_name}.")]
+                stale = [
+                    n
+                    for n in _sys.modules
+                    if n == pkg_name or n.startswith(f"{pkg_name}.")
+                ]
                 for n in stale:
                     del _sys.modules[n]
 
                 mod = importlib.import_module(pkg_name)
                 missing_attrs = [
-                    attr for attr in ("goal", "nodes", "edges") if getattr(mod, attr, None) is None
+                    attr
+                    for attr in ("goal", "nodes", "edges")
+                    if getattr(mod, attr, None) is None
                 ]
                 if missing_attrs:
                     return json.dumps(
@@ -3471,7 +3608,9 @@ def register_queen_lifecycle_tools(
                         if node.tools:
                             missing = set(node.tools) - available_tool_names
                             if missing:
-                                missing_by_node[f"{node.name} (id={node.id})"] = sorted(missing)
+                                missing_by_node[f"{node.name} (id={node.id})"] = sorted(
+                                    missing
+                                )
                     if missing_by_node:
                         # Unload the broken worker
                         try:
@@ -3479,7 +3618,8 @@ def register_queen_lifecycle_tools(
                         except Exception:
                             pass
                         details = "; ".join(
-                            f"Node '{k}' missing {v}" for k, v in missing_by_node.items()
+                            f"Node '{k}' missing {v}"
+                            for k, v in missing_by_node.items()
                         )
                         return json.dumps(
                             {
@@ -3536,13 +3676,17 @@ def register_queen_lifecycle_tools(
                                     )
                                 )
                             except Exception:
-                                logger.warning("Failed to emit flowchart map", exc_info=True)
+                                logger.warning(
+                                    "Failed to emit flowchart map", exc_info=True
+                                )
 
                 # Switch to staging phase after successful load + validation
                 if phase_state is not None:
                     phase_state.agent_path = str(resolved_path)
                     await phase_state.switch_to_staging()
-                    _update_meta_json(session_manager, manager_session_id, {"phase": "staging"})
+                    _update_meta_json(
+                        session_manager, manager_session_id, {"phase": "staging"}
+                    )
 
                 worker_name = info.name if info else updated_session.worker_id
                 return json.dumps(
@@ -3562,7 +3706,9 @@ def register_queen_lifecycle_tools(
                     }
                 )
             except Exception as e:
-                logger.error("load_built_agent failed for '%s'", agent_path, exc_info=True)
+                logger.error(
+                    "load_built_agent failed for '%s'", agent_path, exc_info=True
+                )
                 return json.dumps({"error": f"Failed to load agent: {e}"})
 
         _load_built_tool = Tool(
@@ -3578,7 +3724,9 @@ def register_queen_lifecycle_tools(
                 "properties": {
                     "agent_path": {
                         "type": "string",
-                        "description": ("Path to the agent directory (e.g. 'exports/my_agent')"),
+                        "description": (
+                            "Path to the agent directory (e.g. 'exports/my_agent')"
+                        ),
                     },
                 },
                 "required": ["agent_path"],
@@ -3662,7 +3810,9 @@ def register_queen_lifecycle_tools(
             # Switch to running phase
             if phase_state is not None:
                 await phase_state.switch_to_running()
-                _update_meta_json(session_manager, manager_session_id, {"phase": "running"})
+                _update_meta_json(
+                    session_manager, manager_session_id, {"phase": "running"}
+                )
 
             return json.dumps(
                 {
@@ -3708,7 +3858,9 @@ def register_queen_lifecycle_tools(
         },
     )
     registry.register(
-        "run_agent_with_input", _run_input_tool, lambda inputs: run_agent_with_input(**inputs)
+        "run_agent_with_input",
+        _run_input_tool,
+        lambda inputs: run_agent_with_input(**inputs),
     )
     tools_registered += 1
 
@@ -3786,7 +3938,9 @@ def register_queen_lifecycle_tools(
             invalid = [m.upper() for m in methods if m.upper() not in valid_methods]
             if invalid:
                 return json.dumps(
-                    {"error": f"Invalid HTTP methods: {invalid}. Valid: {sorted(valid_methods)}"}
+                    {
+                        "error": f"Invalid HTTP methods: {invalid}. Valid: {sorted(valid_methods)}"
+                    }
                 )
 
             try:
@@ -3835,17 +3989,25 @@ def register_queen_lifecycle_tools(
                 from croniter import croniter
 
                 if not croniter.is_valid(cron_expr):
-                    return json.dumps({"error": f"Invalid cron expression: {cron_expr}"})
+                    return json.dumps(
+                        {"error": f"Invalid cron expression: {cron_expr}"}
+                    )
             except ImportError:
                 return json.dumps(
-                    {"error": "croniter package not installed — cannot validate cron expression."}
+                    {
+                        "error": "croniter package not installed — cannot validate cron expression."
+                    }
                 )
         elif interval:
             if not isinstance(interval, (int, float)) or interval <= 0:
-                return json.dumps({"error": f"interval_minutes must be > 0, got {interval}"})
+                return json.dumps(
+                    {"error": f"interval_minutes must be > 0, got {interval}"}
+                )
         else:
             return json.dumps(
-                {"error": "Timer trigger needs 'cron' or 'interval_minutes' in trigger_config."}
+                {
+                    "error": "Timer trigger needs 'cron' or 'interval_minutes' in trigger_config."
+                }
             )
 
         # Start timer
@@ -3931,7 +4093,9 @@ def register_queen_lifecycle_tools(
             "required": ["trigger_id"],
         },
     )
-    registry.register("set_trigger", _set_trigger_tool, lambda inputs: set_trigger(**inputs))
+    registry.register(
+        "set_trigger", _set_trigger_tool, lambda inputs: set_trigger(**inputs)
+    )
     tools_registered += 1
 
     # --- remove_trigger --------------------------------------------------------
@@ -4034,7 +4198,9 @@ def register_queen_lifecycle_tools(
             "properties": {},
         },
     )
-    registry.register("list_triggers", _list_triggers_tool, lambda inputs: list_triggers())
+    registry.register(
+        "list_triggers", _list_triggers_tool, lambda inputs: list_triggers()
+    )
     tools_registered += 1
 
     logger.info("Registered %d queen lifecycle tools", tools_registered)

@@ -66,13 +66,17 @@ def _session_to_live_dict(session) -> dict:
         "loaded_at": session.loaded_at,
         "uptime_seconds": round(time.time() - session.loaded_at, 1),
         "intro_message": getattr(session.runner, "intro_message", "") or "",
-        "queen_phase": phase_state.phase
-        if phase_state
-        else ("staging" if session.worker_runtime else "planning"),
+        "queen_phase": (
+            phase_state.phase
+            if phase_state
+            else ("staging" if session.worker_runtime else "planning")
+        ),
     }
 
 
-def _credential_error_response(exc: Exception, agent_path: str | None) -> web.Response | None:
+def _credential_error_response(
+    exc: Exception, agent_path: str | None
+) -> web.Response | None:
     """If *exc* is a CredentialError, return a 424 with structured credential info.
 
     Returns None if *exc* is not a credential error (caller should handle it).
@@ -308,7 +312,9 @@ async def handle_load_worker(request: web.Request) -> web.Response:
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=409)
     except FileNotFoundError:
-        return web.json_response({"error": f"Agent not found: {agent_path}"}, status=404)
+        return web.json_response(
+            {"error": f"Agent not found: {agent_path}"}, status=404
+        )
     except Exception as e:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
@@ -506,7 +512,9 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
         _start_trigger_webhook,
     )
 
-    if "trigger_config" in updates and trigger_id in getattr(session, "active_trigger_ids", set()):
+    if "trigger_config" in updates and trigger_id in getattr(
+        session, "active_trigger_ids", set()
+    ):
         task = session.active_timer_tasks.pop(trigger_id, None)
         if task and not task.done():
             task.cancel()
@@ -624,7 +632,9 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
 
         cp_dir = d / "checkpoints"
         if cp_dir.exists():
-            entry["checkpoint_count"] = sum(1 for f in cp_dir.iterdir() if f.suffix == ".json")
+            entry["checkpoint_count"] = sum(
+                1 for f in cp_dir.iterdir() if f.suffix == ".json"
+            )
         else:
             entry["checkpoint_count"] = 0
 
@@ -722,7 +732,9 @@ async def handle_restore_checkpoint(request: web.Request) -> web.Response:
         return err
 
     if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+        return web.json_response(
+            {"error": "No worker loaded in this session"}, status=503
+        )
 
     ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
     ws_id = safe_path_segment(ws_id)
@@ -851,10 +863,17 @@ async def handle_messages(request: web.Request) -> web.Response:
                 or (
                     not m.get("is_transition_marker")
                     and m["role"] != "tool"
-                    and not (m["role"] == "assistant" and m.get("tool_calls"))
+                    and not (
+                        m["role"] == "assistant"
+                        and m.get("tool_calls")
+                        and not m.get("content")
+                    )
                     and (
                         (m["role"] == "user" and m.get("is_client_input"))
-                        or (m["role"] == "assistant" and m.get("_node_id") in client_facing_nodes)
+                        or (
+                            m["role"] == "assistant"
+                            and m.get("_node_id") in client_facing_nodes
+                        )
                     )
                 )
             ]
@@ -910,7 +929,9 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
         for m in all_messages
         if not m.get("is_transition_marker")
         and m["role"] != "tool"
-        and not (m["role"] == "assistant" and m.get("tool_calls"))
+        and not (
+            m["role"] == "assistant" and m.get("tool_calls") and not m.get("content")
+        )
     ]
 
     return web.json_response({"messages": all_messages, "session_id": session_id})
@@ -993,8 +1014,12 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
         try:
             shutil.rmtree(queen_session_dir)
         except OSError as e:
-            logger.warning("Failed to delete session directory %s: %s", queen_session_dir, e)
-            return web.json_response({"error": f"Failed to delete session: {e}"}, status=500)
+            logger.warning(
+                "Failed to delete session directory %s: %s", queen_session_dir, e
+            )
+            return web.json_response(
+                {"error": f"Failed to delete session: {e}"}, status=500
+            )
 
     return web.json_response({"deleted": session_id})
 
@@ -1009,7 +1034,9 @@ async def handle_discover(request: web.Request) -> web.Response:
     from framework.agents.discovery import discover_agents
 
     manager = _get_manager(request)
-    loaded_paths = {str(s.worker_path) for s in manager.list_sessions() if s.worker_path}
+    loaded_paths = {
+        str(s.worker_path) for s in manager.list_sessions() if s.worker_path
+    }
 
     groups = discover_agents()
     result = {}
@@ -1048,7 +1075,9 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/sessions", handle_list_live_sessions)
     # history must be registered before {session_id} so it takes priority
     app.router.add_get("/api/sessions/history", handle_session_history)
-    app.router.add_delete("/api/sessions/history/{session_id}", handle_delete_history_session)
+    app.router.add_delete(
+        "/api/sessions/history/{session_id}", handle_delete_history_session
+    )
     app.router.add_get("/api/sessions/{session_id}", handle_get_live_session)
     app.router.add_delete("/api/sessions/{session_id}", handle_stop_session)
 
@@ -1058,21 +1087,30 @@ def register_routes(app: web.Application) -> None:
 
     # Session info
     app.router.add_get("/api/sessions/{session_id}/stats", handle_session_stats)
-    app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
+    app.router.add_get(
+        "/api/sessions/{session_id}/entry-points", handle_session_entry_points
+    )
     app.router.add_patch(
         "/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task
     )
     app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
-    app.router.add_get("/api/sessions/{session_id}/queen-messages", handle_queen_messages)
-    app.router.add_get("/api/sessions/{session_id}/events/history", handle_session_events_history)
+    app.router.add_get(
+        "/api/sessions/{session_id}/queen-messages", handle_queen_messages
+    )
+    app.router.add_get(
+        "/api/sessions/{session_id}/events/history", handle_session_events_history
+    )
 
     # Worker session browsing (session-primary)
-    app.router.add_get("/api/sessions/{session_id}/worker-sessions", handle_list_worker_sessions)
+    app.router.add_get(
+        "/api/sessions/{session_id}/worker-sessions", handle_list_worker_sessions
+    )
     app.router.add_get(
         "/api/sessions/{session_id}/worker-sessions/{ws_id}", handle_get_worker_session
     )
     app.router.add_delete(
-        "/api/sessions/{session_id}/worker-sessions/{ws_id}", handle_delete_worker_session
+        "/api/sessions/{session_id}/worker-sessions/{ws_id}",
+        handle_delete_worker_session,
     )
     app.router.add_get(
         "/api/sessions/{session_id}/worker-sessions/{ws_id}/checkpoints",
