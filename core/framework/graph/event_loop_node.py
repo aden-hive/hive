@@ -527,8 +527,10 @@ class EventLoopNode(NodeProtocol):
                 if ctx.default_skill_batch_nudge:
                     from framework.skills.defaults import is_batch_scenario as _is_batch
 
-                    _input_text = (ctx.goal_context or "") + " " + " ".join(
-                        str(v) for v in ctx.input_data.values() if v
+                    _input_text = (
+                        (ctx.goal_context or "")
+                        + " "
+                        + " ".join(str(v) for v in ctx.input_data.values() if v)
                     )
                     if _is_batch(_input_text):
                         system_prompt = f"{system_prompt}\n\n{ctx.default_skill_batch_nudge}"

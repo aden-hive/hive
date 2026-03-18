@@ -232,9 +232,7 @@ class TestConfigOverrideSubstitution:
 
     def test_context_preservation_override_threshold(self):
         config = SkillsConfig.from_agent_vars(
-            default_skills={
-                "hive.context-preservation": {"warn_at_usage_ratio": 0.4}
-            }
+            default_skills={"hive.context-preservation": {"warn_at_usage_ratio": 0.4}}
         )
         manager = DefaultSkillManager(config)
         manager.load()
@@ -301,9 +299,7 @@ class TestContextWarnRatio:
 
     def test_override_ratio(self):
         config = SkillsConfig.from_agent_vars(
-            default_skills={
-                "hive.context-preservation": {"warn_at_usage_ratio": 0.3}
-            }
+            default_skills={"hive.context-preservation": {"warn_at_usage_ratio": 0.3}}
         )
         manager = DefaultSkillManager(config)
         manager.load()
