@@ -13,7 +13,7 @@ Usage:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -23,32 +23,36 @@ if TYPE_CHECKING:
 # Role sets (matching Playwright's aria roles that matter for interaction)
 # ---------------------------------------------------------------------------
 
-INTERACTIVE_ROLES: frozenset[str] = frozenset({
-    "button",
-    "checkbox",
-    "combobox",
-    "link",
-    "listbox",
-    "menuitem",
-    "menuitemcheckbox",
-    "menuitemradio",
-    "option",
-    "radio",
-    "scrollbar",
-    "searchbox",
-    "slider",
-    "spinbutton",
-    "switch",
-    "tab",
-    "textbox",
-    "treeitem",
-})
+INTERACTIVE_ROLES: frozenset[str] = frozenset(
+    {
+        "button",
+        "checkbox",
+        "combobox",
+        "link",
+        "listbox",
+        "menuitem",
+        "menuitemcheckbox",
+        "menuitemradio",
+        "option",
+        "radio",
+        "scrollbar",
+        "searchbox",
+        "slider",
+        "spinbutton",
+        "switch",
+        "tab",
+        "textbox",
+        "treeitem",
+    }
+)
 
-NAMED_CONTENT_ROLES: frozenset[str] = frozenset({
-    "cell",
-    "heading",
-    "img",
-})
+NAMED_CONTENT_ROLES: frozenset[str] = frozenset(
+    {
+        "cell",
+        "heading",
+        "img",
+    }
+)
 
 # Regex: captures indent, role, optional quoted name, and trailing text.
 # Example line:  "  - button \"Submit\" [disabled]"

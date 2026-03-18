@@ -124,7 +124,10 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             result: dict = {"ok": True, "action": "click", "selector": selector}
             if auto_snapshot:
                 snapshot = await _auto_snapshot(
-                    page, session=session, target_id=target_id, wait_for_nav=True,
+                    page,
+                    session=session,
+                    target_id=target_id,
+                    wait_for_nav=True,
                 )
                 if snapshot:
                     result["snapshot"] = snapshot
@@ -172,7 +175,10 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             result: dict = {"ok": True, "action": "click_coordinate", "x": x, "y": y}
             if auto_snapshot:
                 snapshot = await _auto_snapshot(
-                    page, session=session, target_id=target_id, wait_for_nav=True,
+                    page,
+                    session=session,
+                    target_id=target_id,
+                    wait_for_nav=True,
                 )
                 if snapshot:
                     result["snapshot"] = snapshot

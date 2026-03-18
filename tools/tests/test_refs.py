@@ -10,7 +10,6 @@ from gcu.browser.refs import (
     resolve_ref,
 )
 
-
 # ---------------------------------------------------------------------------
 # annotate_snapshot
 # ---------------------------------------------------------------------------
@@ -67,7 +66,7 @@ class TestAnnotateSnapshot:
         assert len(ref_map) == 0
 
     def test_preserves_non_matching_lines(self):
-        snapshot = "some random text\n- button \"OK\"\nanother line"
+        snapshot = 'some random text\n- button "OK"\nanother line'
         annotated, _ = annotate_snapshot(snapshot)
         lines = annotated.split("\n")
         assert lines[0] == "some random text"
@@ -79,18 +78,14 @@ class TestAnnotateSnapshot:
 
         # Two "Save" buttons should have nth=0 and nth=1
         save_entries = [
-            (rid, e) for rid, e in ref_map.items()
-            if e.role == "button" and e.name == "Save"
+            (rid, e) for rid, e in ref_map.items() if e.role == "button" and e.name == "Save"
         ]
         assert len(save_entries) == 2
         nths = sorted(e.nth for _, e in save_entries)
         assert nths == [0, 1]
 
         # "Cancel" should have nth=0
-        cancel_entries = [
-            e for e in ref_map.values()
-            if e.role == "button" and e.name == "Cancel"
-        ]
+        cancel_entries = [e for e in ref_map.values() if e.role == "button" and e.name == "Cancel"]
         assert len(cancel_entries) == 1
         assert cancel_entries[0].nth == 0
 
