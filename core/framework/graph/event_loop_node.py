@@ -407,6 +407,8 @@ class EventLoopNode(NodeProtocol):
         stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
         execution_id = ctx.execution_id or ""
+        # Store skill dirs for AS-9 file-read interception in _execute_tool
+        self._skill_dirs: list[str] = ctx.skill_dirs
 
         # Verdict counters for runtime logging
         _accept_count = _retry_count = _escalate_count = _continue_count = 0
@@ -2582,6 +2584,7 @@ class EventLoopNode(NodeProtocol):
                     tool_use_id=tc.tool_use_id,
                     content=result.content,
                     is_error=result.is_error,
+                    is_skill_content=result.is_skill_content,
                 )
                 if tc.tool_name in ("ask_user", "ask_user_multiple"):
                     # Defer tool_call_completed until after user responds
@@ -3392,6 +3395,33 @@ class EventLoopNode(NodeProtocol):
                 content=f"No tool executor configured for '{tc.tool_name}'",
                 is_error=True,
             )
+
+        # AS-9: Intercept file-read tools for skill directories — bypass session sandbox
+        _SKILL_READ_TOOLS = {"view_file", "load_data", "read_file"}
+        skill_dirs = getattr(self, "_skill_dirs", [])
+        if tc.tool_name in _SKILL_READ_TOOLS and skill_dirs:
+            _path = tc.tool_input.get("path", "")
+            if _path:
+                import os
+                from pathlib import Path as _Path
+
+                _resolved = os.path.realpath(os.path.abspath(_path))
+                if any(_resolved.startswith(os.path.realpath(d)) for d in skill_dirs):
+                    try:
+                        _content = _Path(_resolved).read_text(encoding="utf-8")
+                        _is_skill_md = _resolved.endswith("SKILL.md")
+                        return ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=_content,
+                            is_skill_content=_is_skill_md,  # AS-10: protect SKILL.md reads
+                        )
+                    except Exception as _exc:
+                        return ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=f"Could not read skill resource '{_path}': {_exc}",
+                            is_error=True,
+                        )
+
         tool_use = ToolUse(id=tc.tool_use_id, name=tc.tool_name, input=tc.tool_input)
         timeout = self._config.tool_call_timeout_seconds
 
