@@ -93,7 +93,6 @@ def annotate_snapshot(snapshot: str) -> tuple[str, RefMap]:
     # First pass: identify which lines get refs and count (role, name) pairs
     # for nth disambiguation.
     candidates: list[tuple[int, str, str | None]] = []  # (line_idx, role, name)
-    pair_counts: dict[tuple[str, str | None], int] = {}
 
     for i, line in enumerate(lines):
         m = _LINE_RE.match(line)
@@ -104,8 +103,6 @@ def annotate_snapshot(snapshot: str) -> tuple[str, RefMap]:
 
         if role in INTERACTIVE_ROLES or (role in NAMED_CONTENT_ROLES and name):
             candidates.append((i, role, name))
-            key = (role, name)
-            pair_counts[key] = pair_counts.get(key, 0) + 1
 
     # Second pass: assign refs with nth indices.
     ref_map: RefMap = {}

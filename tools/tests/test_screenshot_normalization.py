@@ -1,13 +1,21 @@
-"""Tests for screenshot normalization."""
+"""Tests for screenshot normalization.
+
+Requires the ``browser`` extra (Pillow).  Skipped automatically when
+Pillow is not installed.
+"""
 
 from __future__ import annotations
 
 import io
 from unittest.mock import patch
 
-from PIL import Image
+import pytest
 
-from gcu.browser.tools.inspection import _normalize_screenshot
+Image = pytest.importorskip(
+    "PIL.Image", reason="Pillow not installed (install with: pip install pillow)"
+)
+
+from gcu.browser.tools.inspection import _normalize_screenshot  # noqa: E402
 
 
 def _make_png(width: int, height: int, *, mode: str = "RGB") -> bytes:

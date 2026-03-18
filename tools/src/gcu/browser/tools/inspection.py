@@ -229,6 +229,9 @@ def register_inspection_tools(mcp: FastMCP) -> None:
                 ]
 
             if selector:
+                from ..refs import resolve_selector
+
+                selector = resolve_selector(selector, session, target_id)
                 element = await page.query_selector(selector)
                 if not element:
                     return [
