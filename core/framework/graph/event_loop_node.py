@@ -504,9 +504,21 @@ class EventLoopNode(NodeProtocol):
                 _restored_tool_fingerprints = []
 
                 # Fresh conversation: either isolated mode or first node in continuous mode.
-                from framework.graph.prompt_composer import _with_datetime
+                from framework.graph.prompt_composer import (
+                    EXECUTION_SCOPE_PREAMBLE,
+                    _with_datetime,
+                )
 
                 system_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
+                # Prepend execution-scope preamble for worker nodes so the
+                # LLM knows it is one step in a pipeline and should not try
+                # to perform work that belongs to other nodes.
+                if (
+                    not ctx.is_subagent_mode
+                    and ctx.node_spec.node_type in ("event_loop", "gcu")
+                    and ctx.node_spec.output_keys
+                ):
+                    system_prompt = f"{EXECUTION_SCOPE_PREAMBLE}\n\n{system_prompt}"
                 # Prepend GCU browser best-practices prompt for gcu nodes
                 if ctx.node_spec.node_type == "gcu":
                     from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
