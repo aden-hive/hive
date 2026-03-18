@@ -34,6 +34,10 @@ from pathlib import Path
 
 from aiohttp import web
 
+from framework.credentials.models import CredentialError
+from framework.runner.preload_validation import (
+    PreloadValidationError,
+)
 from framework.server.app import (
     cold_sessions_dir,
     resolve_session,
@@ -66,19 +70,22 @@ def _session_to_live_dict(session) -> dict:
         "loaded_at": session.loaded_at,
         "uptime_seconds": round(time.time() - session.loaded_at, 1),
         "intro_message": getattr(session.runner, "intro_message", "") or "",
-        "queen_phase": phase_state.phase
-        if phase_state
-        else ("staging" if session.worker_runtime else "planning"),
+        "queen_phase": (
+            phase_state.phase
+            if phase_state
+            else ("staging" if session.worker_runtime else "planning")
+        ),
     }
 
 
-def _credential_error_response(exc: Exception, agent_path: str | None) -> web.Response | None:
+def _credential_error_response(
+    exc: Exception, agent_path: str | None
+) -> web.Response | None:
     """If *exc* is a CredentialError, return a 424 with structured credential info.
 
     Returns None if *exc* is not a credential error (caller should handle it).
     Uses the CredentialValidationResult attached by validate_agent_credentials.
     """
-    from framework.credentials.models import CredentialError
 
     if not isinstance(exc, CredentialError):
         return None
@@ -160,6 +167,8 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 initial_prompt=initial_prompt,
                 queen_resume_from=queen_resume_from,
             )
+    except PreloadValidationError as e:
+        return web.json_response({"error": str(e)}, status=400)
     except ValueError as e:
         msg = str(e)
         if "currently loading" in msg:
@@ -199,7 +208,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
     This lets the frontend detect a server restart and restore message history.
     """
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -260,7 +269,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
 async def handle_stop_session(request: web.Request) -> web.Response:
     """DELETE /api/sessions/{session_id} — stop a session entirely."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     stopped = await manager.stop_session(session_id)
     if not stopped:
@@ -283,7 +292,7 @@ async def handle_load_worker(request: web.Request) -> web.Response:
     Body: {"agent_path": "...", "worker_id": "..." (optional), "model": "..." (optional)}
     """
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     body = await request.json()
 
     agent_path = body.get("agent_path")
@@ -305,10 +314,14 @@ async def handle_load_worker(request: web.Request) -> web.Response:
             worker_id=worker_id,
             model=model,
         )
+    except PreloadValidationError as e:
+        return web.json_response({"error": str(e)}, status=400)
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=409)
     except FileNotFoundError:
-        return web.json_response({"error": f"Agent not found: {agent_path}"}, status=404)
+        return web.json_response(
+            {"error": f"Agent not found: {agent_path}"}, status=404
+        )
     except Exception as e:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
@@ -322,7 +335,7 @@ async def handle_load_worker(request: web.Request) -> web.Response:
 async def handle_unload_worker(request: web.Request) -> web.Response:
     """DELETE /api/sessions/{session_id}/worker — unload worker, keep queen alive."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     removed = await manager.unload_worker(session_id)
     if not removed:
@@ -348,7 +361,7 @@ async def handle_unload_worker(request: web.Request) -> web.Response:
 async def handle_session_stats(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/stats — runtime statistics."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -364,7 +377,7 @@ async def handle_session_stats(request: web.Request) -> web.Response:
 async def handle_session_entry_points(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/entry-points — list entry points."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -506,7 +519,9 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
         _start_trigger_webhook,
     )
 
-    if "trigger_config" in updates and trigger_id in getattr(session, "active_trigger_ids", set()):
+    if "trigger_config" in updates and trigger_id in getattr(
+        session, "active_trigger_ids", set()
+    ):
         task = session.active_timer_tasks.pop(trigger_id, None)
         if task and not task.done():
             task.cancel()
@@ -525,7 +540,7 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
             await _start_trigger_webhook(session, trigger_id, tdef)
 
     if trigger_id in getattr(session, "active_trigger_ids", set()):
-        session_id = request.match_info["session_id"]
+        session_id = safe_path_segment(request.match_info["session_id"])
         await _persist_active_triggers(session, session_id)
 
     _save_trigger_to_agent(session, trigger_id, tdef)
@@ -566,7 +581,7 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
 async def handle_session_graphs(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/graphs — list loaded graphs."""
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(session_id)
 
     if session is None:
@@ -589,7 +604,7 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
     session, err = resolve_session(request)
     if err:
         # Fall back to cold session lookup from disk
-        sid = request.match_info["session_id"]
+        sid = safe_path_segment(request.match_info["session_id"])
         sess_dir = cold_sessions_dir(sid)
         if sess_dir is None:
             return err
@@ -624,7 +639,9 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
 
         cp_dir = d / "checkpoints"
         if cp_dir.exists():
-            entry["checkpoint_count"] = sum(1 for f in cp_dir.iterdir() if f.suffix == ".json")
+            entry["checkpoint_count"] = sum(
+                1 for f in cp_dir.iterdir() if f.suffix == ".json"
+            )
         else:
             entry["checkpoint_count"] = 0
 
@@ -722,7 +739,9 @@ async def handle_restore_checkpoint(request: web.Request) -> web.Response:
         return err
 
     if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+        return web.json_response(
+            {"error": "No worker loaded in this session"}, status=503
+        )
 
     ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
     ws_id = safe_path_segment(ws_id)
@@ -761,7 +780,7 @@ async def handle_messages(request: web.Request) -> web.Response:
     session, err = resolve_session(request)
     if err:
         # Fall back to cold session lookup from disk
-        sid = request.match_info["session_id"]
+        sid = safe_path_segment(request.match_info["session_id"])
         sess_dir = cold_sessions_dir(sid)
         if sess_dir is None:
             return err
@@ -854,7 +873,10 @@ async def handle_messages(request: web.Request) -> web.Response:
                     and not (m["role"] == "assistant" and m.get("tool_calls"))
                     and (
                         (m["role"] == "user" and m.get("is_client_input"))
-                        or (m["role"] == "assistant" and m.get("_node_id") in client_facing_nodes)
+                        or (
+                            m["role"] == "assistant"
+                            and m.get("_node_id") in client_facing_nodes
+                        )
                     )
                 )
             ]
@@ -868,8 +890,7 @@ async def handle_queen_messages(request: web.Request) -> web.Response:
     Reads directly from disk so it works for both live sessions and cold
     (post-server-restart) sessions — no live session required.
     """
-    session_id = request.match_info["session_id"]
-
+    session_id = safe_path_segment(request.match_info["session_id"])
     queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
     convs_dir = queen_dir / "conversations"
     if not convs_dir.exists():
@@ -924,8 +945,7 @@ async def handle_session_events_history(request: web.Request) -> web.Response:
     replays these events through ``sseEventToChatMessage`` to fully reconstruct
     the UI state on resume.
     """
-    session_id = request.match_info["session_id"]
-
+    session_id = safe_path_segment(request.match_info["session_id"])
     queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
     events_path = queen_dir / "events.jsonl"
     if not events_path.exists():
@@ -981,7 +1001,7 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
     This is the frontend 'delete from history' action.
     """
     manager = _get_manager(request)
-    session_id = request.match_info["session_id"]
+    session_id = safe_path_segment(request.match_info["session_id"])
 
     # Stop the live session if it exists (best-effort)
     if manager.get_session(session_id):
@@ -993,8 +1013,12 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
         try:
             shutil.rmtree(queen_session_dir)
         except OSError as e:
-            logger.warning("Failed to delete session directory %s: %s", queen_session_dir, e)
-            return web.json_response({"error": f"Failed to delete session: {e}"}, status=500)
+            logger.warning(
+                "Failed to delete session directory %s: %s", queen_session_dir, e
+            )
+            return web.json_response(
+                {"error": f"Failed to delete session: {e}"}, status=500
+            )
 
     return web.json_response({"deleted": session_id})
 
@@ -1009,7 +1033,9 @@ async def handle_discover(request: web.Request) -> web.Response:
     from framework.agents.discovery import discover_agents
 
     manager = _get_manager(request)
-    loaded_paths = {str(s.worker_path) for s in manager.list_sessions() if s.worker_path}
+    loaded_paths = {
+        str(s.worker_path) for s in manager.list_sessions() if s.worker_path
+    }
 
     groups = discover_agents()
     result = {}
@@ -1048,7 +1074,9 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/sessions", handle_list_live_sessions)
     # history must be registered before {session_id} so it takes priority
     app.router.add_get("/api/sessions/history", handle_session_history)
-    app.router.add_delete("/api/sessions/history/{session_id}", handle_delete_history_session)
+    app.router.add_delete(
+        "/api/sessions/history/{session_id}", handle_delete_history_session
+    )
     app.router.add_get("/api/sessions/{session_id}", handle_get_live_session)
     app.router.add_delete("/api/sessions/{session_id}", handle_stop_session)
 
@@ -1058,21 +1086,30 @@ def register_routes(app: web.Application) -> None:
 
     # Session info
     app.router.add_get("/api/sessions/{session_id}/stats", handle_session_stats)
-    app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
+    app.router.add_get(
+        "/api/sessions/{session_id}/entry-points", handle_session_entry_points
+    )
     app.router.add_patch(
         "/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task
     )
     app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
-    app.router.add_get("/api/sessions/{session_id}/queen-messages", handle_queen_messages)
-    app.router.add_get("/api/sessions/{session_id}/events/history", handle_session_events_history)
+    app.router.add_get(
+        "/api/sessions/{session_id}/queen-messages", handle_queen_messages
+    )
+    app.router.add_get(
+        "/api/sessions/{session_id}/events/history", handle_session_events_history
+    )
 
     # Worker session browsing (session-primary)
-    app.router.add_get("/api/sessions/{session_id}/worker-sessions", handle_list_worker_sessions)
+    app.router.add_get(
+        "/api/sessions/{session_id}/worker-sessions", handle_list_worker_sessions
+    )
     app.router.add_get(
         "/api/sessions/{session_id}/worker-sessions/{ws_id}", handle_get_worker_session
     )
     app.router.add_delete(
-        "/api/sessions/{session_id}/worker-sessions/{ws_id}", handle_delete_worker_session
+        "/api/sessions/{session_id}/worker-sessions/{ws_id}",
+        handle_delete_worker_session,
     )
     app.router.add_get(
         "/api/sessions/{session_id}/worker-sessions/{ws_id}/checkpoints",

@@ -75,10 +75,12 @@ def resolve_session(request: web.Request):
     Returns (session, None) on success or (None, error_response) on failure.
     """
     manager: SessionManager = request.app["manager"]
-    sid = request.match_info["session_id"]
+    sid = safe_path_segment(request.match_info["session_id"])
     session = manager.get_session(sid)
     if not session:
-        return None, web.json_response({"error": f"Session '{sid}' not found"}, status=404)
+        return None, web.json_response(
+            {"error": f"Session '{sid}' not found"}, status=404
+        )
     return session, None
 
 
@@ -211,7 +213,9 @@ def create_app(model: str | None = None) -> web.Application:
         # Auto-generate credential key for web-only users who never ran the TUI
         if not os.environ.get("HIVE_CREDENTIAL_KEY"):
             try:
-                from framework.credentials.key_storage import generate_and_save_credential_key
+                from framework.credentials.key_storage import (
+                    generate_and_save_credential_key,
+                )
 
                 generate_and_save_credential_key()
                 logger.info(
@@ -235,12 +239,18 @@ def create_app(model: str | None = None) -> web.Application:
     app.router.add_get("/api/health", handle_health)
 
     # Register route modules
-    from framework.server.routes_credentials import register_routes as register_credential_routes
+    from framework.server.routes_credentials import (
+        register_routes as register_credential_routes,
+    )
     from framework.server.routes_events import register_routes as register_event_routes
-    from framework.server.routes_execution import register_routes as register_execution_routes
+    from framework.server.routes_execution import (
+        register_routes as register_execution_routes,
+    )
     from framework.server.routes_graphs import register_routes as register_graph_routes
     from framework.server.routes_logs import register_routes as register_log_routes
-    from framework.server.routes_sessions import register_routes as register_session_routes
+    from framework.server.routes_sessions import (
+        register_routes as register_session_routes,
+    )
 
     register_credential_routes(app)
     register_execution_routes(app)

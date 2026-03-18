@@ -146,11 +146,15 @@ class SessionManager:
         """
         # Reuse the original session ID when cold-restoring
         resolved_session_id = queen_resume_from or session_id
-        session = await self._create_session_core(session_id=resolved_session_id, model=model)
+        session = await self._create_session_core(
+            session_id=resolved_session_id, model=model
+        )
         session.queen_resume_from = queen_resume_from
 
         # Start queen immediately (queen-only, no worker tools yet)
-        await self._start_queen(session, worker_identity=None, initial_prompt=initial_prompt)
+        await self._start_queen(
+            session, worker_identity=None, initial_prompt=initial_prompt
+        )
 
         logger.info(
             "Session '%s' created (queen-only, resume_from=%s)",
@@ -185,7 +189,12 @@ class SessionManager:
         if queen_resume_from:
             _resume_phase = None
             _meta_path = (
-                Path.home() / ".hive" / "queen" / "session" / queen_resume_from / "meta.json"
+                Path.home()
+                / ".hive"
+                / "queen"
+                / "session"
+                / queen_resume_from
+                / "meta.json"
             )
             if _meta_path.exists():
                 try:
@@ -277,11 +286,15 @@ class SessionManager:
         resolved_worker_id = worker_id or agent_path.name
 
         if session.worker_runtime is not None:
-            raise ValueError(f"Session '{session.id}' already has worker '{session.worker_id}'")
+            raise ValueError(
+                f"Session '{session.id}' already has worker '{session.worker_id}'"
+            )
 
         async with self._lock:
             if session.id in self._loading:
-                raise ValueError(f"Session '{session.id}' is currently loading a worker")
+                raise ValueError(
+                    f"Session '{session.id}' is currently loading a worker"
+                )
             self._loading.add(session.id)
 
         try:
@@ -322,10 +335,14 @@ class SessionManager:
                         description=tdata.get("name", tid),
                         task=tdata.get("task", ""),
                     )
-                    logger.info("Loaded trigger '%s' (%s) from triggers.json", tid, ttype)
+                    logger.info(
+                        "Loaded trigger '%s' (%s) from triggers.json", tid, ttype
+                    )
 
             if session.available_triggers:
-                await self._emit_trigger_events(session, "available", session.available_triggers)
+                await self._emit_trigger_events(
+                    session, "available", session.available_triggers
+                )
 
             # Start runtime on event loop
             if runtime and not runtime.is_running:
@@ -411,11 +428,17 @@ class SessionManager:
                     continue
 
                 state["status"] = "cancelled"
-                state.setdefault("result", {})["error"] = "Stale session: runtime restarted"
-                state.setdefault("timestamps", {})["updated_at"] = datetime.now().isoformat()
+                state.setdefault("result", {})[
+                    "error"
+                ] = "Stale session: runtime restarted"
+                state.setdefault("timestamps", {})[
+                    "updated_at"
+                ] = datetime.now().isoformat()
                 state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
                 logger.info(
-                    "Marked stale session '%s' as cancelled for agent '%s'", d.name, agent_path.name
+                    "Marked stale session '%s' as cancelled for agent '%s'",
+                    d.name,
+                    agent_path.name,
                 )
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to clean up stale session %s: %s", d.name, e)
@@ -448,7 +471,9 @@ class SessionManager:
                 return False
             return True
 
-    async def _restore_active_triggers(self, session: "Session", session_id: str) -> None:
+    async def _restore_active_triggers(
+        self, session: "Session", session_id: str
+    ) -> None:
         """Restore previously active triggers from persisted session state.
 
         Called after worker loading to restart any timer/webhook triggers
@@ -523,7 +548,14 @@ class SessionManager:
 
         # Update meta.json so cold-restore can discover this session by agent_path
         storage_session_id = session.queen_resume_from or session.id
-        meta_path = Path.home() / ".hive" / "queen" / "session" / storage_session_id / "meta.json"
+        meta_path = (
+            Path.home()
+            / ".hive"
+            / "queen"
+            / "session"
+            / storage_session_id
+            / "meta.json"
+        )
         try:
             _agent_name = (
                 session.worker_info.name
@@ -580,7 +612,9 @@ class SessionManager:
 
         # Clean up triggers
         if session.available_triggers:
-            await self._emit_trigger_events(session, "removed", session.available_triggers)
+            await self._emit_trigger_events(
+                session, "removed", session.available_triggers
+            )
             session.available_triggers.clear()
 
         if session.worker_digest_sub is not None:
@@ -617,7 +651,11 @@ class SessionManager:
 
         # Capture session data for memory consolidation before teardown
         _llm = getattr(session, "llm", None)
-        _storage_id = getattr(session, "queen_resume_from", None) or session_id
+        from .app import safe_path_segment
+
+        _storage_id = safe_path_segment(
+            getattr(session, "queen_resume_from", None) or session_id
+        )
         _session_dir = Path.home() / ".hive" / "queen" / "session" / _storage_id
 
         if session.worker_handoff_sub is not None:
@@ -693,7 +731,9 @@ class SessionManager:
     # Queen startup
     # ------------------------------------------------------------------
 
-    async def _handle_worker_handoff(self, session: Session, executor: Any, event: Any) -> None:
+    async def _handle_worker_handoff(
+        self, session: Session, executor: Any, event: Any
+    ) -> None:
         """Route worker escalation events into the queen conversation."""
         if event.stream_id == "queen":
             return
@@ -766,7 +806,9 @@ class SessionManager:
             from framework.agents.worker_memory import digest_path
 
             try:
-                content = digest_path(_agent_name, run_id).read_text(encoding="utf-8").strip()
+                content = (
+                    digest_path(_agent_name, run_id).read_text(encoding="utf-8").strip()
+                )
             except OSError:
                 return
             if not content:
@@ -948,7 +990,9 @@ class SessionManager:
                     )
         except OSError:
             pass
-        session.event_bus.set_session_log(events_path, iteration_offset=iteration_offset)
+        session.event_bus.set_session_log(
+            events_path, iteration_offset=iteration_offset
+        )
 
         session.queen_task = await create_queen(
             session=session,
@@ -973,22 +1017,35 @@ class SessionManager:
                             # Agent fully built — load worker and resume
                             await self.load_worker(session.id, _agent_path)
                             if session.phase_state:
-                                await session.phase_state.switch_to_staging(source="auto")
+                                await session.phase_state.switch_to_staging(
+                                    source="auto"
+                                )
                             # Emit flowchart overlay so frontend can display it
                             await self._emit_flowchart_on_restore(session, _agent_path)
-                            logger.info("Cold restore: auto-loaded worker from %s", _agent_path)
+                            logger.info(
+                                "Cold restore: auto-loaded worker from %s", _agent_path
+                            )
                         elif _phase == "building":
                             # Agent folder exists but incomplete — resume building
                             if session.phase_state:
                                 session.phase_state.agent_path = _agent_path
-                                await session.phase_state.switch_to_building(source="auto")
-                            logger.info("Cold restore: resumed BUILDING phase for %s", _agent_path)
+                                await session.phase_state.switch_to_building(
+                                    source="auto"
+                                )
+                            logger.info(
+                                "Cold restore: resumed BUILDING phase for %s",
+                                _agent_path,
+                            )
                         elif _phase == "planning":
                             if session.phase_state:
                                 session.phase_state.agent_path = _agent_path
-                            logger.info("Cold restore: PLANNING phase for %s", _agent_path)
+                            logger.info(
+                                "Cold restore: PLANNING phase for %s", _agent_path
+                            )
                 except Exception:
-                    logger.warning("Cold restore: failed to auto-load worker", exc_info=True)
+                    logger.warning(
+                        "Cold restore: failed to auto-load worker", exc_info=True
+                    )
 
         # Memory consolidation — triggered by context compaction events.
         # Compaction is a natural signal that "enough has happened to be worth remembering".
@@ -1024,7 +1081,9 @@ class SessionManager:
         if node is None or not hasattr(node, "inject_event"):
             return
 
-        profile = build_worker_profile(session.worker_runtime, agent_path=session.worker_path)
+        profile = build_worker_profile(
+            session.worker_runtime, agent_path=session.worker_path
+        )
 
         # Append available trigger info so the queen knows what's schedulable
         trigger_lines = ""
@@ -1032,8 +1091,12 @@ class SessionManager:
             parts = []
             for t in session.available_triggers.values():
                 cfg = t.trigger_config
-                detail = cfg.get("cron") or f"every {cfg.get('interval_minutes', '?')} min"
-                task_info = f' -> task: "{t.task}"' if t.task else " (no task configured)"
+                detail = (
+                    cfg.get("cron") or f"every {cfg.get('interval_minutes', '?')} min"
+                )
+                task_info = (
+                    f' -> task: "{t.task}"' if t.task else " (no task configured)"
+                )
                 parts.append(f"  - {t.id} ({t.trigger_type}: {detail}){task_info}")
             trigger_lines = (
                 "\n\nAvailable triggers (inactive — use set_trigger to activate):\n"
@@ -1054,14 +1117,18 @@ class SessionManager:
                 data={
                     "worker_id": session.worker_id,
                     "worker_name": info.name if info else session.worker_id,
-                    "agent_path": str(session.worker_path) if session.worker_path else "",
+                    "agent_path": (
+                        str(session.worker_path) if session.worker_path else ""
+                    ),
                     "goal": info.goal_name if info else "",
                     "node_count": info.node_count if info else 0,
                 },
             )
         )
 
-    async def _emit_flowchart_on_restore(self, session: Session, agent_path: str | Path) -> None:
+    async def _emit_flowchart_on_restore(
+        self, session: Session, agent_path: str | Path
+    ) -> None:
         """Emit FLOWCHART_MAP_UPDATED from persisted flowchart file on cold restore."""
         from framework.runtime.event_bus import AgentEvent, EventType
         from framework.tools.flowchart_utils import load_flowchart_file
@@ -1109,7 +1176,9 @@ class SessionManager:
         from framework.runtime.event_bus import AgentEvent, EventType
 
         event_type = (
-            EventType.TRIGGER_AVAILABLE if kind == "available" else EventType.TRIGGER_REMOVED
+            EventType.TRIGGER_AVAILABLE
+            if kind == "available"
+            else EventType.TRIGGER_REMOVED
         )
         # Resolve graph entry node for trigger target
         runner = getattr(session, "runner", None)
@@ -1130,7 +1199,9 @@ class SessionManager:
                 )
             )
 
-    async def revive_queen(self, session: Session, initial_prompt: str | None = None) -> None:
+    async def revive_queen(
+        self, session: Session, initial_prompt: str | None = None
+    ) -> None:
         """Revive a dead queen executor on an existing session.
 
         Restarts the queen with the same session context (worker profile, tools, etc.).
@@ -1193,6 +1264,9 @@ class SessionManager:
         ~/.hive/queen/session/{session_id}/conversations/.  Returns None when
         no data is found so callers can fall through to a 404.
         """
+        from .app import safe_path_segment
+
+        session_id = safe_path_segment(session_id)
         queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
         convs_dir = queen_dir / "conversations"
         if not convs_dir.exists():
@@ -1203,7 +1277,9 @@ class SessionManager:
         try:
             # Flat layout: conversations/parts/*.json
             flat_parts = convs_dir / "parts"
-            if flat_parts.exists() and any(f.suffix == ".json" for f in flat_parts.iterdir()):
+            if flat_parts.exists() and any(
+                f.suffix == ".json" for f in flat_parts.iterdir()
+            ):
                 has_messages = True
             else:
                 # Node-based layout: conversations/<node_id>/parts/*.json
@@ -1211,7 +1287,9 @@ class SessionManager:
                     if not node_dir.is_dir() or node_dir.name == "parts":
                         continue
                     parts_dir = node_dir / "parts"
-                    if parts_dir.exists() and any(f.suffix == ".json" for f in parts_dir.iterdir()):
+                    if parts_dir.exists() and any(
+                        f.suffix == ".json" for f in parts_dir.iterdir()
+                    ):
                         has_messages = True
                         break
         except OSError:
@@ -1291,7 +1369,9 @@ class SessionManager:
                 try:
                     all_parts: list[dict] = []
 
-                    def _collect_parts(parts_dir: Path, _dest: list[dict] = all_parts) -> None:
+                    def _collect_parts(
+                        parts_dir: Path, _dest: list[dict] = all_parts
+                    ) -> None:
                         if not parts_dir.exists():
                             return
                         for part_file in sorted(parts_dir.iterdir()):
