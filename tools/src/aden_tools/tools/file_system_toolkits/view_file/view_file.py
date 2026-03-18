@@ -119,8 +119,11 @@ def register_tools(mcp: FastMCP) -> None:
                 }
 
             content = content_raw
-            if len(content.encode(encoding)) > max_size:
-                content = content[:max_size]
+            content_bytes = content.encode(encoding)
+            if len(content_bytes) > max_size:
+                # Truncate by bytes to avoid splitting multibyte sequences (e.g. UTF-8 emojis)
+                truncated_bytes = content_bytes[:max_size]
+                content = truncated_bytes.decode(encoding, errors="ignore")
                 content += "\n\n[... Content truncated due to size limit ...]"
 
             return {
