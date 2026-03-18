@@ -1,9 +1,9 @@
 import type { GraphTopology, NodeSpec } from "@/api/types";
-import type { GraphNode, NodeStatus } from "@/components/AgentGraph";
+import type { GraphNode, NodeStatus } from "@/components/graph-types";
 
 /**
  * Convert a backend GraphTopology (nodes + edges + entry_node) into
- * the GraphNode[] shape that AgentGraph renders.
+ * the GraphNode[] shape that DraftGraph renders.
  *
  * Four jobs:
  *  1. Synthesize trigger nodes from non-manual entry_points

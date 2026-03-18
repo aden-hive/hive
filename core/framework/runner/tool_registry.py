@@ -455,11 +455,23 @@ class ToolRegistry:
 
         for server_config in server_list:
             server_config = self._resolve_mcp_server_config(server_config, base_dir)
-            try:
-                self.register_mcp_server(server_config)
-            except Exception as e:
-                name = server_config.get("name", "unknown")
-                logger.warning(f"Failed to register MCP server '{name}': {e}")
+            for _attempt in range(2):
+                try:
+                    self.register_mcp_server(server_config)
+                    break
+                except Exception as e:
+                    name = server_config.get("name", "unknown")
+                    if _attempt == 0:
+                        logger.warning(
+                            "MCP server '%s' failed to register, retrying in 2s: %s",
+                            name,
+                            e,
+                        )
+                        import time
+
+                        time.sleep(2)
+                    else:
+                        logger.warning("MCP server '%s' failed after retry: %s", name, e)
 
         # Snapshot credential files and ADEN_API_KEY so we can detect mid-session changes
         self._mcp_cred_snapshot = self._snapshot_credentials()

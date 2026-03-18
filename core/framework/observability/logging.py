@@ -206,6 +206,15 @@ def configure_logging(
     root_logger.addHandler(handler)
     root_logger.setLevel(level.upper())
 
+    # Suppress noisy LiteLLM INFO logs (model/provider line + Provider List URL
+    # printed on every single completion call).  Warnings and errors still show.
+    # Honour LITELLM_LOG env var so users can opt-in to debug output.
+    _litellm_level = os.getenv("LITELLM_LOG", "").upper()
+    if _litellm_level and hasattr(logging, _litellm_level):
+        logging.getLogger("LiteLLM").setLevel(getattr(logging, _litellm_level))
+    else:
+        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
     # When in JSON mode, configure known third-party loggers to use JSON formatter
     # This ensures libraries like LiteLLM, httpcore also output clean JSON
     if format == "json":

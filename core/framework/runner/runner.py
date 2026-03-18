@@ -28,6 +28,7 @@ from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.runtime_log_store import RuntimeLogStore
+from framework.tools.flowchart_utils import generate_fallback_flowchart
 
 if TYPE_CHECKING:
     from framework.runner.protocol import AgentMessage, CapabilityResponse
@@ -959,6 +960,8 @@ class AgentRunner:
 
             graph = GraphSpec(**graph_kwargs)
 
+            # Generate flowchart.json if missing (for template/legacy agents)
+            generate_fallback_flowchart(graph, goal, agent_path)
             # Read skill configuration from agent module
             agent_default_skills = getattr(agent_module, "default_skills", None)
             agent_skills = getattr(agent_module, "skills", None)
@@ -1010,6 +1013,9 @@ class AgentRunner:
             graph, goal = load_agent_export(export_data)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON in agent export file: {agent_json_path}") from exc
+
+        # Generate flowchart.json if missing (for legacy JSON-based agents)
+        generate_fallback_flowchart(graph, goal, agent_path)
 
         runner = cls(
             agent_path=agent_path,
@@ -1376,6 +1382,8 @@ class AgentRunner:
             return "MISTRAL_API_KEY"
         elif model_lower.startswith("groq/"):
             return "GROQ_API_KEY"
+        elif model_lower.startswith("openrouter/"):
+            return "OPENROUTER_API_KEY"
         elif self._is_local_model(model_lower):
             return None  # Local models don't need an API key
         elif model_lower.startswith("azure/"):
@@ -1390,6 +1398,8 @@ class AgentRunner:
             return "MINIMAX_API_KEY"
         elif model_lower.startswith("kimi/"):
             return "KIMI_API_KEY"
+        elif model_lower.startswith("hive/"):
+            return "HIVE_API_KEY"
         else:
             # Default: assume OpenAI-compatible
             return "OPENAI_API_KEY"
@@ -1412,6 +1422,8 @@ class AgentRunner:
             cred_id = "minimax"
         elif model_lower.startswith("kimi/"):
             cred_id = "kimi"
+        elif model_lower.startswith("hive/"):
+            cred_id = "hive"
         # Add more mappings as providers are added to LLM_CREDENTIALS
 
         if cred_id is None:

@@ -337,7 +337,8 @@ export type EventTypeName =
   | "trigger_activated"
   | "trigger_deactivated"
   | "trigger_fired"
-  | "trigger_removed";
+  | "trigger_removed"
+  | "trigger_updated";
 
 export interface AgentEvent {
   type: EventTypeName;

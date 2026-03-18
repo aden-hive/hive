@@ -1423,6 +1423,7 @@ class GraphExecutor:
                     next_spec = graph.get_node(current_node_id)
                     if next_spec and next_spec.node_type == "event_loop":
                         from framework.graph.prompt_composer import (
+                            EXECUTION_SCOPE_PREAMBLE,
                             build_accounts_prompt,
                             build_narrative,
                             build_transition_marker,
@@ -1462,9 +1463,14 @@ class GraphExecutor:
                             )
 
                         # Compose new system prompt (Layer 1 + 2 + 3 + accounts)
+                        # Prepend scope preamble to focus so the LLM stays
+                        # within this node's responsibility.
+                        _focus = next_spec.system_prompt
+                        if next_spec.output_keys and _focus:
+                            _focus = f"{EXECUTION_SCOPE_PREAMBLE}\n\n{_focus}"
                         new_system = compose_system_prompt(
                             identity_prompt=getattr(graph, "identity_prompt", None),
-                            focus_prompt=next_spec.system_prompt,
+                            focus_prompt=_focus,
                             narrative=narrative,
                             accounts_prompt=_node_accounts,
                         )
