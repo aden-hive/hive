@@ -6,6 +6,42 @@
 import type { ChatMessage } from "@/components/ChatPanel";
 import type { AgentEvent } from "@/api/types";
 
+function getMergeKey(message: ChatMessage): string {
+  if (message.createdAt != null) {
+    return [
+      message.thread ?? "",
+      message.role ?? "",
+      message.type ?? "",
+      message.agent,
+      message.createdAt,
+    ].join("\u001f");
+  }
+  return message.id;
+}
+
+export function mergeRestoredMessages(
+  restoredMessages: ChatMessage[],
+  existingMessages: ChatMessage[],
+): ChatMessage[] {
+  const merged = new Map<string, ChatMessage>();
+
+  for (const message of [...restoredMessages, ...existingMessages]) {
+    const key = getMergeKey(message);
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, message);
+      continue;
+    }
+    if ((message.content?.length ?? 0) >= (current.content?.length ?? 0)) {
+      merged.set(key, message);
+    }
+  }
+
+  return Array.from(merged.values()).sort(
+    (a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0),
+  );
+}
+
 /**
  * Derive a human-readable display name from a raw agent identifier.
  *

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { sseEventToChatMessage, formatAgentDisplayName } from "./chat-helpers";
+import {
+  mergeRestoredMessages,
+  sseEventToChatMessage,
+  formatAgentDisplayName,
+} from "./chat-helpers";
 import type { AgentEvent } from "@/api/types";
 
 // ---------------------------------------------------------------------------
@@ -411,6 +415,119 @@ describe("sseEventToChatMessage", () => {
     });
     const result = sseEventToChatMessage(event, "t", "My Agent");
     expect(result!.agent).toBe("System");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mergeRestoredMessages
+// ---------------------------------------------------------------------------
+
+describe("mergeRestoredMessages", () => {
+  it("deduplicates restored messages when the tab already has the same conversation", () => {
+    const restored = [
+      {
+        id: "restored-queen",
+        agent: "Queen Bee",
+        agentColor: "",
+        content: "Welcome back",
+        timestamp: "",
+        role: "queen" as const,
+        thread: "demo-agent",
+        createdAt: 1000,
+      },
+      {
+        id: "restored-user",
+        agent: "You",
+        agentColor: "",
+        content: "Hello",
+        timestamp: "",
+        type: "user" as const,
+        thread: "demo-agent",
+        createdAt: 2000,
+      },
+    ];
+    const existing = [
+      {
+        id: "live-queen",
+        agent: "Queen Bee",
+        agentColor: "",
+        content: "Welcome back",
+        timestamp: "",
+        role: "queen" as const,
+        thread: "demo-agent",
+        createdAt: 1000,
+      },
+      {
+        id: "live-user",
+        agent: "You",
+        agentColor: "",
+        content: "Hello",
+        timestamp: "",
+        type: "user" as const,
+        thread: "demo-agent",
+        createdAt: 2000,
+      },
+    ];
+
+    expect(mergeRestoredMessages(restored, existing)).toEqual(existing);
+  });
+
+  it("keeps the longer snapshot when restored and live copies share the same message", () => {
+    const restored = [
+      {
+        id: "restored-stream",
+        agent: "research",
+        agentColor: "",
+        content: "Working",
+        timestamp: "",
+        role: "worker" as const,
+        thread: "demo-agent",
+        createdAt: 3000,
+      },
+    ];
+    const existing = [
+      {
+        id: "live-stream",
+        agent: "research",
+        agentColor: "",
+        content: "Working on a full answer",
+        timestamp: "",
+        role: "worker" as const,
+        thread: "demo-agent",
+        createdAt: 3000,
+      },
+    ];
+
+    expect(mergeRestoredMessages(restored, existing)).toEqual(existing);
+  });
+
+  it("preserves distinct messages when their timestamps differ", () => {
+    const restored = [
+      {
+        id: "first",
+        agent: "Queen Bee",
+        agentColor: "",
+        content: "First",
+        timestamp: "",
+        role: "queen" as const,
+        thread: "demo-agent",
+        createdAt: 1000,
+      },
+    ];
+    const existing = [
+      {
+        id: "second",
+        agent: "Queen Bee",
+        agentColor: "",
+        content: "Second",
+        timestamp: "",
+        role: "queen" as const,
+        thread: "demo-agent",
+        createdAt: 2000,
+      },
+    ];
+
+    expect(mergeRestoredMessages(restored, existing)).toEqual([...restored, ...existing]);
   });
 });
 

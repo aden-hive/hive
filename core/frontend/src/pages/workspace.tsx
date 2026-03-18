@@ -15,7 +15,11 @@ import { graphsApi } from "@/api/graphs";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
 import type { LiveSession, AgentEvent, DiscoverEntry, NodeSpec, DraftGraph as DraftGraphData } from "@/api/types";
-import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
+import {
+  mergeRestoredMessages,
+  sseEventToChatMessage,
+  formatAgentDisplayName,
+} from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
 import { cronToLabel } from "@/lib/graphUtils";
 import { ApiError } from "@/api/client";
@@ -1127,7 +1131,9 @@ export default function Workspace() {
         setSessionsByAgent((prev) => ({
           ...prev,
           [agentType]: (prev[agentType] || []).map((s, i) =>
-            i === 0 ? { ...s, messages: [...restoredMsgs, ...s.messages] } : s,
+            i === 0
+              ? { ...s, messages: mergeRestoredMessages(restoredMsgs, s.messages) }
+              : s,
           ),
         }));
       }
