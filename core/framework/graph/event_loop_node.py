@@ -822,6 +822,7 @@ class EventLoopNode(NodeProtocol):
             )
             _stream_retry_count = 0
             _turn_cancelled = False
+            _llm_turn_failed_waiting_input = False
             while True:
                 try:
                     (
@@ -941,6 +942,16 @@ class EventLoopNode(NodeProtocol):
                     # can retry or adjust the request.
                     if ctx.node_spec.client_facing:
                         error_msg = f"LLM call failed: {e}"
+                        _guardrail_phrase = (
+                            "no endpoints available matching your guardrail restrictions "
+                            "and data policy"
+                        )
+                        if _guardrail_phrase in str(e).lower():
+                            error_msg += (
+                                " OpenRouter blocked this model under current privacy settings. "
+                                "Update https://openrouter.ai/settings/privacy or choose another "
+                                "OpenRouter model."
+                            )
                         logger.error(
                             "[%s] iter=%d: %s — waiting for user input",
                             node_id,
@@ -962,6 +973,7 @@ class EventLoopNode(NodeProtocol):
                             f"[Error: {error_msg}. Please try again.]"
                         )
                         await self._await_user_input(ctx, prompt="")
+                        _llm_turn_failed_waiting_input = True
                         break  # exit retry loop, continue outer iteration
 
                     # Non-client-facing: crash as before
@@ -1011,6 +1023,11 @@ class EventLoopNode(NodeProtocol):
                 if ctx.node_spec.client_facing and not ctx.event_triggered:
                     await self._await_user_input(ctx, prompt="")
                 continue  # back to top of for-iteration loop
+
+            # Client-facing non-transient LLM failures wait for user input and then
+            # continue the outer loop without touching per-turn token vars.
+            if _llm_turn_failed_waiting_input:
+                continue
 
             # 6e'. Feed actual API token count back for accurate estimation
             turn_input = turn_tokens.get("input", 0)
@@ -2298,7 +2315,6 @@ class EventLoopNode(NodeProtocol):
 
                 elif tc.tool_name == "ask_user":
                     # --- Framework-level ask_user handling ---
-                    user_input_requested = True
                     ask_user_prompt = tc.tool_input.get("question", "")
                     raw_options = tc.tool_input.get("options", None)
                     # Defensive: ensure options is a list of strings.
@@ -2335,6 +2351,8 @@ class EventLoopNode(NodeProtocol):
                         user_input_requested = False
                         continue
 
+                    user_input_requested = True
+
                     # Free-form ask_user (no options): stream the question
                     # text as a chat message so the user can see it.  When
                     # options are present the QuestionWidget shows the
@@ -2360,7 +2378,6 @@ class EventLoopNode(NodeProtocol):
 
                 elif tc.tool_name == "ask_user_multiple":
                     # --- Framework-level ask_user_multiple ---
-                    user_input_requested = True
                     raw_questions = tc.tool_input.get("questions", [])
                     if not isinstance(raw_questions, list) or len(raw_questions) < 2:
                         result = ToolResult(
@@ -2397,6 +2414,8 @@ class EventLoopNode(NodeProtocol):
                                 **({"options": opts} if opts else {}),
                             }
                         )
+
+                    user_input_requested = True
 
                     # Store as multi-question prompt/options for
                     # the event emission path
@@ -2708,7 +2727,11 @@ class EventLoopNode(NodeProtocol):
                     content=result.content,
                     is_error=result.is_error,
                 )
-                if tc.tool_name in ("ask_user", "ask_user_multiple"):
+                if (
+                    tc.tool_name in ("ask_user", "ask_user_multiple")
+                    and user_input_requested
+                    and not result.is_error
+                ):
                     # Defer tool_call_completed until after user responds
                     self._deferred_tool_complete = {
                         "stream_id": stream_id,

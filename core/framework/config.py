@@ -51,7 +51,13 @@ def get_preferred_model() -> str:
     """Return the user's preferred LLM model string (e.g. 'anthropic/claude-sonnet-4-20250514')."""
     llm = get_hive_config().get("llm", {})
     if llm.get("provider") and llm.get("model"):
-        return f"{llm['provider']}/{llm['model']}"
+        provider = str(llm["provider"])
+        model = str(llm["model"]).strip()
+        # OpenRouter quickstart stores raw model IDs; tolerate pasted "openrouter/<id>" too.
+        if provider.lower() == "openrouter" and model.lower().startswith("openrouter/"):
+            model = model[len("openrouter/") :]
+        if model:
+            return f"{provider}/{model}"
     return "anthropic/claude-sonnet-4-20250514"
 
 
@@ -61,6 +67,7 @@ def get_max_tokens() -> int:
 
 
 DEFAULT_MAX_CONTEXT_TOKENS = 32_000
+OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 
 
 def get_max_context_tokens() -> int:
@@ -142,7 +149,11 @@ def get_api_base() -> str | None:
     if llm.get("use_kimi_code_subscription"):
         # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
         return "https://api.kimi.com/coding"
-    return llm.get("api_base")
+    if llm.get("api_base"):
+        return llm["api_base"]
+    if str(llm.get("provider", "")).lower() == "openrouter":
+        return OPENROUTER_API_BASE
+    return None
 
 
 def get_llm_extra_kwargs() -> dict[str, Any]:
