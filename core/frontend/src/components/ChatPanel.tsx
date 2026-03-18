@@ -251,7 +251,13 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
 
   const threadMessages = messages.filter((m) => {
     if (m.type === "system" && !m.thread) return false;
-    return m.thread === activeThread;
+    if (m.thread !== activeThread) return false;
+    // Hide queen messages whose content is whitespace-only — these are
+    // tool-use-only turns that have no visible text.  During live operation
+    // tool pills provide context, but on resume the pills are gone so
+    // the empty bubble is meaningless.
+    if (m.role === "queen" && !m.type && (!m.content || !m.content.trim())) return false;
+    return true;
   });
 
   // Mark current thread as read
