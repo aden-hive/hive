@@ -179,6 +179,31 @@ class SessionManager:
         agent_path = Path(agent_path)
         resolved_worker_id = agent_id or agent_path.name
 
+        # When cold-restoring, check meta.json for the phase — if the agent
+        # was still being built we must NOT try to load the worker (the code
+        # is incomplete and will fail to import).
+        if queen_resume_from:
+            _resume_phase = None
+            _meta_path = (
+                Path.home() / ".hive" / "queen" / "session" / queen_resume_from / "meta.json"
+            )
+            if _meta_path.exists():
+                try:
+                    _meta = json.loads(_meta_path.read_text(encoding="utf-8"))
+                    _resume_phase = _meta.get("phase")
+                except (json.JSONDecodeError, OSError):
+                    pass
+            if _resume_phase in ("building", "planning"):
+                # Fall back to queen-only session — cold resume handler in
+                # _start_queen will set phase_state.agent_path and switch to
+                # the correct phase.
+                return await self.create_session(
+                    session_id=session_id,
+                    model=model,
+                    initial_prompt=initial_prompt,
+                    queen_resume_from=queen_resume_from,
+                )
+
         # Reuse the original session ID when cold-restoring so the frontend
         # sees one continuous session instead of a new one each time.
         session = await self._create_session_core(
@@ -209,7 +234,23 @@ class SessionManager:
             )
 
         except Exception:
-            # If anything fails, tear down the session
+            if queen_resume_from:
+                # Cold restore: worker load failed (e.g. incomplete code from a
+                # building session).  Fall back to queen-only so the user can
+                # continue the conversation and fix / rebuild the agent.
+                logger.warning(
+                    "Cold restore: worker load failed for '%s', falling back to queen-only",
+                    agent_path,
+                    exc_info=True,
+                )
+                await self.stop_session(session.id)
+                return await self.create_session(
+                    session_id=session_id,
+                    model=model,
+                    initial_prompt=initial_prompt,
+                    queen_resume_from=queen_resume_from,
+                )
+            # If anything fails (non-cold-restore), tear down the session
             await self.stop_session(session.id)
             raise
         return session
@@ -858,16 +899,21 @@ class SessionManager:
                     else None
                 )
             )
-            _meta_path.write_text(
-                json.dumps(
-                    {
-                        "agent_name": _agent_name,
-                        "agent_path": str(session.worker_path) if session.worker_path else None,
-                        "created_at": time.time(),
-                    }
-                ),
-                encoding="utf-8",
-            )
+            # Merge into existing meta.json to preserve fields written by
+            # _update_meta_json (e.g. phase, agent_path set during building).
+            _existing_meta: dict = {}
+            if _meta_path.exists():
+                try:
+                    _existing_meta = json.loads(_meta_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    pass
+            _new_meta: dict = {"created_at": time.time()}
+            if _agent_name is not None:
+                _new_meta["agent_name"] = _agent_name
+            if session.worker_path is not None:
+                _new_meta["agent_path"] = str(session.worker_path)
+            _existing_meta.update(_new_meta)
+            _meta_path.write_text(json.dumps(_existing_meta), encoding="utf-8")
         except OSError:
             pass
 
@@ -920,11 +966,27 @@ class SessionManager:
                 try:
                     _meta = json.loads(meta_path.read_text(encoding="utf-8"))
                     _agent_path = _meta.get("agent_path")
+                    _phase = _meta.get("phase")
+
                     if _agent_path and Path(_agent_path).exists():
-                        await self.load_worker(session.id, _agent_path)
-                        if session.phase_state:
-                            await session.phase_state.switch_to_staging(source="auto")
-                        logger.info("Cold restore: auto-loaded worker from %s", _agent_path)
+                        if _phase in ("staging", "running", None):
+                            # Agent fully built — load worker and resume
+                            await self.load_worker(session.id, _agent_path)
+                            if session.phase_state:
+                                await session.phase_state.switch_to_staging(source="auto")
+                            # Emit flowchart overlay so frontend can display it
+                            await self._emit_flowchart_on_restore(session, _agent_path)
+                            logger.info("Cold restore: auto-loaded worker from %s", _agent_path)
+                        elif _phase == "building":
+                            # Agent folder exists but incomplete — resume building
+                            if session.phase_state:
+                                session.phase_state.agent_path = _agent_path
+                                await session.phase_state.switch_to_building(source="auto")
+                            logger.info("Cold restore: resumed BUILDING phase for %s", _agent_path)
+                        elif _phase == "planning":
+                            if session.phase_state:
+                                session.phase_state.agent_path = _agent_path
+                            logger.info("Cold restore: PLANNING phase for %s", _agent_path)
                 except Exception:
                     logger.warning("Cold restore: failed to auto-load worker", exc_info=True)
 
@@ -995,6 +1057,31 @@ class SessionManager:
                     "agent_path": str(session.worker_path) if session.worker_path else "",
                     "goal": info.goal_name if info else "",
                     "node_count": info.node_count if info else 0,
+                },
+            )
+        )
+
+    async def _emit_flowchart_on_restore(
+        self, session: Session, agent_path: str | Path
+    ) -> None:
+        """Emit FLOWCHART_MAP_UPDATED from persisted flowchart file on cold restore."""
+        from framework.runtime.event_bus import AgentEvent, EventType
+        from framework.tools.flowchart_utils import load_flowchart_file
+
+        original_draft, flowchart_map = load_flowchart_file(agent_path)
+        if original_draft is None:
+            return
+        # Cache in phase_state so the REST endpoint also returns it
+        if session.phase_state:
+            session.phase_state.original_draft_graph = original_draft
+            session.phase_state.flowchart_map = flowchart_map
+        await session.event_bus.publish(
+            AgentEvent(
+                type=EventType.FLOWCHART_MAP_UPDATED,
+                stream_id="queen",
+                data={
+                    "map": flowchart_map,
+                    "original_draft": original_draft,
                 },
             )
         )
