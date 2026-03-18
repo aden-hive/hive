@@ -3980,6 +3980,68 @@ class EventLoopNode(NodeProtocol):
         ratio_before = conversation.usage_ratio()
         phase_grad = getattr(ctx, "continuous_mode", False)
 
+        # Debug snapshot helper
+        def _snap(name: str, **extra: Any) -> dict[str, Any]:
+            roles: dict[str, int] = {}
+            for m in conversation.messages:
+                roles[m.role] = roles.get(m.role, 0) + 1
+            return {
+                "name": name,
+                "message_count": conversation.message_count,
+                "estimated_tokens": conversation.estimate_tokens(),
+                "usage_ratio": f"{conversation.usage_ratio():.2%}",
+                "max_context_tokens": self._config.max_context_tokens,
+                "messages_by_role": roles,
+                **extra,
+            }
+
+        initial = _snap("initial")
+
+        # When over budget, attach a full message inventory so the log
+        # shows exactly what is consuming the context window.
+        if ratio_before >= 1.0:
+            inventory: list[dict[str, Any]] = []
+            for m in conversation.messages:
+                content_chars = len(m.content)
+                tc_chars = 0
+                tool_name = None
+                if m.tool_calls:
+                    for tc in m.tool_calls:
+                        args = tc.get("function", {}).get("arguments", "")
+                        tc_chars += len(args) if isinstance(args, str) else len(json.dumps(args))
+                    names = [tc.get("function", {}).get("name", "?") for tc in m.tool_calls]
+                    tool_name = ", ".join(names)
+                elif m.role == "tool" and m.tool_use_id:
+                    # Try to find the tool name from the preceding assistant message
+                    for prev in conversation.messages:
+                        if prev.tool_calls:
+                            for tc in prev.tool_calls:
+                                if tc.get("id") == m.tool_use_id:
+                                    tool_name = tc.get("function", {}).get("name", "?")
+                                    break
+                        if tool_name:
+                            break
+                entry: dict[str, Any] = {
+                    "seq": m.seq,
+                    "role": m.role,
+                    "content_chars": content_chars,
+                }
+                if tc_chars:
+                    entry["tool_call_args_chars"] = tc_chars
+                if tool_name:
+                    entry["tool"] = tool_name
+                if m.is_error:
+                    entry["is_error"] = True
+                if m.phase_id:
+                    entry["phase"] = m.phase_id
+                # Content preview for the biggest messages
+                if content_chars > 2000:
+                    entry["preview"] = m.content[:200] + "…"
+                inventory.append(entry)
+            initial["message_inventory"] = inventory
+
+        debug_steps: list[dict[str, Any]] = [initial]
+
         # --- Step 1: Prune old tool results (free, no LLM) ---
         protect = max(2000, self._config.max_context_tokens // 12)
         pruned = await conversation.prune_old_tool_results(
@@ -3993,8 +4055,10 @@ class EventLoopNode(NodeProtocol):
                 ratio_before * 100,
                 conversation.usage_ratio() * 100,
             )
+        debug_steps.append(_snap("after_prune", messages_pruned=pruned))
         if not conversation.needs_compaction():
             await self._log_compaction(ctx, conversation, ratio_before)
+            self._write_compaction_debug_log(ctx, debug_steps)
             return
 
         # --- Step 2: Standard structure-preserving compaction (free, no LLM) ---
@@ -4006,8 +4070,14 @@ class EventLoopNode(NodeProtocol):
                 keep_recent=4,
                 phase_graduated=phase_grad,
             )
+            debug_steps.append(_snap(
+                "after_structural",
+                spillover_dir=spill_dir,
+                keep_recent=4,
+            ))
         if not conversation.needs_compaction():
             await self._log_compaction(ctx, conversation, ratio_before)
+            self._write_compaction_debug_log(ctx, debug_steps)
             return
 
         # --- Step 3: LLM summary compaction ---
@@ -4030,11 +4100,20 @@ class EventLoopNode(NodeProtocol):
                     keep_recent=2,
                     phase_graduated=phase_grad,
                 )
+                debug_steps.append(_snap(
+                    "after_llm_compact",
+                    summary_chars=len(summary),
+                ))
             except Exception as e:
                 logger.warning("LLM compaction failed: %s", e)
+                debug_steps.append(_snap(
+                    "llm_compact_failed",
+                    error=str(e),
+                ))
 
         if not conversation.needs_compaction():
             await self._log_compaction(ctx, conversation, ratio_before)
+            self._write_compaction_debug_log(ctx, debug_steps)
             return
 
         # --- Step 4: Emergency deterministic summary (LLM failed/unavailable) ---
@@ -4048,7 +4127,12 @@ class EventLoopNode(NodeProtocol):
             keep_recent=1,
             phase_graduated=phase_grad,
         )
+        debug_steps.append(_snap(
+            "after_emergency",
+            summary_chars=len(summary),
+        ))
         await self._log_compaction(ctx, conversation, ratio_before)
+        self._write_compaction_debug_log(ctx, debug_steps)
 
     # --- LLM compaction with binary-search splitting ----------------------
 
@@ -4261,6 +4345,91 @@ class EventLoopNode(NodeProtocol):
                     },
                 )
             )
+
+    @staticmethod
+    def _write_compaction_debug_log(
+        ctx: NodeContext,
+        steps: list[dict[str, Any]],
+    ) -> None:
+        """Write detailed compaction analysis to ~/.hive/compaction_log/.
+
+        Only runs when HIVE_COMPACTION_DEBUG is set in the environment.
+        Each compaction produces a timestamped markdown file.
+        """
+        import os
+
+        if not os.environ.get("HIVE_COMPACTION_DEBUG"):
+            return
+
+        log_dir = Path.home() / ".hive" / "compaction_log"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%f")
+        node_label = ctx.node_id.replace("/", "_")
+        log_path = log_dir / f"{ts}_{node_label}.md"
+
+        lines: list[str] = []
+        lines.append(f"# Compaction Debug — {ctx.node_id}")
+        lines.append(f"**Time:** {datetime.now(UTC).isoformat()}")
+        lines.append(f"**Node:** {ctx.node_spec.name} (`{ctx.node_id}`)")
+        if ctx.stream_id:
+            lines.append(f"**Stream:** {ctx.stream_id}")
+        lines.append("")
+
+        for step in steps:
+            name = step.get("name", "unknown")
+            lines.append(f"## Step: {name}")
+            for key, val in step.items():
+                if key == "name":
+                    continue
+                if key == "messages_by_role":
+                    lines.append(f"- **{key}:**")
+                    for role, count in val.items():
+                        lines.append(f"  - {role}: {count}")
+                elif key == "message_inventory":
+                    total_chars = sum(e.get("content_chars", 0) + e.get("tool_call_args_chars", 0) for e in val)
+                    lines.append(f"### Message Inventory ({len(val)} messages, {total_chars:,} total chars)")
+                    lines.append("")
+                    # Sort descending by size for the table
+                    ranked = sorted(val, key=lambda e: e.get("content_chars", 0) + e.get("tool_call_args_chars", 0), reverse=True)
+                    lines.append("| # | seq | role | tool | chars | % of total | flags |")
+                    lines.append("|---|-----|------|------|------:|------------|-------|")
+                    for i, entry in enumerate(ranked, 1):
+                        chars = entry.get("content_chars", 0) + entry.get("tool_call_args_chars", 0)
+                        pct = (chars / total_chars * 100) if total_chars else 0
+                        tool = entry.get("tool", "")
+                        flags = []
+                        if entry.get("is_error"):
+                            flags.append("error")
+                        if entry.get("phase"):
+                            flags.append(f"phase={entry['phase']}")
+                        lines.append(
+                            f"| {i} | {entry['seq']} | {entry['role']} | {tool} "
+                            f"| {chars:,} | {pct:.1f}% | {', '.join(flags)} |"
+                        )
+                    # Previews for large messages
+                    large = [e for e in ranked if e.get("preview")]
+                    if large:
+                        lines.append("")
+                        lines.append("#### Large message previews")
+                        for entry in large:
+                            lines.append(f"\n**seq={entry['seq']}** ({entry['role']}, {entry.get('tool', '')}):")
+                            lines.append(f"```\n{entry['preview']}\n```")
+                elif key == "discarded_messages":
+                    lines.append(f"- **{key}:** ({len(val)} messages)")
+                    for msg_info in val[:50]:  # cap at 50
+                        lines.append(f"  - seq={msg_info['seq']} role={msg_info['role']} chars={msg_info['chars']}")
+                    if len(val) > 50:
+                        lines.append(f"  - ... and {len(val) - 50} more")
+                else:
+                    lines.append(f"- **{key}:** {val}")
+            lines.append("")
+
+        try:
+            log_path.write_text("\n".join(lines), encoding="utf-8")
+            logger.debug("Compaction debug log written to %s", log_path)
+        except OSError:
+            logger.debug("Failed to write compaction debug log to %s", log_path)
 
     def _build_emergency_summary(
         self,

@@ -210,6 +210,16 @@ def configure_logging(
     # printed on every single completion call).  Warnings and errors still show.
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
+    # Suppress the "Provider List: ..." banner litellm prints to stdout via
+    # print() on every completion call.  This is independent of log format.
+    try:
+        import litellm as _litellm
+
+        if hasattr(_litellm, "suppress_debug_info"):
+            _litellm.suppress_debug_info = True  # type: ignore[attr-defined]
+    except (ImportError, AttributeError):
+        pass
+
     # When in JSON mode, configure known third-party loggers to use JSON formatter
     # This ensures libraries like LiteLLM, httpcore also output clean JSON
     if format == "json":
@@ -231,16 +241,6 @@ def _disable_third_party_colors() -> None:
     # Set NO_COLOR environment variable (common convention for disabling colors)
     os.environ["NO_COLOR"] = "1"
     os.environ["FORCE_COLOR"] = "0"
-
-    # Disable LiteLLM debug/verbose output colors if available
-    try:
-        import litellm
-
-        # LiteLLM respects NO_COLOR, but we can also suppress debug info
-        if hasattr(litellm, "suppress_debug_info"):
-            litellm.suppress_debug_info = True  # type: ignore[attr-defined]
-    except (ImportError, AttributeError):
-        pass
 
 
 def set_trace_context(**kwargs: Any) -> None:
