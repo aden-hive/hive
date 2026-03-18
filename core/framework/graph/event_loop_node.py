@@ -2707,6 +2707,7 @@ class EventLoopNode(NodeProtocol):
                     tool_use_id=tc.tool_use_id,
                     content=result.content,
                     is_error=result.is_error,
+                    image_content=result.image_content,
                 )
                 if tc.tool_name in ("ask_user", "ask_user_multiple"):
                     # Defer tool_call_completed until after user responds
@@ -3813,6 +3814,7 @@ class EventLoopNode(NodeProtocol):
                 tool_use_id=result.tool_use_id,
                 content=truncated,
                 is_error=False,
+                image_content=result.image_content,
             )
 
         spill_dir = self._config.spillover_dir
@@ -3885,6 +3887,7 @@ class EventLoopNode(NodeProtocol):
                 tool_use_id=result.tool_use_id,
                 content=content,
                 is_error=False,
+                image_content=result.image_content,
             )
 
         # No spillover_dir — truncate in-place if needed
@@ -3927,6 +3930,7 @@ class EventLoopNode(NodeProtocol):
                 tool_use_id=result.tool_use_id,
                 content=truncated,
                 is_error=False,
+                image_content=result.image_content,
             )
 
         return result

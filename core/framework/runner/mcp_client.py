@@ -391,17 +391,30 @@ class MCPClient:
                     error_text = content_item.text
             raise RuntimeError(f"MCP tool '{tool_name}' failed: {error_text}")
 
-        # Extract content
+        # Extract content — preserve image blocks alongside text
         if result.content:
-            # MCP returns content as a list of content items
-            if len(result.content) > 0:
-                content_item = result.content[0]
-                # Check if it's a text content item
-                if hasattr(content_item, "text"):
-                    return content_item.text
-                elif hasattr(content_item, "data"):
-                    return content_item.data
-            return result.content
+            text_parts: list[str] = []
+            image_parts: list[dict[str, Any]] = []
+            for item in result.content:
+                if hasattr(item, "text"):
+                    text_parts.append(item.text)
+                elif hasattr(item, "data") and hasattr(item, "mimeType"):
+                    # MCP ImageContent — preserve as structured image block
+                    image_parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{item.mimeType};base64,{item.data}",
+                            },
+                        }
+                    )
+                elif hasattr(item, "data"):
+                    text_parts.append(str(item.data))
+
+            text = "\n".join(text_parts) if text_parts else ""
+            if image_parts:
+                return {"_text": text, "_images": image_parts}
+            return text if text else None
 
         return None
 

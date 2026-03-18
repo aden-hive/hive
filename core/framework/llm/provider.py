@@ -45,6 +45,7 @@ class ToolResult:
     tool_use_id: str
     content: str
     is_error: bool = False
+    image_content: list[dict[str, Any]] | None = None
 
 
 class LLMProvider(ABC):

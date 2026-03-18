@@ -48,6 +48,9 @@ dev = [
 sandbox = [
     "RestrictedPython>=7.0",
 ]
+browser = [
+    "pillow>=10.0.0",
+]
 ocr = [
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
