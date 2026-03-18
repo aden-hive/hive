@@ -2347,6 +2347,30 @@ def register_queen_lifecycle_tools(
         """Get the session's event bus for querying history."""
         return getattr(session, "event_bus", None)
 
+    def _get_worker_name() -> str | None:
+        """Return the worker agent directory name, used for diary lookups."""
+        p = getattr(session, "worker_path", None)
+        return p.name if p else None
+
+    def _format_diary(max_runs: int) -> str:
+        """Read recent run digests from disk — no EventBus required."""
+        agent_name = _get_worker_name()
+        if not agent_name:
+            return "No worker loaded — diary unavailable."
+        from framework.agents.worker_memory import read_recent_digests
+
+        entries = read_recent_digests(agent_name, max_runs)
+        if not entries:
+            return (
+                f"No run digests for '{agent_name}' yet. "
+                "Digests are written at the end of each completed run."
+            )
+        lines = [f"Worker '{agent_name}' — {len(entries)} recent run digest(s):", ""]
+        for _run_id, content in entries:
+            lines.append(content)
+            lines.append("")
+        return "\n".join(lines).rstrip()
+
     # Tiered cooldowns: summary is free, detail has short cooldown, full keeps 30s
     _COOLDOWN_FULL = 30.0
     _COOLDOWN_DETAIL = 10.0
@@ -2949,16 +2973,17 @@ def register_queen_lifecycle_tools(
         import time as _time
 
         # --- Tiered cooldown ---
+        # diary is free (file reads only), summary is free, detail has 10s, full has 30s
         now = _time.monotonic()
         if focus == "full":
             cooldown = _COOLDOWN_FULL
             tier = "full"
-        elif focus is not None:
+        elif focus == "diary" or focus is None:
+            cooldown = 0.0
+            tier = focus or "summary"
+        else:
             cooldown = _COOLDOWN_DETAIL
             tier = "detail"
-        else:
-            cooldown = 0.0
-            tier = "summary"
 
         elapsed_since = now - _status_last_called.get(tier, 0.0)
         if elapsed_since < cooldown:
@@ -2973,6 +2998,10 @@ def register_queen_lifecycle_tools(
                 }
             )
         _status_last_called[tier] = now
+
+        # --- Diary: pure file reads, no runtime required ---
+        if focus == "diary":
+            return _format_diary(last_n)
 
         # --- Runtime check ---
         runtime = _get_runtime()
@@ -3023,7 +3052,7 @@ def register_queen_lifecycle_tools(
             else:
                 return (
                     f"Unknown focus '{focus}'. "
-                    "Valid options: activity, memory, tools, issues, progress, full."
+                    "Valid options: diary, activity, memory, tools, issues, progress, full."
                 )
         except Exception as exc:
             logger.exception("get_worker_status error")
@@ -3034,6 +3063,8 @@ def register_queen_lifecycle_tools(
         description=(
             "Check on the worker. Returns a brief prose summary by default. "
             "Use 'focus' to drill into specifics:\n"
+            "- diary: persistent run digests from past executions — read this first "
+            "before digging into live runtime logs\n"
             "- activity: current node, transitions, latest LLM output\n"
             "- memory: worker's accumulated knowledge and state\n"
             "- tools: running and recent tool calls\n"
@@ -3046,8 +3077,11 @@ def register_queen_lifecycle_tools(
             "properties": {
                 "focus": {
                     "type": "string",
-                    "enum": ["activity", "memory", "tools", "issues", "progress", "full"],
-                    "description": ("Aspect to inspect. Omit for a brief summary."),
+                    "enum": ["diary", "activity", "memory", "tools", "issues", "progress", "full"],
+                    "description": (
+                        "Aspect to inspect. Omit for a brief summary. "
+                        "Use 'diary' to read persistent run history before checking live logs."
+                    ),
                 },
                 "last_n": {
                     "type": "integer",

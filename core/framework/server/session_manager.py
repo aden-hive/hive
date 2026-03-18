@@ -47,6 +47,8 @@ class Session:
     worker_handoff_sub: str | None = None
     # Memory consolidation subscription (fires on CONTEXT_COMPACTED)
     memory_consolidation_sub: str | None = None
+    # Worker run digest subscription (fires on EXECUTION_COMPLETED / EXECUTION_FAILED)
+    worker_digest_sub: str | None = None
     # Trigger definitions loaded from agent's triggers.json (available but inactive)
     available_triggers: dict[str, TriggerDefinition] = field(default_factory=dict)
     # Active trigger tracking (IDs currently firing + their asyncio tasks)
@@ -297,6 +299,9 @@ class SessionManager:
             session.worker_runtime = runtime
             session.worker_info = info
 
+            # Subscribe to execution completion for per-run digest generation
+            self._subscribe_worker_digest(session)
+
             async with self._lock:
                 self._loading.discard(session.id)
 
@@ -526,6 +531,13 @@ class SessionManager:
             await self._emit_trigger_events(session, "removed", session.available_triggers)
             session.available_triggers.clear()
 
+        if session.worker_digest_sub is not None:
+            try:
+                session.event_bus.unsubscribe(session.worker_digest_sub)
+            except Exception:
+                pass
+            session.worker_digest_sub = None
+
         worker_id = session.worker_id
         session.worker_id = None
         session.worker_path = None
@@ -562,6 +574,13 @@ class SessionManager:
             except Exception:
                 pass
             session.worker_handoff_sub = None
+
+        if session.worker_digest_sub is not None:
+            try:
+                session.event_bus.unsubscribe(session.worker_digest_sub)
+            except Exception:
+                pass
+            session.worker_digest_sub = None
 
         # Stop queen and memory consolidation subscription
         if session.memory_consolidation_sub is not None:
@@ -646,6 +665,43 @@ class SessionManager:
             await node.inject_event(handoff, is_client_input=False)
         else:
             logger.warning("Worker handoff received but queen node not ready")
+
+    def _subscribe_worker_digest(self, session: Session) -> None:
+        """Subscribe to worker execution completion events to write run digests."""
+        from framework.runtime.event_bus import EventType as _ET
+
+        if session.worker_digest_sub is not None:
+            try:
+                session.event_bus.unsubscribe(session.worker_digest_sub)
+            except Exception:
+                pass
+            session.worker_digest_sub = None
+
+        agent_name = session.worker_path.name if session.worker_path else None
+        if not agent_name:
+            return
+
+        _agent_name = agent_name
+        _llm = session.llm
+        _bus = session.event_bus
+
+        async def _on_execution_done(event: Any) -> None:
+            run_id = getattr(event, "run_id", None)
+            if not run_id or event.stream_id == "queen":
+                return
+            import asyncio as _asyncio
+
+            from framework.agents.worker_memory import consolidate_worker_run
+
+            _asyncio.create_task(
+                consolidate_worker_run(_agent_name, run_id, event, _bus, _llm),
+                name=f"worker-digest-{run_id}",
+            )
+
+        session.worker_digest_sub = session.event_bus.subscribe(
+            event_types=[_ET.EXECUTION_COMPLETED, _ET.EXECUTION_FAILED],
+            handler=_on_execution_done,
+        )
 
     def _subscribe_worker_handoffs(self, session: Session, executor: Any) -> None:
         """Subscribe queen to worker/subagent escalation handoff events."""
