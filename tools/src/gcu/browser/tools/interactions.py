@@ -17,7 +17,8 @@ from playwright.async_api import (
 )
 
 from ..highlight import highlight_coordinate, highlight_element
-from ..session import DEFAULT_TIMEOUT_MS, get_session
+from ..refs import annotate_snapshot, resolve_selector
+from ..session import DEFAULT_TIMEOUT_MS, BrowserSession, get_session
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,8 @@ _AUTO_SNAPSHOT_MAX_CHARS = 4000
 async def _auto_snapshot(
     page: Page,
     *,
+    session: BrowserSession | None = None,
+    target_id: str | None = None,
     wait_for_nav: bool = False,
     max_chars: int = _AUTO_SNAPSHOT_MAX_CHARS,
 ) -> str | None:
@@ -34,6 +37,8 @@ async def _auto_snapshot(
 
     Args:
         page: Playwright Page instance.
+        session: BrowserSession to store ref maps in.
+        target_id: Target page id for ref map storage.
         wait_for_nav: If True, briefly wait for any in-flight navigation to
             settle before snapshotting.  Used after click actions that may
             trigger page navigation.
@@ -48,6 +53,14 @@ async def _auto_snapshot(
             except Exception:
                 pass  # No navigation happened — that's fine
         snapshot = await page.locator(":root").aria_snapshot()
+
+        # Annotate with refs before truncation so the full RefMap is captured
+        if snapshot and session:
+            snapshot, ref_map = annotate_snapshot(snapshot)
+            tid = target_id or session.active_page_id
+            if tid:
+                session.ref_maps[tid] = ref_map
+
         if snapshot and max_chars > 0 and len(snapshot) > max_chars:
             snapshot = (
                 snapshot[:max_chars]
@@ -96,6 +109,11 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             if not page:
                 return {"ok": False, "error": "No active tab"}
 
+            try:
+                selector = resolve_selector(selector, session, target_id)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+
             await highlight_element(page, selector)
 
             if double_click:
@@ -105,7 +123,9 @@ def register_interaction_tools(mcp: FastMCP) -> None:
 
             result: dict = {"ok": True, "action": "click", "selector": selector}
             if auto_snapshot:
-                snapshot = await _auto_snapshot(page, wait_for_nav=True)
+                snapshot = await _auto_snapshot(
+                    page, session=session, target_id=target_id, wait_for_nav=True,
+                )
                 if snapshot:
                     result["snapshot"] = snapshot
                     result["url"] = page.url
@@ -151,7 +171,9 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             await page.mouse.click(x, y, button=button)
             result: dict = {"ok": True, "action": "click_coordinate", "x": x, "y": y}
             if auto_snapshot:
-                snapshot = await _auto_snapshot(page, wait_for_nav=True)
+                snapshot = await _auto_snapshot(
+                    page, session=session, target_id=target_id, wait_for_nav=True,
+                )
                 if snapshot:
                     result["snapshot"] = snapshot
                     result["url"] = page.url
@@ -194,6 +216,11 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             if not page:
                 return {"ok": False, "error": "No active tab"}
 
+            try:
+                selector = resolve_selector(selector, session, target_id)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+
             await highlight_element(page, selector)
 
             if clear_first:
@@ -202,7 +229,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             await page.type(selector, text, delay=delay_ms, timeout=timeout_ms)
             result: dict = {"ok": True, "action": "type", "selector": selector, "length": len(text)}
             if auto_snapshot:
-                snapshot = await _auto_snapshot(page)
+                snapshot = await _auto_snapshot(page, session=session, target_id=target_id)
                 if snapshot:
                     result["snapshot"] = snapshot
                     result["url"] = page.url
@@ -244,12 +271,17 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             if not page:
                 return {"ok": False, "error": "No active tab"}
 
+            try:
+                selector = resolve_selector(selector, session, target_id)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+
             await highlight_element(page, selector)
 
             await page.fill(selector, value, timeout=timeout_ms)
             result: dict = {"ok": True, "action": "fill", "selector": selector}
             if auto_snapshot:
-                snapshot = await _auto_snapshot(page)
+                snapshot = await _auto_snapshot(page, session=session, target_id=target_id)
                 if snapshot:
                     result["snapshot"] = snapshot
                     result["url"] = page.url
@@ -287,6 +319,10 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 return {"ok": False, "error": "No active tab"}
 
             if selector:
+                try:
+                    selector = resolve_selector(selector, session, target_id)
+                except ValueError as e:
+                    return {"ok": False, "error": str(e)}
                 await page.press(selector, key, timeout=timeout_ms)
             else:
                 await page.keyboard.press(key)
@@ -321,6 +357,11 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             page = session.get_page(target_id)
             if not page:
                 return {"ok": False, "error": "No active tab"}
+
+            try:
+                selector = resolve_selector(selector, session, target_id)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
 
             await page.hover(selector, timeout=timeout_ms)
             return {"ok": True, "action": "hover", "selector": selector}
@@ -360,6 +401,11 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             if not page:
                 return {"ok": False, "error": "No active tab"}
 
+            try:
+                selector = resolve_selector(selector, session, target_id)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+
             selected = await page.select_option(selector, values, timeout=timeout_ms)
             result: dict = {
                 "ok": True,
@@ -368,7 +414,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 "selected": selected,
             }
             if auto_snapshot:
-                snapshot = await _auto_snapshot(page)
+                snapshot = await _auto_snapshot(page, session=session, target_id=target_id)
                 if snapshot:
                     result["snapshot"] = snapshot
                     result["url"] = page.url
@@ -422,6 +468,10 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 delta_x = -amount
 
             if selector:
+                try:
+                    selector = resolve_selector(selector, session, target_id)
+                except ValueError as e:
+                    return {"ok": False, "error": str(e)}
                 element = await page.query_selector(selector)
                 if element:
                     await element.evaluate(f"e => e.scrollBy({delta_x}, {delta_y})")
@@ -435,7 +485,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 "amount": amount,
             }
             if auto_snapshot:
-                snapshot = await _auto_snapshot(page)
+                snapshot = await _auto_snapshot(page, session=session, target_id=target_id)
                 if snapshot:
                     result["snapshot"] = snapshot
                     result["url"] = page.url
@@ -474,6 +524,12 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             if not page:
                 return {"ok": False, "error": "No active tab"}
 
+            try:
+                start_selector = resolve_selector(start_selector, session, target_id)
+                end_selector = resolve_selector(end_selector, session, target_id)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+
             await page.drag_and_drop(
                 start_selector,
                 end_selector,
@@ -486,7 +542,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 "to": end_selector,
             }
             if auto_snapshot:
-                snapshot = await _auto_snapshot(page)
+                snapshot = await _auto_snapshot(page, session=session, target_id=target_id)
                 if snapshot:
                     result["snapshot"] = snapshot
                     result["url"] = page.url

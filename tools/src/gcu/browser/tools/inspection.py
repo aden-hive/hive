@@ -196,6 +196,13 @@ def register_inspection_tools(mcp: FastMCP) -> None:
                     await cdp.detach()
             else:
                 snapshot = await page.locator(":root").aria_snapshot()
+                # Annotate with [ref=eN] markers for interactive elements
+                from ..refs import annotate_snapshot
+
+                snapshot, ref_map = annotate_snapshot(snapshot)
+                tid = target_id or session.active_page_id
+                if tid:
+                    session.ref_maps[tid] = ref_map
 
             return {
                 "ok": True,
