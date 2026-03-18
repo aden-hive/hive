@@ -1559,11 +1559,21 @@ def register_queen_lifecycle_tools(
                 # Find edges where this leaf node is the source
                 out_edges = [e for e in validated_edges if e["source"] == leaf_id]
                 in_edges = [e for e in validated_edges if e["target"] == leaf_id]
-                if not out_edges:
-                    continue  # already a proper leaf
 
                 # Identify the parent (predecessor that connects IN)
                 parent_ids = [e["source"] for e in in_edges]
+
+                if not out_edges:
+                    # Already a proper leaf — still ensure sub_agents is set
+                    for pid in parent_ids:
+                        parent = node_by_id_v.get(pid)
+                        if parent is None:
+                            continue
+                        existing = parent.get("sub_agents") or []
+                        if leaf_id not in existing:
+                            existing.append(leaf_id)
+                        parent["sub_agents"] = existing
+                    continue
 
                 # Strip all outgoing edges from the leaf node that
                 # don't go back to a parent (report edges are OK)
@@ -1977,6 +1987,17 @@ def register_queen_lifecycle_tools(
                             "success_criteria": {
                                 "type": "string",
                                 "description": "What success looks like for this node",
+                            },
+                            "sub_agents": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "IDs of GCU/browser sub-agent nodes managed by this node. "
+                                    "At build time, sub-agent nodes are dissolved into this list. "
+                                    "Set this on the PARENT node — e.g. the orchestrator that "
+                                    "delegates to GCU leaves. Visual delegation edges are "
+                                    "synthesized automatically."
+                                ),
                             },
                             "decision_clause": {
                                 "type": "string",

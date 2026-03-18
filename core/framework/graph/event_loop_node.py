@@ -243,7 +243,7 @@ class LoopConfig:
     # Maximum seconds a delegate_to_sub_agent call may run before being
     # killed.  Subagents run a full event-loop so they naturally take
     # longer than a single tool call — default is 10 minutes.  0 = no timeout.
-    subagent_timeout_seconds: float = 300.0
+    subagent_timeout_seconds: float = 600.0
 
     # --- Lifecycle hooks ---
     # Hooks are async callables keyed by event name.  Supported events:
