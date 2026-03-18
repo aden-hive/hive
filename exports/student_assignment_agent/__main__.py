@@ -9,8 +9,7 @@ import json
 import logging
 import sys
 import click
-
-from .agent import default_agent, DeepResearchAgent
+from .agent import default_agent, StudentAssignmentAgent
 
 
 def setup_logging(verbose=False, debug=False):
@@ -82,7 +81,7 @@ def tui(verbose, debug):
     from framework.runtime.execution_stream import EntryPointSpec
 
     async def run_with_tui():
-        agent = DeepResearchAgent()
+        agent = StudentAssignmentAgent()
 
         # Build graph and tools
         agent._event_bus = EventBus()
@@ -181,7 +180,7 @@ async def _interactive_shell(verbose=False):
     click.echo("=== Deep Research Agent ===")
     click.echo("Enter a topic to research (or 'quit' to exit):\n")
 
-    agent = DeepResearchAgent()
+    agent = StudentAssignmentAgent()
     await agent.start()
 
     try:
