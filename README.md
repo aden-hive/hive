@@ -41,7 +41,8 @@ Generate a swarm of worker agents with a coding agent(queen) that control them. 
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
-[![Hive Demo](https://img.youtube.com/vi/XDOG9fOaLjU/maxresdefault.jpg)](https://www.youtube.com/watch?v=XDOG9fOaLjU)
+https://github.com/user-attachments/assets/aad3a035-e7b3-4cac-b13d-4a83c7002c30
+
 
 ## Who Is Hive For?
 
