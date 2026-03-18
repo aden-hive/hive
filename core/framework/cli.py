@@ -94,6 +94,11 @@ def main():
 
     register_skill_commands(subparsers)
 
+    # Register debugger commands (debugger)
+    from framework.debugger.cli import register_debugger_commands
+
+    register_debugger_commands(subparsers)
+
     args = parser.parse_args()
 
     if hasattr(args, "func"):
