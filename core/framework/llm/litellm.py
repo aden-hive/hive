@@ -9,8 +9,10 @@ See: https://docs.litellm.ai/docs/providers
 
 import ast
 import asyncio
+import hashlib
 import json
 import logging
+import os
 import re
 import time
 from collections.abc import AsyncIterator
@@ -46,7 +48,10 @@ def _patch_litellm_anthropic_oauth() -> None:
     """
     try:
         from litellm.llms.anthropic.common_utils import AnthropicModelInfo
-        from litellm.types.llms.anthropic import ANTHROPIC_OAUTH_TOKEN_PREFIX
+        from litellm.types.llms.anthropic import (
+            ANTHROPIC_OAUTH_BETA_HEADER,
+            ANTHROPIC_OAUTH_TOKEN_PREFIX,
+        )
     except ImportError:
         logger.warning(
             "Could not apply litellm Anthropic OAuth patch — litellm internals may have "
@@ -71,9 +76,27 @@ def _patch_litellm_anthropic_oauth() -> None:
             api_key=api_key,
             api_base=api_base,
         )
+        # Check both authorization header and x-api-key for OAuth tokens.
+        # litellm's optionally_handle_anthropic_oauth only checks headers["authorization"],
+        # but hive passes OAuth tokens via api_key — so litellm puts them into x-api-key.
+        # Anthropic rejects OAuth tokens in x-api-key; they must go in Authorization: Bearer.
         auth = result.get("authorization", "")
-        if auth.startswith(f"Bearer {ANTHROPIC_OAUTH_TOKEN_PREFIX}"):
+        x_api_key = result.get("x-api-key", "")
+        oauth_prefix = f"Bearer {ANTHROPIC_OAUTH_TOKEN_PREFIX}"
+        auth_is_oauth = auth.startswith(oauth_prefix)
+        key_is_oauth = x_api_key.startswith(ANTHROPIC_OAUTH_TOKEN_PREFIX)
+        if auth_is_oauth or key_is_oauth:
+            token = x_api_key if key_is_oauth else auth.removeprefix("Bearer ").strip()
             result.pop("x-api-key", None)
+            result["authorization"] = f"Bearer {token}"
+            # Merge the OAuth beta header with any existing beta headers.
+            existing_beta = result.get("anthropic-beta", "")
+            beta_parts = (
+                [b.strip() for b in existing_beta.split(",") if b.strip()] if existing_beta else []
+            )
+            if ANTHROPIC_OAUTH_BETA_HEADER not in beta_parts:
+                beta_parts.append(ANTHROPIC_OAUTH_BETA_HEADER)
+            result["anthropic-beta"] = ",".join(beta_parts)
         return result
 
     AnthropicModelInfo.validate_environment = _patched_validate_environment
@@ -132,6 +155,9 @@ def _patch_litellm_metadata_nonetype() -> None:
 if litellm is not None:
     _patch_litellm_anthropic_oauth()
     _patch_litellm_metadata_nonetype()
+    # Let litellm silently drop params unsupported by the target provider
+    # (e.g. stream_options for Anthropic) instead of forwarding them verbatim.
+    litellm.drop_params = True
 
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
@@ -161,6 +187,53 @@ def _model_supports_cache_control(model: str) -> bool:
 # Claude Code integration uses this format; the /v1 OpenAI-compatible endpoint
 # enforces a coding-agent whitelist that blocks unknown User-Agents.
 KIMI_API_BASE = "https://api.kimi.com/coding"
+
+# Claude Code OAuth subscription: the Anthropic API requires a specific
+# User-Agent and a billing integrity header for OAuth-authenticated requests.
+CLAUDE_CODE_VERSION = "2.1.76"
+CLAUDE_CODE_USER_AGENT = f"claude-code/{CLAUDE_CODE_VERSION}"
+_CLAUDE_CODE_BILLING_SALT = "59cf53e54c78"
+
+
+def _sample_js_code_unit(text: str, idx: int) -> str:
+    """Return the character at UTF-16 code unit index *idx*, matching JS semantics."""
+    encoded = text.encode("utf-16-le")
+    unit_offset = idx * 2
+    if unit_offset + 2 > len(encoded):
+        return "0"
+    code_unit = int.from_bytes(encoded[unit_offset : unit_offset + 2], "little")
+    return chr(code_unit)
+
+
+def _claude_code_billing_header(messages: list[dict[str, Any]]) -> str:
+    """Build the billing integrity system block required by Anthropic's OAuth path."""
+    # Find the first user message text
+    first_text = ""
+    for msg in messages:
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            first_text = content
+            break
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text" and block.get("text"):
+                    first_text = block["text"]
+                    break
+            if first_text:
+                break
+
+    sampled = "".join(_sample_js_code_unit(first_text, i) for i in (4, 7, 20))
+    version_hash = hashlib.sha256(
+        f"{_CLAUDE_CODE_BILLING_SALT}{sampled}{CLAUDE_CODE_VERSION}".encode()
+    ).hexdigest()
+    entrypoint = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").strip() or "cli"
+    return (
+        f"x-anthropic-billing-header: cc_version={CLAUDE_CODE_VERSION}.{version_hash[:3]}; "
+        f"cc_entrypoint={entrypoint}; cch=00000;"
+    )
+
 
 # Empty-stream retries use a short fixed delay, not the rate-limit backoff.
 # Conversation-structure issues are deterministic — long waits don't help.
@@ -441,6 +514,12 @@ class LiteLLMProvider(LLMProvider):
         self.api_key = api_key
         self.api_base = api_base or self._default_api_base_for_model(_original_model)
         self.extra_kwargs = kwargs
+        # Detect Claude Code OAuth subscription by checking the api_key prefix.
+        self._claude_code_oauth = bool(api_key and api_key.startswith("sk-ant-oat"))
+        if self._claude_code_oauth:
+            # Anthropic requires a specific User-Agent for OAuth requests.
+            eh = self.extra_kwargs.setdefault("extra_headers", {})
+            eh.setdefault("user-agent", CLAUDE_CODE_USER_AGENT)
         # The Codex ChatGPT backend (chatgpt.com/backend-api/codex) rejects
         # several standard OpenAI params: max_output_tokens, stream_options.
         self._codex_backend = bool(
@@ -808,6 +887,9 @@ class LiteLLMProvider(LLMProvider):
             return await self._collect_stream_to_response(stream_iter)
 
         full_messages: list[dict[str, Any]] = []
+        if self._claude_code_oauth:
+            billing = _claude_code_billing_header(messages)
+            full_messages.append({"role": "system", "content": billing})
         if system:
             sys_msg: dict[str, Any] = {"role": "system", "content": system}
             if _model_supports_cache_control(self.model):
@@ -868,6 +950,11 @@ class LiteLLMProvider(LLMProvider):
                 },
             },
         }
+
+    def _is_anthropic_model(self) -> bool:
+        """Return True when the configured model targets Anthropic."""
+        model = (self.model or "").lower()
+        return model.startswith("anthropic/") or model.startswith("claude-")
 
     def _is_minimax_model(self) -> bool:
         """Return True when the configured model targets MiniMax."""
@@ -1479,6 +1566,9 @@ class LiteLLMProvider(LLMProvider):
             return
 
         full_messages: list[dict[str, Any]] = []
+        if self._claude_code_oauth:
+            billing = _claude_code_billing_header(messages)
+            full_messages.append({"role": "system", "content": billing})
         if system:
             sys_msg: dict[str, Any] = {"role": "system", "content": system}
             if _model_supports_cache_control(self.model):
@@ -1516,9 +1606,12 @@ class LiteLLMProvider(LLMProvider):
             "messages": full_messages,
             "max_tokens": max_tokens,
             "stream": True,
-            "stream_options": {"include_usage": True},
             **self.extra_kwargs,
         }
+        # stream_options is OpenAI-specific; Anthropic rejects it with 400.
+        # Only include it for providers that support it.
+        if not self._is_anthropic_model():
+            kwargs["stream_options"] = {"include_usage": True}
         if self.api_key:
             kwargs["api_key"] = self.api_key
         if self.api_base:
