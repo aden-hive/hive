@@ -232,7 +232,23 @@ class SessionManager:
             )
 
         except Exception:
-            # If anything fails, tear down the session
+            if queen_resume_from:
+                # Cold restore: worker load failed (e.g. incomplete code from a
+                # building session).  Fall back to queen-only so the user can
+                # continue the conversation and fix / rebuild the agent.
+                logger.warning(
+                    "Cold restore: worker load failed for '%s', falling back to queen-only",
+                    agent_path,
+                    exc_info=True,
+                )
+                await self.stop_session(session.id)
+                return await self.create_session(
+                    session_id=session_id,
+                    model=model,
+                    initial_prompt=initial_prompt,
+                    queen_resume_from=queen_resume_from,
+                )
+            # If anything fails (non-cold-restore), tear down the session
             await self.stop_session(session.id)
             raise
         return session
