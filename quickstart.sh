@@ -46,7 +46,6 @@ prompt_yes_no() {
     else
         prompt="$prompt [y/N] "
     fi
-
     read -r -p "$prompt" response
     response="${response:-$default}"
     [[ "$response" =~ ^[Yy] ]]
@@ -741,12 +740,17 @@ prompt_model_selection() {
                     local model_hc_result=""
                     local model_hc_valid=""
                     local model_hc_msg=""
+                    local model_hc_canonical=""
                     local model_hc_base="${SELECTED_API_BASE:-https://openrouter.ai/api/v1}"
                     echo -n "  Verifying model id... "
                     model_hc_result="$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "openrouter" "$openrouter_key" "$model_hc_base" "$normalized_model" 2>/dev/null)" || true
                     model_hc_valid="$(echo "$model_hc_result" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null)" || true
                     model_hc_msg="$(echo "$model_hc_result" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null)" || true
+                    model_hc_canonical="$(echo "$model_hc_result" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('model',''))" 2>/dev/null)" || true
                     if [ "$model_hc_valid" = "True" ]; then
+                        if [ -n "$model_hc_canonical" ]; then
+                            normalized_model="$model_hc_canonical"
+                        fi
                         echo -e "${GREEN}ok${NC}"
                     elif [ "$model_hc_valid" = "False" ]; then
                         echo -e "${RED}failed${NC}"
@@ -865,70 +869,73 @@ save_configuration() {
         max_context_tokens=120000
     fi
 
-    uv run python -c "
-import json
-from datetime import datetime, timezone
-from pathlib import Path
-
-cfg_path = Path.home() / '.hive' / 'configuration.json'
-cfg_path.parent.mkdir(parents=True, exist_ok=True)
-
-config = {
-    'llm': {
-        'provider': '$provider_id',
-        'model': '$model',
-        'max_tokens': $max_tokens,
-        'max_context_tokens': $max_context_tokens,
-        'api_key_env_var': '$env_var'
-    },
-    'created_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S+00:00')
-}
-if '$use_claude_code_sub' == 'true':
-    config['llm']['use_claude_code_subscription'] = True
-    # No api_key_env_var needed for Claude Code subscription
-    config['llm'].pop('api_key_env_var', None)
-if '$use_codex_sub' == 'true':
-    config['llm']['use_codex_subscription'] = True
-    # No api_key_env_var needed for Codex subscription
-    config['llm'].pop('api_key_env_var', None)
-if '$api_base':
-    config['llm']['api_base'] = '$api_base'
-tmp_path = cfg_path.parent / (cfg_path.name + '.tmp')
-with open(tmp_path, 'w', encoding='utf-8') as f:
-    json.dump(config, f, indent=2)
-tmp_path.replace(cfg_path)
-print(json.dumps(config, indent=2))
-"
-}
-
-# Verify that configuration was persisted exactly as selected.
-# Args: provider_id env_var model [api_base]
-verify_configuration() {
-    local provider_id="$1"
-    local env_var="$2"
-    local model="$3"
-    local api_base="${4:-}"
-
-    uv run python -c "
+    uv run python - \
+        "$provider_id" \
+        "$env_var" \
+        "$model" \
+        "$max_tokens" \
+        "$max_context_tokens" \
+        "$use_claude_code_sub" \
+        "$api_base" \
+        "$use_codex_sub" \
+        "$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")" 2>/dev/null <<'PY'
 import json
 import sys
 from pathlib import Path
 
-cfg_path = Path.home() / '.hive' / 'configuration.json'
-with open(cfg_path, encoding='utf-8-sig') as f:
-    cfg = json.load(f)
-llm = cfg.get('llm', {})
+(
+    provider_id,
+    env_var,
+    model,
+    max_tokens,
+    max_context_tokens,
+    use_claude_code_sub,
+    api_base,
+    use_codex_sub,
+    created_at,
+) = sys.argv[1:10]
 
-ok = (llm.get('provider') == '$provider_id' and llm.get('model') == '$model')
-if '$env_var':
-    ok = ok and (llm.get('api_key_env_var') == '$env_var')
-if '$api_base':
-    ok = ok and (llm.get('api_base') == '$api_base')
+cfg_path = Path.home() / ".hive" / "configuration.json"
+cfg_path.parent.mkdir(parents=True, exist_ok=True)
 
-if not ok:
-    print(json.dumps(llm, indent=2))
-    sys.exit(1)
-"
+try:
+    with open(cfg_path, encoding="utf-8-sig") as f:
+        config = json.load(f)
+except (OSError, json.JSONDecodeError):
+    config = {}
+
+config["llm"] = {
+    "provider": provider_id,
+    "model": model,
+    "max_tokens": int(max_tokens),
+    "max_context_tokens": int(max_context_tokens),
+    "api_key_env_var": env_var,
+}
+config["created_at"] = created_at
+
+if use_claude_code_sub == "true":
+    config["llm"]["use_claude_code_subscription"] = True
+    config["llm"].pop("api_key_env_var", None)
+else:
+    config["llm"].pop("use_claude_code_subscription", None)
+
+if use_codex_sub == "true":
+    config["llm"]["use_codex_subscription"] = True
+    config["llm"].pop("api_key_env_var", None)
+else:
+    config["llm"].pop("use_codex_subscription", None)
+
+if api_base:
+    config["llm"]["api_base"] = api_base
+else:
+    config["llm"].pop("api_base", None)
+
+tmp_path = cfg_path.with_name(cfg_path.name + ".tmp")
+with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(config, f, indent=2)
+tmp_path.replace(cfg_path)
+print(json.dumps(config, indent=2))
+PY
 }
 
 # Source shell rc file to pick up existing env vars (temporarily disable set -e)
@@ -1009,28 +1016,36 @@ PREV_MODEL=""
 PREV_ENV_VAR=""
 PREV_SUB_MODE=""
 if [ -f "$HIVE_CONFIG_FILE" ]; then
-    eval "$(uv run python -c "
-import json, sys
+    eval "$(uv run python - 2>/dev/null <<'PY'
+import json
 from pathlib import Path
+
+cfg_path = Path.home() / ".hive" / "configuration.json"
 try:
-    cfg_path = Path.home() / '.hive' / 'configuration.json'
-    with open(cfg_path, encoding='utf-8-sig') as f:
+    with open(cfg_path, encoding="utf-8-sig") as f:
         c = json.load(f)
-    llm = c.get('llm', {})
-    print(f'PREV_PROVIDER={llm.get(\"provider\", \"\")}')
-    print(f'PREV_MODEL={llm.get(\"model\", \"\")}')
-    print(f'PREV_ENV_VAR={llm.get(\"api_key_env_var\", \"\")}')
-    sub = ''
-    if llm.get('use_claude_code_subscription'): sub = 'claude_code'
-    elif llm.get('use_codex_subscription'): sub = 'codex'
-    elif llm.get('use_kimi_code_subscription'): sub = 'kimi_code'
-    elif llm.get('provider', '') == 'minimax' or 'api.minimax.io' in llm.get('api_base', ''): sub = 'minimax_code'
-    elif llm.get('provider', '') == 'hive' or 'adenhq.com' in llm.get('api_base', ''): sub = 'hive_llm'
-    elif 'api.z.ai' in llm.get('api_base', ''): sub = 'zai_code'
-    print(f'PREV_SUB_MODE={sub}')
+    llm = c.get("llm", {})
+    print(f"PREV_PROVIDER={llm.get(\"provider\", \"\")}")
+    print(f"PREV_MODEL={llm.get(\"model\", \"\")}")
+    print(f"PREV_ENV_VAR={llm.get(\"api_key_env_var\", \"\")}")
+    sub = ""
+    if llm.get("use_claude_code_subscription"):
+        sub = "claude_code"
+    elif llm.get("use_codex_subscription"):
+        sub = "codex"
+    elif llm.get("use_kimi_code_subscription"):
+        sub = "kimi_code"
+    elif llm.get("provider", "") == "minimax" or "api.minimax.io" in llm.get("api_base", ""):
+        sub = "minimax_code"
+    elif llm.get("provider", "") == "hive" or "adenhq.com" in llm.get("api_base", ""):
+        sub = "hive_llm"
+    elif "api.z.ai" in llm.get("api_base", ""):
+        sub = "zai_code"
+    print(f"PREV_SUB_MODE={sub}")
 except Exception:
     pass
-" 2>/dev/null)" || true
+PY
+)" || true
 fi
 
 # Compute default menu number from previous config (only if credential is still valid)
@@ -1494,17 +1509,6 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
         echo -e "${YELLOW}  Could not write ~/.hive/configuration.json. Please rerun quickstart.${NC}"
         exit 1
     fi
-    VERIFY_API_BASE=""
-    if [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
-        VERIFY_API_BASE="https://api.z.ai/api/coding/paas/v4"
-    elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ] || [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
-        VERIFY_API_BASE="${SELECTED_API_BASE:-}"
-    fi
-    if ! verify_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$VERIFY_API_BASE"; then
-        echo -e "${RED}failed${NC}"
-        echo -e "${YELLOW}  Configuration verification failed for ~/.hive/configuration.json.${NC}"
-        exit 1
-    fi
     echo -e "${GREEN}⬢${NC}"
     echo -e "  ${DIM}~/.hive/configuration.json${NC}"
 fi
@@ -1518,24 +1522,46 @@ echo ""
 echo -e "${GREEN}⬢${NC} Browser automation enabled"
 
 # Patch gcu_enabled into configuration.json
-uv run python -c "
+if [ -f "$HIVE_CONFIG_FILE" ]; then
+    if ! uv run python - <<'PY'
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
-cfg_path = Path.home() / '.hive' / 'configuration.json'
-cfg_path.parent.mkdir(parents=True, exist_ok=True)
-if cfg_path.exists():
-    with open(cfg_path, encoding='utf-8-sig') as f:
-        config = json.load(f)
-else:
-    config = {'created_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S+00:00')}
-config['gcu_enabled'] = True
-tmp_path = cfg_path.parent / (cfg_path.name + '.tmp')
-with open(tmp_path, 'w', encoding='utf-8') as f:
+cfg_path = Path.home() / ".hive" / "configuration.json"
+with open(cfg_path, encoding="utf-8-sig") as f:
+    config = json.load(f)
+config["gcu_enabled"] = True
+tmp_path = cfg_path.with_name(cfg_path.name + ".tmp")
+with open(tmp_path, "w", encoding="utf-8") as f:
     json.dump(config, f, indent=2)
 tmp_path.replace(cfg_path)
-"
+PY
+    then
+        echo -e "${RED}failed${NC}"
+        echo -e "${YELLOW}  Could not update ~/.hive/configuration.json with browser automation settings.${NC}"
+        exit 1
+    fi
+else
+    if ! uv run python - "$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+cfg_path = Path.home() / ".hive" / "configuration.json"
+cfg_path.parent.mkdir(parents=True, exist_ok=True)
+config = {
+    "gcu_enabled": True,
+    "created_at": sys.argv[1],
+}
+with open(cfg_path, "w", encoding="utf-8") as f:
+    json.dump(config, f, indent=2)
+PY
+    then
+        echo -e "${RED}failed${NC}"
+        echo -e "${YELLOW}  Could not create ~/.hive/configuration.json for browser automation settings.${NC}"
+        exit 1
+    fi
+fi
 
 echo ""
 
@@ -1782,7 +1808,6 @@ if [ "$CODEX_AVAILABLE" = true ]; then
     echo ""
 fi
 
-# Setup-only mode: quickstart never auto-launches the dashboard.
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BOLD}IMPORTANT: Load your new configuration${NC}"
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -1800,7 +1825,11 @@ echo ""
 
 echo -e "${BOLD}Run an Agent:${NC}"
 echo ""
-echo -e "  Launch the interactive dashboard when you're ready:"
+if [ "$FRONTEND_BUILT" = true ]; then
+    echo -e "  Quickstart only sets things up. Launch the dashboard when you're ready:"
+else
+    echo -e "  Frontend build was skipped or failed. Once the dashboard is available, launch it with:"
+fi
 echo -e "     ${CYAN}hive open${NC}"
 echo ""
 echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"

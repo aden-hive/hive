@@ -12,13 +12,31 @@ Output: single JSON line {"valid": bool, "message": str}
 """
 
 import json
+import re
 import sys
+import unicodedata
+from difflib import get_close_matches
 
 import httpx
 
 from framework.config import HIVE_LLM_ENDPOINT
 
 TIMEOUT = 10.0
+OPENROUTER_SEPARATOR_TRANSLATION = str.maketrans(
+    {
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u2012": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2015": "-",
+        "\u2212": "-",
+        "\u2044": "/",
+        "\u2215": "/",
+        "\u29F8": "/",
+        "\uFF0F": "/",
+    }
+)
 
 
 def _extract_error_message(response: httpx.Response) -> str:
@@ -42,6 +60,77 @@ def _extract_error_message(response: httpx.Response) -> str:
             return message.strip()
 
     return ""
+
+
+def _sanitize_openrouter_model_id(value: str) -> str:
+    """Sanitize pasted OpenRouter model IDs into a comparable slug."""
+    normalized = unicodedata.normalize("NFKC", value or "")
+    normalized = "".join(
+        ch
+        for ch in normalized
+        if unicodedata.category(ch) not in {"Cc", "Cf"}
+    )
+    normalized = normalized.translate(OPENROUTER_SEPARATOR_TRANSLATION)
+    normalized = re.sub(r"\s+", "", normalized)
+    if normalized.casefold().startswith("openrouter/"):
+        normalized = normalized.split("/", 1)[1]
+    return normalized
+
+
+def _normalize_openrouter_model_id(value: str) -> str:
+    """Normalize OpenRouter model IDs for exact/alias matching."""
+    return _sanitize_openrouter_model_id(value).casefold()
+
+
+def _extract_openrouter_model_lookup(payload: object) -> dict[str, str]:
+    """Map normalized model IDs/aliases to a preferred canonical display slug."""
+    if not isinstance(payload, dict):
+        return {}
+
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return {}
+
+    lookup: dict[str, str] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+
+        model_id = item.get("id")
+        canonical_slug = item.get("canonical_slug")
+        candidates = [
+            _sanitize_openrouter_model_id(value)
+            for value in (model_id, canonical_slug)
+            if isinstance(value, str) and _sanitize_openrouter_model_id(value)
+        ]
+        if not candidates:
+            continue
+
+        preferred_slug = candidates[-1]
+        for candidate in candidates:
+            lookup[_normalize_openrouter_model_id(candidate)] = preferred_slug
+
+    return lookup
+
+
+def _format_openrouter_model_unavailable_message(
+    model: str, available_model_lookup: dict[str, str]
+) -> str:
+    """Return a helpful not-found message with close-match suggestions."""
+    suggestions = [
+        available_model_lookup[key]
+        for key in get_close_matches(
+            _normalize_openrouter_model_id(model),
+            list(available_model_lookup),
+            n=1,
+            cutoff=0.6,
+        )
+    ]
+
+    base = f"OpenRouter model is not available for this key/settings: {model}"
+    if suggestions:
+        return f"{base}. Closest matches: {', '.join(suggestions)}"
+    return base
 
 
 def check_anthropic(api_key: str, **_: str) -> dict:
@@ -103,23 +192,32 @@ def check_openrouter_model(
     api_base: str = "https://openrouter.ai/api/v1",
     **_: str,
 ) -> dict:
-    """Validate that an OpenRouter model ID is routable with this key."""
-    endpoint = f"{api_base.rstrip('/')}/chat/completions"
+    """Validate that an OpenRouter model ID is available to this key/settings."""
+    requested_model = _sanitize_openrouter_model_id(model)
+    endpoint = f"{api_base.rstrip('/')}/models/user"
     with httpx.Client(timeout=TIMEOUT) as client:
-        r = client.post(
+        r = client.get(
             endpoint,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": "Hello, are you working?"}],
-                "max_tokens": 1,
-            },
+            headers={"Authorization": f"Bearer {api_key}"},
         )
     if r.status_code == 200:
-        return {"valid": True, "message": f"OpenRouter model is available: {model}"}
+        available_model_lookup = _extract_openrouter_model_lookup(r.json())
+        matched_model = available_model_lookup.get(
+            _normalize_openrouter_model_id(requested_model)
+        )
+        if matched_model:
+            return {
+                "valid": True,
+                "message": f"OpenRouter model is available: {matched_model}",
+                "model": matched_model,
+            }
+
+        return {
+            "valid": False,
+            "message": _format_openrouter_model_unavailable_message(
+                requested_model, available_model_lookup
+            ),
+        }
     if r.status_code == 429:
         return {
             "valid": True,
@@ -132,7 +230,10 @@ def check_openrouter_model(
 
     detail = _extract_error_message(r)
     if r.status_code in (400, 404, 422):
-        base = f"OpenRouter model is not available: {model}"
+        base = (
+            "OpenRouter model is not available for this key/settings: "
+            f"{requested_model}"
+        )
         return {"valid": False, "message": f"{base}. {detail}" if detail else base}
 
     suffix = f": {detail}" if detail else ""

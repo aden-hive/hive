@@ -39,7 +39,12 @@ def _run_openrouter_check(monkeypatch, status_code: int):
     return result, calls
 
 
-def _run_openrouter_model_check(monkeypatch, status_code: int, payload: dict | None = None):
+def _run_openrouter_model_check(
+    monkeypatch,
+    status_code: int,
+    payload: dict | None = None,
+    model: str = "openai/gpt-4o-mini",
+):
     module = _load_check_llm_key_module()
     calls = {}
 
@@ -64,14 +69,13 @@ def _run_openrouter_model_check(monkeypatch, status_code: int, payload: dict | N
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def post(self, endpoint, headers, json):
+        def get(self, endpoint, headers):
             calls["endpoint"] = endpoint
             calls["headers"] = headers
-            calls["json"] = json
             return FakeResponse(status_code)
 
     monkeypatch.setattr(module.httpx, "Client", FakeClient)
-    result = module.check_openrouter_model("test-key", "openai/gpt-4o-mini")
+    result = module.check_openrouter_model("test-key", model)
     return result, calls
 
 
@@ -98,18 +102,88 @@ def test_check_openrouter_429(monkeypatch):
 
 
 def test_check_openrouter_model_200(monkeypatch):
-    result, calls = _run_openrouter_model_check(monkeypatch, 200)
+    result, calls = _run_openrouter_model_check(
+        monkeypatch,
+        200,
+        {
+            "data": [
+                {
+                    "id": "openai/gpt-4o-mini",
+                    "canonical_slug": "openai/gpt-4o-mini",
+                }
+            ]
+        },
+    )
     assert result == {
         "valid": True,
         "message": "OpenRouter model is available: openai/gpt-4o-mini",
+        "model": "openai/gpt-4o-mini",
     }
-    assert calls["endpoint"] == "https://openrouter.ai/api/v1/chat/completions"
-    assert calls["headers"] == {
-        "Authorization": "Bearer test-key",
-        "Content-Type": "application/json",
+    assert calls["endpoint"] == "https://openrouter.ai/api/v1/models/user"
+    assert calls["headers"] == {"Authorization": "Bearer test-key"}
+
+
+def test_check_openrouter_model_200_matches_canonical_slug(monkeypatch):
+    result, _ = _run_openrouter_model_check(
+        monkeypatch,
+        200,
+        {
+            "data": [
+                {
+                    "id": "mistralai/mistral-small-4",
+                    "canonical_slug": "mistralai/mistral-small-2603",
+                }
+            ]
+        },
+        model="mistralai/mistral-small-2603",
+    )
+    assert result == {
+        "valid": True,
+        "message": "OpenRouter model is available: mistralai/mistral-small-2603",
+        "model": "mistralai/mistral-small-2603",
     }
-    assert calls["json"]["model"] == "openai/gpt-4o-mini"
-    assert calls["json"]["max_tokens"] == 1
+
+
+def test_check_openrouter_model_200_sanitizes_pasted_unicode(monkeypatch):
+    result, _ = _run_openrouter_model_check(
+        monkeypatch,
+        200,
+        {
+            "data": [
+                {
+                    "id": "z-ai/glm-5-turbo",
+                    "canonical_slug": "z-ai/glm-5-turbo",
+                }
+            ]
+        },
+        model="openrouter/z-ai\u200b/glm\u20115\u2011turbo",
+    )
+    assert result == {
+        "valid": True,
+        "message": "OpenRouter model is available: z-ai/glm-5-turbo",
+        "model": "z-ai/glm-5-turbo",
+    }
+
+
+def test_check_openrouter_model_200_not_found_with_suggestions(monkeypatch):
+    result, _ = _run_openrouter_model_check(
+        monkeypatch,
+        200,
+        {
+            "data": [
+                {"id": "z-ai/glm-5-turbo"},
+                {"id": "z-ai/glm-4.6v"},
+            ]
+        },
+        model="z-ai/glm-5-turb",
+    )
+    assert result == {
+        "valid": False,
+        "message": (
+            "OpenRouter model is not available for this key/settings: z-ai/glm-5-turb. "
+            "Closest matches: z-ai/glm-5-turbo"
+        ),
+    }
 
 
 def test_check_openrouter_model_404_with_error_message(monkeypatch):
@@ -121,7 +195,7 @@ def test_check_openrouter_model_404_with_error_message(monkeypatch):
     assert result == {
         "valid": False,
         "message": (
-            "OpenRouter model is not available: openai/gpt-4o-mini. "
+            "OpenRouter model is not available for this key/settings: openai/gpt-4o-mini. "
             "No endpoints available for this model"
         ),
     }

@@ -11,7 +11,6 @@ import ast
 import asyncio
 import json
 import logging
-import os
 import re
 import time
 from collections.abc import AsyncIterator
@@ -133,11 +132,6 @@ def _patch_litellm_metadata_nonetype() -> None:
 if litellm is not None:
     _patch_litellm_anthropic_oauth()
     _patch_litellm_metadata_nonetype()
-    litellm.suppress_debug_info = True
-    if not os.environ.get("LITELLM_LOG"):
-        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-        logging.getLogger("LiteLLM Router").setLevel(logging.WARNING)
-        logging.getLogger("LiteLLM Proxy").setLevel(logging.WARNING)
 
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
@@ -181,7 +175,9 @@ OPENROUTER_TOOL_CALL_RE = re.compile(
     r"<\|tool_call_start\|>\s*(.*?)\s*<\|tool_call_end\|>",
     re.DOTALL,
 )
-OPENROUTER_TOOL_COMPAT_MODEL_CACHE: set[str] = set()
+OPENROUTER_TOOL_COMPAT_CACHE_TTL_SECONDS = 3600
+# OpenRouter routing can change over time, so tool-compat caching must expire.
+OPENROUTER_TOOL_COMPAT_MODEL_CACHE: dict[str, float] = {}
 
 # Directory for dumping failed requests
 FAILED_REQUESTS_DIR = Path.home() / ".hive" / "failed_requests"
@@ -222,6 +218,24 @@ def _prune_failed_request_dumps(max_files: int = MAX_FAILED_REQUEST_DUMPS) -> No
                 old_file.unlink(missing_ok=True)
     except Exception:
         pass  # Best-effort — never block the caller
+
+
+def _remember_openrouter_tool_compat_model(model: str) -> None:
+    """Cache OpenRouter tool-compat fallback for a bounded time window."""
+    OPENROUTER_TOOL_COMPAT_MODEL_CACHE[model] = (
+        time.monotonic() + OPENROUTER_TOOL_COMPAT_CACHE_TTL_SECONDS
+    )
+
+
+def _is_openrouter_tool_compat_cached(model: str) -> bool:
+    """Return True when the cached OpenRouter compat entry is still fresh."""
+    expires_at = OPENROUTER_TOOL_COMPAT_MODEL_CACHE.get(model)
+    if expires_at is None:
+        return False
+    if expires_at <= time.monotonic():
+        OPENROUTER_TOOL_COMPAT_MODEL_CACHE.pop(model, None)
+        return False
+    return True
 
 
 def _dump_failed_request(
@@ -1457,7 +1471,7 @@ class LiteLLMProvider(LLMProvider):
         if (
             tools
             and self._is_openrouter_model()
-            and self.model in OPENROUTER_TOOL_COMPAT_MODEL_CACHE
+            and _is_openrouter_tool_compat_cached(self.model)
         ):
             async for event in self._stream_via_openrouter_tool_compat(
                 messages=messages,
@@ -1799,7 +1813,7 @@ class LiteLLMProvider(LLMProvider):
 
             except Exception as e:
                 if self._should_use_openrouter_tool_compat(e, tools):
-                    OPENROUTER_TOOL_COMPAT_MODEL_CACHE.add(self.model)
+                    _remember_openrouter_tool_compat_model(self.model)
                     async for event in self._stream_via_openrouter_tool_compat(
                         messages=messages,
                         system=system,

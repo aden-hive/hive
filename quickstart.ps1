@@ -867,6 +867,9 @@ function Get-ModelSelection {
                         $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "openrouter" $openrouterKey $modelApiBase $normalizedModel 2>$null
                         $hcJson = $hcResult | ConvertFrom-Json
                         if ($hcJson.valid -eq $true) {
+                            if ($hcJson.model) {
+                                $normalizedModel = [string]$hcJson.model
+                            }
                             Write-Color -Text "ok" -Color Green
                         } elseif ($hcJson.valid -eq $false) {
                             Write-Color -Text "failed" -Color Red
@@ -1575,37 +1578,6 @@ if ($SelectedProviderId) {
     }
 
     $config | ConvertTo-Json -Depth 4 | Set-Content -Path $HiveConfigFile -Encoding UTF8
-
-    $expectedApiBase = ""
-    if ($SubscriptionMode -eq "zai_code") {
-        $expectedApiBase = "https://api.z.ai/api/coding/paas/v4"
-    } elseif ($SubscriptionMode -eq "kimi_code") {
-        $expectedApiBase = "https://api.kimi.com/coding"
-    } elseif ($SelectedProviderId -eq "openrouter") {
-        $expectedApiBase = "https://openrouter.ai/api/v1"
-    }
-
-    try {
-        $savedConfig = Get-Content -Path $HiveConfigFile -Raw | ConvertFrom-Json
-        $savedLlm = $savedConfig.llm
-        $verifyOk = $savedLlm -and $savedLlm.provider -eq $SelectedProviderId -and $savedLlm.model -eq $SelectedModel
-
-        if ($SelectedEnvVar) {
-            $verifyOk = $verifyOk -and $savedLlm.api_key_env_var -eq $SelectedEnvVar
-        }
-        if ($expectedApiBase) {
-            $verifyOk = $verifyOk -and $savedLlm.api_base -eq $expectedApiBase
-        }
-
-        if (-not $verifyOk) {
-            throw "Saved configuration mismatch"
-        }
-    } catch {
-        Write-Fail "configuration verification failed"
-        Write-Color -Text "  Could not persist ~/.hive/configuration.json with the selected LLM settings." -Color Yellow
-        exit 1
-    }
-
     Write-Ok "done"
     Write-Color -Text "  ~/.hive/configuration.json" -Color DarkGray
 }
@@ -1933,35 +1905,69 @@ if ($CodexAvailable) {
     Write-Host ""
 }
 
-# Setup-only mode: quickstart never auto-launches the dashboard.
-Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
-Write-Host ""
-Write-Color -Text "  IMPORTANT: Restart your terminal now!" -Color Yellow
-Write-Host ""
-Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
-Write-Host ""
-Write-Host 'Environment variables (uv, API keys) are now configured, but you need to'
-Write-Host 'restart your terminal for them to take effect in new sessions.'
-Write-Host ""
+# Setup-only mode: show manual instructions
+if ($FrontendBuilt) {
+    Write-Color -Text "â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•" -Color Yellow
+    Write-Host ""
+    Write-Color -Text "  IMPORTANT: Restart your terminal now!" -Color Yellow
+    Write-Host ""
+    Write-Color -Text "â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•" -Color Yellow
+    Write-Host ""
+    Write-Host 'Environment variables (uv, API keys) are now configured, but you need to'
+    Write-Host 'restart your terminal for them to take effect in new sessions.'
+    Write-Host ""
 
-Write-Color -Text "Run an Agent:" -Color White
-Write-Host ""
-Write-Host "  Launch the interactive dashboard when you're ready:"
-Write-Color -Text "     hive open" -Color Cyan
-Write-Host ""
+    Write-Color -Text "Run an Agent:" -Color White
+    Write-Host ""
+    Write-Host "  Quickstart only sets things up. Launch the dashboard when you're ready:"
+    Write-Color -Text "     hive open" -Color Cyan
+    Write-Host ""
 
-if ($SelectedProviderId -or $credKey) {
-    Write-Color -Text "Note:" -Color White
-    Write-Host "- uv has been added to your User PATH"
-    if ($SelectedProviderId -and $SelectedEnvVar) {
-        Write-Host "- $SelectedEnvVar is set for LLM access"
+    if ($SelectedProviderId -or $credKey) {
+        Write-Color -Text "Note:" -Color White
+        Write-Host "- uv has been added to your User PATH"
+        if ($SelectedProviderId -and $SelectedEnvVar) {
+            Write-Host "- $SelectedEnvVar is set for LLM access"
+        }
+        if ($credKey) {
+            Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
+        }
+        Write-Host "- All variables will persist across reboots"
+        Write-Host ""
     }
-    if ($credKey) {
-        Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
+
+    Write-Color -Text 'Run .\quickstart.ps1 again to reconfigure.' -Color DarkGray
+    Write-Host ""
+} else {
+    Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
+    Write-Host ""
+    Write-Color -Text "  IMPORTANT: Restart your terminal now!" -Color Yellow
+    Write-Host ""
+    Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
+    Write-Host ""
+    Write-Host 'Environment variables (uv, API keys) are now configured, but you need to'
+    Write-Host 'restart your terminal for them to take effect in new sessions.'
+    Write-Host ""
+
+    Write-Color -Text "Run an Agent:" -Color White
+    Write-Host ""
+    Write-Host "  Frontend build was skipped or failed. Once the dashboard is available, launch it with:"
+    Write-Color -Text "     hive open" -Color Cyan
+    Write-Host ""
+
+    if ($SelectedProviderId -or $credKey) {
+        Write-Color -Text "Note:" -Color White
+        Write-Host "- uv has been added to your User PATH"
+        if ($SelectedProviderId -and $SelectedEnvVar) {
+            Write-Host "- $SelectedEnvVar is set for LLM access"
+        }
+        if ($credKey) {
+            Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
+        }
+        Write-Host "- All variables will persist across reboots"
+        Write-Host ""
     }
-    Write-Host "- All variables will persist across reboots"
+
+    Write-Color -Text 'Run .\quickstart.ps1 again to reconfigure.' -Color DarkGray
     Write-Host ""
 }
-
-Write-Color -Text 'Run .\quickstart.ps1 again to reconfigure.' -Color DarkGray
-Write-Host ""
