@@ -42,11 +42,14 @@ class SkillsManagerConfig:
             When ``None``, community discovery is skipped.
         skip_community_discovery: Explicitly skip community scanning
             even when ``project_root`` is set.
+        interactive: Whether trust gating can prompt the user interactively.
+            When ``False``, untrusted project skills are silently skipped.
     """
 
     skills_config: SkillsConfig = field(default_factory=SkillsConfig)
     project_root: Path | None = None
     skip_community_discovery: bool = False
+    interactive: bool = True
 
 
 class SkillsManager:
@@ -63,6 +66,7 @@ class SkillsManager:
         self._loaded = False
         self._catalog_prompt: str = ""
         self._protocols_prompt: str = ""
+        self._allowlisted_dirs: list[str] = []
 
     # ------------------------------------------------------------------
     # Factory for backwards-compat bridge
@@ -85,6 +89,7 @@ class SkillsManager:
         mgr._loaded = True  # skip load()
         mgr._catalog_prompt = skills_catalog_prompt
         mgr._protocols_prompt = protocols_prompt
+        mgr._allowlisted_dirs = []
         return mgr
 
     # ------------------------------------------------------------------
@@ -113,9 +118,18 @@ class SkillsManager:
         # 1. Community skill discovery (when project_root is available)
         catalog_prompt = ""
         if self._config.project_root is not None and not self._config.skip_community_discovery:
+            from framework.skills.trust import TrustGate
+
             discovery = SkillDiscovery(DiscoveryConfig(project_root=self._config.project_root))
             discovered = discovery.discover()
+
+            # Trust-gate project-scope skills (AS-13)
+            discovered = TrustGate(interactive=self._config.interactive).filter_and_gate(
+                discovered, project_dir=self._config.project_root
+            )
+
             catalog = SkillCatalog(discovered)
+            self._allowlisted_dirs = catalog.allowlisted_dirs
             catalog_prompt = catalog.to_prompt()
 
             # Pre-activated community skills
@@ -159,6 +173,11 @@ class SkillsManager:
     def protocols_prompt(self) -> str:
         """Default skill operational protocols for system prompt injection."""
         return self._protocols_prompt
+
+    @property
+    def allowlisted_dirs(self) -> list[str]:
+        """Skill base directories for Tier 3 resource access (AS-6)."""
+        return self._allowlisted_dirs
 
     @property
     def is_loaded(self) -> bool:
