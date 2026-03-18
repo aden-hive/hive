@@ -975,7 +975,8 @@ class SessionManager:
                 if max_iter >= 0:
                     iteration_offset = max_iter + 1
                     logger.info(
-                        "Session '%s' resuming with iteration_offset=%d (from events.jsonl max), last phase: %s",
+                        "Session '%s' resuming with iteration_offset=%d"
+                        " (from events.jsonl max), last phase: %s",
                         session.id,
                         iteration_offset,
                         last_phase or "unknown",
