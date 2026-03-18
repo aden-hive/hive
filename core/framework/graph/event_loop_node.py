@@ -326,11 +326,7 @@ class OutputAccumulator:
         if self.max_value_chars <= 0 or not self.spillover_dir:
             return value
 
-        val_str = (
-            json.dumps(value, ensure_ascii=False)
-            if not isinstance(value, str)
-            else value
-        )
+        val_str = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
         if len(val_str) <= self.max_value_chars:
             return value
 
@@ -346,8 +342,7 @@ class OutputAccumulator:
         (spill_path / filename).write_text(write_content, encoding="utf-8")
         file_size = (spill_path / filename).stat().st_size
         logger.info(
-            "set_output value auto-spilled: key=%s, "
-            "%d chars → %s (%d bytes)",
+            "set_output value auto-spilled: key=%s, %d chars → %s (%d bytes)",
             key,
             len(val_str),
             filename,
@@ -641,10 +636,10 @@ class EventLoopNode(NodeProtocol):
                 if _is_continuous:
                     conversation.set_current_phase(ctx.node_id)
                 accumulator = OutputAccumulator(
-                store=self._conversation_store,
-                spillover_dir=self._config.spillover_dir,
-                max_value_chars=self._config.max_output_value_chars,
-            )
+                    store=self._conversation_store,
+                    spillover_dir=self._config.spillover_dir,
+                    max_value_chars=self._config.max_output_value_chars,
+                )
                 start_iteration = 0
 
                 # Add initial user message from input data
@@ -2668,9 +2663,7 @@ class EventLoopNode(NodeProtocol):
                     # subagent results are saved to spillover files
                     # and survive pruning (instead of being "cleared
                     # from context" with no recovery path).
-                    result = self._truncate_tool_result(
-                        result, "delegate_to_sub_agent"
-                    )
+                    result = self._truncate_tool_result(result, "delegate_to_sub_agent")
                     results_by_id[tc.tool_use_id] = result
                     logged_tool_calls.append(
                         {
@@ -4331,16 +4324,14 @@ class EventLoopNode(NodeProtocol):
                         )
                         parts.append(
                             "CONVERSATION HISTORY (freeform messages saved during compaction — "
-                            "use load_data('<filename>') to review earlier dialogue):\n"
-                            + conv_list
+                            "use load_data('<filename>') to review earlier dialogue):\n" + conv_list
                         )
                     if data_files:
                         file_list = "\n".join(
                             f"  - {f}  (full path: {data_dir / f})" for f in data_files[:30]
                         )
                         parts.append(
-                            "DATA FILES (use load_data('<filename>') to read):\n"
-                            + file_list
+                            "DATA FILES (use load_data('<filename>') to read):\n" + file_list
                         )
                     if not all_files:
                         parts.append(

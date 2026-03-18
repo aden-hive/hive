@@ -301,9 +301,7 @@ def build_transition_marker(
                         if isinstance(value, (dict, list))
                         else str(value)
                     )
-                    (data_path / filename).write_text(
-                        write_content, encoding="utf-8"
-                    )
+                    (data_path / filename).write_text(write_content, encoding="utf-8")
                     file_size = (data_path / filename).stat().st_size
                     val_str = (
                         f"[Saved to '{filename}' ({file_size:,} bytes). "
@@ -328,8 +326,7 @@ def build_transition_marker(
                 ]
                 if file_lines:
                     sections.append(
-                        "\nData files (use load_data to access):\n"
-                        + "\n".join(file_lines)
+                        "\nData files (use load_data to access):\n" + "\n".join(file_lines)
                     )
 
     # Agent working memory

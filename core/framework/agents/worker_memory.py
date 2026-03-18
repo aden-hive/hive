@@ -126,9 +126,7 @@ def _build_run_context(
     if tool_events:
         names = [e.data.get("tool_name", "?") for e in tool_events]
         counts = Counter(names)
-        summary = ", ".join(
-            f"{name}×{n}" if n > 1 else name for name, n in counts.most_common()
-        )
+        summary = ", ".join(f"{name}×{n}" if n > 1 else name for name, n in counts.most_common())
         lines.append(f"Tools used: {summary}")
         # Note any tool errors
         errors = [e for e in tool_events if e.data.get("is_error")]
@@ -157,9 +155,7 @@ def _build_run_context(
         lines.append(f"Escalations to queen: {len(escalations)}")
 
     # Final LLM output snippet (last LLM_TEXT_DELTA snapshot)
-    text_events = [
-        e for e in reversed(events_chron) if e.type == EventType.LLM_TEXT_DELTA
-    ]
+    text_events = [e for e in reversed(events_chron) if e.type == EventType.LLM_TEXT_DELTA]
     if text_events:
         snapshot = text_events[0].data.get("snapshot", "") or ""
         if snapshot:
