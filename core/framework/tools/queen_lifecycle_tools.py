@@ -2123,10 +2123,14 @@ def register_queen_lifecycle_tools(
             _agent_folder.mkdir(parents=True, exist_ok=True)
             _save_flowchart_file(_agent_folder, original_copy, fmap)
             phase_state.agent_path = str(_agent_folder)
-            _update_meta_json(session_manager, manager_session_id, {
-                "agent_path": str(_agent_folder),
-                "agent_name": _agent_name.replace("_", " ").title(),
-            })
+            _update_meta_json(
+                session_manager,
+                manager_session_id,
+                {
+                    "agent_path": str(_agent_folder),
+                    "agent_name": _agent_name.replace("_", " ").title(),
+                },
+            )
 
         dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
         decision_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "decision")
@@ -2301,9 +2305,13 @@ def register_queen_lifecycle_tools(
                 if parsed.get("success", True):
                     if phase_state is not None:
                         # Set agent_path so the frontend can query credentials
-                        phase_state.agent_path = phase_state.agent_path or str(Path("exports") / agent_name)
+                        phase_state.agent_path = phase_state.agent_path or str(
+                            Path("exports") / agent_name
+                        )
                         await phase_state.switch_to_building(source="tool")
-                        _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
+                        _update_meta_json(
+                            session_manager, manager_session_id, {"phase": "building"}
+                        )
                         # Reset draft state after successful scaffolding
                         phase_state.build_confirmed = False
                         # Persist flowchart now that the agent folder exists

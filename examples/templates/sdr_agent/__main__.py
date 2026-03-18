@@ -34,9 +34,27 @@ def cli():
 
 
 @cli.command()
-@click.option("--contacts", "-c", type=str, required=True, help="JSON string or file path of contacts list")
-@click.option("--goal", "-g", type=str, default="coffee chat", help="Outreach goal (e.g. 'coffee chat', 'sales pitch')")
-@click.option("--background", "-b", type=str, default="", help="Your background/role for personalization")
+@click.option(
+    "--contacts",
+    "-c",
+    type=str,
+    required=True,
+    help="JSON string or file path of contacts list",
+)
+@click.option(
+    "--goal",
+    "-g",
+    type=str,
+    default="coffee chat",
+    help="Outreach goal (e.g. 'coffee chat', 'sales pitch')",
+)
+@click.option(
+    "--background",
+    "-b",
+    type=str,
+    default="",
+    help="Your background/role for personalization",
+)
 @click.option(
     "--max-contacts",
     "-m",
@@ -44,7 +62,9 @@ def cli():
     default=20,
     help="Max contacts to process per batch (default: 20)",
 )
-@click.option("--mock", is_flag=True, help="Run in mock mode without LLM or Gmail calls")
+@click.option(
+    "--mock", is_flag=True, help="Run in mock mode without LLM or Gmail calls"
+)
 @click.option("--quiet", "-q", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
@@ -204,6 +224,7 @@ async def _interactive_shell(verbose=False):
             except Exception as e:
                 click.echo(f"Error: {e}", err=True)
                 import traceback
+
                 traceback.print_exc()
     finally:
         await agent.stop()
