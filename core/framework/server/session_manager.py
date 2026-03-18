@@ -734,9 +734,23 @@ class SessionManager:
             if event.stream_id == "queen":
                 return
 
-            if event.type in (_ET.EXECUTION_COMPLETED, _ET.EXECUTION_FAILED):
-                # Final digest — always fire, ignore cooldown
-                run_id = getattr(event, "run_id", None)
+            exec_id = event.execution_id
+
+            if event.type == _ET.EXECUTION_STARTED:
+                # New run on this execution_id — reset cooldown so the first
+                # iteration always produces a mid-run snapshot.
+                if exec_id:
+                    _last_digest.pop(exec_id, None)
+
+            elif event.type in (
+                _ET.EXECUTION_COMPLETED,
+                _ET.EXECUTION_FAILED,
+                _ET.EXECUTION_PAUSED,
+            ):
+                # Final digest — always fire, ignore cooldown.
+                # EXECUTION_PAUSED covers cancellation (queen re-triggering the
+                # worker cancels the previous execution, emitting paused).
+                run_id = getattr(event, "run_id", None) or _resolve_run_id(exec_id)
                 if run_id:
                     asyncio.create_task(
                         _consolidate_and_notify(run_id, event),
@@ -744,16 +758,15 @@ class SessionManager:
                     )
 
             elif event.type == _ET.NODE_LOOP_ITERATION:
-                # Mid-run snapshot — respect 300 s cooldown per execution
-                exec_id = event.execution_id
+                # Mid-run snapshot — respect 300 s cooldown per execution.
                 if not exec_id:
                     return
                 now = _time.monotonic()
                 if now - _last_digest.get(exec_id, 0.0) < _DIGEST_COOLDOWN:
                     return
-                _last_digest[exec_id] = now
                 run_id = _resolve_run_id(exec_id)
                 if run_id:
+                    _last_digest[exec_id] = now
                     asyncio.create_task(
                         _consolidate_and_notify(run_id, None),
                         name=f"worker-digest-{run_id}",
@@ -761,9 +774,11 @@ class SessionManager:
 
         session.worker_digest_sub = session.event_bus.subscribe(
             event_types=[
+                _ET.EXECUTION_STARTED,
                 _ET.NODE_LOOP_ITERATION,
                 _ET.EXECUTION_COMPLETED,
                 _ET.EXECUTION_FAILED,
+                _ET.EXECUTION_PAUSED,
             ],
             handler=_on_worker_event,
         )
