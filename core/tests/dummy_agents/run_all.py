@@ -37,77 +37,12 @@ API_KEY_PROVIDERS = [
 ]
 
 
-def _detect_claude_code_token() -> str | None:
-    """Check if Claude Code subscription credentials are available."""
-    try:
-        from framework.runner.runner import get_claude_code_token
-
-        return get_claude_code_token()
-    except Exception:
-        return None
-
-
-def _detect_codex_token() -> str | None:
-    """Check if Codex subscription credentials are available."""
-    try:
-        from framework.runner.runner import get_codex_token
-
-        return get_codex_token()
-    except Exception:
-        return None
-
-
-def _detect_kimi_code_token() -> str | None:
-    """Check if Kimi Code subscription credentials are available."""
-    try:
-        from framework.runner.runner import get_kimi_code_token
-
-        return get_kimi_code_token()
-    except Exception:
-        return None
-
-
 def detect_available() -> list[dict]:
     """Detect all available LLM providers with valid credentials.
 
     Returns list of dicts: {name, model, api_key, source}
     """
     available = []
-
-    # Subscription-based providers
-    token = _detect_claude_code_token()
-    if token:
-        available.append(
-            {
-                "name": "Claude Code (subscription)",
-                "model": "claude-sonnet-4-20250514",
-                "api_key": token,
-                "source": "claude_code_sub",
-                "extra_headers": {"authorization": f"Bearer {token}"},
-            }
-        )
-
-    token = _detect_codex_token()
-    if token:
-        available.append(
-            {
-                "name": "Codex (subscription)",
-                "model": "gpt-5-mini",
-                "api_key": token,
-                "source": "codex_sub",
-            }
-        )
-
-    token = _detect_kimi_code_token()
-    if token:
-        available.append(
-            {
-                "name": "Kimi Code (subscription)",
-                "model": "moonshotai/kimi-k2-instruct-0905",
-                "api_key": token,
-                "source": "kimi_sub",
-            }
-        )
 
     # API key providers (env vars)
     for env_var, name, default_model in API_KEY_PROVIDERS:

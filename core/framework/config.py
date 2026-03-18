@@ -69,56 +69,29 @@ def get_max_context_tokens() -> int:
 
 
 def get_api_key() -> str | None:
-    """Return the API key, supporting env var, Claude Code subscription, Codex, and ZAI Code.
+    """Return the API key from explicit sources only.
 
     Priority:
-    1. Claude Code subscription (``use_claude_code_subscription: true``)
-       reads the OAuth token from ``~/.claude/.credentials.json``.
-    2. Codex subscription (``use_codex_subscription: true``)
-       reads the OAuth token from macOS Keychain or ``~/.codex/auth.json``.
-    3. Environment variable named in ``api_key_env_var``.
+    1. Environment variable named in ``api_key_env_var`` config field.
+    2. ``api_key`` field stored in ~/.hive/configuration.json.
+
+    Auto-detection of third-party credentials (Claude Code, Codex, Kimi)
+    has been removed for security reasons. Users must provide their API key
+    explicitly via environment variable or during setup.
+    See: https://github.com/aden-hive/hive/issues/6573
     """
     llm = get_hive_config().get("llm", {})
-
-    # Claude Code subscription: read OAuth token directly
-    if llm.get("use_claude_code_subscription"):
-        try:
-            from framework.runner.runner import get_claude_code_token
-
-            token = get_claude_code_token()
-            if token:
-                return token
-        except ImportError:
-            pass
-
-    # Codex subscription: read OAuth token from Keychain / auth.json
-    if llm.get("use_codex_subscription"):
-        try:
-            from framework.runner.runner import get_codex_token
-
-            token = get_codex_token()
-            if token:
-                return token
-        except ImportError:
-            pass
-
-    # Kimi Code subscription: read API key from ~/.kimi/config.toml
-    if llm.get("use_kimi_code_subscription"):
-        try:
-            from framework.runner.runner import get_kimi_code_token
-
-            token = get_kimi_code_token()
-            if token:
-                return token
-        except ImportError:
-            pass
-
-    # Standard env-var path (covers ZAI Code and all API-key providers)
+    # 1. Environment variable
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
-        return os.environ.get(api_key_env_var)
+        key = os.environ.get(api_key_env_var)
+        if key:
+            return key
+    # 2. Explicitly stored api_key in config
+    stored_key = llm.get("api_key")
+    if stored_key:
+        return stored_key
     return None
-
 
 def get_gcu_enabled() -> bool:
     """Return whether GCU (browser automation) is enabled in user config."""
@@ -134,56 +107,24 @@ def get_gcu_viewport_scale() -> float:
 
 
 def get_api_base() -> str | None:
-    """Return the api_base URL for OpenAI-compatible endpoints, if configured."""
+    """Return the api_base URL for OpenAI-compatible endpoints, if configured.
+
+    Only returns explicitly configured api_base values.
+    Auto-detection of third-party endpoints (Codex, Kimi) has been removed
+    for security reasons. See: https://github.com/aden-hive/hive/issues/6573
+    """
     llm = get_hive_config().get("llm", {})
-    if llm.get("use_codex_subscription"):
-        # Codex subscription routes through the ChatGPT backend, not api.openai.com.
-        return "https://chatgpt.com/backend-api/codex"
-    if llm.get("use_kimi_code_subscription"):
-        # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
-        return "https://api.kimi.com/coding"
     return llm.get("api_base")
 
 
 def get_llm_extra_kwargs() -> dict[str, Any]:
-    """Return extra kwargs for LiteLLMProvider (e.g. OAuth headers).
+    """Return extra kwargs for LiteLLMProvider.
 
-    When ``use_claude_code_subscription`` is enabled, returns
-    ``extra_headers`` with the OAuth Bearer token so that litellm's
-    built-in Anthropic OAuth handler adds the required beta headers.
-
-    When ``use_codex_subscription`` is enabled, returns
-    ``extra_headers`` with the Bearer token, ``ChatGPT-Account-Id``,
-    and ``store=False`` (required by the ChatGPT backend).
+    Auto-forwarding of OAuth tokens to third-party endpoints has been removed
+    for security reasons. See: https://github.com/aden-hive/hive/issues/6573
     """
-    llm = get_hive_config().get("llm", {})
-    if llm.get("use_claude_code_subscription"):
-        api_key = get_api_key()
-        if api_key:
-            return {
-                "extra_headers": {"authorization": f"Bearer {api_key}"},
-            }
-    if llm.get("use_codex_subscription"):
-        api_key = get_api_key()
-        if api_key:
-            headers: dict[str, str] = {
-                "Authorization": f"Bearer {api_key}",
-                "User-Agent": "CodexBar",
-            }
-            try:
-                from framework.runner.runner import get_codex_account_id
-
-                account_id = get_codex_account_id()
-                if account_id:
-                    headers["ChatGPT-Account-Id"] = account_id
-            except ImportError:
-                pass
-            return {
-                "extra_headers": headers,
-                "store": False,
-                "allowed_openai_params": ["store"],
-            }
     return {}
+
 
 
 # ---------------------------------------------------------------------------
@@ -202,3 +143,29 @@ class RuntimeConfig:
     api_key: str | None = field(default_factory=get_api_key)
     api_base: str | None = field(default_factory=get_api_base)
     extra_kwargs: dict[str, Any] = field(default_factory=get_llm_extra_kwargs)
+
+
+def get_api_key() -> str | None:
+    """Return the API key from explicit sources only.
+
+    Priority:
+    1. Environment variable named in ``api_key_env_var`` config field.
+    2. ``api_key`` field stored in ~/.hive/configuration.json.
+
+    Auto-detection of third-party credentials (Claude Code, Codex, Kimi)
+    has been removed for security reasons. Users must provide their API key
+    explicitly via environment variable or during setup.
+    See: https://github.com/aden-hive/hive/issues/6573
+    """
+    llm = get_hive_config().get("llm", {})
+    # 1. Environment variable
+    api_key_env_var = llm.get("api_key_env_var")
+    if api_key_env_var:
+        key = os.environ.get(api_key_env_var)
+        if key:
+            return key
+    # 2. Explicitly stored api_key in config
+    stored_key = llm.get("api_key")
+    if stored_key:
+        return stored_key
+    return None

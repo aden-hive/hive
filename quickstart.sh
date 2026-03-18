@@ -765,18 +765,15 @@ prompt_model_selection() {
 }
 
 # Function to save configuration
-# Args: provider_id env_var model max_tokens max_context_tokens [use_claude_code_sub] [api_base] [use_codex_sub]
+# Args: provider_id env_var model max_tokens max_context_tokens [api_base]
 save_configuration() {
     local provider_id="$1"
     local env_var="$2"
     local model="$3"
     local max_tokens="$4"
     local max_context_tokens="$5"
-    local use_claude_code_sub="${6:-}"
-    local api_base="${7:-}"
-    local use_codex_sub="${8:-}"
+    local api_base="${6:-}"
 
-    # Fallbacks if not provided
     if [ -z "$model" ]; then
         model="$(get_default_model "$provider_id")"
     fi
@@ -801,14 +798,6 @@ config = {
     },
     'created_at': '$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")'
 }
-if '$use_claude_code_sub' == 'true':
-    config['llm']['use_claude_code_subscription'] = True
-    # No api_key_env_var needed for Claude Code subscription
-    config['llm'].pop('api_key_env_var', None)
-if '$use_codex_sub' == 'true':
-    config['llm']['use_codex_subscription'] = True
-    # No api_key_env_var needed for Codex subscription
-    config['llm'].pop('api_key_env_var', None)
 if '$api_base':
     config['llm']['api_base'] = '$api_base'
 with open('$HIVE_CONFIG_FILE', 'w') as f:
@@ -833,22 +822,14 @@ SELECTED_ENV_VAR=""     # Will hold the chosen env var
 SELECTED_MODEL=""       # Will hold the chosen model ID
 SELECTED_MAX_TOKENS=8192 # Will hold the chosen max_tokens (output limit)
 SELECTED_MAX_CONTEXT_TOKENS=120000 # Will hold the chosen max_context_tokens (input history budget)
-SUBSCRIPTION_MODE=""    # "claude_code" | "codex" | "zai_code" | ""
+SUBSCRIPTION_MODE=""    # "zai_code" | ""
 
-# ── Credential detection (silent — just set flags) ───────────
+# ── Credential detection (env vars only — no filesystem probing) ───────────
+# NOTE: Auto-detection of third-party credentials (Claude Code, Codex, Kimi)
+# has been removed for security reasons. See: https://github.com/aden-hive/hive/issues/6573
 CLAUDE_CRED_DETECTED=false
-if command -v security &>/dev/null && security find-generic-password -s "Claude Code-credentials" &>/dev/null 2>&1; then
-    CLAUDE_CRED_DETECTED=true
-elif [ -f "$HOME/.claude/.credentials.json" ]; then
-    CLAUDE_CRED_DETECTED=true
-fi
 
 CODEX_CRED_DETECTED=false
-if command -v security &>/dev/null && security find-generic-password -s "Codex Auth" &>/dev/null 2>&1; then
-    CODEX_CRED_DETECTED=true
-elif [ -f "$HOME/.codex/auth.json" ]; then
-    CODEX_CRED_DETECTED=true
-fi
 
 ZAI_CRED_DETECTED=false
 if [ -n "${ZAI_API_KEY:-}" ]; then
@@ -861,9 +842,7 @@ if [ -n "${MINIMAX_API_KEY:-}" ]; then
 fi
 
 KIMI_CRED_DETECTED=false
-if [ -f "$HOME/.kimi/config.toml" ]; then
-    KIMI_CRED_DETECTED=true
-elif [ -n "${KIMI_API_KEY:-}" ]; then
+if [ -n "${KIMI_API_KEY:-}" ]; then
     KIMI_CRED_DETECTED=true
 fi
 
@@ -905,9 +884,6 @@ try:
     print(f'PREV_MODEL={llm.get(\"model\", \"\")}')
     print(f'PREV_ENV_VAR={llm.get(\"api_key_env_var\", \"\")}')
     sub = ''
-    if llm.get('use_claude_code_subscription'): sub = 'claude_code'
-    elif llm.get('use_codex_subscription'): sub = 'codex'
-    elif llm.get('use_kimi_code_subscription'): sub = 'kimi_code'
     elif llm.get('provider', '') == 'minimax' or 'api.minimax.io' in llm.get('api_base', ''): sub = 'minimax_code'
     elif llm.get('provider', '') == 'hive' or 'adenhq.com' in llm.get('api_base', ''): sub = 'hive_llm'
     elif 'api.z.ai' in llm.get('api_base', ''): sub = 'zai_code'
@@ -1048,7 +1024,7 @@ case $choice in
         # Claude Code Subscription
         if [ "$CLAUDE_CRED_DETECTED" = false ]; then
             echo ""
-            echo -e "${YELLOW}  ~/.claude/.credentials.json not found.${NC}"
+            echo -e "${YELLOW}  Claude Code subscription mode is no longer supported.${NC}"
             echo -e "  Run ${CYAN}claude${NC} first to authenticate with your Claude subscription,"
             echo -e "  then run this quickstart again."
             echo ""
@@ -1584,7 +1560,7 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     echo -e "${BOLD}Default LLM:${NC}"
     if [ "$SUBSCRIPTION_MODE" = "claude_code" ]; then
         echo -e "  ${GREEN}⬢${NC} Claude Code Subscription → ${DIM}$SELECTED_MODEL${NC}"
-        echo -e "  ${DIM}Token auto-refresh from ~/.claude/.credentials.json${NC}"
+        echo -e "  ${DIM}API key from environment variable or config${NC}"
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
         echo -e "  ${GREEN}⬢${NC} ZAI Code Subscription → ${DIM}$SELECTED_MODEL${NC}"
         echo -e "  ${DIM}API: api.z.ai (OpenAI-compatible)${NC}"
