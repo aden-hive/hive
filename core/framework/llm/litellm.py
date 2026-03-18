@@ -1468,11 +1468,7 @@ class LiteLLMProvider(LLMProvider):
                 yield event
             return
 
-        if (
-            tools
-            and self._is_openrouter_model()
-            and _is_openrouter_tool_compat_cached(self.model)
-        ):
+        if tools and self._is_openrouter_model() and _is_openrouter_tool_compat_cached(self.model):
             async for event in self._stream_via_openrouter_tool_compat(
                 messages=messages,
                 system=system,
