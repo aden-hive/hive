@@ -18,7 +18,6 @@
  *   PR_NUMBER                  — (notify mode) The merged PR number
  */
 
-import { MongoClient } from "mongodb";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -151,37 +150,38 @@ async function getMergedBountyPRs(
 }
 
 // ---------------------------------------------------------------------------
-// Identity resolution (MongoDB-backed)
+// Identity resolution (via bot API)
 // ---------------------------------------------------------------------------
 
 async function loadContributors(): Promise<Map<string, Contributor>> {
   const map = new Map<string, Contributor>();
 
-  const uri = process.env.MONGODB_URI;
-  if (!uri) {
-    console.warn("Warning: MONGODB_URI not set, contributor lookups disabled");
+  const apiUrl = process.env.BOT_API_URL;
+  if (!apiUrl) {
+    console.warn("Warning: BOT_API_URL not set, contributor lookups disabled");
     return map;
   }
 
-  const client = new MongoClient(uri);
   try {
-    await client.connect();
-    const db = client.db("hive");
-    const docs = await db.collection("contributors").find().toArray();
-
-    for (const doc of docs) {
-      map.set((doc.github as string).toLowerCase(), {
-        github: (doc.githubDisplay as string) ?? (doc.github as string),
-        discord: doc.discord as string,
-        name: doc.name as string | undefined,
-      });
+    const headers: Record<string, string> = {};
+    const apiKey = process.env.BOT_API_KEY;
+    if (apiKey) {
+      headers.Authorization = `Bearer ${apiKey}`;
     }
 
-    console.log(`Loaded ${map.size} contributors from MongoDB`);
+    const res = await fetch(`${apiUrl}/api/contributors`, { headers });
+    if (!res.ok) {
+      throw new Error(`${res.status} ${res.statusText}`);
+    }
+
+    const docs = (await res.json()) as Contributor[];
+    for (const doc of docs) {
+      map.set(doc.github.toLowerCase(), doc);
+    }
+
+    console.log(`Loaded ${map.size} contributors from bot API`);
   } catch (err) {
-    console.warn(`Warning: could not load contributors from MongoDB: ${err}`);
-  } finally {
-    await client.close();
+    console.warn(`Warning: could not load contributors from bot API: ${err}`);
   }
 
   return map;

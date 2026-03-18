@@ -33,9 +33,6 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install mongodb dependency
-        run: bun add mongodb
-
       - name: Award XP and notify Discord
         run: bun run scripts/bounty-tracker.ts notify
         env:
@@ -43,7 +40,8 @@ jobs:
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_BOUNTY_WEBHOOK_URL }}
-          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          BOT_API_URL: ${{ secrets.BOT_API_URL }}
+          BOT_API_KEY: ${{ secrets.BOT_API_KEY }}
           LURKR_API_KEY: ${{ secrets.LURKR_API_KEY }}
           LURKR_GUILD_ID: ${{ secrets.LURKR_GUILD_ID }}
           PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}

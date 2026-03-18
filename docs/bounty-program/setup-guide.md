@@ -104,7 +104,8 @@ Repo Settings > Secrets and variables > Actions:
 | `DISCORD_BOUNTY_WEBHOOK_URL` | Webhook URL from Step 5    |
 | `LURKR_API_KEY`              | Lurkr API key from Step 4f |
 | `LURKR_GUILD_ID`             | Your Discord server ID\*   |
-| `MONGODB_URI`                | MongoDB connection string  |
+| `BOT_API_URL`                | Discord bot API URL        |
+| `BOT_API_KEY`                | Discord bot API key        |
 
 \*Enable Developer Mode in Discord, right-click server name > Copy Server ID.
 

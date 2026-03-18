@@ -28,9 +28,6 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install mongodb dependency
-        run: bun add mongodb
-
       - name: Post leaderboard to Discord
         run: bun run scripts/bounty-tracker.ts leaderboard
         env:
@@ -38,7 +35,8 @@ jobs:
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_BOUNTY_WEBHOOK_URL }}
-          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          BOT_API_URL: ${{ secrets.BOT_API_URL }}
+          BOT_API_KEY: ${{ secrets.BOT_API_KEY }}
           LURKR_API_KEY: ${{ secrets.LURKR_API_KEY }}
           LURKR_GUILD_ID: ${{ secrets.LURKR_GUILD_ID }}
           SINCE_DATE: ${{ github.event.inputs.since_date || '' }}
