@@ -1703,6 +1703,13 @@ export default function Workspace() {
         case "client_input_received":
         case "client_input_requested":
         case "llm_text_delta": {
+          // If the very first queen event is not execution_started (e.g. a
+          // fast-fail path that immediately asks for more input), still mark
+          // the session as ready so the input box doesn't stay disabled.
+          if (isQueen && shouldMarkQueenReady) {
+            updateAgentState(agentType, { queenReady: true });
+          }
+
           const chatMsg = sseEventToChatMessage(event, agentType, displayName, currentTurn);
           if (isQueen) console.log('[QUEEN] chatMsg:', chatMsg?.id, chatMsg?.content?.slice(0, 50), 'turn:', currentTurn);
           if (chatMsg && !suppressQueenMessages) {
@@ -1758,18 +1765,26 @@ export default function Workspace() {
             if (isQueen) {
               const prompt = (event.data?.prompt as string) || "";
               const isAutoBlock = !prompt && !options && !questions;
+              const cur = agentStates[agentType] || defaultAgentState();
+              const workerQuestionActive = cur.pendingQuestionSource === "worker";
+              const likelySilentQueenFailure =
+                isAutoBlock &&
+                !workerQuestionActive &&
+                cur.queenIsTyping &&
+                !cur.isStreaming;
+
               // Queen auto-block (empty prompt, no options) should not
               // overwrite a pending worker question — the worker's
               // QuestionWidget must stay visible.  Use the updater form
               // to read the latest state and avoid stale-closure races
               // when worker and queen events arrive in the same batch.
               setAgentStates(prev => {
-                const cur = prev[agentType] || defaultAgentState();
-                const workerQuestionActive = cur.pendingQuestionSource === "worker";
-                if (isAutoBlock && workerQuestionActive) {
+                const state = prev[agentType] || defaultAgentState();
+                const workerQuestionStillActive = state.pendingQuestionSource === "worker";
+                if (isAutoBlock && workerQuestionStillActive) {
                   return {
                     ...prev, [agentType]: {
-                      ...cur,
+                      ...state,
                       awaitingInput: true,
                       isTyping: false,
                       isStreaming: false,
@@ -1780,7 +1795,7 @@ export default function Workspace() {
                 }
                 return {
                   ...prev, [agentType]: {
-                    ...cur,
+                    ...state,
                     awaitingInput: true,
                     isTyping: false,
                     isStreaming: false,
@@ -1793,6 +1808,21 @@ export default function Workspace() {
                   }
                 };
               });
+
+              if (likelySilentQueenFailure && !suppressQueenMessages) {
+                const failureMsg: ChatMessage = {
+                  id: `queen-llm-failure-${event.execution_id || event.timestamp}`,
+                  agent: "System",
+                  agentColor: "",
+                  content: "Failed to get a response from Queen. Please try sending your message again.",
+                  timestamp: "",
+                  type: "system",
+                  role: "queen",
+                  thread: agentType,
+                  createdAt: eventCreatedAt,
+                };
+                upsertChatMessage(agentType, failureMsg);
+              }
             } else {
               // Worker input request.
               // If the prompt is non-empty (explicit ask_user), create a visible
