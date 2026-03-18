@@ -409,6 +409,8 @@ class BrowserSession:
         We're already inside ``self._lock`` so we can't call ``stop()``.
         This mirrors the teardown logic without re-acquiring the lock.
         """
+        _CLOSE_TIMEOUT = 10.0  # seconds
+
         if self.cdp_port:
             from .port_manager import release_port
 
@@ -417,21 +419,21 @@ class BrowserSession:
 
         if self.context:
             try:
-                await self.context.close()
+                await asyncio.wait_for(self.context.close(), timeout=_CLOSE_TIMEOUT)
             except Exception:
                 pass
             self.context = None
 
         if self.browser:
             try:
-                await self.browser.close()
+                await asyncio.wait_for(self.browser.close(), timeout=_CLOSE_TIMEOUT)
             except Exception:
                 pass
             self.browser = None
 
         if self._playwright:
             try:
-                await self._playwright.stop()
+                await asyncio.wait_for(self._playwright.stop(), timeout=_CLOSE_TIMEOUT)
             except Exception:
                 pass
             self._playwright = None
@@ -588,6 +590,10 @@ class BrowserSession:
 
     async def stop(self) -> dict:
         """Stop the browser and clean up resources."""
+        # Timeout for each Playwright teardown call — prevents hanging when
+        # the browser process is crashed or unresponsive.
+        _CLOSE_TIMEOUT = 10.0  # seconds
+
         async with self._lock:
             # Release CDP port if allocated
             if self.cdp_port:
@@ -598,23 +604,35 @@ class BrowserSession:
 
             # Close context (works for both persistent and ephemeral)
             if self.context:
-                await self.context.close()
+                try:
+                    await asyncio.wait_for(self.context.close(), timeout=_CLOSE_TIMEOUT)
+                except Exception as exc:
+                    logger.warning("context.close() failed for profile %r: %s", self.profile, exc)
                 self.context = None
 
             # Agent sessions share a browser — don't close it (other agents depend on it).
             # Only standard sessions own their browser and playwright instances.
             if self.session_type != "agent":
                 if self.browser:
-                    await self.browser.close()
+                    try:
+                        await asyncio.wait_for(self.browser.close(), timeout=_CLOSE_TIMEOUT)
+                    except Exception as exc:
+                        logger.warning("browser.close() failed for profile %r: %s", self.profile, exc)
                     self.browser = None
 
                 if self._playwright:
-                    await self._playwright.stop()
+                    try:
+                        await asyncio.wait_for(self._playwright.stop(), timeout=_CLOSE_TIMEOUT)
+                    except Exception as exc:
+                        logger.warning("playwright.stop() failed for profile %r: %s", self.profile, exc)
                     self._playwright = None
 
                 # Kill the Chrome subprocess
                 if self._chrome_process:
-                    await self._chrome_process.kill()
+                    try:
+                        await self._chrome_process.kill()
+                    except Exception as exc:
+                        logger.warning("chrome_process.kill() failed for profile %r: %s", self.profile, exc)
                     self._chrome_process = None
             else:
                 self.browser = None  # Drop reference to shared browser
