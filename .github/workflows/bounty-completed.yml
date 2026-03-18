@@ -5,11 +5,19 @@ on:
   pull_request_target:
     types: [closed]
 
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to process (for missed bounties)"
+        required: true
+        type: number
+
 jobs:
   bounty-notify:
     if: >
-      github.event.pull_request.merged == true &&
-      contains(join(github.event.pull_request.labels.*.name, ','), 'bounty:')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       contains(join(github.event.pull_request.labels.*.name, ','), 'bounty:'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -25,6 +33,9 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install mongodb dependency
+        run: bun add mongodb
+
       - name: Award XP and notify Discord
         run: bun run scripts/bounty-tracker.ts notify
         env:
@@ -32,6 +43,7 @@ jobs:
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_BOUNTY_WEBHOOK_URL }}
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
           LURKR_API_KEY: ${{ secrets.LURKR_API_KEY }}
           LURKR_GUILD_ID: ${{ secrets.LURKR_GUILD_ID }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number }}

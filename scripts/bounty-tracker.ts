@@ -12,13 +12,13 @@
  *   GITHUB_REPOSITORY_OWNER    — e.g. "adenhq"
  *   GITHUB_REPOSITORY_NAME     — e.g. "hive"
  *   DISCORD_WEBHOOK_URL        — Discord webhook for #integrations-announcements
+ *   MONGODB_URI                — MongoDB connection string (contributors collection)
  *   LURKR_API_KEY              — Lurkr Read/Write API key (for XP push)
  *   LURKR_GUILD_ID             — Discord server ID where Lurkr is installed
  *   PR_NUMBER                  — (notify mode) The merged PR number
  */
 
-import { readFileSync } from "fs";
-import { join } from "path";
+import { MongoClient } from "mongodb";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -151,59 +151,37 @@ async function getMergedBountyPRs(
 }
 
 // ---------------------------------------------------------------------------
-// Identity resolution
+// Identity resolution (MongoDB-backed)
 // ---------------------------------------------------------------------------
 
-// Parse contributors.yml without a YAML dependency.
-// The format is simple enough to parse with regex:
-//   contributors:
-//     - github: jane-doe
-//       discord: "123456789012345678"
-//       name: Jane Doe
-function parseContributorsYaml(raw: string): Contributor[] {
-  const contributors: Contributor[] = [];
-  let current: Partial<Contributor> | null = null;
-
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-
-    if (trimmed.startsWith("- github:")) {
-      if (current?.github && current?.discord) {
-        contributors.push(current as Contributor);
-      }
-      current = { github: trimmed.replace("- github:", "").trim() };
-    } else if (trimmed.startsWith("discord:") && current) {
-      current.discord = trimmed.replace("discord:", "").trim().replace(/^["']|["']$/g, "");
-    } else if (trimmed.startsWith("name:") && current) {
-      current.name = trimmed.replace("name:", "").trim();
-    }
-  }
-
-  // Don't forget the last entry
-  if (current?.github && current?.discord) {
-    contributors.push(current as Contributor);
-  }
-
-  return contributors;
-}
-
-function loadContributors(): Map<string, Contributor> {
+async function loadContributors(): Promise<Map<string, Contributor>> {
   const map = new Map<string, Contributor>();
 
-  try {
-    // Resolve path relative to the script location (scripts/ dir → repo root)
-    const scriptDir = new URL(".", import.meta.url).pathname;
-    const raw = readFileSync(
-      join(scriptDir, "..", "contributors.yml"),
-      "utf-8"
-    );
-    const entries = parseContributorsYaml(raw);
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    console.warn("Warning: MONGODB_URI not set, contributor lookups disabled");
+    return map;
+  }
 
-    for (const c of entries) {
-      map.set(c.github.toLowerCase(), c);
+  const client = new MongoClient(uri);
+  try {
+    await client.connect();
+    const db = client.db("hive");
+    const docs = await db.collection("contributors").find().toArray();
+
+    for (const doc of docs) {
+      map.set((doc.github as string).toLowerCase(), {
+        github: (doc.githubDisplay as string) ?? (doc.github as string),
+        discord: doc.discord as string,
+        name: doc.name as string | undefined,
+      });
     }
-  } catch {
-    console.warn("Warning: could not load contributors.yml");
+
+    console.log(`Loaded ${map.size} contributors from MongoDB`);
+  } catch (err) {
+    console.warn(`Warning: could not load contributors from MongoDB: ${err}`);
+  } finally {
+    await client.close();
   }
 
   return map;
@@ -295,7 +273,7 @@ function formatBountyNotification(bounty: BountyResult): string {
   msg += `PR: ${bounty.pr.html_url}\n`;
 
   if (!bounty.discordId) {
-    msg += `\n_\u{1F517} @${bounty.contributor}: link your Discord in \`contributors.yml\` to get pinged!_`;
+    msg += `\n_\u{1F517} @${bounty.contributor}: use \`/link-github\` in Discord to get pinged!_`;
   }
 
   return msg;
@@ -464,7 +442,7 @@ async function main() {
     process.exit(1);
   }
 
-  const contributors = loadContributors();
+  const contributors = await loadContributors();
 
   if (mode === "notify") {
     // Single bounty notification

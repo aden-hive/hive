@@ -104,6 +104,7 @@ Repo Settings > Secrets and variables > Actions:
 | `DISCORD_BOUNTY_WEBHOOK_URL` | Webhook URL from Step 5    |
 | `LURKR_API_KEY`              | Lurkr API key from Step 4f |
 | `LURKR_GUILD_ID`             | Your Discord server ID\*   |
+| `MONGODB_URI`                | MongoDB connection string  |
 
 \*Enable Developer Mode in Discord, right-click server name > Copy Server ID.
 
@@ -146,12 +147,12 @@ powerbi, redis
 - [ ] All 3 GitHub secrets added
 - [ ] Both workflows enabled (`bounty-completed.yml`, `weekly-leaderboard.yml`)
 - [ ] Test PR + merge triggers Discord notification
-- [ ] `contributors.yml` exists at repo root
+- [ ] MongoDB `hive.contributors` collection accessible
 
 ## Troubleshooting
 
 **No Discord message:** Check `DISCORD_BOUNTY_WEBHOOK_URL` secret and Action logs.
 
-**Lurkr XP not awarded:** Confirm API key is Read/Write, contributor is in `contributors.yml`, check Action logs for `Lurkr XP push failed`.
+**Lurkr XP not awarded:** Confirm API key is Read/Write, contributor has run `/link-github` in Discord, check Action logs for `Lurkr XP push failed`.
 
 **Role not assigned:** Verify role rewards in the Lurkr dashboard or via `/config set`. Lurkr's role must be above the roles it assigns in server hierarchy.
