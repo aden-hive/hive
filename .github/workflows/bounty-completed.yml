@@ -2,7 +2,7 @@ name: Bounty completed
 description: Awards points and notifies Discord when a bounty PR is merged
 
 on:
-  pull_request:
+  pull_request_target:
     types: [closed]
 
 jobs:
