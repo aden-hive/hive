@@ -667,8 +667,19 @@ class SessionManager:
             logger.warning("Worker handoff received but queen node not ready")
 
     def _subscribe_worker_digest(self, session: Session) -> None:
-        """Subscribe to worker execution completion events to write run digests."""
+        """Subscribe to worker events to write per-run digests.
+
+        Two triggers:
+        - NODE_LOOP_ITERATION: write a mid-run snapshot, throttled to at most
+          once every _DIGEST_COOLDOWN seconds per execution.
+        - EXECUTION_COMPLETED / EXECUTION_FAILED: always write the final digest,
+          bypassing the cooldown.
+        """
+        import time as _time
+
         from framework.runtime.event_bus import EventType as _ET
+
+        _DIGEST_COOLDOWN = 300.0  # seconds between mid-run snapshots
 
         if session.worker_digest_sub is not None:
             try:
@@ -684,23 +695,54 @@ class SessionManager:
         _agent_name = agent_name
         _llm = session.llm
         _bus = session.event_bus
+        # per-execution_id monotonic timestamp of last mid-run digest
+        _last_digest: dict[str, float] = {}
 
-        async def _on_execution_done(event: Any) -> None:
-            run_id = getattr(event, "run_id", None)
-            if not run_id or event.stream_id == "queen":
+        def _resolve_run_id(exec_id: str) -> str | None:
+            """Look up the run_id for a given execution_id via EXECUTION_STARTED history."""
+            for e in _bus.get_history(event_type=_ET.EXECUTION_STARTED, limit=200):
+                if e.execution_id == exec_id and getattr(e, "run_id", None):
+                    return e.run_id
+            return None
+
+        async def _on_worker_event(event: Any) -> None:
+            if event.stream_id == "queen":
                 return
-            import asyncio as _asyncio
 
             from framework.agents.worker_memory import consolidate_worker_run
 
-            _asyncio.create_task(
-                consolidate_worker_run(_agent_name, run_id, event, _bus, _llm),
-                name=f"worker-digest-{run_id}",
-            )
+            if event.type in (_ET.EXECUTION_COMPLETED, _ET.EXECUTION_FAILED):
+                # Final digest — always fire, ignore cooldown
+                run_id = getattr(event, "run_id", None)
+                if run_id:
+                    asyncio.create_task(
+                        consolidate_worker_run(_agent_name, run_id, event, _bus, _llm),
+                        name=f"worker-digest-final-{run_id}",
+                    )
+
+            elif event.type == _ET.NODE_LOOP_ITERATION:
+                # Mid-run snapshot — respect 300 s cooldown per execution
+                exec_id = event.execution_id
+                if not exec_id:
+                    return
+                now = _time.monotonic()
+                if now - _last_digest.get(exec_id, 0.0) < _DIGEST_COOLDOWN:
+                    return
+                _last_digest[exec_id] = now
+                run_id = _resolve_run_id(exec_id)
+                if run_id:
+                    asyncio.create_task(
+                        consolidate_worker_run(_agent_name, run_id, None, _bus, _llm),
+                        name=f"worker-digest-{run_id}",
+                    )
 
         session.worker_digest_sub = session.event_bus.subscribe(
-            event_types=[_ET.EXECUTION_COMPLETED, _ET.EXECUTION_FAILED],
-            handler=_on_execution_done,
+            event_types=[
+                _ET.NODE_LOOP_ITERATION,
+                _ET.EXECUTION_COMPLETED,
+                _ET.EXECUTION_FAILED,
+            ],
+            handler=_on_worker_event,
         )
 
     def _subscribe_worker_handoffs(self, session: Session, executor: Any) -> None:
