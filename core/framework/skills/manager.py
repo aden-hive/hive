@@ -67,6 +67,7 @@ class SkillsManager:
         self._catalog_prompt: str = ""
         self._protocols_prompt: str = ""
         self._allowlisted_dirs: list[str] = []
+        self._default_mgr: object = None  # DefaultSkillManager, set after load()
 
     # ------------------------------------------------------------------
     # Factory for backwards-compat bridge
@@ -90,6 +91,7 @@ class SkillsManager:
         mgr._catalog_prompt = skills_catalog_prompt
         mgr._protocols_prompt = protocols_prompt
         mgr._allowlisted_dirs = []
+        mgr._default_mgr = None
         return mgr
 
     # ------------------------------------------------------------------
@@ -146,6 +148,7 @@ class SkillsManager:
         default_mgr.load()
         default_mgr.log_active_skills()
         protocols_prompt = default_mgr.build_protocols_prompt()
+        self._default_mgr = default_mgr
 
         # 3. Cache
         self._catalog_prompt = catalog_prompt
@@ -178,6 +181,20 @@ class SkillsManager:
     def allowlisted_dirs(self) -> list[str]:
         """Skill base directories for Tier 3 resource access (AS-6)."""
         return self._allowlisted_dirs
+
+    @property
+    def batch_init_nudge(self) -> str | None:
+        """Batch init nudge text for DS-12 auto-detection, or None if disabled."""
+        if self._default_mgr is None:
+            return None
+        return self._default_mgr.batch_init_nudge  # type: ignore[union-attr]
+
+    @property
+    def context_warn_ratio(self) -> float | None:
+        """Token usage ratio for DS-13 context preservation warning, or None if disabled."""
+        if self._default_mgr is None:
+            return None
+        return self._default_mgr.context_warn_ratio  # type: ignore[union-attr]
 
     @property
     def is_loaded(self) -> bool:
