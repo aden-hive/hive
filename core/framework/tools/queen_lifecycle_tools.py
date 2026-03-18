@@ -1903,10 +1903,7 @@ def register_queen_lifecycle_tools(
             "with unique colors. No code is generated. "
             "Planning-only types (decision, browser/GCU) are dissolved at confirm/build time: "
             "decision nodes merge into predecessor's success_criteria with yes/no edges; "
-            "browser/GCU nodes merge into predecessor's sub_agents list as leaf delegates. "
-            "Keep arguments compact: use the smallest graph that fits the request, "
-            "keep node descriptions to one short sentence, and omit optional metadata "
-            "unless it is necessary for the design."
+            "browser/GCU nodes merge into predecessor's sub_agents list as leaf delegates."
         ),
         parameters={
             "type": "object",

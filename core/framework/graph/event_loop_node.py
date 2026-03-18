@@ -69,53 +69,6 @@ def _is_context_too_large_error(exc: BaseException) -> bool:
     return bool(_CONTEXT_TOO_LARGE_RE.search(str(exc)))
 
 
-def _normalize_question_text(value: str) -> str:
-    """Normalize question text for duplicate-input detection."""
-    return " ".join(str(value).split()).strip().casefold()
-
-
-def _build_question_signature(
-    prompt: str,
-    options: list[str] | None = None,
-) -> str | None:
-    """Return a stable signature for a single user-facing question."""
-    normalized_prompt = _normalize_question_text(prompt)
-    normalized_options = [
-        _normalize_question_text(option)
-        for option in (options or [])
-        if _normalize_question_text(option)
-    ]
-    if not normalized_prompt and not normalized_options:
-        return None
-    payload = {
-        "prompt": normalized_prompt,
-        "options": normalized_options,
-    }
-    return f"question:{json.dumps(payload, sort_keys=True, separators=(',', ':'))}"
-
-
-def _build_question_batch_signature(questions: list[dict[str, Any]]) -> str | None:
-    """Return a stable signature for a multi-question widget."""
-    normalized_questions: list[dict[str, Any]] = []
-    for question in questions:
-        prompt = _normalize_question_text(str(question.get("prompt", "")))
-        options = [
-            _normalize_question_text(option)
-            for option in question.get("options", []) or []
-            if _normalize_question_text(option)
-        ]
-        normalized_questions.append(
-            {
-                "id": _normalize_question_text(str(question.get("id", ""))),
-                "prompt": prompt,
-                **({"options": options} if options else {}),
-            }
-        )
-    if not normalized_questions:
-        return None
-    return f"batch:{json.dumps(normalized_questions, sort_keys=True, separators=(',', ':'))}"
-
-
 # ---------------------------------------------------------------------------
 # Escalation receiver (temporary routing target for subagent → user input)
 # ---------------------------------------------------------------------------
@@ -439,10 +392,6 @@ class EventLoopNode(NodeProtocol):
         self._action_plan_emitted: set[str] = set()
         # Monotonic counter for spillover file naming (web_search_1.txt, etc.)
         self._spill_counter: int = 0
-        # Prevent weak models from re-asking the exact same question immediately
-        # after the user already answered it.
-        self._pending_input_signatures: set[str] = set()
-        self._recent_answered_input_signatures: set[str] = set()
         # Subagent mark_complete: when True, _evaluate returns ACCEPT immediately
         self._mark_complete_flag = False
         # Counter for subagent instances (1, 2, 3, ...)
@@ -475,10 +424,6 @@ class EventLoopNode(NodeProtocol):
 
         # Verdict counters for runtime logging
         _accept_count = _retry_count = _escalate_count = _continue_count = 0
-
-        # Per-run question dedupe state should not leak across sessions/runs.
-        self._pending_input_signatures.clear()
-        self._recent_answered_input_signatures.clear()
 
         # Client-facing auto-block grace: consecutive text-only turns without
         # any real tool call or set_output.  Resets on progress.
@@ -914,20 +859,12 @@ class EventLoopNode(NodeProtocol):
                         # its arguments.
                         error_str = str(e).lower()
                         if "failed to parse tool call" in error_str:
-                            tool_hint = ""
-                            tool_match = re.search(r"for '([^']+)'", str(e))
-                            if tool_match and tool_match.group(1) == "save_agent_draft":
-                                tool_hint = (
-                                    " For save_agent_draft specifically: keep node descriptions "
-                                    "to one short sentence, omit optional metadata, and prefer "
-                                    "the smallest graph that still satisfies the request."
-                                )
                             await conversation.add_user_message(
                                 "[System: Your previous tool call had malformed "
                                 "JSON arguments (likely truncated). Keep your "
                                 "tool call arguments shorter and simpler. Do NOT "
                                 "repeat the same long argument — summarize or "
-                                f"split into multiple calls.{tool_hint}]"
+                                "split into multiple calls.]"
                             )
 
                         await asyncio.sleep(delay)
@@ -1433,9 +1370,6 @@ class EventLoopNode(NodeProtocol):
                     options=ask_user_options,
                     questions=multi_qs,
                 )
-                if got_input and self._pending_input_signatures:
-                    self._recent_answered_input_signatures = set(self._pending_input_signatures)
-                self._pending_input_signatures.clear()
                 # Emit deferred tool_call_completed for ask_user / ask_user_multiple
                 deferred = getattr(self, "_deferred_tool_complete", None)
                 if deferred:
@@ -2333,7 +2267,6 @@ class EventLoopNode(NodeProtocol):
                         await accumulator.set(key, value)
                         self._record_learning(key, value)
                         outputs_set_this_turn.append(key)
-                        self._recent_answered_input_signatures.clear()
                         await self._publish_output_key_set(stream_id, node_id, key, execution_id)
                     logged_tool_calls.append(
                         {
@@ -2386,36 +2319,7 @@ class EventLoopNode(NodeProtocol):
                         user_input_requested = False
                         continue
 
-                    ask_user_signature = _build_question_signature(
-                        str(ask_user_prompt),
-                        ask_user_options,
-                    )
-                    if (
-                        ask_user_signature
-                        and ask_user_signature in self._recent_answered_input_signatures
-                    ):
-                        logger.info(
-                            "[%s] blocked duplicate ask_user after answered input: %s",
-                            node_id,
-                            str(ask_user_prompt)[:120],
-                        )
-                        result = ToolResult(
-                            tool_use_id=tc.tool_use_id,
-                            content=(
-                                "ERROR: This question was already asked and answered. "
-                                "Use the user's latest answer already present in the "
-                                "conversation instead of asking again."
-                            ),
-                            is_error=True,
-                        )
-                        results_by_id[tc.tool_use_id] = result
-                        user_input_requested = False
-                        continue
-
                     user_input_requested = True
-                    self._pending_input_signatures = (
-                        {ask_user_signature} if ask_user_signature else set()
-                    )
 
                     # Free-form ask_user (no options): stream the question
                     # text as a chat message so the user can see it.  When
@@ -2479,42 +2383,7 @@ class EventLoopNode(NodeProtocol):
                             }
                         )
 
-                    batch_signature = _build_question_batch_signature(questions)
-                    if (
-                        batch_signature
-                        and batch_signature in self._recent_answered_input_signatures
-                    ):
-                        logger.info(
-                            "[%s] blocked duplicate ask_user_multiple after answered input",
-                            node_id,
-                        )
-                        result = ToolResult(
-                            tool_use_id=tc.tool_use_id,
-                            content=(
-                                "ERROR: This same question set was already asked and "
-                                "answered. Use the user's latest answers from the "
-                                "conversation instead of asking again."
-                            ),
-                            is_error=True,
-                        )
-                        results_by_id[tc.tool_use_id] = result
-                        user_input_requested = False
-                        continue
-
                     user_input_requested = True
-                    self._pending_input_signatures = {
-                        signature
-                        for signature in (
-                            _build_question_signature(
-                                str(question.get("prompt", "")),
-                                question.get("options"),
-                            )
-                            for question in questions
-                        )
-                        if signature
-                    }
-                    if batch_signature:
-                        self._pending_input_signatures.add(batch_signature)
 
                     # Store as multi-question prompt/options for
                     # the event emission path
@@ -2533,7 +2402,6 @@ class EventLoopNode(NodeProtocol):
 
                 elif tc.tool_name == "escalate":
                     # --- Framework-level escalate handling ---
-                    self._recent_answered_input_signatures.clear()
                     reason = str(tc.tool_input.get("reason", "")).strip()
                     context = str(tc.tool_input.get("context", "")).strip()
 
@@ -2578,7 +2446,6 @@ class EventLoopNode(NodeProtocol):
 
                 elif tc.tool_name == "delegate_to_sub_agent":
                     # --- Framework-level subagent delegation ---
-                    self._recent_answered_input_signatures.clear()
                     # Queue for parallel execution in Phase 2
                     logger.info(
                         "🔄 LLM requesting subagent delegation: agent_id='%s', task='%s'",
@@ -2591,7 +2458,6 @@ class EventLoopNode(NodeProtocol):
 
                 elif tc.tool_name == "report_to_parent":
                     # --- Report from sub-agent to parent (optionally blocking) ---
-                    self._recent_answered_input_signatures.clear()
                     reported_to_parent = True
                     msg = tc.tool_input.get("message", "")
                     data = tc.tool_input.get("data")
@@ -2646,7 +2512,6 @@ class EventLoopNode(NodeProtocol):
                         )
                         results_by_id[tc.tool_use_id] = result
                     else:
-                        self._recent_answered_input_signatures.clear()
                         pending_real.append(tc)
 
             # Phase 2a: execute real tools in parallel.
@@ -2973,8 +2838,6 @@ class EventLoopNode(NodeProtocol):
                 "Always call it after greeting the user, asking a question, or "
                 "requesting approval. Do NOT call it for status updates or "
                 "summaries that don't require a response. "
-                "Never ask the same question again after the user has already "
-                "answered it; use their latest answer from the conversation. "
                 "Always include 2-3 predefined options. The UI automatically "
                 "appends an 'Other' free-text input after your options, so NEVER "
                 "include catch-all options like 'Custom idea', 'Something else', "
@@ -3033,8 +2896,6 @@ class EventLoopNode(NodeProtocol):
                 "questions together with a single Submit button. "
                 "ALWAYS prefer this over ask_user when you have multiple things "
                 "to clarify. "
-                "Do NOT repeat the same batch after the user already answered it; "
-                "use the answers already present in the conversation. "
                 "IMPORTANT: Do NOT repeat the questions in your text response — "
                 "the widget renders them. Keep your text to a brief intro only. "
                 'Example: {"questions": ['
