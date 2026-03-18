@@ -5,6 +5,7 @@ Uses aiohttp TestClient with mocked sessions to test all endpoints
 without requiring actual LLM calls or agent loading.
 """
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +17,9 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from framework.server.app import cold_sessions_dir, create_app
 from framework.server.session_manager import Session, SessionManager
+from framework.runtime.triggers import TriggerDefinition
+from framework.server.app import create_app
+from framework.server.session_manager import Session
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 EXAMPLE_AGENT_PATH = REPO_ROOT / "examples" / "templates" / "deep_research_agent"
@@ -486,6 +490,70 @@ class TestSessionCRUD:
             assert resp.status == 200
             data = await resp.json()
             assert "primary" in data["graphs"]
+
+    @pytest.mark.asyncio
+    async def test_update_trigger_task(self, tmp_path):
+        session = _make_session(tmp_dir=tmp_path)
+        session.available_triggers["daily"] = TriggerDefinition(
+            id="daily",
+            trigger_type="timer",
+            trigger_config={"cron": "0 5 * * *"},
+            task="Old task",
+        )
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.patch(
+                "/api/sessions/test_agent/triggers/daily",
+                json={"task": "New task"},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["task"] == "New task"
+            assert data["trigger_config"]["cron"] == "0 5 * * *"
+            assert session.available_triggers["daily"].task == "New task"
+
+    @pytest.mark.asyncio
+    async def test_update_trigger_cron_restarts_active_timer(self, tmp_path):
+        session = _make_session(tmp_dir=tmp_path)
+        session.available_triggers["daily"] = TriggerDefinition(
+            id="daily",
+            trigger_type="timer",
+            trigger_config={"cron": "0 5 * * *"},
+            task="Run task",
+            active=True,
+        )
+        session.active_trigger_ids.add("daily")
+        session.active_timer_tasks["daily"] = asyncio.create_task(asyncio.sleep(60))
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.patch(
+                "/api/sessions/test_agent/triggers/daily",
+                json={"trigger_config": {"cron": "0 6 * * *"}},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["trigger_config"]["cron"] == "0 6 * * *"
+            assert "daily" in session.active_timer_tasks
+            assert session.active_timer_tasks["daily"] is not None
+            assert session.available_triggers["daily"].trigger_config["cron"] == "0 6 * * *"
+            session.active_timer_tasks["daily"].cancel()
+
+    @pytest.mark.asyncio
+    async def test_update_trigger_cron_rejects_invalid_expression(self, tmp_path):
+        session = _make_session(tmp_dir=tmp_path)
+        session.available_triggers["daily"] = TriggerDefinition(
+            id="daily",
+            trigger_type="timer",
+            trigger_config={"cron": "0 5 * * *"},
+            task="Run task",
+        )
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.patch(
+                "/api/sessions/test_agent/triggers/daily",
+                json={"trigger_config": {"cron": "not a cron"}},
+            )
+            assert resp.status == 400
 
 
 class TestExecution:

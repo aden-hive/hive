@@ -1381,6 +1381,8 @@ class AgentRunner:
             return "MISTRAL_API_KEY"
         elif model_lower.startswith("groq/"):
             return "GROQ_API_KEY"
+        elif model_lower.startswith("openrouter/"):
+            return "OPENROUTER_API_KEY"
         elif self._is_local_model(model_lower):
             return None  # Local models don't need an API key
         elif model_lower.startswith("azure/"):

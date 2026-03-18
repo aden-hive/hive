@@ -17,6 +17,7 @@ import { useMultiSSE } from "@/hooks/use-sse";
 import type { LiveSession, AgentEvent, DiscoverEntry, NodeSpec, DraftGraph as DraftGraphData } from "@/api/types";
 import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
+import { cronToLabel } from "@/lib/graphUtils";
 import { ApiError } from "@/api/client";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
@@ -251,6 +252,10 @@ function truncate(s: string, max: number): string {
 type SessionRestoreResult = {
   messages: ChatMessage[];
   restoredPhase: "planning" | "building" | "staging" | "running" | null;
+  /** Last flowchart map from events — used to restore flowchart overlay on cold resume. */
+  flowchartMap: Record<string, string[]> | null;
+  /** Last original draft from events — used to restore flowchart overlay on cold resume. */
+  originalDraft: DraftGraphData | null;
 };
 
 /**
@@ -267,6 +272,8 @@ async function restoreSessionMessages(
     if (events.length > 0) {
       const messages: ChatMessage[] = [];
       let runningPhase: ChatMessage["phase"] = undefined;
+      let flowchartMap: Record<string, string[]> | null = null;
+      let originalDraft: DraftGraphData | null = null;
       for (const evt of events) {
         // Track phase transitions so each message gets the phase it was created in
         const p = evt.type === "queen_phase_changed" ? evt.data?.phase as string
@@ -274,6 +281,12 @@ async function restoreSessionMessages(
           : undefined;
         if (p && ["planning", "building", "staging", "running"].includes(p)) {
           runningPhase = p as ChatMessage["phase"];
+        }
+        // Track last flowchart state for cold restore
+        if (evt.type === "flowchart_map_updated" && evt.data) {
+          const mapData = evt.data as { map?: Record<string, string[]>; original_draft?: DraftGraphData };
+          flowchartMap = mapData.map ?? null;
+          originalDraft = mapData.original_draft ?? null;
         }
         const msg = sseEventToChatMessage(evt, thread, agentDisplayName);
         if (!msg) continue;
@@ -283,12 +296,12 @@ async function restoreSessionMessages(
         }
         messages.push(msg);
       }
-      return { messages, restoredPhase: runningPhase ?? null };
+      return { messages, restoredPhase: runningPhase ?? null, flowchartMap, originalDraft };
     }
   } catch {
     // Event log not available — session will start fresh.
   }
-  return { messages: [], restoredPhase: null };
+  return { messages: [], restoredPhase: null, flowchartMap: null, originalDraft: null };
 }
 
 // --- Per-agent backend state (consolidated) ---
@@ -557,7 +570,11 @@ export default function Workspace() {
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [triggerTaskDraft, setTriggerTaskDraft] = useState("");
+  const [triggerCronDraft, setTriggerCronDraft] = useState("");
   const [triggerTaskSaving, setTriggerTaskSaving] = useState(false);
+  const [triggerScheduleSaving, setTriggerScheduleSaving] = useState(false);
+  const [triggerCronSaved, setTriggerCronSaved] = useState(false);
+  const [triggerTaskSaved, setTriggerTaskSaved] = useState(false);
   const [newTabOpen, setNewTabOpen] = useState(false);
   const newTabBtnRef = useRef<HTMLButtonElement>(null);
   const [graphPanelPct, setGraphPanelPct] = useState(30);
@@ -794,6 +811,8 @@ export default function Workspace() {
         }
 
         let restoredPhase: "planning" | "building" | "staging" | "running" | null = null;
+        let restoredFlowchartMap: Record<string, string[]> | null = null;
+        let restoredOriginalDraft: DraftGraphData | null = null;
         if (!liveSession) {
           // Fetch conversation history from disk BEFORE creating the new session.
           // SKIP if messages were already pre-populated by handleHistoryOpen.
@@ -805,8 +824,21 @@ export default function Workspace() {
               const restored = await restoreSessionMessages(restoreFrom, agentType, "Queen Bee");
               preRestoredMsgs.push(...restored.messages);
               restoredPhase = restored.restoredPhase;
+              restoredFlowchartMap = restored.flowchartMap;
+              restoredOriginalDraft = restored.originalDraft;
             } catch {
               // Not available — will start fresh
+            }
+          } else if (restoreFrom && alreadyHasMessages) {
+            // Messages already cached in localStorage — still fetch events for
+            // non-message state (phase, flowchart) that isn't cached.
+            try {
+              const restored = await restoreSessionMessages(restoreFrom, agentType, "Queen Bee");
+              restoredPhase = restored.restoredPhase;
+              restoredFlowchartMap = restored.flowchartMap;
+              restoredOriginalDraft = restored.originalDraft;
+            } catch {
+              // Not critical — UI will still show cached messages
             }
           }
 
@@ -830,7 +862,7 @@ export default function Workspace() {
               }));
             }
             restoredMessageCount = preRestoredMsgs.length;
-          } else if (restoreFrom && activeId) {
+          } else if (restoreFrom && activeId && !alreadyHasMessages) {
             // We had a stored session but no messages on disk — wipe stale localStorage cache
             setSessionsByAgent(prev => ({
               ...prev,
@@ -884,6 +916,9 @@ export default function Workspace() {
           queenReady: true,
           queenPhase: qPhase,
           queenBuilding: qPhase === "building",
+          // Restore flowchart overlay from persisted events
+          ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
+          ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -958,6 +993,8 @@ export default function Workspace() {
 
       // Track the last queen phase seen in the event log for cold restore
       let restoredPhase: "planning" | "building" | "staging" | "running" | null = null;
+      let restoredFlowchartMap: Record<string, string[]> | null = null;
+      let restoredOriginalDraft: DraftGraphData | null = null;
 
       if (!liveSession) {
         // Reconnect failed — clear stale cached messages from localStorage restore.
@@ -985,6 +1022,19 @@ export default function Workspace() {
           const restored = await restoreSessionMessages(coldRestoreId, agentType, displayNameTemp);
           preQueenMsgs = restored.messages;
           restoredPhase = restored.restoredPhase;
+          restoredFlowchartMap = restored.flowchartMap;
+          restoredOriginalDraft = restored.originalDraft;
+        } else if (coldRestoreId && alreadyHasMessages) {
+          // Messages already cached — still fetch events for non-message state (phase, flowchart)
+          try {
+            const displayNameTemp = formatAgentDisplayName(agentPath);
+            const restored = await restoreSessionMessages(coldRestoreId, agentType, displayNameTemp);
+            restoredPhase = restored.restoredPhase;
+            restoredFlowchartMap = restored.flowchartMap;
+            restoredOriginalDraft = restored.originalDraft;
+          } catch {
+            // Not critical — UI will still show cached messages
+          }
         }
 
         // Suppress intro whenever we are about to restore a previous conversation.
@@ -1065,6 +1115,9 @@ export default function Workspace() {
         displayName,
         queenPhase: initialPhase,
         queenBuilding: initialPhase === "building",
+        // Restore flowchart overlay from persisted events
+        ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
+        ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
       });
 
       // Update the session label + backendSessionId.  Also set historySourceId
@@ -1102,6 +1155,11 @@ export default function Workspace() {
       if (historyId && !coldRestoreId) {
         const restored = await restoreSessionMessages(historyId, agentType, displayName);
         restoredMsgs.push(...restored.messages);
+        // Use flowchart from event log if not already set
+        if (restored.flowchartMap && !restoredFlowchartMap) {
+          restoredFlowchartMap = restored.flowchartMap;
+          restoredOriginalDraft = restored.originalDraft;
+        }
 
         // Check worker status (needed for isWorkerRunning flag)
         try {
@@ -1144,6 +1202,9 @@ export default function Workspace() {
         loading: false,
         queenReady: !!(isResumedSession || hasRestoredContent),
         ...(isWorkerRunning ? { workerRunState: "running" } : {}),
+        // Restore flowchart overlay from persisted events
+        ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
+        ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1260,12 +1321,28 @@ export default function Workspace() {
 
           const fireMap = new Map<string, number>();
           const taskMap = new Map<string, string>();
+          const labelMap = new Map<string, string>();
+          const targetMap = new Map<string, string>();
           for (const ep of triggerEps) {
+            const nodeId = `__trigger_${ep.id}`;
             if (ep.next_fire_in != null) {
-              fireMap.set(`__trigger_${ep.id}`, ep.next_fire_in);
+              fireMap.set(nodeId, ep.next_fire_in);
             }
             if (ep.task != null) {
-              taskMap.set(`__trigger_${ep.id}`, ep.task);
+              taskMap.set(nodeId, ep.task);
+            }
+            const cron = ep.trigger_config?.cron as string | undefined;
+            const interval = ep.trigger_config?.interval_minutes as number | undefined;
+            const epLabel = cron
+              ? cronToLabel(cron)
+              : interval
+                ? `Every ${interval >= 60 ? `${interval / 60}h` : `${interval}m`}`
+                : ep.name || undefined;
+            if (epLabel) {
+              labelMap.set(nodeId, epLabel);
+            }
+            if (ep.entry_node) {
+              targetMap.set(nodeId, ep.entry_node);
             }
           }
 
@@ -1274,14 +1351,18 @@ export default function Workspace() {
             if (!ss?.length) return prev;
             const existingIds = new Set(ss[0].graphNodes.map(n => n.id));
 
-            // Update existing trigger nodes
+            // Update existing trigger nodes (countdown, task, label, target)
             let updated = ss[0].graphNodes.map((n) => {
               if (n.nodeType !== "trigger") return n;
               const nfi = fireMap.get(n.id);
               const task = taskMap.get(n.id);
-              if (nfi == null && task == null) return n;
+              const label = labelMap.get(n.id);
+              const target = targetMap.get(n.id);
+              if (nfi == null && task == null && !label && !target) return n;
               return {
                 ...n,
+                ...(label && label !== n.label ? { label } : {}),
+                ...(target ? { next: [target] } : {}),
                 triggerConfig: {
                   ...n.triggerConfig,
                   ...(nfi != null ? { next_fire_in: nfi } : {}),
@@ -1291,14 +1372,15 @@ export default function Workspace() {
             });
 
             // Discover new triggers not yet in the graph
-            const entryNode = ss[0].graphNodes.find(n => n.nodeType !== "trigger")?.id;
+            const fallbackEntry = ss[0].graphNodes.find(n => n.nodeType !== "trigger")?.id;
             const newNodes: GraphNode[] = [];
             for (const ep of triggerEps) {
               const nodeId = `__trigger_${ep.id}`;
               if (existingIds.has(nodeId)) continue;
+              const target = ep.entry_node || fallbackEntry;
               newNodes.push({
                 id: nodeId,
-                label: ep.name || ep.id,
+                label: labelMap.get(nodeId) || ep.name || ep.id,
                 status: "pending",
                 nodeType: "trigger",
                 triggerType: ep.trigger_type,
@@ -1307,7 +1389,7 @@ export default function Workspace() {
                   ...(ep.next_fire_in != null ? { next_fire_in: ep.next_fire_in } : {}),
                   ...(ep.task ? { task: ep.task } : {}),
                 },
-                ...(entryNode ? { next: [entryNode] } : {}),
+                ...(target ? { next: [target] } : {}),
               });
             }
             if (newNodes.length > 0) {
@@ -2237,10 +2319,18 @@ export default function Workspace() {
                   // Synthesize new trigger node at the front of the graph
                   const triggerType = (event.data?.trigger_type as string) || "timer";
                   const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
-                  const entryNode = s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const entryNode = (event.data?.entry_node as string) || s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const triggerName = (event.data?.name as string) || triggerId;
+                  const _cron = triggerConfig.cron as string | undefined;
+                  const _interval = triggerConfig.interval_minutes as number | undefined;
+                  const computedLabel = _cron
+                    ? cronToLabel(_cron)
+                    : _interval
+                      ? `Every ${_interval >= 60 ? `${_interval / 60}h` : `${_interval}m`}`
+                      : triggerName;
                   const newNode: GraphNode = {
                     id: nodeId,
-                    label: triggerId,
+                    label: computedLabel,
                     status: "running",
                     nodeType: "trigger",
                     triggerType,
@@ -2305,10 +2395,18 @@ export default function Workspace() {
                   if (s.graphNodes.some(n => n.id === nodeId)) return s;
                   const triggerType = (event.data?.trigger_type as string) || "timer";
                   const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
-                  const entryNode = s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const entryNode = (event.data?.entry_node as string) || s.graphNodes.find(n => n.nodeType !== "trigger")?.id;
+                  const triggerName = (event.data?.name as string) || triggerId;
+                  const _cron2 = triggerConfig.cron as string | undefined;
+                  const _interval2 = triggerConfig.interval_minutes as number | undefined;
+                  const computedLabel2 = _cron2
+                    ? cronToLabel(_cron2)
+                    : _interval2
+                      ? `Every ${_interval2 >= 60 ? `${_interval2 / 60}h` : `${_interval2}m`}`
+                      : triggerName;
                   const newNode: GraphNode = {
                     id: nodeId,
-                    label: triggerId,
+                    label: computedLabel2,
                     status: "pending",
                     nodeType: "trigger",
                     triggerType,
@@ -2316,6 +2414,43 @@ export default function Workspace() {
                     ...(entryNode ? { next: [entryNode] } : {}),
                   };
                   return { ...s, graphNodes: [newNode, ...s.graphNodes] };
+                }),
+              };
+            });
+          }
+          break;
+        }
+
+        case "trigger_updated": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            const nodeId = `__trigger_${triggerId}`;
+            const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
+            const cron = triggerConfig.cron as string | undefined;
+            const interval = triggerConfig.interval_minutes as number | undefined;
+            const newLabel = cron
+              ? cronToLabel(cron)
+              : interval
+                ? `Every ${interval >= 60 ? `${interval / 60}h` : `${interval}m`}`
+                : undefined;
+            setSessionsByAgent(prev => {
+              const sessions = prev[agentType] || [];
+              const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
+              return {
+                ...prev,
+                [agentType]: sessions.map(s => {
+                  if (s.id !== activeId) return s;
+                  return {
+                    ...s,
+                    graphNodes: s.graphNodes.map(n => {
+                      if (n.id !== nodeId) return n;
+                      return {
+                        ...n,
+                        ...(newLabel ? { label: newLabel } : {}),
+                        triggerConfig: { ...n.triggerConfig, ...triggerConfig },
+                      };
+                    }),
+                  };
                 }),
               };
             });
@@ -2376,13 +2511,42 @@ export default function Workspace() {
   const liveSelectedNode = selectedNode && currentGraph.nodes.find(n => n.id === selectedNode.id);
   const resolvedSelectedNode = liveSelectedNode || selectedNode;
 
-  // Sync trigger task draft when selected trigger node changes
+  // Sync trigger drafts when selected trigger node changes
   useEffect(() => {
     if (resolvedSelectedNode?.nodeType === "trigger") {
       const tc = resolvedSelectedNode.triggerConfig as Record<string, unknown> | undefined;
       setTriggerTaskDraft((tc?.task as string) || "");
+      setTriggerCronDraft((tc?.cron as string) || "");
     }
   }, [resolvedSelectedNode?.id]);
+
+  const patchTriggerNode = useCallback((agentType: string, triggerNodeId: string, patch: { task?: string; trigger_config?: Record<string, unknown>; label?: string }) => {
+    setSessionsByAgent(prev => {
+      const sessions = prev[agentType] || [];
+      const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
+      return {
+        ...prev,
+        [agentType]: sessions.map(s => {
+          if (s.id !== activeId) return s;
+          return {
+            ...s,
+            graphNodes: s.graphNodes.map(n => {
+              if (n.id !== triggerNodeId) return n;
+              return {
+                ...n,
+                ...(patch.label !== undefined ? { label: patch.label } : {}),
+                triggerConfig: {
+                  ...n.triggerConfig,
+                  ...(patch.trigger_config || {}),
+                  ...(patch.task !== undefined ? { task: patch.task } : {}),
+                },
+              };
+            }),
+          };
+        }),
+      };
+    });
+  }, []);
 
   // Build a flat list of all agent-type tabs for the tab bar
   const agentTabs = Object.entries(sessionsByAgent)
@@ -3052,18 +3216,64 @@ export default function Workspace() {
                       const interval = tc?.interval_minutes as number | undefined;
                       const eventTypes = tc?.event_types as string[] | undefined;
                       const scheduleLabel = cron
-                        ? `cron: ${cron}`
+                        ? cronToLabel(cron)
                         : interval
                           ? `Every ${interval >= 60 ? `${interval / 60}h` : `${interval}m`}`
                           : eventTypes?.length
                             ? eventTypes.join(", ")
                             : null;
-                      return scheduleLabel ? (
+                      const canEditCron = resolvedSelectedNode.triggerType === "timer";
+                      const cronChanged = canEditCron && triggerCronDraft.trim() !== (cron || "");
+                      return scheduleLabel || canEditCron ? (
                         <div>
                           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Schedule</p>
-                          <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
-                            {scheduleLabel}
-                          </p>
+                          {scheduleLabel && (
+                            <p className="text-xs text-foreground/80 font-mono bg-muted/30 rounded-lg px-3 py-2 border border-border/20">
+                              {scheduleLabel}
+                            </p>
+                          )}
+                          {canEditCron && (
+                            <>
+                              <input
+                                value={triggerCronDraft}
+                                onChange={(e) => setTriggerCronDraft(e.target.value)}
+                                placeholder="0 5 * * *"
+                                className="mt-1.5 w-full text-xs text-foreground/80 bg-muted/30 rounded-lg px-3 py-2 border border-border/20 font-mono focus:outline-none focus:border-primary/40"
+                              />
+                              <p className="text-[10px] text-muted-foreground/60 mt-1">
+                                Edit the cron expression for this timer trigger.
+                              </p>
+                              {(cronChanged || triggerCronSaved) && (
+                                <button
+                                  disabled={triggerScheduleSaving || !cronChanged}
+                                  onClick={async () => {
+                                    const sessionId = activeAgentState?.sessionId;
+                                    const triggerId = resolvedSelectedNode.id.replace("__trigger_", "");
+                                    const nextCron = triggerCronDraft.trim();
+                                    if (!sessionId || !nextCron) return;
+                                    const nextTriggerConfig: Record<string, unknown> = { cron: nextCron };
+                                    setTriggerScheduleSaving(true);
+                                    try {
+                                      await sessionsApi.updateTrigger(sessionId, triggerId, {
+                                        trigger_config: nextTriggerConfig,
+                                      });
+                                      patchTriggerNode(activeWorker, resolvedSelectedNode.id, {
+                                        trigger_config: nextTriggerConfig,
+                                        label: cronToLabel(nextCron),
+                                      });
+                                      setTriggerCronSaved(true);
+                                      setTimeout(() => setTriggerCronSaved(false), 2000);
+                                    } finally {
+                                      setTriggerScheduleSaving(false);
+                                    }
+                                  }}
+                                  className="mt-1.5 w-full text-[11px] px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
+                                >
+                                  {triggerScheduleSaving ? "Saving..." : triggerCronSaved ? "Saved" : "Save Cron"}
+                                </button>
+                              )}
+                            </>
+                          )}
                         </div>
                       ) : null;
                     })()}
@@ -3090,24 +3300,27 @@ export default function Workspace() {
                       {(() => {
                         const currentTask = (resolvedSelectedNode.triggerConfig as Record<string, unknown> | undefined)?.task as string || "";
                         const hasChanged = triggerTaskDraft !== currentTask;
-                        if (!hasChanged) return null;
+                        if (!hasChanged && !triggerTaskSaved) return null;
                         return (
                           <button
-                            disabled={triggerTaskSaving}
+                            disabled={triggerTaskSaving || !hasChanged}
                             onClick={async () => {
                               const sessionId = activeAgentState?.sessionId;
                               const triggerId = resolvedSelectedNode.id.replace("__trigger_", "");
                               if (!sessionId) return;
                               setTriggerTaskSaving(true);
                               try {
-                                await sessionsApi.updateTriggerTask(sessionId, triggerId, triggerTaskDraft);
+                                await sessionsApi.updateTrigger(sessionId, triggerId, { task: triggerTaskDraft });
+                                patchTriggerNode(activeWorker, resolvedSelectedNode.id, { task: triggerTaskDraft });
+                                setTriggerTaskSaved(true);
+                                setTimeout(() => setTriggerTaskSaved(false), 2000);
                               } finally {
                                 setTriggerTaskSaving(false);
                               }
                             }}
                             className="mt-1.5 w-full text-[11px] px-3 py-1.5 rounded-lg border border-primary/30 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50"
                           >
-                            {triggerTaskSaving ? "Saving..." : "Save Task"}
+                            {triggerTaskSaving ? "Saving..." : triggerTaskSaved ? "Saved" : "Save Task"}
                           </button>
                         );
                       })()}

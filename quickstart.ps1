@@ -778,6 +778,7 @@ $ProviderMap = [ordered]@{
     GOOGLE_API_KEY    = @{ Name = "Google AI";           Id = "google" }
     GROQ_API_KEY      = @{ Name = "Groq";               Id = "groq" }
     CEREBRAS_API_KEY  = @{ Name = "Cerebras";            Id = "cerebras" }
+    OPENROUTER_API_KEY = @{ Name = "OpenRouter";          Id = "openrouter" }
     MISTRAL_API_KEY   = @{ Name = "Mistral";             Id = "mistral" }
     TOGETHER_API_KEY  = @{ Name = "Together AI";         Id = "together" }
     DEEPSEEK_API_KEY  = @{ Name = "DeepSeek";            Id = "deepseek" }
@@ -820,8 +821,80 @@ $ModelChoices = @{
     )
 }
 
+function Normalize-OpenRouterModelId {
+    param([string]$ModelId)
+    $normalized = if ($ModelId) { $ModelId.Trim() } else { "" }
+    if ($normalized -match '(?i)^openrouter/(.+)$') {
+        $normalized = $matches[1]
+    }
+    return $normalized
+}
+
 function Get-ModelSelection {
     param([string]$ProviderId)
+
+    if ($ProviderId -eq "openrouter") {
+        $defaultModel = ""
+        if ($PrevModel -and $PrevProvider -eq $ProviderId) {
+            $defaultModel = Normalize-OpenRouterModelId $PrevModel
+        }
+        Write-Host ""
+        Write-Color -Text "Enter your OpenRouter model id:" -Color White
+        Write-Color -Text "  Paste from openrouter.ai (example: x-ai/grok-4.20-beta)" -Color DarkGray
+        Write-Color -Text "  If calls fail with guardrail/privacy errors: openrouter.ai/settings/privacy" -Color DarkGray
+        Write-Host ""
+        while ($true) {
+            if ($defaultModel) {
+                $rawModel = Read-Host "Model id [$defaultModel]"
+                if ([string]::IsNullOrWhiteSpace($rawModel)) { $rawModel = $defaultModel }
+            } else {
+                $rawModel = Read-Host "Model id"
+            }
+            $normalizedModel = Normalize-OpenRouterModelId $rawModel
+            if (-not [string]::IsNullOrWhiteSpace($normalizedModel)) {
+                $openrouterKey = $null
+                if ($SelectedEnvVar) {
+                    $openrouterKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "Process")
+                    if (-not $openrouterKey) {
+                        $openrouterKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "User")
+                    }
+                }
+
+                if ($openrouterKey) {
+                    Write-Host "  Verifying model id... " -NoNewline
+                    try {
+                        $modelApiBase = if ($SelectedApiBase) { $SelectedApiBase } else { "https://openrouter.ai/api/v1" }
+                        $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "openrouter" $openrouterKey $modelApiBase $normalizedModel 2>$null
+                        $hcJson = $hcResult | ConvertFrom-Json
+                        if ($hcJson.valid -eq $true) {
+                            if ($hcJson.model) {
+                                $normalizedModel = [string]$hcJson.model
+                            }
+                            Write-Color -Text "ok" -Color Green
+                        } elseif ($hcJson.valid -eq $false) {
+                            Write-Color -Text "failed" -Color Red
+                            Write-Warn $hcJson.message
+                            Write-Host ""
+                            continue
+                        } else {
+                            Write-Color -Text "--" -Color Yellow
+                            Write-Color -Text "  Could not verify model id (network issue). Continuing with your selection." -Color DarkGray
+                        }
+                    } catch {
+                        Write-Color -Text "--" -Color Yellow
+                        Write-Color -Text "  Could not verify model id (network issue). Continuing with your selection." -Color DarkGray
+                    }
+                } else {
+                    Write-Color -Text "  Skipping model verification (OpenRouter key not available in current shell)." -Color DarkGray
+                }
+
+                Write-Host ""
+                Write-Ok "Model: $normalizedModel"
+                return @{ Model = $normalizedModel; MaxTokens = 8192; MaxContextTokens = 120000 }
+            }
+            Write-Color -Text "Model id cannot be empty." -Color Red
+        }
+    }
 
     $choices = $ModelChoices[$ProviderId]
     if (-not $choices -or $choices.Count -eq 0) {
@@ -883,6 +956,7 @@ $SelectedEnvVar          = ""
 $SelectedModel           = ""
 $SelectedMaxTokens       = 8192
 $SelectedMaxContextTokens = 120000
+$SelectedApiBase         = ""
 $SubscriptionMode        = ""
 
 # ── Credential detection (silent — just set flags) ───────────
@@ -912,15 +986,16 @@ if (-not $hiveKey) { $hiveKey = $env:HIVE_API_KEY }
 if ($hiveKey) { $HiveCredDetected = $true }
 
 # Detect API key providers
-$ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY")
-$ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier")
-$ProviderMenuIds      = @("anthropic", "openai", "gemini", "groq", "cerebras")
+$ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY")
+$ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier", "OpenRouter - Bring any OpenRouter model")
+$ProviderMenuIds      = @("anthropic", "openai", "gemini", "groq", "cerebras", "openrouter")
 $ProviderMenuUrls     = @(
     "https://console.anthropic.com/settings/keys",
     "https://platform.openai.com/api-keys",
     "https://aistudio.google.com/apikey",
     "https://console.groq.com/keys",
-    "https://cloud.cerebras.ai/"
+    "https://cloud.cerebras.ai/",
+    "https://openrouter.ai/keys"
 )
 
 # ── Read previous configuration (if any) ──────────────────────
@@ -979,6 +1054,7 @@ if ($PrevSubMode -or $PrevProvider) {
                 "gemini"    { $DefaultChoice = "8" }
                 "groq"      { $DefaultChoice = "9" }
                 "cerebras"  { $DefaultChoice = "10" }
+                "openrouter" { $DefaultChoice = "11" }
                 "kimi"      { $DefaultChoice = "4" }
             }
         }
@@ -1028,7 +1104,7 @@ if ($HiveCredDetected) { Write-Color -Text "  (credential detected)" -Color Gree
 Write-Host ""
 Write-Color -Text "  API key providers:" -Color Cyan
 
-# 6-10) API key providers
+# 6-11) API key providers
 for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     $num = $idx + 6
     $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "Process")
@@ -1039,8 +1115,9 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     if ($envVal) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 }
 
+$SkipChoice = 6 + $ProviderMenuEnvVars.Count
 Write-Host "  " -NoNewline
-Write-Color -Text "11" -Color Cyan -NoNewline
+Write-Color -Text "$SkipChoice" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
 Write-Host ""
 
@@ -1051,16 +1128,16 @@ if ($DefaultChoice) {
 
 while ($true) {
     if ($DefaultChoice) {
-        $raw = Read-Host "Enter choice (1-11) [$DefaultChoice]"
+        $raw = Read-Host "Enter choice (1-$SkipChoice) [$DefaultChoice]"
         if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $DefaultChoice }
     } else {
-        $raw = Read-Host "Enter choice (1-11)"
+        $raw = Read-Host "Enter choice (1-$SkipChoice)"
     }
     if ($raw -match '^\d+$') {
         $num = [int]$raw
-        if ($num -ge 1 -and $num -le 11) { break }
+        if ($num -ge 1 -and $num -le $SkipChoice) { break }
     }
-    Write-Color -Text "Invalid choice. Please enter 1-11" -Color Red
+    Write-Color -Text "Invalid choice. Please enter 1-$SkipChoice" -Color Red
 }
 
 switch ($num) {
@@ -1163,13 +1240,18 @@ switch ($num) {
         }
         Write-Color -Text "  Model: $SelectedModel | API: $HiveLlmEndpoint" -Color DarkGray
     }
-    { $_ -ge 6 -and $_ -le 10 } {
+    { $_ -ge 6 -and $_ -le 11 } {
         # API key providers
         $provIdx = $num - 6
         $SelectedEnvVar     = $ProviderMenuEnvVars[$provIdx]
         $SelectedProviderId = $ProviderMenuIds[$provIdx]
         $providerName       = $ProviderMenuNames[$provIdx] -replace ' - .*', ''  # strip description
         $signupUrl          = $ProviderMenuUrls[$provIdx]
+        if ($SelectedProviderId -eq "openrouter") {
+            $SelectedApiBase = "https://openrouter.ai/api/v1"
+        } else {
+            $SelectedApiBase = ""
+        }
 
         # Prompt for key (allow replacement if already set) with verification + retry
         while ($true) {
@@ -1198,7 +1280,11 @@ switch ($num) {
                 # Health check the new key
                 Write-Host "  Verifying API key... " -NoNewline
                 try {
-                    $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") $SelectedProviderId $apiKey 2>$null
+                    if ($SelectedApiBase) {
+                        $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") $SelectedProviderId $apiKey $SelectedApiBase 2>$null
+                    } else {
+                        $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") $SelectedProviderId $apiKey 2>$null
+                    }
                     $hcJson = $hcResult | ConvertFrom-Json
                     if ($hcJson.valid -eq $true) {
                         Write-Color -Text "ok" -Color Green
@@ -1236,7 +1322,7 @@ switch ($num) {
             }
         }
     }
-    11 {
+    { $_ -eq $SkipChoice } {
         Write-Host ""
         Write-Warn "Skipped. An LLM API key is required to test and use worker agents."
         Write-Host "  Add your API key later by running:"
@@ -1483,6 +1569,9 @@ if ($SelectedProviderId) {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } elseif ($SubscriptionMode -eq "hive_llm") {
         $config.llm["api_base"] = $HiveLlmEndpoint
+        $config.llm["api_key_env_var"] = $SelectedEnvVar
+    } elseif ($SelectedProviderId -eq "openrouter") {
+        $config.llm["api_base"] = "https://openrouter.ai/api/v1"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } else {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
@@ -1783,6 +1872,9 @@ if ($SelectedProviderId) {
         Write-Color -Text "  API: api.z.ai (OpenAI-compatible)" -Color DarkGray
     } elseif ($SubscriptionMode -eq "codex") {
         Write-Ok "OpenAI Codex Subscription -> $SelectedModel"
+    } elseif ($SelectedProviderId -eq "openrouter") {
+        Write-Ok "OpenRouter API Key -> $SelectedModel"
+        Write-Color -Text "  API: openrouter.ai/api/v1 (OpenAI-compatible)" -Color DarkGray
     } else {
         Write-Color -Text "  $SelectedProviderId" -Color Cyan -NoNewline
         Write-Host " -> " -NoNewline
@@ -1813,14 +1905,39 @@ if ($CodexAvailable) {
     Write-Host ""
 }
 
-# Auto-launch dashboard or show manual instructions
+# Setup-only mode: show manual instructions
 if ($FrontendBuilt) {
-    Write-Color -Text "Launching dashboard..." -Color White
+    Write-Color -Text "â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•" -Color Yellow
     Write-Host ""
-    Write-Color -Text "  Starting server on http://localhost:8787" -Color DarkGray
-    Write-Color -Text "  Press Ctrl+C to stop" -Color DarkGray
+    Write-Color -Text "  IMPORTANT: Restart your terminal now!" -Color Yellow
     Write-Host ""
-    & (Join-Path $ScriptDir "hive.ps1") open
+    Write-Color -Text "â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•" -Color Yellow
+    Write-Host ""
+    Write-Host 'Environment variables (uv, API keys) are now configured, but you need to'
+    Write-Host 'restart your terminal for them to take effect in new sessions.'
+    Write-Host ""
+
+    Write-Color -Text "Run an Agent:" -Color White
+    Write-Host ""
+    Write-Host "  Quickstart only sets things up. Launch the dashboard when you're ready:"
+    Write-Color -Text "     hive open" -Color Cyan
+    Write-Host ""
+
+    if ($SelectedProviderId -or $credKey) {
+        Write-Color -Text "Note:" -Color White
+        Write-Host "- uv has been added to your User PATH"
+        if ($SelectedProviderId -and $SelectedEnvVar) {
+            Write-Host "- $SelectedEnvVar is set for LLM access"
+        }
+        if ($credKey) {
+            Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
+        }
+        Write-Host "- All variables will persist across reboots"
+        Write-Host ""
+    }
+
+    Write-Color -Text 'Run .\quickstart.ps1 again to reconfigure.' -Color DarkGray
+    Write-Host ""
 } else {
     Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
     Write-Host ""
@@ -1834,9 +1951,8 @@ if ($FrontendBuilt) {
 
     Write-Color -Text "Run an Agent:" -Color White
     Write-Host ""
-    Write-Host "  Launch the interactive dashboard to browse and run agents:"
-    Write-Host "  You can start an example agent or an agent built by yourself:"
-    Write-Color -Text "     .\hive.ps1 tui" -Color Cyan
+    Write-Host "  Frontend build was skipped or failed. Once the dashboard is available, launch it with:"
+    Write-Color -Text "     hive open" -Color Cyan
     Write-Host ""
 
     if ($SelectedProviderId -or $credKey) {
