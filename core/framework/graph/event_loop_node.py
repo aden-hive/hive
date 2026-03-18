@@ -24,6 +24,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from framework.graph.conversation import ConversationStore, NodeConversation
 from framework.graph.node import NodeContext, NodeProtocol, NodeResult
+from framework.llm.capabilities import supports_image_tool_results
 from framework.llm.provider import Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
     FinishEvent,
@@ -2703,11 +2704,21 @@ class EventLoopNode(NodeProtocol):
                     real_tool_results.append(tool_entry)
                     logged_tool_calls.append(tool_entry)
 
+                # Strip image content for models that can't handle it
+                image_content = result.image_content
+                if image_content and ctx.llm and not supports_image_tool_results(ctx.llm.model):
+                    logger.info(
+                        "Stripping image_content from tool result — model '%s' "
+                        "does not support images in tool results",
+                        ctx.llm.model,
+                    )
+                    image_content = None
+
                 await conversation.add_tool_result(
                     tool_use_id=tc.tool_use_id,
                     content=result.content,
                     is_error=result.is_error,
-                    image_content=result.image_content,
+                    image_content=image_content,
                 )
                 if tc.tool_name in ("ask_user", "ask_user_multiple"):
                     # Defer tool_call_completed until after user responds
