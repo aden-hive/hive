@@ -70,8 +70,6 @@ from .file_system_toolkits.list_dir import register_tools as register_list_dir
 from .file_system_toolkits.replace_file_content import (
     register_tools as register_replace_file_content,
 )
-from .file_system_toolkits.view_file import register_tools as register_view_file
-from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
 from .gitlab_tool import register_tools as register_gitlab
 from .gmail_tool import register_tools as register_gmail
@@ -186,14 +184,12 @@ def _register_verified(
     register_account_info(mcp, credentials=credentials)
 
     # --- File system toolkits ---
-    register_view_file(mcp)
-    register_write_to_file(mcp)
     register_list_dir(mcp)
     register_replace_file_content(mcp)
     register_apply_diff(mcp)
     register_apply_patch(mcp)
     register_grep_search(mcp)
-    # hashline_edit: anchor-based editing, pairs with view_file/grep_search hashline mode
+    # hashline_edit: anchor-based editing, pairs with read_file/grep_search hashline mode
     register_hashline_edit(mcp)
     register_execute_command(mcp)
     register_data_tools(mcp)

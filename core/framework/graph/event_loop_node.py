@@ -243,7 +243,7 @@ class LoopConfig:
     # Maximum seconds a delegate_to_sub_agent call may run before being
     # killed.  Subagents run a full event-loop so they naturally take
     # longer than a single tool call — default is 10 minutes.  0 = no timeout.
-    subagent_timeout_seconds: float = 300.0
+    subagent_timeout_seconds: float = 600.0
 
     # --- Lifecycle hooks ---
     # Hooks are async callables keyed by event name.  Supported events:
@@ -293,13 +293,26 @@ class OutputAccumulator:
 
     Values are stored in memory and optionally written through to a
     ConversationStore's cursor data for crash recovery.
+
+    When *spillover_dir* and *max_value_chars* are set, large values are
+    automatically saved to files and replaced with lightweight file
+    references.  This guarantees auto-spill fires on **every** ``set()``
+    call regardless of code path (resume, checkpoint restore, etc.).
     """
 
     values: dict[str, Any] = field(default_factory=dict)
     store: ConversationStore | None = None
+    spillover_dir: str | None = None
+    max_value_chars: int = 0  # 0 = disabled
 
     async def set(self, key: str, value: Any) -> None:
-        """Set a key-value pair, persisting immediately if store is available."""
+        """Set a key-value pair, auto-spilling large values to files.
+
+        When the serialised value exceeds *max_value_chars*, the data is
+        saved to ``<spillover_dir>/output_<key>.<ext>`` and *value* is
+        replaced with a compact file-reference string.
+        """
+        value = self._auto_spill(key, value)
         self.values[key] = value
         if self.store:
             cursor = await self.store.read_cursor() or {}
@@ -307,6 +320,39 @@ class OutputAccumulator:
             outputs[key] = value
             cursor["outputs"] = outputs
             await self.store.write_cursor(cursor)
+
+    def _auto_spill(self, key: str, value: Any) -> Any:
+        """Save large values to a file and return a reference string."""
+        if self.max_value_chars <= 0 or not self.spillover_dir:
+            return value
+
+        val_str = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
+        if len(val_str) <= self.max_value_chars:
+            return value
+
+        spill_path = Path(self.spillover_dir)
+        spill_path.mkdir(parents=True, exist_ok=True)
+        ext = ".json" if isinstance(value, (dict, list)) else ".txt"
+        filename = f"output_{key}{ext}"
+        write_content = (
+            json.dumps(value, indent=2, ensure_ascii=False)
+            if isinstance(value, (dict, list))
+            else str(value)
+        )
+        (spill_path / filename).write_text(write_content, encoding="utf-8")
+        file_size = (spill_path / filename).stat().st_size
+        logger.info(
+            "set_output value auto-spilled: key=%s, %d chars → %s (%d bytes)",
+            key,
+            len(val_str),
+            filename,
+            file_size,
+        )
+        return (
+            f"[Saved to '{filename}' ({file_size:,} bytes). "
+            f"Use load_data(filename='{filename}') "
+            f"to access full data.]"
+        )
 
     def get(self, key: str) -> Any | None:
         """Get a value by key, or None if not present."""
@@ -467,7 +513,11 @@ class EventLoopNode(NodeProtocol):
             conversation._output_keys = (
                 ctx.cumulative_output_keys or ctx.node_spec.output_keys or None
             )
-            accumulator = OutputAccumulator(store=self._conversation_store)
+            accumulator = OutputAccumulator(
+                store=self._conversation_store,
+                spillover_dir=self._config.spillover_dir,
+                max_value_chars=self._config.max_output_value_chars,
+            )
             start_iteration = 0
             _restored_recent_responses: list[str] = []
             _restored_tool_fingerprints: list[list[tuple[str, str]]] = []
@@ -585,7 +635,11 @@ class EventLoopNode(NodeProtocol):
                 # Stamp phase for first node in continuous mode
                 if _is_continuous:
                     conversation.set_current_phase(ctx.node_id)
-                accumulator = OutputAccumulator(store=self._conversation_store)
+                accumulator = OutputAccumulator(
+                    store=self._conversation_store,
+                    spillover_dir=self._config.spillover_dir,
+                    max_value_chars=self._config.max_output_value_chars,
+                )
                 start_iteration = 0
 
                 # Add initial user message from input data
@@ -2209,58 +2263,24 @@ class EventLoopNode(NodeProtocol):
                                 pass
                         key = tc.tool_input.get("key", "")
 
-                        # Auto-spill: save large values to data files and
-                        # replace with a lightweight file reference so shared
-                        # memory / adapt.md / transition markers stay small.
-                        spill_dir = self._config.spillover_dir
-                        max_val = self._config.max_output_value_chars
-                        if max_val > 0 and spill_dir:
-                            val_str = (
-                                json.dumps(value, ensure_ascii=False)
-                                if not isinstance(value, str)
-                                else value
-                            )
-                            if len(val_str) > max_val:
-                                spill_path = Path(spill_dir)
-                                spill_path.mkdir(parents=True, exist_ok=True)
-                                ext = ".json" if isinstance(value, (dict, list)) else ".txt"
-                                filename = f"output_{key}{ext}"
-                                write_content = (
-                                    json.dumps(value, indent=2, ensure_ascii=False)
-                                    if isinstance(value, (dict, list))
-                                    else str(value)
-                                )
-                                (spill_path / filename).write_text(write_content, encoding="utf-8")
-                                file_size = (spill_path / filename).stat().st_size
-                                logger.info(
-                                    "set_output value auto-spilled: key=%s, "
-                                    "%d chars → %s (%d bytes)",
-                                    key,
-                                    len(val_str),
-                                    filename,
-                                    file_size,
-                                )
-                                # Replace value with reference
-                                value = (
-                                    f"[Saved to '{filename}' ({file_size:,} bytes). "
-                                    f"Use load_data(filename='{filename}') "
-                                    f"to access full data.]"
-                                )
-                                # Update tool result to inform the LLM
-                                result = ToolResult(
-                                    tool_use_id=tc.tool_use_id,
-                                    content=(
-                                        f"Output '{key}' was large "
-                                        f"({len(val_str):,} chars) — data saved "
-                                        f"to '{filename}' ({file_size:,} bytes). "
-                                        f"The next phase will see the file "
-                                        f"reference and can load full data."
-                                    ),
-                                    is_error=False,
-                                )
-
+                        # Auto-spill happens inside accumulator.set()
+                        # — it fires on every code path (fresh, resume,
+                        # restore) and prevents overwrite regression.
                         await accumulator.set(key, value)
-                        self._record_learning(key, value)
+                        stored = accumulator.get(key)
+                        # If the accumulator spilled, update the tool
+                        # result so the LLM knows data was saved to a file.
+                        if isinstance(stored, str) and stored.startswith("[Saved to '"):
+                            result = ToolResult(
+                                tool_use_id=tc.tool_use_id,
+                                content=(
+                                    f"Output '{key}' auto-saved to file "
+                                    f"(value was too large for inline). "
+                                    f"{stored}"
+                                ),
+                                is_error=False,
+                            )
+                        self._record_learning(key, stored)
                         outputs_set_this_turn.append(key)
                         await self._publish_output_key_set(stream_id, node_id, key, execution_id)
                     logged_tool_calls.append(
@@ -2639,6 +2659,11 @@ class EventLoopNode(NodeProtocol):
                             content=raw.content,
                             is_error=raw.is_error,
                         )
+                    # Route through _truncate_tool_result so large
+                    # subagent results are saved to spillover files
+                    # and survive pruning (instead of being "cleared
+                    # from context" with no recovery path).
+                    result = self._truncate_tool_result(result, "delegate_to_sub_agent")
                     results_by_id[tc.tool_use_id] = result
                     logged_tool_calls.append(
                         {
@@ -4299,17 +4324,14 @@ class EventLoopNode(NodeProtocol):
                         )
                         parts.append(
                             "CONVERSATION HISTORY (freeform messages saved during compaction — "
-                            "use load_data('<filename>'), read_file('<full_path>'), "
-                            "or run_command('cat \"<full_path>\"') to review earlier dialogue):\n"
-                            + conv_list
+                            "use load_data('<filename>') to review earlier dialogue):\n" + conv_list
                         )
                     if data_files:
                         file_list = "\n".join(
                             f"  - {f}  (full path: {data_dir / f})" for f in data_files[:30]
                         )
                         parts.append(
-                            "DATA FILES (use load_data('<filename>'), read_file('<full_path>'), "
-                            "or run_command('cat \"<full_path>\"') to read):\n" + file_list
+                            "DATA FILES (use load_data('<filename>') to read):\n" + file_list
                         )
                     if not all_files:
                         parts.append(
@@ -4375,6 +4397,8 @@ class EventLoopNode(NodeProtocol):
             return None
 
         accumulator = await OutputAccumulator.restore(self._conversation_store)
+        accumulator.spillover_dir = self._config.spillover_dir
+        accumulator.max_value_chars = self._config.max_output_value_chars
 
         cursor = await self._conversation_store.read_cursor()
         start_iteration = cursor.get("iteration", 0) + 1 if cursor else 0

@@ -69,6 +69,7 @@ async def create_queen(
         QueenPhaseState,
         register_queen_lifecycle_tools,
     )
+    from framework.tools.queen_memory_tools import register_queen_memory_tools
 
     hive_home = Path.home() / ".hive"
 
@@ -121,6 +122,9 @@ async def create_queen(
         manager_session_id=session.id,
         phase_state=phase_state,
     )
+
+    # ---- Episodic memory tools (always registered) ---------------------
+    register_queen_memory_tools(queen_registry)
 
     # ---- Monitoring tools (only when worker is loaded) ----------------
     if session.worker_runtime:
