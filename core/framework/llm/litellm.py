@@ -86,17 +86,13 @@ def _patch_litellm_anthropic_oauth() -> None:
         auth_is_oauth = auth.startswith(oauth_prefix)
         key_is_oauth = x_api_key.startswith(ANTHROPIC_OAUTH_TOKEN_PREFIX)
         if auth_is_oauth or key_is_oauth:
-            token = (
-                x_api_key if key_is_oauth
-                else auth.removeprefix("Bearer ").strip()
-            )
+            token = x_api_key if key_is_oauth else auth.removeprefix("Bearer ").strip()
             result.pop("x-api-key", None)
             result["authorization"] = f"Bearer {token}"
             # Merge the OAuth beta header with any existing beta headers.
             existing_beta = result.get("anthropic-beta", "")
             beta_parts = (
-                [b.strip() for b in existing_beta.split(",") if b.strip()]
-                if existing_beta else []
+                [b.strip() for b in existing_beta.split(",") if b.strip()] if existing_beta else []
             )
             if ANTHROPIC_OAUTH_BETA_HEADER not in beta_parts:
                 beta_parts.append(ANTHROPIC_OAUTH_BETA_HEADER)
@@ -519,9 +515,7 @@ class LiteLLMProvider(LLMProvider):
         self.api_base = api_base or self._default_api_base_for_model(_original_model)
         self.extra_kwargs = kwargs
         # Detect Claude Code OAuth subscription by checking the api_key prefix.
-        self._claude_code_oauth = bool(
-            api_key and api_key.startswith("sk-ant-oat")
-        )
+        self._claude_code_oauth = bool(api_key and api_key.startswith("sk-ant-oat"))
         if self._claude_code_oauth:
             # Anthropic requires a specific User-Agent for OAuth requests.
             eh = self.extra_kwargs.setdefault("extra_headers", {})
