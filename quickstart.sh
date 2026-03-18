@@ -1058,7 +1058,7 @@ case $choice in
             SELECTED_PROVIDER_ID="anthropic"
             SELECTED_MODEL="claude-opus-4-6"
             SELECTED_MAX_TOKENS=32768
-            SELECTED_MAX_CONTEXT_TOKENS=180000  # Claude — 200k context window
+            SELECTED_MAX_CONTEXT_TOKENS=960000  # Claude — 200k context window
             echo ""
             echo -e "${GREEN}⬢${NC} Using Claude Code subscription"
         fi
@@ -1070,7 +1070,7 @@ case $choice in
         SELECTED_ENV_VAR="ZAI_API_KEY"
         SELECTED_MODEL="glm-5"
         SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=120000  # GLM-5 — 128k context window
+        SELECTED_MAX_CONTEXT_TOKENS=180000  # GLM-5 — 128k context window
         PROVIDER_NAME="ZAI"
         echo ""
         echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
@@ -1128,7 +1128,7 @@ case $choice in
         SELECTED_ENV_VAR="KIMI_API_KEY"
         SELECTED_MODEL="kimi-k2.5"
         SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=120000  # Kimi K2.5 — 128k context window
+        SELECTED_MAX_CONTEXT_TOKENS=240000  # Kimi K2.5 — 128k context window
         SELECTED_API_BASE="https://api.kimi.com/coding"
         PROVIDER_NAME="Kimi"
         SIGNUP_URL="https://www.kimi.com/code"
@@ -1142,7 +1142,7 @@ case $choice in
         SELECTED_PROVIDER_ID="hive"
         SELECTED_ENV_VAR="HIVE_API_KEY"
         SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=120000
+        SELECTED_MAX_CONTEXT_TOKENS=180000
         SELECTED_API_BASE="$HIVE_LLM_ENDPOINT"
         PROVIDER_NAME="Hive"
         SIGNUP_URL="https://discord.com/invite/hQdU7QDkgR"
