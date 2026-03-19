@@ -424,7 +424,7 @@ prompt_model_selection() {
 }
 
 # ── Save worker_llm section to configuration.json ────────────────────
-# Args: provider_id env_var model max_tokens max_context_tokens [use_claude_code_sub] [api_base] [use_codex_sub]
+# Args: provider_id env_var model max_tokens max_context_tokens [use_claude_code_sub] [api_base] [use_codex_sub] [use_antigravity_sub]
 
 save_worker_configuration() {
     local provider_id="$1"
@@ -435,6 +435,7 @@ save_worker_configuration() {
     local use_claude_code_sub="${6:-}"
     local api_base="${7:-}"
     local use_codex_sub="${8:-}"
+    local use_antigravity_sub="${9:-}"
 
     if [ -z "$model" ]; then
         model="$(get_default_model "$provider_id")"
@@ -451,7 +452,8 @@ save_worker_configuration() {
         "$max_context_tokens" \
         "$use_claude_code_sub" \
         "$api_base" \
-        "$use_codex_sub" 2>/dev/null <<'PY'
+        "$use_codex_sub" \
+        "$use_antigravity_sub" 2>/dev/null <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -465,7 +467,8 @@ from pathlib import Path
     use_claude_code_sub,
     api_base,
     use_codex_sub,
-) = sys.argv[1:9]
+    use_antigravity_sub,
+) = sys.argv[1:10]
 
 cfg_path = Path.home() / ".hive" / "configuration.json"
 cfg_path.parent.mkdir(parents=True, exist_ok=True)
@@ -495,6 +498,12 @@ if use_codex_sub == "true":
     config["worker_llm"].pop("api_key_env_var", None)
 else:
     config["worker_llm"].pop("use_codex_subscription", None)
+
+if use_antigravity_sub == "true":
+    config["worker_llm"]["use_antigravity_subscription"] = True
+    config["worker_llm"].pop("api_key_env_var", None)
+else:
+    config["worker_llm"].pop("use_antigravity_subscription", None)
 
 if api_base:
     config["worker_llm"]["api_base"] = api_base
@@ -591,6 +600,19 @@ if [ -n "${HIVE_API_KEY:-}" ]; then
     HIVE_CRED_DETECTED=true
 fi
 
+ANTIGRAVITY_CRED_DETECTED=false
+# Check native Antigravity IDE (macOS/Linux) SQLite state DB first
+if [ -f "$HOME/Library/Application Support/Antigravity/User/globalStorage/state.vscdb" ]; then
+    ANTIGRAVITY_CRED_DETECTED=true
+elif [ -f "$HOME/.config/Antigravity/User/globalStorage/state.vscdb" ]; then
+    ANTIGRAVITY_CRED_DETECTED=true
+# Fallback: antigravity-auth CLI tool JSON files
+elif [ -f "$HOME/.config/opencode/antigravity-accounts.json" ]; then
+    ANTIGRAVITY_CRED_DETECTED=true
+elif [ -f "$HOME/.config/antigravity_auth/accounts.json" ]; then
+    ANTIGRAVITY_CRED_DETECTED=true
+fi
+
 # Detect API key providers
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     for env_var in "${!PROVIDER_NAMES[@]}"; do
@@ -633,6 +655,8 @@ try:
         sub = "codex"
     elif llm.get("use_kimi_code_subscription"):
         sub = "kimi_code"
+    elif llm.get("use_antigravity_subscription"):
+        sub = "antigravity"
     elif llm.get("provider", "") == "minimax" or "api.minimax.io" in llm.get("api_base", ""):
         sub = "minimax_code"
     elif llm.get("provider", "") == "hive" or "adenhq.com" in llm.get("api_base", ""):
@@ -656,6 +680,7 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
         codex)       [ "$CODEX_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         kimi_code)   [ "$KIMI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         hive_llm)    [ "$HIVE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        antigravity) [ "$ANTIGRAVITY_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         *)
             # API key provider — check if the env var is set
             if [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
@@ -672,15 +697,16 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
             minimax_code) DEFAULT_CHOICE=4 ;;
             kimi_code)   DEFAULT_CHOICE=5 ;;
             hive_llm)    DEFAULT_CHOICE=6 ;;
+            antigravity) DEFAULT_CHOICE=7 ;;
         esac
         if [ -z "$DEFAULT_CHOICE" ]; then
             case "$PREV_PROVIDER" in
-                anthropic) DEFAULT_CHOICE=7 ;;
-                openai)    DEFAULT_CHOICE=8 ;;
-                gemini)    DEFAULT_CHOICE=9 ;;
-                groq)      DEFAULT_CHOICE=10 ;;
-                cerebras)  DEFAULT_CHOICE=11 ;;
-                openrouter) DEFAULT_CHOICE=12 ;;
+                anthropic) DEFAULT_CHOICE=8 ;;
+                openai)    DEFAULT_CHOICE=9 ;;
+                gemini)    DEFAULT_CHOICE=10 ;;
+                groq)      DEFAULT_CHOICE=11 ;;
+                cerebras)  DEFAULT_CHOICE=12 ;;
+                openrouter) DEFAULT_CHOICE=13 ;;
                 minimax)   DEFAULT_CHOICE=4 ;;
                 kimi)      DEFAULT_CHOICE=5 ;;
                 hive)      DEFAULT_CHOICE=6 ;;
@@ -736,14 +762,21 @@ else
     echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}"
 fi
 
+# 7) Antigravity
+if [ "$ANTIGRAVITY_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}7)${NC} Antigravity Subscription  ${DIM}(use your Google/Gemini plan)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}7)${NC} Antigravity Subscription  ${DIM}(use your Google/Gemini plan)${NC}"
+fi
+
 echo ""
 echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 
-# 7-12) API key providers — show (credential detected) if key already set
+# 8-13) API key providers — show (credential detected) if key already set
 PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY)
 PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model")
 for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
-    num=$((idx + 7))
+    num=$((idx + 8))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
     if [ -n "${!env_var}" ]; then
         echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}  ${GREEN}(credential detected)${NC}"
@@ -752,7 +785,7 @@ for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     fi
 done
 
-SKIP_CHOICE=$((7 + ${#PROVIDER_MENU_ENVS[@]}))
+SKIP_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]}))
 echo -e "  ${CYAN}$SKIP_CHOICE)${NC} Skip for now"
 echo ""
 
@@ -895,36 +928,59 @@ case $choice in
         echo -e "  ${DIM}Model: $SELECTED_MODEL | API: ${HIVE_LLM_ENDPOINT}${NC}"
         ;;
     7)
+        # Antigravity Subscription
+        if [ "$ANTIGRAVITY_CRED_DETECTED" = false ]; then
+            echo ""
+            echo -e "${YELLOW}  Antigravity credentials not found.${NC}"
+            echo -e "  Run ${CYAN}antigravity-auth accounts add${NC} to authenticate,"
+            echo -e "  then run this script again."
+            echo ""
+            exit 1
+        else
+            SUBSCRIPTION_MODE="antigravity"
+            SELECTED_PROVIDER_ID="openai"
+            SELECTED_MODEL="gemini-3-flash"
+            SELECTED_MAX_TOKENS=32768
+            SELECTED_MAX_CONTEXT_TOKENS=1000000  # Gemini 3 Flash — 1M context window
+            echo ""
+            echo -e "${YELLOW}  ⚠ Using Antigravity can technically cause your account suspension. Please use at your own risk.${NC}"
+            echo ""
+            echo -e "${GREEN}⬢${NC} Using Antigravity subscription"
+            echo -e "  ${DIM}Model: gemini-3-flash | Proxy: localhost:8069/v1${NC}"
+            echo -e "  ${DIM}Ensure 'antigravity-auth serve' is running before starting agents.${NC}"
+        fi
+        ;;
+    8)
         SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
         SELECTED_PROVIDER_ID="anthropic"
         PROVIDER_NAME="Anthropic"
         SIGNUP_URL="https://console.anthropic.com/settings/keys"
         ;;
-    8)
+    9)
         SELECTED_ENV_VAR="OPENAI_API_KEY"
         SELECTED_PROVIDER_ID="openai"
         PROVIDER_NAME="OpenAI"
         SIGNUP_URL="https://platform.openai.com/api-keys"
         ;;
-    9)
+    10)
         SELECTED_ENV_VAR="GEMINI_API_KEY"
         SELECTED_PROVIDER_ID="gemini"
         PROVIDER_NAME="Google Gemini"
         SIGNUP_URL="https://aistudio.google.com/apikey"
         ;;
-    10)
+    11)
         SELECTED_ENV_VAR="GROQ_API_KEY"
         SELECTED_PROVIDER_ID="groq"
         PROVIDER_NAME="Groq"
         SIGNUP_URL="https://console.groq.com/keys"
         ;;
-    11)
+    12)
         SELECTED_ENV_VAR="CEREBRAS_API_KEY"
         SELECTED_PROVIDER_ID="cerebras"
         PROVIDER_NAME="Cerebras"
         SIGNUP_URL="https://cloud.cerebras.ai/"
         ;;
-    12)
+    13)
         SELECTED_ENV_VAR="OPENROUTER_API_KEY"
         SELECTED_PROVIDER_ID="openrouter"
         SELECTED_API_BASE="https://openrouter.ai/api/v1"
@@ -1086,6 +1142,8 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
         save_worker_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "true" "" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "codex" ]; then
         save_worker_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "" "true" > /dev/null || SAVE_OK=false
+    elif [ "$SUBSCRIPTION_MODE" = "antigravity" ]; then
+        save_worker_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "" "" "true" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
         save_worker_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then

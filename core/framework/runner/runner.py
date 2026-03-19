@@ -552,6 +552,319 @@ def get_kimi_code_token() -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Antigravity subscription token helpers
+# ---------------------------------------------------------------------------
+
+# Antigravity IDE (native macOS/Linux app) stores OAuth tokens in its
+# VSCode-style SQLite state database under the key
+# "antigravityUnifiedStateSync.oauthToken" as a base64-encoded protobuf blob.
+ANTIGRAVITY_IDE_STATE_DB = (
+    Path.home()
+    / "Library"
+    / "Application Support"
+    / "Antigravity"
+    / "User"
+    / "globalStorage"
+    / "state.vscdb"
+)
+# Linux fallback for the IDE state DB
+ANTIGRAVITY_IDE_STATE_DB_LINUX = (
+    Path.home() / ".config" / "Antigravity" / "User" / "globalStorage" / "state.vscdb"
+)
+# antigravity-auth CLI tool stores credentials in JSON files
+ANTIGRAVITY_AUTH_FILE = Path.home() / ".config" / "opencode" / "antigravity-accounts.json"
+ANTIGRAVITY_AUTH_FILE_FALLBACK = Path.home() / ".config" / "antigravity_auth" / "accounts.json"
+
+ANTIGRAVITY_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
+ANTIGRAVITY_OAUTH_CLIENT_ID = (
+    "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+)
+_ANTIGRAVITY_TOKEN_LIFETIME_SECS = 3600  # Google access tokens expire in 1 hour
+_ANTIGRAVITY_IDE_STATE_DB_KEY = "antigravityUnifiedStateSync.oauthToken"
+
+
+def _read_antigravity_ide_credentials() -> dict | None:
+    """Read credentials from the Antigravity IDE's SQLite state database.
+
+    The Antigravity desktop IDE (VSCode-based) stores its OAuth token as a
+    base64-encoded protobuf blob in a SQLite database.  The access token is
+    a standard Google OAuth ``ya29.*`` bearer token.
+
+    Returns:
+        Dict with ``accessToken`` and optionally ``refreshToken`` keys,
+        plus ``_source: "ide"`` to skip file-based save on refresh.
+        Returns None if the database is absent or the key is not found.
+    """
+    import re
+    import sqlite3
+
+    for db_path in (ANTIGRAVITY_IDE_STATE_DB, ANTIGRAVITY_IDE_STATE_DB_LINUX):
+        if not db_path.exists():
+            continue
+        try:
+            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            try:
+                row = con.execute(
+                    "SELECT value FROM ItemTable WHERE key = ?",
+                    (_ANTIGRAVITY_IDE_STATE_DB_KEY,),
+                ).fetchone()
+            finally:
+                con.close()
+
+            if not row:
+                continue
+
+            import base64
+
+            blob = base64.b64decode(row[0])
+
+            # The protobuf blob contains the access token (ya29.*) and
+            # refresh token (1//*) as length-prefixed UTF-8 strings.
+            # Decode the inner base64 layer and extract with regex.
+            inner_b64_candidates = re.findall(rb"[A-Za-z0-9+/=_\-]{40,}", blob)
+            access_token: str | None = None
+            refresh_token: str | None = None
+            for candidate in inner_b64_candidates:
+                try:
+                    padded = candidate + b"=" * (-len(candidate) % 4)
+                    inner = base64.urlsafe_b64decode(padded)
+                except Exception:
+                    continue
+                if not access_token:
+                    m = re.search(rb"ya29\.[A-Za-z0-9_\-\.]+", inner)
+                    if m:
+                        access_token = m.group(0).decode("ascii")
+                if not refresh_token:
+                    m = re.search(rb"1//[A-Za-z0-9_\-\.]+", inner)
+                    if m:
+                        refresh_token = m.group(0).decode("ascii")
+                if access_token and refresh_token:
+                    break
+
+            if access_token:
+                return {
+                    "accounts": [
+                        {
+                            "accessToken": access_token,
+                            "refreshToken": refresh_token or "",
+                        }
+                    ],
+                    "_source": "ide",
+                    "_db_path": str(db_path),
+                }
+        except Exception as exc:
+            logger.debug("Failed to read Antigravity IDE state DB: %s", exc)
+            continue
+
+    return None
+
+
+def _read_antigravity_credentials() -> dict | None:
+    """Read Antigravity auth data from all supported credential sources.
+
+    Checks in order:
+    1. Antigravity IDE SQLite state database (native macOS/Linux app)
+    2. antigravity-auth CLI JSON file (~/.config/opencode/antigravity-accounts.json)
+    3. antigravity-auth CLI fallback (~/.config/antigravity_auth/accounts.json)
+
+    Returns:
+        Auth data dict with an ``accounts`` list on success, None otherwise.
+    """
+    # 1. Native Antigravity IDE (primary on macOS)
+    ide_creds = _read_antigravity_ide_credentials()
+    if ide_creds:
+        return ide_creds
+
+    # 2 & 3. antigravity-auth CLI tool JSON files
+    for path in (ANTIGRAVITY_AUTH_FILE, ANTIGRAVITY_AUTH_FILE_FALLBACK):
+        if not path.exists():
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            accounts = data.get("accounts", [])
+            if accounts and isinstance(accounts[0], dict):
+                return data
+        except (json.JSONDecodeError, OSError):
+            continue
+    return None
+
+
+def _is_antigravity_token_expired(auth_data: dict) -> bool:
+    """Check whether the Antigravity access token is expired or near expiry.
+
+    For IDE-sourced credentials: uses the state DB's mtime as last_refresh
+    since the IDE keeps the DB fresh while it's running.
+    For JSON-sourced credentials: uses the ``last_refresh`` field or file mtime.
+    """
+    import time
+    from datetime import datetime
+
+    now = time.time()
+
+    if auth_data.get("_source") == "ide":
+        # The IDE refreshes tokens automatically while running.
+        # Use the DB file's mtime as a proxy for when the token was last updated.
+        try:
+            db_path = Path(auth_data.get("_db_path", str(ANTIGRAVITY_IDE_STATE_DB)))
+            last_refresh: float = db_path.stat().st_mtime
+        except OSError:
+            return True
+        expires_at = last_refresh + _ANTIGRAVITY_TOKEN_LIFETIME_SECS
+        return now >= (expires_at - _TOKEN_REFRESH_BUFFER_SECS)
+
+    last_refresh_val: float | str | None = auth_data.get("last_refresh")
+    if last_refresh_val is None:
+        try:
+            path = (
+                ANTIGRAVITY_AUTH_FILE
+                if ANTIGRAVITY_AUTH_FILE.exists()
+                else ANTIGRAVITY_AUTH_FILE_FALLBACK
+            )
+            last_refresh_val = path.stat().st_mtime
+        except OSError:
+            return True
+    elif isinstance(last_refresh_val, str):
+        try:
+            last_refresh_val = datetime.fromisoformat(
+                last_refresh_val.replace("Z", "+00:00")
+            ).timestamp()
+        except (ValueError, TypeError):
+            return True
+
+    expires_at = float(last_refresh_val) + _ANTIGRAVITY_TOKEN_LIFETIME_SECS
+    return now >= (expires_at - _TOKEN_REFRESH_BUFFER_SECS)
+
+
+def _refresh_antigravity_token(refresh_token: str) -> dict | None:
+    """Refresh the Antigravity access token via Google OAuth.
+
+    POSTs form-encoded ``grant_type=refresh_token`` to the Google token
+    endpoint using Antigravity's public OAuth client ID.
+
+    Returns:
+        Parsed response dict (containing ``access_token``) on success,
+        None on any error.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    data = urllib.parse.urlencode(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": ANTIGRAVITY_OAUTH_CLIENT_ID,
+        }
+    ).encode("utf-8")
+
+    req = urllib.request.Request(
+        ANTIGRAVITY_OAUTH_TOKEN_URL,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
+            return json.loads(resp.read())
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
+        logger.debug("Antigravity token refresh failed: %s", exc)
+        return None
+
+
+def _save_refreshed_antigravity_credentials(auth_data: dict, token_data: dict) -> None:
+    """Write refreshed tokens back to the Antigravity JSON credentials file.
+
+    Skipped for IDE-sourced credentials (the IDE manages its own DB).
+    Updates ``accounts[0].accessToken`` (and ``refreshToken`` if present),
+    then persists ``last_refresh`` as an ISO-8601 UTC string.
+    """
+    from datetime import datetime
+
+    # IDE manages its own state — we do not write back to its SQLite DB
+    if auth_data.get("_source") == "ide":
+        return
+
+    try:
+        accounts = auth_data.get("accounts", [])
+        if not accounts:
+            return
+        account = accounts[0]
+        account["accessToken"] = token_data["access_token"]
+        if "refresh_token" in token_data:
+            account["refreshToken"] = token_data["refresh_token"]
+        auth_data["accounts"] = accounts
+        auth_data["last_refresh"] = datetime.now(UTC).isoformat()
+
+        target_path = (
+            ANTIGRAVITY_AUTH_FILE
+            if ANTIGRAVITY_AUTH_FILE.exists()
+            else ANTIGRAVITY_AUTH_FILE_FALLBACK
+        )
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(target_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(auth_data, f, indent=2)
+        logger.debug("Antigravity credentials refreshed and saved")
+    except (OSError, KeyError) as exc:
+        logger.debug("Failed to save refreshed Antigravity credentials: %s", exc)
+
+
+def get_antigravity_token() -> str | None:
+    """Get the OAuth access token from an Antigravity subscription.
+
+    Credential sources checked in order:
+    1. Antigravity IDE SQLite state DB (native app, macOS/Linux)
+    2. antigravity-auth CLI JSON file
+
+    For IDE credentials the token is read directly (the IDE refreshes it
+    automatically while running).  For JSON credentials an automatic OAuth
+    refresh is attempted when the token is near expiry.
+
+    Returns:
+        The ``ya29.*`` Google OAuth access token, or None if unavailable.
+    """
+    auth_data = _read_antigravity_credentials()
+    if not auth_data:
+        return None
+
+    accounts = auth_data.get("accounts", [])
+    if not accounts:
+        return None
+    account = accounts[0]
+
+    access_token = account.get("accessToken")
+    if not access_token:
+        return None
+
+    if not _is_antigravity_token_expired(auth_data):
+        return access_token
+
+    # Token is expired or near expiry — attempt a refresh
+    refresh_token = account.get("refreshToken")
+    if not refresh_token:
+        logger.warning(
+            "Antigravity token expired and no refresh token available. "
+            "Re-open the Antigravity IDE to refresh, or run 'antigravity-auth accounts add'."
+        )
+        return access_token  # return stale token; proxy may still accept it briefly
+
+    logger.info("Antigravity token expired or near expiry, refreshing...")
+    token_data = _refresh_antigravity_token(refresh_token)
+
+    if token_data and "access_token" in token_data:
+        _save_refreshed_antigravity_credentials(auth_data, token_data)
+        return token_data["access_token"]
+
+    logger.warning(
+        "Antigravity token refresh failed. "
+        "Re-open the Antigravity IDE or run 'antigravity-auth accounts add'."
+    )
+    return access_token
+
+
 @dataclass
 class AgentInfo:
     """Information about an exported agent."""
@@ -1158,6 +1471,7 @@ class AgentRunner:
             use_claude_code = llm_config.get("use_claude_code_subscription", False)
             use_codex = llm_config.get("use_codex_subscription", False)
             use_kimi_code = llm_config.get("use_kimi_code_subscription", False)
+            use_antigravity = llm_config.get("use_antigravity_subscription", False)
             api_base = llm_config.get("api_base")
 
             api_key = None
@@ -1179,6 +1493,12 @@ class AgentRunner:
                 if not api_key:
                     print("Warning: Kimi Code subscription configured but no key found.")
                     print("Run 'kimi /login' to authenticate, then try again.")
+            elif use_antigravity:
+                # Get OAuth token from Antigravity subscription (Google OAuth)
+                api_key = get_antigravity_token()
+                if not api_key:
+                    print("Warning: Antigravity subscription configured but no token found.")
+                    print("Run 'antigravity-auth accounts add' to authenticate, then try again.")
 
             if api_key and use_claude_code:
                 # Use litellm's built-in Anthropic OAuth support.
@@ -1216,6 +1536,15 @@ class AgentRunner:
                     model=self.model,
                     api_key=api_key,
                     api_base=api_base,
+                )
+            elif api_key and use_antigravity:
+                # Antigravity routes through a local OpenAI-compatible proxy
+                # started with 'antigravity-auth serve' on localhost:8069.
+                # No special headers required — the proxy handles auth internally.
+                self._llm = LiteLLMProvider(
+                    model=self.model,
+                    api_key=api_key,
+                    api_base="http://localhost:8069/v1",
                 )
             else:
                 # Local models (e.g. Ollama) don't need an API key

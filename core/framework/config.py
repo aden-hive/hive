@@ -116,6 +116,16 @@ def get_worker_api_key() -> str | None:
         except ImportError:
             pass
 
+    if worker_llm.get("use_antigravity_subscription"):
+        try:
+            from framework.runner.runner import get_antigravity_token
+
+            token = get_antigravity_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
     api_key_env_var = worker_llm.get("api_key_env_var")
     if api_key_env_var:
         return os.environ.get(api_key_env_var)
@@ -134,6 +144,8 @@ def get_worker_api_base() -> str | None:
         return "https://chatgpt.com/backend-api/codex"
     if worker_llm.get("use_kimi_code_subscription"):
         return "https://api.kimi.com/coding"
+    if worker_llm.get("use_antigravity_subscription"):
+        return "http://localhost:8069/v1"
     if worker_llm.get("api_base"):
         return worker_llm["api_base"]
     if str(worker_llm.get("provider", "")).lower() == "openrouter":
@@ -251,6 +263,17 @@ def get_api_key() -> str | None:
         except ImportError:
             pass
 
+    # Antigravity subscription: read OAuth token from accounts JSON
+    if llm.get("use_antigravity_subscription"):
+        try:
+            from framework.runner.runner import get_antigravity_token
+
+            token = get_antigravity_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
@@ -280,6 +303,9 @@ def get_api_base() -> str | None:
     if llm.get("use_kimi_code_subscription"):
         # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
         return "https://api.kimi.com/coding"
+    if llm.get("use_antigravity_subscription"):
+        # Antigravity routes through a local OpenAI-compatible proxy.
+        return "http://localhost:8069/v1"
     if llm.get("api_base"):
         return llm["api_base"]
     if str(llm.get("provider", "")).lower() == "openrouter":
