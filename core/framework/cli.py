@@ -8,6 +8,7 @@ Usage:
     hive list exports/
     hive dispatch exports/ --input '{"key": "value"}'
     hive shell exports/my-agent
+    hive doctor [--verify] [--json]   # Diagnose environment and config
 
 Testing commands:
     hive test-run <agent_path> --goal <goal_id>

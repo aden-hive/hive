@@ -286,6 +286,25 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     open_parser.add_argument("--debug", action="store_true", help="Enable DEBUG log level")
     open_parser.set_defaults(func=cmd_open)
 
+    # doctor command (environment diagnostics)
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Diagnose Hive environment and configuration",
+        description="Check config, LLM credentials, and optionally verify API connectivity. "
+        "Useful for debugging setup issues.",
+    )
+    doctor_parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Ping the LLM API to verify the key works (minimal token usage)",
+    )
+    doctor_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
+    )
+    doctor_parser.set_defaults(func=cmd_doctor)
+
 
 def _load_resume_state(
     agent_path: str, session_id: str, checkpoint_id: str | None = None
@@ -1702,3 +1721,158 @@ def cmd_open(args: argparse.Namespace) -> int:
     """Start the HTTP API server and open the dashboard in the browser."""
     args.open = True
     return cmd_serve(args)
+
+
+def _is_local_model(model: str) -> bool:
+    """Check if model is local (Ollama, etc.) and doesn't need an API key."""
+    if not model:
+        return False
+    lower = model.lower()
+    return any(lower.startswith(p) for p in ("ollama/", "ollama_chat/", "local/"))
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Diagnose Hive environment: config, credentials, optional API verification."""
+    import subprocess
+
+    from framework.config import (
+        HIVE_CONFIG_FILE,
+        get_api_base,
+        get_api_key,
+        get_hive_config,
+    )
+
+    results: dict = {
+        "config_file": str(HIVE_CONFIG_FILE),
+        "config_exists": HIVE_CONFIG_FILE.exists(),
+        "config_valid": False,
+        "llm_provider": None,
+        "llm_model": None,
+        "api_key_present": False,
+        "api_key_source": None,
+        "verify": None,
+        "issues": [],
+        "ok": False,
+    }
+
+    # Config file
+    if not HIVE_CONFIG_FILE.exists():
+        results["issues"].append(
+            f"Config file not found: {HIVE_CONFIG_FILE}. Run ./quickstart.sh to set up."
+        )
+    else:
+        try:
+            cfg = get_hive_config()
+            results["config_valid"] = isinstance(cfg, dict)
+            llm = cfg.get("llm", {}) if results["config_valid"] else {}
+            provider = llm.get("provider")
+            model = llm.get("model", "")
+            results["llm_provider"] = provider
+            results["llm_model"] = model
+
+            if not provider or not model:
+                results["issues"].append(
+                    "LLM not configured. Run ./quickstart.sh to select a provider."
+                )
+            elif _is_local_model(model):
+                results["api_key_present"] = True
+                results["api_key_source"] = "local model (no key required)"
+            else:
+                api_key = get_api_key()
+                if api_key:
+                    results["api_key_present"] = True
+                    if llm.get("use_claude_code_subscription"):
+                        results["api_key_source"] = "Claude Code subscription"
+                    elif llm.get("use_codex_subscription"):
+                        results["api_key_source"] = "Codex subscription"
+                    elif llm.get("use_kimi_code_subscription"):
+                        results["api_key_source"] = "Kimi Code subscription"
+                    else:
+                        env_var = llm.get("api_key_env_var", "")
+                        src = f"env:{env_var}" if env_var else "credential store"
+                        results["api_key_source"] = src
+                else:
+                    env_var = llm.get("api_key_env_var", "")
+                    results["issues"].append(
+                        f"API key not found. Set {env_var} or run 'hive setup-credentials'."
+                        if env_var
+                        else "API key not found. Run 'hive setup-credentials'."
+                    )
+        except Exception as e:
+            results["issues"].append(f"Config error: {e}")
+
+    # Optional: verify API connectivity
+    if getattr(args, "verify", False) and results["api_key_present"] and results["llm_provider"]:
+        if _is_local_model(results["llm_model"] or ""):
+            results["verify"] = {"valid": True, "message": "Local model (skip ping)"}
+        else:
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            script = project_root / "scripts" / "check_llm_key.py"
+            api_key = get_api_key()
+            api_base = get_api_base() or ""
+            model = results["llm_model"] or ""
+
+            if script.exists() and api_key:
+                provider_id = str(results["llm_provider"]).lower()
+                cmd = ["uv", "run", "python", str(script), provider_id, api_key]
+                if api_base:
+                    cmd.append(api_base)
+                if model and provider_id == "openrouter":
+                    cmd.append(model)
+                try:
+                    out = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                        cwd=str(project_root),
+                    )
+                    try:
+                        results["verify"] = json.loads(out.stdout.strip() or "{}")
+                    except json.JSONDecodeError:
+                        msg = out.stderr or "Unknown error"
+                        results["verify"] = {"valid": None, "message": msg}
+                except subprocess.TimeoutExpired:
+                    results["verify"] = {"valid": None, "message": "Request timed out"}
+                except FileNotFoundError:
+                    results["verify"] = {"valid": None, "message": "uv not found"}
+            else:
+                results["verify"] = {"valid": None, "message": "Cannot verify"}
+
+    results["ok"] = len(results["issues"]) == 0 and (
+        results["verify"] is None or results["verify"].get("valid") is not False
+    )
+
+    if getattr(args, "json", False):
+        # Redact API key from output
+        out_copy = dict(results)
+        if "verify" in out_copy and out_copy["verify"]:
+            out_copy["verify"] = dict(out_copy["verify"])
+        print(json.dumps(out_copy, indent=2))
+        return 0 if results["ok"] else 1
+
+    # Human-readable output
+    print("Hive environment check")
+    print("=" * 50)
+    print(f"Config: {HIVE_CONFIG_FILE}")
+    print(f"  Exists: {'yes' if results['config_exists'] else 'no'}")
+    print(f"  Valid:  {'yes' if results['config_valid'] else 'no'}")
+    if results["llm_provider"]:
+        print(f"Provider: {results['llm_provider']}")
+        print(f"Model:    {results['llm_model']}")
+        print(f"API key:  {'present' if results['api_key_present'] else 'missing'}")
+        if results["api_key_source"]:
+            print(f"  Source: {results['api_key_source']}")
+    if results["verify"] is not None:
+        v = results["verify"]
+        status = "ok" if v.get("valid") is True else ("fail" if v.get("valid") is False else "?")
+        print(f"Verify:   {status} — {v.get('message', '')}")
+    if results["issues"]:
+        print()
+        print("Issues:")
+        for i in results["issues"]:
+            print(f"  • {i}")
+    else:
+        print()
+        print("All checks passed.")
+    return 0 if results["ok"] else 1

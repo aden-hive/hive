@@ -194,6 +194,16 @@ Install the core package:
 cd core && uv pip install -e .
 ```
 
+### Diagnose setup issues
+
+Run `hive doctor` to check config, credentials, and optionally verify API connectivity:
+
+```bash
+hive doctor              # Quick check
+hive doctor --verify     # Also ping LLM API
+hive doctor --json       # Machine-readable output
+```
+
 ### API key not found
 
 Ensure the environment variable is set in your current shell session:

@@ -62,6 +62,32 @@ Summary of all changes made on the `vamsinole` branch for the Aden Hive contribu
 
 ---
 
+## 4. feat: Add `hive doctor` environment diagnostics
+
+**File:** `core/framework/runner/cli.py`
+
+**Problem:** No quick way to diagnose setup issues. Users hitting "API key not found" or config errors had to dig through docs and source.
+
+**Change:**
+- New `hive doctor` command that checks:
+  - Config file exists and is valid JSON
+  - LLM provider and model are configured
+  - API key presence (env var, Claude Code, Codex, Kimi, credential store)
+  - Optional `--verify` to ping the LLM API (reuses `scripts/check_llm_key.py`)
+- `--json` flag for machine-readable output (e.g. CI, scripting)
+- Exit code 1 when issues found, 0 when all checks pass
+
+**Usage:**
+```bash
+hive doctor              # Human-readable report
+hive doctor --verify     # Also ping LLM API to confirm key works
+hive doctor --json       # JSON output for scripting
+```
+
+**Impact:** Faster debugging for onboarding and support. Similar to `brew doctor` / `flutter doctor`.
+
+---
+
 ## Summary table
 
 | Type | Description | Files |
@@ -69,3 +95,4 @@ Summary of all changes made on the `vamsinole` branch for the Aden Hive contribu
 | micro-fix | print → logger for runner warnings | `core/framework/runner/runner.py` |
 | docs | OpenRouter & Hive LLM setup | `docs/llm_providers.md`, `docs/configuration.md`, `docs/developer-guide.md`, `docs/environment-setup.md`, `README.md` |
 | feat | `hive --version` / `hive -V` | `core/framework/cli.py` |
+| feat | `hive doctor` environment diagnostics | `core/framework/runner/cli.py` |
