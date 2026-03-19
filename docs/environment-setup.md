@@ -10,8 +10,7 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ```
 
 > **Note for Windows Users:**
-> Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.
-> It is **strongly recommended to use WSL (Windows Subsystem for Linux)** for a smoother setup experience.
+> Native Windows is supported via `quickstart.ps1`. Run it in PowerShell 5.1+. Disable "App Execution Aliases" in Windows settings to avoid Python path conflicts.
 
 This will:
 
@@ -25,13 +24,19 @@ This will:
 
 ## Windows Setup
 
-Windows users should use **WSL (Windows Subsystem for Linux)** to set up and run agents.
+Native Windows is supported. Run the PowerShell quickstart:
 
-1. [Install WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install) if you haven't already:
+```powershell
+.\quickstart.ps1
+```
+
+Alternatively, you can use WSL:
+
+1. [Install WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install):
    ```powershell
    wsl --install
    ```
-2. Open your WSL terminal, clone the repo, and run the quickstart script:
+2. Open your WSL terminal, clone the repo, and run:
    ```bash
    ./quickstart.sh
    ```
@@ -93,7 +98,7 @@ uv run python -c "import litellm; print('✓ litellm OK')"
 ```
 
 > **Windows Tip:**
-> On Windows, if the verification commands fail, ensure you are running them in **WSL** or after **disabling Python App Execution Aliases** in Windows Settings → Apps → App Execution Aliases.
+> If the verification commands fail on Windows, disable "App Execution Aliases" in Windows Settings → Apps → App Execution Aliases.
 
 ## Requirements
 
@@ -108,7 +113,7 @@ uv run python -c "import litellm; print('✓ litellm OK')"
 - pip (latest version)
 - 2GB+ RAM
 - Internet connection (for LLM API calls)
-- For Windows users: WSL 2 is recommended for full compatibility.
+- For Windows users: PowerShell 5.1+ (native) or WSL 2.
 
 ### API Keys
 
@@ -180,7 +185,7 @@ MCP tools are also available in Cursor. To enable:
 
 **Claude Code:**
 ```
-Use the coder-tools initialize_agent_package tool to scaffold a new agent
+Use the coder-tools initialize_and_build_agent tool to scaffold a new agent
 ```
 
 **Codex CLI:**
@@ -453,7 +458,7 @@ This design allows agents in `exports/` to be:
 ### 2. Build Agent (Claude Code)
 
 ```
-Use the coder-tools initialize_agent_package tool
+Use the coder-tools initialize_and_build_agent tool
 Enter goal: "Build an agent that processes customer support tickets"
 ```
 

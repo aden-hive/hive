@@ -244,7 +244,7 @@ The fastest way to build agents is with the configured MCP workflow:
 ./quickstart.sh
 
 # Build a new agent
-Use the coder-tools MCP tools from your IDE agent chat (e.g., initialize_agent_package)
+Use the coder-tools MCP tools from your IDE agent chat (e.g., initialize_and_build_agent)
 ```
 
 ### Agent Development Workflow
@@ -252,7 +252,7 @@ Use the coder-tools MCP tools from your IDE agent chat (e.g., initialize_agent_p
 1. **Define Your Goal**
 
    ```
-   Use the coder-tools initialize_agent_package tool
+   Use the coder-tools initialize_and_build_agent tool
    Enter goal: "Build an agent that processes customer support tickets"
    ```
 
@@ -555,7 +555,7 @@ uv add <package>
 
 ```bash
 # Option 1: Use Claude Code skill (recommended)
-Use the coder-tools initialize_agent_package tool
+Use the coder-tools initialize_and_build_agent tool
 
 # Option 2: Create manually
 # Note: exports/ is initially empty (gitignored). Create your agent directory:

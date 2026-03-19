@@ -75,7 +75,7 @@ def register_tools(mcp: FastMCP) -> None:
                 try:
                     if hashline:
                         # Use splitlines() for anchor consistency with
-                        # view_file/hashline_edit (handles Unicode line
+                        # read_file/hashline_edit (handles Unicode line
                         # separators like \u2028, \x85).
                         # Skip files > 10MB to avoid excessive memory use.
                         file_size = os.path.getsize(file_path)

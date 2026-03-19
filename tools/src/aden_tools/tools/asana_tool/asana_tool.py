@@ -71,6 +71,25 @@ def _post(endpoint: str, token: str, body: dict | None = None) -> dict[str, Any]
         return {"error": f"Asana request failed: {e!s}"}
 
 
+def _put(endpoint: str, token: str, body: dict | None = None) -> dict[str, Any]:
+    try:
+        resp = httpx.put(
+            f"{ASANA_API}/{endpoint}",
+            headers=_headers(token),
+            json={"data": body or {}},
+            timeout=30.0,
+        )
+        if resp.status_code == 401:
+            return {"error": "Unauthorized. Check your ASANA_ACCESS_TOKEN."}
+        if resp.status_code not in (200, 201):
+            return {"error": f"Asana API error {resp.status_code}: {resp.text[:500]}"}
+        return resp.json()
+    except httpx.TimeoutException:
+        return {"error": "Request to Asana timed out"}
+    except Exception as e:
+        return {"error": f"Asana request failed: {e!s}"}
+
+
 def _auth_error() -> dict[str, Any]:
     return {
         "error": "ASANA_ACCESS_TOKEN not set",
@@ -331,3 +350,134 @@ def register_tools(
                 }
             )
         return {"query": query, "tasks": tasks}
+
+    @mcp.tool()
+    def asana_update_task(
+        task_gid: str,
+        name: str = "",
+        notes: str = "",
+        completed: bool | None = None,
+        due_on: str = "",
+        assignee: str = "",
+    ) -> dict[str, Any]:
+        """
+        Update an existing Asana task.
+
+        Args:
+            task_gid: Task GID (required)
+            name: New task name (optional)
+            notes: New task description/notes (optional)
+            completed: Set completion status (optional)
+            due_on: New due date YYYY-MM-DD, or empty string to clear (optional)
+            assignee: New assignee GID or "me" (optional)
+
+        Returns:
+            Dict with updated task (gid, name, completed) or error
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not task_gid:
+            return {"error": "task_gid is required"}
+
+        body: dict[str, Any] = {}
+        if name:
+            body["name"] = name
+        if notes:
+            body["notes"] = notes
+        if completed is not None:
+            body["completed"] = completed
+        if due_on:
+            body["due_on"] = due_on
+        if assignee:
+            body["assignee"] = assignee
+
+        if not body:
+            return {"error": "At least one field to update is required"}
+
+        data = _put(f"tasks/{task_gid}", token, body)
+        if "error" in data:
+            return data
+
+        t = data.get("data", {})
+        return {
+            "gid": t.get("gid", ""),
+            "name": t.get("name", ""),
+            "completed": t.get("completed", False),
+            "status": "updated",
+        }
+
+    @mcp.tool()
+    def asana_add_comment(
+        task_gid: str,
+        text: str,
+    ) -> dict[str, Any]:
+        """
+        Add a comment (story) to an Asana task.
+
+        Args:
+            task_gid: Task GID (required)
+            text: Comment text (required). Supports rich text formatting.
+
+        Returns:
+            Dict with created comment (gid, text, created_at) or error
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not task_gid or not text:
+            return {"error": "task_gid and text are required"}
+
+        data = _post(f"tasks/{task_gid}/stories", token, {"text": text})
+        if "error" in data:
+            return data
+
+        s = data.get("data", {})
+        return {
+            "gid": s.get("gid", ""),
+            "text": (s.get("text", "") or "")[:500],
+            "created_at": s.get("created_at", ""),
+            "status": "created",
+        }
+
+    @mcp.tool()
+    def asana_create_subtask(
+        parent_task_gid: str,
+        name: str,
+        notes: str = "",
+        assignee: str = "",
+        due_on: str = "",
+    ) -> dict[str, Any]:
+        """
+        Create a subtask under an existing Asana task.
+
+        Args:
+            parent_task_gid: Parent task GID (required)
+            name: Subtask name (required)
+            notes: Subtask description/notes (optional)
+            assignee: Assignee GID or "me" (optional)
+            due_on: Due date YYYY-MM-DD (optional)
+
+        Returns:
+            Dict with created subtask (gid, name) or error
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not parent_task_gid or not name:
+            return {"error": "parent_task_gid and name are required"}
+
+        body: dict[str, Any] = {"name": name}
+        if notes:
+            body["notes"] = notes
+        if assignee:
+            body["assignee"] = assignee
+        if due_on:
+            body["due_on"] = due_on
+
+        data = _post(f"tasks/{parent_task_gid}/subtasks", token, body)
+        if "error" in data:
+            return data
+
+        t = data.get("data", {})
+        return {"gid": t.get("gid", ""), "name": t.get("name", ""), "status": "created"}

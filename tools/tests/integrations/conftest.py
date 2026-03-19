@@ -137,6 +137,13 @@ def get_all_credential_tool_names() -> list[str]:
     return names
 
 
+# Parameter names that require specific valid values to pass input validation
+# before the credential check is reached.
+_PARAM_OVERRIDES: dict[str, str] = {
+    "object_type": "contacts",
+}
+
+
 def get_minimal_args(fn: Any) -> dict[str, Any]:
     """Build minimal keyword arguments for a tool function.
 
@@ -149,6 +156,11 @@ def get_minimal_args(fn: Any) -> dict[str, Any]:
     for name, param in sig.parameters.items():
         if param.default is not inspect.Parameter.empty:
             continue  # Skip optional params
+
+        # Check for known parameter overrides first
+        if name in _PARAM_OVERRIDES:
+            args[name] = _PARAM_OVERRIDES[name]
+            continue
 
         # Infer a minimal value from annotation
         annotation = param.annotation

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import UTC
 from typing import TYPE_CHECKING, Literal
 
 import httpx
@@ -399,3 +400,233 @@ def register_tools(
             return {"error": f"Network error: {str(e)}"}
         except Exception as e:
             return {"error": f"Exa answer failed: {str(e)}"}
+
+    @mcp.tool()
+    def exa_search_news(
+        query: str,
+        num_results: int = 10,
+        days_back: int = 7,
+        include_text: bool = True,
+    ) -> dict:
+        """
+        Search recent news articles using Exa.
+
+        Convenience wrapper around exa_search pre-configured for news content
+        with automatic date filtering.
+
+        Args:
+            query: News search query (1-500 chars)
+            num_results: Number of results (1-20, default 10)
+            days_back: How many days back to search (default 7)
+            include_text: Include article text in results
+
+        Returns:
+            Dict with news articles including titles, URLs, dates, and text
+        """
+        if not query or len(query) > 500:
+            return {"error": "Query must be 1-500 characters"}
+
+        from datetime import datetime, timedelta
+
+        start_date = (datetime.now(UTC) - timedelta(days=days_back)).strftime(
+            "%Y-%m-%dT00:00:00.000Z"
+        )
+
+        api_key = _get_api_key()
+        if not api_key:
+            return {
+                "error": "Exa credentials not configured",
+                "help": "Set EXA_API_KEY environment variable",
+            }
+
+        payload: dict = {
+            "query": query,
+            "numResults": max(1, min(num_results, 20)),
+            "category": "news",
+            "startPublishedDate": start_date,
+            "contents": {},
+        }
+        if include_text:
+            payload["contents"]["text"] = True
+        payload["contents"]["highlights"] = True
+
+        try:
+            data = _make_request("/search", payload, api_key)
+            if "error" in data:
+                return data
+
+            results = []
+            for item in data.get("results", []):
+                result = {
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "published_date": item.get("publishedDate", ""),
+                    "author": item.get("author", ""),
+                }
+                if include_text and "text" in item:
+                    result["text"] = item["text"]
+                if "highlights" in item:
+                    result["highlights"] = item["highlights"]
+                results.append(result)
+
+            return {
+                "query": query,
+                "days_back": days_back,
+                "results": results,
+                "total": len(results),
+                "provider": "exa",
+            }
+
+        except httpx.TimeoutException:
+            return {"error": "Exa news search timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {str(e)}"}
+        except Exception as e:
+            return {"error": f"Exa news search failed: {str(e)}"}
+
+    @mcp.tool()
+    def exa_search_papers(
+        query: str,
+        num_results: int = 10,
+        year_start: int | None = None,
+        include_text: bool = False,
+    ) -> dict:
+        """
+        Search for research papers and academic content using Exa.
+
+        Convenience wrapper pre-configured for academic paper discovery,
+        restricted to scholarly domains.
+
+        Args:
+            query: Research topic or paper search query (1-500 chars)
+            num_results: Number of results (1-20, default 10)
+            year_start: Only include papers published after this year
+            include_text: Include full paper text (default False for brevity)
+
+        Returns:
+            Dict with research papers including titles, URLs, dates, and highlights
+        """
+        if not query or len(query) > 500:
+            return {"error": "Query must be 1-500 characters"}
+
+        api_key = _get_api_key()
+        if not api_key:
+            return {
+                "error": "Exa credentials not configured",
+                "help": "Set EXA_API_KEY environment variable",
+            }
+
+        payload: dict = {
+            "query": query,
+            "numResults": max(1, min(num_results, 20)),
+            "category": "research paper",
+            "contents": {"highlights": True},
+        }
+        if include_text:
+            payload["contents"]["text"] = True
+        if year_start:
+            payload["startPublishedDate"] = f"{year_start}-01-01T00:00:00.000Z"
+
+        try:
+            data = _make_request("/search", payload, api_key)
+            if "error" in data:
+                return data
+
+            results = []
+            for item in data.get("results", []):
+                result = {
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "published_date": item.get("publishedDate", ""),
+                    "author": item.get("author", ""),
+                }
+                if "highlights" in item:
+                    result["highlights"] = item["highlights"]
+                if include_text and "text" in item:
+                    result["text"] = item["text"]
+                results.append(result)
+
+            return {
+                "query": query,
+                "results": results,
+                "total": len(results),
+                "provider": "exa",
+            }
+
+        except httpx.TimeoutException:
+            return {"error": "Exa paper search timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {str(e)}"}
+        except Exception as e:
+            return {"error": f"Exa paper search failed: {str(e)}"}
+
+    @mcp.tool()
+    def exa_search_companies(
+        query: str,
+        num_results: int = 10,
+        include_text: bool = True,
+    ) -> dict:
+        """
+        Search for companies and startups using Exa.
+
+        Convenience wrapper pre-configured for company/startup discovery
+        using Exa's company category filter.
+
+        Args:
+            query: Company search query, e.g. "AI startups in healthcare" (1-500 chars)
+            num_results: Number of results (1-20, default 10)
+            include_text: Include company page text in results
+
+        Returns:
+            Dict with company results including titles, URLs, and descriptions
+        """
+        if not query or len(query) > 500:
+            return {"error": "Query must be 1-500 characters"}
+
+        api_key = _get_api_key()
+        if not api_key:
+            return {
+                "error": "Exa credentials not configured",
+                "help": "Set EXA_API_KEY environment variable",
+            }
+
+        payload: dict = {
+            "query": query,
+            "numResults": max(1, min(num_results, 20)),
+            "category": "company",
+            "contents": {"highlights": True},
+        }
+        if include_text:
+            payload["contents"]["text"] = True
+
+        try:
+            data = _make_request("/search", payload, api_key)
+            if "error" in data:
+                return data
+
+            results = []
+            for item in data.get("results", []):
+                result = {
+                    "title": item.get("title", ""),
+                    "url": item.get("url", ""),
+                    "published_date": item.get("publishedDate", ""),
+                }
+                if "highlights" in item:
+                    result["highlights"] = item["highlights"]
+                if include_text and "text" in item:
+                    result["text"] = item["text"]
+                results.append(result)
+
+            return {
+                "query": query,
+                "results": results,
+                "total": len(results),
+                "provider": "exa",
+            }
+
+        except httpx.TimeoutException:
+            return {"error": "Exa company search timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {str(e)}"}
+        except Exception as e:
+            return {"error": f"Exa company search failed: {str(e)}"}

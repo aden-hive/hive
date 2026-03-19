@@ -19,6 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from framework.config import get_max_context_tokens
 from framework.graph import Goal, NodeSpec, SuccessCriterion
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.edge import GraphSpec
@@ -455,7 +456,6 @@ identity_prompt = (
 loop_config = {
     "max_iterations": 50,
     "max_tool_calls_per_turn": 30,
-    "max_history_tokens": 32000,
 }
 
 # ---------------------------------------------------------------------------
@@ -541,7 +541,7 @@ class CredentialTesterAgent:
             loop_config={
                 "max_iterations": 50,
                 "max_tool_calls_per_turn": 30,
-                "max_history_tokens": 32000,
+                "max_context_tokens": get_max_context_tokens(),
             },
             conversation_mode="continuous",
             identity_prompt=(

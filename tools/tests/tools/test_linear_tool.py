@@ -441,8 +441,8 @@ class TestToolRegistration:
         mcp = MagicMock()
         mcp.tool.return_value = lambda fn: fn
         register_tools(mcp)
-        # 18 tools: 6 issue + 4 project + 3 team + 2 label + 3 user
-        assert mcp.tool.call_count == 18
+        # 21 tools: 6 issue + 4 project + 3 team + 2 label + 3 user + 2 cycle + 1 relation
+        assert mcp.tool.call_count == 21
 
     def test_no_credentials_returns_error(self):
         mcp = MagicMock()

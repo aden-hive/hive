@@ -1,0 +1,54 @@
+# Closes PRs that still have the `pr-requirements-warning` label
+# after contributors were warned in pr-requirements.yml.
+name: PR Requirements Enforcement
+on:
+  schedule:
+    - cron: "0 0 * * *"   # runs every day once at midnight 
+jobs:
+  enforce:
+    name: Close PRs still failing contribution requirements
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Close PRs still failing requirements
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: "open",
+              per_page: 100
+            });
+            for (const pr of prs) {
+              // Skip draft PRs — author may still be actively working toward compliance
+              if (pr.draft) continue;
+              const labels = pr.labels.map(l => l.name);
+              if (!labels.includes("pr-requirements-warning")) continue;
+              const gracePeriod = 24 * 60 * 60 * 1000;
+              const lastUpdated = new Date(pr.created_at);
+              const now = new Date();
+              if (now - lastUpdated < gracePeriod) {
+                console.log(`Skipping PR #${pr.number} — still within grace period`);
+                continue;
+              }
+              const prNumber = pr.number;
+              const prAuthor = pr.user.login;
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body: `Closing PR because the contribution requirements were not resolved within the 24-hour grace period.
+                If this was closed in error, feel free to reopen the PR after fixing the requirements.`
+              });
+              await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: prNumber,
+                state: "closed"
+              });
+              console.log(`Closed PR #${prNumber} by ${prAuthor} (PR requirements were not met)`);
+            }

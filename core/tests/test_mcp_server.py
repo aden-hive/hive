@@ -40,16 +40,3 @@ class TestMCPDependencies:
         from mcp.server import FastMCP
 
         assert FastMCP is not None
-
-
-class TestMCPPackageExports:
-    """Tests for the framework.mcp package exports."""
-
-    def test_package_importable(self):
-        """Test that framework.mcp package can be imported."""
-        if not MCP_AVAILABLE:
-            pytest.skip(MCP_SKIP_REASON)
-
-        import framework.mcp
-
-        assert framework.mcp is not None

@@ -231,3 +231,124 @@ def register_tools(
             return data
 
         return _extract_message(data)
+
+    @mcp.tool()
+    def twilio_list_phone_numbers() -> dict[str, Any]:
+        """
+        List phone numbers owned by the Twilio account.
+
+        Returns:
+            Dict with phone numbers list (sid, phone_number, friendly_name, capabilities)
+        """
+        sid, token = _get_credentials(credentials)
+        if not sid or not token:
+            return _auth_error()
+
+        url = f"{_base_url(sid)}/IncomingPhoneNumbers.json"
+        data = _request("get", url, sid, token, params={"PageSize": 100})
+        if "error" in data:
+            return data
+
+        numbers = []
+        for n in data.get("incoming_phone_numbers", []):
+            caps = n.get("capabilities", {})
+            numbers.append(
+                {
+                    "sid": n.get("sid", ""),
+                    "phone_number": n.get("phone_number", ""),
+                    "friendly_name": n.get("friendly_name", ""),
+                    "sms_enabled": caps.get("sms", False),
+                    "voice_enabled": caps.get("voice", False),
+                    "mms_enabled": caps.get("mms", False),
+                    "date_created": n.get("date_created"),
+                }
+            )
+        return {"phone_numbers": numbers, "count": len(numbers)}
+
+    @mcp.tool()
+    def twilio_list_calls(
+        to: str = "",
+        from_number: str = "",
+        status: str = "",
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        """
+        List recent calls from your Twilio account.
+
+        Args:
+            to: Filter by recipient number (optional)
+            from_number: Filter by caller number (optional)
+            status: Filter by status: queued, ringing, in-progress, completed,
+                    busy, failed, no-answer, canceled (optional)
+            page_size: Number of results (1-1000, default 20)
+
+        Returns:
+            Dict with calls list (sid, to, from, status, duration, price)
+        """
+        sid, token = _get_credentials(credentials)
+        if not sid or not token:
+            return _auth_error()
+
+        url = f"{_base_url(sid)}/Calls.json"
+        params: dict[str, Any] = {"PageSize": max(1, min(page_size, 1000))}
+        if to:
+            params["To"] = to
+        if from_number:
+            params["From"] = from_number
+        if status:
+            params["Status"] = status
+
+        data = _request("get", url, sid, token, params=params)
+        if "error" in data:
+            return data
+
+        calls = []
+        for c in data.get("calls", []):
+            calls.append(
+                {
+                    "sid": c.get("sid", ""),
+                    "to": c.get("to", ""),
+                    "from": c.get("from", ""),
+                    "status": c.get("status", ""),
+                    "direction": c.get("direction", ""),
+                    "duration": c.get("duration"),
+                    "price": c.get("price"),
+                    "start_time": c.get("start_time"),
+                    "end_time": c.get("end_time"),
+                }
+            )
+        return {"calls": calls, "count": len(calls)}
+
+    @mcp.tool()
+    def twilio_delete_message(message_sid: str) -> dict[str, Any]:
+        """
+        Delete a message from Twilio.
+
+        Args:
+            message_sid: Message SID e.g. "SMxxxxxxxx" (required)
+
+        Returns:
+            Dict with success status or error
+        """
+        sid, token = _get_credentials(credentials)
+        if not sid or not token:
+            return _auth_error()
+        if not message_sid:
+            return {"error": "message_sid is required"}
+
+        url = f"{_base_url(sid)}/Messages/{message_sid}.json"
+        headers: dict[str, str] = {}
+        headers["Authorization"] = _auth_header(sid, token)
+        try:
+            resp = httpx.delete(url, headers=headers, timeout=30.0)
+            if resp.status_code == 204:
+                return {"sid": message_sid, "status": "deleted"}
+            if resp.status_code == 401:
+                return {"error": "Unauthorized. Check your Twilio credentials."}
+            if resp.status_code == 404:
+                return {"error": "Message not found."}
+            return {"error": f"Twilio API error {resp.status_code}: {resp.text[:500]}"}
+        except httpx.TimeoutException:
+            return {"error": "Request to Twilio timed out"}
+        except Exception as e:
+            return {"error": f"Twilio request failed: {e!s}"}

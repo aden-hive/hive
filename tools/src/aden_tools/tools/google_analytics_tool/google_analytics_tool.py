@@ -335,3 +335,122 @@ def register_tools(
         except Exception as e:
             logger.warning("ga_get_traffic_sources failed: %s", e)
             return {"error": f"Google Analytics API error: {e}"}
+
+    @mcp.tool()
+    def ga_get_user_demographics(
+        property_id: str,
+        start_date: str = "28daysAgo",
+        end_date: str = "today",
+        limit: int = 20,
+    ) -> dict:
+        """
+        Get user demographics breakdown (country, language, device).
+
+        Args:
+            property_id: GA4 property ID (e.g., "properties/123456")
+            start_date: Start date (e.g., "2024-01-01" or "28daysAgo")
+            end_date: End date (e.g., "today")
+            limit: Max rows to return (1-10000, default 20)
+
+        Returns:
+            Dict with user counts by country, language, and device category
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+
+        if err := _validate_inputs(property_id, limit=limit):
+            return err
+
+        try:
+            return client.run_report(
+                property_id=property_id,
+                metrics=["totalUsers", "sessions", "engagedSessions"],
+                dimensions=["country", "language", "deviceCategory"],
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+            )
+        except Exception as e:
+            logger.warning("ga_get_user_demographics failed: %s", e)
+            return {"error": f"Google Analytics API error: {e}"}
+
+    @mcp.tool()
+    def ga_get_conversion_events(
+        property_id: str,
+        start_date: str = "28daysAgo",
+        end_date: str = "today",
+        limit: int = 20,
+    ) -> dict:
+        """
+        Get conversion event counts and values.
+
+        Args:
+            property_id: GA4 property ID (e.g., "properties/123456")
+            start_date: Start date (e.g., "2024-01-01" or "28daysAgo")
+            end_date: End date (e.g., "today")
+            limit: Max rows to return (1-10000, default 20)
+
+        Returns:
+            Dict with event names, counts, conversion counts, and total revenue
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+
+        if err := _validate_inputs(property_id, limit=limit):
+            return err
+
+        try:
+            return client.run_report(
+                property_id=property_id,
+                metrics=["eventCount", "conversions", "totalRevenue"],
+                dimensions=["eventName"],
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+            )
+        except Exception as e:
+            logger.warning("ga_get_conversion_events failed: %s", e)
+            return {"error": f"Google Analytics API error: {e}"}
+
+    @mcp.tool()
+    def ga_get_landing_pages(
+        property_id: str,
+        start_date: str = "28daysAgo",
+        end_date: str = "today",
+        limit: int = 10,
+    ) -> dict:
+        """
+        Get top landing pages with entrance metrics.
+
+        Shows which pages users arrive on first and their engagement.
+
+        Args:
+            property_id: GA4 property ID (e.g., "properties/123456")
+            start_date: Start date (e.g., "2024-01-01" or "28daysAgo")
+            end_date: End date (e.g., "today")
+            limit: Max pages to return (1-10000, default 10)
+
+        Returns:
+            Dict with landing pages, sessions, bounce rate, and conversions
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+
+        if err := _validate_inputs(property_id, limit=limit):
+            return err
+
+        try:
+            return client.run_report(
+                property_id=property_id,
+                metrics=["sessions", "bounceRate", "conversions", "averageSessionDuration"],
+                dimensions=["landingPagePlusQueryString"],
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit,
+            )
+        except Exception as e:
+            logger.warning("ga_get_landing_pages failed: %s", e)
+            return {"error": f"Google Analytics API error: {e}"}

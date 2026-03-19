@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from framework.graph import Goal
-from framework.graph.edge import AsyncEntryPointSpec, EdgeCondition, EdgeSpec, GraphSpec
+from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Constraint, SuccessCriterion
 from framework.graph.node import NodeSpec
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
@@ -101,30 +101,12 @@ def sample_graph():
         ),
     ]
 
-    async_entry_points = [
-        AsyncEntryPointSpec(
-            id="webhook",
-            name="Webhook Handler",
-            entry_node="process-webhook",
-            trigger_type="webhook",
-            isolation_level="shared",
-        ),
-        AsyncEntryPointSpec(
-            id="api",
-            name="API Handler",
-            entry_node="process-api",
-            trigger_type="api",
-            isolation_level="shared",
-        ),
-    ]
-
     return GraphSpec(
         id="test-graph",
         goal_id="test-goal",
         version="1.0.0",
         entry_node="process-webhook",
         entry_points={"start": "process-webhook"},
-        async_entry_points=async_entry_points,
         terminal_nodes=["complete"],
         pause_nodes=[],
         nodes=nodes,
@@ -502,108 +484,6 @@ class TestAgentRuntime:
 
 
 # === GraphSpec Validation Tests ===
-
-
-class TestGraphSpecValidation:
-    """Tests for GraphSpec with async_entry_points."""
-
-    def test_has_async_entry_points(self, sample_graph):
-        """Test checking for async entry points."""
-        assert sample_graph.has_async_entry_points() is True
-
-        # Graph without async entry points
-        simple_graph = GraphSpec(
-            id="simple",
-            goal_id="goal",
-            entry_node="start",
-            nodes=[],
-            edges=[],
-        )
-        assert simple_graph.has_async_entry_points() is False
-
-    def test_get_async_entry_point(self, sample_graph):
-        """Test getting async entry point by ID."""
-        ep = sample_graph.get_async_entry_point("webhook")
-        assert ep is not None
-        assert ep.id == "webhook"
-        assert ep.entry_node == "process-webhook"
-
-        ep_not_found = sample_graph.get_async_entry_point("nonexistent")
-        assert ep_not_found is None
-
-    def test_validate_async_entry_points(self):
-        """Test validation catches async entry point errors."""
-        nodes = [
-            NodeSpec(
-                id="valid-node",
-                name="Valid Node",
-                description="A valid node",
-                node_type="event_loop",
-                input_keys=[],
-                output_keys=[],
-            ),
-        ]
-
-        # Invalid entry node
-        graph = GraphSpec(
-            id="test",
-            goal_id="goal",
-            entry_node="valid-node",
-            async_entry_points=[
-                AsyncEntryPointSpec(
-                    id="invalid",
-                    name="Invalid",
-                    entry_node="nonexistent-node",
-                    trigger_type="webhook",
-                ),
-            ],
-            nodes=nodes,
-            edges=[],
-        )
-
-        errors = graph.validate()["errors"]
-        assert any("nonexistent-node" in e for e in errors)
-
-        # Invalid isolation level
-        graph2 = GraphSpec(
-            id="test",
-            goal_id="goal",
-            entry_node="valid-node",
-            async_entry_points=[
-                AsyncEntryPointSpec(
-                    id="bad-isolation",
-                    name="Bad Isolation",
-                    entry_node="valid-node",
-                    trigger_type="webhook",
-                    isolation_level="invalid",
-                ),
-            ],
-            nodes=nodes,
-            edges=[],
-        )
-
-        errors2 = graph2.validate()["errors"]
-        assert any("isolation_level" in e for e in errors2)
-
-        # Invalid trigger type
-        graph3 = GraphSpec(
-            id="test",
-            goal_id="goal",
-            entry_node="valid-node",
-            async_entry_points=[
-                AsyncEntryPointSpec(
-                    id="bad-trigger",
-                    name="Bad Trigger",
-                    entry_node="valid-node",
-                    trigger_type="invalid_trigger",
-                ),
-            ],
-            nodes=nodes,
-            edges=[],
-        )
-
-        errors3 = graph3.validate()["errors"]
-        assert any("trigger_type" in e for e in errors3)
 
 
 # === Integration Tests ===

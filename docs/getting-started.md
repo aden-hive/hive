@@ -13,6 +13,8 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 
 The fastest way to get started:
 
+**Linux / macOS:**
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/adenhq/hive.git
@@ -24,6 +26,22 @@ cd hive
 # 3. Verify installation (optional, quickstart.sh already verifies)
 uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
+
+**Windows (PowerShell):**
+
+```powershell
+# 1. Clone the repository
+git clone https://github.com/adenhq/hive.git
+cd hive
+
+# 2. Run automated setup
+.\quickstart.ps1
+
+# 3. Verify installation (optional, quickstart.ps1 already verifies)
+uv run python -c "import framework; import aden_tools; print('Setup complete')"
+```
+
+> **Note:** On Windows, running `.\quickstart.ps1` requires PowerShell 5.1+. If you see a "running scripts is disabled" error, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first. Alternatively, use WSL — see [environment-setup.md](./environment-setup.md) for details.
 
 ## Building Your First Agent
 
@@ -47,7 +65,7 @@ This is the recommended way to create your first agent.
 # Setup already done via quickstart.sh above
 
 # Start Claude Code and build an agent
-Use the coder-tools initialize_agent_package tool
+Use the coder-tools initialize_and_build_agent tool
 ```
 
 Follow the interactive prompts to:
@@ -173,7 +191,7 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 1. **Dashboard**: Run `hive open` to launch the web dashboard, or `hive tui` for the terminal UI
 2. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
 3. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
-4. **Build Agents**: Use the coder-tools `initialize_agent_package` tool in Claude Code
+4. **Build Agents**: Use the coder-tools `initialize_and_build_agent` tool in Claude Code
 5. **Custom Tools**: Learn to integrate MCP servers
 6. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 

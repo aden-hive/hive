@@ -312,11 +312,11 @@ Ship essential framework utilities: Node validation, HITL (Human-in-the-loop pau
     - [x] Pause/approve workflow
     - [x] State saved to checkpoint
     - [x] Resume with HITLResponse merged into context
-- [x] **TUI Integration**
-    - [x] Chat REPL with streaming support (tui/app.py)
-    - [x] Multi-graph session management
-    - [x] User presence detection
-    - [x] Real-time log viewing
+- [x] ~~**TUI Integration**~~ *(deprecated — see AGENTS.md; use `hive open` browser UI instead)*
+    - [x] ~~Chat REPL with streaming support (tui/app.py)~~
+    - [x] ~~Multi-graph session management~~
+    - [x] ~~User presence detection~~
+    - [x] ~~Real-time log viewing~~
 - [x] **Node Lifecycle Management**
     - [x] Start/stop/pause/resume in execution stream
     - [x] State persistence via checkpoint store
@@ -538,11 +538,11 @@ Release CLI tools specifically for rapid memory management and credential store 
     - [x] test-run, test-debug, test-list, test-stats (testing/cli.py)
     - [x] Pytest integration
     - [x] Test categorization
-- [x] **TUI (Terminal UI)**
-    - [x] Interactive chat with streaming (tui/app.py)
-    - [x] Multi-graph management UI
-    - [x] Log pane for real-time output
-    - [x] Keyboard shortcuts (Ctrl+C, Ctrl+D, etc.)
+- [x] ~~**TUI (Terminal UI)**~~ *(deprecated — see AGENTS.md; use `hive open` browser UI instead)*
+    - [x] ~~Interactive chat with streaming (tui/app.py)~~
+    - [x] ~~Multi-graph management UI~~
+    - [x] ~~Log pane for real-time output~~
+    - [x] ~~Keyboard shortcuts (Ctrl+C, Ctrl+D, etc.)~~
 - [ ] **Memory Management CLI**
     - [ ] Memory inspection commands
     - [ ] Memory cleanup utilities
@@ -776,12 +776,14 @@ Implement an interactive, drag-and-drop canvas (using libraries like React Flow)
 ### TUI to GUI Upgrade
 Port the existing Terminal User Interface (TUI) into a rich web application, allowing users to interact directly with the Queen Bee / Coding Agent via a browser chat interface.
 
-- [x] **TUI Foundation**
-    - [x] Terminal chat interface (tui/app.py)
-    - [x] Streaming support
-    - [x] Multi-graph management
-    - [x] Log pane display
-    - [x] Keyboard shortcuts
+> **Note:** The TUI (`hive tui` / `tui/app.py`) is deprecated and no longer maintained (see AGENTS.md). The items below reflect legacy work completed before deprecation. New development should target the browser-based GUI (`hive open`).
+
+- [x] ~~**TUI Foundation**~~ *(deprecated)*
+    - [x] ~~Terminal chat interface (tui/app.py)~~
+    - [x] ~~Streaming support~~
+    - [x] ~~Multi-graph management~~
+    - [x] ~~Log pane display~~
+    - [x] ~~Keyboard shortcuts~~
 - [ ] **Web Application**
     - [ ] Modern web UI framework setup (React/Vue/Svelte)
     - [ ] Responsive design implementation

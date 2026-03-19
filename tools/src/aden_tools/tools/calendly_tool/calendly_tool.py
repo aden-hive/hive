@@ -34,6 +34,16 @@ def _get(path: str, headers: dict, params: dict | None = None) -> dict:
     return resp.json()
 
 
+def _post(path: str, headers: dict, body: dict) -> dict:
+    """Send a POST request."""
+    resp = httpx.post(f"{BASE_URL}{path}", headers=headers, json=body, timeout=30)
+    if resp.status_code >= 400:
+        return {"error": f"HTTP {resp.status_code}: {resp.text[:500]}"}
+    if not resp.content:
+        return {"status": "ok"}
+    return resp.json()
+
+
 def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
     """Register Calendly tools."""
 
@@ -254,4 +264,125 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
                 }
                 for inv in items
             ],
+        }
+
+    @mcp.tool()
+    def calendly_cancel_event(
+        event_uri: str,
+        reason: str = "",
+    ) -> dict:
+        """Cancel a scheduled Calendly event.
+
+        Args:
+            event_uri: Full event URI (e.g. 'https://api.calendly.com/scheduled_events/XXX').
+            reason: Cancellation reason (optional).
+        """
+        headers = _get_headers()
+        if headers is None:
+            return {
+                "error": "CALENDLY_PAT is required",
+                "help": "Set CALENDLY_PAT environment variable",
+            }
+        if not event_uri:
+            return {"error": "event_uri is required"}
+
+        event_uuid = event_uri.rstrip("/").rsplit("/", 1)[-1]
+        body: dict[str, Any] = {}
+        if reason:
+            body["reason"] = reason
+
+        data = _post(f"/scheduled_events/{event_uuid}/cancellation", headers, body)
+        if "error" in data:
+            return data
+
+        resource = data.get("resource", {})
+        return {
+            "canceled_by": resource.get("canceled_by", ""),
+            "reason": resource.get("reason", ""),
+            "created_at": resource.get("created_at", ""),
+            "status": "canceled",
+        }
+
+    @mcp.tool()
+    def calendly_list_webhooks(
+        organization_uri: str,
+        scope: str = "organization",
+        count: int = 20,
+    ) -> dict:
+        """List webhook subscriptions for a Calendly organization or user.
+
+        Args:
+            organization_uri: Full organization URI from calendly_get_current_user.
+            scope: Scope: 'organization' or 'user' (default 'organization').
+            count: Number of results per page (max 100).
+        """
+        headers = _get_headers()
+        if headers is None:
+            return {
+                "error": "CALENDLY_PAT is required",
+                "help": "Set CALENDLY_PAT environment variable",
+            }
+        if not organization_uri:
+            return {"error": "organization_uri is required"}
+
+        params: dict[str, Any] = {
+            "organization": organization_uri,
+            "scope": scope,
+            "count": min(count, 100),
+        }
+
+        data = _get("/webhook_subscriptions", headers, params)
+        if "error" in data:
+            return data
+
+        items = data.get("collection", [])
+        return {
+            "count": len(items),
+            "webhooks": [
+                {
+                    "uri": wh.get("uri", ""),
+                    "callback_url": wh.get("callback_url", ""),
+                    "state": wh.get("state", ""),
+                    "events": wh.get("events", []),
+                    "scope": wh.get("scope", ""),
+                    "created_at": wh.get("created_at", ""),
+                }
+                for wh in items
+            ],
+        }
+
+    @mcp.tool()
+    def calendly_get_event_type(event_type_uri: str) -> dict:
+        """Get details of a specific Calendly event type (meeting template).
+
+        Args:
+            event_type_uri: Full event type URI (e.g. 'https://api.calendly.com/event_types/XXX').
+        """
+        headers = _get_headers()
+        if headers is None:
+            return {
+                "error": "CALENDLY_PAT is required",
+                "help": "Set CALENDLY_PAT environment variable",
+            }
+        if not event_type_uri:
+            return {"error": "event_type_uri is required"}
+
+        et_uuid = event_type_uri.rstrip("/").rsplit("/", 1)[-1]
+        data = _get(f"/event_types/{et_uuid}", headers)
+        if "error" in data:
+            return data
+
+        et = data.get("resource", {})
+        return {
+            "uri": et.get("uri", ""),
+            "name": et.get("name", ""),
+            "slug": et.get("slug", ""),
+            "active": et.get("active", False),
+            "duration": et.get("duration", 0),
+            "kind": et.get("kind", ""),
+            "type": et.get("type", ""),
+            "color": et.get("color", ""),
+            "scheduling_url": et.get("scheduling_url", ""),
+            "description": et.get("description_plain", ""),
+            "custom_questions": et.get("custom_questions", []),
         }

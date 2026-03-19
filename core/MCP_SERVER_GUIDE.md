@@ -1,6 +1,6 @@
 # MCP Server Guide - Agent Building Tools
 
-> **Note:** The standalone `agent-builder` MCP server (`framework.mcp.agent_builder_server`) has been replaced. Agent building is now done via the `coder-tools` server's `initialize_agent_package` tool, with underlying logic in `framework.builder.package_generator`.
+> **Note:** The standalone `agent-builder` MCP server (`framework.mcp.agent_builder_server`) has been replaced. Agent building is now done via the `coder-tools` server's `initialize_and_build_agent` tool, with underlying logic in `tools/coder_tools_server.py`.
 
 This guide covers the MCP tools available for building goal-driven agents.
 

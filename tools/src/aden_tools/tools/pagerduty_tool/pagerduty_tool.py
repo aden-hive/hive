@@ -276,3 +276,135 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
                 for s in services
             ],
         }
+
+    @mcp.tool()
+    def pagerduty_list_oncalls(
+        schedule_id: str = "",
+        escalation_policy_id: str = "",
+        since: str = "",
+        until: str = "",
+        limit: int = 25,
+    ) -> dict:
+        """List current on-call entries.
+
+        Args:
+            schedule_id: Filter by schedule ID (optional).
+            escalation_policy_id: Filter by escalation policy ID (optional).
+            since: Start of date range (ISO 8601, optional).
+            until: End of date range (ISO 8601, optional).
+            limit: Maximum entries to return (default 25, max 100).
+        """
+        headers = _get_headers()
+        if headers is None:
+            return {
+                "error": "PAGERDUTY_API_KEY is required",
+                "help": "Set PAGERDUTY_API_KEY environment variable",
+            }
+
+        params: dict[str, Any] = {"limit": min(limit, 100)}
+        if schedule_id:
+            params["schedule_ids[]"] = [schedule_id]
+        if escalation_policy_id:
+            params["escalation_policy_ids[]"] = [escalation_policy_id]
+        if since:
+            params["since"] = since
+        if until:
+            params["until"] = until
+
+        data = _get("/oncalls", headers, params)
+        if "error" in data:
+            return data
+
+        oncalls = data.get("oncalls", [])
+        return {
+            "count": len(oncalls),
+            "oncalls": [
+                {
+                    "user_name": (oc.get("user") or {}).get("summary", ""),
+                    "user_id": (oc.get("user") or {}).get("id", ""),
+                    "schedule_name": (oc.get("schedule") or {}).get("summary", ""),
+                    "schedule_id": (oc.get("schedule") or {}).get("id", ""),
+                    "escalation_policy": (oc.get("escalation_policy") or {}).get("summary", ""),
+                    "escalation_level": oc.get("escalation_level", 0),
+                    "start": oc.get("start", ""),
+                    "end": oc.get("end", ""),
+                }
+                for oc in oncalls
+            ],
+        }
+
+    @mcp.tool()
+    def pagerduty_add_incident_note(
+        incident_id: str,
+        content: str,
+    ) -> dict:
+        """Add a note to a PagerDuty incident.
+
+        Args:
+            incident_id: The incident ID (required).
+            content: Note content text (required).
+        """
+        headers = _get_headers(write=True)
+        if headers is None:
+            return {
+                "error": "PAGERDUTY_API_KEY is required",
+                "help": "Set PAGERDUTY_API_KEY environment variable",
+            }
+        if not incident_id or not content:
+            return {"error": "incident_id and content are required"}
+
+        body = {"note": {"content": content}}
+        data = _post(f"/incidents/{incident_id}/notes", headers, body)
+        if "error" in data:
+            return data
+
+        note = data.get("note", {})
+        return {
+            "id": note.get("id", ""),
+            "content": note.get("content", ""),
+            "created_at": note.get("created_at", ""),
+            "user": (note.get("user") or {}).get("summary", ""),
+            "status": "created",
+        }
+
+    @mcp.tool()
+    def pagerduty_list_escalation_policies(
+        query: str = "",
+        limit: int = 25,
+    ) -> dict:
+        """List PagerDuty escalation policies.
+
+        Args:
+            query: Filter by name (optional).
+            limit: Maximum results (default 25, max 100).
+        """
+        headers = _get_headers()
+        if headers is None:
+            return {
+                "error": "PAGERDUTY_API_KEY is required",
+                "help": "Set PAGERDUTY_API_KEY environment variable",
+            }
+
+        params: dict[str, Any] = {"limit": min(limit, 100)}
+        if query:
+            params["query"] = query
+
+        data = _get("/escalation_policies", headers, params)
+        if "error" in data:
+            return data
+
+        policies = data.get("escalation_policies", [])
+        return {
+            "count": len(policies),
+            "escalation_policies": [
+                {
+                    "id": p.get("id", ""),
+                    "name": p.get("name", ""),
+                    "description": p.get("description", ""),
+                    "num_loops": p.get("num_loops", 0),
+                    "teams": [t.get("summary", "") for t in p.get("teams", [])],
+                    "escalation_rules_count": len(p.get("escalation_rules", [])),
+                }
+                for p in policies
+            ],
+        }

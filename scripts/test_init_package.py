@@ -1,4 +1,4 @@
-"""Quick test script for initialize_agent_package."""
+"""Quick test script for initialize_and_build_agent."""
 
 import sys
 import os
@@ -14,6 +14,6 @@ import tools.coder_tools_server as srv
 srv.PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # Access the underlying function (FastMCP wraps it as FunctionTool)
-tool = srv.initialize_agent_package
+tool = srv.initialize_and_build_agent
 result = tool.fn("richard_test2", nodes="intake,process,review")
 print(result)

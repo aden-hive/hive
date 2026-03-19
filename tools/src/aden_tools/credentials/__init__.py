@@ -40,7 +40,6 @@ Credential categories:
 - discord.py: Discord bot credentials
 - github.py: GitHub API credentials
 - google_analytics.py: Google Analytics 4 Data API credentials
-- google_docs.py: Google Docs API credentials
 - google_maps.py: Google Maps Platform credentials
 - hubspot.py: HubSpot CRM credentials
 - intercom.py: Intercom customer messaging credentials
@@ -81,7 +80,6 @@ from .gcp_vision import GCP_VISION_CREDENTIALS
 from .github import GITHUB_CREDENTIALS
 from .gitlab import GITLAB_CREDENTIALS
 from .google_analytics import GOOGLE_ANALYTICS_CREDENTIALS
-from .google_docs import GOOGLE_DOCS_CREDENTIALS
 from .google_maps import GOOGLE_MAPS_CREDENTIALS
 from .google_search_console import GOOGLE_SEARCH_CONSOLE_CREDENTIALS
 from .greenhouse import GREENHOUSE_CREDENTIALS
@@ -171,7 +169,6 @@ CREDENTIAL_SPECS = {
     **GREENHOUSE_CREDENTIALS,
     **GITLAB_CREDENTIALS,
     **GOOGLE_ANALYTICS_CREDENTIALS,
-    **GOOGLE_DOCS_CREDENTIALS,
     **GOOGLE_MAPS_CREDENTIALS,
     **GOOGLE_SEARCH_CONSOLE_CREDENTIALS,
     **HUBSPOT_CREDENTIALS,
@@ -264,7 +261,6 @@ __all__ = [
     "GREENHOUSE_CREDENTIALS",
     "GITLAB_CREDENTIALS",
     "GOOGLE_ANALYTICS_CREDENTIALS",
-    "GOOGLE_DOCS_CREDENTIALS",
     "GOOGLE_MAPS_CREDENTIALS",
     "GOOGLE_SEARCH_CONSOLE_CREDENTIALS",
     "HUBSPOT_CREDENTIALS",

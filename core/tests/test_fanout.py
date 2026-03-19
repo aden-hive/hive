@@ -12,6 +12,7 @@ Covers:
 - Single-edge paths unaffected
 """
 
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -75,6 +76,19 @@ class TimingNode(NodeProtocol):
         return NodeResult(
             success=True, output={f"{self.label}_done": True}, tokens_used=1, latency_ms=1
         )
+
+
+class SlowNode(NodeProtocol):
+    """Sleeps before returning -- used for timeout testing."""
+
+    def __init__(self, delay: float = 10.0):
+        self.delay = delay
+        self.executed = False
+
+    async def execute(self, ctx: NodeContext) -> NodeResult:
+        await asyncio.sleep(self.delay)
+        self.executed = True
+        return NodeResult(success=True, output={"result": "slow"}, tokens_used=1, latency_ms=1)
 
 
 # --- Fixtures ---
@@ -492,3 +506,186 @@ async def test_parallel_disabled_uses_sequential(runtime, goal):
     # Only one branch should have executed (sequential follows first edge)
     executed_count = sum([b1_impl.executed, b2_impl.executed])
     assert executed_count == 1
+
+
+# === 12. Branch timeout cancels slow branch ===
+
+
+@pytest.mark.asyncio
+async def test_branch_timeout_cancels_slow_branch(runtime, goal):
+    """A branch exceeding branch_timeout_seconds should be cancelled."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="slow", node_type="event_loop", output_keys=["b1_out"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="fast", node_type="event_loop", output_keys=["b2_out"]
+    )
+
+    graph = _make_fanout_graph([b1, b2])
+
+    config = ParallelExecutionConfig(branch_timeout_seconds=0.1, on_branch_failure="fail_all")
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", SlowNode(delay=10.0))
+    executor.register_node("b2", SuccessNode({"b2_out": "ok"}))
+
+    result = await executor.execute(graph, goal, {})
+
+    # fail_all: one branch timed out → execution fails
+    assert not result.success
+    assert "failed" in result.error.lower()
+
+
+# === 13. Branch timeout with continue_others ===
+
+
+@pytest.mark.asyncio
+async def test_branch_timeout_with_continue_others(runtime, goal):
+    """continue_others should let fast branches finish even when one times out."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="slow", node_type="event_loop", output_keys=["b1_out"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="fast", node_type="event_loop", output_keys=["b2_out"]
+    )
+
+    graph = _make_fanout_graph([b1, b2])
+
+    config = ParallelExecutionConfig(
+        branch_timeout_seconds=0.1, on_branch_failure="continue_others"
+    )
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", SlowNode(delay=10.0))
+    b2_impl = SuccessNode({"b2_out": "ok"})
+    executor.register_node("b2", b2_impl)
+
+    await executor.execute(graph, goal, {})
+
+    # continue_others tolerates the timeout
+    assert b2_impl.executed
+
+
+# === 14. Branch timeout with fail_all (explicit) ===
+
+
+@pytest.mark.asyncio
+async def test_branch_timeout_with_fail_all(runtime, goal):
+    """fail_all should propagate timeout as execution failure."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="slow", node_type="event_loop", output_keys=["b1_out"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="also slow", node_type="event_loop", output_keys=["b2_out"]
+    )
+
+    graph = _make_fanout_graph([b1, b2])
+
+    config = ParallelExecutionConfig(branch_timeout_seconds=0.1, on_branch_failure="fail_all")
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", SlowNode(delay=10.0))
+    executor.register_node("b2", SlowNode(delay=10.0))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert not result.success
+
+
+# === 15. Memory conflict: last_wins ===
+
+
+@pytest.mark.asyncio
+async def test_memory_conflict_last_wins(runtime, goal):
+    """last_wins should allow both branches to write the same key without error."""
+    # Use distinct output_keys in spec (to pass graph validation) but have
+    # the node impl write a shared key at runtime — this is the scenario
+    # memory_conflict_strategy is designed to handle.
+    b1 = NodeSpec(
+        id="b1", name="B1", description="b1", node_type="event_loop", output_keys=["b1_out"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="b2", node_type="event_loop", output_keys=["b2_out"]
+    )
+
+    graph = _make_fanout_graph([b1, b2])
+
+    config = ParallelExecutionConfig(memory_conflict_strategy="last_wins")
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    # Both impls write "shared_key" — triggers conflict detection at runtime
+    executor.register_node("b1", SuccessNode({"shared_key": "from_b1", "b1_out": "ok"}))
+    executor.register_node("b2", SuccessNode({"shared_key": "from_b2", "b2_out": "ok"}))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert result.success
+    # The key should exist with one of the two values
+    assert result.output.get("shared_key") in ("from_b1", "from_b2")
+
+
+# === 16. Memory conflict: first_wins ===
+
+
+@pytest.mark.asyncio
+async def test_memory_conflict_first_wins(runtime, goal):
+    """first_wins should keep the first branch's value and skip later writes."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="b1", node_type="event_loop", output_keys=["b1_out"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="b2", node_type="event_loop", output_keys=["b2_out"]
+    )
+
+    graph = _make_fanout_graph([b1, b2])
+
+    config = ParallelExecutionConfig(memory_conflict_strategy="first_wins")
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", SuccessNode({"shared_key": "from_b1", "b1_out": "ok"}))
+    executor.register_node("b2", SuccessNode({"shared_key": "from_b2", "b2_out": "ok"}))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert result.success
+
+
+# === 17. Memory conflict: error raises ===
+
+
+@pytest.mark.asyncio
+async def test_memory_conflict_error_raises(runtime, goal):
+    """error strategy should fail when two branches write the same key."""
+    b1 = NodeSpec(
+        id="b1", name="B1", description="b1", node_type="event_loop", output_keys=["b1_out"]
+    )
+    b2 = NodeSpec(
+        id="b2", name="B2", description="b2", node_type="event_loop", output_keys=["b2_out"]
+    )
+
+    graph = _make_fanout_graph([b1, b2])
+
+    config = ParallelExecutionConfig(memory_conflict_strategy="error")
+    executor = GraphExecutor(
+        runtime=runtime, enable_parallel_execution=True, parallel_config=config
+    )
+    executor.register_node("source", SuccessNode({"data": "x"}))
+    executor.register_node("b1", SuccessNode({"shared_key": "from_b1", "b1_out": "ok"}))
+    executor.register_node("b2", SuccessNode({"shared_key": "from_b2", "b2_out": "ok"}))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert not result.success
+    # The conflict RuntimeError is caught inside execute_single_branch,
+    # which causes the branch to fail. fail_all then raises its own error.
+    assert "failed" in result.error.lower()

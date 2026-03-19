@@ -326,3 +326,121 @@ def register_tools(
                 }
             )
         return {"results": results, "count": len(results)}
+
+    @mcp.tool()
+    def confluence_update_page(
+        page_id: str,
+        title: str,
+        body: str,
+        version_number: int,
+    ) -> dict[str, Any]:
+        """
+        Update an existing Confluence page.
+
+        Args:
+            page_id: Page ID (required)
+            title: Page title (required, even if unchanged)
+            body: New page content in Confluence storage format (XHTML) (required)
+            version_number: Current version number + 1 (required).
+                            Get the current version via confluence_get_page first.
+
+        Returns:
+            Dict with updated page id, title, and version
+        """
+        domain, email, token = _get_credentials(credentials)
+        if not domain or not email or not token:
+            return _auth_error()
+        if not page_id or not title or not body:
+            return {"error": "page_id, title, and body are required"}
+        if version_number < 1:
+            return {"error": "version_number must be >= 1"}
+
+        payload: dict[str, Any] = {
+            "id": page_id,
+            "status": "current",
+            "title": title,
+            "body": {
+                "representation": "storage",
+                "value": body,
+            },
+            "version": {
+                "number": version_number,
+                "message": "Updated via API",
+            },
+        }
+
+        url = f"{_base_url(domain)}/wiki/api/v2/pages/{page_id}"
+        data = _request("put", url, email, token, json=payload)
+        if "error" in data:
+            return data
+
+        ver = data.get("version") or {}
+        return {
+            "id": data.get("id", ""),
+            "title": data.get("title", ""),
+            "version": ver.get("number", 0),
+            "status": "updated",
+        }
+
+    @mcp.tool()
+    def confluence_delete_page(page_id: str) -> dict[str, Any]:
+        """
+        Delete a Confluence page.
+
+        Args:
+            page_id: Page ID to delete (required)
+
+        Returns:
+            Dict with success status or error
+        """
+        domain, email, token = _get_credentials(credentials)
+        if not domain or not email or not token:
+            return _auth_error()
+        if not page_id:
+            return {"error": "page_id is required"}
+
+        url = f"{_base_url(domain)}/wiki/api/v2/pages/{page_id}"
+        data = _request("delete", url, email, token)
+        if "error" in data:
+            return data
+
+        return {"page_id": page_id, "status": "deleted"}
+
+    @mcp.tool()
+    def confluence_get_page_children(
+        page_id: str,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        """
+        List child pages of a Confluence page.
+
+        Args:
+            page_id: Parent page ID (required)
+            limit: Max results (1-250, default 25)
+
+        Returns:
+            Dict with child pages list (id, title, status, version)
+        """
+        domain, email, token = _get_credentials(credentials)
+        if not domain or not email or not token:
+            return _auth_error()
+        if not page_id:
+            return {"error": "page_id is required"}
+
+        url = f"{_base_url(domain)}/wiki/api/v2/pages/{page_id}/children"
+        data = _request("get", url, email, token, params={"limit": max(1, min(limit, 250))})
+        if "error" in data:
+            return data
+
+        children = []
+        for p in data.get("results", []):
+            ver = p.get("version") or {}
+            children.append(
+                {
+                    "id": p.get("id", ""),
+                    "title": p.get("title", ""),
+                    "status": p.get("status", ""),
+                    "version": ver.get("number", 0),
+                }
+            )
+        return {"children": children, "count": len(children)}

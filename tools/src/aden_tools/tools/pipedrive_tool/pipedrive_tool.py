@@ -566,3 +566,178 @@ def register_tools(
             return {"error": data.get("error", "Failed to add note")}
 
         return {"id": data.get("data", {}).get("id"), "status": "created"}
+
+    # ── Deal Updates ──────────────────────────────────────────────
+
+    @mcp.tool()
+    def pipedrive_update_deal(
+        deal_id: int,
+        title: str = "",
+        value: float = 0,
+        currency: str = "",
+        status: str = "",
+        stage_id: int = 0,
+        expected_close_date: str = "",
+        lost_reason: str = "",
+    ) -> dict[str, Any]:
+        """
+        Update an existing Pipedrive deal.
+
+        Args:
+            deal_id: Deal ID (required)
+            title: New deal title (optional)
+            value: New deal value (optional)
+            currency: Currency code e.g. "USD" (optional)
+            status: New status: open, won, lost, deleted (optional)
+            stage_id: Move to this pipeline stage ID (optional)
+            expected_close_date: Expected close date YYYY-MM-DD (optional)
+            lost_reason: Reason for loss when setting status to lost (optional)
+
+        Returns:
+            Dict with updated deal (id, title, status) or error
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not deal_id:
+            return {"error": "deal_id is required"}
+
+        body: dict[str, Any] = {}
+        if title:
+            body["title"] = title
+        if value:
+            body["value"] = value
+        if currency:
+            body["currency"] = currency
+        if status:
+            body["status"] = status
+        if stage_id:
+            body["stage_id"] = stage_id
+        if expected_close_date:
+            body["expected_close_date"] = expected_close_date
+        if lost_reason:
+            body["lost_reason"] = lost_reason
+
+        if not body:
+            return {"error": "At least one field to update is required"}
+
+        data = _put(f"deals/{deal_id}", token, body)
+        if "error" in data:
+            return data
+        if not data.get("success"):
+            return {"error": data.get("error", "Failed to update deal")}
+
+        d = data.get("data", {})
+        return {
+            "id": d.get("id"),
+            "title": d.get("title", ""),
+            "status": d.get("status", ""),
+            "result": "updated",
+        }
+
+    # ── Person Creation ───────────────────────────────────────────
+
+    @mcp.tool()
+    def pipedrive_create_person(
+        name: str,
+        email: str = "",
+        phone: str = "",
+        org_id: int = 0,
+    ) -> dict[str, Any]:
+        """
+        Create a new person (contact) in Pipedrive.
+
+        Args:
+            name: Person's full name (required)
+            email: Email address (optional)
+            phone: Phone number (optional)
+            org_id: Associated organization ID (optional)
+
+        Returns:
+            Dict with created person (id, name) or error
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not name:
+            return {"error": "name is required"}
+
+        body: dict[str, Any] = {"name": name}
+        if email:
+            body["email"] = [{"value": email, "primary": True, "label": "work"}]
+        if phone:
+            body["phone"] = [{"value": phone, "primary": True, "label": "work"}]
+        if org_id:
+            body["org_id"] = org_id
+
+        data = _post("persons", token, body)
+        if "error" in data:
+            return data
+        if not data.get("success"):
+            return {"error": data.get("error", "Failed to create person")}
+
+        p = data.get("data", {})
+        return {"id": p.get("id"), "name": p.get("name", ""), "status": "created"}
+
+    # ── Activity Creation ─────────────────────────────────────────
+
+    @mcp.tool()
+    def pipedrive_create_activity(
+        subject: str,
+        activity_type: str = "task",
+        due_date: str = "",
+        due_time: str = "",
+        deal_id: int = 0,
+        person_id: int = 0,
+        org_id: int = 0,
+        note: str = "",
+    ) -> dict[str, Any]:
+        """
+        Create a new activity (call, meeting, task, etc.) in Pipedrive.
+
+        Args:
+            subject: Activity subject/title (required)
+            activity_type: Type: call, meeting, task, deadline, email, lunch (default task)
+            due_date: Due date YYYY-MM-DD (optional)
+            due_time: Due time HH:MM (optional)
+            deal_id: Associated deal ID (optional)
+            person_id: Associated person ID (optional)
+            org_id: Associated organization ID (optional)
+            note: Activity note/description (optional)
+
+        Returns:
+            Dict with created activity (id, subject, type) or error
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not subject:
+            return {"error": "subject is required"}
+
+        body: dict[str, Any] = {"subject": subject, "type": activity_type}
+        if due_date:
+            body["due_date"] = due_date
+        if due_time:
+            body["due_time"] = due_time
+        if deal_id:
+            body["deal_id"] = deal_id
+        if person_id:
+            body["person_id"] = person_id
+        if org_id:
+            body["org_id"] = org_id
+        if note:
+            body["note"] = note
+
+        data = _post("activities", token, body)
+        if "error" in data:
+            return data
+        if not data.get("success"):
+            return {"error": data.get("error", "Failed to create activity")}
+
+        a = data.get("data", {})
+        return {
+            "id": a.get("id"),
+            "subject": a.get("subject", ""),
+            "type": a.get("type", ""),
+            "status": "created",
+        }
