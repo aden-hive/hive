@@ -482,7 +482,7 @@ class ToolRegistry:
     def register_mcp_server(
         self,
         server_config: dict[str, Any],
-        use_connection_manager: bool = False,
+        use_connection_manager: bool = True,
     ) -> int:
         """
         Register an MCP server and discover its tools.

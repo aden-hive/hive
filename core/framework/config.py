@@ -61,6 +61,137 @@ def get_preferred_model() -> str:
     return "anthropic/claude-sonnet-4-20250514"
 
 
+def get_preferred_worker_model() -> str | None:
+    """Return the user's preferred worker LLM model, or None if not configured.
+
+    Reads from the ``worker_llm`` section of ~/.hive/configuration.json.
+    Returns None when no worker-specific model is set, so callers can
+    fall back to the default (queen) model via ``get_preferred_model()``.
+    """
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if worker_llm.get("provider") and worker_llm.get("model"):
+        provider = str(worker_llm["provider"])
+        model = str(worker_llm["model"]).strip()
+        if provider.lower() == "openrouter" and model.lower().startswith("openrouter/"):
+            model = model[len("openrouter/") :]
+        if model:
+            return f"{provider}/{model}"
+    return None
+
+
+def get_worker_api_key() -> str | None:
+    """Return the API key for the worker LLM, falling back to the default key."""
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if not worker_llm:
+        return get_api_key()
+
+    # Worker-specific subscription / env var
+    if worker_llm.get("use_claude_code_subscription"):
+        try:
+            from framework.runner.runner import get_claude_code_token
+
+            token = get_claude_code_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
+    if worker_llm.get("use_codex_subscription"):
+        try:
+            from framework.runner.runner import get_codex_token
+
+            token = get_codex_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
+    if worker_llm.get("use_kimi_code_subscription"):
+        try:
+            from framework.runner.runner import get_kimi_code_token
+
+            token = get_kimi_code_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
+    api_key_env_var = worker_llm.get("api_key_env_var")
+    if api_key_env_var:
+        return os.environ.get(api_key_env_var)
+
+    # Fall back to default key
+    return get_api_key()
+
+
+def get_worker_api_base() -> str | None:
+    """Return the api_base for the worker LLM, falling back to the default."""
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if not worker_llm:
+        return get_api_base()
+
+    if worker_llm.get("use_codex_subscription"):
+        return "https://chatgpt.com/backend-api/codex"
+    if worker_llm.get("use_kimi_code_subscription"):
+        return "https://api.kimi.com/coding"
+    if worker_llm.get("api_base"):
+        return worker_llm["api_base"]
+    if str(worker_llm.get("provider", "")).lower() == "openrouter":
+        return OPENROUTER_API_BASE
+    return None
+
+
+def get_worker_llm_extra_kwargs() -> dict[str, Any]:
+    """Return extra kwargs for the worker LLM provider."""
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if not worker_llm:
+        return get_llm_extra_kwargs()
+
+    if worker_llm.get("use_claude_code_subscription"):
+        api_key = get_worker_api_key()
+        if api_key:
+            return {
+                "extra_headers": {"authorization": f"Bearer {api_key}"},
+            }
+    if worker_llm.get("use_codex_subscription"):
+        api_key = get_worker_api_key()
+        if api_key:
+            headers: dict[str, str] = {
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "CodexBar",
+            }
+            try:
+                from framework.runner.runner import get_codex_account_id
+
+                account_id = get_codex_account_id()
+                if account_id:
+                    headers["ChatGPT-Account-Id"] = account_id
+            except ImportError:
+                pass
+            return {
+                "extra_headers": headers,
+                "store": False,
+                "allowed_openai_params": ["store"],
+            }
+    return {}
+
+
+def get_worker_max_tokens() -> int:
+    """Return max_tokens for the worker LLM, falling back to default."""
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if worker_llm and "max_tokens" in worker_llm:
+        return worker_llm["max_tokens"]
+    return get_max_tokens()
+
+
+def get_worker_max_context_tokens() -> int:
+    """Return max_context_tokens for the worker LLM, falling back to default."""
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if worker_llm and "max_context_tokens" in worker_llm:
+        return worker_llm["max_context_tokens"]
+    return get_max_context_tokens()
+
+
 def get_max_tokens() -> int:
     """Return the configured max_tokens, falling back to DEFAULT_MAX_TOKENS."""
     return get_hive_config().get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)

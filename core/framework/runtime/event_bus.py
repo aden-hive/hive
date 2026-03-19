@@ -117,6 +117,7 @@ class EventType(StrEnum):
 
     # Context management
     CONTEXT_COMPACTED = "context_compacted"
+    CONTEXT_USAGE_UPDATED = "context_usage_updated"
 
     # External triggers
     WEBHOOK_RECEIVED = "webhook_received"

@@ -324,6 +324,7 @@ export type EventTypeName =
   | "node_retry"
   | "edge_traversed"
   | "context_compacted"
+  | "context_usage_updated"
   | "webhook_received"
   | "custom"
   | "escalation_requested"

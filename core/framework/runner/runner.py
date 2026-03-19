@@ -1141,7 +1141,10 @@ class AgentRunner:
 
         # Create LLM provider
         # Uses LiteLLM which auto-detects the provider from model name
-        if self.mock_mode:
+        # Skip if already injected (e.g. worker agents with a pre-built LLM)
+        if self._llm is not None:
+            pass  # LLM already configured externally
+        elif self.mock_mode:
             # Use mock LLM for testing without real API calls
             from framework.llm.mock import MockLLMProvider
 
@@ -1340,7 +1343,7 @@ class AgentRunner:
         except Exception:
             pass  # Best-effort — agent works without account info
 
-        # Skill configuration — the runtime handles discovery, loading, and
+        # Skill configuration — the runtime handles discovery, loading, trust-gating and
         # prompt rasterization.  The runner just builds the config.
         from framework.skills.config import SkillsConfig
         from framework.skills.manager import SkillsManagerConfig
@@ -1351,6 +1354,7 @@ class AgentRunner:
                 skills=getattr(self, "_agent_skills", None),
             ),
             project_root=self.agent_path,
+            interactive=self._interactive,
         )
 
         self._setup_agent_runtime(
@@ -1462,6 +1466,9 @@ class AgentRunner:
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         event_bus=None,
+        skills_catalog_prompt: str = "",
+        protocols_prompt: str = "",
+        skill_dirs: list[str] | None = None,
         skills_manager_config=None,
     ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
