@@ -165,7 +165,7 @@ Write a SQL query for TimescaleDB that:
 1. Create a GitHub Gist with your answers
 2. Name it `aden-architecture-YOURNAME.md`
 3. Include any code files as separate files in the Gist
-4. Email to `careers@adenhq.com`
+4. Email to `contact@adenhq.com`
    - Subject: `[Architecture Challenge] Your Name`
 
 ---

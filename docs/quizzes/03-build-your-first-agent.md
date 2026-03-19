@@ -235,7 +235,7 @@ Design what metrics should be tracked for your agent system:
 2. Name it `aden-agent-challenge-YOURNAME.md`
 3. Include code files separately
 4. If you created diagrams, include images
-5. Email to `careers@adenhq.com`
+5. Email to `contact@adenhq.com`
    - Subject: `[Agent Challenge] Your Name`
 
 ---
