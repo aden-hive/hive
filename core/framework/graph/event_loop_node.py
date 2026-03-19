@@ -4262,22 +4262,15 @@ class EventLoopNode(NodeProtocol):
             if m.tool_calls:
                 for tc in m.tool_calls:
                     args = tc.get("function", {}).get("arguments", "")
-                    tc_chars += len(args) if isinstance(args, str) else len(
-                        json.dumps(args)
-                    )
-                names = [
-                    tc.get("function", {}).get("name", "?")
-                    for tc in m.tool_calls
-                ]
+                    tc_chars += len(args) if isinstance(args, str) else len(json.dumps(args))
+                names = [tc.get("function", {}).get("name", "?") for tc in m.tool_calls]
                 tool_name = ", ".join(names)
             elif m.role == "tool" and m.tool_use_id:
                 for prev in conversation.messages:
                     if prev.tool_calls:
                         for tc in prev.tool_calls:
                             if tc.get("id") == m.tool_use_id:
-                                tool_name = tc.get("function", {}).get(
-                                    "name", "?"
-                                )
+                                tool_name = tc.get("function", {}).get("name", "?")
                                 break
                     if tool_name:
                         break
@@ -4362,9 +4355,7 @@ class EventLoopNode(NodeProtocol):
 
         # Write detailed debug log to ~/.hive/compaction_log/ when enabled
         if _os.environ.get("HIVE_COMPACTION_DEBUG"):
-            self._write_compaction_debug_log(
-                ctx, before_pct, after_pct, level, pre_inventory
-            )
+            self._write_compaction_debug_log(ctx, before_pct, after_pct, level, pre_inventory)
 
     @staticmethod
     def _write_compaction_debug_log(
@@ -4395,8 +4386,7 @@ class EventLoopNode(NodeProtocol):
 
         if inventory:
             total_chars = sum(
-                e.get("content_chars", 0) + e.get("tool_call_args_chars", 0)
-                for e in inventory
+                e.get("content_chars", 0) + e.get("tool_call_args_chars", 0) for e in inventory
             )
             lines.append(
                 f"## Pre-Compaction Message Inventory "
@@ -4405,16 +4395,13 @@ class EventLoopNode(NodeProtocol):
             lines.append("")
             ranked = sorted(
                 inventory,
-                key=lambda e: e.get("content_chars", 0)
-                + e.get("tool_call_args_chars", 0),
+                key=lambda e: e.get("content_chars", 0) + e.get("tool_call_args_chars", 0),
                 reverse=True,
             )
             lines.append("| # | seq | role | tool | chars | % of total | flags |")
             lines.append("|---|-----|------|------|------:|------------|-------|")
             for i, entry in enumerate(ranked, 1):
-                chars = entry.get("content_chars", 0) + entry.get(
-                    "tool_call_args_chars", 0
-                )
+                chars = entry.get("content_chars", 0) + entry.get("tool_call_args_chars", 0)
                 pct = (chars / total_chars * 100) if total_chars else 0
                 tool = entry.get("tool", "")
                 flags = []
@@ -4433,8 +4420,7 @@ class EventLoopNode(NodeProtocol):
                 lines.append("### Large message previews")
                 for entry in large:
                     lines.append(
-                        f"\n**seq={entry['seq']}** "
-                        f"({entry['role']}, {entry.get('tool', '')}):"
+                        f"\n**seq={entry['seq']}** ({entry['role']}, {entry.get('tool', '')}):"
                     )
                     lines.append(f"```\n{entry['preview']}\n```")
         lines.append("")

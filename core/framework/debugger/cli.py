@@ -5,9 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-_SCRIPT = (
-    Path(__file__).resolve().parents[3] / "scripts" / "llm_debug_log_visualizer.py"
-)
+_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "llm_debug_log_visualizer.py"
 
 
 def register_debugger_commands(subparsers: argparse._SubParsersAction) -> None:

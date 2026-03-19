@@ -49,9 +49,7 @@ def log_llm_turn(
     """
     try:
         # Skip logging during test runs to avoid polluting real logs.
-        if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get(
-            "HIVE_DISABLE_LLM_LOGS"
-        ):
+        if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("HIVE_DISABLE_LLM_LOGS"):
             return
         global _log_file, _log_ready  # noqa: PLW0603
         if not _log_ready:
