@@ -1034,8 +1034,11 @@ class SessionManager:
         async def _on_compaction(_event) -> None:
             from framework.agents.queen.queen_memory import consolidate_queen_memory
 
-            await consolidate_queen_memory(
-                session.id, _consolidation_session_dir, _consolidation_llm
+            asyncio.create_task(
+                consolidate_queen_memory(
+                    session.id, _consolidation_session_dir, _consolidation_llm
+                ),
+                name=f"queen-memory-consolidation-{session.id}",
             )
 
         from framework.runtime.event_bus import EventType as _ET
