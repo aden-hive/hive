@@ -467,6 +467,8 @@ class EventLoopNode(NodeProtocol):
         stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
         execution_id = ctx.execution_id or ""
+        # Store skill dirs for AS-9 file-read interception in _execute_tool
+        self._skill_dirs: list[str] = ctx.skill_dirs
 
         # Verdict counters for runtime logging
         _accept_count = _retry_count = _escalate_count = _continue_count = 0
@@ -806,6 +808,13 @@ class EventLoopNode(NodeProtocol):
                 execution_id,
                 extra_data=_iter_meta,
             )
+            # Sync max_context_tokens from live config so mid-session model
+            # switches are reflected in compaction decisions and the UI bar.
+            from framework.config import get_max_context_tokens as _live_mct
+
+            conversation._max_context_tokens = _live_mct()
+
+            await self._publish_context_usage(ctx, conversation, "iteration_start")
 
             # 6d. Pre-turn compaction check (tiered)
             _compacted_this_iter = False
@@ -2726,6 +2735,7 @@ class EventLoopNode(NodeProtocol):
                     tool_use_id=tc.tool_use_id,
                     content=result.content,
                     is_error=result.is_error,
+                    is_skill_content=result.is_skill_content,
                 )
                 if (
                     tc.tool_name in ("ask_user", "ask_user_multiple")
@@ -2833,6 +2843,8 @@ class EventLoopNode(NodeProtocol):
                         pruned,
                         conversation.usage_ratio() * 100,
                     )
+
+            await self._publish_context_usage(ctx, conversation, "post_tool_results")
 
             # If the turn requested external input (ask_user or queen handoff),
             # return immediately so the outer loop can block before judge eval.
@@ -3255,16 +3267,141 @@ class EventLoopNode(NodeProtocol):
             max_context_tokens=self._config.max_context_tokens,
         )
 
+    @staticmethod
+    def _build_message_inventory(
+        conversation: NodeConversation,
+    ) -> list[dict[str, Any]]:
+        """Build a per-message size inventory for debug logging."""
+        inventory: list[dict[str, Any]] = []
+        for m in conversation.messages:
+            content_chars = len(m.content)
+            tc_chars = 0
+            tool_name = None
+            if m.tool_calls:
+                for tc in m.tool_calls:
+                    args = tc.get("function", {}).get("arguments", "")
+                    tc_chars += len(args) if isinstance(args, str) else len(json.dumps(args))
+                names = [tc.get("function", {}).get("name", "?") for tc in m.tool_calls]
+                tool_name = ", ".join(names)
+            elif m.role == "tool" and m.tool_use_id:
+                for prev in conversation.messages:
+                    if prev.tool_calls:
+                        for tc in prev.tool_calls:
+                            if tc.get("id") == m.tool_use_id:
+                                tool_name = tc.get("function", {}).get("name", "?")
+                                break
+                    if tool_name:
+                        break
+            entry: dict[str, Any] = {
+                "seq": m.seq,
+                "role": m.role,
+                "content_chars": content_chars,
+            }
+            if tc_chars:
+                entry["tool_call_args_chars"] = tc_chars
+            if tool_name:
+                entry["tool"] = tool_name
+            if m.is_error:
+                entry["is_error"] = True
+            if m.phase_id:
+                entry["phase"] = m.phase_id
+            if content_chars > 2000:
+                entry["preview"] = m.content[:200] + "…"
+            inventory.append(entry)
+        return inventory
+
     async def _log_compaction(
         self,
         ctx: NodeContext,
         conversation: NodeConversation,
         ratio_before: float,
+        pre_inventory: list[dict[str, Any]] | None = None,
     ) -> None:
         """Log compaction result to runtime logger and event bus."""
         from framework.graph.event_loop.compaction import log_compaction
 
         return await log_compaction(ctx, conversation, ratio_before, self._event_bus)
+
+        # Emit post-compaction usage update
+        await self._publish_context_usage(ctx, conversation, "post_compaction")
+
+        # Write detailed debug log to ~/.hive/compaction_log/ when enabled
+        if _os.environ.get("HIVE_COMPACTION_DEBUG"):
+            self._write_compaction_debug_log(ctx, before_pct, after_pct, level, pre_inventory)
+
+    @staticmethod
+    def _write_compaction_debug_log(
+        ctx: NodeContext,
+        before_pct: int,
+        after_pct: int,
+        level: str,
+        inventory: list[dict[str, Any]] | None,
+    ) -> None:
+        """Write detailed compaction analysis to ~/.hive/compaction_log/."""
+        log_dir = Path.home() / ".hive" / "compaction_log"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%f")
+        node_label = ctx.node_id.replace("/", "_")
+        log_path = log_dir / f"{ts}_{node_label}.md"
+
+        lines: list[str] = [
+            f"# Compaction Debug — {ctx.node_id}",
+            f"**Time:** {datetime.now(UTC).isoformat()}",
+            f"**Node:** {ctx.node_spec.name} (`{ctx.node_id}`)",
+        ]
+        if ctx.stream_id:
+            lines.append(f"**Stream:** {ctx.stream_id}")
+        lines.append(f"**Level:** {level}")
+        lines.append(f"**Usage:** {before_pct}% → {after_pct}%")
+        lines.append("")
+
+        if inventory:
+            total_chars = sum(
+                e.get("content_chars", 0) + e.get("tool_call_args_chars", 0) for e in inventory
+            )
+            lines.append(
+                f"## Pre-Compaction Message Inventory "
+                f"({len(inventory)} messages, {total_chars:,} total chars)"
+            )
+            lines.append("")
+            ranked = sorted(
+                inventory,
+                key=lambda e: e.get("content_chars", 0) + e.get("tool_call_args_chars", 0),
+                reverse=True,
+            )
+            lines.append("| # | seq | role | tool | chars | % of total | flags |")
+            lines.append("|---|-----|------|------|------:|------------|-------|")
+            for i, entry in enumerate(ranked, 1):
+                chars = entry.get("content_chars", 0) + entry.get("tool_call_args_chars", 0)
+                pct = (chars / total_chars * 100) if total_chars else 0
+                tool = entry.get("tool", "")
+                flags = []
+                if entry.get("is_error"):
+                    flags.append("error")
+                if entry.get("phase"):
+                    flags.append(f"phase={entry['phase']}")
+                lines.append(
+                    f"| {i} | {entry['seq']} | {entry['role']} | {tool} "
+                    f"| {chars:,} | {pct:.1f}% | {', '.join(flags)} |"
+                )
+
+            large = [e for e in ranked if e.get("preview")]
+            if large:
+                lines.append("")
+                lines.append("### Large message previews")
+                for entry in large:
+                    lines.append(
+                        f"\n**seq={entry['seq']}** ({entry['role']}, {entry.get('tool', '')}):"
+                    )
+                    lines.append(f"```\n{entry['preview']}\n```")
+        lines.append("")
+
+        try:
+            log_path.write_text("\n".join(lines), encoding="utf-8")
+            logger.debug("Compaction debug log written to %s", log_path)
+        except OSError:
+            logger.debug("Failed to write compaction debug log to %s", log_path)
 
     def _build_emergency_summary(
         self,
@@ -3444,6 +3581,36 @@ class EventLoopNode(NodeProtocol):
             event=event,
             conversation=conversation,
             trigger=trigger,
+        )
+
+    async def _publish_context_usage(
+        self,
+        ctx: NodeContext,
+        conversation: NodeConversation,
+        trigger: str,
+    ) -> None:
+        """Emit a CONTEXT_USAGE_UPDATED event with current context window state."""
+        if not self._event_bus:
+            return
+        from framework.runtime.event_bus import AgentEvent, EventType
+
+        estimated = conversation.estimate_tokens()
+        max_tokens = conversation._max_context_tokens
+        ratio = estimated / max_tokens if max_tokens > 0 else 0.0
+        await self._event_bus.publish(
+            AgentEvent(
+                type=EventType.CONTEXT_USAGE_UPDATED,
+                stream_id=ctx.stream_id or ctx.node_id,
+                node_id=ctx.node_id,
+                data={
+                    "usage_ratio": round(ratio, 4),
+                    "usage_pct": round(ratio * 100),
+                    "message_count": conversation.message_count,
+                    "estimated_tokens": estimated,
+                    "max_context_tokens": max_tokens,
+                    "trigger": trigger,
+                },
+            )
         )
 
     async def _publish_iteration(

@@ -568,6 +568,7 @@ class NodeContext:
     # Skill system prompts — injected by the skill discovery pipeline
     skills_catalog_prompt: str = ""  # Available skills XML catalog
     protocols_prompt: str = ""  # Default skill operational protocols
+    skill_dirs: list[str] = field(default_factory=list)  # Skill base dirs for resource access
 
     # Per-iteration metadata provider — when set, EventLoopNode merges
     # the returned dict into node_loop_iteration event data.  Used by

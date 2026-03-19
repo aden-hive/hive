@@ -28,6 +28,13 @@ export interface SubagentReport {
   status?: "running" | "complete" | "error";
 }
 
+interface ContextUsage {
+  usagePct: number;
+  messageCount: number;
+  estimatedTokens: number;
+  maxTokens: number;
+}
+
 interface NodeDetailPanelProps {
   node: GraphNode | null;
   nodeSpec?: NodeSpec | null;
@@ -38,6 +45,7 @@ interface NodeDetailPanelProps {
   workerSessionId?: string | null;
   nodeLogs?: string[];
   actionPlan?: string;
+  contextUsage?: ContextUsage;
   onClose: () => void;
 }
 
@@ -309,7 +317,7 @@ const tabs: { id: Tab; label: string; Icon: React.FC<{ className?: string }> }[]
   { id: "subagents", label: "Subagents", Icon: ({ className }) => <Bot className={className} /> },
 ];
 
-export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagentReports, sessionId, graphId, workerSessionId, nodeLogs, actionPlan, onClose }: NodeDetailPanelProps) {
+export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagentReports, sessionId, graphId, workerSessionId, nodeLogs, actionPlan, contextUsage, onClose }: NodeDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [realTools, setRealTools] = useState<ToolInfo[] | null>(null);
   const [realCriteria, setRealCriteria] = useState<NodeCriteria | null>(null);
@@ -385,6 +393,43 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground bg-muted/40 rounded-lg px-3 py-2">
             <Zap className="w-3 h-3 text-primary flex-shrink-0" />
             <span className="italic">{node.statusLabel}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Context window usage */}
+      {contextUsage && (
+        <div className="px-4 py-2 border-b border-border/20 flex-shrink-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] text-muted-foreground font-medium">Context</span>
+            <span className="text-[10px] text-muted-foreground/70 ml-auto">
+              {(contextUsage.estimatedTokens / 1000).toFixed(1)}k / {(contextUsage.maxTokens / 1000).toFixed(0)}k tokens
+            </span>
+          </div>
+          <div className="w-full h-1.5 rounded-full bg-muted/50 overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-500 ease-out"
+              style={{
+                width: `${Math.min(contextUsage.usagePct, 100)}%`,
+                backgroundColor: contextUsage.usagePct >= 90
+                  ? "hsl(0,65%,55%)"
+                  : contextUsage.usagePct >= 70
+                    ? "hsl(35,90%,55%)"
+                    : "hsl(45,95%,58%)",
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[10px] text-muted-foreground/60">{contextUsage.messageCount} messages</span>
+            <span className="text-[10px] font-medium ml-auto" style={{
+              color: contextUsage.usagePct >= 90
+                ? "hsl(0,65%,55%)"
+                : contextUsage.usagePct >= 70
+                  ? "hsl(35,90%,55%)"
+                  : "hsl(45,95%,58%)",
+            }}>
+              {contextUsage.usagePct}%
+            </span>
           </div>
         </div>
       )}
