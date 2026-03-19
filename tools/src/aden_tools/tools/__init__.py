@@ -77,6 +77,7 @@ from .gitlab_tool import register_tools as register_gitlab
 from .gmail_tool import register_tools as register_gmail
 from .google_analytics_tool import register_tools as register_google_analytics
 from .google_docs_tool import register_tools as register_google_docs
+from .google_drive_tool import register_tools as register_google_drive
 from .google_maps_tool import register_tools as register_google_maps
 from .google_search_console_tool import register_tools as register_google_search_console
 from .google_sheets_tool import register_tools as register_google_sheets
@@ -183,6 +184,7 @@ def _register_verified(
     register_google_docs(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
     register_google_sheets(mcp, credentials=credentials)
+    register_google_drive(mcp, credentials=credentials)
     register_account_info(mcp, credentials=credentials)
 
     # --- File system toolkits ---
@@ -223,6 +225,7 @@ def _register_verified(
     register_telegram(mcp, credentials=credentials)
     register_google_docs(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
+    register_google_drive(mcp, credentials=credentials)
     register_account_info(mcp, credentials=credentials)
 
 

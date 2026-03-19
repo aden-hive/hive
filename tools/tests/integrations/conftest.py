@@ -20,20 +20,8 @@ from aden_tools.credentials import CREDENTIAL_SPECS
 # the actual MCP tool is "web_search" (multi-provider). This is because
 # _tool_to_cred is 1:1 and web_search already maps to brave_search.
 # These specs use a phantom tool name for credential grouping.
-# drive_* tools: credential spec defined ahead of tool implementation.
 KNOWN_PHANTOM_TOOLS: set[str] = {
     "google_search",
-    "drive_list_files",
-    "drive_get_file",
-    "drive_upload_file",
-    "drive_download_file",
-    "drive_search_files",
-    "drive_create_folder",
-    "drive_delete_file",
-    "drive_share_file",
-    "drive_get_file_metadata",
-    "drive_copy_file",
-    "drive_move_file",
 }
 
 # Modules that accept `credentials` to query the credential store itself
