@@ -46,6 +46,13 @@ from framework.credentials.models import CredentialError
 from framework.runner.preload_validation import credential_errors_to_json, validate_credentials
 from framework.runtime.event_bus import AgentEvent, EventType
 from framework.server.app import validate_agent_path
+from framework.tools.flowchart_utils import (
+    FLOWCHART_TYPES,
+    classify_flowchart_node,
+    load_flowchart_file,
+    save_flowchart_file,
+    synthesize_draft_from_runtime,
+)
 
 if TYPE_CHECKING:
     from framework.runner.tool_registry import ToolRegistry
@@ -294,66 +301,7 @@ def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = 
     return "\n".join(lines)
 
 
-_FLOWCHART_TYPES = {
-    # ── Core symbols (ISO 5807 §4) ──────────────────────────
-    # Terminator — rounded rectangle (stadium shape)
-    "start": {"shape": "stadium", "color": "#4CAF50"},  # green
-    "terminal": {"shape": "stadium", "color": "#F44336"},  # red
-    # Process — rectangle
-    "process": {"shape": "rectangle", "color": "#2196F3"},  # blue
-    # Decision — diamond
-    "decision": {"shape": "diamond", "color": "#FF9800"},  # amber
-    # Data (Input/Output) — parallelogram
-    "io": {"shape": "parallelogram", "color": "#9C27B0"},  # purple
-    # Document — rectangle with wavy bottom
-    "document": {"shape": "document", "color": "#607D8B"},  # blue-grey
-    # Multi-document — stacked documents
-    "multi_document": {"shape": "multi_document", "color": "#78909C"},  # blue-grey light
-    # Predefined process / subroutine — rectangle with double vertical bars
-    "subprocess": {"shape": "subroutine", "color": "#009688"},  # teal
-    # Preparation — hexagon
-    "preparation": {"shape": "hexagon", "color": "#795548"},  # brown
-    # Manual input — trapezoid with slanted top
-    "manual_input": {"shape": "manual_input", "color": "#E91E63"},  # pink
-    # Manual operation — inverted trapezoid
-    "manual_operation": {"shape": "trapezoid", "color": "#AD1457"},  # dark pink
-    # Delay — half-rounded rectangle (D-shape)
-    "delay": {"shape": "delay", "color": "#FF5722"},  # deep orange
-    # Display — rounded rectangle with pointed left
-    "display": {"shape": "display", "color": "#00BCD4"},  # cyan
-    # ── Data storage symbols ────────────────────────────────
-    # Database / direct access storage — cylinder
-    "database": {"shape": "cylinder", "color": "#8BC34A"},  # light green
-    # Stored data — generic data store
-    "stored_data": {"shape": "stored_data", "color": "#CDDC39"},  # lime
-    # Internal storage — rectangle with cross-hatch
-    "internal_storage": {"shape": "internal_storage", "color": "#FFC107"},  # amber light
-    # ── Connectors ──────────────────────────────────────────
-    # On-page connector — small circle
-    "connector": {"shape": "circle", "color": "#9E9E9E"},  # grey
-    # Off-page connector — pentagon / home-plate
-    "offpage_connector": {"shape": "pentagon", "color": "#757575"},  # dark grey
-    # ── Flow operations ─────────────────────────────────────
-    # Merge — inverted triangle
-    "merge": {"shape": "triangle_inv", "color": "#3F51B5"},  # indigo
-    # Extract — upward triangle
-    "extract": {"shape": "triangle", "color": "#5C6BC0"},  # indigo light
-    # Sort — hourglass / double triangle
-    "sort": {"shape": "hourglass", "color": "#7986CB"},  # indigo lighter
-    # Collate — merged hourglass
-    "collate": {"shape": "hourglass_inv", "color": "#9FA8DA"},  # indigo lightest
-    # Summing junction — circle with cross
-    "summing_junction": {"shape": "circle_cross", "color": "#F06292"},  # pink light
-    # Or — circle with horizontal bar
-    "or": {"shape": "circle_bar", "color": "#CE93D8"},  # purple light
-    # ── Domain-specific (Hive agent context) ────────────────
-    # Browser automation (GCU) — mapped to preparation/hexagon
-    "browser": {"shape": "hexagon", "color": "#1A237E"},  # dark indigo
-    # Comment / annotation — flag shape
-    "comment": {"shape": "flag", "color": "#BDBDBD"},  # light grey
-    # Alternate process — rounded rectangle
-    "alternate_process": {"shape": "rounded_rect", "color": "#42A5F5"},  # light blue
-}
+# FLOWCHART_TYPES is imported from framework.tools.flowchart_utils
 
 
 def _read_agent_triggers_json(agent_path: Path) -> list[dict]:
@@ -645,7 +593,7 @@ def _dissolve_planning_nodes(
         if not predecessors:
             # Decision at start: convert to regular process node
             d_node["flowchart_type"] = "process"
-            fc_meta = _FLOWCHART_TYPES["process"]
+            fc_meta = FLOWCHART_TYPES["process"]
             d_node["flowchart_shape"] = fc_meta["shape"]
             d_node["flowchart_color"] = fc_meta["color"]
             if not d_node.get("success_criteria"):
@@ -777,6 +725,25 @@ def _dissolve_planning_nodes(
     converted["entry_node"] = nodes[0]["id"] if nodes else ""
 
     return converted, flowchart_map
+
+
+def _update_meta_json(session_manager, manager_session_id, updates: dict) -> None:
+    """Merge updates into the queen session's meta.json."""
+    if session_manager is None or not manager_session_id:
+        return
+    srv_session = session_manager.get_session(manager_session_id)
+    if not srv_session:
+        return
+    storage_sid = getattr(srv_session, "queen_resume_from", None) or srv_session.id
+    meta_path = Path.home() / ".hive" / "queen" / "session" / storage_sid / "meta.json"
+    try:
+        existing = {}
+        if meta_path.exists():
+            existing = json.loads(meta_path.read_text(encoding="utf-8"))
+        existing.update(updates)
+        meta_path.write_text(json.dumps(existing), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def register_queen_lifecycle_tools(
@@ -1027,6 +994,7 @@ def register_queen_lifecycle_tools(
         # Switch to building phase
         if phase_state is not None:
             await phase_state.switch_to_building()
+            _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
 
         result = json.loads(stop_result)
         result["phase"] = "building"
@@ -1157,308 +1125,19 @@ def register_queen_lifecycle_tools(
     registry.register("replan_agent", _replan_tool, lambda inputs: replan_agent())
     tools_registered += 1
 
-    # --- Flowchart file persistence -------------------------------------------
-    # The flowchart is saved as flowchart.json in the agent's folder so it
-    # survives restarts and is available when loading any agent.
-
-    FLOWCHART_FILENAME = "flowchart.json"
-
-    def _save_flowchart_file(
-        agent_path: Path | str | None,
-        original_draft: dict,
-        flowchart_map: dict[str, list[str]] | None,
-    ) -> None:
-        """Persist the flowchart to the agent's folder."""
-        if agent_path is None:
-            return
-        p = Path(agent_path)
-        if not p.is_dir():
-            return
-        try:
-            target = p / FLOWCHART_FILENAME
-            target.write_text(
-                json.dumps(
-                    {"original_draft": original_draft, "flowchart_map": flowchart_map},
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-            logger.debug("Flowchart saved to %s", target)
-        except Exception:
-            logger.warning("Failed to save flowchart to %s", p, exc_info=True)
-
-    def _load_flowchart_file(
-        agent_path: Path | str | None,
-    ) -> tuple[dict | None, dict[str, list[str]] | None]:
-        """Load flowchart from the agent's folder. Returns (original_draft, flowchart_map)."""
-        if agent_path is None:
-            return None, None
-        target = Path(agent_path) / FLOWCHART_FILENAME
-        if not target.is_file():
-            return None, None
-        try:
-            data = json.loads(target.read_text(encoding="utf-8"))
-            return data.get("original_draft"), data.get("flowchart_map")
-        except Exception:
-            logger.warning("Failed to load flowchart from %s", target, exc_info=True)
-            return None, None
-
-    def _synthesize_draft_from_runtime(
-        runtime_nodes: list,
-        runtime_edges: list,
-        agent_name: str = "",
-        goal_name: str = "",
-    ) -> tuple[dict, dict[str, list[str]]]:
-        """Generate a flowchart draft from a loaded runtime graph.
-
-        Used for agents that were never planned through the draft workflow
-        (e.g., hand-coded or loaded from "my agents"). Produces a valid
-        DraftGraph structure with auto-classified flowchart types.
-        """
-        nodes: list[dict] = []
-        edges: list[dict] = []
-        node_ids = {n.id for n in runtime_nodes}
-
-        # Build edge dicts first (needed for classification)
-        for i, re in enumerate(runtime_edges):
-            edges.append(
-                {
-                    "id": f"edge-{i}",
-                    "source": re.source,
-                    "target": re.target,
-                    "condition": str(re.condition.value)
-                    if hasattr(re.condition, "value")
-                    else str(re.condition),
-                    "description": getattr(re, "description", "") or "",
-                    "label": "",
-                }
-            )
-
-        # Terminal detection — exclude sub-agent nodes (they are leaf helpers, not endpoints)
-        sub_agent_ids: set[str] = set()
-        for rn in runtime_nodes:
-            for sa_id in getattr(rn, "sub_agents", None) or []:
-                sub_agent_ids.add(sa_id)
-        sources = {e["source"] for e in edges}
-        terminal_ids = node_ids - sources - sub_agent_ids
-        if not terminal_ids and runtime_nodes:
-            terminal_ids = {runtime_nodes[-1].id}
-
-        # Build node dicts with classification
-        total = len(runtime_nodes)
-        for i, rn in enumerate(runtime_nodes):
-            node: dict = {
-                "id": rn.id,
-                "name": rn.name,
-                "description": rn.description or "",
-                "node_type": getattr(rn, "node_type", "event_loop") or "event_loop",
-                "tools": list(rn.tools) if rn.tools else [],
-                "input_keys": list(rn.input_keys) if rn.input_keys else [],
-                "output_keys": list(rn.output_keys) if rn.output_keys else [],
-                "success_criteria": getattr(rn, "success_criteria", "") or "",
-                "sub_agents": list(rn.sub_agents) if getattr(rn, "sub_agents", None) else [],
-            }
-            fc_type = _classify_flowchart_node(node, i, total, edges, terminal_ids)
-            fc_meta = _FLOWCHART_TYPES[fc_type]
-            node["flowchart_type"] = fc_type
-            node["flowchart_shape"] = fc_meta["shape"]
-            node["flowchart_color"] = fc_meta["color"]
-            nodes.append(node)
-
-        # Add visual edges from parent nodes to their sub_agents.
-        # Sub-agents are connected via the sub_agents field, not via EdgeSpec,
-        # so they'd appear as disconnected islands without this.
-        # Two edges per sub-agent: delegate (parent→sub) and report (sub→parent).
-        edge_counter = len(edges)
-        for node in nodes:
-            for sa_id in node.get("sub_agents") or []:
-                if sa_id in node_ids:
-                    edges.append(
-                        {
-                            "id": f"edge-subagent-{edge_counter}",
-                            "source": node["id"],
-                            "target": sa_id,
-                            "condition": "always",
-                            "description": "sub-agent delegation",
-                            "label": "delegate",
-                        }
-                    )
-                    edge_counter += 1
-                    edges.append(
-                        {
-                            "id": f"edge-subagent-{edge_counter}",
-                            "source": sa_id,
-                            "target": node["id"],
-                            "condition": "always",
-                            "description": "sub-agent report back",
-                            "label": "report",
-                        }
-                    )
-                    edge_counter += 1
-
-        # Group sub-agent nodes under their parent in the flowchart map
-        # (mirrors what _dissolve_planning_nodes does for planned drafts)
-        sub_agent_ids: set[str] = set()
-        for node in nodes:
-            for sa_id in node.get("sub_agents") or []:
-                if sa_id in node_ids:
-                    sub_agent_ids.add(sa_id)
-
-        fmap: dict[str, list[str]] = {}
-        for node in nodes:
-            nid = node["id"]
-            if nid in sub_agent_ids:
-                continue  # skip — will be included via parent
-            absorbed = [nid]
-            for sa_id in node.get("sub_agents") or []:
-                if sa_id in node_ids:
-                    absorbed.append(sa_id)
-            fmap[nid] = absorbed
-
-        draft = {
-            "agent_name": agent_name,
-            "goal": goal_name,
-            "description": "",
-            "success_criteria": [],
-            "constraints": [],
-            "nodes": nodes,
-            "edges": edges,
-            "entry_node": nodes[0]["id"] if nodes else "",
-            "terminal_nodes": sorted(terminal_ids),
-            "flowchart_legend": {
-                fc_type: {"shape": meta["shape"], "color": meta["color"]}
-                for fc_type, meta in _FLOWCHART_TYPES.items()
-            },
-        }
-
-        return draft, fmap
+    # --- Flowchart utilities ---------------------------------------------------
+    # Flowchart persistence, classification, and synthesis functions are now in
+    # framework.tools.flowchart_utils. Local aliases for backward compatibility
+    # within this closure:
+    _save_flowchart_file = save_flowchart_file
+    _load_flowchart_file = load_flowchart_file
+    _synthesize_draft_from_runtime = synthesize_draft_from_runtime
+    _classify_flowchart_node = classify_flowchart_node
 
     # --- save_agent_draft (Planning phase — declarative graph preview) ---------
     # Creates a lightweight draft graph with nodes, edges, and business metadata.
     # Loose validation: only requires names and descriptions. Emits an event
     # so the frontend can render the graph during planning (before any code).
-
-    def _classify_flowchart_node(
-        node: dict,
-        index: int,
-        total: int,
-        edges: list[dict],
-        terminal_ids: set[str],
-    ) -> str:
-        """Auto-detect the ISO 5807 flowchart type for a draft node.
-
-        Priority: explicit override > structural detection > heuristic > default.
-        """
-        # Explicit override from the queen
-        explicit = node.get("flowchart_type", "").strip()
-        if explicit and explicit in _FLOWCHART_TYPES:
-            return explicit
-
-        node_id = node["id"]
-        node_type = node.get("node_type", "event_loop")
-        node_tools = set(node.get("tools") or [])
-        desc = (node.get("description") or "").lower()
-        name = (node.get("name") or "").lower()
-
-        # GCU / browser automation nodes → hexagon
-        if node_type == "gcu":
-            return "browser"
-
-        # Entry node (first node or no incoming edges) → start terminator
-        incoming = {e["target"] for e in edges}
-        if index == 0 or (node_id not in incoming and index == 0):
-            return "start"
-
-        # Terminal node → end terminator
-        if node_id in terminal_ids:
-            return "terminal"
-
-        # Decision node: has outgoing edges with branching conditions → diamond
-        outgoing = [e for e in edges if e["source"] == node_id]
-        if len(outgoing) >= 2:
-            conditions = {e.get("condition", "on_success") for e in outgoing}
-            if len(conditions) > 1 or conditions - {"on_success"}:
-                return "decision"
-
-        # Sub-agent / subprocess nodes → subroutine (double-bordered rect)
-        if node.get("sub_agents"):
-            return "subprocess"
-
-        # Database / data store nodes → cylinder
-        db_tool_hints = {
-            "query_database",
-            "sql_query",
-            "read_table",
-            "write_table",
-            "save_data",
-            "load_data",
-        }
-        db_desc_hints = {"database", "data store", "storage", "persist", "cache"}
-        if node_tools & db_tool_hints or any(h in desc for h in db_desc_hints):
-            return "database"
-
-        # Document generation nodes → document shape
-        doc_tool_hints = {
-            "generate_report",
-            "create_document",
-            "write_report",
-            "render_template",
-            "export_pdf",
-        }
-        doc_desc_hints = {"report", "document", "summary", "write up", "writeup"}
-        if node_tools & doc_tool_hints or any(h in desc for h in doc_desc_hints):
-            return "document"
-
-        # I/O nodes: external data ingestion or delivery → parallelogram
-        io_tool_hints = {
-            "serve_file_to_user",
-            "send_email",
-            "post_message",
-            "upload_file",
-            "download_file",
-            "fetch_url",
-            "post_to_slack",
-            "send_notification",
-        }
-        io_desc_hints = {"deliver", "send", "output", "notify", "publish"}
-        if node_tools & io_tool_hints or any(h in desc for h in io_desc_hints):
-            return "io"
-
-        # Manual / human-in-the-loop nodes → trapezoid
-        manual_desc_hints = {
-            "human review",
-            "manual",
-            "approval",
-            "human-in-the-loop",
-            "user review",
-            "manual check",
-        }
-        if any(h in desc for h in manual_desc_hints) or any(h in name for h in manual_desc_hints):
-            return "manual_operation"
-
-        # Preparation / setup nodes → hexagon
-        prep_desc_hints = {"setup", "initialize", "prepare", "configure", "provision"}
-        if any(h in desc for h in prep_desc_hints) or any(h in name for h in prep_desc_hints):
-            return "preparation"
-
-        # Delay / wait nodes → D-shape
-        delay_desc_hints = {"wait", "delay", "pause", "cooldown", "throttle", "sleep"}
-        if any(h in desc for h in delay_desc_hints):
-            return "delay"
-
-        # Merge nodes → inverted triangle
-        merge_desc_hints = {"merge", "combine", "aggregate", "consolidate"}
-        if any(h in desc for h in merge_desc_hints) or any(h in name for h in merge_desc_hints):
-            return "merge"
-
-        # Display nodes → display shape
-        display_desc_hints = {"display", "show", "present", "render", "visualize"}
-        display_tool_hints = {"serve_file_to_user", "display_results"}
-        if node_tools & display_tool_hints or any(h in name for h in display_desc_hints):
-            return "display"
-
-        # Default: process (rectangle)
-        return "process"
 
     def _dissolve_planning_nodes(
         draft: dict,
@@ -1545,7 +1224,7 @@ def register_queen_lifecycle_tools(
             if not predecessors:
                 # Decision at start: convert to regular process node
                 d_node["flowchart_type"] = "process"
-                fc_meta = _FLOWCHART_TYPES["process"]
+                fc_meta = FLOWCHART_TYPES["process"]
                 d_node["flowchart_shape"] = fc_meta["shape"]
                 d_node["flowchart_color"] = fc_meta["color"]
                 if not d_node.get("success_criteria"):
@@ -1900,11 +1579,21 @@ def register_queen_lifecycle_tools(
                 # Find edges where this leaf node is the source
                 out_edges = [e for e in validated_edges if e["source"] == leaf_id]
                 in_edges = [e for e in validated_edges if e["target"] == leaf_id]
-                if not out_edges:
-                    continue  # already a proper leaf
 
                 # Identify the parent (predecessor that connects IN)
                 parent_ids = [e["source"] for e in in_edges]
+
+                if not out_edges:
+                    # Already a proper leaf — still ensure sub_agents is set
+                    for pid in parent_ids:
+                        parent = node_by_id_v.get(pid)
+                        if parent is None:
+                            continue
+                        existing = parent.get("sub_agents") or []
+                        if leaf_id not in existing:
+                            existing.append(leaf_id)
+                        parent["sub_agents"] = existing
+                    continue
 
                 # Strip all outgoing edges from the leaf node that
                 # don't go back to a parent (report edges are OK)
@@ -2097,7 +1786,7 @@ def register_queen_lifecycle_tools(
                 validated_edges,
                 terminal_ids,
             )
-            fc_meta = _FLOWCHART_TYPES[fc_type]
+            fc_meta = FLOWCHART_TYPES[fc_type]
             node["flowchart_type"] = fc_type
             node["flowchart_shape"] = fc_meta["shape"]
             node["flowchart_color"] = fc_meta["color"]
@@ -2115,7 +1804,7 @@ def register_queen_lifecycle_tools(
             # Color legend for the frontend
             "flowchart_legend": {
                 fc_type: {"shape": meta["shape"], "color": meta["color"]}
-                for fc_type, meta in _FLOWCHART_TYPES.items()
+                for fc_type, meta in FLOWCHART_TYPES.items()
             },
         }
 
@@ -2286,39 +1975,18 @@ def register_queen_lifecycle_tools(
                                     "decision",
                                     "io",
                                     "document",
-                                    "multi_document",
-                                    "subprocess",
-                                    "preparation",
-                                    "manual_input",
-                                    "manual_operation",
-                                    "delay",
-                                    "display",
                                     "database",
-                                    "stored_data",
-                                    "internal_storage",
-                                    "connector",
-                                    "offpage_connector",
-                                    "merge",
-                                    "extract",
-                                    "sort",
-                                    "collate",
-                                    "summing_junction",
-                                    "or",
+                                    "subprocess",
                                     "browser",
-                                    "comment",
-                                    "alternate_process",
                                 ],
                                 "description": (
-                                    "ISO 5807 flowchart symbol type. Auto-detected if omitted. "
-                                    "Core: start (green stadium), terminal (red stadium), "
-                                    "process (blue rect), decision (amber diamond), "
-                                    "io (purple parallelogram), document (grey wavy rect), "
-                                    "subprocess (teal subroutine), preparation (brown hexagon), "
-                                    "manual_operation (pink trapezoid), delay (orange D-shape), "
-                                    "display (cyan), database (green cylinder), "
-                                    "merge (indigo triangle), browser (dark indigo hexagon — "
-                                    "for GCU/browser sub-agents; must be a leaf node connected "
-                                    "only to its managing parent)"
+                                    "Flowchart symbol type. Auto-detected if omitted. "
+                                    "start (sage green stadium), terminal (dusty red stadium), "
+                                    "process (blue-gray rect), decision (amber diamond), "
+                                    "io (purple parallelogram), document (steel blue wavy rect), "
+                                    "database (teal cylinder), subprocess (cyan subroutine), "
+                                    "browser (deep blue hexagon — for GCU/browser "
+                                    "sub-agents; must be a leaf node)"
                                 ),
                             },
                             "tools": {
@@ -2339,6 +2007,17 @@ def register_queen_lifecycle_tools(
                             "success_criteria": {
                                 "type": "string",
                                 "description": "What success looks like for this node",
+                            },
+                            "sub_agents": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "IDs of GCU/browser sub-agent nodes managed by this node. "
+                                    "At build time, sub-agent nodes are dissolved into this list. "
+                                    "Set this on the PARENT node — e.g. the orchestrator that "
+                                    "delegates to GCU leaves. Visual delegation edges are "
+                                    "synthesized automatically."
+                                ),
                             },
                             "decision_clause": {
                                 "type": "string",
@@ -2457,8 +2136,22 @@ def register_queen_lifecycle_tools(
         phase_state.draft_graph = converted
         phase_state.flowchart_map = fmap
 
-        # Note: flowchart file is persisted later, in initialize_and_build_agent
-        # (after the agent folder is scaffolded) or in load_built_agent.
+        # Create agent folder early so flowchart and agent_path are available
+        # throughout the entire BUILDING phase.
+        _agent_name = phase_state.draft_graph.get("agent_name", "").strip()
+        if _agent_name:
+            _agent_folder = Path("exports") / _agent_name
+            _agent_folder.mkdir(parents=True, exist_ok=True)
+            _save_flowchart_file(_agent_folder, original_copy, fmap)
+            phase_state.agent_path = str(_agent_folder)
+            _update_meta_json(
+                session_manager,
+                manager_session_id,
+                {
+                    "agent_path": str(_agent_folder),
+                    "agent_name": _agent_name.replace("_", " ").title(),
+                },
+            )
 
         dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
         decision_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "decision")
@@ -2590,6 +2283,7 @@ def register_queen_lifecycle_tools(
                     if fallback_path:
                         phase_state.agent_path = str(fallback_path)
                     await phase_state.switch_to_building(source="tool")
+                    _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
                     if phase_state.inject_notification:
                         await phase_state.inject_notification(
                             "[PHASE CHANGE] Switched to BUILDING phase. "
@@ -2632,8 +2326,13 @@ def register_queen_lifecycle_tools(
                 if parsed.get("success", True):
                     if phase_state is not None:
                         # Set agent_path so the frontend can query credentials
-                        phase_state.agent_path = str(Path("exports") / agent_name)
+                        phase_state.agent_path = phase_state.agent_path or str(
+                            Path("exports") / agent_name
+                        )
                         await phase_state.switch_to_building(source="tool")
+                        _update_meta_json(
+                            session_manager, manager_session_id, {"phase": "building"}
+                        )
                         # Reset draft state after successful scaffolding
                         phase_state.build_confirmed = False
                         # Persist flowchart now that the agent folder exists
@@ -2681,6 +2380,7 @@ def register_queen_lifecycle_tools(
         # Switch to staging phase
         if phase_state is not None:
             await phase_state.switch_to_staging()
+            _update_meta_json(session_manager, manager_session_id, {"phase": "staging"})
 
         result = json.loads(stop_result)
         result["phase"] = "staging"
@@ -2708,6 +2408,30 @@ def register_queen_lifecycle_tools(
     def _get_event_bus():
         """Get the session's event bus for querying history."""
         return getattr(session, "event_bus", None)
+
+    def _get_worker_name() -> str | None:
+        """Return the worker agent directory name, used for diary lookups."""
+        p = getattr(session, "worker_path", None)
+        return p.name if p else None
+
+    def _format_diary(max_runs: int) -> str:
+        """Read recent run digests from disk — no EventBus required."""
+        agent_name = _get_worker_name()
+        if not agent_name:
+            return "No worker loaded — diary unavailable."
+        from framework.agents.worker_memory import read_recent_digests
+
+        entries = read_recent_digests(agent_name, max_runs)
+        if not entries:
+            return (
+                f"No run digests for '{agent_name}' yet. "
+                "Digests are written at the end of each completed run."
+            )
+        lines = [f"Worker '{agent_name}' — {len(entries)} recent run digest(s):", ""]
+        for _run_id, content in entries:
+            lines.append(content)
+            lines.append("")
+        return "\n".join(lines).rstrip()
 
     # Tiered cooldowns: summary is free, detail has short cooldown, full keeps 30s
     _COOLDOWN_FULL = 30.0
@@ -3311,16 +3035,17 @@ def register_queen_lifecycle_tools(
         import time as _time
 
         # --- Tiered cooldown ---
+        # diary is free (file reads only), summary is free, detail has 10s, full has 30s
         now = _time.monotonic()
         if focus == "full":
             cooldown = _COOLDOWN_FULL
             tier = "full"
-        elif focus is not None:
+        elif focus == "diary" or focus is None:
+            cooldown = 0.0
+            tier = focus or "summary"
+        else:
             cooldown = _COOLDOWN_DETAIL
             tier = "detail"
-        else:
-            cooldown = 0.0
-            tier = "summary"
 
         elapsed_since = now - _status_last_called.get(tier, 0.0)
         if elapsed_since < cooldown:
@@ -3335,6 +3060,10 @@ def register_queen_lifecycle_tools(
                 }
             )
         _status_last_called[tier] = now
+
+        # --- Diary: pure file reads, no runtime required ---
+        if focus == "diary":
+            return _format_diary(last_n)
 
         # --- Runtime check ---
         runtime = _get_runtime()
@@ -3385,7 +3114,7 @@ def register_queen_lifecycle_tools(
             else:
                 return (
                     f"Unknown focus '{focus}'. "
-                    "Valid options: activity, memory, tools, issues, progress, full."
+                    "Valid options: diary, activity, memory, tools, issues, progress, full."
                 )
         except Exception as exc:
             logger.exception("get_worker_status error")
@@ -3396,6 +3125,8 @@ def register_queen_lifecycle_tools(
         description=(
             "Check on the worker. Returns a brief prose summary by default. "
             "Use 'focus' to drill into specifics:\n"
+            "- diary: persistent run digests from past executions — read this first "
+            "before digging into live runtime logs\n"
             "- activity: current node, transitions, latest LLM output\n"
             "- memory: worker's accumulated knowledge and state\n"
             "- tools: running and recent tool calls\n"
@@ -3408,8 +3139,11 @@ def register_queen_lifecycle_tools(
             "properties": {
                 "focus": {
                     "type": "string",
-                    "enum": ["activity", "memory", "tools", "issues", "progress", "full"],
-                    "description": ("Aspect to inspect. Omit for a brief summary."),
+                    "enum": ["diary", "activity", "memory", "tools", "issues", "progress", "full"],
+                    "description": (
+                        "Aspect to inspect. Omit for a brief summary. "
+                        "Use 'diary' to read persistent run history before checking live logs."
+                    ),
                 },
                 "last_n": {
                     "type": "integer",
@@ -3808,6 +3542,7 @@ def register_queen_lifecycle_tools(
                 if phase_state is not None:
                     phase_state.agent_path = str(resolved_path)
                     await phase_state.switch_to_staging()
+                    _update_meta_json(session_manager, manager_session_id, {"phase": "staging"})
 
                 worker_name = info.name if info else updated_session.worker_id
                 return json.dumps(
@@ -3927,6 +3662,7 @@ def register_queen_lifecycle_tools(
             # Switch to running phase
             if phase_state is not None:
                 await phase_state.switch_to_running()
+                _update_meta_json(session_manager, manager_session_id, {"phase": "running"})
 
             return json.dumps(
                 {
@@ -4064,6 +3800,8 @@ def register_queen_lifecycle_tools(
             _save_trigger_to_agent(session, trigger_id, tdef)
             bus = getattr(session, "event_bus", None)
             if bus:
+                _runner = getattr(session, "runner", None)
+                _graph_entry = _runner.graph.entry_node if _runner else None
                 await bus.publish(
                     AgentEvent(
                         type=EventType.TRIGGER_ACTIVATED,
@@ -4072,6 +3810,8 @@ def register_queen_lifecycle_tools(
                             "trigger_id": trigger_id,
                             "trigger_type": t_type,
                             "trigger_config": t_config,
+                            "name": tdef.description or trigger_id,
+                            **({"entry_node": _graph_entry} if _graph_entry else {}),
                         },
                     )
                 )
@@ -4124,6 +3864,8 @@ def register_queen_lifecycle_tools(
         # Emit event
         bus = getattr(session, "event_bus", None)
         if bus:
+            _runner = getattr(session, "runner", None)
+            _graph_entry = _runner.graph.entry_node if _runner else None
             await bus.publish(
                 AgentEvent(
                     type=EventType.TRIGGER_ACTIVATED,
@@ -4132,6 +3874,8 @@ def register_queen_lifecycle_tools(
                         "trigger_id": trigger_id,
                         "trigger_type": t_type,
                         "trigger_config": t_config,
+                        "name": tdef.description or trigger_id,
+                        **({"entry_node": _graph_entry} if _graph_entry else {}),
                     },
                 )
             )
@@ -4230,7 +3974,10 @@ def register_queen_lifecycle_tools(
                 AgentEvent(
                     type=EventType.TRIGGER_DEACTIVATED,
                     stream_id="queen",
-                    data={"trigger_id": trigger_id},
+                    data={
+                        "trigger_id": trigger_id,
+                        "name": tdef.description or trigger_id if tdef else trigger_id,
+                    },
                 )
             )
 

@@ -324,6 +324,7 @@ export type EventTypeName =
   | "node_retry"
   | "edge_traversed"
   | "context_compacted"
+  | "context_usage_updated"
   | "webhook_received"
   | "custom"
   | "escalation_requested"
@@ -337,7 +338,8 @@ export type EventTypeName =
   | "trigger_activated"
   | "trigger_deactivated"
   | "trigger_fired"
-  | "trigger_removed";
+  | "trigger_removed"
+  | "trigger_updated";
 
 export interface AgentEvent {
   type: EventTypeName;
