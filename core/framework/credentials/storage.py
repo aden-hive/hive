@@ -155,8 +155,10 @@ class EncryptedFileStorage(CredentialStorage):
                 # Generate new key
                 self._key = Fernet.generate_key()
                 logger.warning(
-                    f"Generated new encryption key. To persist credentials across restarts, "
-                    f"set {key_env_var}={self._key.decode()}"
+                    "Generated ephemeral encryption key — credentials will NOT survive restart. "
+                    "To persist, run: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\" "
+                    "and set the result as %s in your environment.",
+                    key_env_var,
                 )
 
         self._fernet = Fernet(self._key)

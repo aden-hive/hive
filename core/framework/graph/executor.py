@@ -547,6 +547,15 @@ class GraphExecutor:
             for key, value in input_data.items():
                 memory.write(key, value)
 
+        # Inject improvement context from prior evaluations into the goal's
+        # context dict so it flows through to_prompt_context() automatically.
+        _improvement_ctx = (
+            session_state.get("_improvement_context") if session_state else None
+        )
+        if _improvement_ctx:
+            goal.context["_improvement_guidance"] = _improvement_ctx
+            self.logger.info("📈 Injected improvement guidance from prior evaluations")
+
         # Detect event-triggered execution (timer/webhook) — no interactive user.
         _event_triggered = bool(input_data and isinstance(input_data.get("event"), dict))
 
@@ -1047,6 +1056,10 @@ class GraphExecutor:
                             )
 
                 if result.success:
+                    # Reset retry count on success so feedback-loop revisits
+                    # start with a fresh retry budget (fixes #6605).
+                    node_retry_counts.pop(current_node_id, None)
+
                     self.logger.info(
                         f"   ✓ Success (tokens: {result.tokens_used}, "
                         f"latency: {result.latency_ms}ms)"

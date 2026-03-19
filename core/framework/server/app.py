@@ -1,7 +1,10 @@
 """aiohttp Application factory for the Hive HTTP API server."""
 
+import hashlib
+import hmac
 import logging
 import os
+import secrets
 from pathlib import Path
 
 from aiohttp import web
@@ -131,6 +134,49 @@ def _is_cors_allowed(origin: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# API-key authentication
+# ---------------------------------------------------------------------------
+# When HIVE_API_KEY is set, every request (except health and CORS preflight)
+# must carry a matching Bearer token or X-API-Key header.
+# When unset, authentication is disabled for backwards compatibility with
+# local-only development setups.
+
+_API_KEY: str | None = os.environ.get("HIVE_API_KEY")
+
+# Public endpoints that never require auth
+_PUBLIC_PATHS = frozenset({"/api/health", "/"})
+
+
+@web.middleware
+async def auth_middleware(request: web.Request, handler):
+    """Reject unauthenticated requests when HIVE_API_KEY is configured."""
+    api_key = _API_KEY or os.environ.get("HIVE_API_KEY")  # re-read at runtime
+    if not api_key:
+        return await handler(request)
+
+    # Skip auth for OPTIONS preflight and public endpoints
+    if request.method == "OPTIONS" or request.path in _PUBLIC_PATHS:
+        return await handler(request)
+
+    # Accept either Authorization: Bearer <key> or X-API-Key: <key>
+    provided = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        provided = auth_header[7:].strip()
+    if not provided:
+        provided = request.headers.get("X-API-Key", "").strip() or None
+
+    if not provided or not hmac.compare_digest(provided, api_key):
+        return web.json_response(
+            {"error": "Unauthorized — set HIVE_API_KEY and pass it via "
+                      "Authorization: Bearer <key> or X-API-Key header."},
+            status=401,
+        )
+
+    return await handler(request)
+
+
 @web.middleware
 async def cors_middleware(request: web.Request, handler):
     """CORS middleware scoped to localhost origins."""
@@ -197,7 +243,7 @@ def create_app(model: str | None = None) -> web.Application:
     Returns:
         Configured aiohttp Application ready to run.
     """
-    app = web.Application(middlewares=[cors_middleware, error_middleware])
+    app = web.Application(middlewares=[cors_middleware, auth_middleware, error_middleware])
 
     # Initialize credential store (before SessionManager so it can be shared)
     from framework.credentials.store import CredentialStore
@@ -236,6 +282,7 @@ def create_app(model: str | None = None) -> web.Application:
 
     # Register route modules
     from framework.server.routes_credentials import register_routes as register_credential_routes
+    from framework.server.routes_evaluation import register_routes as register_evaluation_routes
     from framework.server.routes_events import register_routes as register_event_routes
     from framework.server.routes_execution import register_routes as register_execution_routes
     from framework.server.routes_graphs import register_routes as register_graph_routes
@@ -244,6 +291,7 @@ def create_app(model: str | None = None) -> web.Application:
 
     register_credential_routes(app)
     register_execution_routes(app)
+    register_evaluation_routes(app)
     register_event_routes(app)
     register_session_routes(app)
     register_graph_routes(app)

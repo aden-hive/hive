@@ -12,6 +12,7 @@ Architecture:
 import asyncio
 import json
 import logging
+import secrets
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -100,8 +101,9 @@ class SessionManager:
         from framework.llm.litellm import LiteLLMProvider
         from framework.runtime.event_bus import EventBus
 
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        resolved_id = session_id or f"session_{ts}_{uuid.uuid4().hex[:8]}"
+        # Use cryptographically secure random token (128-bit entropy) instead
+        # of predictable timestamp + short uuid to prevent session enumeration.
+        resolved_id = session_id or f"session_{secrets.token_hex(16)}"
 
         async with self._lock:
             if resolved_id in self._sessions:

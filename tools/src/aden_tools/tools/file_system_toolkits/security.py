@@ -36,4 +36,20 @@ def get_secure_path(path: str, workspace_id: str, agent_id: str, session_id: str
     if common_prefix != session_dir:
         raise ValueError(f"Access denied: Path '{path}' is outside the session sandbox.")
 
+    # Resolve symlinks and re-check — a symlink inside the sandbox could
+    # point to an arbitrary location outside of it.
+    if os.path.exists(final_path):
+        real_path = os.path.realpath(final_path)
+        real_session = os.path.realpath(session_dir)
+        try:
+            real_common = os.path.commonpath([real_path, real_session])
+        except ValueError as err:
+            raise ValueError(
+                f"Access denied: Path '{path}' resolves outside the session sandbox via symlink."
+            ) from err
+        if real_common != real_session:
+            raise ValueError(
+                f"Access denied: Path '{path}' resolves outside the session sandbox via symlink."
+            )
+
     return final_path

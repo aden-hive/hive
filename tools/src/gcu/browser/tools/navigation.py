@@ -2,6 +2,8 @@
 Browser navigation tools - navigate, go_back, go_forward, reload.
 """
 
+from urllib.parse import urlparse
+
 from fastmcp import FastMCP
 from playwright.async_api import (
     Error as PlaywrightError,
@@ -9,6 +11,25 @@ from playwright.async_api import (
 )
 
 from ..session import DEFAULT_NAVIGATION_TIMEOUT_MS, get_session
+
+# Schemes safe for browser navigation — block javascript:, data:, file:, etc.
+_ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+
+def _validate_navigation_url(url: str) -> str | None:
+    """Return an error message if *url* is unsafe for browser navigation, else None."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return f"Malformed URL: {url!r}"
+
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in _ALLOWED_SCHEMES:
+        return (
+            f"URL scheme '{scheme}' is not allowed. "
+            f"Only {', '.join(sorted(_ALLOWED_SCHEMES))} URLs are permitted."
+        )
+    return None
 
 
 def register_navigation_tools(mcp: FastMCP) -> None:
@@ -29,7 +50,7 @@ def register_navigation_tools(mcp: FastMCP) -> None:
         You do NOT need to call ``browser_wait`` afterward.
 
         Args:
-            url: URL to navigate to
+            url: URL to navigate to (http/https only)
             target_id: Tab ID to navigate (default: active tab)
             profile: Browser profile name (default: "default")
             wait_until: Wait condition (domcontentloaded, load, networkidle)
@@ -37,6 +58,11 @@ def register_navigation_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with navigation result (url, title)
         """
+        # Validate URL scheme to prevent javascript:, data:, file: attacks
+        url_error = _validate_navigation_url(url)
+        if url_error:
+            return {"ok": False, "error": url_error}
+
         try:
             session = get_session(profile)
             page = session.get_page(target_id)
