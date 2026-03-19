@@ -50,7 +50,7 @@ async def test_worker_handoff_injects_formatted_request_into_queen() -> None:
 
 
 @pytest.mark.asyncio
-async def test_worker_handoff_ignores_queen_and_judge_streams() -> None:
+async def test_worker_handoff_ignores_queen_stream() -> None:
     bus = EventBus()
     manager = SessionManager()
     session = _make_session(bus)
@@ -61,11 +61,6 @@ async def test_worker_handoff_ignores_queen_and_judge_streams() -> None:
     await bus.emit_escalation_requested(
         stream_id="queen",
         node_id="queen",
-        reason="should be ignored",
-    )
-    await bus.emit_escalation_requested(
-        stream_id="judge",
-        node_id="judge",
         reason="should be ignored",
     )
 

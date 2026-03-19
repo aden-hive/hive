@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Open a browser-based viewer for Hive LLM debug JSONL sessions.
 
+Starts a local HTTP server and loads session data on demand (one at a time).
+
 Usage:
     uv run --no-project scripts/llm_debug_log_visualizer.py
-    uv run --no-project scripts/llm_debug_log_visualizer.py --no-open
     uv run --no-project scripts/llm_debug_log_visualizer.py --session <execution_id>
+    uv run --no-project scripts/llm_debug_log_visualizer.py --port 8080
+    uv run --no-project scripts/llm_debug_log_visualizer.py --output debug.html
 """
 
 from __future__ import annotations
 
 import argparse
+import http.server
 import json
-import tempfile
+import urllib.parse
 import webbrowser
 from collections import defaultdict
 from dataclasses import dataclass
@@ -56,9 +60,20 @@ def _parse_args() -> argparse.Namespace:
         help="Maximum number of newest log files to scan.",
     )
     parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="Port for the local server (0 = auto-pick a free port).",
+    )
+    parser.add_argument(
         "--no-open",
         action="store_true",
-        help="Generate the HTML but do not open a browser.",
+        help="Start the server but do not open a browser.",
+    )
+    parser.add_argument(
+        "--include-tests",
+        action="store_true",
+        help="Show test/mock sessions (hidden by default).",
     )
     return parser.parse_args()
 
@@ -117,14 +132,42 @@ def _format_timestamp(raw: str) -> str:
         return raw
 
 
+def _is_test_session(execution_id: str, records: list[dict[str, Any]]) -> bool:
+    """Return True for sessions that look like test artifacts."""
+    if execution_id.startswith("<MagicMock"):
+        return True
+    models = {
+        str(r.get("token_counts", {}).get("model", ""))
+        for r in records
+        if isinstance(r.get("token_counts"), dict)
+    }
+    models.discard("")
+    # Sessions that only used the mock LLM provider.
+    if models and models <= {"mock"}:
+        return True
+    # Sessions with no real model at all (empty string or missing).
+    if not models:
+        return True
+    return False
+
+
 def _group_sessions(
     records: list[dict[str, Any]],
+    *,
+    include_tests: bool = False,
 ) -> tuple[list[SessionSummary], dict[str, list[dict[str, Any]]]]:
     by_session: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in records:
         execution_id = str(record.get("execution_id") or "").strip()
         if execution_id:
             by_session[execution_id].append(record)
+
+    if not include_tests:
+        by_session = {
+            eid: recs
+            for eid, recs in by_session.items()
+            if not _is_test_session(eid, recs)
+        }
 
     summaries: list[SessionSummary] = []
     for execution_id, session_records in by_session.items():
@@ -174,7 +217,6 @@ def _group_sessions(
 
 def _render_html(
     summaries: list[SessionSummary],
-    sessions: dict[str, list[dict[str, Any]]],
     initial_session_id: str,
 ) -> str:
     summaries_data = [
@@ -193,16 +235,6 @@ def _render_html(
         for summary in summaries
     ]
 
-    sessions_data = {
-        execution_id: sorted(
-            records,
-            key=lambda record: (
-                str(record.get("timestamp", "")),
-                record.get("iteration", 0),
-            ),
-        )
-        for execution_id, records in sessions.items()
-    }
     initial = initial_session_id or (summaries[0].execution_id if summaries else "")
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -579,10 +611,9 @@ def _render_html(
   </div>
 
   <script id="session-summaries" type="application/json">{json.dumps(summaries_data, ensure_ascii=False)}</script>
-  <script id="session-records" type="application/json">{json.dumps(sessions_data, ensure_ascii=False)}</script>
   <script>
     const summaries = JSON.parse(document.getElementById("session-summaries").textContent);
-    const recordsBySession = JSON.parse(document.getElementById("session-records").textContent);
+    const recordCache = {{}};
     const initialSessionId = {json.dumps(initial, ensure_ascii=False)};
 
     const sessionSearch = document.getElementById("sessionSearch");
@@ -746,10 +777,18 @@ def _render_html(
       `;
     }}
 
-    function renderSession(sessionId) {{
+    async function fetchSession(sessionId) {{
+      if (recordCache[sessionId]) return recordCache[sessionId];
+      const resp = await fetch(`/api/session/${{encodeURIComponent(sessionId)}}`);
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      recordCache[sessionId] = data;
+      return data;
+    }}
+
+    async function renderSession(sessionId) {{
       activeSessionId = sessionId;
       const summary = summaries.find((entry) => entry.execution_id === sessionId);
-      const records = recordsBySession[sessionId] || [];
 
       renderSessionChooser();
 
@@ -773,6 +812,9 @@ def _render_html(
         renderMetaCard("Source file", summary.log_file),
       ].join("");
 
+      turnsEl.innerHTML = '<div class="empty">Loading session\u2026</div>';
+      const records = await fetchSession(sessionId);
+      if (activeSessionId !== sessionId) return;
       turnsEl.innerHTML = records.length
         ? records.map((record) => renderTurn(record)).join("")
         : '<div class="empty">This session has no turn records.</div>';
@@ -804,7 +846,8 @@ def _render_html(
     }});
 
     const hashSession = decodeURIComponent(window.location.hash.replace(/^#/, ""));
-    const bootSession = recordsBySession[hashSession] ? hashSession : activeSessionId;
+    const knownIds = new Set(summaries.map((s) => s.execution_id));
+    const bootSession = knownIds.has(hashSession) ? hashSession : activeSessionId;
     renderSessionChooser();
     renderSession(bootSession);
   </script>
@@ -813,28 +856,70 @@ def _render_html(
 """
 
 
-def _write_report(html_report: str, output: Path | None) -> Path:
-    if output is not None:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(html_report, encoding="utf-8")
-        return output
+def _sort_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        records,
+        key=lambda r: (str(r.get("timestamp", "")), r.get("iteration", 0)),
+    )
 
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        prefix="hive_llm_debug_",
-        suffix=".html",
-        delete=False,
-        dir="/tmp",
-    ) as handle:
-        handle.write(html_report)
-        return Path(handle.name)
+
+def _run_server(
+    html: str,
+    sessions: dict[str, list[dict[str, Any]]],
+    port: int,
+    no_open: bool,
+) -> None:
+    html_bytes = html.encode("utf-8")
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path == "/":
+                self._respond(200, "text/html; charset=utf-8", html_bytes)
+            elif self.path.startswith("/api/session/"):
+                sid = urllib.parse.unquote(self.path[len("/api/session/"):])
+                records = sessions.get(sid)
+                if records is None:
+                    self._respond(404, "application/json", b"[]")
+                else:
+                    body = json.dumps(
+                        _sort_records(records), ensure_ascii=False
+                    ).encode("utf-8")
+                    self._respond(200, "application/json", body)
+            else:
+                self.send_error(404)
+
+        def _respond(self, code: int, content_type: str, body: bytes) -> None:
+            self.send_response(code)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass  # silence per-request logs
+
+    server = http.server.HTTPServer(("127.0.0.1", port), Handler)
+    actual_port = server.server_address[1]
+    url = f"http://127.0.0.1:{actual_port}"
+    print(f"Serving at {url}  (Ctrl+C to stop)")
+
+    if not no_open:
+        webbrowser.open(url)
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nStopped.")
+    finally:
+        server.server_close()
 
 
 def main() -> int:
     args = _parse_args()
     records = _discover_records(args.logs_dir.expanduser(), args.limit_files)
-    summaries, sessions = _group_sessions(records)
+    summaries, sessions = _group_sessions(
+        records, include_tests=args.include_tests
+    )
 
     initial_session_id = args.session or (
         summaries[0].execution_id if summaries else ""
@@ -843,13 +928,15 @@ def main() -> int:
         print(f"session not found: {initial_session_id}")
         return 1
 
-    html_report = _render_html(summaries, sessions, initial_session_id)
-    output_path = _write_report(html_report, args.output)
-    print(output_path)
+    html_report = _render_html(summaries, initial_session_id)
 
-    if not args.no_open:
-        webbrowser.open(output_path.resolve().as_uri())
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(html_report, encoding="utf-8")
+        print(args.output)
+        return 0
 
+    _run_server(html_report, sessions, args.port, args.no_open)
     return 0
 
 
