@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff, X, Crown, Cpu } from "lucide-react";
+import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff, X } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import DraftGraph from "@/components/DraftGraph";
 import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
@@ -3195,58 +3195,6 @@ export default function Workspace() {
               )
             )}
 
-            {/* Context window usage bars — floating overlay at bottom of chat */}
-            {(() => {
-              const cu = activeAgentState?.contextUsage;
-              if (!cu) return null;
-              const queenUsage = cu["__queen__"];
-              const workerEntries = Object.entries(cu).filter(([k]) => k !== "__queen__");
-              const workerUsage = workerEntries.length > 0
-                ? workerEntries.reduce((best, [, v]) => (v.usagePct > best.usagePct ? v : best), workerEntries[0][1])
-                : undefined;
-              if (!queenUsage && !workerUsage) return null;
-              return (
-                <div className="absolute bottom-16 left-3 right-3 z-20 flex items-center gap-3 px-3 py-1.5 rounded-lg bg-background/80 backdrop-blur-sm border border-border/30 shadow-sm group/ctx pointer-events-auto">
-                  {queenUsage && (
-                    <div className="flex items-center gap-2 flex-1 min-w-0 relative" title={`Queen: ${(queenUsage.estimatedTokens / 1000).toFixed(1)}k / ${(queenUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${queenUsage.messageCount} messages`}>
-                      <Crown className="w-3 h-3 flex-shrink-0" style={{ color: "hsl(45,95%,58%)" }} />
-                      <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden min-w-[60px]">
-                        <div
-                          className="h-full rounded-full transition-all duration-500 ease-out"
-                          style={{
-                            width: `${Math.min(queenUsage.usagePct, 100)}%`,
-                            backgroundColor: queenUsage.usagePct >= 90 ? "hsl(0,65%,55%)" : queenUsage.usagePct >= 70 ? "hsl(35,90%,55%)" : "hsl(45,95%,58%)",
-                          }}
-                        />
-                      </div>
-                      <span className="text-[10px] text-muted-foreground/70 flex-shrink-0 tabular-nums">
-                        <span className="group-hover/ctx:hidden">{queenUsage.usagePct}%</span>
-                        <span className="hidden group-hover/ctx:inline">{(queenUsage.estimatedTokens / 1000).toFixed(1)}k / {(queenUsage.maxTokens / 1000).toFixed(0)}k</span>
-                      </span>
-                    </div>
-                  )}
-                  {workerUsage && (
-                    <div className="flex items-center gap-2 flex-1 min-w-0 relative" title={`Worker: ${(workerUsage.estimatedTokens / 1000).toFixed(1)}k / ${(workerUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${workerUsage.messageCount} messages`}>
-                      <Cpu className="w-3 h-3 flex-shrink-0" style={{ color: "hsl(220,60%,55%)" }} />
-                      <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden min-w-[60px]">
-                        <div
-                          className="h-full rounded-full transition-all duration-500 ease-out"
-                          style={{
-                            width: `${Math.min(workerUsage.usagePct, 100)}%`,
-                            backgroundColor: workerUsage.usagePct >= 90 ? "hsl(0,65%,55%)" : workerUsage.usagePct >= 70 ? "hsl(35,90%,55%)" : "hsl(220,60%,55%)",
-                          }}
-                        />
-                      </div>
-                      <span className="text-[10px] text-muted-foreground/70 flex-shrink-0 tabular-nums">
-                        <span className="group-hover/ctx:hidden">{workerUsage.usagePct}%</span>
-                        <span className="hidden group-hover/ctx:inline">{(workerUsage.estimatedTokens / 1000).toFixed(1)}k / {(workerUsage.maxTokens / 1000).toFixed(0)}k</span>
-                      </span>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-
             {activeSession && (
               <ChatPanel
                 messages={activeSession.messages}
@@ -3271,6 +3219,7 @@ export default function Workspace() {
                 }
                 onMultiQuestionSubmit={handleMultiQuestionAnswer}
                 onQuestionDismiss={handleQuestionDismiss}
+                contextUsage={activeAgentState?.contextUsage}
               />
             )}
           </div>

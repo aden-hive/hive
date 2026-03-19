@@ -808,6 +808,12 @@ class EventLoopNode(NodeProtocol):
                 execution_id,
                 extra_data=_iter_meta,
             )
+            # Sync max_context_tokens from live config so mid-session model
+            # switches are reflected in compaction decisions and the UI bar.
+            from framework.config import get_max_context_tokens as _live_mct
+
+            conversation._max_context_tokens = _live_mct()
+
             await self._publish_context_usage(ctx, conversation, "iteration_start")
 
             # 6d. Pre-turn compaction check (tiered)
