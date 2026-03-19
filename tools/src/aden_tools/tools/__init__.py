@@ -117,6 +117,7 @@ from .shopify_tool import register_tools as register_shopify
 from .slack_tool import register_tools as register_slack
 from .snowflake_tool import register_tools as register_snowflake
 from .ssl_tls_scanner import register_tools as register_ssl_tls_scanner
+from .stack_overflow_tool import register_tools as register_stack_overflow
 from .stripe_tool import register_tools as register_stripe
 from .subdomain_enumerator import register_tools as register_subdomain_enumerator
 from .supabase_tool import register_tools as register_supabase
@@ -154,6 +155,7 @@ def _register_verified(
     register_runtime_logs(mcp)
     register_wikipedia(mcp)
     register_arxiv(mcp)
+    register_stack_overflow(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection

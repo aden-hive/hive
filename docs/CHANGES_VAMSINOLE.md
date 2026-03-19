@@ -88,6 +88,34 @@ hive doctor --json       # JSON output for scripting
 
 ---
 
+## 5. feat: Stack Overflow integration (agent capability)
+
+**Files:** `tools/src/aden_tools/tools/stack_overflow_tool/`
+
+**Problem:** Agents had no way to look up coding solutions, error fixes, or technical Q&A from Stack Overflow.
+
+**Change:**
+- New integration with Stack Exchange API (no API key required, 10k req/day)
+- Two tools:
+  - `stack_overflow_search` — search questions by query, returns titles, excerpts, links, scores, answer counts
+  - `stack_overflow_get_answers` — fetch top answers for a question by ID (accepted first, then by votes)
+- Supports stackoverflow, serverfault, superuser, askubuntu
+- Registered in verified tools (available to all agents by default)
+
+**Use cases:**
+- Coding agents: look up solutions for errors, best practices, library usage
+- Support agents: find answers to technical questions
+- Research agents: gather community knowledge on a topic
+
+**Example:**
+```python
+# In agent config: tools = ["stack_overflow_search", "stack_overflow_get_answers", ...]
+# Agent can call: stack_overflow_search(query="python asyncio timeout")
+# Then: stack_overflow_get_answers(question_id=12345)
+```
+
+---
+
 ## Summary table
 
 | Type | Description | Files |
@@ -96,3 +124,4 @@ hive doctor --json       # JSON output for scripting
 | docs | OpenRouter & Hive LLM setup | `docs/llm_providers.md`, `docs/configuration.md`, `docs/developer-guide.md`, `docs/environment-setup.md`, `README.md` |
 | feat | `hive --version` / `hive -V` | `core/framework/cli.py` |
 | feat | `hive doctor` environment diagnostics | `core/framework/runner/cli.py` |
+| feat | Stack Overflow integration | `tools/src/aden_tools/tools/stack_overflow_tool/` |
