@@ -808,6 +808,7 @@ class EventLoopNode(NodeProtocol):
                 execution_id,
                 extra_data=_iter_meta,
             )
+            await self._publish_context_usage(ctx, conversation, "iteration_start")
 
             # 6d. Pre-turn compaction check (tiered)
             _compacted_this_iter = False
@@ -2837,6 +2838,8 @@ class EventLoopNode(NodeProtocol):
                         conversation.usage_ratio() * 100,
                     )
 
+            await self._publish_context_usage(ctx, conversation, "post_tool_results")
+
             # If the turn requested external input (ask_user or queen handoff),
             # return immediately so the outer loop can block before judge eval.
             if user_input_requested or queen_input_requested:
@@ -4007,15 +4010,13 @@ class EventLoopNode(NodeProtocol):
            does not fully resolve the budget.
         4. Emergency deterministic summary only if LLM failed or unavailable.
         """
-        import os as _os
-
         ratio_before = conversation.usage_ratio()
         phase_grad = getattr(ctx, "continuous_mode", False)
 
-        # Capture pre-compaction message inventory when over budget and debug
-        # is enabled, since compaction mutates the conversation in place.
+        # Capture pre-compaction message inventory when over budget,
+        # since compaction mutates the conversation in place.
         pre_inventory: list[dict[str, Any]] | None = None
-        if ratio_before >= 1.0 and _os.environ.get("HIVE_COMPACTION_DEBUG"):
+        if ratio_before >= 1.0:
             pre_inventory = self._build_message_inventory(conversation)
 
         # --- Step 1: Prune old tool results (free, no LLM) ---
@@ -4340,18 +4341,24 @@ class EventLoopNode(NodeProtocol):
         if self._event_bus:
             from framework.runtime.event_bus import AgentEvent, EventType
 
+            event_data: dict[str, Any] = {
+                "level": level,
+                "usage_before": before_pct,
+                "usage_after": after_pct,
+            }
+            if pre_inventory is not None:
+                event_data["message_inventory"] = pre_inventory
             await self._event_bus.publish(
                 AgentEvent(
                     type=EventType.CONTEXT_COMPACTED,
                     stream_id=ctx.stream_id or ctx.node_id,
                     node_id=ctx.node_id,
-                    data={
-                        "level": level,
-                        "usage_before": before_pct,
-                        "usage_after": after_pct,
-                    },
+                    data=event_data,
                 )
             )
+
+        # Emit post-compaction usage update
+        await self._publish_context_usage(ctx, conversation, "post_compaction")
 
         # Write detailed debug log to ~/.hive/compaction_log/ when enabled
         if _os.environ.get("HIVE_COMPACTION_DEBUG"):
@@ -4841,6 +4848,36 @@ class EventLoopNode(NodeProtocol):
                 conversation.update_system_prompt(result.system_prompt)
             if result.inject:
                 await conversation.add_user_message(result.inject)
+
+    async def _publish_context_usage(
+        self,
+        ctx: NodeContext,
+        conversation: NodeConversation,
+        trigger: str,
+    ) -> None:
+        """Emit a CONTEXT_USAGE_UPDATED event with current context window state."""
+        if not self._event_bus:
+            return
+        from framework.runtime.event_bus import AgentEvent, EventType
+
+        estimated = conversation.estimate_tokens()
+        max_tokens = conversation._max_context_tokens
+        ratio = estimated / max_tokens if max_tokens > 0 else 0.0
+        await self._event_bus.publish(
+            AgentEvent(
+                type=EventType.CONTEXT_USAGE_UPDATED,
+                stream_id=ctx.stream_id or ctx.node_id,
+                node_id=ctx.node_id,
+                data={
+                    "usage_ratio": round(ratio, 4),
+                    "usage_pct": round(ratio * 100),
+                    "message_count": conversation.message_count,
+                    "estimated_tokens": estimated,
+                    "max_context_tokens": max_tokens,
+                    "trigger": trigger,
+                },
+            )
+        )
 
     async def _publish_iteration(
         self,
