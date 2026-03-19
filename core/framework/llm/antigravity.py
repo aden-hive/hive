@@ -65,12 +65,7 @@ _IDE_STATE_DB_MAC = (
     / "state.vscdb"
 )
 _IDE_STATE_DB_LINUX = (
-    Path.home()
-    / ".config"
-    / "Antigravity"
-    / "User"
-    / "globalStorage"
-    / "state.vscdb"
+    Path.home() / ".config" / "Antigravity" / "User" / "globalStorage" / "state.vscdb"
 )
 _IDE_STATE_DB_KEY = "antigravityUnifiedStateSync.oauthToken"
 
@@ -110,9 +105,7 @@ def _load_from_json_file() -> tuple[str | None, str | None, str, float]:
     if not accounts:
         return None, None, _DEFAULT_PROJECT_ID, 0.0
 
-    account = next(
-        (a for a in accounts if a.get("enabled", True) is not False), accounts[0]
-    )
+    account = next((a for a in accounts if a.get("enabled", True) is not False), accounts[0])
     schema_version = data.get("schemaVersion", 1)
 
     if schema_version >= 4:
@@ -143,9 +136,7 @@ def _load_from_json_file() -> tuple[str | None, str | None, str, float]:
             try:
                 from datetime import datetime  # noqa: PLC0415
 
-                ts = datetime.fromisoformat(
-                    last_refresh_str.replace("Z", "+00:00")
-                ).timestamp()
+                ts = datetime.fromisoformat(last_refresh_str.replace("Z", "+00:00")).timestamp()
                 expires_at = ts + 3600.0
                 if time.time() >= expires_at - _TOKEN_REFRESH_BUFFER_SECS:
                     access_token = None
@@ -253,7 +244,7 @@ def _do_token_refresh(refresh_token: str) -> tuple[str, float] | None:
         expires_in: int = payload.get("expires_in", 3600)
         logger.debug("Antigravity token refreshed successfully")
         return access_token, time.time() + expires_in
-    except (Exception) as exc:
+    except Exception as exc:
         logger.debug("Antigravity token refresh failed: %s", exc)
         return None
 
@@ -307,13 +298,15 @@ def _to_gemini_contents(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             tc_id = msg.get("tool_call_id", "")
             # Look up function name from the pre-built map; fall back to msg.name.
             fn_name = tc_id_to_name.get(tc_id) or msg.get("name", "")
-            pending_tool_parts.append({
-                "functionResponse": {
-                    "name": fn_name,
-                    "id": tc_id,
-                    "response": {"content": result_str},
+            pending_tool_parts.append(
+                {
+                    "functionResponse": {
+                        "name": fn_name,
+                        "id": tc_id,
+                        "response": {"content": result_str},
+                    }
                 }
-            })
+            )
             continue
 
         _flush_tool_results()
@@ -340,13 +333,15 @@ def _to_gemini_contents(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 args = json.loads(fn.get("arguments", "{}") or "{}")
             except (json.JSONDecodeError, TypeError):
                 args = {}
-            parts.append({
-                "functionCall": {
-                    "name": fn.get("name", ""),
-                    "args": args,
-                    "id": tc.get("id", str(uuid.uuid4())),
+            parts.append(
+                {
+                    "functionCall": {
+                        "name": fn.get("name", ""),
+                        "args": args,
+                        "id": tc.get("id", str(uuid.uuid4())),
+                    }
                 }
-            })
+            )
 
         if parts:
             contents.append({"role": gemini_role, "parts": parts})
@@ -389,9 +384,7 @@ def _parse_complete_response(raw: dict[str, Any], model: str) -> LLMResponse:
         model=payload.get("modelVersion", model),
         input_tokens=usage.get("promptTokenCount", 0),
         output_tokens=usage.get("candidatesTokenCount", 0),
-        stop_reason=_map_finish_reason(
-            candidates[0].get("finishReason", "") if candidates else ""
-        ),
+        stop_reason=_map_finish_reason(candidates[0].get("finishReason", "") if candidates else ""),
         raw_response=raw,
     )
 
@@ -558,7 +551,8 @@ class AntigravityProvider(LLMProvider):
                         {
                             "name": _clean_tool_name(t.name),
                             "description": t.description,
-                            "parameters": t.parameters or {
+                            "parameters": t.parameters
+                            or {
                                 "type": "object",
                                 "properties": {},
                             },
@@ -601,9 +595,7 @@ class AntigravityProvider(LLMProvider):
         last_exc: Exception | None = None
         for base_url in _ENDPOINTS:
             url = f"{base_url}{path}"
-            req = urllib.request.Request(
-                url, data=body_bytes, headers=headers, method="POST"
-            )
+            req = urllib.request.Request(url, data=body_bytes, headers=headers, method="POST")
             try:
                 return urllib.request.urlopen(req, timeout=120)  # noqa: S310
             except urllib.error.HTTPError as exc:
@@ -631,9 +623,7 @@ class AntigravityProvider(LLMProvider):
                     err_body = exc.read().decode("utf-8", errors="replace")
                 except Exception:
                     err_body = "(unreadable)"
-                raise RuntimeError(
-                    f"Antigravity HTTP {exc.code} from {url}: {err_body}"
-                ) from exc
+                raise RuntimeError(f"Antigravity HTTP {exc.code} from {url}: {err_body}") from exc
             except (urllib.error.URLError, OSError) as exc:
                 last_exc = exc
                 continue
@@ -683,9 +673,7 @@ class AntigravityProvider(LLMProvider):
                     loop.call_soon_threadsafe(queue.put_nowait, event)
             except Exception as exc:
                 logger.error("Antigravity stream error: %s", exc)
-                loop.call_soon_threadsafe(
-                    queue.put_nowait, StreamErrorEvent(error=str(exc))
-                )
+                loop.call_soon_threadsafe(queue.put_nowait, StreamErrorEvent(error=str(exc)))
             finally:
                 loop.call_soon_threadsafe(queue.put_nowait, None)  # sentinel
 
