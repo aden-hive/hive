@@ -282,6 +282,9 @@ class ExecutionStream:
 
         # State
         self._running = False
+        # Tracks executions paused via pause_execution() so the CancelledError
+        # handler can write status="paused" instead of "cancelled".
+        self._pause_requested: set[str] = set()
 
     async def start(self) -> None:
         """Start the execution stream."""
@@ -849,9 +852,10 @@ class ExecutionStream:
                     )
 
                 # Update context status based on result
-                if has_result and result.paused_at:
+                if execution_id in self._pause_requested or (has_result and result.paused_at):
                     ctx.status = "paused"
                     ctx.completed_at = datetime.now()
+                    self._pause_requested.discard(execution_id)
                 else:
                     ctx.status = "cancelled"
 
@@ -1187,6 +1191,29 @@ class ExecutionStream:
             # respond to cancellation quickly. The cancellation is already
             # requested; the task will clean up in the background.
             done, _ = await asyncio.wait({task}, timeout=5.0)
+            return True
+        return False
+
+    async def pause_execution(self, execution_id: str) -> bool:
+        """
+        Pause a running execution so it can be resumed later.
+
+        Marks the execution as pause-requested before cancelling its task so
+        that the CancelledError handler writes ``status="paused"`` to disk
+        instead of ``status="cancelled"``.  The caller can then resume the
+        execution via the ``/resume`` endpoint.
+
+        Args:
+            execution_id: Execution to pause
+
+        Returns:
+            True if the execution was found and paused, False if not found
+        """
+        task = self._execution_tasks.get(execution_id)
+        if task and not task.done():
+            self._pause_requested.add(execution_id)
+            task.cancel()
+            await asyncio.wait({task}, timeout=5.0)
             return True
         return False
 

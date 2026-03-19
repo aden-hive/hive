@@ -168,7 +168,8 @@ Every HTTP endpoint is a direct, thin delegation to a shared runtime method. No 
 | `POST /api/agents/{id}/chat` | Auto-route | `runtime.inject_input()` or `runtime.trigger()` |
 | `POST /api/agents/{id}/inject` | Send user input | `runtime.inject_input(node_id, content)` |
 | `POST /api/agents/{id}/resume` | Resume session | `runtime.trigger()` with `session_state` |
-| `POST /api/agents/{id}/stop` | Pause execution | Cancels the execution task |
+| `POST /api/agents/{id}/pause` | Pause execution (resumable) | `stream.pause_execution()` → writes `status="paused"` to disk |
+| `POST /api/agents/{id}/stop` | Terminate execution permanently | `stream.cancel_execution()` → writes `status="cancelled"` to disk |
 | `POST /api/agents/{id}/replay` | Replay checkpoint | Checkpoint restore → `runtime.trigger()` |
 | `GET /api/agents/{id}/goal-progress` | Goal progress | `runtime.get_goal_progress()` |
 

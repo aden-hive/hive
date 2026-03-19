@@ -86,6 +86,9 @@ class MockStream:
     async def cancel_execution(self, execution_id: str) -> bool:
         return execution_id in self._execution_tasks
 
+    async def pause_execution(self, execution_id: str) -> bool:
+        return execution_id in self._execution_tasks
+
 
 @dataclass
 class MockGraphRegistration:
@@ -137,8 +140,11 @@ class MockRuntime:
     def get_stats(self):
         return {"running": True, "executions": 1}
 
-    def get_timer_next_fire_in(self, ep_id):
-        return None
+    def pause_timers(self) -> None:
+        pass
+
+    def resume_timers(self) -> None:
+        pass
 
 
 class MockAgentInfo:
@@ -687,6 +693,26 @@ class TestExecution:
             queen_node.cancel_current_turn.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_pause_success(self):
+        """Pausing a running execution marks it as paused and stops timer-driven runs."""
+        session = _make_session()
+        # Replace pause_timers with a MagicMock so we can assert it was called
+        session.worker_runtime.pause_timers = MagicMock()
+        session.worker_runtime._mock_streams["default"]._execution_tasks["exec_abc"] = MagicMock()
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/pause",
+                json={"execution_id": "exec_abc"},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["paused"] is True
+            assert data["execution_id"] == "exec_abc"
+            # Timer-driven entry points must be frozen alongside the live execution
+            session.worker_runtime.pause_timers.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_goal_progress(self):
         session = _make_session()
         app = _make_app_with_session(session)
@@ -700,11 +726,13 @@ class TestExecution:
 class TestResume:
     @pytest.mark.asyncio
     async def test_resume_from_session_state(self, sample_session, tmp_agent_dir):
-        """Resume using session state (paused_at)."""
+        """Resume using session state (paused_at) and re-enables timers."""
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
         session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        # Replace resume_timers with a MagicMock so we can assert it was called
+        session.worker_runtime.resume_timers = MagicMock()
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
@@ -717,6 +745,8 @@ class TestResume:
             assert data["execution_id"] == "exec_test_123"
             assert data["resumed_from"] == session_id
             assert data["checkpoint_id"] is None
+            # Timers must be re-enabled when resuming
+            session.worker_runtime.resume_timers.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_resume_with_checkpoint(self, sample_session, tmp_agent_dir):
@@ -760,6 +790,33 @@ class TestResume:
                 json={"session_id": "session_nonexistent"},
             )
             assert resp.status == 404
+
+    @pytest.mark.asyncio
+    async def test_resume_rejected_for_cancelled_session(self, tmp_agent_dir):
+        """Resuming a stopped (cancelled) session must return 409."""
+        tmp_path, agent_name, base = tmp_agent_dir
+        session_id = "session_cancelled"
+        session_dir = base / "sessions" / session_id
+        session_dir.mkdir(parents=True)
+        cancelled_state = {
+            "status": "cancelled",
+            "input_data": {},
+            "memory": {},
+            "progress": {},
+        }
+        (session_dir / "state.json").write_text(json.dumps(cancelled_state))
+
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/resume",
+                json={"session_id": session_id},
+            )
+            assert resp.status == 409
+            data = await resp.json()
+            assert "stopped" in data["error"].lower() or "cancelled" in data["error"].lower()
 
 
 class TestStop:

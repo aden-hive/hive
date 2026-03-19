@@ -289,6 +289,22 @@ async def handle_resume(request: web.Request) -> web.Response:
     except (json.JSONDecodeError, OSError) as e:
         return web.json_response({"error": f"Failed to read session: {e}"}, status=500)
 
+    # Only paused sessions can be resumed. Stopped (cancelled) sessions must
+    # be re-started from scratch using the /trigger endpoint.
+    session_status = state.get("status", "")
+    if session_status == "cancelled":
+        return web.json_response(
+            {
+                "error": (
+                    "Cannot resume a stopped session. "
+                    "Use POST /trigger to start a new execution."
+                ),
+                "session_id": worker_session_id,
+                "status": session_status,
+            },
+            status=409,
+        )
+
     if checkpoint_id:
         resume_session_state = {
             "resume_session_id": worker_session_id,
@@ -317,6 +333,10 @@ async def handle_resume(request: web.Request) -> web.Response:
         input_data=input_data,
         session_state=resume_session_state,
     )
+
+    # Re-enable timer-driven entry points that were paused alongside
+    # the execution.
+    session.worker_runtime.resume_timers()
 
     return web.json_response(
         {
@@ -434,6 +454,47 @@ async def handle_stop(request: web.Request) -> web.Response:
                 )
 
     return web.json_response({"stopped": False, "error": "Execution not found"}, status=404)
+
+
+async def handle_pause(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/pause — pause a running execution.
+
+    Freezes the execution at its current state and writes status=\"paused\"
+    to disk so it can be resumed later via /resume.
+
+    Body: {"execution_id": "..."}
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    if not session.worker_runtime:
+        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+
+    body = await request.json()
+    execution_id = body.get("execution_id")
+
+    if not execution_id:
+        return web.json_response({"error": "execution_id is required"}, status=400)
+
+    for graph_id in session.worker_runtime.list_graphs():
+        reg = session.worker_runtime.get_graph_registration(graph_id)
+        if reg is None:
+            continue
+        for _ep_id, stream in reg.streams.items():
+            paused = await stream.pause_execution(execution_id)
+            if paused:
+                # Also pause timer-driven entry points so no new runs
+                # are triggered while the execution is frozen.
+                session.worker_runtime.pause_timers()
+                return web.json_response(
+                    {
+                        "paused": True,
+                        "execution_id": execution_id,
+                    }
+                )
+
+    return web.json_response({"paused": False, "error": "Execution not found"}, status=404)
 
 
 async def handle_replay(request: web.Request) -> web.Response:
