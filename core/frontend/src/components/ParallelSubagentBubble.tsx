@@ -1,7 +1,118 @@
-import { memo, useState, useRef, useEffect } from "react";
+import { memo, useState, useRef, useEffect, useCallback } from "react";
 import { ChevronDown, ChevronUp, Cpu } from "lucide-react";
 import type { ChatMessage, ContextUsageEntry } from "@/components/ChatPanel";
 import MarkdownContent from "@/components/MarkdownContent";
+
+// ---------------------------------------------------------------------------
+// Matrix rain canvas for subagent squares
+// ---------------------------------------------------------------------------
+
+/** Render a matrix-rain effect inside a canvas. Drops only fall within the
+ *  filled region (bottom `fillPct`% of the canvas). */
+function MatrixRainCanvas({
+  color,
+  fillPct,
+  width,
+  height,
+}: {
+  color: string;
+  fillPct: number;
+  width: number;
+  height: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stateRef = useRef<{
+    columns: number[];
+    frameId: number;
+    lastTick: number;
+  } | null>(null);
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const w = width * dpr;
+    const h = height * dpr;
+
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+
+    const fontSize = 7 * dpr;
+    const cols = Math.floor(w / fontSize);
+    const fillH = (Math.min(fillPct, 100) / 100) * h;
+    const topOfFill = h - fillH;
+
+    // Init columns
+    if (!stateRef.current || stateRef.current.columns.length !== cols) {
+      stateRef.current = {
+        columns: Array.from({ length: cols }, () =>
+          topOfFill + Math.random() * fillH
+        ),
+        frameId: 0,
+        lastTick: 0,
+      };
+    }
+
+    const state = stateRef.current;
+    const now = performance.now();
+    // Tick at ~8 fps for a slow, ambient feel
+    if (now - state.lastTick < 125) {
+      state.frameId = requestAnimationFrame(draw);
+      return;
+    }
+    state.lastTick = now;
+
+    // Fade previous frame
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.font = `${fontSize}px monospace`;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.8;
+
+    for (let i = 0; i < cols; i++) {
+      // Random character (digits, symbols, katakana-ish)
+      const chars = "01.:+*#>|~";
+      const char = chars[Math.floor(Math.random() * chars.length)];
+      const x = i * fontSize;
+      const y = state.columns[i];
+
+      if (y >= topOfFill && y <= h) {
+        ctx.fillText(char, x, y);
+      }
+
+      // Advance drop; reset when past bottom
+      state.columns[i] += fontSize;
+      if (state.columns[i] > h || Math.random() > 0.96) {
+        state.columns[i] = topOfFill;
+      }
+    }
+
+    ctx.globalAlpha = 1.0;
+    state.frameId = requestAnimationFrame(draw);
+  }, [color, fillPct, width, height]);
+
+  useEffect(() => {
+    const frameId = requestAnimationFrame(draw);
+    return () => {
+      cancelAnimationFrame(frameId);
+      if (stateRef.current) cancelAnimationFrame(stateRef.current.frameId);
+    };
+  }, [draw]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0"
+      style={{ width, height }}
+    />
+  );
+}
 
 const workerColor = "hsl(220,60%,55%)";
 
@@ -85,27 +196,39 @@ function SubagentSquare({
         {msgCount}
       </span>
 
-      {/* Color-filled square — fill level = context window usage */}
+      {/* Pixel-rain square — matrix rain within the filled region */}
       <div
         className={`relative w-10 h-10 rounded-md overflow-hidden transition-all ${
           isLatest ? "ring-2 ring-offset-1 ring-offset-background" : ""
         }`}
         style={{
-          backgroundColor: `${color}12`,
+          backgroundColor: "#0a0a0a",
           ...(isLatest ? { ringColor: color } : {}),
         }}
       >
+        {/* Dim base fill so there's something visible even without animation */}
         <div
           className="absolute bottom-0 left-0 right-0 transition-all duration-500 ease-out"
           style={{
             height: `${Math.min(fillPct, 100)}%`,
             backgroundColor: color,
-            opacity: 0.55,
+            opacity: 0.1,
           }}
         />
+        {/* Matrix rain canvas */}
+        <MatrixRainCanvas
+          color={color}
+          fillPct={fillPct}
+          width={40}
+          height={40}
+        />
+        {/* Percentage overlay */}
         <span
-          className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold tabular-nums"
-          style={{ color }}
+          className="absolute inset-0 flex items-center justify-center text-[10px] font-bold tabular-nums"
+          style={{
+            color: "#fff",
+            textShadow: `0 0 6px ${color}, 0 0 2px ${color}`,
+          }}
         >
           {fillPct}%
         </span>

@@ -274,10 +274,10 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
     return true;
   });
 
-  // Group consecutive subagent messages into parallel bubbles.
-  // A message is a "subagent message" if its nodeId contains ":subagent:".
-  // Consecutive runs of subagent messages with 2+ distinct nodeIds become
-  // a ParallelSubagentBubble; runs with only 1 nodeId render normally.
+  // Group subagent messages into parallel bubbles.
+  // A subagent message has nodeId containing ":subagent:".
+  // The run only ends on hard boundaries (user messages, run_dividers)
+  // so interleaved queen/tool/system messages don't fragment the bubble.
   type RenderItem =
     | { kind: "message"; msg: ChatMessage }
     | { kind: "parallel"; groupId: string; groups: SubagentGroup[] };
@@ -293,35 +293,56 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
         i++;
         continue;
       }
-      // Start collecting a consecutive subagent run
-      const runStart = i;
-      while (
-        i < threadMessages.length &&
-        threadMessages[i].nodeId?.includes(":subagent:")
-      ) {
+
+      // Start a subagent run. Collect all subagent messages, allowing
+      // non-subagent messages in between (they render as normal items
+      // before the bubble). Only break on hard boundaries.
+      const subagentMsgs: ChatMessage[] = [];
+      const interleaved: { idx: number; msg: ChatMessage }[] = [];
+      const firstId = msg.id;
+
+      while (i < threadMessages.length) {
+        const m = threadMessages[i];
+        const isSa = m.nodeId?.includes(":subagent:");
+
+        if (isSa) {
+          subagentMsgs.push(m);
+          i++;
+          continue;
+        }
+
+        // Hard boundary — stop the run
+        if (m.type === "user" || m.type === "run_divider") break;
+
+        // Soft interruption (queen output, system, tool_status) —
+        // render it normally but keep the subagent run going
+        interleaved.push({ idx: items.length + interleaved.length, msg: m });
         i++;
       }
-      const runMsgs = threadMessages.slice(runStart, i);
-      // Group by nodeId. With the backend fix, each subagent instance
-      // gets a unique nodeId (e.g. "node:subagent:agent:2" for instance 2).
-      const byNode = new Map<string, ChatMessage[]>();
-      for (const m of runMsgs) {
-        const nid = m.nodeId!;
-        if (!byNode.has(nid)) byNode.set(nid, []);
-        byNode.get(nid)!.push(m);
+
+      // Emit interleaved messages first (before the bubble)
+      for (const { msg: im } of interleaved) {
+        items.push({ kind: "message", msg: im });
       }
-      // Always fold subagent messages into a consolidated bubble —
-      // even a single subagent gets the folded view with one square.
-      const groups: SubagentGroup[] = [];
-      for (const [nodeId, msgs] of byNode) {
-        groups.push({
-          nodeId,
-          messages: msgs,
-          contextUsage: contextUsage?.[nodeId],
-        });
+
+      // Build the single parallel bubble from all collected subagent msgs
+      if (subagentMsgs.length > 0) {
+        const byNode = new Map<string, ChatMessage[]>();
+        for (const m of subagentMsgs) {
+          const nid = m.nodeId!;
+          if (!byNode.has(nid)) byNode.set(nid, []);
+          byNode.get(nid)!.push(m);
+        }
+        const groups: SubagentGroup[] = [];
+        for (const [nodeId, msgs] of byNode) {
+          groups.push({
+            nodeId,
+            messages: msgs,
+            contextUsage: contextUsage?.[nodeId],
+          });
+        }
+        items.push({ kind: "parallel", groupId: `par-${firstId}`, groups });
       }
-      const groupId = `par-${runMsgs[0].id}`;
-      items.push({ kind: "parallel", groupId, groups });
     }
     return items;
   }, [threadMessages, contextUsage]);
