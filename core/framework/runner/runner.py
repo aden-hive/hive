@@ -1141,7 +1141,10 @@ class AgentRunner:
 
         # Create LLM provider
         # Uses LiteLLM which auto-detects the provider from model name
-        if self.mock_mode:
+        # Skip if already injected (e.g. worker agents with a pre-built LLM)
+        if self._llm is not None:
+            pass  # LLM already configured externally
+        elif self.mock_mode:
             # Use mock LLM for testing without real API calls
             from framework.llm.mock import MockLLMProvider
 
