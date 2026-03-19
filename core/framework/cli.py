@@ -18,7 +18,16 @@ Testing commands:
 
 import argparse
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+
+
+def _get_version() -> str:
+    """Return framework version from package metadata or fallback."""
+    try:
+        return version("framework")
+    except PackageNotFoundError:
+        return "0.7.1"
 
 
 def _configure_paths():
@@ -70,6 +79,12 @@ def main():
     parser = argparse.ArgumentParser(
         prog="hive",
         description="Aden Hive - Build and run goal-driven agents",
+    )
+    parser.add_argument(
+        "--version",
+        "-V",
+        action="version",
+        version=f"%(prog)s {_get_version()}",
     )
     parser.add_argument(
         "--model",
