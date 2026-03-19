@@ -34,6 +34,108 @@ if TYPE_CHECKING:
     from framework.credentials import CredentialStore
 
 
+class _FallbackCredentialValue:
+    """Small credential wrapper used when framework is unavailable."""
+
+    def __init__(self, value: str):
+        self._value = value
+
+    def get_default_key(self) -> str:
+        return self._value
+
+
+class _FallbackCredentialStore:
+    """Minimal env-backed store for standalone tools installs.
+
+    This keeps the Docker image functional even when the monorepo-only
+    ``framework`` package is not installed. Advanced storage, OAuth refresh,
+    and local-account features remain available when framework is present.
+    """
+
+    def __init__(
+        self,
+        env_mapping: dict[str, str],
+        overrides: dict[str, str] | None = None,
+    ):
+        import os
+        import re
+
+        self._env_mapping = env_mapping
+        self._overrides = overrides or {}
+        self._os = os
+        self._template_re = re.compile(r"\{\{([^}.]+)\.([^}]+)\}\}")
+
+    def _lookup(self, credential_id: str) -> str | None:
+        if credential_id in self._overrides:
+            return self._overrides[credential_id]
+        env_var = self._env_mapping.get(credential_id)
+        if env_var is None:
+            return None
+        value = self._os.getenv(env_var)
+        return value if value != "" else None
+
+    def get(self, credential_id: str) -> str | None:
+        return self._lookup(credential_id)
+
+    def get_key(self, credential_id: str, key_name: str) -> str | None:
+        if key_name not in {"api_key", "access_token", "token"}:
+            return None
+        return self._lookup(credential_id)
+
+    def resolve(self, template: str) -> str:
+        def replacer(match) -> str:
+            credential_id, key_name = match.groups()
+            value = self.get_key(credential_id, key_name)
+            return value if value is not None else match.group(0)
+
+        return self._template_re.sub(replacer, template)
+
+    def resolve_headers(self, headers: dict[str, str]) -> dict[str, str]:
+        return {key: self.resolve(value) for key, value in headers.items()}
+
+    def resolve_params(self, params: dict[str, str]) -> dict[str, str]:
+        return {key: self.resolve(value) for key, value in params.items()}
+
+    def list_accounts(self, provider_name: str) -> list[dict]:
+        value = self._lookup(provider_name)
+        if value is None:
+            return []
+        return [
+            {
+                "provider": provider_name,
+                "alias": "default",
+                "source": "env",
+            }
+        ]
+
+    def get_credential_by_alias(
+        self,
+        provider_name: str,
+        alias: str,
+    ) -> _FallbackCredentialValue | None:
+        if alias != "default":
+            return None
+        value = self._lookup(provider_name)
+        if value is None:
+            return None
+        return _FallbackCredentialValue(value)
+
+
+def _framework_credentials_available() -> bool:
+    try:
+        import framework.credentials  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _build_fallback_store(
+    env_mapping: dict[str, str],
+    overrides: dict[str, str] | None = None,
+) -> _FallbackCredentialStore:
+    return _FallbackCredentialStore(env_mapping=env_mapping, overrides=overrides)
+
+
 class CredentialStoreAdapter:
     """
     Adapter that makes CredentialStore compatible with existing CredentialManager API.
@@ -500,6 +602,12 @@ class CredentialStoreAdapter:
 
         env_mapping = {name: spec.env_var for name, spec in specs.items()}
 
+        if not _framework_credentials_available():
+            log.info(
+                "framework package not installed; using env-backed credential storage only"
+            )
+            return cls(store=_build_fallback_store(env_mapping), specs=specs)
+
         # --- Aden sync branch ---
         # Note: we don't use CredentialStore.with_aden_sync() here because it
         # only wraps EncryptedFileStorage.  We need CompositeStorage (encrypted
@@ -587,6 +695,15 @@ class CredentialStoreAdapter:
             credentials = CredentialStoreAdapter.for_testing({"brave_search": "test-key"})
             assert credentials.get("brave_search") == "test-key"
         """
+        if specs is None:
+            from . import CREDENTIAL_SPECS
+
+            specs = CREDENTIAL_SPECS
+
+        if not _framework_credentials_available():
+            env_mapping = {name: spec.env_var for name, spec in specs.items()}
+            return cls(store=_build_fallback_store(env_mapping, overrides), specs=specs)
+
         from framework.credentials import CredentialStore
 
         # Convert to CredentialStore.for_testing format
@@ -614,8 +731,6 @@ class CredentialStoreAdapter:
         Returns:
             CredentialStoreAdapter using env vars for storage
         """
-        from framework.credentials import CredentialStore
-
         # Build env mapping from specs if not provided
         if env_mapping is None:
             if specs is None:
@@ -623,6 +738,11 @@ class CredentialStoreAdapter:
 
                 specs = CREDENTIAL_SPECS
             env_mapping = {name: spec.env_var for name, spec in specs.items()}
+
+        if not _framework_credentials_available():
+            return cls(store=_build_fallback_store(env_mapping), specs=specs)
+
+        from framework.credentials import CredentialStore
 
         store = CredentialStore.with_env_storage(env_mapping)
         return cls(store=store, specs=specs)

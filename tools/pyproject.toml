@@ -33,7 +33,6 @@ dependencies = [
     "resend>=2.0.0",
     "asana>=3.2.0",
     "google-analytics-data>=0.18.0",
-    "framework",
     "stripe>=14.3.0",
     "arxiv>=2.1.0",
     "requests>=2.31.0",
@@ -75,9 +74,6 @@ all = [
     "databricks-sdk>=0.30.0",
     "databricks-mcp>=0.1.0",
 ]
-
-[tool.uv.sources]
-framework = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

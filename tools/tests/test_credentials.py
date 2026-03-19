@@ -611,3 +611,28 @@ class TestCredentialStoreAdapterAdenSync:
         # Fell back to default — env vars still work, no Aden provider
         assert adapter.store.get_provider("aden_sync") is None
         assert adapter.get("brave_search") == "brave-fallback"
+
+
+class TestCredentialStoreAdapterWithoutFramework:
+    """Standalone tools installs should still work without framework."""
+
+    def test_default_falls_back_when_framework_is_missing(self, monkeypatch):
+        monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "standalone-key")
+
+        with patch(
+            "aden_tools.credentials.store_adapter._framework_credentials_available",
+            return_value=False,
+        ):
+            adapter = CredentialStoreAdapter.default()
+
+        assert adapter.get("brave_search") == "standalone-key"
+        assert adapter.resolve("Bearer {{brave_search.api_key}}") == "Bearer standalone-key"
+
+    def test_for_testing_falls_back_when_framework_is_missing(self):
+        with patch(
+            "aden_tools.credentials.store_adapter._framework_credentials_available",
+            return_value=False,
+        ):
+            adapter = CredentialStoreAdapter.for_testing({"brave_search": "mock-key"})
+
+        assert adapter.get("brave_search") == "mock-key"
