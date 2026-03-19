@@ -533,12 +533,28 @@ class EventLoopNode(NodeProtocol):
                 _restored_recent_responses = restored.recent_responses
                 _restored_tool_fingerprints = restored.recent_tool_fingerprints
 
-                # Refresh the system prompt with full 3-layer composition.
-                # The stored prompt may be stale after code changes or when
-                # runtime-injected context (e.g. worker identity) has changed.
-                # On resume, we rebuild identity + narrative + focus so the LLM
-                # understands the session history, not just the node directive.
-                from framework.graph.prompt_composer import compose_system_prompt
+                # Refresh the system prompt with full composition including
+                # execution preamble and node-type preamble.  The stored
+                # prompt may be stale after code changes or when runtime-
+                # injected context (e.g. worker identity) has changed.
+                from framework.graph.prompt_composer import (
+                    EXECUTION_SCOPE_PREAMBLE,
+                    compose_system_prompt,
+                )
+
+                _exec_preamble = None
+                if (
+                    not ctx.is_subagent_mode
+                    and ctx.node_spec.node_type in ("event_loop", "gcu")
+                    and ctx.node_spec.output_keys
+                ):
+                    _exec_preamble = EXECUTION_SCOPE_PREAMBLE
+
+                _node_type_preamble = None
+                if ctx.node_spec.node_type == "gcu":
+                    from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
+
+                    _node_type_preamble = GCU_BROWSER_SYSTEM_PROMPT
 
                 _current_prompt = compose_system_prompt(
                     identity_prompt=ctx.identity_prompt or None,
@@ -547,6 +563,8 @@ class EventLoopNode(NodeProtocol):
                     accounts_prompt=ctx.accounts_prompt or None,
                     skills_catalog_prompt=ctx.skills_catalog_prompt or None,
                     protocols_prompt=ctx.protocols_prompt or None,
+                    execution_preamble=_exec_preamble,
+                    node_type_preamble=_node_type_preamble,
                 )
                 if conversation.system_prompt != _current_prompt:
                     conversation.update_system_prompt(_current_prompt)
@@ -2486,6 +2504,27 @@ class EventLoopNode(NodeProtocol):
                     results_by_id[tc.tool_use_id] = result
 
                 elif tc.tool_name == "delegate_to_sub_agent":
+                    # Guard: in continuous mode the LLM may see delegate
+                    # calls from a previous node's conversation history and
+                    # attempt to re-use the tool on a node that doesn't own
+                    # it.  Only accept if the tool was actually offered.
+                    if not any(t.name == "delegate_to_sub_agent" for t in tools):
+                        logger.warning(
+                            "[%s] LLM called delegate_to_sub_agent but tool "
+                            "was not offered to this node — rejecting",
+                            node_id,
+                        )
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: delegate_to_sub_agent is not available "
+                                "on this node. This tool belongs to a different "
+                                "node in the workflow."
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                        continue
                     # --- Framework-level subagent delegation ---
                     # Queue for parallel execution in Phase 2
                     logger.info(
@@ -5155,7 +5194,20 @@ class EventLoopNode(NodeProtocol):
             write_keys=[],  # Read-only!
         )
 
-        # 2b. Set up report callback (one-way channel to parent / event bus)
+        # 2b. Compute instance counter early so node_id is available for the
+        # report callback and the NodeContext.  Each delegation to the same
+        # agent_id gets a unique suffix (instance 1 has no suffix for backward
+        # compat; instance 2+ appends ":N").
+        self._subagent_instance_counter.setdefault(agent_id, 0)
+        self._subagent_instance_counter[agent_id] += 1
+        _sa_instance = self._subagent_instance_counter[agent_id]
+        if _sa_instance > 1:
+            sa_node_id = f"{ctx.node_id}:subagent:{agent_id}:{_sa_instance}"
+        else:
+            sa_node_id = f"{ctx.node_id}:subagent:{agent_id}"
+        subagent_instance = str(_sa_instance)
+
+        # 2c. Set up report callback (one-way channel to parent / event bus)
         subagent_reports: list[dict] = []
 
         async def _report_callback(
@@ -5168,7 +5220,7 @@ class EventLoopNode(NodeProtocol):
             if self._event_bus:
                 await self._event_bus.emit_subagent_report(
                     stream_id=ctx.node_id,
-                    node_id=f"{ctx.node_id}:subagent:{agent_id}",
+                    node_id=sa_node_id,
                     subagent_id=agent_id,
                     message=message,
                     data=data,
@@ -5258,7 +5310,7 @@ class EventLoopNode(NodeProtocol):
         max_iter = min(self._config.max_iterations, 10)
         subagent_ctx = NodeContext(
             runtime=ctx.runtime,
-            node_id=f"{ctx.node_id}:subagent:{agent_id}",
+            node_id=sa_node_id,
             node_spec=subagent_spec,
             memory=scoped_memory,
             input_data={"task": task, **parent_data},
@@ -5286,10 +5338,7 @@ class EventLoopNode(NodeProtocol):
         # Derive a conversation store for the subagent from the parent's store.
         # Each invocation gets a unique path so that repeated delegate calls
         # (e.g. one per profile) don't restore a stale completed conversation.
-        self._subagent_instance_counter.setdefault(agent_id, 0)
-        self._subagent_instance_counter[agent_id] += 1
-        subagent_instance = str(self._subagent_instance_counter[agent_id])
-
+        # (Instance counter was computed earlier in step 2b.)
         subagent_conv_store = None
         if self._conversation_store is not None:
             from framework.storage.conversation_store import FileConversationStore
