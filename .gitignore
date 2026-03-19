@@ -68,7 +68,6 @@ temp/
 exports/*
 
 .claude/settings.local.json
-.claude/skills/ship-it/
 
 .venv
 

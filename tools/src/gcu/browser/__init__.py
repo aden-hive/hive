@@ -30,6 +30,7 @@ from .session import (
     get_all_sessions,
     get_session,
     get_shared_browser,
+    shutdown_all_browsers,
 )
 from .tools import (
     register_advanced_tools,
@@ -73,6 +74,7 @@ __all__ = [
     # Shared browser for agent contexts
     "get_shared_browser",
     "close_shared_browser",
+    "shutdown_all_browsers",
     # Constants
     "DEFAULT_TIMEOUT_MS",
     "DEFAULT_NAVIGATION_TIMEOUT_MS",

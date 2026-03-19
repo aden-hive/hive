@@ -24,6 +24,10 @@ def register_navigation_tools(mcp: FastMCP) -> None:
         """
         Navigate the current tab to a URL.
 
+        This tool already waits for the page to reach the ``wait_until``
+        condition (default: ``domcontentloaded``) before returning.
+        You do NOT need to call ``browser_wait`` afterward.
+
         Args:
             url: URL to navigate to
             target_id: Tab ID to navigate (default: active tab)

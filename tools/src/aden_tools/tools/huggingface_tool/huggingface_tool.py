@@ -1,12 +1,17 @@
 """
-HuggingFace Hub Tool - Models, datasets, and spaces discovery via Hub API.
+HuggingFace Hub Tool - Models, datasets, spaces discovery and inference via Hub API.
 
 Supports:
 - HuggingFace API token (HUGGINGFACE_TOKEN)
 - Model, dataset, and space listing/search
 - Repository details and user info
+- Model inference (text-generation, summarization, classification, etc.)
+- Text embeddings via Inference API
+- Inference endpoints management
 
-API Reference: https://huggingface.co/docs/hub/api
+API Reference:
+  Hub API: https://huggingface.co/docs/hub/api
+  Inference API: https://huggingface.co/docs/api-inference
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
 BASE_URL = "https://huggingface.co/api"
+INFERENCE_URL = "https://api-inference.huggingface.co/models"
 
 
 def _get_token(credentials: CredentialStoreAdapter | None) -> str | None:
@@ -48,12 +54,56 @@ def _get(
         if resp.status_code == 404:
             return {"error": f"Not found: {path}"}
         if resp.status_code != 200:
-            return {"error": f"HuggingFace API error {resp.status_code}: {resp.text[:500]}"}
+            return {"error": (f"HuggingFace API error {resp.status_code}: {resp.text[:500]}")}
         return resp.json()
     except httpx.TimeoutException:
         return {"error": "Request to HuggingFace timed out"}
     except Exception as e:
         return {"error": f"HuggingFace request failed: {e!s}"}
+
+
+def _post(
+    url: str,
+    token: str | None,
+    payload: dict[str, Any],
+    timeout: float = 120.0,
+) -> dict[str, Any] | list:
+    """Make a POST request to the HuggingFace Inference API."""
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        resp = httpx.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=timeout,
+        )
+        if resp.status_code == 401:
+            return {"error": "Unauthorized. Check your HUGGINGFACE_TOKEN."}
+        if resp.status_code == 404:
+            return {"error": f"Model not found: {url}"}
+        if resp.status_code == 503:
+            body = (
+                resp.json()
+                if resp.headers.get("content-type", "").startswith("application/json")
+                else {}
+            )
+            estimated = body.get("estimated_time", "unknown")
+            return {
+                "error": "Model is loading",
+                "estimated_time": estimated,
+                "help": "The model is being loaded. Retry after the estimated time.",
+            }
+        if resp.status_code != 200:
+            return {
+                "error": (f"HuggingFace Inference API error {resp.status_code}: {resp.text[:500]}")
+            }
+        return resp.json()
+    except httpx.TimeoutException:
+        return {"error": "Inference request timed out. Try a smaller input or a faster model."}
+    except Exception as e:
+        return {"error": f"HuggingFace inference request failed: {e!s}"}
 
 
 def _auth_error() -> dict[str, Any]:
@@ -322,3 +372,187 @@ def register_tools(
             "orgs": orgs,
             "type": u.get("type", ""),
         }
+
+    # -----------------------------------------------------------------
+    # Inference API Tools
+    # -----------------------------------------------------------------
+
+    @mcp.tool()
+    def huggingface_run_inference(
+        model_id: str,
+        inputs: str,
+        task: str = "",
+        parameters: str = "",
+    ) -> dict[str, Any]:
+        """
+        Run inference on a HuggingFace model via the Inference API.
+
+        Supports text-generation, summarization, translation, classification,
+        fill-mask, question-answering, and more. The model's pipeline_tag
+        determines the task automatically unless overridden.
+
+        Args:
+            model_id: Model ID (e.g. "meta-llama/Llama-3.1-8B-Instruct",
+                      "facebook/bart-large-cnn", "distilbert-base-uncased-finetuned-sst-2-english")
+            inputs: Input text for the model
+            task: Optional task override (e.g. "text-generation", "summarization")
+            parameters: Optional JSON string of model parameters
+                        (e.g. '{"max_new_tokens": 256, "temperature": 0.7}')
+
+        Returns:
+            Dict with model output or error
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not model_id:
+            return {"error": "model_id is required"}
+        if not inputs:
+            return {"error": "inputs is required"}
+
+        payload: dict[str, Any] = {"inputs": inputs}
+
+        if parameters:
+            import json as _json
+
+            try:
+                payload["parameters"] = _json.loads(parameters)
+            except _json.JSONDecodeError:
+                return {"error": "parameters must be a valid JSON string"}
+
+        url = f"{INFERENCE_URL}/{model_id}"
+        data = _post(url, token, payload)
+
+        if isinstance(data, dict) and "error" in data:
+            return data
+
+        return {
+            "model_id": model_id,
+            "task": task or "auto",
+            "output": data,
+        }
+
+    @mcp.tool()
+    def huggingface_run_embedding(
+        model_id: str,
+        inputs: str,
+    ) -> dict[str, Any]:
+        """
+        Generate text embeddings using a HuggingFace model via the Inference API.
+
+        Useful for semantic search, clustering, and similarity comparison.
+
+        Args:
+            model_id: Embedding model ID
+                      (e.g. "sentence-transformers/all-MiniLM-L6-v2",
+                       "BAAI/bge-small-en-v1.5")
+            inputs: Text to embed (single string)
+
+        Returns:
+            Dict with embedding vector, model_id, and dimensions count
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not model_id:
+            return {"error": "model_id is required"}
+        if not inputs:
+            return {"error": "inputs is required"}
+
+        url = f"{INFERENCE_URL}/{model_id}"
+        payload: dict[str, Any] = {"inputs": inputs}
+        data = _post(url, token, payload)
+
+        if isinstance(data, dict) and "error" in data:
+            return data
+
+        # Inference API returns the embedding directly as a list of floats
+        # or a list of lists for batched inputs
+        embedding = data if isinstance(data, list) else []
+        dims = len(embedding) if embedding and isinstance(embedding[0], (int, float)) else 0
+
+        return {
+            "model_id": model_id,
+            "embedding": embedding,
+            "dimensions": dims,
+        }
+
+    @mcp.tool()
+    def huggingface_list_inference_endpoints(
+        namespace: str = "",
+    ) -> dict[str, Any]:
+        """
+        List deployed Inference Endpoints on HuggingFace.
+
+        Inference Endpoints are dedicated, production-ready deployments
+        of HuggingFace models with autoscaling and GPU support.
+
+        Args:
+            namespace: Optional namespace/organization to filter by.
+                       Defaults to the authenticated user.
+
+        Returns:
+            Dict with list of endpoints (name, model, status, url, etc.)
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+
+        path = f"/api/endpoints/{namespace}" if namespace else "/api/endpoints"
+        headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+
+        try:
+            resp = httpx.get(
+                f"https://api.endpoints.huggingface.cloud{path}",
+                headers=headers,
+                timeout=30.0,
+            )
+            if resp.status_code == 401:
+                return {"error": "Unauthorized. Check your HUGGINGFACE_TOKEN."}
+            if resp.status_code != 200:
+                return {
+                    "error": (
+                        f"Failed to list endpoints (HTTP {resp.status_code}): {resp.text[:500]}"
+                    )
+                }
+            data = resp.json()
+        except httpx.TimeoutException:
+            return {"error": "Request to HuggingFace Endpoints API timed out"}
+        except Exception as e:
+            return {"error": f"Endpoints request failed: {e!s}"}
+
+        items = data.get("items", data) if isinstance(data, dict) else data
+        endpoints = []
+        for ep in items if isinstance(items, list) else []:
+            endpoints.append(
+                {
+                    "name": ep.get("name", ""),
+                    "model": (
+                        ep.get("model", {}).get("repository", "")
+                        if isinstance(ep.get("model"), dict)
+                        else ep.get("model", "")
+                    ),
+                    "status": (
+                        ep.get("status", {}).get("state", "")
+                        if isinstance(ep.get("status"), dict)
+                        else ep.get("status", "")
+                    ),
+                    "url": (
+                        ep.get("status", {}).get("url", "")
+                        if isinstance(ep.get("status"), dict)
+                        else ""
+                    ),
+                    "type": ep.get("type", ""),
+                    "provider": (
+                        ep.get("provider", {}).get("vendor", "")
+                        if isinstance(ep.get("provider"), dict)
+                        else ""
+                    ),
+                    "region": (
+                        ep.get("provider", {}).get("region", "")
+                        if isinstance(ep.get("provider"), dict)
+                        else ""
+                    ),
+                }
+            )
+        return {"endpoints": endpoints, "count": len(endpoints)}

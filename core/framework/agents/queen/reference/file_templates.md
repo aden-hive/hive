@@ -180,7 +180,7 @@ terminal_nodes = []  # Forever-alive
 # Module-level vars read by AgentRunner.load()
 conversation_mode = "continuous"
 identity_prompt = "You are a helpful agent."
-loop_config = {"max_iterations": 100, "max_tool_calls_per_turn": 20, "max_history_tokens": 32000}
+loop_config = {"max_iterations": 100, "max_tool_calls_per_turn": 20, "max_context_tokens": 32000}
 
 
 class MyAgent:
@@ -332,81 +332,46 @@ class MyAgent:
 default_agent = MyAgent()
 ```
 
-## agent.py — Async Entry Points Variant
+## triggers.json — Timer and Webhook Triggers
 
-When an agent needs timers, webhooks, or event-driven triggers, add
-`async_entry_points` and optionally `runtime_config` as module-level variables.
-These are IN ADDITION to the standard variables above.
+When an agent needs timers, webhooks, or event-driven triggers, create a
+`triggers.json` file in the agent's directory (alongside `agent.py`).
+The queen loads these at session start and the user can manage them via
+the `set_trigger` / `remove_trigger` tools at runtime.
 
-```python
-# Additional imports for async entry points
-from framework.graph.edge import GraphSpec, AsyncEntryPointSpec
-from framework.runtime.agent_runtime import (
-    AgentRuntime, AgentRuntimeConfig, create_agent_runtime,
-)
-
-# ... (goal, nodes, edges, entry_node, entry_points, etc. as above) ...
-
-# Async entry points — event-driven triggers
-async_entry_points = [
-    # Timer with cron: daily at 9am
-    AsyncEntryPointSpec(
-        id="daily-check",
-        name="Daily Check",
-        entry_node="process-node",
-        trigger_type="timer",
-        trigger_config={"cron": "0 9 * * *"},
-        isolation_level="shared",
-        max_concurrent=1,
-    ),
-    # Timer with fixed interval: every 20 minutes
-    AsyncEntryPointSpec(
-        id="scheduled-check",
-        name="Scheduled Check",
-        entry_node="process-node",
-        trigger_type="timer",
-        trigger_config={"interval_minutes": 20, "run_immediately": False},
-        isolation_level="shared",
-        max_concurrent=1,
-    ),
-    # Event: reacts to webhook events
-    AsyncEntryPointSpec(
-        id="webhook-event",
-        name="Webhook Event Handler",
-        entry_node="process-node",
-        trigger_type="event",
-        trigger_config={"event_types": ["webhook_received"]},
-        isolation_level="shared",
-        max_concurrent=10,
-    ),
+```json
+[
+  {
+    "id": "daily-check",
+    "name": "Daily Check",
+    "trigger_type": "timer",
+    "trigger_config": {"cron": "0 9 * * *"},
+    "task": "Run the daily check process"
+  },
+  {
+    "id": "scheduled-check",
+    "name": "Scheduled Check",
+    "trigger_type": "timer",
+    "trigger_config": {"interval_minutes": 20},
+    "task": "Run the scheduled check"
+  },
+  {
+    "id": "webhook-event",
+    "name": "Webhook Event Handler",
+    "trigger_type": "webhook",
+    "trigger_config": {"event_types": ["webhook_received"]},
+    "task": "Process incoming webhook event"
+  }
 ]
-
-# Webhook server config (only needed if using webhooks)
-runtime_config = AgentRuntimeConfig(
-    webhook_host="127.0.0.1",
-    webhook_port=8080,
-    webhook_routes=[
-        {
-            "source_id": "my-source",
-            "path": "/webhooks/my-source",
-            "methods": ["POST"],
-        },
-    ],
-)
 ```
 
-**Key rules for async entry points:**
-- `async_entry_points` is a list of `AsyncEntryPointSpec` (NOT `EntryPointSpec`)
-- `runtime_config` is `AgentRuntimeConfig` (NOT `RuntimeConfig` from config.py)
-- Valid trigger_types: `timer`, `event`, `webhook`, `manual`, `api`
-- Valid isolation_levels: `isolated`, `shared`, `synchronized`
+**Key rules for triggers.json:**
+- Valid trigger_types: `timer`, `webhook`
 - Timer trigger_config (cron): `{"cron": "0 9 * * *"}` — standard 5-field cron expression
-- Timer trigger_config (interval): `{"interval_minutes": float, "run_immediately": bool}`
-- Event trigger_config: `{"event_types": ["webhook_received"], "filter_stream": "...", "filter_node": "..."}`
-- Use `isolation_level="shared"` for async entry points that need to read
-  the primary session's memory (e.g., user-configured rules)
-- The `_build_graph()` method passes `async_entry_points` to GraphSpec
-- Reference: `exports/gmail_inbox_guardian/agent.py`
+- Timer trigger_config (interval): `{"interval_minutes": float}`
+- Each trigger must have a unique `id`
+- The `task` field describes what the worker should do when the trigger fires
+- Triggers are persisted back to `triggers.json` when modified via queen tools
 
 ## __init__.py
 
@@ -450,21 +415,6 @@ __all__ = [
     "loop_config",
     "default_config",
     "metadata",
-]
-```
-
-**If the agent uses async entry points**, also import and export:
-```python
-from .agent import (
-    ...,
-    async_entry_points,
-    runtime_config,  # Only if using webhooks
-)
-
-__all__ = [
-    ...,
-    "async_entry_points",
-    "runtime_config",
 ]
 ```
 

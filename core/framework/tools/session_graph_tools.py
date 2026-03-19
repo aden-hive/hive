@@ -78,19 +78,6 @@ def register_graph_tools(registry: ToolRegistry, runtime: AgentRuntime) -> int:
                 isolation_level="shared",
             )
 
-        # Async entry points
-        for aep in runner.graph.async_entry_points:
-            entry_points[aep.id] = EntryPointSpec(
-                id=aep.id,
-                name=aep.name,
-                entry_node=aep.entry_node,
-                trigger_type=aep.trigger_type,
-                trigger_config=aep.trigger_config,
-                isolation_level=aep.isolation_level,
-                priority=aep.priority,
-                max_concurrent=aep.max_concurrent,
-            )
-
         await runtime.add_graph(
             graph_id=graph_id,
             graph=runner.graph,

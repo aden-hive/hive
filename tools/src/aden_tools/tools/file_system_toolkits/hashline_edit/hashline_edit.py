@@ -2,6 +2,7 @@ import contextlib
 import json
 import os
 import re
+import sys
 import tempfile
 
 from mcp.server.fastmcp import FastMCP
@@ -38,7 +39,7 @@ def register_tools(mcp: FastMCP) -> None:
             Edit a file using anchor-based line references (N:hash) for precise edits.
 
         When to use
-            After reading a file with view_file(hashline=True), use the anchors to make
+            After reading a file with read_file(hashline=True), use the anchors to make
             targeted edits without reproducing exact file content.
 
         Rules & Constraints
@@ -380,16 +381,25 @@ def register_tools(mcp: FastMCP) -> None:
 
         # 9. Atomic write (write-to-tmp + os.replace)
         try:
-            original_mode = os.stat(secure_path).st_mode
             fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(secure_path))
             fd_open = True
             try:
-                if hasattr(os, "fchmod"):
-                    os.fchmod(fd, original_mode)
+                match sys.platform:
+                    case "win32":
+                        pass  # ACL preservation handled by atomic_replace below
+                    case _:
+                        original_mode = os.stat(secure_path).st_mode
+                        os.fchmod(fd, original_mode)
                 with os.fdopen(fd, "w", encoding=encoding, newline="") as f:
                     fd_open = False
                     f.write(joined)
-                os.replace(tmp_path, secure_path)
+                match sys.platform:
+                    case "win32":
+                        from aden_tools._win32_atomic import atomic_replace
+
+                        atomic_replace(secure_path, tmp_path)
+                    case _:
+                        os.replace(tmp_path, secure_path)
             except BaseException:
                 if fd_open:
                     os.close(fd)

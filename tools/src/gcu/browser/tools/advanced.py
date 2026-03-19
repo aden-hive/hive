@@ -56,7 +56,8 @@ def register_advanced_tools(mcp: FastMCP) -> None:
                 return {"ok": True, "action": "wait", "condition": "selector", "selector": selector}
             elif text:
                 await page.wait_for_function(
-                    f"document.body.innerText.includes('{text}')",
+                    "(text) => document.body.innerText.includes(text)",
+                    arg=text,
                     timeout=timeout_ms,
                 )
                 return {"ok": True, "action": "wait", "condition": "text", "text": text}
