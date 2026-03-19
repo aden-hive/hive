@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import time
 from collections.abc import AsyncIterator
@@ -351,8 +352,9 @@ def _dump_failed_request(
 def _compute_retry_delay(
     attempt: int,
     exception: BaseException | None = None,
-    backoff_base: int = RATE_LIMIT_BACKOFF_BASE,
-    max_delay: int = RATE_LIMIT_MAX_DELAY,
+    backoff_base: int = 1,
+    max_delay: int = 60,
+    add_jitter: bool = False,
 ) -> float:
     """Compute retry delay, preferring server-provided Retry-After headers.
 
@@ -360,10 +362,12 @@ def _compute_retry_delay(
     1. retry-after-ms header (milliseconds, float)
     2. retry-after header as seconds (float)
     3. retry-after header as HTTP-date (RFC 7231)
-    4. Exponential backoff: backoff_base * 2^attempt
+    4. Parsed retry delay hints in error text (retryDelay / Please retry in Xs)
+    5. Exponential backoff: backoff_base * 2^attempt
 
-    All values are capped at max_delay seconds.
+    Jitter (0-1s) can be added on top when requested.
     """
+    delay: float | None = None
     if exception is not None:
         response = getattr(exception, "response", None)
         if response is not None:
@@ -374,34 +378,98 @@ def _compute_retry_delay(
                 if retry_after_ms is not None:
                     try:
                         delay = float(retry_after_ms) / 1000.0
-                        return min(max(delay, 0), max_delay)
                     except (ValueError, TypeError):
-                        pass
+                        delay = None
 
                 # Priority 2: retry-after (seconds or HTTP-date)
-                retry_after = headers.get("retry-after")
-                if retry_after is not None:
+                if delay is None:
+                    retry_after = headers.get("retry-after")
+                else:
+                    retry_after = None
+                if retry_after is not None and delay is None:
                     # Try as seconds (float)
                     try:
                         delay = float(retry_after)
-                        return min(max(delay, 0), max_delay)
                     except (ValueError, TypeError):
-                        pass
+                        delay = None
 
                     # Try as HTTP-date (e.g., "Fri, 31 Dec 2025 23:59:59 GMT")
-                    try:
-                        from email.utils import parsedate_to_datetime
+                    if delay is None:
+                        try:
+                            from email.utils import parsedate_to_datetime
 
-                        retry_date = parsedate_to_datetime(retry_after)
-                        now = datetime.now(retry_date.tzinfo)
-                        delay = (retry_date - now).total_seconds()
-                        return min(max(delay, 0), max_delay)
-                    except (ValueError, TypeError, OverflowError):
-                        pass
+                            retry_date = parsedate_to_datetime(retry_after)
+                            now = datetime.now(retry_date.tzinfo)
+                            delay = (retry_date - now).total_seconds()
+                        except (ValueError, TypeError, OverflowError):
+                            delay = None
+
+        if delay is None:
+            error_text = str(exception)
+            retry_delay_match = re.search(
+                r"retrydelay[\"'\s:=]+\s*([0-9]+(?:\.[0-9]+)?)\s*(ms|s|sec|secs|second|seconds)?",
+                error_text,
+                flags=re.IGNORECASE,
+            )
+            if retry_delay_match:
+                value = float(retry_delay_match.group(1))
+                unit = (retry_delay_match.group(2) or "s").lower()
+                delay = value / 1000.0 if unit == "ms" else value
+
+        if delay is None:
+            please_retry_match = re.search(
+                r"please retry in\s*([0-9]+(?:\.[0-9]+)?)\s*(ms|s|sec|secs|second|seconds)",
+                str(exception),
+                flags=re.IGNORECASE,
+            )
+            if please_retry_match:
+                value = float(please_retry_match.group(1))
+                unit = please_retry_match.group(2).lower()
+                delay = value / 1000.0 if unit == "ms" else value
 
     # Fallback: exponential backoff
-    delay = backoff_base * (2**attempt)
-    return min(delay, max_delay)
+    if delay is None:
+        delay = backoff_base * (2**attempt)
+
+    delay = min(max(delay, 0), max_delay)
+    if add_jitter:
+        delay += random.uniform(0, 1)
+    return delay
+
+
+def is_rate_limit_error(error: Exception) -> bool:
+    """Return True when the exception likely represents provider rate limiting."""
+    if isinstance(getattr(error, "status_code", None), int) and getattr(error, "status_code") == 429:
+        return True
+
+    status = getattr(error, "status", None)
+    if isinstance(status, int) and status == 429:
+        return True
+
+    response = getattr(error, "response", None)
+    if response is not None:
+        response_status_code = getattr(response, "status_code", None)
+        if isinstance(response_status_code, int) and response_status_code == 429:
+            return True
+        response_status = getattr(response, "status", None)
+        if isinstance(response_status, int) and response_status == 429:
+            return True
+
+    error_text = str(error).lower()
+    return (
+        "429" in error_text
+        or "resource_exhausted" in error_text
+        or "rate limit" in error_text
+        or "quota exceeded" in error_text
+    )
+
+
+def _truncate_error_message(error: BaseException, max_len: int = 160) -> str:
+    """Return a concise, single-line error string for logs."""
+    message = str(error).strip().replace("\n", " ")
+    if len(message) <= max_len:
+        return message
+    return f"{message[: max_len - 3]}..."
 
 
 def _is_stream_transient_error(exc: BaseException) -> bool:
@@ -633,33 +701,50 @@ class LiteLLMProvider(LLMProvider):
                     continue
 
                 return response
-            except RateLimitError as e:
-                # Dump full request to file for debugging
-                messages = kwargs.get("messages", [])
-                token_count, token_method = _estimate_tokens(model, messages)
-                dump_path = _dump_failed_request(
-                    model=model,
-                    kwargs=kwargs,
-                    error_type="rate_limit",
-                    attempt=attempt,
-                )
-                if attempt == retries:
-                    logger.error(
-                        f"[retry] GAVE UP on {model} after {retries + 1} "
-                        f"attempts — rate limit error: {e!s}. "
-                        f"~{token_count} tokens ({token_method}). "
-                        f"Full request dumped to: {dump_path}"
+            except Exception as e:
+                if is_rate_limit_error(e):
+                    # Dump full request to file for debugging
+                    messages = kwargs.get("messages", [])
+                    token_count, token_method = _estimate_tokens(model, messages)
+                    dump_path = _dump_failed_request(
+                        model=model,
+                        kwargs=kwargs,
+                        error_type="rate_limit",
+                        attempt=attempt,
                     )
-                    raise
-                wait = _compute_retry_delay(attempt, exception=e)
-                logger.warning(
-                    f"[retry] {model} rate limited (429): {e!s}. "
-                    f"~{token_count} tokens ({token_method}). "
-                    f"Full request dumped to: {dump_path}. "
-                    f"Retrying in {wait}s "
-                    f"(attempt {attempt + 1}/{retries})"
-                )
-                time.sleep(wait)
+                    short_error = _truncate_error_message(e)
+                    if attempt == retries:
+                        logger.error(
+                            f"[RateLimit] Exhausted {retries + 1}/{retries + 1} attempts | "
+                            f"model={model} | error={short_error}. "
+                            "Rate limit exceeded after "
+                            f"{retries + 1} attempts. Please wait or upgrade your API plan."
+                        )
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(
+                                "[RateLimit] model=%s | dump_path=%s | ~%s tokens (%s)",
+                                model,
+                                dump_path,
+                                token_count,
+                                token_method,
+                            )
+                        raise
+                    wait = _compute_retry_delay(attempt, exception=e, add_jitter=True)
+                    logger.warning(
+                        f"[RateLimit] Attempt {attempt + 1}/{retries + 1} | "
+                        f"Retrying in {wait:.1f}s | model={model} | error={short_error}"
+                    )
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "[RateLimit] model=%s | dump_path=%s | ~%s tokens (%s)",
+                            model,
+                            dump_path,
+                            token_count,
+                            token_method,
+                        )
+                    time.sleep(wait)
+                    continue
+                raise
         # unreachable, but satisfies type checker
         raise RuntimeError("Exhausted rate limit retries")
 
@@ -834,32 +919,49 @@ class LiteLLMProvider(LLMProvider):
                     continue
 
                 return response
-            except RateLimitError as e:
-                messages = kwargs.get("messages", [])
-                token_count, token_method = _estimate_tokens(model, messages)
-                dump_path = _dump_failed_request(
-                    model=model,
-                    kwargs=kwargs,
-                    error_type="rate_limit",
-                    attempt=attempt,
-                )
-                if attempt == retries:
-                    logger.error(
-                        f"[async-retry] GAVE UP on {model} after {retries + 1} "
-                        f"attempts — rate limit error: {e!s}. "
-                        f"~{token_count} tokens ({token_method}). "
-                        f"Full request dumped to: {dump_path}"
+            except Exception as e:
+                if is_rate_limit_error(e):
+                    messages = kwargs.get("messages", [])
+                    token_count, token_method = _estimate_tokens(model, messages)
+                    dump_path = _dump_failed_request(
+                        model=model,
+                        kwargs=kwargs,
+                        error_type="rate_limit",
+                        attempt=attempt,
                     )
-                    raise
-                wait = _compute_retry_delay(attempt, exception=e)
-                logger.warning(
-                    f"[async-retry] {model} rate limited (429): {e!s}. "
-                    f"~{token_count} tokens ({token_method}). "
-                    f"Full request dumped to: {dump_path}. "
-                    f"Retrying in {wait}s "
-                    f"(attempt {attempt + 1}/{retries})"
-                )
-                await asyncio.sleep(wait)
+                    short_error = _truncate_error_message(e)
+                    if attempt == retries:
+                        logger.error(
+                            f"[RateLimit] Exhausted {retries + 1}/{retries + 1} attempts | "
+                            f"model={model} | error={short_error}. "
+                            "Rate limit exceeded after "
+                            f"{retries + 1} attempts. Please wait or upgrade your API plan."
+                        )
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(
+                                "[RateLimit] model=%s | dump_path=%s | ~%s tokens (%s)",
+                                model,
+                                dump_path,
+                                token_count,
+                                token_method,
+                            )
+                        raise
+                    wait = _compute_retry_delay(attempt, exception=e, add_jitter=True)
+                    logger.warning(
+                        f"[RateLimit] Attempt {attempt + 1}/{retries + 1} | "
+                        f"Retrying in {wait:.1f}s | model={model} | error={short_error}"
+                    )
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "[RateLimit] model=%s | dump_path=%s | ~%s tokens (%s)",
+                            model,
+                            dump_path,
+                            token_count,
+                            token_method,
+                        )
+                    await asyncio.sleep(wait)
+                    continue
+                raise
         raise RuntimeError("Exhausted rate limit retries")
 
     async def acomplete(
@@ -1887,20 +1989,27 @@ class LiteLLMProvider(LLMProvider):
                     yield event
                 return
 
-            except RateLimitError as e:
-                if attempt < RATE_LIMIT_MAX_RETRIES:
-                    wait = _compute_retry_delay(attempt, exception=e)
-                    logger.warning(
-                        f"[stream-retry] {self.model} rate limited (429): {e!s}. "
-                        f"Retrying in {wait:.1f}s "
-                        f"(attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES})"
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-                yield StreamErrorEvent(error=str(e), recoverable=False)
-                return
-
             except Exception as e:
+                if is_rate_limit_error(e):
+                    short_error = _truncate_error_message(e)
+                    if attempt < RATE_LIMIT_MAX_RETRIES:
+                        wait = _compute_retry_delay(attempt, exception=e, add_jitter=True)
+                        logger.warning(
+                            f"[RateLimit] Attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES + 1} | "
+                            f"Retrying in {wait:.1f}s | model={self.model} | "
+                            f"error={short_error}"
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+                    logger.error(
+                        f"[RateLimit] Exhausted {RATE_LIMIT_MAX_RETRIES + 1}/"
+                        f"{RATE_LIMIT_MAX_RETRIES + 1} attempts | model={self.model} | "
+                        f"error={short_error}. Rate limit exceeded after "
+                        f"{RATE_LIMIT_MAX_RETRIES + 1} attempts. Please wait or upgrade your "
+                        "API plan."
+                    )
+                    yield StreamErrorEvent(error=str(e), recoverable=False)
+                    return
                 if self._should_use_openrouter_tool_compat(e, tools):
                     _remember_openrouter_tool_compat_model(self.model)
                     async for event in self._stream_via_openrouter_tool_compat(
