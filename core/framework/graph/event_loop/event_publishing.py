@@ -320,9 +320,7 @@ async def run_hooks(
         try:
             result = await hook(ctx)
         except Exception:
-            logger.warning(
-                "Hook '%s' raised an exception", event, exc_info=True
-            )
+            logger.warning("Hook '%s' raised an exception", event, exc_info=True)
             continue
         if result is None:
             continue

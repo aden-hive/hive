@@ -33,8 +33,8 @@ OPENROUTER_SEPARATOR_TRANSLATION = str.maketrans(
         "\u2212": "-",
         "\u2044": "/",
         "\u2215": "/",
-        "\u29F8": "/",
-        "\uFF0F": "/",
+        "\u29f8": "/",
+        "\uff0f": "/",
     }
 )
 
@@ -66,9 +66,7 @@ def _sanitize_openrouter_model_id(value: str) -> str:
     """Sanitize pasted OpenRouter model IDs into a comparable slug."""
     normalized = unicodedata.normalize("NFKC", value or "")
     normalized = "".join(
-        ch
-        for ch in normalized
-        if unicodedata.category(ch) not in {"Cc", "Cf"}
+        ch for ch in normalized if unicodedata.category(ch) not in {"Cc", "Cf"}
     )
     normalized = normalized.translate(OPENROUTER_SEPARATOR_TRANSLATION)
     normalized = re.sub(r"\s+", "", normalized)
@@ -183,7 +181,10 @@ def check_openrouter(
         return {"valid": False, "message": "Invalid OpenRouter API key"}
     if r.status_code == 403:
         return {"valid": False, "message": "OpenRouter API key lacks permissions"}
-    return {"valid": False, "message": f"OpenRouter API returned status {r.status_code}"}
+    return {
+        "valid": False,
+        "message": f"OpenRouter API returned status {r.status_code}",
+    }
 
 
 def check_openrouter_model(

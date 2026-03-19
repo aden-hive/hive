@@ -269,9 +269,7 @@ async def execute_subagent(
     # Derive a subagent-scoped spillover dir
     subagent_spillover = None
     if config.spillover_dir:
-        subagent_spillover = str(
-            Path(config.spillover_dir) / agent_id / subagent_instance
-        )
+        subagent_spillover = str(Path(config.spillover_dir) / agent_id / subagent_instance)
 
     # Import here to avoid circular imports at module level
     from framework.graph.event_loop_node import EventLoopNode, LoopConfig, SubagentJudge

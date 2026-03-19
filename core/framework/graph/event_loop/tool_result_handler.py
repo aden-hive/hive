@@ -122,9 +122,7 @@ def extract_json_metadata(parsed: Any, *, _depth: int = 0, _max_depth: int = 3) 
                         line += f" (each item: list of {len(first)} elements)"
                 lines.append(line)
             elif isinstance(value, dict):
-                child = extract_json_metadata(
-                    value, _depth=_depth + 1, _max_depth=_max_depth
-                )
+                child = extract_json_metadata(value, _depth=_depth + 1, _max_depth=_max_depth)
                 lines.append(f'{indent}"{key}": {child}')
             else:
                 lines.append(f'{indent}"{key}": {type(value).__name__}')
@@ -261,8 +259,7 @@ def truncate_tool_result(
         if metadata_str:
             header += f"\n\nData structure:\n{metadata_str}"
         header += (
-            "\n\nWARNING: This is an INCOMPLETE preview. "
-            "Do NOT draw conclusions or counts from it."
+            "\n\nWARNING: This is an INCOMPLETE preview. Do NOT draw conclusions or counts from it."
         )
 
         truncated = f"{header}\n\nPreview (small sample only):\n{preview_block}"

@@ -2864,21 +2864,25 @@ class EventLoopNode(NodeProtocol):
     def _build_ask_user_tool(self) -> Tool:
         """Build the synthetic ask_user tool. Delegates to synthetic_tools module."""
         from framework.graph.event_loop.synthetic_tools import build_ask_user_tool
+
         return build_ask_user_tool()
 
     def _build_ask_user_multiple_tool(self) -> Tool:
         """Build the synthetic ask_user_multiple tool. Delegates to synthetic_tools module."""
         from framework.graph.event_loop.synthetic_tools import build_ask_user_multiple_tool
+
         return build_ask_user_multiple_tool()
 
     def _build_set_output_tool(self, output_keys: list[str] | None) -> Tool | None:
         """Build the synthetic set_output tool. Delegates to synthetic_tools module."""
         from framework.graph.event_loop.synthetic_tools import build_set_output_tool
+
         return build_set_output_tool(output_keys)
 
     def _build_escalate_tool(self) -> Tool:
         """Build the synthetic escalate tool. Delegates to synthetic_tools module."""
         from framework.graph.event_loop.synthetic_tools import build_escalate_tool
+
         return build_escalate_tool()
 
     def _build_delegate_tool(
@@ -2886,11 +2890,13 @@ class EventLoopNode(NodeProtocol):
     ) -> Tool | None:
         """Build the synthetic delegate_to_sub_agent tool. Delegates to synthetic_tools module."""
         from framework.graph.event_loop.synthetic_tools import build_delegate_tool
+
         return build_delegate_tool(sub_agents, node_registry)
 
     def _build_report_to_parent_tool(self) -> Tool:
         """Build the synthetic report_to_parent tool. Delegates to synthetic_tools module."""
         from framework.graph.event_loop.synthetic_tools import build_report_to_parent_tool
+
         return build_report_to_parent_tool()
 
     def _handle_set_output(
@@ -2900,6 +2906,7 @@ class EventLoopNode(NodeProtocol):
     ) -> ToolResult:
         """Handle set_output tool call. Delegates to synthetic_tools module."""
         from framework.graph.event_loop.synthetic_tools import handle_set_output
+
         return handle_set_output(tool_input, output_keys)
 
     # -------------------------------------------------------------------
@@ -2917,6 +2924,7 @@ class EventLoopNode(NodeProtocol):
     ) -> JudgeVerdict:
         """Evaluate the current state. Delegates to judge_pipeline module."""
         from framework.graph.event_loop.judge_pipeline import judge_turn
+
         return await judge_turn(
             mark_complete_flag=self._mark_complete_flag,
             judge=self._judge,
@@ -2987,11 +2995,13 @@ class EventLoopNode(NodeProtocol):
     def _ngram_similarity(s1: str, s2: str, n: int = 2) -> float:
         """Jaccard similarity of n-gram sets. Delegates to stall_detector module."""
         from framework.graph.event_loop.stall_detector import ngram_similarity
+
         return ngram_similarity(s1, s2, n)
 
     def _is_stalled(self, recent_responses: list[str]) -> bool:
         """Detect stall using n-gram similarity. Delegates to stall_detector module."""
         from framework.graph.event_loop.stall_detector import is_stalled
+
         return is_stalled(
             recent_responses,
             self._config.stall_detection_threshold,
@@ -3002,6 +3012,7 @@ class EventLoopNode(NodeProtocol):
     def _is_transient_error(exc: BaseException) -> bool:
         """Classify whether an exception is transient. Delegates to tool_result_handler module."""
         from framework.graph.event_loop.tool_result_handler import is_transient_error
+
         return is_transient_error(exc)
 
     @staticmethod
@@ -3010,6 +3021,7 @@ class EventLoopNode(NodeProtocol):
     ) -> list[tuple[str, str]]:
         """Create deterministic fingerprints. Delegates to stall_detector module."""
         from framework.graph.event_loop.stall_detector import fingerprint_tool_calls
+
         return fingerprint_tool_calls(tool_results)
 
     def _is_tool_doom_loop(
@@ -3018,6 +3030,7 @@ class EventLoopNode(NodeProtocol):
     ) -> tuple[bool, str]:
         """Detect doom loop. Delegates to stall_detector module."""
         from framework.graph.event_loop.stall_detector import is_tool_doom_loop
+
         return is_tool_doom_loop(
             recent_tool_fingerprints=recent_tool_fingerprints,
             threshold=self._config.tool_doom_loop_threshold,
@@ -3034,6 +3047,7 @@ class EventLoopNode(NodeProtocol):
         don't freeze the event loop.
         """
         from framework.graph.event_loop.tool_result_handler import execute_tool
+
         return await execute_tool(
             tool_executor=self._tool_executor,
             tc=tc,
@@ -3049,6 +3063,7 @@ class EventLoopNode(NodeProtocol):
         any compaction.
         """
         from framework.graph.event_loop.tool_result_handler import record_learning
+
         return record_learning(
             key=key,
             value=value,
@@ -3065,6 +3080,7 @@ class EventLoopNode(NodeProtocol):
     def _restore_spill_counter(self) -> None:
         """Scan spillover_dir for existing spill files and restore the counter."""
         from framework.graph.event_loop.tool_result_handler import restore_spill_counter
+
         self._spill_counter = restore_spill_counter(
             spillover_dir=self._config.spillover_dir,
         )
@@ -3083,6 +3099,7 @@ class EventLoopNode(NodeProtocol):
         Returns an empty string for simple scalars.
         """
         from framework.graph.event_loop.tool_result_handler import extract_json_metadata
+
         return extract_json_metadata(
             parsed=parsed,
         )
@@ -3097,6 +3114,7 @@ class EventLoopNode(NodeProtocol):
         Returns ``None`` if no truncation was needed (no large arrays).
         """
         from framework.graph.event_loop.tool_result_handler import build_json_preview
+
         return build_json_preview(
             parsed=parsed,
             max_chars=max_chars,
@@ -3120,6 +3138,7 @@ class EventLoopNode(NodeProtocol):
         - load_data results: truncate with pagination hint (no re-spill)
         """
         from framework.graph.event_loop.tool_result_handler import truncate_tool_result
+
         return truncate_tool_result(
             result=result,
             tool_name=tool_name,
@@ -3152,6 +3171,7 @@ class EventLoopNode(NodeProtocol):
         4. Emergency deterministic summary only if LLM failed or unavailable.
         """
         from framework.graph.event_loop.compaction import compact
+
         return await compact(
             ctx=ctx,
             conversation=conversation,
@@ -3179,6 +3199,7 @@ class EventLoopNode(NodeProtocol):
         appended once at the top-level call (``_depth == 0``).
         """
         from framework.graph.event_loop.compaction import llm_compact
+
         return await llm_compact(
             ctx=ctx,
             messages=messages,
@@ -3198,6 +3219,7 @@ class EventLoopNode(NodeProtocol):
     ) -> str:
         """Split messages in half and summarise each half independently."""
         from framework.graph.event_loop.compaction import _llm_compact_split
+
         return await _llm_compact_split(
             ctx=ctx,
             messages=messages,
@@ -3214,6 +3236,7 @@ class EventLoopNode(NodeProtocol):
     def _format_messages_for_summary(messages: list) -> str:
         """Format messages as text for LLM summarisation."""
         from framework.graph.event_loop.compaction import format_messages_for_summary
+
         return format_messages_for_summary(messages)
 
     def _build_llm_compaction_prompt(
@@ -3224,6 +3247,7 @@ class EventLoopNode(NodeProtocol):
     ) -> str:
         """Build prompt for LLM compaction targeting 50% of token budget."""
         from framework.graph.event_loop.compaction import build_llm_compaction_prompt
+
         return build_llm_compaction_prompt(
             ctx,
             accumulator,
@@ -3239,6 +3263,7 @@ class EventLoopNode(NodeProtocol):
     ) -> None:
         """Log compaction result to runtime logger and event bus."""
         from framework.graph.event_loop.compaction import log_compaction
+
         return await log_compaction(ctx, conversation, ratio_before, self._event_bus)
 
     def _build_emergency_summary(
@@ -3256,6 +3281,7 @@ class EventLoopNode(NodeProtocol):
         compaction without losing track of its task and inputs.
         """
         from framework.graph.event_loop.compaction import build_emergency_summary
+
         return build_emergency_summary(ctx, accumulator, conversation, self._config)
 
     # -------------------------------------------------------------------
@@ -3283,6 +3309,7 @@ class EventLoopNode(NodeProtocol):
         resume exactly where execution stopped.
         """
         from framework.graph.event_loop.cursor_persistence import restore
+
         return await restore(
             conversation_store=self._conversation_store,
             ctx=ctx,
@@ -3305,6 +3332,7 @@ class EventLoopNode(NodeProtocol):
         detection state so that resume picks up exactly where execution stopped.
         """
         from framework.graph.event_loop.cursor_persistence import write_cursor
+
         return await write_cursor(
             conversation_store=self._conversation_store,
             ctx=ctx,
@@ -3318,6 +3346,7 @@ class EventLoopNode(NodeProtocol):
     async def _drain_injection_queue(self, conversation: NodeConversation) -> int:
         """Drain all pending injected events as user messages. Returns count."""
         from framework.graph.event_loop.cursor_persistence import drain_injection_queue
+
         return await drain_injection_queue(
             queue=self._injection_queue,
             conversation=conversation,
@@ -3330,6 +3359,7 @@ class EventLoopNode(NodeProtocol):
         reason about all pending triggers before acting.
         """
         from framework.graph.event_loop.cursor_persistence import drain_trigger_queue
+
         return await drain_trigger_queue(
             queue=self._trigger_queue,
             conversation=conversation,
@@ -3348,6 +3378,7 @@ class EventLoopNode(NodeProtocol):
         If paused, the node exits having completed {iteration} iterations (0 to iteration-1).
         """
         from framework.graph.event_loop.cursor_persistence import check_pause
+
         return await check_pause(
             ctx=ctx,
             conversation=conversation,
@@ -3362,6 +3393,7 @@ class EventLoopNode(NodeProtocol):
         self, stream_id: str, node_id: str, execution_id: str = ""
     ) -> None:
         from framework.graph.event_loop.event_publishing import publish_loop_started
+
         return await publish_loop_started(
             event_bus=self._event_bus,
             stream_id=stream_id,
@@ -3382,6 +3414,7 @@ class EventLoopNode(NodeProtocol):
         Runs as a fire-and-forget task so it never blocks the main loop.
         """
         from framework.graph.event_loop.event_publishing import generate_action_plan
+
         return await generate_action_plan(
             event_bus=self._event_bus,
             ctx=ctx,
@@ -3405,6 +3438,7 @@ class EventLoopNode(NodeProtocol):
         previous hook.
         """
         from framework.graph.event_loop.event_publishing import run_hooks
+
         return await run_hooks(
             hooks_config=self._config.hooks,
             event=event,
@@ -3421,6 +3455,7 @@ class EventLoopNode(NodeProtocol):
         extra_data: dict | None = None,
     ) -> None:
         from framework.graph.event_loop.event_publishing import publish_iteration
+
         return await publish_iteration(
             event_bus=self._event_bus,
             stream_id=stream_id,
@@ -3443,6 +3478,7 @@ class EventLoopNode(NodeProtocol):
         iteration: int | None = None,
     ) -> None:
         from framework.graph.event_loop.event_publishing import publish_llm_turn_complete
+
         return await publish_llm_turn_complete(
             event_bus=self._event_bus,
             stream_id=stream_id,
@@ -3469,6 +3505,7 @@ class EventLoopNode(NodeProtocol):
     ) -> None:
         """Log a CONTINUE step that skips judge evaluation (e.g., waiting for input)."""
         from framework.graph.event_loop.event_publishing import log_skip_judge
+
         return log_skip_judge(
             ctx=ctx,
             node_id=node_id,
@@ -3484,6 +3521,7 @@ class EventLoopNode(NodeProtocol):
         self, stream_id: str, node_id: str, iterations: int, execution_id: str = ""
     ) -> None:
         from framework.graph.event_loop.event_publishing import publish_loop_completed
+
         return await publish_loop_completed(
             event_bus=self._event_bus,
             stream_id=stream_id,
@@ -3514,6 +3552,7 @@ class EventLoopNode(NodeProtocol):
         inner_turn: int = 0,
     ) -> None:
         from framework.graph.event_loop.event_publishing import publish_text_delta
+
         return await publish_text_delta(
             event_bus=self._event_bus,
             stream_id=stream_id,
@@ -3536,6 +3575,7 @@ class EventLoopNode(NodeProtocol):
         execution_id: str = "",
     ) -> None:
         from framework.graph.event_loop.event_publishing import publish_tool_started
+
         return await publish_tool_started(
             event_bus=self._event_bus,
             stream_id=stream_id,
@@ -3557,6 +3597,7 @@ class EventLoopNode(NodeProtocol):
         execution_id: str = "",
     ) -> None:
         from framework.graph.event_loop.event_publishing import publish_tool_completed
+
         return await publish_tool_completed(
             event_bus=self._event_bus,
             stream_id=stream_id,
@@ -3579,6 +3620,7 @@ class EventLoopNode(NodeProtocol):
         execution_id: str = "",
     ) -> None:
         from framework.graph.event_loop.event_publishing import publish_judge_verdict
+
         return await publish_judge_verdict(
             event_bus=self._event_bus,
             stream_id=stream_id,
@@ -3598,6 +3640,7 @@ class EventLoopNode(NodeProtocol):
         execution_id: str = "",
     ) -> None:
         from framework.graph.event_loop.event_publishing import publish_output_key_set
+
         return await publish_output_key_set(
             event_bus=self._event_bus,
             stream_id=stream_id,
@@ -3641,6 +3684,7 @@ class EventLoopNode(NodeProtocol):
             - metadata: Execution metadata (success, tokens, latency)
         """
         from framework.graph.event_loop.subagent_executor import execute_subagent
+
         return await execute_subagent(
             ctx=ctx,
             agent_id=agent_id,

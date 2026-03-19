@@ -205,9 +205,7 @@ def build_escalate_tool() -> Tool:
     )
 
 
-def build_delegate_tool(
-    sub_agents: list[str], node_registry: dict[str, Any]
-) -> Tool | None:
+def build_delegate_tool(sub_agents: list[str], node_registry: dict[str, Any]) -> Tool | None:
     """Build the synthetic delegate_to_sub_agent tool for subagent invocation.
 
     Args:

@@ -442,9 +442,7 @@ def build_emergency_summary(
                     file_list = "\n".join(
                         f"  - {f}  (full path: {data_dir / f})" for f in data_files[:30]
                     )
-                    parts.append(
-                        "DATA FILES (use load_data('<filename>') to read):\n" + file_list
-                    )
+                    parts.append("DATA FILES (use load_data('<filename>') to read):\n" + file_list)
                 if not all_files:
                     parts.append(
                         "NOTE: Large tool results may have been saved to files. "
@@ -477,4 +475,5 @@ def _extract_tool_call_history(conversation: NodeConversation) -> str:
     which works on raw message lists).
     """
     from framework.graph.conversation import extract_tool_call_history
+
     return extract_tool_call_history(list(conversation.messages))
