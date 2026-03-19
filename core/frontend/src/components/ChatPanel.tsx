@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useEffect } from "react";
+import { memo, useState, useRef, useEffect, useMemo } from "react";
 import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
 
 export interface ContextUsageEntry {
@@ -10,6 +10,7 @@ export interface ContextUsageEntry {
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
 import MultiQuestionWidget from "@/components/MultiQuestionWidget";
+import ParallelSubagentBubble, { type SubagentGroup } from "@/components/ParallelSubagentBubble";
 
 export interface ChatMessage {
   id: string;
@@ -25,6 +26,10 @@ export interface ChatMessage {
   createdAt?: number;
   /** Queen phase active when this message was created */
   phase?: "planning" | "building" | "staging" | "running";
+  /** Backend node_id that produced this message — used for subagent grouping */
+  nodeId?: string;
+  /** Backend execution_id for this message */
+  executionId?: string;
 }
 
 interface ChatPanelProps {
@@ -269,6 +274,58 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
     return true;
   });
 
+  // Group consecutive subagent messages into parallel bubbles.
+  // A message is a "subagent message" if its nodeId contains ":subagent:".
+  // Consecutive runs of subagent messages with 2+ distinct nodeIds become
+  // a ParallelSubagentBubble; runs with only 1 nodeId render normally.
+  type RenderItem =
+    | { kind: "message"; msg: ChatMessage }
+    | { kind: "parallel"; groupId: string; groups: SubagentGroup[] };
+
+  const renderItems = useMemo<RenderItem[]>(() => {
+    const items: RenderItem[] = [];
+    let i = 0;
+    while (i < threadMessages.length) {
+      const msg = threadMessages[i];
+      const isSubagent = msg.nodeId?.includes(":subagent:");
+      if (!isSubagent) {
+        items.push({ kind: "message", msg });
+        i++;
+        continue;
+      }
+      // Start collecting a consecutive subagent run
+      const runStart = i;
+      while (
+        i < threadMessages.length &&
+        threadMessages[i].nodeId?.includes(":subagent:")
+      ) {
+        i++;
+      }
+      const runMsgs = threadMessages.slice(runStart, i);
+      // Group by nodeId. With the backend fix, each subagent instance
+      // gets a unique nodeId (e.g. "node:subagent:agent:2" for instance 2).
+      const byNode = new Map<string, ChatMessage[]>();
+      for (const m of runMsgs) {
+        const nid = m.nodeId!;
+        if (!byNode.has(nid)) byNode.set(nid, []);
+        byNode.get(nid)!.push(m);
+      }
+      // Always fold subagent messages into a consolidated bubble —
+      // even a single subagent gets the folded view with one square.
+      const groups: SubagentGroup[] = [];
+      for (const [nodeId, msgs] of byNode) {
+        groups.push({
+          nodeId,
+          messages: msgs,
+          contextUsage: contextUsage?.[nodeId],
+        });
+      }
+      const groupId = `par-${runMsgs[0].id}`;
+      items.push({ kind: "parallel", groupId, groups });
+    }
+    return items;
+  }, [threadMessages, contextUsage]);
+
   // Mark current thread as read
   useEffect(() => {
     const count = messages.filter((m) => m.thread === activeThread).length;
@@ -314,11 +371,17 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
 
       {/* Messages */}
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto px-5 py-4 space-y-3">
-        {threadMessages.map((msg) => (
-          <div key={msg.id}>
-            <MessageBubble msg={msg} queenPhase={queenPhase} />
-          </div>
-        ))}
+        {renderItems.map((item) =>
+          item.kind === "parallel" ? (
+            <div key={item.groupId}>
+              <ParallelSubagentBubble groupId={item.groupId} groups={item.groups} />
+            </div>
+          ) : (
+            <div key={item.msg.id}>
+              <MessageBubble msg={item.msg} queenPhase={queenPhase} />
+            </div>
+          )
+        )}
 
         {/* Show typing indicator while waiting for first queen response (disabled + empty chat) */}
         {(isWaiting || (disabled && threadMessages.length === 0)) && (
