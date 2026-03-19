@@ -11,7 +11,6 @@ Session-primary routes:
 - GET    /api/sessions/{session_id}/entry-points     — list entry points
 - PATCH  /api/sessions/{session_id}/triggers/{id}   — update trigger task
 - GET    /api/sessions/{session_id}/graphs           — list graph IDs
-- GET    /api/sessions/{session_id}/queen-messages   — queen conversation history
 - GET    /api/sessions/{session_id}/events/history  — persisted eventbus log (for replay)
 
 Worker session browsing (persisted execution runs on disk):
@@ -862,60 +861,6 @@ async def handle_messages(request: web.Request) -> web.Response:
     return web.json_response({"messages": all_messages})
 
 
-async def handle_queen_messages(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/queen-messages — get queen conversation.
-
-    Reads directly from disk so it works for both live sessions and cold
-    (post-server-restart) sessions — no live session required.
-    """
-    session_id = request.match_info["session_id"]
-
-    queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
-    convs_dir = queen_dir / "conversations"
-    if not convs_dir.exists():
-        return web.json_response({"messages": [], "session_id": session_id})
-
-    all_messages: list[dict] = []
-
-    def _read_parts(parts_dir: Path, node_id: str) -> None:
-        if not parts_dir.exists():
-            return
-        for part_file in sorted(parts_dir.iterdir()):
-            if part_file.suffix != ".json":
-                continue
-            try:
-                part = json.loads(part_file.read_text(encoding="utf-8"))
-                part["_node_id"] = node_id
-                # Use file mtime as created_at so frontend can order
-                # queen and worker messages chronologically.
-                part.setdefault("created_at", part_file.stat().st_mtime)
-                all_messages.append(part)
-            except (json.JSONDecodeError, OSError):
-                continue
-
-    # Flat layout: conversations/parts/*.json
-    _read_parts(convs_dir / "parts", "queen")
-
-    # Node-based layout: conversations/<node_id>/parts/*.json
-    for node_dir in convs_dir.iterdir():
-        if not node_dir.is_dir() or node_dir.name == "parts":
-            continue
-        _read_parts(node_dir / "parts", node_dir.name)
-
-    all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
-
-    # Filter to client-facing messages only
-    all_messages = [
-        m
-        for m in all_messages
-        if not m.get("is_transition_marker")
-        and m["role"] != "tool"
-        and not (m["role"] == "assistant" and m.get("tool_calls"))
-    ]
-
-    return web.json_response({"messages": all_messages, "session_id": session_id})
-
-
 async def handle_session_events_history(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/events/history — persisted eventbus log.
 
@@ -1063,7 +1008,7 @@ def register_routes(app: web.Application) -> None:
         "/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task
     )
     app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
-    app.router.add_get("/api/sessions/{session_id}/queen-messages", handle_queen_messages)
+
     app.router.add_get("/api/sessions/{session_id}/events/history", handle_session_events_history)
 
     # Worker session browsing (session-primary)

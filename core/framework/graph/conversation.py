@@ -35,6 +35,8 @@ class Message:
     is_client_input: bool = False
     # Optional image content blocks (e.g. from browser_screenshot)
     image_content: list[dict[str, Any]] | None = None
+    # True when message contains an activated skill body (AS-10: never prune)
+    is_skill_content: bool = False
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
@@ -424,6 +426,7 @@ class NodeConversation:
         content: str,
         is_error: bool = False,
         image_content: list[dict[str, Any]] | None = None,
+        is_skill_content: bool = False,
     ) -> Message:
         msg = Message(
             seq=self._next_seq,
@@ -433,6 +436,7 @@ class NodeConversation:
             is_error=is_error,
             phase_id=self._current_phase,
             image_content=image_content,
+            is_skill_content=is_skill_content,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -626,6 +630,8 @@ class NodeConversation:
                 continue
             if msg.is_error:
                 continue  # never prune errors
+            if msg.is_skill_content:
+                continue  # never prune activated skill instructions (AS-10)
             if msg.content.startswith("[Pruned tool result"):
                 continue  # already pruned
             # Tiny results (set_output acks, confirmations) — pruning

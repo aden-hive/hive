@@ -54,6 +54,8 @@ class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, RegisteredTool] = {}
         self._mcp_clients: list[Any] = []  # List of MCPClient instances
+        self._mcp_client_servers: dict[int, str] = {}  # client id -> server name
+        self._mcp_managed_clients: set[int] = set()  # client ids acquired from the manager
         self._session_context: dict[str, Any] = {}  # Auto-injected context for tools
         self._provider_index: dict[str, set[str]] = {}  # provider -> tool names
         # MCP resync tracking
@@ -487,6 +489,7 @@ class ToolRegistry:
     def register_mcp_server(
         self,
         server_config: dict[str, Any],
+        use_connection_manager: bool = True,
     ) -> int:
         """
         Register an MCP server and discover its tools.
@@ -502,12 +505,14 @@ class ToolRegistry:
                 - url: Server URL (for http)
                 - headers: HTTP headers (for http)
                 - description: Server description (optional)
+            use_connection_manager: When True, reuse a shared client keyed by server name
 
         Returns:
             Number of tools registered from this server
         """
         try:
             from framework.runner.mcp_client import MCPClient, MCPServerConfig
+            from framework.runner.mcp_connection_manager import MCPConnectionManager
 
             # Build config object
             config = MCPServerConfig(
@@ -523,11 +528,18 @@ class ToolRegistry:
             )
 
             # Create and connect client
-            client = MCPClient(config)
-            client.connect()
+            if use_connection_manager:
+                client = MCPConnectionManager.get_instance().acquire(config)
+            else:
+                client = MCPClient(config)
+                client.connect()
 
             # Store client for cleanup
             self._mcp_clients.append(client)
+            client_id = id(client)
+            self._mcp_client_servers[client_id] = config.name
+            if use_connection_manager:
+                self._mcp_managed_clients.add(client_id)
 
             # Register each tool
             server_name = server_config["name"]
@@ -729,12 +741,7 @@ class ToolRegistry:
         logger.info("%s — resyncing MCP servers", reason)
 
         # 1. Disconnect existing MCP clients
-        for client in self._mcp_clients:
-            try:
-                client.disconnect()
-            except Exception as e:
-                logger.warning(f"Error disconnecting MCP client during resync: {e}")
-        self._mcp_clients.clear()
+        self._cleanup_mcp_clients("during resync")
 
         # 2. Remove MCP-registered tools
         for name in self._mcp_tool_names:
@@ -749,12 +756,28 @@ class ToolRegistry:
 
     def cleanup(self) -> None:
         """Clean up all MCP client connections."""
+        self._cleanup_mcp_clients()
+
+    def _cleanup_mcp_clients(self, context: str = "") -> None:
+        """Disconnect or release all tracked MCP clients for this registry."""
+        if context:
+            context = f" {context}"
+
         for client in self._mcp_clients:
+            client_id = id(client)
+            server_name = self._mcp_client_servers.get(client_id, client.config.name)
             try:
-                client.disconnect()
+                if client_id in self._mcp_managed_clients:
+                    from framework.runner.mcp_connection_manager import MCPConnectionManager
+
+                    MCPConnectionManager.get_instance().release(server_name)
+                else:
+                    client.disconnect()
             except Exception as e:
-                logger.warning(f"Error disconnecting MCP client: {e}")
+                logger.warning(f"Error disconnecting MCP client{context}: {e}")
         self._mcp_clients.clear()
+        self._mcp_client_servers.clear()
+        self._mcp_managed_clients.clear()
 
     def __del__(self):
         """Destructor to ensure cleanup."""

@@ -1,5 +1,12 @@
 import { memo, useState, useRef, useEffect } from "react";
 import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
+
+export interface ContextUsageEntry {
+  usagePct: number;
+  messageCount: number;
+  estimatedTokens: number;
+  maxTokens: number;
+}
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
 import MultiQuestionWidget from "@/components/MultiQuestionWidget";
@@ -47,6 +54,8 @@ interface ChatPanelProps {
   onQuestionDismiss?: () => void;
   /** Queen operating phase — shown as a tag on queen messages */
   queenPhase?: "planning" | "building" | "staging" | "running";
+  /** Context window usage for queen and workers */
+  contextUsage?: Record<string, ContextUsageEntry>;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -241,7 +250,7 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
   );
 }, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.msg.phase === next.msg.phase && prev.queenPhase === next.queenPhase);
 
-export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, pendingQuestions, onQuestionSubmit, onMultiQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, pendingQuestions, onQuestionSubmit, onMultiQuestionSubmit, onQuestionDismiss, queenPhase, contextUsage }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -251,7 +260,13 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
 
   const threadMessages = messages.filter((m) => {
     if (m.type === "system" && !m.thread) return false;
-    return m.thread === activeThread;
+    if (m.thread !== activeThread) return false;
+    // Hide queen messages whose content is whitespace-only — these are
+    // tool-use-only turns that have no visible text.  During live operation
+    // tool pills provide context, but on resume the pills are gone so
+    // the empty bubble is meaningless.
+    if (m.role === "queen" && !m.type && (!m.content || !m.content.trim())) return false;
+    return true;
   });
 
   // Mark current thread as read
@@ -349,6 +364,57 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
         )}
         <div ref={bottomRef} />
       </div>
+
+      {/* Context window usage bar — sits between messages and input */}
+      {(() => {
+        if (!contextUsage) return null;
+        const queenUsage = contextUsage["__queen__"];
+        const workerEntries = Object.entries(contextUsage).filter(([k]) => k !== "__queen__");
+        const workerUsage = workerEntries.length > 0
+          ? workerEntries.reduce((best, [, v]) => (v.usagePct > best.usagePct ? v : best), workerEntries[0][1])
+          : undefined;
+        if (!queenUsage && !workerUsage) return null;
+        return (
+          <div className="flex items-center gap-3 mx-4 px-3 py-1 rounded-lg bg-muted/30 border border-border/20 group/ctx flex-shrink-0">
+            {queenUsage && (
+              <div className="flex items-center gap-2 flex-1 min-w-0" title={`Queen: ${(queenUsage.estimatedTokens / 1000).toFixed(1)}k / ${(queenUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${queenUsage.messageCount} messages`}>
+                <Crown className="w-3 h-3 flex-shrink-0" style={{ color: "hsl(45,95%,58%)" }} />
+                <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden min-w-[60px]">
+                  <div
+                    className="h-full rounded-full transition-all duration-500 ease-out"
+                    style={{
+                      width: `${Math.min(queenUsage.usagePct, 100)}%`,
+                      backgroundColor: queenUsage.usagePct >= 90 ? "hsl(0,65%,55%)" : queenUsage.usagePct >= 70 ? "hsl(35,90%,55%)" : "hsl(45,95%,58%)",
+                    }}
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground/70 flex-shrink-0 tabular-nums">
+                  <span className="group-hover/ctx:hidden">{queenUsage.usagePct}%</span>
+                  <span className="hidden group-hover/ctx:inline">{(queenUsage.estimatedTokens / 1000).toFixed(1)}k / {(queenUsage.maxTokens / 1000).toFixed(0)}k</span>
+                </span>
+              </div>
+            )}
+            {workerUsage && (
+              <div className="flex items-center gap-2 flex-1 min-w-0" title={`Worker: ${(workerUsage.estimatedTokens / 1000).toFixed(1)}k / ${(workerUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${workerUsage.messageCount} messages`}>
+                <Cpu className="w-3 h-3 flex-shrink-0" style={{ color: "hsl(220,60%,55%)" }} />
+                <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden min-w-[60px]">
+                  <div
+                    className="h-full rounded-full transition-all duration-500 ease-out"
+                    style={{
+                      width: `${Math.min(workerUsage.usagePct, 100)}%`,
+                      backgroundColor: workerUsage.usagePct >= 90 ? "hsl(0,65%,55%)" : workerUsage.usagePct >= 70 ? "hsl(35,90%,55%)" : "hsl(220,60%,55%)",
+                    }}
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground/70 flex-shrink-0 tabular-nums">
+                  <span className="group-hover/ctx:hidden">{workerUsage.usagePct}%</span>
+                  <span className="hidden group-hover/ctx:inline">{(workerUsage.estimatedTokens / 1000).toFixed(1)}k / {(workerUsage.maxTokens / 1000).toFixed(0)}k</span>
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Input area — question widget replaces textarea when a question is pending */}
       {pendingQuestions && pendingQuestions.length >= 2 && onMultiQuestionSubmit ? (
