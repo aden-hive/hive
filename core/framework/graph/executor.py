@@ -155,6 +155,8 @@ class GraphExecutor:
         skills_catalog_prompt: str = "",
         protocols_prompt: str = "",
         skill_dirs: list[str] | None = None,
+        context_warn_ratio: float | None = None,
+        batch_init_nudge: str | None = None,
     ):
         """
         Initialize the executor.
@@ -183,6 +185,8 @@ class GraphExecutor:
             skills_catalog_prompt: Available skills catalog for system prompt
             protocols_prompt: Default skill operational protocols for system prompt
             skill_dirs: Skill base directories for Tier 3 resource access
+            context_warn_ratio: Token usage ratio to trigger DS-13 preservation warning
+            batch_init_nudge: System prompt nudge for DS-12 batch auto-detection
         """
         self.runtime = runtime
         self.llm = llm
@@ -207,6 +211,8 @@ class GraphExecutor:
         self.skills_catalog_prompt = skills_catalog_prompt
         self.protocols_prompt = protocols_prompt
         self.skill_dirs: list[str] = skill_dirs or []
+        self.context_warn_ratio: float | None = context_warn_ratio
+        self.batch_init_nudge: str | None = batch_init_nudge
 
         if protocols_prompt:
             self.logger.info(
@@ -1906,6 +1912,8 @@ class GraphExecutor:
             skills_catalog_prompt=self.skills_catalog_prompt,
             protocols_prompt=self.protocols_prompt,
             skill_dirs=self.skill_dirs,
+            default_skill_warn_ratio=self.context_warn_ratio,
+            default_skill_batch_nudge=self.batch_init_nudge,
         )
 
     VALID_NODE_TYPES = {

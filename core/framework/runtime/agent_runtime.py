@@ -200,6 +200,8 @@ class AgentRuntime:
             self._skills_manager.load()
 
         self.skill_dirs: list[str] = self._skills_manager.allowlisted_dirs
+        self.context_warn_ratio: float | None = self._skills_manager.context_warn_ratio
+        self.batch_init_nudge: str | None = self._skills_manager.batch_init_nudge
 
         # Primary graph identity
         self._graph_id: str = graph_id or "primary"
@@ -348,6 +350,8 @@ class AgentRuntime:
                     skills_catalog_prompt=self.skills_catalog_prompt,
                     protocols_prompt=self.protocols_prompt,
                     skill_dirs=self.skill_dirs,
+                    context_warn_ratio=self.context_warn_ratio,
+                    batch_init_nudge=self.batch_init_nudge,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream

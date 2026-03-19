@@ -569,6 +569,10 @@ class NodeContext:
     skills_catalog_prompt: str = ""  # Available skills XML catalog
     protocols_prompt: str = ""  # Default skill operational protocols
     skill_dirs: list[str] = field(default_factory=list)  # Skill base dirs for resource access
+    # DS-12: batch auto-detection nudge appended to system prompt when input looks like a batch
+    default_skill_batch_nudge: str | None = None
+    # DS-13: token usage ratio at which to inject a context preservation warning
+    default_skill_warn_ratio: float | None = None
 
     # Per-iteration metadata provider — when set, EventLoopNode merges
     # the returned dict into node_loop_iteration event data.  Used by
