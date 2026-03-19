@@ -1165,20 +1165,26 @@ class AgentRunner:
                 # Get OAuth token from Claude Code subscription
                 api_key = get_claude_code_token()
                 if not api_key:
-                    print("Warning: Claude Code subscription configured but no token found.")
-                    print("Run 'claude' to authenticate, then try again.")
+                    logger.warning(
+                        "Claude Code subscription configured but no token found. "
+                        "Run 'claude' to authenticate, then try again."
+                    )
             elif use_codex:
                 # Get OAuth token from Codex subscription
                 api_key = get_codex_token()
                 if not api_key:
-                    print("Warning: Codex subscription configured but no token found.")
-                    print("Run 'codex' to authenticate, then try again.")
+                    logger.warning(
+                        "Codex subscription configured but no token found. "
+                        "Run 'codex' to authenticate, then try again."
+                    )
             elif use_kimi_code:
                 # Get API key from Kimi Code CLI config (~/.kimi/config.toml)
                 api_key = get_kimi_code_token()
                 if not api_key:
-                    print("Warning: Kimi Code subscription configured but no key found.")
-                    print("Run 'kimi /login' to authenticate, then try again.")
+                    logger.warning(
+                        "Kimi Code subscription configured but no key found. "
+                        "Run 'kimi /login' to authenticate, then try again."
+                    )
 
             if api_key and use_claude_code:
                 # Use litellm's built-in Anthropic OAuth support.
@@ -1248,8 +1254,11 @@ class AgentRunner:
                             if api_key_env:
                                 os.environ[api_key_env] = api_key
                         elif api_key_env:
-                            print(f"Warning: {api_key_env} not set. LLM calls will fail.")
-                            print(f"Set it with: export {api_key_env}=your-api-key")
+                            logger.warning(
+                                "%s not set. LLM calls will fail. export %s=your-api-key",
+                                api_key_env,
+                                api_key_env,
+                            )
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
