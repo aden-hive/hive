@@ -391,7 +391,7 @@ def register_tools(
     def google_sheets_update_values(
         spreadsheet_id: str,
         range_name: str,
-        values: list[list[Any]],
+        values: list[list[Any]] | str,
         value_input_option: str = "USER_ENTERED",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
@@ -405,13 +405,19 @@ def register_tools(
         Args:
             spreadsheet_id: The spreadsheet ID (from the URL)
             range_name: The A1 notation range (e.g., "Sheet1!A1:B10")
-            values: 2D array of values to write
+            values: 2D array of values to write. Accepts a list or a JSON string.
             value_input_option: How to interpret input
                 (USER_ENTERED parses, RAW stores as-is)
 
         Returns:
             Dict with update result or error
         """
+        # Accept stringified JSON and deserialize
+        import json
+        if isinstance(values, str):
+            values = json.loads(values)
+        if not isinstance(values, list):
+            return {"error": f"values must be a 2D list or JSON string, got {type(values).__name__}"}
         client = _get_client()
         if isinstance(client, dict):
             return client
@@ -426,7 +432,7 @@ def register_tools(
     def google_sheets_append_values(
         spreadsheet_id: str,
         range_name: str,
-        values: list[list[Any]],
+        values: list[list[Any]] | str,
         value_input_option: str = "USER_ENTERED",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
@@ -440,13 +446,19 @@ def register_tools(
         Args:
             spreadsheet_id: The spreadsheet ID (from the URL)
             range_name: The A1 notation range (e.g., "Sheet1!A1")
-            values: 2D array of values to append
+            values: 2D array of values to append. Accepts a list or a JSON string.
             value_input_option: How to interpret input
                 (USER_ENTERED parses, RAW stores as-is)
 
         Returns:
             Dict with append result or error
         """
+        # Accept stringified JSON and deserialize
+        import json
+        if isinstance(values, str):
+            values = json.loads(values)
+        if not isinstance(values, list):
+            return {"error": f"values must be a 2D list or JSON string, got {type(values).__name__}"}
         client = _get_client()
         if isinstance(client, dict):
             return client
