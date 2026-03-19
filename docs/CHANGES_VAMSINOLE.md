@@ -116,6 +116,26 @@ hive doctor --json       # JSON output for scripting
 
 ---
 
+## 6. feat: Hacker News integration (agent capability)
+
+**Files:** `tools/src/aden_tools/tools/hacker_news_tool/`
+
+**Problem:** Agents had no way to fetch tech news or trending discussions from Hacker News.
+
+**Change:**
+- New integration with Algolia HN Search API (no API key required)
+- Two tools:
+  - `hacker_news_search` — search stories by query (relevance or date), optional tag filter
+  - `hacker_news_front_page` — get current front page stories
+- Registered in verified tools
+
+**Use cases:**
+- News agents: find trending tech news and product launches
+- Research agents: gather community discussions on a topic
+- Content agents: discover popular stories for curation
+
+---
+
 ## Summary table
 
 | Type | Description | Files |
@@ -125,3 +145,4 @@ hive doctor --json       # JSON output for scripting
 | feat | `hive --version` / `hive -V` | `core/framework/cli.py` |
 | feat | `hive doctor` environment diagnostics | `core/framework/runner/cli.py` |
 | feat | Stack Overflow integration | `tools/src/aden_tools/tools/stack_overflow_tool/` |
+| feat | Hacker News integration | `tools/src/aden_tools/tools/hacker_news_tool/` |

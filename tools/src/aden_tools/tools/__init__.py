@@ -79,6 +79,7 @@ from .google_maps_tool import register_tools as register_google_maps
 from .google_search_console_tool import register_tools as register_google_search_console
 from .google_sheets_tool import register_tools as register_google_sheets
 from .greenhouse_tool import register_tools as register_greenhouse
+from .hacker_news_tool import register_tools as register_hacker_news
 from .http_headers_scanner import register_tools as register_http_headers_scanner
 from .hubspot_tool import register_tools as register_hubspot
 from .huggingface_tool import register_tools as register_huggingface
@@ -156,6 +157,7 @@ def _register_verified(
     register_wikipedia(mcp)
     register_arxiv(mcp)
     register_stack_overflow(mcp)
+    register_hacker_news(mcp)
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
