@@ -92,7 +92,11 @@ Get API keys:
 
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
+- **OpenRouter**: [openrouter.ai/keys](https://openrouter.ai/keys)
+- **Hive LLM**: [hive.adenhq.com](https://hive.adenhq.com)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
+
+See [llm_providers.md](llm_providers.md) for OpenRouter and Hive LLM setup.
 
 ### Install Claude Code Skills
 

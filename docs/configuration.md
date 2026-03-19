@@ -46,9 +46,17 @@ export CEREBRAS_API_KEY="..."
 
 # Groq (optional, fast inference)
 export GROQ_API_KEY="..."
+
+# OpenRouter (access 100+ models via single API)
+export OPENROUTER_API_KEY="sk-or-..."
+
+# Hive LLM (Aden-hosted models: queen, kimi-2.5, GLM-5, etc.)
+export HIVE_API_KEY="your-hive-api-key"
 ```
 
 The framework supports 100+ LLM providers through [LiteLLM](https://docs.litellm.ai/docs/providers). Set the corresponding environment variable for your provider.
+
+See [LLM Providers](llm_providers.md) for OpenRouter and Hive LLM setup details.
 
 ### Search & Tools (optional)
 

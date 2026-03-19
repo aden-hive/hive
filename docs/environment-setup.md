@@ -18,7 +18,7 @@ This will:
 - Install the core framework package (`framework`)
 - Install the tools package (`aden_tools`)
 - Initialize encrypted credential store (`~/.hive/credentials`)
-- Configure default LLM provider
+- Configure default LLM provider (Anthropic, OpenAI, OpenRouter, Hive LLM, etc. — see [llm_providers.md](llm_providers.md))
 - Fix package compatibility issues (openai + litellm)
 - Verify all installations
 

@@ -109,10 +109,12 @@ This sets up:
 - **framework** - Core agent runtime and graph executor (in `core/.venv`)
 - **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
 - **credential store** - Encrypted API key storage (`~/.hive/credentials`)
-- **LLM provider** - Interactive default model configuration
+- **LLM provider** - Interactive default model configuration (Anthropic, OpenAI, OpenRouter, Hive LLM, etc.)
 - All required Python dependencies with `uv`
 
 - Finally, it will open the Hive interface in your browser
+
+> **Tip:** For OpenRouter or Hive LLM, set `OPENROUTER_API_KEY` or `HIVE_API_KEY` before running quickstart. See [docs/llm_providers.md](docs/llm_providers.md) for details.
 
 > **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
 
