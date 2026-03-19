@@ -1810,29 +1810,16 @@ if [ "$CODEX_AVAILABLE" = true ]; then
     echo ""
 fi
 
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BOLD}IMPORTANT: Load your new configuration${NC}"
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-echo -e "  Your API keys have been saved to ${CYAN}$SHELL_RC_FILE${NC}"
-echo -e "  To use them, either:"
-echo ""
-echo -e "  ${GREEN}Option 1:${NC} Source your shell config now:"
-echo -e "     ${CYAN}source $SHELL_RC_FILE${NC}"
-echo ""
-echo -e "  ${GREEN}Option 2:${NC} Open a new terminal window"
-echo ""
-echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${DIM}API keys saved to ${CYAN}$SHELL_RC_FILE${NC}${DIM}. New terminals pick them up automatically.${NC}"
+echo -e "${DIM}Launch anytime with ${CYAN}hive open${NC}${DIM}. Run ./quickstart.sh again to reconfigure.${NC}"
 echo ""
 
-echo -e "${BOLD}Run an Agent:${NC}"
-echo ""
 if [ "$FRONTEND_BUILT" = true ]; then
-    echo -e "  Quickstart only sets things up. Launch the dashboard when you're ready:"
+    echo -e "${BOLD}Launching dashboard...${NC}"
+    echo ""
+    hive open
 else
-    echo -e "  Frontend build was skipped or failed. Once the dashboard is available, launch it with:"
+    echo -e "${YELLOW}Frontend build was skipped or failed.${NC} Launch manually when ready:"
+    echo -e "     ${CYAN}hive open${NC}"
+    echo ""
 fi
-echo -e "     ${CYAN}hive open${NC}"
-echo ""
-echo -e "${DIM}Run ./quickstart.sh again to reconfigure.${NC}"
-echo ""

@@ -819,10 +819,11 @@ class SessionManager:
             exec_id = event.execution_id
 
             if event.type == _ET.EXECUTION_STARTED:
-                # New run on this execution_id — reset cooldown so the first
-                # iteration always produces a mid-run snapshot.
+                # New run on this execution_id — start the cooldown timer so
+                # mid-run snapshots don't fire immediately at session start.
+                # The first snapshot will happen after _DIGEST_COOLDOWN seconds.
                 if exec_id:
-                    _last_digest.pop(exec_id, None)
+                    _last_digest[exec_id] = _time.monotonic()
 
             elif event.type in (
                 _ET.EXECUTION_COMPLETED,

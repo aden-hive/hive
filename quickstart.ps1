@@ -1908,69 +1908,20 @@ if ($CodexAvailable) {
     Write-Host ""
 }
 
-# Setup-only mode: show manual instructions
+# Final instructions and auto-launch
+Write-Host "API keys saved as User environment variables. New terminals pick them up automatically." -ForegroundColor DarkGray
+Write-Host "Launch anytime with " -NoNewline -ForegroundColor DarkGray
+Write-Color -Text "hive open" -Color Cyan -NoNewline
+Write-Host ". Run .\quickstart.ps1 again to reconfigure." -ForegroundColor DarkGray
+Write-Host ""
+
 if ($FrontendBuilt) {
-    Write-Color -Text "â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•" -Color Yellow
+    Write-Color -Text "Launching dashboard..." -Color White
     Write-Host ""
-    Write-Color -Text "  IMPORTANT: Restart your terminal now!" -Color Yellow
-    Write-Host ""
-    Write-Color -Text "â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•" -Color Yellow
-    Write-Host ""
-    Write-Host 'Environment variables (uv, API keys) are now configured, but you need to'
-    Write-Host 'restart your terminal for them to take effect in new sessions.'
-    Write-Host ""
-
-    Write-Color -Text "Run an Agent:" -Color White
-    Write-Host ""
-    Write-Host "  Quickstart only sets things up. Launch the dashboard when you're ready:"
-    Write-Color -Text "     hive open" -Color Cyan
-    Write-Host ""
-
-    if ($SelectedProviderId -or $credKey) {
-        Write-Color -Text "Note:" -Color White
-        Write-Host "- uv has been added to your User PATH"
-        if ($SelectedProviderId -and $SelectedEnvVar) {
-            Write-Host "- $SelectedEnvVar is set for LLM access"
-        }
-        if ($credKey) {
-            Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
-        }
-        Write-Host "- All variables will persist across reboots"
-        Write-Host ""
-    }
-
-    Write-Color -Text 'Run .\quickstart.ps1 again to reconfigure.' -Color DarkGray
-    Write-Host ""
+    & hive open
 } else {
-    Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
-    Write-Host ""
-    Write-Color -Text "  IMPORTANT: Restart your terminal now!" -Color Yellow
-    Write-Host ""
-    Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
-    Write-Host ""
-    Write-Host 'Environment variables (uv, API keys) are now configured, but you need to'
-    Write-Host 'restart your terminal for them to take effect in new sessions.'
-    Write-Host ""
-
-    Write-Color -Text "Run an Agent:" -Color White
-    Write-Host ""
-    Write-Host "  Frontend build was skipped or failed. Once the dashboard is available, launch it with:"
+    Write-Color -Text "Frontend build was skipped or failed." -Color Yellow -NoNewline
+    Write-Host " Launch manually when ready:"
     Write-Color -Text "     hive open" -Color Cyan
-    Write-Host ""
-
-    if ($SelectedProviderId -or $credKey) {
-        Write-Color -Text "Note:" -Color White
-        Write-Host "- uv has been added to your User PATH"
-        if ($SelectedProviderId -and $SelectedEnvVar) {
-            Write-Host "- $SelectedEnvVar is set for LLM access"
-        }
-        if ($credKey) {
-            Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
-        }
-        Write-Host "- All variables will persist across reboots"
-        Write-Host ""
-    }
-
-    Write-Color -Text 'Run .\quickstart.ps1 again to reconfigure.' -Color DarkGray
     Write-Host ""
 }

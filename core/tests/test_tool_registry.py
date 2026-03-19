@@ -152,7 +152,8 @@ def test_register_mcp_server_uses_connection_manager_when_enabled(monkeypatch):
     assert client.disconnect_calls == 0
 
 
-def test_register_mcp_server_defaults_to_direct_client_behavior(monkeypatch):
+def test_register_mcp_server_defaults_to_connection_manager(monkeypatch):
+    """Default behavior uses the connection manager (reuse enabled by default)."""
     registry = ToolRegistry()
     created_clients: list[_RegistryFakeClient] = []
 
@@ -161,17 +162,41 @@ def test_register_mcp_server_defaults_to_direct_client_behavior(monkeypatch):
         created_clients.append(client)
         return client
 
-    def fail_if_manager_used():
-        raise AssertionError("connection manager should not be used by default")
+    class FakeManager:
+        def acquire(self, config):
+            return fake_client_factory(config)
 
-    monkeypatch.setattr("framework.runner.mcp_client.MCPClient", fake_client_factory)
+        def release(self, server_name):
+            pass
+
     monkeypatch.setattr(
         "framework.runner.mcp_connection_manager.MCPConnectionManager.get_instance",
-        fail_if_manager_used,
+        lambda: FakeManager(),
     )
 
     count = registry.register_mcp_server(
         {"name": "direct", "transport": "stdio", "command": "echo"},
+    )
+
+    assert count == 1
+    assert len(created_clients) == 1
+
+
+def test_register_mcp_server_direct_client_when_manager_disabled(monkeypatch):
+    """When use_connection_manager=False, a direct MCPClient is created."""
+    registry = ToolRegistry()
+    created_clients: list[_RegistryFakeClient] = []
+
+    def fake_client_factory(config):
+        client = _RegistryFakeClient(config)
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr("framework.runner.mcp_client.MCPClient", fake_client_factory)
+
+    count = registry.register_mcp_server(
+        {"name": "direct", "transport": "stdio", "command": "echo"},
+        use_connection_manager=False,
     )
 
     assert count == 1

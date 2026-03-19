@@ -1,11 +1,14 @@
 """Shared MCP client connection management."""
 
+import logging
 import threading
 from typing import Any
 
 import httpx
 
 from framework.runner.mcp_client import MCPClient, MCPServerConfig
+
+logger = logging.getLogger(__name__)
 
 
 class MCPConnectionManager:
@@ -46,8 +49,14 @@ class MCPConnectionManager:
             with self._pool_lock:
                 client = self._pool.get(server_name)
                 if self._is_connected(client) and server_name not in self._transitions:
-                    self._refcounts[server_name] = self._refcounts.get(server_name, 0) + 1
+                    new_refcount = self._refcounts.get(server_name, 0) + 1
+                    self._refcounts[server_name] = new_refcount
                     self._configs[server_name] = config
+                    logger.debug(
+                        "Reusing pooled connection for MCP server '%s' (refcount=%d)",
+                        server_name,
+                        new_refcount,
+                    )
                     return client
 
                 transition_event = self._transitions.get(server_name)
