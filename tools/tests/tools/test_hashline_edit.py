@@ -966,6 +966,9 @@ class TestAtomicWrite:
     @pytest.mark.skipif(
         sys.platform == "win32", reason="chmod on directories not supported on Windows"
     )
+    @pytest.mark.skipif(
+        os.getuid() == 0, reason="chmod restrictions do not apply to root"
+    )
     def test_atomic_write_preserves_original_on_write_failure(
         self, hashline_edit_fn, mock_workspace, mock_secure_path, tmp_path
     ):

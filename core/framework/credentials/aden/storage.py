@@ -193,13 +193,7 @@ class AdenCachedStorage(CredentialStorage):
             logger.debug(f"Using cached credential '{credential_id}'")
             return local_cred
 
-        # If nothing local, there's nothing to refresh from Aden.
-        # sync_all() already fetched all available credentials — anything
-        # not in local storage doesn't exist on the Aden server.
-        if local_cred is None:
-            return None
-
-        # Try to refresh stale local credential from Aden
+        # Try to fetch / refresh from Aden when local is missing or stale.
         try:
             aden_cred = self._aden_provider.fetch_from_aden(credential_id)
             if aden_cred:
@@ -208,8 +202,9 @@ class AdenCachedStorage(CredentialStorage):
                 return aden_cred
         except Exception as e:
             logger.warning(f"Failed to fetch '{credential_id}' from Aden: {e}")
-            logger.info(f"Using stale cached credential '{credential_id}'")
-            return local_cred
+            if local_cred is not None:
+                logger.info(f"Using stale cached credential '{credential_id}'")
+                return local_cred
 
         return local_cred
 

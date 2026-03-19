@@ -120,6 +120,22 @@ async def handle_chat(request: web.Request) -> web.Response:
     if not message:
         return web.json_response({"error": "message is required"}, status=400)
 
+    # If a worker node is awaiting input, inject there instead of queen.
+    if session.worker_runtime and hasattr(session.worker_runtime, "find_awaiting_node"):
+        awaiting = session.worker_runtime.find_awaiting_node()
+        if awaiting and awaiting[0] is not None:
+            node_id, graph_id = awaiting
+            delivered = await session.worker_runtime.inject_input(
+                node_id, message, graph_id=graph_id
+            )
+            return web.json_response(
+                {
+                    "status": "injected",
+                    "node_id": node_id,
+                    "delivered": delivered,
+                }
+            )
+
     queen_executor = session.queen_executor
     if queen_executor is not None:
         node = queen_executor.node_registry.get("queen")

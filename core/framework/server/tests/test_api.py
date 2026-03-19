@@ -83,7 +83,7 @@ class MockStream:
     _active_executors: dict = field(default_factory=dict)
     active_execution_ids: set = field(default_factory=set)
 
-    async def cancel_execution(self, execution_id: str) -> bool:
+    async def cancel_execution(self, execution_id: str, **kwargs) -> bool:
         return execution_id in self._execution_tasks
 
 

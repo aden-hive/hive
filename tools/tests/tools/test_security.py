@@ -248,12 +248,10 @@ class TestGetSecurePath:
         assert result == str(symlink_path)
 
     def test_symlink_escape_detected_with_realpath(self, ids):
-        """Symlinks pointing outside sandbox can be detected using realpath.
+        """Symlinks pointing outside sandbox are blocked by get_secure_path.
 
-        Note: get_secure_path uses abspath (not realpath), so it validates the
-        lexical path. To fully protect against symlink attacks, callers should
-        verify realpath(result) is still within the sandbox before file I/O.
-        This test documents that pattern.
+        get_secure_path resolves symlinks and validates the real path is still
+        within the session sandbox, blocking symlink-based escape attacks.
         """
         from aden_tools.tools.file_system_toolkits.security import get_secure_path
 
@@ -267,10 +265,6 @@ class TestGetSecurePath:
         symlink_path = session_dir / "escape_link"
         symlink_path.symlink_to(outside_target)
 
-        # get_secure_path accepts the lexical path (symlink is inside session)
-        result = get_secure_path("escape_link", **ids)
-        assert result == str(symlink_path)
-
-        # However, realpath reveals the escape - callers should check this
-        real_path = os.path.realpath(result)
-        assert os.path.commonpath([real_path, str(session_dir)]) != str(session_dir)
+        # get_secure_path detects the symlink escape and raises ValueError
+        with pytest.raises(ValueError, match="resolves outside the session sandbox via symlink"):
+            get_secure_path("escape_link", **ids)

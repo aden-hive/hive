@@ -287,6 +287,12 @@ class ExecutionStream:
 
         self._evaluator = ExecutionEvaluator()
 
+        # Builder — applies improvement plans to the graph specification
+        # so the next execution benefits from structural changes.
+        from framework.runtime.builder import AgentBuilder
+
+        self._builder = AgentBuilder()
+
         # State
         self._running = False
 
@@ -792,6 +798,20 @@ class ExecutionStream:
                         result.session_state["_improvement_context"] = (
                             improvement.to_prompt_context()
                         )
+
+                    # --- Builder: apply structural improvements to graph ---
+                    try:
+                        build_result = self._builder.build(
+                            self.graph, improvement
+                        )
+                        if build_result.modification_count > 0:
+                            logger.info(
+                                "Builder applied %d modification(s) to graph",
+                                build_result.modification_count,
+                            )
+                    except Exception:
+                        logger.debug("Builder failed (non-fatal)", exc_info=True)
+
                     logger.info(
                         "Evaluation complete for %s: score=%.2f, trend=%s",
                         execution_id,

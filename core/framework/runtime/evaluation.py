@@ -219,8 +219,13 @@ class ExecutionEvaluator:
     This is the *execute → evaluate* leg of the self-improvement loop.
     """
 
-    def __init__(self, store: EvaluationStore | None = None) -> None:
+    def __init__(
+        self,
+        store: EvaluationStore | None = None,
+        llm_provider: Any | None = None,
+    ) -> None:
         self._store = store or EvaluationStore()
+        self._llm_provider = llm_provider  # Optional LLMProvider for llm_judge metrics
 
     # ----- public API -----
 
@@ -390,6 +395,8 @@ class ExecutionEvaluator:
             return self._eval_output_contains(criterion, output, target)
         elif metric == "output_equals":
             return self._eval_output_equals(criterion, output, target)
+        elif metric == "llm_judge":
+            return self._eval_llm_judge(criterion, result)
         elif metric == "success_rate":
             # Binary: did the execution succeed?
             return CriterionResult(
@@ -451,3 +458,54 @@ class ExecutionEvaluator:
             evidence=f"key '{target_key}' missing from output",
             metric_used="output_equals",
         )
+
+    def _eval_llm_judge(
+        self, criterion: SuccessCriterion, result: ExecutionResult
+    ) -> CriterionResult:
+        """Use LLM Judge for semantic quality evaluation.
+
+        Falls back to binary success if no LLM provider is available.
+        """
+        try:
+            from framework.testing.llm_judge import LLMJudge
+        except ImportError:
+            logger.debug("LLMJudge not available, falling back to binary success")
+            return CriterionResult(
+                criterion_id=criterion.id,
+                description=criterion.description,
+                met=result.success,
+                score=1.0 if result.success else 0.0,
+                evidence="llm_judge unavailable — used binary success",
+                metric_used="llm_judge_fallback",
+            )
+
+        judge = LLMJudge(llm_provider=self._llm_provider)
+        output_str = json.dumps(result.output, default=str)
+
+        try:
+            verdict = judge.evaluate(
+                constraint=criterion.description,
+                source_document=f"Goal criterion: {criterion.description}\nTarget: {criterion.target}",
+                summary=output_str,
+                criteria=str(criterion.target),
+            )
+            passes = verdict.get("passes", False)
+            explanation = verdict.get("explanation", "")
+            return CriterionResult(
+                criterion_id=criterion.id,
+                description=criterion.description,
+                met=passes,
+                score=1.0 if passes else 0.0,
+                evidence=f"LLM judge: {explanation}",
+                metric_used="llm_judge",
+            )
+        except Exception as e:
+            logger.warning("LLM judge evaluation failed: %s", e)
+            return CriterionResult(
+                criterion_id=criterion.id,
+                description=criterion.description,
+                met=result.success,
+                score=1.0 if result.success else 0.0,
+                evidence=f"llm_judge error ({e}) — used binary success",
+                metric_used="llm_judge_fallback",
+            )
