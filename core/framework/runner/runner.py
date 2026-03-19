@@ -751,13 +751,18 @@ def _refresh_antigravity_token(refresh_token: str) -> dict | None:
     import urllib.parse
     import urllib.request
 
-    data = urllib.parse.urlencode(
-        {
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": ANTIGRAVITY_OAUTH_CLIENT_ID,
-        }
-    ).encode("utf-8")
+    from framework.config import get_antigravity_client_secret
+
+    client_secret = get_antigravity_client_secret()
+    params: dict = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": ANTIGRAVITY_OAUTH_CLIENT_ID,
+    }
+    if client_secret:
+        params["client_secret"] = client_secret
+
+    data = urllib.parse.urlencode(params).encode("utf-8")
 
     req = urllib.request.Request(
         ANTIGRAVITY_OAUTH_TOKEN_URL,
@@ -863,6 +868,17 @@ def get_antigravity_token() -> str | None:
         "Re-open the Antigravity IDE or run 'antigravity-auth accounts add'."
     )
     return access_token
+
+
+def _is_antigravity_proxy_available() -> bool:
+    """Return True if antigravity-auth serve is running on localhost:8069."""
+    import socket
+
+    try:
+        with socket.create_connection(("localhost", 8069), timeout=0.5):
+            return True
+    except (OSError, TimeoutError):
+        return False
 
 
 @dataclass
@@ -1494,11 +1510,7 @@ class AgentRunner:
                     print("Warning: Kimi Code subscription configured but no key found.")
                     print("Run 'kimi /login' to authenticate, then try again.")
             elif use_antigravity:
-                # Get OAuth token from Antigravity subscription (Google OAuth)
-                api_key = get_antigravity_token()
-                if not api_key:
-                    print("Warning: Antigravity subscription configured but no token found.")
-                    print("Run 'antigravity-auth accounts add' to authenticate, then try again.")
+                pass  # AntigravityProvider handles credentials internally
 
             if api_key and use_claude_code:
                 # Use litellm's built-in Anthropic OAuth support.
@@ -1537,15 +1549,20 @@ class AgentRunner:
                     api_key=api_key,
                     api_base=api_base,
                 )
-            elif api_key and use_antigravity:
-                # Antigravity routes through a local OpenAI-compatible proxy
-                # started with 'antigravity-auth serve' on localhost:8069.
-                # No special headers required — the proxy handles auth internally.
-                self._llm = LiteLLMProvider(
-                    model=self.model,
-                    api_key=api_key,
-                    api_base="http://localhost:8069/v1",
-                )
+            elif use_antigravity:
+                # Direct OAuth to Google's internal Cloud Code Assist gateway.
+                # No local proxy required — AntigravityProvider handles token
+                # refresh and Gemini-format request/response conversion natively.
+                from framework.llm.antigravity import AntigravityProvider  # noqa: PLC0415
+
+                provider = AntigravityProvider(model=self.model)
+                if not provider.has_credentials():
+                    print(
+                        "Warning: Antigravity credentials not found. "
+                        "Install the opencode-antigravity-auth plugin and authenticate: "
+                        "https://github.com/NoeFabris/opencode-antigravity-auth"
+                    )
+                self._llm = provider
             else:
                 # Local models (e.g. Ollama) don't need an API key
                 if self._is_local_model(self.model):

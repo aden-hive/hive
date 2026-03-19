@@ -145,7 +145,8 @@ def get_worker_api_base() -> str | None:
     if worker_llm.get("use_kimi_code_subscription"):
         return "https://api.kimi.com/coding"
     if worker_llm.get("use_antigravity_subscription"):
-        return "http://localhost:8069/v1"
+        # Antigravity uses AntigravityProvider directly — no api_base needed.
+        return None
     if worker_llm.get("api_base"):
         return worker_llm["api_base"]
     if str(worker_llm.get("provider", "")).lower() == "openrouter":
@@ -281,6 +282,47 @@ def get_api_key() -> str | None:
     return None
 
 
+def get_antigravity_client_id() -> str:
+    """Return the Antigravity OAuth application client ID.
+
+    Checked in order:
+    1. ``ANTIGRAVITY_CLIENT_ID`` environment variable
+    2. ``llm.antigravity_client_id`` in ~/.hive/configuration.json
+       (written by quickstart when Antigravity is configured)
+
+    Falls back to the well-known application client ID registered by
+    Google for the Antigravity IDE — same value for every user of the
+    application, analogous to CLAUDE_OAUTH_CLIENT_ID / CODEX_OAUTH_CLIENT_ID
+    in runner.py.
+    """
+    env = os.environ.get("ANTIGRAVITY_CLIENT_ID")
+    if env:
+        return env
+    cfg_val = get_hive_config().get("llm", {}).get("antigravity_client_id")
+    if cfg_val:
+        return cfg_val
+    # Well-known Antigravity application client ID (public, not user-specific).
+    # Source: github.com/NoeFabris/opencode-antigravity-auth/blob/dev/src/constants.ts
+    return "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+
+
+def get_antigravity_client_secret() -> str | None:
+    """Return the Antigravity OAuth client secret.
+
+    Checked in order:
+    1. ``ANTIGRAVITY_CLIENT_SECRET`` environment variable
+    2. ``llm.antigravity_client_secret`` in ~/.hive/configuration.json
+       (written by quickstart when Antigravity is configured)
+
+    Returns None when not found — token refresh will be skipped and
+    the caller must use whatever access token is already available.
+    """
+    env = os.environ.get("ANTIGRAVITY_CLIENT_SECRET")
+    if env:
+        return env
+    return get_hive_config().get("llm", {}).get("antigravity_client_secret") or None
+
+
 def get_gcu_enabled() -> bool:
     """Return whether GCU (browser automation) is enabled in user config."""
     return get_hive_config().get("gcu_enabled", True)
@@ -304,8 +346,8 @@ def get_api_base() -> str | None:
         # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
         return "https://api.kimi.com/coding"
     if llm.get("use_antigravity_subscription"):
-        # Antigravity routes through a local OpenAI-compatible proxy.
-        return "http://localhost:8069/v1"
+        # Antigravity uses AntigravityProvider directly — no api_base needed.
+        return None
     if llm.get("api_base"):
         return llm["api_base"]
     if str(llm.get("provider", "")).lower() == "openrouter":

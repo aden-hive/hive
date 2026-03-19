@@ -846,6 +846,32 @@ prompt_model_selection() {
     done
 }
 
+# Read Antigravity OAuth client credentials from the installed npm package.
+# Exports _AG_CLIENT_SECRET and _AG_CLIENT_ID; returns 1 if package not found.
+_read_antigravity_creds_from_npm() {
+    local constants_js=""
+    local npm_root
+    npm_root="$(npm root -g 2>/dev/null)" && \
+        [ -f "$npm_root/opencode-antigravity-auth/dist/src/constants.js" ] && \
+        constants_js="$npm_root/opencode-antigravity-auth/dist/src/constants.js"
+    if [ -z "$constants_js" ]; then
+        for _candidate in \
+            /opt/homebrew/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js \
+            /usr/local/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js \
+            /usr/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js; do
+            if [ -f "$_candidate" ]; then
+                constants_js="$_candidate"
+                break
+            fi
+        done
+    fi
+    [ -z "$constants_js" ] && return 1
+    _AG_CLIENT_SECRET="$(grep -o '"GOCSPX-[^"]*"' "$constants_js" 2>/dev/null | tr -d '"' | head -1)"
+    _AG_CLIENT_ID="$(grep -o '"[0-9]*-[a-z0-9]*\.apps\.googleusercontent\.com"' "$constants_js" 2>/dev/null | tr -d '"' | head -1)"
+    export _AG_CLIENT_SECRET _AG_CLIENT_ID
+    [ -n "$_AG_CLIENT_SECRET" ] && [ -n "$_AG_CLIENT_ID" ]
+}
+
 # Function to save configuration
 # Args: provider_id env_var model max_tokens max_context_tokens [use_claude_code_sub] [api_base] [use_codex_sub] [use_antigravity_sub]
 save_configuration() {
@@ -868,6 +894,11 @@ save_configuration() {
     fi
     if [ -z "$max_context_tokens" ]; then
         max_context_tokens=120000
+    fi
+
+    if _read_antigravity_creds_from_npm 2>/dev/null; then
+        export ANTIGRAVITY_CLIENT_SECRET="$_AG_CLIENT_SECRET"
+        export ANTIGRAVITY_CLIENT_ID="$_AG_CLIENT_ID"
     fi
 
     uv run python - \
@@ -931,8 +962,19 @@ else:
 if use_antigravity_sub == "true":
     config["llm"]["use_antigravity_subscription"] = True
     config["llm"].pop("api_key_env_var", None)
+    # Store the Antigravity OAuth client secret so token refresh works
+    # without hardcoding it in source code (read at runtime via config.py).
+    import os as _os
+    _secret = _os.environ.get("ANTIGRAVITY_CLIENT_SECRET") or ""
+    if _secret:
+        config["llm"]["antigravity_client_secret"] = _secret
+    _client_id = _os.environ.get("ANTIGRAVITY_CLIENT_ID") or ""
+    if _client_id:
+        config["llm"]["antigravity_client_id"] = _client_id
 else:
     config["llm"].pop("use_antigravity_subscription", None)
+    config["llm"].pop("antigravity_client_secret", None)
+    config["llm"].pop("antigravity_client_id", None)
 
 if api_base:
     config["llm"]["api_base"] = api_base
@@ -1333,12 +1375,112 @@ case $choice in
         # Antigravity Subscription
         if [ "$ANTIGRAVITY_CRED_DETECTED" = false ]; then
             echo ""
-            echo -e "${YELLOW}  Antigravity credentials not found.${NC}"
-            echo -e "  Run ${CYAN}antigravity-auth accounts add${NC} to authenticate,"
-            echo -e "  then run this quickstart again."
+            echo -e "${CYAN}  Setting up Antigravity authentication...${NC}"
             echo ""
-            exit 1
-        else
+
+            # ── Step 1: ensure opencode is installed ────────────────────────
+            if ! command -v opencode &>/dev/null; then
+                echo -e "  Installing ${CYAN}opencode${NC} (required for Antigravity OAuth)..."
+                if command -v npm &>/dev/null; then
+                    npm install -g opencode-ai || { echo -e "${RED}  npm install failed. Install Node.js and retry.${NC}"; exit 1; }
+                else
+                    echo -e "${RED}  Node.js/npm not found. Install Node.js first: https://nodejs.org${NC}"
+                    exit 1
+                fi
+            fi
+
+            # ── Step 2: write opencode.json with the plugin ─────────────────
+            OPENCODE_CFG_DIR="$HOME/.config/opencode"
+            OPENCODE_CFG="$OPENCODE_CFG_DIR/opencode.json"
+            mkdir -p "$OPENCODE_CFG_DIR"
+
+            if [ ! -f "$OPENCODE_CFG" ]; then
+                cat > "$OPENCODE_CFG" <<'JSON'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-antigravity-auth@latest"],
+  "provider": {
+    "google": {
+      "models": {
+        "antigravity-gemini-3-flash": {
+          "name": "Gemini 3 Flash (Antigravity)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "antigravity-gemini-3-pro": {
+          "name": "Gemini 3 Pro (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "antigravity-gemini-3.1-pro": {
+          "name": "Gemini 3.1 Pro (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "antigravity-claude-sonnet-4-6": {
+          "name": "Claude Sonnet 4.6 (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "antigravity-claude-opus-4-6-thinking": {
+          "name": "Claude Opus 4.6 Thinking (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        }
+      }
+    }
+  }
+}
+JSON
+            else
+                # Inject plugin entry if not already present
+                uv run python3 - "$OPENCODE_CFG" <<'PY' 2>/dev/null || true
+import json, sys
+p = sys.argv[1]
+try:
+    with open(p) as f:
+        cfg = json.load(f)
+except Exception:
+    cfg = {}
+plugins = cfg.get("plugin", [])
+entry = "opencode-antigravity-auth@latest"
+if entry not in plugins:
+    plugins.append(entry)
+cfg["plugin"] = plugins
+import os
+fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+with os.fdopen(fd, "w") as f:
+    json.dump(cfg, f, indent=2)
+print("plugin entry added")
+PY
+            fi
+
+            echo -e "  ${GREEN}✓${NC} opencode.json configured with antigravity plugin"
+            echo ""
+            echo -e "  ${YELLOW}A browser window will open for Google OAuth.${NC}"
+            echo -e "  Sign in with your Google account that has Antigravity access."
+            echo ""
+
+            # ── Step 3: run opencode auth login ─────────────────────────────
+            opencode auth login || true
+
+            # ── Step 4: re-detect credentials ───────────────────────────────
+            if [ -f "$HOME/.config/opencode/antigravity-accounts.json" ]; then
+                ANTIGRAVITY_CRED_DETECTED=true
+            elif [ -f "$HOME/.config/antigravity_auth/accounts.json" ]; then
+                ANTIGRAVITY_CRED_DETECTED=true
+            fi
+
+            if [ "$ANTIGRAVITY_CRED_DETECTED" = false ]; then
+                echo ""
+                echo -e "${RED}  Authentication did not produce credentials.${NC}"
+                echo -e "  Run ${CYAN}opencode auth login${NC} manually and try again."
+                echo ""
+                exit 1
+            fi
+        fi
+
+        if [ "$ANTIGRAVITY_CRED_DETECTED" = true ]; then
             SUBSCRIPTION_MODE="antigravity"
             SELECTED_PROVIDER_ID="openai"
             SELECTED_MODEL="gemini-3-flash"
@@ -1348,8 +1490,7 @@ case $choice in
             echo -e "${YELLOW}  ⚠ Using Antigravity can technically cause your account suspension. Please use at your own risk.${NC}"
             echo ""
             echo -e "${GREEN}⬢${NC} Using Antigravity subscription"
-            echo -e "  ${DIM}Model: gemini-3-flash | Proxy: localhost:8069/v1${NC}"
-            echo -e "  ${DIM}Ensure 'antigravity-auth serve' is running before starting agents.${NC}"
+            echo -e "  ${DIM}Model: gemini-3-flash | Direct OAuth (no proxy required)${NC}"
         fi
         ;;
     8)
