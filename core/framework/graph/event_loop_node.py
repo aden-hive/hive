@@ -4007,8 +4007,16 @@ class EventLoopNode(NodeProtocol):
            does not fully resolve the budget.
         4. Emergency deterministic summary only if LLM failed or unavailable.
         """
+        import os as _os
+
         ratio_before = conversation.usage_ratio()
         phase_grad = getattr(ctx, "continuous_mode", False)
+
+        # Capture pre-compaction message inventory when over budget and debug
+        # is enabled, since compaction mutates the conversation in place.
+        pre_inventory: list[dict[str, Any]] | None = None
+        if ratio_before >= 1.0 and _os.environ.get("HIVE_COMPACTION_DEBUG"):
+            pre_inventory = self._build_message_inventory(conversation)
 
         # --- Step 1: Prune old tool results (free, no LLM) ---
         protect = max(2000, self._config.max_context_tokens // 12)
@@ -4024,7 +4032,7 @@ class EventLoopNode(NodeProtocol):
                 conversation.usage_ratio() * 100,
             )
         if not conversation.needs_compaction():
-            await self._log_compaction(ctx, conversation, ratio_before)
+            await self._log_compaction(ctx, conversation, ratio_before, pre_inventory)
             return
 
         # --- Step 2: Standard structure-preserving compaction (free, no LLM) ---
@@ -4037,7 +4045,7 @@ class EventLoopNode(NodeProtocol):
                 phase_graduated=phase_grad,
             )
         if not conversation.needs_compaction():
-            await self._log_compaction(ctx, conversation, ratio_before)
+            await self._log_compaction(ctx, conversation, ratio_before, pre_inventory)
             return
 
         # --- Step 3: LLM summary compaction ---
@@ -4064,7 +4072,7 @@ class EventLoopNode(NodeProtocol):
                 logger.warning("LLM compaction failed: %s", e)
 
         if not conversation.needs_compaction():
-            await self._log_compaction(ctx, conversation, ratio_before)
+            await self._log_compaction(ctx, conversation, ratio_before, pre_inventory)
             return
 
         # --- Step 4: Emergency deterministic summary (LLM failed/unavailable) ---
@@ -4078,7 +4086,7 @@ class EventLoopNode(NodeProtocol):
             keep_recent=1,
             phase_graduated=phase_grad,
         )
-        await self._log_compaction(ctx, conversation, ratio_before)
+        await self._log_compaction(ctx, conversation, ratio_before, pre_inventory)
 
     # --- LLM compaction with binary-search splitting ----------------------
 
