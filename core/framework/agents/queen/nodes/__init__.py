@@ -62,6 +62,12 @@ _SHARED_TOOLS = [
     "get_agent_checkpoint",
 ]
 
+# Episodic memory tools — available in every queen phase.
+_QUEEN_MEMORY_TOOLS = [
+    "write_to_diary",
+    "recall_diary",
+]
+
 # Queen phase-specific tool sets.
 
 # Planning phase: read-only exploration + design, no write tools.
@@ -84,16 +90,19 @@ _QUEEN_PLANNING_TOOLS = [
     "initialize_and_build_agent",
     # Load existing agent (after user confirms)
     "load_built_agent",
-]
+] + _QUEEN_MEMORY_TOOLS
 
 # Building phase: full coding + agent construction tools.
-_QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
-    "load_built_agent",
-    "list_credentials",
-    "replan_agent",
-    "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
-    "write_to_diary",  # Episodic memory — available in all phases
-]
+_QUEEN_BUILDING_TOOLS = (
+    _SHARED_TOOLS
+    + [
+        "load_built_agent",
+        "list_credentials",
+        "replan_agent",
+        "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
+    ]
+    + _QUEEN_MEMORY_TOOLS
+)
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
 _QUEEN_STAGING_TOOLS = [
@@ -114,7 +123,7 @@ _QUEEN_STAGING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-]
+] + _QUEEN_MEMORY_TOOLS
 
 # Running phase: worker is executing — monitor and control.
 _QUEEN_RUNNING_TOOLS = [
@@ -135,12 +144,11 @@ _QUEEN_RUNNING_TOOLS = [
     # Monitoring
     "get_worker_health_summary",
     "notify_operator",
-    "write_to_diary",  # Episodic memory — available in all phases
-    # Trigger management
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-]
+    "write_to_diary",  # Episodic memory — available in all phases
+] + _QUEEN_MEMORY_TOOLS
 
 
 # ---------------------------------------------------------------------------
@@ -279,44 +287,28 @@ visible to the user immediately. The draft captures business logic \
 Include in each node: id, name, description, planned tools, \
 input/output keys, and success criteria as high-level hints.
 
-Each node is auto-classified into an ISO 5807 flowchart symbol type \
-with a unique color. You can override auto-detection by setting \
-`flowchart_type` explicitly on a node. Common types:
+Each node is auto-classified into a flowchart symbol type with a unique \
+color. You can override auto-detection by setting `flowchart_type` \
+explicitly on a node. Available types:
 
-**Core symbols:**
-- **start** (green, stadium): Entry point / trigger
-- **terminal** (red, stadium): End of flow
-- **process** (blue, rectangle): Standard processing step
-- **decision** (amber, diamond): Conditional branching
-- **io** (purple, parallelogram): External data input/output
-- **document** (blue-grey, wavy rect): Report or document generation
-- **subprocess** (teal, subroutine): Delegated sub-agent / predefined process
-- **preparation** (brown, hexagon): Setup / initialization step
-- **manual_operation** (pink, trapezoid): Human-in-the-loop / manual review
-- **delay** (orange, D-shape): Wait / throttle / cooldown
-- **display** (cyan): Present results to user
-
-**Data storage:**
-- **database** (light green, cylinder): Database or data store
-- **stored_data** (lime): Generic persistent data
-- **internal_storage** (amber): In-memory / cache
-
-**Flow operations:**
-- **merge** (indigo, inv. triangle): Combine multiple inputs
-- **extract** (indigo, triangle): Split or filter data
-- **connector** (grey, circle): On-page link
-- **offpage_connector** (dark grey, pentagon): Cross-page link
-
-**Domain-specific:**
-- **browser** (dark indigo, hexagon): GCU browser automation / sub-agent \
+- **start** (sage green, stadium): Entry point / trigger
+- **terminal** (dusty red, stadium): End of flow
+- **process** (blue-gray, rectangle): Standard processing step
+- **decision** (warm amber, diamond): Conditional branching
+- **io** (dusty purple, parallelogram): External data input/output
+- **document** (steel blue, wavy rect): Report or document generation
+- **database** (muted teal, cylinder): Database or data store
+- **subprocess** (dark cyan, subroutine): Delegated sub-agent / predefined process
+- **browser** (deep blue, hexagon): GCU browser automation / sub-agent \
 delegation. At build time, browser nodes are dissolved into the parent \
 node's sub_agents list. Use for any GCU or sub-agent leaf node.
 
 Auto-detection works well for most cases: first node → start, nodes with \
 no outgoing edges → terminal, nodes with multiple conditional outgoing \
 edges → decision, GCU nodes → browser, nodes mentioning "database" → \
-database, nodes mentioning "report/document" → document, etc. Set \
-flowchart_type explicitly only when auto-detection would be wrong.
+database, nodes mentioning "report/document" → document, I/O tools like \
+send_email → io. Everything else defaults to process. Set flowchart_type \
+explicitly only when auto-detection would be wrong.
 
 ## Decision Nodes — Planning-Only Conditional Branching
 
@@ -858,6 +850,11 @@ You keep a diary. Use write_to_diary() when something worth remembering \
 happens: a pipeline went live, the user shared something important, a goal \
 was reached or abandoned. Write in first person, as you actually experienced \
 it. One or two paragraphs is enough.
+
+Use recall_diary() to look up past diary entries when the user asks about \
+previous sessions ("what happened yesterday?", "what did we work on last \
+week?") or when you need past context to make a decision. You can filter by \
+keyword and control how far back to search.
 """
 
 _queen_behavior_always = _queen_behavior_always + _queen_memory_instructions
@@ -1035,6 +1032,19 @@ You wake up when:
 If the user asks for progress, call get_worker_status() ONCE and report. \
 If the summary mentions issues, follow up with get_worker_status(focus="issues").
 
+## Subagent delegations (browser automation, GCU)
+
+When the worker delegates to a subagent (e.g., GCU browser automation), expect it \
+to take 2-5 minutes. During this time:
+- Progress will show 0% — this is NORMAL. The subagent only calls set_output at the end.
+- Check get_worker_status(focus="full") for "subagent_activity" — this shows the \
+subagent's latest reasoning text and confirms it is making real progress.
+- Do NOT conclude the subagent is stuck just because progress is 0% or because \
+you see repeated browser_click/browser_snapshot calls — that is the expected \
+pattern for web scraping.
+- Only intervene if: the subagent has been running for 5+ minutes with no new \
+subagent_activity updates, OR the judge escalates.
+
 ## Handling worker termination ([WORKER_TERMINAL])
 
 When you receive a `[WORKER_TERMINAL]` event, the worker has finished:
@@ -1063,19 +1073,30 @@ IMPORTANT: Only auto-handle if the user has NOT explicitly told you how to handl
 escalations. If the user gave you instructions (e.g., "just retry on errors", \
 "skip any auth issues"), follow those instructions instead.
 
+CRITICAL — escalation relay protocol:
+When an escalation requires user input (auth blocks, human review), the worker \
+or its subagent is BLOCKED and waiting for your response. You MUST follow this \
+exact two-step sequence:
+  Step 1: call ask_user() to get the user's answer.
+  Step 2: call inject_worker_message() with the user's answer IMMEDIATELY after.
+If you skip Step 2, the worker/subagent stays blocked FOREVER and the task hangs. \
+NEVER respond to the user without also calling inject_worker_message() to unblock \
+the worker. Even if the user says "skip" or "cancel", you must still relay that \
+decision via inject_worker_message() so the worker can clean up.
+
 **Auth blocks / credential issues:**
 - ALWAYS ask the user (unless user explicitly told you how to handle this).
 - The worker cannot proceed without valid credentials.
 - Explain which credential is missing or invalid.
-- Use ask_user to get guidance: "Provide credentials", "Skip this task", "Stop and edit agent"
-- Use inject_worker_message() to relay user decisions back to the worker.
+- Step 1: ask_user for guidance — "Provide credentials", "Skip this task", "Stop and edit agent"
+- Step 2: inject_worker_message() with the user's response to unblock the worker.
 
 **Need human review / approval:**
 - ALWAYS ask the user (unless user explicitly told you how to handle this).
 - The worker is explicitly requesting human judgment.
 - Present the context clearly (what decision is needed, what are the options).
-- Use ask_user with the actual decision options.
-- Use inject_worker_message() to relay user decisions back to the worker.
+- Step 1: ask_user with the actual decision options.
+- Step 2: inject_worker_message() with the user's decision to unblock the worker.
 
 **Errors / unexpected failures:**
 - Explain what went wrong in plain terms.
@@ -1083,6 +1104,7 @@ escalations. If the user gave you instructions (e.g., "just retry on errors", \
 - Or offer: "Diagnose the issue" → use stop_worker_and_plan() to investigate first.
 - Or offer: "Retry as-is", "Skip this task", "Abort run"
 - (Skip asking if user explicitly told you to auto-retry or auto-skip errors.)
+- If the escalation had wait_for_response: inject_worker_message() with the decision.
 
 **Informational / progress updates:**
 - Acknowledge briefly and let the worker continue.
@@ -1122,6 +1144,8 @@ Batch your response — do not call run_agent_with_input() once per trigger.
 config since last run), skip it and inform the user.
 - Never disable a trigger without telling the user. Use remove_trigger() only \
 when explicitly asked or when the trigger is clearly obsolete.
+- When the user asks to remove or disable a trigger, you MUST call remove_trigger(trigger_id). \
+Never just say "it's removed" without actually calling the tool.
 """
 
 # -- Backward-compatible composed versions (used by queen_node.system_prompt default) --

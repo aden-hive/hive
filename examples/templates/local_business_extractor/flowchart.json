@@ -1,0 +1,165 @@
+{
+  "original_draft": {
+    "agent_name": "local_business_extractor",
+    "goal": "Find local businesses on Maps, extract contacts, and sync to Google Sheets.",
+    "description": "",
+    "success_criteria": [
+      "Extract business details from Maps",
+      "Sync data to Google Sheets"
+    ],
+    "constraints": [
+      "Must verify website presence before scraping"
+    ],
+    "nodes": [
+      {
+        "id": "map-search-worker",
+        "name": "Maps Browser Worker",
+        "description": "Browser subagent that searches Google Maps and extracts business links.",
+        "node_type": "gcu",
+        "tools": [],
+        "input_keys": [
+          "query"
+        ],
+        "output_keys": [
+          "business_list"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "browser",
+        "flowchart_shape": "hexagon",
+        "flowchart_color": "#cc8850"
+      },
+      {
+        "id": "extract-contacts",
+        "name": "Extract Business Details",
+        "description": "Scrapes business websites and Maps for comprehensive business details.",
+        "node_type": "event_loop",
+        "tools": [
+          "exa_get_contents",
+          "exa_search"
+        ],
+        "input_keys": [
+          "user_request"
+        ],
+        "output_keys": [
+          "business_data"
+        ],
+        "success_criteria": "Comprehensive business details (reviews, hours, contacts) extracted.",
+        "sub_agents": [
+          "map-search-worker"
+        ],
+        "flowchart_type": "subprocess",
+        "flowchart_shape": "subroutine",
+        "flowchart_color": "#887a48"
+      },
+      {
+        "id": "sheets-sync",
+        "name": "Google Sheets Sync",
+        "description": "Appends the extracted business data to a Google Sheets spreadsheet.",
+        "node_type": "event_loop",
+        "tools": [
+          "google_sheets_create_spreadsheet",
+          "google_sheets_update_values",
+          "google_sheets_append_values",
+          "google_sheets_get_values"
+        ],
+        "input_keys": [
+          "business_data"
+        ],
+        "output_keys": [
+          "spreadsheet_id"
+        ],
+        "success_criteria": "Data successfully synced to Google Sheets.",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "extract-contacts",
+        "target": "sheets-sync",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "sheets-sync",
+        "target": "extract-contacts",
+        "condition": "always",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-subagent-2",
+        "source": "extract-contacts",
+        "target": "map-search-worker",
+        "condition": "always",
+        "description": "sub-agent delegation",
+        "label": "delegate"
+      },
+      {
+        "id": "edge-subagent-3",
+        "source": "map-search-worker",
+        "target": "extract-contacts",
+        "condition": "always",
+        "description": "sub-agent report back",
+        "label": "report"
+      }
+    ],
+    "entry_node": "extract-contacts",
+    "terminal_nodes": [
+      "sheets-sync"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "extract-contacts": [
+      "extract-contacts",
+      "map-search-worker"
+    ],
+    "sheets-sync": [
+      "sheets-sync"
+    ]
+  }
+}

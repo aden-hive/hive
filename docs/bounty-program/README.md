@@ -1,6 +1,6 @@
-# Integration Bounty Program
+# Bounty Program
 
-Earn XP, Discord roles, and money by testing, documenting, and building integrations for the Aden agent framework.
+Earn XP, Discord roles, and money by contributing to the Aden agent framework — from quick fixes to major features, plus integration testing and development.
 
 ## Why Contribute?
 
@@ -33,6 +33,10 @@ Lurkr auto-assigns the first two roles. Core Contributor requires sustained, qua
 
 ## Bounty Types
 
+### Integration Bounties
+
+Focused on the tool ecosystem — testing, documenting, and building integrations.
+
 | Type                  | Label             | Points | What You Do                                                                |
 | --------------------- | ----------------- | ------ | -------------------------------------------------------------------------- |
 | **Test a tool**       | `bounty:test`     | 20     | Test with a real API key, submit a report with logs                        |
@@ -41,6 +45,47 @@ Lurkr auto-assigns the first two roles. Core Contributor requires sustained, qua
 | **New integration**   | `bounty:new-tool` | 75     | Build a complete integration from scratch                                  |
 
 Promoting a tool from unverified to verified is the final step — submit a PR moving it from `_register_unverified()` to `_register_verified()` after the [promotion checklist](promotion-checklist.md) is complete.
+
+### Standard Bounties
+
+General contributions to the framework, docs, tests, and infrastructure — not tied to a specific integration.
+
+| Size         | Label              | Points | Scope                                                                              |
+| ------------ | ------------------ | ------ | ---------------------------------------------------------------------------------- |
+| **Small**    | `bounty:small`     | 10     | Typo fixes, broken links, error message improvements, confirm/reproduce bug reports |
+| **Medium**   | `bounty:medium`    | 30     | Bug fixes, new or improved unit tests, how-to guides, CLI UX improvements           |
+| **Large**    | `bounty:large`     | 75     | New features, performance optimizations with benchmarks, architecture docs           |
+| **Extreme**  | `bounty:extreme`   | 150    | Major subsystem work, security audits, cross-cutting refactors, new core capabilities |
+
+#### Examples by size
+
+**Small (10 pts):**
+- Fix typos or broken links in documentation
+- Improve an error message to include actionable guidance
+- Add missing type annotations to a module
+- Reproduce and confirm an open bug report with environment details
+- Fix linting or CI warnings
+
+**Medium (30 pts):**
+- Fix a non-critical bug with a regression test
+- Write a how-to guide or tutorial for a common workflow
+- Add or significantly improve test coverage for a core module
+- Improve CLI help text, argument validation, or UX
+- Add structured logging or observability to a module
+
+**Large (75 pts):**
+- Implement a new user-facing feature end to end
+- Performance optimization with before/after benchmarks
+- Build a new CLI command or subcommand
+- Write comprehensive architecture documentation for a subsystem
+- Add a new credential adapter type
+
+**Extreme (150 pts):**
+- Design and implement a major subsystem (e.g., plugin system, caching layer)
+- Security audit of a core module with findings and fixes
+- Major refactor of core architecture (must have maintainer pre-approval)
+- Build a complete example application or reference implementation
+- End-to-end testing framework for agent workflows
 
 ## Quality Gates
 
@@ -52,12 +97,28 @@ Promoting a tool from unverified to verified is the final step — submit a PR m
 
 ## Labels
 
+### Integration bounty labels
+
 | Label               | Color              | Meaning                                 |
 | ------------------- | ------------------ | --------------------------------------- |
 | `bounty:test`       | `#1D76DB` (blue)   | Test a tool with a real API key         |
 | `bounty:docs`       | `#FBCA04` (yellow) | Write or improve documentation          |
 | `bounty:code`       | `#D93F0B` (orange) | Health checker, bug fix, or improvement |
 | `bounty:new-tool`   | `#6F42C1` (purple) | Build a new integration from scratch    |
+
+### Standard bounty labels
+
+| Label               | Color              | Meaning                                            |
+| ------------------- | ------------------ | -------------------------------------------------- |
+| `bounty:small`      | `#C2E0C6` (green)  | Quick fix — typos, links, error messages           |
+| `bounty:medium`     | `#0E8A16` (green)  | Bug fix, tests, guides, CLI improvements           |
+| `bounty:large`      | `#B60205` (red)    | New feature, perf work, architecture docs          |
+| `bounty:extreme`    | `#000000` (black)  | Major subsystem, security audit, core refactor     |
+
+### Difficulty labels
+
+| Label               | Color              | Meaning                                 |
+| ------------------- | ------------------ | --------------------------------------- |
 | `difficulty:easy`   | `#BFD4F2`          | Good first contribution                 |
 | `difficulty:medium` | `#D4C5F9`          | Requires some familiarity               |
 | `difficulty:hard`   | `#F9D0C4`          | Significant effort or expertise needed  |
@@ -96,7 +157,7 @@ All bounty types open in parallel. Contributors self-select. Daily progress upda
 PR merged with bounty:* label
   → GitHub Action runs bounty-tracker.ts
   → Calculates points from label
-  → Resolves GitHub → Discord ID via contributors.yml
+  → Resolves GitHub → Discord ID via MongoDB (hive.contributors)
   → Pushes XP to Lurkr API
   → Posts notification to #integrations-announcements
 ```
@@ -105,7 +166,7 @@ See the [Setup Guide](setup-guide.md) for full configuration (Lurkr, webhooks, s
 
 ### Identity Linking
 
-Contributors link GitHub ↔ Discord by opening a [Link Discord Account](https://github.com/aden-hive/hive/issues/new?template=link-discord.yml) issue. A GitHub Action auto-adds them to `contributors.yml` and closes the issue.
+Contributors link GitHub ↔ Discord by running `/link-github` in Discord. The bot verifies ownership via a public gist, then stores the mapping in MongoDB.
 
 Without this link, bounties are still tracked but Lurkr can't push XP to your Discord account.
 
@@ -120,7 +181,7 @@ Without this link, bounties are still tracked but Lurkr can't push XP to your Di
 | Agent Builder role       | Lurkr bot                  | Auto-assigned at level 5                        |
 | OSS Contributor role     | Lurkr bot                  | Auto-assigned at level 15                       |
 | Core Contributor role    | Maintainer                 | Manual (involves money)                         |
-| Identity linking         | contributors.yml           | PR-based, reviewed by maintainers               |
+| Identity linking         | Discord bot → MongoDB      | `/link-github` command with gist verification   |
 
 ## Guides
 
@@ -142,4 +203,4 @@ Without this link, bounties are still tracked but Lurkr can't push XP to your Di
 - `.github/workflows/weekly-leaderboard.yml` — Monday leaderboard post
 - `scripts/bounty-tracker.ts` — Point calculation, Lurkr API, Discord formatting
 - `scripts/setup-bounty-labels.sh` — One-time label setup
-- `contributors.yml` — GitHub ↔ Discord identity mapping
+- MongoDB `hive.contributors` — GitHub ↔ Discord identity mapping (managed by Discord bot)

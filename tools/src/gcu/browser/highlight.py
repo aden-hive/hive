@@ -7,7 +7,10 @@ Purely cosmetic — pointer-events: none, self-removing, fire-and-forget.
 Configure via environment variables:
     HIVE_BROWSER_HIGHLIGHTS=0   Disable entirely
     HIVE_HIGHLIGHT_COLOR        Override color (default: #FAC43B)
-    HIVE_HIGHLIGHT_DURATION_MS  Override visible duration (default: 600)
+    HIVE_HIGHLIGHT_DURATION_MS  Override visible duration (default: 1500)
+    HIVE_HIGHLIGHT_WAIT_S       Seconds to block after injecting highlight
+                                (default: 0 — fire-and-forget; set 0.35 for
+                                the old blocking behavior)
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ logger = logging.getLogger(__name__)
 _ENABLED = os.environ.get("HIVE_BROWSER_HIGHLIGHTS", "1") != "0"
 _COLOR = os.environ.get("HIVE_HIGHLIGHT_COLOR", "#FAC43B")
 _DURATION_MS = int(os.environ.get("HIVE_HIGHLIGHT_DURATION_MS", "1500"))
-_ANIMATION_WAIT_S = 0.35
+_ANIMATION_WAIT_S = float(os.environ.get("HIVE_HIGHLIGHT_WAIT_S", "0"))
 
 # ---------------------------------------------------------------------------
 # JS templates
@@ -179,7 +182,8 @@ async def highlight_element(page: Page, selector: str) -> None:
             _ELEMENT_HIGHLIGHT_JS,
             [box, _COLOR, _DURATION_MS],
         )
-        await asyncio.sleep(_ANIMATION_WAIT_S)
+        if _ANIMATION_WAIT_S > 0:
+            await asyncio.sleep(_ANIMATION_WAIT_S)
     except Exception:
         logger.debug("highlight_element failed for %s", selector, exc_info=True)
 
@@ -193,6 +197,7 @@ async def highlight_coordinate(page: Page, x: float, y: float) -> None:
             _COORDINATE_HIGHLIGHT_JS,
             [x, y, _COLOR, _DURATION_MS],
         )
-        await asyncio.sleep(_ANIMATION_WAIT_S)
+        if _ANIMATION_WAIT_S > 0:
+            await asyncio.sleep(_ANIMATION_WAIT_S)
     except Exception:
         logger.debug("highlight_coordinate failed at (%s, %s)", x, y, exc_info=True)

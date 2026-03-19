@@ -12,7 +12,7 @@ import zlib
 
 # Files beyond this size are skipped/rejected in hashline mode because
 # hashline anchors are not practical on files this large (minified
-# bundles, logs, data dumps). Shared by view_file, grep_search, and
+# bundles, logs, data dumps). Shared by read_file, grep_search, and
 # hashline_edit.
 HASHLINE_MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 

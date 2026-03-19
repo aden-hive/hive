@@ -33,6 +33,8 @@ class Message:
     is_transition_marker: bool = False
     # True when this message is real human input (from /chat), not a system prompt
     is_client_input: bool = False
+    # True when message contains an activated skill body (AS-10: never prune)
+    is_skill_content: bool = False
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
@@ -409,6 +411,7 @@ class NodeConversation:
         tool_use_id: str,
         content: str,
         is_error: bool = False,
+        is_skill_content: bool = False,
     ) -> Message:
         msg = Message(
             seq=self._next_seq,
@@ -417,6 +420,7 @@ class NodeConversation:
             tool_use_id=tool_use_id,
             is_error=is_error,
             phase_id=self._current_phase,
+            is_skill_content=is_skill_content,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -610,8 +614,15 @@ class NodeConversation:
                 continue
             if msg.is_error:
                 continue  # never prune errors
+            if msg.is_skill_content:
+                continue  # never prune activated skill instructions (AS-10)
             if msg.content.startswith("[Pruned tool result"):
                 continue  # already pruned
+            # Tiny results (set_output acks, confirmations) — pruning
+            # saves negligible space but makes the LLM think the call
+            # failed, causing costly retries.
+            if len(msg.content) < 100:
+                continue
 
             # Phase-aware: protect current phase messages
             if self._current_phase and msg.phase_id == self._current_phase:
@@ -901,8 +912,7 @@ class NodeConversation:
             full_path = str((spill_path / conv_filename).resolve())
             ref_parts.append(
                 f"[Previous conversation saved to '{full_path}'. "
-                f"Use load_data('{conv_filename}'), read_file('{full_path}'), "
-                f"or run_command('cat \"{full_path}\"') to review if needed.]"
+                f"Use load_data('{conv_filename}') to review if needed.]"
             )
         elif not collapsed_msgs:
             ref_parts.append("[Previous freeform messages compacted.]")

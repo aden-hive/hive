@@ -39,7 +39,7 @@ def register_tools(mcp: FastMCP) -> None:
             Edit a file using anchor-based line references (N:hash) for precise edits.
 
         When to use
-            After reading a file with view_file(hashline=True), use the anchors to make
+            After reading a file with read_file(hashline=True), use the anchors to make
             targeted edits without reproducing exact file content.
 
         Rules & Constraints

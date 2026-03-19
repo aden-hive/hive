@@ -1531,6 +1531,34 @@ class TestTransientErrorRetry:
         assert llm._call_index == 1  # only tried once
 
     @pytest.mark.asyncio
+    async def test_client_facing_non_transient_error_does_not_crash(
+        self, runtime, node_spec, memory
+    ):
+        """Client-facing non-transient errors should wait for input, not crash on token vars."""
+        node_spec.output_keys = []
+        node_spec.client_facing = True
+        llm = ErrorThenSuccessLLM(
+            error=ValueError("bad request: blocked by policy"),
+            fail_count=100,  # always fails
+            success_scenario=text_scenario("unreachable"),
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            config=LoopConfig(
+                max_iterations=1,
+                max_stream_retries=0,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        node._await_user_input = AsyncMock(return_value=None)
+
+        result = await node.execute(ctx)
+
+        assert result.success is False
+        assert "Max iterations" in (result.error or "")
+        node._await_user_input.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_transient_error_exhausts_retries(self, runtime, node_spec, memory):
         """Transient errors that exhaust retries should raise."""
         node_spec.output_keys = []

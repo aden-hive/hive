@@ -1,0 +1,218 @@
+{
+  "original_draft": {
+    "agent_name": "email_inbox_management",
+    "goal": "Manage Gmail inbox emails autonomously using user-defined free-text rules. For every five minutes, fetch inbox emails (configurable batch size, default 100), apply the user's rules to each email, and execute the appropriate Gmail actions \u2014 trash, mark as spam, mark important, mark read/unread, star, draft replies, create/apply custom labels, and more.",
+    "description": "",
+    "success_criteria": [
+      "Gmail actions are applied correctly to the right emails based on the user's rules",
+      "Produces a summary report showing what was done: how many emails were affected by each action type, with email subjects listed",
+      "All fetched emails up to the configured max are processed and acted upon; none are silently skipped",
+      "Custom labels are created and applied correctly when rules require them"
+    ],
+    "constraints": [
+      "Must loop through all inbox emails by paginating with max_emails as page size; no emails should be silently skipped",
+      "Archiving removes from inbox but preserves the email; only explicit trash rules move emails to trash",
+      "Agent creates draft replies but NEVER sends them automatically"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Receive and validate input parameters: rules and max_emails. Present the interpreted rules back to the user for confirmation.",
+        "node_type": "event_loop",
+        "tools": [
+          "gmail_list_labels"
+        ],
+        "input_keys": [
+          "rules",
+          "max_emails"
+        ],
+        "output_keys": [
+          "rules",
+          "max_emails",
+          "query"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "fetch-emails",
+        "name": "Fetch Emails",
+        "description": "Fetch one page of emails from Gmail inbox. Returns emails filename and next_page_token for pagination. The graph loops back here if more pages remain.",
+        "node_type": "event_loop",
+        "tools": [
+          "bulk_fetch_emails"
+        ],
+        "input_keys": [
+          "rules",
+          "max_emails",
+          "next_page_token",
+          "last_processed_timestamp",
+          "query"
+        ],
+        "output_keys": [
+          "emails",
+          "next_page_token"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "classify-and-act",
+        "name": "Classify and Act",
+        "description": "Apply the user's rules to each email and execute the appropriate Gmail actions.",
+        "node_type": "event_loop",
+        "tools": [
+          "gmail_trash_message",
+          "gmail_modify_message",
+          "gmail_batch_modify_messages",
+          "gmail_create_draft",
+          "gmail_create_label",
+          "gmail_list_labels",
+          "load_data",
+          "append_data"
+        ],
+        "input_keys": [
+          "rules",
+          "emails"
+        ],
+        "output_keys": [
+          "actions_taken"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "decision",
+        "flowchart_shape": "diamond",
+        "flowchart_color": "#d89d26"
+      },
+      {
+        "id": "report",
+        "name": "Report",
+        "description": "Generate a summary report of all actions taken on the emails and present it to the user.",
+        "node_type": "event_loop",
+        "tools": [
+          "load_data",
+          "get_current_timestamp"
+        ],
+        "input_keys": [
+          "actions_taken",
+          "rules"
+        ],
+        "output_keys": [
+          "summary_report",
+          "rules",
+          "last_processed_timestamp"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "intake",
+        "target": "fetch-emails",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "fetch-emails",
+        "target": "classify-and-act",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "classify-and-act",
+        "target": "fetch-emails",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-3",
+        "source": "classify-and-act",
+        "target": "report",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-4",
+        "source": "report",
+        "target": "intake",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "intake",
+    "terminal_nodes": [
+      "report"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "intake": [
+      "intake"
+    ],
+    "fetch-emails": [
+      "fetch-emails"
+    ],
+    "classify-and-act": [
+      "classify-and-act"
+    ],
+    "report": [
+      "report"
+    ]
+  }
+}

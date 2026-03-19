@@ -8,6 +8,7 @@ write. Errors are silently swallowed — this must never break the agent.
 
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import IO, Any
@@ -47,6 +48,9 @@ def log_llm_turn(
     Never raises.
     """
     try:
+        # Skip logging during test runs to avoid polluting real logs.
+        if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("HIVE_DISABLE_LLM_LOGS"):
+            return
         global _log_file, _log_ready  # noqa: PLW0603
         if not _log_ready:
             _log_file = _open_log()

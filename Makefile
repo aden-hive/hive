@@ -1,4 +1,11 @@
-.PHONY: lint format check test install-hooks help frontend-install frontend-dev frontend-build
+.PHONY: lint format check test test-tools test-live test-all install-hooks help frontend-install frontend-dev frontend-build
+
+# ── Ensure uv is findable in Git Bash on Windows ──────────────────────────────
+# uv installs to ~/.local/bin on Windows/Linux/macOS. Git Bash may not include
+# this in PATH by default, so we prepend it here.
+export PATH := $(HOME)/.local/bin:$(PATH)
+
+# ── Targets ───────────────────────────────────────────────────────────────────
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \

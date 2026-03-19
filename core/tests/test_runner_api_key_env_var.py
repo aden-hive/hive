@@ -21,3 +21,8 @@ def test_minimax_provider_prefix_maps_to_minimax_api_key():
 def test_minimax_model_name_prefix_maps_to_minimax_api_key():
     runner = _runner_for_unit_test()
     assert runner._get_api_key_env_var("minimax-chat") == "MINIMAX_API_KEY"
+
+
+def test_openrouter_provider_prefix_maps_to_openrouter_api_key():
+    runner = _runner_for_unit_test()
+    assert runner._get_api_key_env_var("openrouter/x-ai/grok-4.20-beta") == "OPENROUTER_API_KEY"

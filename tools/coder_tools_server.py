@@ -25,6 +25,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+_TOOLS_SRC = Path(__file__).resolve().parent / "src"
+if _TOOLS_SRC.is_dir():
+    tools_src = str(_TOOLS_SRC)
+    if tools_src not in sys.path:
+        sys.path.insert(0, tools_src)
+
 
 def setup_logger():
     if not logger.handlers:
@@ -51,6 +57,12 @@ if "--stdio" in sys.argv:
 
 
 from fastmcp import FastMCP  # noqa: E402
+
+# Import command sanitizer — shared module in aden_tools
+from aden_tools.tools.file_system_toolkits.command_sanitizer import (  # noqa: E402
+    CommandBlockedError,
+    validate_command,
+)
 
 mcp = FastMCP("coder-tools")
 
@@ -208,6 +220,8 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
 
     PYTHONPATH is automatically set to include core/ and exports/.
     Output is truncated at 30K chars with a notice.
+    Commands still execute with shell=True, so the sanitizer blocks
+    explicit nested shell executables but cannot remove shell parsing.
 
     Args:
         command: Shell command to execute
@@ -222,6 +236,11 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
 
     try:
         command = _translate_command_for_windows(command)
+        # Validate command against safety blocklist before execution
+        try:
+            validate_command(command)
+        except CommandBlockedError as e:
+            return f"Error: {e}"
         start = time.monotonic()
         result = subprocess.run(
             command,
@@ -2257,21 +2276,24 @@ if __name__ == "__main__":
     )
 
     # -- mcp_servers.json --
-    _write(
-        "mcp_servers.json",
-        json.dumps(
-            {
-                "hive-tools": {
-                    "transport": "stdio",
-                    "command": "uv",
-                    "args": ["run", "python", "mcp_server.py", "--stdio"],
-                    "cwd": "../../tools",
-                    "description": "Hive tools MCP server",
-                }
-            },
-            indent=2,
-        ),
-    )
+    mcp_config: dict = {
+        "hive-tools": {
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "mcp_server.py", "--stdio"],
+            "cwd": "../../tools",
+            "description": "Hive tools MCP server",
+        },
+        "gcu-tools": {
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "-m", "gcu.server", "--stdio"],
+            "cwd": "../../tools",
+            "description": "GCU browser automation tools",
+        },
+    }
+
+    _write("mcp_servers.json", json.dumps(mcp_config, indent=2))
 
     # -- tests/conftest.py --
     _write(

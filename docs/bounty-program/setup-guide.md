@@ -14,7 +14,7 @@ Complete setup from zero to running. Estimated time: 30 minutes.
 ./scripts/setup-bounty-labels.sh
 ```
 
-This creates 7 labels: 4 bounty types (`bounty:test`, `bounty:docs`, `bounty:code`, `bounty:new-tool`) and 3 difficulty levels (`difficulty:easy`, `difficulty:medium`, `difficulty:hard`).
+This creates 11 labels: 4 integration bounty types (`bounty:test`, `bounty:docs`, `bounty:code`, `bounty:new-tool`), 4 standard bounty sizes (`bounty:small`, `bounty:medium`, `bounty:large`, `bounty:extreme`), and 3 difficulty levels (`difficulty:easy`, `difficulty:medium`, `difficulty:hard`).
 
 ## Step 2: Create Discord Channels (3 min)
 
@@ -104,6 +104,8 @@ Repo Settings > Secrets and variables > Actions:
 | `DISCORD_BOUNTY_WEBHOOK_URL` | Webhook URL from Step 5    |
 | `LURKR_API_KEY`              | Lurkr API key from Step 4f |
 | `LURKR_GUILD_ID`             | Your Discord server ID\*   |
+| `BOT_API_URL`                | Discord bot API URL        |
+| `BOT_API_KEY`                | Discord bot API key        |
 
 \*Enable Developer Mode in Discord, right-click server name > Copy Server ID.
 
@@ -146,12 +148,12 @@ powerbi, redis
 - [ ] All 3 GitHub secrets added
 - [ ] Both workflows enabled (`bounty-completed.yml`, `weekly-leaderboard.yml`)
 - [ ] Test PR + merge triggers Discord notification
-- [ ] `contributors.yml` exists at repo root
+- [ ] MongoDB `hive.contributors` collection accessible
 
 ## Troubleshooting
 
 **No Discord message:** Check `DISCORD_BOUNTY_WEBHOOK_URL` secret and Action logs.
 
-**Lurkr XP not awarded:** Confirm API key is Read/Write, contributor is in `contributors.yml`, check Action logs for `Lurkr XP push failed`.
+**Lurkr XP not awarded:** Confirm API key is Read/Write, contributor has run `/link-github` in Discord, check Action logs for `Lurkr XP push failed`.
 
 **Role not assigned:** Verify role rewards in the Lurkr dashboard or via `/config set`. Lurkr's role must be above the roles it assigns in server hierarchy.
