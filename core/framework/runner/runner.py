@@ -808,6 +808,29 @@ class AgentRunner:
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
 
+        # Optional: load additional MCP servers selected via mcp_registry.json.
+        # This is backward-compatible: if the file doesn't exist, nothing changes.
+        mcp_registry_path = agent_path / "mcp_registry.json"
+        if mcp_registry_path.exists():
+            try:
+                raw_selection = json.loads(mcp_registry_path.read_text(encoding="utf-8"))
+                if not isinstance(raw_selection, dict):
+                    raise TypeError("mcp_registry.json must be a JSON object")
+
+                allowed_keys = {
+                    "include",
+                    "tags",
+                    "exclude",
+                    "profile",
+                    "max_tools",
+                    "versions",
+                }
+                selection = {k: v for k, v in raw_selection.items() if k in allowed_keys}
+
+                self._tool_registry.load_registry_servers(**selection)
+            except Exception as e:
+                logger.warning("Failed to load mcp_registry.json: %s", e)
+
     @staticmethod
     def _import_agent_module(agent_path: Path):
         """Import an agent package from its directory path.

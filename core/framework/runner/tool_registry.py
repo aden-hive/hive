@@ -64,6 +64,7 @@ class ToolRegistry:
         self._mcp_cred_snapshot: set[str] = set()  # Credential filenames at MCP load time
         self._mcp_aden_key_snapshot: str | None = None  # ADEN_API_KEY value at MCP load time
         self._mcp_server_tools: dict[str, set[str]] = {}  # server name -> tool names
+        self._mcp_registry_selection: dict[str, Any] | None = None  # for resync
 
     def register(
         self,
@@ -479,10 +480,85 @@ class ToolRegistry:
         self._mcp_cred_snapshot = self._snapshot_credentials()
         self._mcp_aden_key_snapshot = os.environ.get("ADEN_API_KEY")
 
+    def load_registry_servers(
+        self,
+        *,
+        include: list[str] | None = None,
+        tags: list[str] | None = None,
+        exclude: list[str] | None = None,
+        profile: str | None = None,
+        max_tools: int | None = None,
+        versions: dict[str, str] | None = None,
+    ) -> int:
+        """
+        Resolve and load MCP servers based on `mcp_registry.json` selection.
+
+        Implements:
+        - deterministic server order (resolved by resolver)
+        - first-wins tool collisions (existing tools are preserved)
+        - `max_tools` cap on *newly registered* tools from registry servers
+        """
+
+        from framework.runner.mcp_registry_resolver import resolve_registry_servers
+
+        self._mcp_registry_selection = {
+            "include": include,
+            "tags": tags,
+            "exclude": exclude,
+            "profile": profile,
+            "max_tools": max_tools,
+            "versions": versions,
+        }
+
+        resolved_servers = resolve_registry_servers(
+            include=include,
+            tags=tags,
+            exclude=exclude,
+            profile=profile,
+            max_tools=max_tools,
+            versions=versions or {},
+        )
+        if not resolved_servers:
+            logger.warning("MCP registry selection resolved to 0 servers; nothing to load")
+            return 0
+
+        tools_added = 0
+        repo_root = Path(__file__).resolve().parents[3]
+
+        for server_cfg in resolved_servers:
+            if not isinstance(server_cfg, dict):
+                continue
+
+            if max_tools is not None and tools_added >= max_tools:
+                break
+
+            # Normalize stdio config so scripts/cwd behave like mcp_servers.json loading.
+            server_cfg = self._resolve_mcp_server_config(server_cfg, repo_root)
+
+            remaining = None
+            if max_tools is not None:
+                remaining = max_tools - tools_added
+                if remaining <= 0:
+                    break
+
+            added = self.register_mcp_server(
+                server_cfg,
+                preserve_existing_tools=True,
+                tool_cap=remaining,
+                log_collisions=True,
+            )
+            tools_added += added
+
+        return tools_added
+
     def register_mcp_server(
         self,
         server_config: dict[str, Any],
         use_connection_manager: bool = False,
+        *,
+        preserve_existing_tools: bool = False,
+        tool_cap: int | None = None,
+        log_collisions: bool = False,
     ) -> int:
         """
         Register an MCP server and discover its tools.
@@ -540,6 +616,23 @@ class ToolRegistry:
                 self._mcp_server_tools[server_name] = set()
             count = 0
             for mcp_tool in client.list_tools():
+                if tool_cap is not None and count >= tool_cap:
+                    break
+
+                if preserve_existing_tools and mcp_tool.name in self._tools:
+                    if log_collisions:
+                        origin_server = (
+                            self._find_mcp_origin_server_for_tool(mcp_tool.name) or "<existing>"
+                        )
+                        logger.warning(
+                            "MCP tool '%s' from '%s' shadowed by '%s' (loaded first)",
+                            mcp_tool.name,
+                            server_name,
+                            origin_server,
+                        )
+                    # Skip registration; do not update MCP tool bookkeeping for this server.
+                    continue
+
                 # Convert MCP tool to framework Tool (strips context params from LLM schema)
                 tool = self._convert_mcp_tool_to_framework_tool(mcp_tool)
 
@@ -605,6 +698,12 @@ class ToolRegistry:
                     "script path correct). Worker config uses base_dir = mcp_servers.json parent."
                 )
             return 0
+
+    def _find_mcp_origin_server_for_tool(self, tool_name: str) -> str | None:
+        for server_name, tool_names in self._mcp_server_tools.items():
+            if tool_name in tool_names:
+                return server_name
+        return None
 
     def _convert_mcp_tool_to_framework_tool(self, mcp_tool: Any) -> Tool:
         """
@@ -738,9 +837,13 @@ class ToolRegistry:
         for name in self._mcp_tool_names:
             self._tools.pop(name, None)
         self._mcp_tool_names.clear()
+        self._mcp_server_tools.clear()
 
         # 3. Re-load MCP servers (spawns fresh subprocesses with new credentials)
         self.load_mcp_config(self._mcp_config_path)
+        if self._mcp_registry_selection is not None:
+            # Re-apply the same registry selection (preserves tool collision semantics).
+            self.load_registry_servers(**self._mcp_registry_selection)
 
         logger.info("MCP server resync complete")
         return True

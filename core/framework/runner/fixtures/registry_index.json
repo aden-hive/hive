@@ -1,0 +1,44 @@
+{
+  "servers": [
+    {
+      "name": "hive-tools",
+      "version": "1.0.0",
+      "tags": ["core", "productivity"],
+      "profiles": ["all", "core", "productivity"],
+      "mcp_config": {
+        "transport": "stdio",
+        "command": "uv",
+        "args": ["run", "python", "mcp_server.py", "--stdio"],
+        "cwd": "tools",
+        "description": "Hive tools MCP server providing core utilities"
+      }
+    },
+    {
+      "name": "coder-tools",
+      "version": "1.0.0",
+      "tags": ["coding", "productivity"],
+      "profiles": ["all", "coding", "productivity"],
+      "mcp_config": {
+        "transport": "stdio",
+        "command": "uv",
+        "args": ["run", "python", "coder_tools_server.py", "--stdio"],
+        "cwd": "tools",
+        "description": "Unsandboxed file/code tools for code generation"
+      }
+    },
+    {
+      "name": "tools",
+      "version": "1.0.0",
+      "tags": ["web", "productivity"],
+      "profiles": ["all", "general"],
+      "mcp_config": {
+        "transport": "stdio",
+        "command": "uv",
+        "args": ["run", "python", "mcp_server.py", "--stdio"],
+        "cwd": "tools",
+        "description": "Aden tools MCP server providing web/file utilities"
+      }
+    }
+  ]
+}
+
