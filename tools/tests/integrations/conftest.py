@@ -20,7 +20,9 @@ from aden_tools.credentials import CREDENTIAL_SPECS
 # the actual MCP tool is "web_search" (multi-provider). This is because
 # _tool_to_cred is 1:1 and web_search already maps to brave_search.
 # These specs use a phantom tool name for credential grouping.
-KNOWN_PHANTOM_TOOLS: set[str] = {"google_search"}
+KNOWN_PHANTOM_TOOLS: set[str] = {
+    "google_search",
+}
 
 # Modules that accept `credentials` to query the credential store itself
 # (meta-tools), not for external API auth. They don't need CredentialSpecs.
