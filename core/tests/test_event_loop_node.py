@@ -1485,6 +1485,39 @@ class ErrorThenSuccessLLM(LLMProvider):
         return LLMResponse(content="ok", model="mock", stop_reason="stop")
 
 
+class PartialStreamThenErrorLLM(LLMProvider):
+    """Simulates the fixed LiteLLMProvider.stream() behavior for mid-stream errors.
+
+    Call 0: yields ``chunks`` as TextDeltaEvents then yields
+    StreamErrorEvent(recoverable=True) — modelling the guard in litellm.py
+    that stops retrying once text has been published to the event bus.
+
+    Call 1+: yields ``success_scenario`` events (or nothing if None), allowing
+    tests to assert that no outer retry fires when accumulated_text is non-empty.
+    """
+
+    def __init__(self, chunks: list[str], success_scenario: list | None = None):
+        self.chunks = chunks
+        self.success_scenario = success_scenario or []
+        self._call_index = 0
+
+    async def stream(self, messages, system="", tools=None, max_tokens=4096):
+        idx = self._call_index
+        self._call_index += 1
+        if idx == 0:
+            snapshot = ""
+            for chunk in self.chunks:
+                snapshot += chunk
+                yield TextDeltaEvent(content=chunk, snapshot=snapshot)
+            yield StreamErrorEvent(error="connection reset mid-stream", recoverable=True)
+        else:
+            for event in self.success_scenario:
+                yield event
+
+    def complete(self, messages, system="", **kwargs) -> LLMResponse:
+        return LLMResponse(content="ok", model="mock", stop_reason="stop")
+
+
 class TestTransientErrorRetry:
     """Test retry-with-backoff for transient LLM errors in EventLoopNode."""
 
@@ -1742,6 +1775,246 @@ class TestIsTransientError:
     def test_runtime_error_without_transient_keywords(self):
         assert EventLoopNode._is_transient_error(RuntimeError("authentication failed")) is False
         assert EventLoopNode._is_transient_error(RuntimeError("invalid JSON in response")) is False
+
+
+# ===========================================================================
+# Mid-stream retry duplication (#5923)
+# ===========================================================================
+
+
+class TestMidStreamRetryNoDuplication:
+    """Verify that mid-stream errors with accumulated text do not duplicate
+    client-visible events.
+
+    The fix in litellm.py guards the retry path: when ``accumulated_text``
+    is non-empty at the time an exception fires, it yields
+    StreamErrorEvent(recoverable=True) instead of continuing the retry loop.
+    EventLoopNode then commits the partial text and does NOT trigger an outer
+    retry (because ``accumulated_text != ""`` makes the line-1706 guard false).
+
+    These tests simulate the fixed LiteLLMProvider.stream() behavior via
+    PartialStreamThenErrorLLM, then assert exact event-bus emission counts.
+    """
+
+    @pytest.mark.asyncio
+    async def test_mid_stream_error_no_duplicate_deltas_3_chunks(
+        self, runtime, node_spec, memory
+    ):
+        """3 text chunks yielded, then recoverable error — bus gets exactly 3 deltas.
+
+        Before the fix: internal retry would re-stream from token 1, producing
+        6 or more LLM_TEXT_DELTA events.  After the fix: exactly 3.
+        """
+        node_spec.output_keys = []
+        chunks = ["Hello", " world", "!"]
+        llm = PartialStreamThenErrorLLM(chunks=chunks)
+        bus = EventBus()
+        delta_events: list = []
+        bus.subscribe(
+            event_types=[EventType.LLM_TEXT_DELTA],
+            handler=lambda e: delta_events.append(e),
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=3,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        # Exactly K delta events — no second wave from retry
+        assert len(delta_events) == 3
+        # Confirm content is not doubled
+        content = "".join(e.data["content"] for e in delta_events)
+        assert content == "Hello world!"
+        # No outer retry fired — stream() was called exactly once
+        assert llm._call_index == 1
+
+    @pytest.mark.asyncio
+    async def test_mid_stream_error_no_duplicate_deltas_50_chunks(
+        self, runtime, node_spec, memory
+    ):
+        """50 text chunks yielded, then recoverable error — bus gets exactly 50 deltas.
+
+        Covers the 'chunk 50' scenario from the forensic analysis where a
+        mid-response rate limit would previously replay the full response.
+        """
+        node_spec.output_keys = []
+        chunks = [f"t{i}" for i in range(50)]
+        llm = PartialStreamThenErrorLLM(chunks=chunks)
+        bus = EventBus()
+        delta_events: list = []
+        bus.subscribe(
+            event_types=[EventType.LLM_TEXT_DELTA],
+            handler=lambda e: delta_events.append(e),
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=3,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        assert len(delta_events) == 50
+        assert llm._call_index == 1
+
+    @pytest.mark.asyncio
+    async def test_mid_stream_error_at_chunk_0_triggers_outer_retry(
+        self, runtime, node_spec, memory
+    ):
+        """Error before any text chunk — outer retry fires; bus gets success deltas only.
+
+        When accumulated_text == '' at error time, the guard in litellm.py does
+        NOT fire.  The inner retry proceeds (or outer retry handles it).  The
+        client sees exactly the deltas from the successful attempt — no partial
+        first chunk to duplicate.
+        """
+        node_spec.output_keys = []
+        success_events = [
+            TextDeltaEvent(content="A", snapshot="A"),
+            TextDeltaEvent(content="B", snapshot="AB"),
+            FinishEvent(stop_reason="stop", input_tokens=5, output_tokens=2, model="mock"),
+        ]
+        llm = ErrorThenSuccessLLM(
+            error=ConnectionError("connection reset before first chunk"),
+            fail_count=1,
+            success_scenario=success_events,
+        )
+        bus = EventBus()
+        delta_events: list = []
+        bus.subscribe(
+            event_types=[EventType.LLM_TEXT_DELTA],
+            handler=lambda e: delta_events.append(e),
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=3,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        # Outer retry fired — two stream() calls
+        assert llm._call_index == 2
+        # Exactly 2 deltas from the successful retry, zero from attempt 0
+        assert len(delta_events) == 2
+        assert delta_events[0].data["content"] == "A"
+        assert delta_events[1].data["content"] == "B"
+
+    @pytest.mark.asyncio
+    async def test_mid_stream_tool_only_error_inner_retry_unaffected(
+        self, runtime, node_spec, memory
+    ):
+        """Error with no text emitted (tool-call-only stream) — outer retry fires safely.
+
+        Tool call argument deltas are buffered inside LiteLLMProvider.stream()
+        and never published to the event bus.  So an error mid-tool-stream has
+        accumulated_text == '' and the guard does NOT fire.  The retry proceeds
+        (inner or outer) without any duplication risk.
+
+        Simulated here as: LLM call 0 raises ConnectionError before yielding
+        any TextDeltaEvent; LLM call 1 succeeds with set_output.
+        """
+        node_spec.output_keys = ["result"]
+        call_index = 0
+
+        class ToolOnlyThenErrorLLM(LLMProvider):
+            async def stream(self, messages, system="", tools=None, max_tokens=4096):
+                nonlocal call_index
+                idx = call_index
+                call_index += 1
+                if idx == 0:
+                    # Raise immediately — no TextDeltaEvent emitted
+                    raise ConnectionError("network error during tool stream")
+                elif idx == 1:
+                    for event in tool_call_scenario(
+                        "set_output", {"key": "result", "value": "tool-done"}
+                    ):
+                        yield event
+                else:
+                    for event in text_scenario("done"):
+                        yield event
+
+            def complete(self, messages, system="", **kwargs) -> LLMResponse:
+                return LLMResponse(content="ok", model="mock", stop_reason="stop")
+
+        llm = ToolOnlyThenErrorLLM()
+        bus = EventBus()
+        delta_events: list = []
+        bus.subscribe(
+            event_types=[EventType.LLM_TEXT_DELTA],
+            handler=lambda e: delta_events.append(e),
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=3,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        assert result.output.get("result") == "tool-done"
+        # Outer retry fired (call 0 failed, call 1 succeeded with set_output)
+        assert call_index >= 2
+        # Call 0 raised before yielding any text — zero deltas from the error call.
+        # Call 1 is a pure tool call (no TextDeltaEvent).
+        # Call 2 (inner loop after tool result) returns text_scenario("done") → 1 delta.
+        # The key property: no duplication from call 0; the count matches only
+        # the legitimate post-tool-call LLM turn.
+        assert len(delta_events) == 1
+        assert delta_events[0].data["content"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_mid_stream_recoverable_error_partial_text_committed(
+        self, runtime, node_spec, memory
+    ):
+        """Partial text from before the error is committed as the turn output.
+
+        When the guard fires (accumulated_text != ''), EventLoopNode receives
+        StreamErrorEvent(recoverable=True) after the partial text.  Because
+        accumulated_text is non-empty, the line-1706 check does not raise
+        ConnectionError.  The partial text is committed as final_text and the
+        node completes successfully — no duplication, no crash.
+        """
+        node_spec.output_keys = []
+        chunks = ["partial", " response"]
+        llm = PartialStreamThenErrorLLM(chunks=chunks)
+        bus = EventBus()
+        delta_events: list = []
+        bus.subscribe(
+            event_types=[EventType.LLM_TEXT_DELTA],
+            handler=lambda e: delta_events.append(e),
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=5,
+                max_stream_retries=3,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        # Exactly 2 deltas — no second wave
+        assert len(delta_events) == 2
+        assert delta_events[0].data["content"] == "partial"
+        assert delta_events[1].data["content"] == " response"
+        # Stream called exactly once — no outer retry
+        assert llm._call_index == 1
 
 
 # ===========================================================================
