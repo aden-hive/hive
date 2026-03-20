@@ -417,7 +417,9 @@ def register_tools(
         if isinstance(values, str):
             values = json.loads(values)
         if not isinstance(values, list):
-            return {"error": f"values must be a 2D list or JSON string, got {type(values).__name__}"}
+            return {
+                "error": f"values must be a 2D list or JSON string, got {type(values).__name__}"
+            }
         client = _get_client()
         if isinstance(client, dict):
             return client
@@ -458,7 +460,9 @@ def register_tools(
         if isinstance(values, str):
             values = json.loads(values)
         if not isinstance(values, list):
-            return {"error": f"values must be a 2D list or JSON string, got {type(values).__name__}"}
+            return {
+                "error": f"values must be a 2D list or JSON string, got {type(values).__name__}"
+            }
         client = _get_client()
         if isinstance(client, dict):
             return client
