@@ -10,6 +10,7 @@ Provides different isolation levels:
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -79,7 +80,9 @@ class SharedStateManager:
         # State storage at each level
         self._global_state: dict[str, Any] = {}
         self._stream_state: dict[str, dict[str, Any]] = {}  # stream_id -> {key: value}
-        self._execution_state: dict[str, dict[str, Any]] = {}  # execution_id -> {key: value}
+        self._execution_state: dict[str, dict[str, Any]] = (
+            {}
+        )  # execution_id -> {key: value}
 
         # Locks for synchronized access
         self._global_lock = asyncio.Lock()
@@ -250,6 +253,43 @@ class SharedStateManager:
 
         self._version += 1
 
+    async def atomic_update(
+        self,
+        key: str,
+        transform_fn: Callable[[Any], Any],
+        execution_id: str,
+        stream_id: str,
+        isolation: IsolationLevel,
+        scope: StateScope = StateScope.EXECUTION,
+    ) -> Any:
+        """Atomically read, transform, and write a value under a single lock."""
+        # For non-synchronized or execution-local, just use standard read/write
+        if isolation != IsolationLevel.SYNCHRONIZED or scope == StateScope.EXECUTION:
+            current = await self.read(key, execution_id, stream_id, isolation)
+            new_val = transform_fn(current)
+            await self.write(key, new_val, execution_id, stream_id, isolation, scope)
+            return new_val
+
+        # For SYNCHRONIZED stream/global, use the lock across the whole cycle
+        lock = self._get_lock(scope, key, stream_id)
+        async with lock:
+            current = await self.read(key, execution_id, stream_id, isolation)
+            new_val = transform_fn(current)
+            await self._write_direct(key, new_val, execution_id, stream_id, scope)
+
+            # Record change
+            self._record_change(
+                StateChange(
+                    key=key,
+                    old_value=current,
+                    new_value=new_val,
+                    scope=scope,
+                    execution_id=execution_id,
+                    stream_id=stream_id,
+                )
+            )
+            return new_val
+
     async def _write_with_lock(
         self,
         key: str,
@@ -414,6 +454,26 @@ class StreamMemory:
         await self._manager.write(
             key=key,
             value=value,
+            execution_id=self._execution_id,
+            stream_id=self._stream_id,
+            isolation=self._isolation,
+            scope=scope,
+        )
+
+    async def atomic_update(
+        self,
+        key: str,
+        transform_fn: Callable[[Any], Any],
+        scope: StateScope = StateScope.EXECUTION,
+    ) -> Any:
+        """Atomically read, transform, and write a value."""
+        # Check permissions
+        if self._allowed_write is not None and key not in self._allowed_write:
+            raise PermissionError(f"Not allowed to write key: {key}")
+
+        return await self._manager.atomic_update(
+            key=key,
+            transform_fn=transform_fn,
             execution_id=self._execution_id,
             stream_id=self._stream_id,
             isolation=self._isolation,
