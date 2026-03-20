@@ -314,8 +314,13 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
         // Hard boundary — stop the run
         if (m.type === "user" || m.type === "run_divider") break;
 
-        // Soft interruption (queen output, system, tool_status) —
-        // render it normally but keep the subagent run going
+        // Worker message from a non-subagent node means the graph has
+        // moved on to the next stage.  Close the bubble even if some
+        // subagents are still streaming in the background.
+        if (m.role === "worker" && m.nodeId && !m.nodeId.includes(":subagent:")) break;
+
+        // Soft interruption (queen output, system, tool_status without
+        // nodeId) — render it normally but keep the subagent run going
         interleaved.push({ idx: items.length + interleaved.length, msg: m });
         i++;
       }
