@@ -533,12 +533,28 @@ class EventLoopNode(NodeProtocol):
                 _restored_recent_responses = restored.recent_responses
                 _restored_tool_fingerprints = restored.recent_tool_fingerprints
 
-                # Refresh the system prompt with full 3-layer composition.
-                # The stored prompt may be stale after code changes or when
-                # runtime-injected context (e.g. worker identity) has changed.
-                # On resume, we rebuild identity + narrative + focus so the LLM
-                # understands the session history, not just the node directive.
-                from framework.graph.prompt_composer import compose_system_prompt
+                # Refresh the system prompt with full composition including
+                # execution preamble and node-type preamble.  The stored
+                # prompt may be stale after code changes or when runtime-
+                # injected context (e.g. worker identity) has changed.
+                from framework.graph.prompt_composer import (
+                    EXECUTION_SCOPE_PREAMBLE,
+                    compose_system_prompt,
+                )
+
+                _exec_preamble = None
+                if (
+                    not ctx.is_subagent_mode
+                    and ctx.node_spec.node_type in ("event_loop", "gcu")
+                    and ctx.node_spec.output_keys
+                ):
+                    _exec_preamble = EXECUTION_SCOPE_PREAMBLE
+
+                _node_type_preamble = None
+                if ctx.node_spec.node_type == "gcu":
+                    from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
+
+                    _node_type_preamble = GCU_BROWSER_SYSTEM_PROMPT
 
                 _current_prompt = compose_system_prompt(
                     identity_prompt=ctx.identity_prompt or None,
@@ -547,6 +563,8 @@ class EventLoopNode(NodeProtocol):
                     accounts_prompt=ctx.accounts_prompt or None,
                     skills_catalog_prompt=ctx.skills_catalog_prompt or None,
                     protocols_prompt=ctx.protocols_prompt or None,
+                    execution_preamble=_exec_preamble,
+                    node_type_preamble=_node_type_preamble,
                 )
                 if conversation.system_prompt != _current_prompt:
                     conversation.update_system_prompt(_current_prompt)
@@ -2486,6 +2504,27 @@ class EventLoopNode(NodeProtocol):
                     results_by_id[tc.tool_use_id] = result
 
                 elif tc.tool_name == "delegate_to_sub_agent":
+                    # Guard: in continuous mode the LLM may see delegate
+                    # calls from a previous node's conversation history and
+                    # attempt to re-use the tool on a node that doesn't own
+                    # it.  Only accept if the tool was actually offered.
+                    if not any(t.name == "delegate_to_sub_agent" for t in tools):
+                        logger.warning(
+                            "[%s] LLM called delegate_to_sub_agent but tool "
+                            "was not offered to this node — rejecting",
+                            node_id,
+                        )
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: delegate_to_sub_agent is not available "
+                                "on this node. This tool belongs to a different "
+                                "node in the workflow."
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                        continue
                     # --- Framework-level subagent delegation ---
                     # Queue for parallel execution in Phase 2
                     logger.info(
@@ -3852,6 +3891,7 @@ class EventLoopNode(NodeProtocol):
         """
         from framework.graph.event_loop.subagent_executor import execute_subagent
 
+<<<<<<< HEAD
         return await execute_subagent(
             ctx=ctx,
             agent_id=agent_id,
@@ -3859,6 +3899,243 @@ class EventLoopNode(NodeProtocol):
             accumulator=accumulator,
             event_bus=self._event_bus,
             config=self._config,
+=======
+        # Log subagent invocation start
+        logger.info(
+            "\n" + "=" * 60 + "\n"
+            "🤖 SUBAGENT INVOCATION\n"
+            "=" * 60 + "\n"
+            "Parent Node: %s\n"
+            "Subagent ID: %s\n"
+            "Task: %s\n" + "=" * 60,
+            ctx.node_id,
+            agent_id,
+            task[:500] + "..." if len(task) > 500 else task,
+        )
+
+        # 1. Validate agent exists in registry
+        if agent_id not in ctx.node_registry:
+            return ToolResult(
+                tool_use_id="",
+                content=json.dumps(
+                    {
+                        "message": f"Sub-agent '{agent_id}' not found in registry",
+                        "data": None,
+                        "metadata": {"agent_id": agent_id, "success": False, "error": "not_found"},
+                    }
+                ),
+                is_error=True,
+            )
+
+        subagent_spec = ctx.node_registry[agent_id]
+
+        # 2. Create read-only memory snapshot
+        # Start with everything the parent can read from shared memory.
+        parent_data = ctx.memory.read_all()
+
+        # Merge in-flight outputs from the parent's accumulator.
+        # set_output() writes to the accumulator but shared memory is only
+        # updated after the parent node completes — so the subagent would
+        # otherwise miss any keys the parent set before delegating.
+        if accumulator:
+            for key, value in accumulator.to_dict().items():
+                if key not in parent_data:
+                    parent_data[key] = value
+
+        subagent_memory = SharedMemory()
+        for key, value in parent_data.items():
+            subagent_memory.write(key, value, validate=False)
+
+        # Allow reads for parent data AND the subagent's declared input_keys
+        # (input_keys may reference keys that exist but weren't in read_all,
+        # or keys that were just written by the accumulator).
+        read_keys = set(parent_data.keys()) | set(subagent_spec.input_keys or [])
+        scoped_memory = subagent_memory.with_permissions(
+            read_keys=list(read_keys),
+            write_keys=[],  # Read-only!
+        )
+
+        # 2b. Compute instance counter early so node_id is available for the
+        # report callback and the NodeContext.  Each delegation to the same
+        # agent_id gets a unique suffix (instance 1 has no suffix for backward
+        # compat; instance 2+ appends ":N").
+        self._subagent_instance_counter.setdefault(agent_id, 0)
+        self._subagent_instance_counter[agent_id] += 1
+        _sa_instance = self._subagent_instance_counter[agent_id]
+        if _sa_instance > 1:
+            sa_node_id = f"{ctx.node_id}:subagent:{agent_id}:{_sa_instance}"
+        else:
+            sa_node_id = f"{ctx.node_id}:subagent:{agent_id}"
+        subagent_instance = str(_sa_instance)
+
+        # 2c. Set up report callback (one-way channel to parent / event bus)
+        subagent_reports: list[dict] = []
+
+        async def _report_callback(
+            message: str,
+            data: dict | None = None,
+            *,
+            wait_for_response: bool = False,
+        ) -> str | None:
+            subagent_reports.append({"message": message, "data": data, "timestamp": time.time()})
+            if self._event_bus:
+                await self._event_bus.emit_subagent_report(
+                    stream_id=ctx.node_id,
+                    node_id=sa_node_id,
+                    subagent_id=agent_id,
+                    message=message,
+                    data=data,
+                    execution_id=ctx.execution_id,
+                )
+
+            if not wait_for_response:
+                return None
+
+            if not self._event_bus:
+                logger.warning(
+                    "Subagent '%s' requested user response but no event_bus available",
+                    agent_id,
+                )
+                return None
+
+            # Create isolated receiver and register for input routing
+            import uuid
+
+            escalation_id = f"{ctx.node_id}:escalation:{uuid.uuid4().hex[:8]}"
+            receiver = _EscalationReceiver()
+            registry = ctx.shared_node_registry
+
+            registry[escalation_id] = receiver
+            try:
+                # Escalate to the queen instead of asking the user directly.
+                # The queen handles the request and injects the response via
+                # inject_worker_message(), which finds this receiver through
+                # its _awaiting_input flag.
+                await self._event_bus.emit_escalation_requested(
+                    stream_id=ctx.stream_id or ctx.node_id,
+                    node_id=escalation_id,
+                    reason=f"Subagent report (wait_for_response) from {agent_id}",
+                    context=message,
+                    execution_id=ctx.execution_id,
+                )
+                # Block until queen responds
+                return await receiver.wait()
+            finally:
+                registry.pop(escalation_id, None)
+
+        # 3. Filter tools for subagent
+        # Use the full tool catalog (ctx.all_tools) so subagents can access tools
+        # that aren't in the parent node's filtered set (e.g. browser tools for a
+        # GCU subagent when the parent only has web_scrape/save_data).
+        # Falls back to ctx.available_tools if all_tools is empty (e.g. in tests).
+        subagent_tool_names = set(subagent_spec.tools or [])
+        tool_source = ctx.all_tools if ctx.all_tools else ctx.available_tools
+
+        # GCU auto-population: GCU nodes declare tools=[] because the runner
+        # auto-populates them at setup time.  But that expansion doesn't reach
+        # subagents invoked via delegate_to_sub_agent — the subagent spec still
+        # has the original empty list.  When a GCU subagent has no declared
+        # tools, include all catalog tools so browser tools are available.
+        if subagent_spec.node_type == "gcu" and not subagent_tool_names:
+            subagent_tools = [t for t in tool_source if t.name != "delegate_to_sub_agent"]
+        else:
+            subagent_tools = [
+                t
+                for t in tool_source
+                if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
+            ]
+
+        missing = subagent_tool_names - {t.name for t in subagent_tools}
+        if missing:
+            logger.warning(
+                "Subagent '%s' requested tools not found in catalog: %s",
+                agent_id,
+                sorted(missing),
+            )
+
+        logger.info(
+            "📦 Subagent '%s' configuration:\n"
+            "   - System prompt: %s\n"
+            "   - Tools available (%d): %s\n"
+            "   - Memory keys inherited: %s",
+            agent_id,
+            (subagent_spec.system_prompt[:200] + "...")
+            if subagent_spec.system_prompt and len(subagent_spec.system_prompt) > 200
+            else subagent_spec.system_prompt,
+            len(subagent_tools),
+            [t.name for t in subagent_tools],
+            list(parent_data.keys()),
+        )
+
+        # 4. Build subagent context
+        max_iter = min(self._config.max_iterations, 10)
+        subagent_ctx = NodeContext(
+            runtime=ctx.runtime,
+            node_id=sa_node_id,
+            node_spec=subagent_spec,
+            memory=scoped_memory,
+            input_data={"task": task, **parent_data},
+            llm=ctx.llm,
+            available_tools=subagent_tools,
+            goal_context=(
+                f"Your specific task: {task}\n\n"
+                f"COMPLETION REQUIREMENTS:\n"
+                f"When your task is done, you MUST call set_output() "
+                f"for each required key: {subagent_spec.output_keys}\n"
+                f"Alternatively, call report_to_parent(mark_complete=true) "
+                f"with your findings in message/data.\n"
+                f"You have a maximum of {max_iter} turns to complete this task."
+            ),
+            goal=ctx.goal,
+            max_tokens=ctx.max_tokens,
+            runtime_logger=ctx.runtime_logger,
+            is_subagent_mode=True,  # Prevents nested delegation
+            report_callback=_report_callback,
+            node_registry={},  # Empty - no nested subagents
+            shared_node_registry=ctx.shared_node_registry,  # For escalation routing
+        )
+
+        # 5. Create and execute subagent EventLoopNode
+        # Derive a conversation store for the subagent from the parent's store.
+        # Each invocation gets a unique path so that repeated delegate calls
+        # (e.g. one per profile) don't restore a stale completed conversation.
+        # (Instance counter was computed earlier in step 2b.)
+        subagent_conv_store = None
+        if self._conversation_store is not None:
+            from framework.storage.conversation_store import FileConversationStore
+
+            parent_base = getattr(self._conversation_store, "_base", None)
+            if parent_base is not None:
+                # Store subagent conversations parallel to the parent node,
+                # not nested inside it.  e.g. conversations/{node}:subagent:{agent_id}:{instance}/
+                conversations_dir = parent_base.parent  # e.g. conversations/
+                subagent_dir_name = f"{agent_id}-{subagent_instance}"
+                subagent_store_path = conversations_dir / subagent_dir_name
+                subagent_conv_store = FileConversationStore(base_path=subagent_store_path)
+
+        # Derive a subagent-scoped spillover dir so large tool results
+        # (e.g. browser_snapshot) get written to disk instead of being
+        # silently truncated.  Each instance gets its own directory to
+        # avoid file collisions between concurrent subagents.
+        subagent_spillover = None
+        if self._config.spillover_dir:
+            subagent_spillover = str(
+                Path(self._config.spillover_dir) / agent_id / subagent_instance
+            )
+
+        subagent_node = EventLoopNode(
+            event_bus=self._event_bus,  # Subagent events visible to Queen via shared bus
+            judge=SubagentJudge(task=task, max_iterations=max_iter),
+            config=LoopConfig(
+                max_iterations=max_iter,  # Tighter budget
+                max_tool_calls_per_turn=self._config.max_tool_calls_per_turn,
+                tool_call_overflow_margin=self._config.tool_call_overflow_margin,
+                max_context_tokens=self._config.max_context_tokens,
+                stall_detection_threshold=self._config.stall_detection_threshold,
+                max_tool_result_chars=self._config.max_tool_result_chars,
+                spillover_dir=subagent_spillover,
+            ),
+>>>>>>> 764012c5985b8e6590606bab3ae4ecd99d4000c2
             tool_executor=self._tool_executor,
             conversation_store=self._conversation_store,
             subagent_instance_counter=self._subagent_instance_counter,

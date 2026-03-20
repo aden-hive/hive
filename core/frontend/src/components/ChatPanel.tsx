@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useEffect } from "react";
+import { memo, useState, useRef, useEffect, useMemo } from "react";
 import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
 
 export interface ContextUsageEntry {
@@ -10,6 +10,7 @@ export interface ContextUsageEntry {
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
 import MultiQuestionWidget from "@/components/MultiQuestionWidget";
+import ParallelSubagentBubble, { type SubagentGroup } from "@/components/ParallelSubagentBubble";
 
 export interface ChatMessage {
   id: string;
@@ -25,6 +26,10 @@ export interface ChatMessage {
   createdAt?: number;
   /** Queen phase active when this message was created */
   phase?: "planning" | "building" | "staging" | "running";
+  /** Backend node_id that produced this message — used for subagent grouping */
+  nodeId?: string;
+  /** Backend execution_id for this message */
+  executionId?: string;
 }
 
 interface ChatPanelProps {
@@ -269,6 +274,84 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
     return true;
   });
 
+  // Group subagent messages into parallel bubbles.
+  // A subagent message has nodeId containing ":subagent:".
+  // The run only ends on hard boundaries (user messages, run_dividers)
+  // so interleaved queen/tool/system messages don't fragment the bubble.
+  type RenderItem =
+    | { kind: "message"; msg: ChatMessage }
+    | { kind: "parallel"; groupId: string; groups: SubagentGroup[] };
+
+  const renderItems = useMemo<RenderItem[]>(() => {
+    const items: RenderItem[] = [];
+    let i = 0;
+    while (i < threadMessages.length) {
+      const msg = threadMessages[i];
+      const isSubagent = msg.nodeId?.includes(":subagent:");
+      if (!isSubagent) {
+        items.push({ kind: "message", msg });
+        i++;
+        continue;
+      }
+
+      // Start a subagent run. Collect all subagent messages, allowing
+      // non-subagent messages in between (they render as normal items
+      // before the bubble). Only break on hard boundaries.
+      const subagentMsgs: ChatMessage[] = [];
+      const interleaved: { idx: number; msg: ChatMessage }[] = [];
+      const firstId = msg.id;
+
+      while (i < threadMessages.length) {
+        const m = threadMessages[i];
+        const isSa = m.nodeId?.includes(":subagent:");
+
+        if (isSa) {
+          subagentMsgs.push(m);
+          i++;
+          continue;
+        }
+
+        // Hard boundary — stop the run
+        if (m.type === "user" || m.type === "run_divider") break;
+
+        // Worker message from a non-subagent node means the graph has
+        // moved on to the next stage.  Close the bubble even if some
+        // subagents are still streaming in the background.
+        if (m.role === "worker" && m.nodeId && !m.nodeId.includes(":subagent:")) break;
+
+        // Soft interruption (queen output, system, tool_status without
+        // nodeId) — render it normally but keep the subagent run going
+        interleaved.push({ idx: items.length + interleaved.length, msg: m });
+        i++;
+      }
+
+      // Emit interleaved messages first (before the bubble)
+      for (const { msg: im } of interleaved) {
+        items.push({ kind: "message", msg: im });
+      }
+
+      // Build the single parallel bubble from all collected subagent msgs
+      if (subagentMsgs.length > 0) {
+        const byNode = new Map<string, ChatMessage[]>();
+        for (const m of subagentMsgs) {
+          const nid = m.nodeId!;
+          if (!byNode.has(nid)) byNode.set(nid, []);
+          byNode.get(nid)!.push(m);
+        }
+        const groups: SubagentGroup[] = [];
+        for (const [nodeId, msgs] of byNode) {
+          groups.push({
+            nodeId,
+            messages: msgs,
+            contextUsage: contextUsage?.[nodeId],
+          });
+        }
+        items.push({ kind: "parallel", groupId: `par-${firstId}`, groups });
+      }
+    }
+    return items;
+  }, [threadMessages, contextUsage]);
+
   // Mark current thread as read
   useEffect(() => {
     const count = messages.filter((m) => m.thread === activeThread).length;
@@ -314,11 +397,17 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
 
       {/* Messages */}
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto px-5 py-4 space-y-3">
-        {threadMessages.map((msg) => (
-          <div key={msg.id}>
-            <MessageBubble msg={msg} queenPhase={queenPhase} />
-          </div>
-        ))}
+        {renderItems.map((item) =>
+          item.kind === "parallel" ? (
+            <div key={item.groupId}>
+              <ParallelSubagentBubble groupId={item.groupId} groups={item.groups} />
+            </div>
+          ) : (
+            <div key={item.msg.id}>
+              <MessageBubble msg={item.msg} queenPhase={queenPhase} />
+            </div>
+          )
+        )}
 
         {/* Show typing indicator while waiting for first queen response (disabled + empty chat) */}
         {(isWaiting || (disabled && threadMessages.length === 0)) && (
