@@ -5,15 +5,11 @@ Claude, and GPT-OSS models through a single Gemini-style interface.  It is
 NOT the public ``generativelanguage.googleapis.com`` API.
 
 Authentication uses Google OAuth2.  Token refresh is done directly with the
-OAuth client secret — no local proxy (``antigravity-auth serve``) required.
+OAuth client secret — no local proxy required.
 
 Credential sources (checked in order):
-  1. ``~/.config/opencode/antigravity-accounts.json``  (written by the
-     opencode-antigravity-auth plugin — V4 schema with proper expiry info)
-  2. Antigravity IDE SQLite state DB  (macOS / Linux)
-
-References:
-  https://github.com/NoeFabris/opencode-antigravity-auth
+  1. ``~/.hive/antigravity-accounts.json`` (native OAuth implementation)
+  2. Antigravity IDE SQLite state DB (macOS / Linux)
 """
 
 from __future__ import annotations
@@ -54,7 +50,8 @@ _ENDPOINTS = [
 _DEFAULT_PROJECT_ID = "rising-fact-p41fc"
 _TOKEN_REFRESH_BUFFER_SECS = 60
 
-_ACCOUNTS_FILE = Path.home() / ".config" / "opencode" / "antigravity-accounts.json"
+# Credentials file in ~/.hive/ (native implementation)
+_ACCOUNTS_FILE = Path.home() / ".hive" / "antigravity-accounts.json"
 _IDE_STATE_DB_MAC = (
     Path.home()
     / "Library"
@@ -87,7 +84,9 @@ _BASE_HEADERS: dict[str, str] = {
 
 
 def _load_from_json_file() -> tuple[str | None, str | None, str, float]:
-    """Read credentials from ``~/.config/opencode/antigravity-accounts.json``.
+    """Read credentials from JSON accounts file.
+
+    Reads from ~/.hive/antigravity-accounts.json.
 
     Returns ``(access_token | None, refresh_token | None, project_id, expires_at)``.
     ``expires_at`` is a Unix timestamp (seconds); 0.0 means unknown.
@@ -539,9 +538,8 @@ class AntigravityProvider(LLMProvider):
             return self._access_token
 
         raise RuntimeError(
-            "No valid Antigravity credentials. Authenticate with the "
-            "opencode-antigravity-auth plugin: "
-            "https://github.com/NoeFabris/opencode-antigravity-auth"
+            "No valid Antigravity credentials. "
+            "Run: uv run python core/antigravity_auth.py auth account add"
         )
 
     # --- Request building -------------------------------------------------- #

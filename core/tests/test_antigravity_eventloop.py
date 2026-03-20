@@ -3,10 +3,8 @@
 Run: .venv/bin/python core/tests/test_antigravity_eventloop.py
 
 Requires:
-  - ~/.config/opencode/antigravity-accounts.json with valid credentials
-    (run 'antigravity-auth accounts add' to authenticate)
-  - antigravity-auth serve running on localhost:8069
-    (run 'antigravity-auth serve' in a separate terminal)
+  - ~/.hive/antigravity-accounts.json with valid credentials
+    (run 'uv run python core/antigravity_auth.py auth account add' to authenticate)
 """
 
 import asyncio

@@ -282,18 +282,46 @@ def get_api_key() -> str | None:
     return None
 
 
+# OAuth credentials for Antigravity are fetched from the opencode-antigravity-auth project.
+# This project reverse-engineered and published the public OAuth credentials
+# for Google's Antigravity/Cloud Code Assist API.
+# Source: https://github.com/NoeFabris/opencode-antigravity-auth
+_ANTIGRAVITY_CREDENTIALS_URL = "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/dev/src/constants.ts"
+_antigravity_credentials_cache: tuple[str | None, str | None] = (None, None)
+
+
+def _fetch_antigravity_credentials() -> tuple[str | None, str | None]:
+    """Fetch OAuth client ID and secret from the public npm package source on GitHub."""
+    global _antigravity_credentials_cache
+    if _antigravity_credentials_cache[0] and _antigravity_credentials_cache[1]:
+        return _antigravity_credentials_cache
+
+    import re
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(_ANTIGRAVITY_CREDENTIALS_URL, headers={"User-Agent": "Hive/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            content = resp.read().decode("utf-8")
+            id_match = re.search(r'ANTIGRAVITY_CLIENT_ID\s*=\s*"([^"]+)"', content)
+            secret_match = re.search(r'ANTIGRAVITY_CLIENT_SECRET\s*=\s*"([^"]+)"', content)
+            client_id = id_match.group(1) if id_match else None
+            client_secret = secret_match.group(1) if secret_match else None
+            if client_id and client_secret:
+                _antigravity_credentials_cache = (client_id, client_secret)
+            return client_id, client_secret
+    except Exception as e:
+        logger.debug("Failed to fetch Antigravity credentials from public source: %s", e)
+    return None, None
+
+
 def get_antigravity_client_id() -> str:
     """Return the Antigravity OAuth application client ID.
 
     Checked in order:
     1. ``ANTIGRAVITY_CLIENT_ID`` environment variable
     2. ``llm.antigravity_client_id`` in ~/.hive/configuration.json
-       (written by quickstart when Antigravity is configured)
-
-    Falls back to the well-known application client ID registered by
-    Google for the Antigravity IDE — same value for every user of the
-    application, analogous to CLAUDE_OAUTH_CLIENT_ID / CODEX_OAUTH_CLIENT_ID
-    in runner.py.
+    3. Fetch from public source (opencode-antigravity-auth project on GitHub)
     """
     env = os.environ.get("ANTIGRAVITY_CLIENT_ID")
     if env:
@@ -301,43 +329,11 @@ def get_antigravity_client_id() -> str:
     cfg_val = get_hive_config().get("llm", {}).get("antigravity_client_id")
     if cfg_val:
         return cfg_val
-    # Well-known Antigravity application client ID (public, not user-specific).
-    # Source: github.com/NoeFabris/opencode-antigravity-auth/blob/dev/src/constants.ts
-    return "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
-
-
-def _read_antigravity_secret_from_npm() -> str | None:
-    """Read the Antigravity OAuth client secret from the globally installed npm package.
-
-    Mirrors the bash ``_read_antigravity_creds_from_npm()`` helper so that users
-    who have ``opencode-antigravity-auth`` installed globally always get the secret
-    at runtime — regardless of whether quickstart wrote it to their config.
-    """
-    import re as _re
-    import subprocess
-    from pathlib import Path as _Path
-
-    candidates: list[_Path] = []
-    try:
-        npm_root = (
-            subprocess.check_output(["npm", "root", "-g"], stderr=subprocess.DEVNULL, timeout=5)
-            .decode()
-            .strip()
-        )
-        candidates.append(_Path(npm_root) / "opencode-antigravity-auth/dist/src/constants.js")
-    except Exception:
-        pass
-    candidates += [
-        _Path("/opt/homebrew/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js"),
-        _Path("/usr/local/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js"),
-        _Path("/usr/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js"),
-    ]
-    for p in candidates:
-        if p.exists():
-            m = _re.search(r'"(GOCSPX-[^"]+)"', p.read_text(errors="ignore"))
-            if m:
-                return m.group(1)
-    return None
+    # Fetch from public source
+    client_id, _ = _fetch_antigravity_credentials()
+    if client_id:
+        return client_id
+    raise RuntimeError("Could not obtain Antigravity OAuth client ID")
 
 
 def get_antigravity_client_secret() -> str | None:
@@ -346,8 +342,7 @@ def get_antigravity_client_secret() -> str | None:
     Checked in order:
     1. ``ANTIGRAVITY_CLIENT_SECRET`` environment variable
     2. ``llm.antigravity_client_secret`` in ~/.hive/configuration.json
-       (written by quickstart when Antigravity is configured)
-    3. Globally installed ``opencode-antigravity-auth`` npm package (runtime fallback)
+    3. Fetch from public source (opencode-antigravity-auth project on GitHub)
 
     Returns None when not found — token refresh will be skipped and
     the caller must use whatever access token is already available.
@@ -358,9 +353,9 @@ def get_antigravity_client_secret() -> str | None:
     cfg_val = get_hive_config().get("llm", {}).get("antigravity_client_secret") or None
     if cfg_val:
         return cfg_val
-    # Runtime fallback: read from globally installed npm package so users who set up
-    # via a path other than the updated quickstart still get the secret automatically.
-    return _read_antigravity_secret_from_npm()
+    # Fetch from public source
+    _, secret = _fetch_antigravity_credentials()
+    return secret
 
 
 def get_gcu_enabled() -> bool:

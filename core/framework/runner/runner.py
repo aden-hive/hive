@@ -572,14 +572,10 @@ ANTIGRAVITY_IDE_STATE_DB = (
 ANTIGRAVITY_IDE_STATE_DB_LINUX = (
     Path.home() / ".config" / "Antigravity" / "User" / "globalStorage" / "state.vscdb"
 )
-# antigravity-auth CLI tool stores credentials in JSON files
-ANTIGRAVITY_AUTH_FILE = Path.home() / ".config" / "opencode" / "antigravity-accounts.json"
-ANTIGRAVITY_AUTH_FILE_FALLBACK = Path.home() / ".config" / "antigravity_auth" / "accounts.json"
+# Antigravity credentials stored by native OAuth implementation
+ANTIGRAVITY_AUTH_FILE = Path.home() / ".hive" / "antigravity-accounts.json"
 
 ANTIGRAVITY_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
-ANTIGRAVITY_OAUTH_CLIENT_ID = (
-    "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
-)
 _ANTIGRAVITY_TOKEN_LIFETIME_SECS = 3600  # Google access tokens expire in 1 hour
 _ANTIGRAVITY_IDE_STATE_DB_KEY = "antigravityUnifiedStateSync.oauthToken"
 
@@ -665,8 +661,7 @@ def _read_antigravity_credentials() -> dict | None:
 
     Checks in order:
     1. Antigravity IDE SQLite state database (native macOS/Linux app)
-    2. antigravity-auth CLI JSON file (~/.config/opencode/antigravity-accounts.json)
-    3. antigravity-auth CLI fallback (~/.config/antigravity_auth/accounts.json)
+    2. Native OAuth credentials file (~/.hive/antigravity-accounts.json)
 
     Returns:
         Auth data dict with an ``accounts`` list on success, None otherwise.
@@ -676,18 +671,16 @@ def _read_antigravity_credentials() -> dict | None:
     if ide_creds:
         return ide_creds
 
-    # 2 & 3. antigravity-auth CLI tool JSON files
-    for path in (ANTIGRAVITY_AUTH_FILE, ANTIGRAVITY_AUTH_FILE_FALLBACK):
-        if not path.exists():
-            continue
+    # 2. Native OAuth credentials file
+    if ANTIGRAVITY_AUTH_FILE.exists():
         try:
-            with open(path, encoding="utf-8") as f:
+            with open(ANTIGRAVITY_AUTH_FILE, encoding="utf-8") as f:
                 data = json.load(f)
             accounts = data.get("accounts", [])
             if accounts and isinstance(accounts[0], dict):
                 return data
         except (json.JSONDecodeError, OSError):
-            continue
+            pass
     return None
 
 
@@ -717,12 +710,7 @@ def _is_antigravity_token_expired(auth_data: dict) -> bool:
     last_refresh_val: float | str | None = auth_data.get("last_refresh")
     if last_refresh_val is None:
         try:
-            path = (
-                ANTIGRAVITY_AUTH_FILE
-                if ANTIGRAVITY_AUTH_FILE.exists()
-                else ANTIGRAVITY_AUTH_FILE_FALLBACK
-            )
-            last_refresh_val = path.stat().st_mtime
+            last_refresh_val = ANTIGRAVITY_AUTH_FILE.stat().st_mtime
         except OSError:
             return True
     elif isinstance(last_refresh_val, str):
@@ -751,13 +739,14 @@ def _refresh_antigravity_token(refresh_token: str) -> dict | None:
     import urllib.parse
     import urllib.request
 
-    from framework.config import get_antigravity_client_secret
+    from framework.config import get_antigravity_client_id, get_antigravity_client_secret
 
+    client_id = get_antigravity_client_id()
     client_secret = get_antigravity_client_secret()
     params: dict = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
-        "client_id": ANTIGRAVITY_OAUTH_CLIENT_ID,
+        "client_id": client_id,
     }
     if client_secret:
         params["client_secret"] = client_secret
@@ -803,13 +792,8 @@ def _save_refreshed_antigravity_credentials(auth_data: dict, token_data: dict) -
         auth_data["accounts"] = accounts
         auth_data["last_refresh"] = datetime.now(UTC).isoformat()
 
-        target_path = (
-            ANTIGRAVITY_AUTH_FILE
-            if ANTIGRAVITY_AUTH_FILE.exists()
-            else ANTIGRAVITY_AUTH_FILE_FALLBACK
-        )
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(target_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        ANTIGRAVITY_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(ANTIGRAVITY_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(auth_data, f, indent=2)
         logger.debug("Antigravity credentials refreshed and saved")
@@ -1559,8 +1543,7 @@ class AgentRunner:
                 if not provider.has_credentials():
                     print(
                         "Warning: Antigravity credentials not found. "
-                        "Install the opencode-antigravity-auth plugin and authenticate: "
-                        "https://github.com/NoeFabris/opencode-antigravity-auth"
+                        "Run: uv run python core/antigravity_auth.py auth account add"
                     )
                 self._llm = provider
             else:

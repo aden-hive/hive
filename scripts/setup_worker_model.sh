@@ -423,32 +423,6 @@ prompt_model_selection() {
     done
 }
 
-# Read Antigravity OAuth client credentials from the installed npm package.
-# Exports _AG_CLIENT_SECRET and _AG_CLIENT_ID; returns 1 if package not found.
-_read_antigravity_creds_from_npm() {
-    local constants_js=""
-    local npm_root
-    npm_root="$(npm root -g 2>/dev/null)" && \
-        [ -f "$npm_root/opencode-antigravity-auth/dist/src/constants.js" ] && \
-        constants_js="$npm_root/opencode-antigravity-auth/dist/src/constants.js"
-    if [ -z "$constants_js" ]; then
-        for _candidate in \
-            /opt/homebrew/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js \
-            /usr/local/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js \
-            /usr/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js; do
-            if [ -f "$_candidate" ]; then
-                constants_js="$_candidate"
-                break
-            fi
-        done
-    fi
-    [ -z "$constants_js" ] && return 1
-    _AG_CLIENT_SECRET="$(grep -o '"GOCSPX-[^"]*"' "$constants_js" 2>/dev/null | tr -d '"' | head -1)"
-    _AG_CLIENT_ID="$(grep -o '"[0-9]*-[a-z0-9]*\.apps\.googleusercontent\.com"' "$constants_js" 2>/dev/null | tr -d '"' | head -1)"
-    export _AG_CLIENT_SECRET _AG_CLIENT_ID
-    [ -n "$_AG_CLIENT_SECRET" ] && [ -n "$_AG_CLIENT_ID" ]
-}
-
 # ── Save worker_llm section to configuration.json ────────────────────
 # Args: provider_id env_var model max_tokens max_context_tokens [use_claude_code_sub] [api_base] [use_codex_sub] [use_antigravity_sub]
 
@@ -468,11 +442,6 @@ save_worker_configuration() {
     fi
     if [ -z "$max_tokens" ]; then max_tokens=8192; fi
     if [ -z "$max_context_tokens" ]; then max_context_tokens=120000; fi
-
-    if _read_antigravity_creds_from_npm 2>/dev/null; then
-        export ANTIGRAVITY_CLIENT_SECRET="$_AG_CLIENT_SECRET"
-        export ANTIGRAVITY_CLIENT_ID="$_AG_CLIENT_ID"
-    fi
 
     cd "$PROJECT_DIR"
     uv run python - \
@@ -646,10 +615,8 @@ if [ -f "$HOME/Library/Application Support/Antigravity/User/globalStorage/state.
     ANTIGRAVITY_CRED_DETECTED=true
 elif [ -f "$HOME/.config/Antigravity/User/globalStorage/state.vscdb" ]; then
     ANTIGRAVITY_CRED_DETECTED=true
-# Fallback: antigravity-auth CLI tool JSON files
-elif [ -f "$HOME/.config/opencode/antigravity-accounts.json" ]; then
-    ANTIGRAVITY_CRED_DETECTED=true
-elif [ -f "$HOME/.config/antigravity_auth/accounts.json" ]; then
+# Native OAuth credentials
+elif [ -f "$HOME/.hive/antigravity-accounts.json" ]; then
     ANTIGRAVITY_CRED_DETECTED=true
 fi
 
@@ -973,102 +940,21 @@ case $choice in
             echo ""
             echo -e "${CYAN}  Setting up Antigravity authentication...${NC}"
             echo ""
-
-            # ── Step 1: ensure opencode is installed ────────────────────────
-            if ! command -v opencode &>/dev/null; then
-                echo -e "  Installing ${CYAN}opencode${NC} (required for Antigravity OAuth)..."
-                if command -v npm &>/dev/null; then
-                    npm install -g opencode-ai || { echo -e "${RED}  npm install failed. Install Node.js and retry.${NC}"; exit 1; }
-                else
-                    echo -e "${RED}  Node.js/npm not found. Install Node.js first: https://nodejs.org${NC}"
-                    exit 1
-                fi
-            fi
-
-            # ── Step 2: write opencode.json with the plugin ─────────────────
-            OPENCODE_CFG_DIR="$HOME/.config/opencode"
-            OPENCODE_CFG="$OPENCODE_CFG_DIR/opencode.json"
-            mkdir -p "$OPENCODE_CFG_DIR"
-
-            if [ ! -f "$OPENCODE_CFG" ]; then
-                cat > "$OPENCODE_CFG" <<'JSON'
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-antigravity-auth@latest"],
-  "provider": {
-    "google": {
-      "models": {
-        "antigravity-gemini-3-flash": {
-          "name": "Gemini 3 Flash (Antigravity)",
-          "limit": { "context": 1048576, "output": 65536 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        },
-        "antigravity-gemini-3-pro": {
-          "name": "Gemini 3 Pro (Antigravity)",
-          "limit": { "context": 1048576, "output": 65535 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        },
-        "antigravity-gemini-3.1-pro": {
-          "name": "Gemini 3.1 Pro (Antigravity)",
-          "limit": { "context": 1048576, "output": 65535 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        },
-        "antigravity-claude-sonnet-4-6": {
-          "name": "Claude Sonnet 4.6 (Antigravity)",
-          "limit": { "context": 200000, "output": 64000 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        },
-        "antigravity-claude-opus-4-6-thinking": {
-          "name": "Claude Opus 4.6 Thinking (Antigravity)",
-          "limit": { "context": 200000, "output": 64000 },
-          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        }
-      }
-    }
-  }
-}
-JSON
-            else
-                uv run python3 - "$OPENCODE_CFG" <<'PY' 2>/dev/null || true
-import json, sys
-p = sys.argv[1]
-try:
-    with open(p) as f:
-        cfg = json.load(f)
-except Exception:
-    cfg = {}
-plugins = cfg.get("plugin", [])
-entry = "opencode-antigravity-auth@latest"
-if entry not in plugins:
-    plugins.append(entry)
-cfg["plugin"] = plugins
-import os
-fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-with os.fdopen(fd, "w") as f:
-    json.dump(cfg, f, indent=2)
-PY
-            fi
-
-            echo -e "  ${GREEN}✓${NC} opencode.json configured with antigravity plugin"
-            echo ""
             echo -e "  ${YELLOW}A browser window will open for Google OAuth.${NC}"
             echo -e "  Sign in with your Google account that has Antigravity access."
             echo ""
 
-            # ── Step 3: run opencode auth login ─────────────────────────────
-            opencode auth login || true
-
-            # ── Step 4: re-detect credentials ───────────────────────────────
-            if [ -f "$HOME/.config/opencode/antigravity-accounts.json" ]; then
-                ANTIGRAVITY_CRED_DETECTED=true
-            elif [ -f "$HOME/.config/antigravity_auth/accounts.json" ]; then
-                ANTIGRAVITY_CRED_DETECTED=true
+            # Run native OAuth flow
+            if uv run python "$PROJECT_DIR/core/antigravity_auth.py" auth account add; then
+                # Re-detect credentials
+                if [ -f "$HOME/.hive/antigravity-accounts.json" ]; then
+                    ANTIGRAVITY_CRED_DETECTED=true
+                fi
             fi
 
             if [ "$ANTIGRAVITY_CRED_DETECTED" = false ]; then
                 echo ""
-                echo -e "${RED}  Authentication did not produce credentials.${NC}"
-                echo -e "  Run ${CYAN}opencode auth login${NC} manually and try again."
+                echo -e "${RED}  Authentication failed or was cancelled.${NC}"
                 echo ""
                 exit 1
             fi
