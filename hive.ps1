@@ -10,6 +10,9 @@
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$UvHelperPath = Join-Path $ScriptDir "scripts\uv-discovery.ps1"
+
+. $UvHelperPath
 
 # ── Validate project directory ──────────────────────────────────────
 
@@ -30,16 +33,12 @@ if (-not (Test-Path (Join-Path $ScriptDir ".venv"))) {
 
 # ── Ensure uv is available ──────────────────────────────────────────
 
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    # Check default install location before giving up
-    $uvExe = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
-    if (Test-Path $uvExe) {
-        $env:Path = (Split-Path $uvExe) + ";" + $env:Path
-    } else {
-        Write-Error "uv is not installed. Run .\quickstart.ps1 first."
-        exit 1
-    }
+$uvInfo = Get-WorkingUvInfo
+if (-not $uvInfo) {
+    Write-Error "uv is not installed or is not runnable. Run .\quickstart.ps1 first."
+    exit 1
 }
+$uvExe = $uvInfo.Path
 
 # ── Load environment variables from Windows Registry ────────────────
 # Windows stores User-level env vars in the registry. New terminal
@@ -80,4 +79,4 @@ if (-not $env:HIVE_CREDENTIAL_KEY) {
 # ── Run the Hive CLI ────────────────────────────────────────────────
 # PYTHONUTF8=1: use UTF-8 for default encoding (fixes charmap decode errors on Windows)
 $env:PYTHONUTF8 = "1"
-& uv run hive @args
+& $uvExe run hive @args

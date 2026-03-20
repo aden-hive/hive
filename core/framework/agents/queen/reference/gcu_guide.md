@@ -109,6 +109,45 @@ Key rules to bake into GCU node prompts:
 - Keep tool calls per turn ≤10
 - Tab isolation: when browser is already running, use `browser_open(background=true)` and pass `target_id` to every call
 
+## Multiple Concurrent GCU Subagents
+
+When a task can be parallelized across multiple sites or profiles, declare a distinct GCU
+node for each and invoke them all in the same LLM turn.  The framework batches all
+`delegate_to_sub_agent` calls made in one turn and runs them with `asyncio.gather`, so
+they execute concurrently — not sequentially.
+
+**Each GCU subagent automatically gets its own isolated browser context** — no `profile=`
+argument is needed in tool calls.  The framework derives a unique profile from the subagent's
+node ID and instance counter and injects it via an asyncio `ContextVar` before the subagent
+runs.
+
+### Example: three sites in parallel
+
+```python
+# Three distinct GCU nodes
+gcu_site_a = NodeSpec(id="gcu-site-a", node_type="gcu", ...)
+gcu_site_b = NodeSpec(id="gcu-site-b", node_type="gcu", ...)
+gcu_site_c = NodeSpec(id="gcu-site-c", node_type="gcu", ...)
+
+orchestrator = NodeSpec(
+    id="orchestrator",
+    node_type="event_loop",
+    sub_agents=["gcu-site-a", "gcu-site-b", "gcu-site-c"],
+    system_prompt="""\
+Call all three subagents in a single response to run them in parallel:
+  delegate_to_sub_agent(agent_id="gcu-site-a", task="Scrape prices from site A")
+  delegate_to_sub_agent(agent_id="gcu-site-b", task="Scrape prices from site B")
+  delegate_to_sub_agent(agent_id="gcu-site-c", task="Scrape prices from site C")
+""",
+)
+```
+
+**Rules:**
+- Use distinct node IDs for each concurrent task — sharing an ID shares the browser context.
+- The GCU node prompts do not need to mention `profile=`; isolation is automatic.
+- Cleanup is automatic at session end, but GCU nodes can call `browser_stop()` explicitly
+  if they want to release resources mid-run.
+
 ## GCU Anti-Patterns
 
 - Using `browser_screenshot` to read text (use `browser_snapshot`)

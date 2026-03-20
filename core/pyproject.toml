@@ -1,6 +1,6 @@
 [project]
 name = "framework"
-version = "0.5.1"
+version = "0.7.1"
 description = "Goal-driven agent runtime with Builder-friendly observability"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -11,6 +11,7 @@ dependencies = [
   "litellm>=1.81.0",
   "mcp>=1.0.0",
   "fastmcp>=2.0.0",
+  "croniter>=1.4.0",
   "tools",
 ]
 
@@ -60,6 +61,10 @@ lint.isort.section-order = [
   "third-party",
   "first-party",
   "local-folder",
+]
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:litellm.*"
 ]
 
 [dependency-groups]

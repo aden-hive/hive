@@ -1,8 +1,6 @@
 """CLI entry point for Credential Tester agent."""
 
 import asyncio
-import logging
-import sys
 
 import click
 
@@ -10,13 +8,14 @@ from .agent import CredentialTesterAgent
 
 
 def setup_logging(verbose=False, debug=False):
+    from framework.observability import configure_logging
+
     if debug:
-        level, fmt = logging.DEBUG, "%(asctime)s %(name)s: %(message)s"
+        configure_logging(level="DEBUG")
     elif verbose:
-        level, fmt = logging.INFO, "%(message)s"
+        configure_logging(level="INFO")
     else:
-        level, fmt = logging.WARNING, "%(levelname)s: %(message)s"
-    logging.basicConfig(level=level, format=fmt, stream=sys.stderr)
+        configure_logging(level="WARNING")
 
 
 def pick_account(agent: CredentialTesterAgent) -> dict | None:

@@ -296,6 +296,7 @@ def register_tools(
         include_grid_data: bool = False,
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -325,6 +326,7 @@ def register_tools(
         sheet_titles: list[str] | None = None,
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -357,6 +359,7 @@ def register_tools(
         value_render_option: str = "FORMATTED_VALUE",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -388,10 +391,11 @@ def register_tools(
     def google_sheets_update_values(
         spreadsheet_id: str,
         range_name: str,
-        values: list[list[Any]],
+        values: list[list[Any]] | str,
         value_input_option: str = "USER_ENTERED",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -401,16 +405,29 @@ def register_tools(
         Args:
             spreadsheet_id: The spreadsheet ID (from the URL)
             range_name: The A1 notation range (e.g., "Sheet1!A1:B10")
-            values: 2D array of values to write
+            values: 2D array of values to write. Accepts a list or a JSON string.
             value_input_option: How to interpret input
                 (USER_ENTERED parses, RAW stores as-is)
 
         Returns:
             Dict with update result or error
         """
+        # Credentials check first so missing-creds errors aren't masked
         client = _get_client()
         if isinstance(client, dict):
             return client
+        # Accept stringified JSON and deserialize
+        import json
+
+        if isinstance(values, str):
+            try:
+                values = json.loads(values)
+            except (json.JSONDecodeError, ValueError):
+                return {"error": "values is not valid JSON"}
+        if not isinstance(values, list):
+            return {
+                "error": f"values must be a 2D list or JSON string, got {type(values).__name__}"
+            }
         try:
             return client.update_values(spreadsheet_id, range_name, values, value_input_option)
         except httpx.TimeoutException:
@@ -422,10 +439,11 @@ def register_tools(
     def google_sheets_append_values(
         spreadsheet_id: str,
         range_name: str,
-        values: list[list[Any]],
+        values: list[list[Any]] | str,
         value_input_option: str = "USER_ENTERED",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -435,16 +453,29 @@ def register_tools(
         Args:
             spreadsheet_id: The spreadsheet ID (from the URL)
             range_name: The A1 notation range (e.g., "Sheet1!A1")
-            values: 2D array of values to append
+            values: 2D array of values to append. Accepts a list or a JSON string.
             value_input_option: How to interpret input
                 (USER_ENTERED parses, RAW stores as-is)
 
         Returns:
             Dict with append result or error
         """
+        # Credentials check first so missing-creds errors aren't masked
         client = _get_client()
         if isinstance(client, dict):
             return client
+        # Accept stringified JSON and deserialize
+        import json
+
+        if isinstance(values, str):
+            try:
+                values = json.loads(values)
+            except (json.JSONDecodeError, ValueError):
+                return {"error": "values is not valid JSON"}
+        if not isinstance(values, list):
+            return {
+                "error": f"values must be a 2D list or JSON string, got {type(values).__name__}"
+            }
         try:
             return client.append_values(spreadsheet_id, range_name, values, value_input_option)
         except httpx.TimeoutException:
@@ -458,6 +489,7 @@ def register_tools(
         range_name: str,
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -490,6 +522,7 @@ def register_tools(
         value_input_option: str = "USER_ENTERED",
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -521,6 +554,7 @@ def register_tools(
         ranges: list[str],
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -554,6 +588,7 @@ def register_tools(
         column_count: int = 26,
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:
@@ -585,6 +620,7 @@ def register_tools(
         sheet_id: int,
         # Tracking parameters (injected by framework, ignored by tool)
         workspace_id: str | None = None,
+        account: str | None = None,
         agent_id: str | None = None,
         session_id: str | None = None,
     ) -> dict:

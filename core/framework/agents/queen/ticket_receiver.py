@@ -1,8 +1,8 @@
 """Queen's ticket receiver entry point.
 
-When the Worker Health Judge emits a WORKER_ESCALATION_TICKET event on the
-shared EventBus, this entry point fires and routes to the ``ticket_triage``
-node, where the Queen deliberates and decides whether to notify the operator.
+When a WORKER_ESCALATION_TICKET event is emitted on the shared EventBus,
+this entry point fires and routes to the ``ticket_triage`` node, where the
+Queen deliberates and decides whether to notify the operator.
 
 Isolation level is ``isolated`` — the queen's triage memory is kept separate
 from the worker's shared memory. Each ticket triage runs in its own context.

@@ -9,8 +9,9 @@ Session-primary routes:
 - DELETE /api/sessions/{session_id}/worker           — unload worker from session
 - GET    /api/sessions/{session_id}/stats            — runtime statistics
 - GET    /api/sessions/{session_id}/entry-points     — list entry points
+- PATCH  /api/sessions/{session_id}/triggers/{id}   — update trigger task
 - GET    /api/sessions/{session_id}/graphs           — list graph IDs
-- GET    /api/sessions/{session_id}/queen-messages   — queen conversation history
+- GET    /api/sessions/{session_id}/events/history  — persisted eventbus log (for replay)
 
 Worker session browsing (persisted execution runs on disk):
 - GET    /api/sessions/{session_id}/worker-sessions                             — list
@@ -22,6 +23,8 @@ Worker session browsing (persisted execution runs on disk):
 
 """
 
+import asyncio
+import contextlib
 import json
 import logging
 import shutil
@@ -31,6 +34,7 @@ from pathlib import Path
 from aiohttp import web
 
 from framework.server.app import (
+    cold_sessions_dir,
     resolve_session,
     safe_path_segment,
     sessions_dir,
@@ -61,7 +65,9 @@ def _session_to_live_dict(session) -> dict:
         "loaded_at": session.loaded_at,
         "uptime_seconds": round(time.time() - session.loaded_at, 1),
         "intro_message": getattr(session.runner, "intro_message", "") or "",
-        "queen_phase": phase_state.phase if phase_state else "planning",
+        "queen_phase": phase_state.phase
+        if phase_state
+        else ("staging" if session.worker_runtime else "planning"),
     }
 
 
@@ -140,6 +146,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
             session = await manager.create_session_with_worker(
                 agent_path,
                 agent_id=agent_id,
+                session_id=session_id,
                 model=model,
                 initial_prompt=initial_prompt,
                 queen_resume_from=queen_resume_from,
@@ -228,6 +235,22 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
             }
             for ep in rt.get_entry_points()
         ]
+        # Append triggers from triggers.json (stored on session)
+        runner = getattr(session, "runner", None)
+        graph_entry = runner.graph.entry_node if runner else ""
+        for t in getattr(session, "available_triggers", {}).values():
+            entry = {
+                "id": t.id,
+                "name": t.description or t.id,
+                "entry_node": graph_entry,
+                "trigger_type": t.trigger_type,
+                "trigger_config": t.trigger_config,
+                "task": t.task,
+            }
+            mono = getattr(session, "trigger_next_fire", {}).get(t.id)
+            if mono is not None:
+                entry["next_fire_in"] = max(0.0, mono - time.monotonic())
+            data["entry_points"].append(entry)
         data["graphs"] = session.worker_runtime.list_graphs()
 
     return web.json_response(data)
@@ -351,23 +374,190 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
 
     rt = session.worker_runtime
     eps = rt.get_entry_points() if rt else []
+    entry_points = [
+        {
+            "id": ep.id,
+            "name": ep.name,
+            "entry_node": ep.entry_node,
+            "trigger_type": ep.trigger_type,
+            "trigger_config": ep.trigger_config,
+            **(
+                {"next_fire_in": nf}
+                if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None
+                else {}
+            ),
+        }
+        for ep in eps
+    ]
+    # Append triggers from triggers.json (stored on session)
+    runner = getattr(session, "runner", None)
+    graph_entry = runner.graph.entry_node if runner else ""
+    for t in getattr(session, "available_triggers", {}).values():
+        entry = {
+            "id": t.id,
+            "name": t.description or t.id,
+            "entry_node": graph_entry,
+            "trigger_type": t.trigger_type,
+            "trigger_config": t.trigger_config,
+            "task": t.task,
+        }
+        mono = getattr(session, "trigger_next_fire", {}).get(t.id)
+        if mono is not None:
+            entry["next_fire_in"] = max(0.0, mono - time.monotonic())
+        entry_points.append(entry)
+    return web.json_response({"entry_points": entry_points})
+
+
+async def handle_update_trigger_task(request: web.Request) -> web.Response:
+    """PATCH /api/sessions/{session_id}/triggers/{trigger_id} — update trigger fields."""
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    trigger_id = request.match_info["trigger_id"]
+    available = getattr(session, "available_triggers", {})
+    tdef = available.get(trigger_id)
+    if tdef is None:
+        return web.json_response(
+            {"error": f"Trigger '{trigger_id}' not found"},
+            status=404,
+        )
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    updates: dict[str, object] = {}
+
+    if "task" in body:
+        task = body.get("task")
+        if not isinstance(task, str):
+            return web.json_response({"error": "'task' must be a string"}, status=400)
+        tdef.task = task
+        updates["task"] = tdef.task
+
+    trigger_config_update = body.get("trigger_config")
+    if trigger_config_update is not None:
+        if not isinstance(trigger_config_update, dict):
+            return web.json_response(
+                {"error": "'trigger_config' must be an object"},
+                status=400,
+            )
+        merged_trigger_config = dict(tdef.trigger_config)
+        merged_trigger_config.update(trigger_config_update)
+
+        if tdef.trigger_type == "timer":
+            cron_expr = merged_trigger_config.get("cron")
+            interval = merged_trigger_config.get("interval_minutes")
+            if cron_expr is not None and not isinstance(cron_expr, str):
+                return web.json_response(
+                    {"error": "'trigger_config.cron' must be a string"},
+                    status=400,
+                )
+            if cron_expr:
+                try:
+                    from croniter import croniter
+
+                    if not croniter.is_valid(cron_expr):
+                        return web.json_response(
+                            {"error": f"Invalid cron expression: {cron_expr}"},
+                            status=400,
+                        )
+                except ImportError:
+                    return web.json_response(
+                        {
+                            "error": (
+                                "croniter package not installed — cannot validate cron expression."
+                            )
+                        },
+                        status=500,
+                    )
+                merged_trigger_config.pop("interval_minutes", None)
+            elif interval is None:
+                return web.json_response(
+                    {
+                        "error": (
+                            "Timer trigger needs 'cron' or 'interval_minutes' in trigger_config."
+                        )
+                    },
+                    status=400,
+                )
+            elif not isinstance(interval, (int, float)) or interval <= 0:
+                return web.json_response(
+                    {"error": "'trigger_config.interval_minutes' must be > 0"},
+                    status=400,
+                )
+        tdef.trigger_config = merged_trigger_config
+        updates["trigger_config"] = tdef.trigger_config
+
+    if not updates:
+        return web.json_response(
+            {"error": "Provide at least one of 'task' or 'trigger_config'"},
+            status=400,
+        )
+
+    # Persist to session state and agent definition
+    from framework.tools.queen_lifecycle_tools import (
+        _persist_active_triggers,
+        _save_trigger_to_agent,
+        _start_trigger_timer,
+        _start_trigger_webhook,
+    )
+
+    if "trigger_config" in updates and trigger_id in getattr(session, "active_trigger_ids", set()):
+        task = session.active_timer_tasks.pop(trigger_id, None)
+        if task and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        getattr(session, "trigger_next_fire", {}).pop(trigger_id, None)
+
+        webhook_subs = getattr(session, "active_webhook_subs", {})
+        if sub_id := webhook_subs.pop(trigger_id, None):
+            with contextlib.suppress(Exception):
+                session.event_bus.unsubscribe(sub_id)
+
+        if tdef.trigger_type == "timer":
+            await _start_trigger_timer(session, trigger_id, tdef)
+        elif tdef.trigger_type == "webhook":
+            await _start_trigger_webhook(session, trigger_id, tdef)
+
+    if trigger_id in getattr(session, "active_trigger_ids", set()):
+        session_id = request.match_info["session_id"]
+        await _persist_active_triggers(session, session_id)
+
+    _save_trigger_to_agent(session, trigger_id, tdef)
+
+    # Emit SSE event so the frontend updates the graph and detail panel
+    bus = getattr(session, "event_bus", None)
+    if bus:
+        from framework.runtime.event_bus import AgentEvent, EventType
+
+        await bus.publish(
+            AgentEvent(
+                type=EventType.TRIGGER_UPDATED,
+                stream_id="queen",
+                data={
+                    "trigger_id": trigger_id,
+                    "task": tdef.task,
+                    "trigger_config": tdef.trigger_config,
+                    "trigger_type": tdef.trigger_type,
+                    "name": tdef.description or trigger_id,
+                    "entry_node": getattr(
+                        getattr(getattr(session, "runner", None), "graph", None),
+                        "entry_node",
+                        None,
+                    ),
+                },
+            )
+        )
+
     return web.json_response(
         {
-            "entry_points": [
-                {
-                    "id": ep.id,
-                    "name": ep.name,
-                    "entry_node": ep.entry_node,
-                    "trigger_type": ep.trigger_type,
-                    "trigger_config": ep.trigger_config,
-                    **(
-                        {"next_fire_in": nf}
-                        if rt and (nf := rt.get_timer_next_fire_in(ep.id)) is not None
-                        else {}
-                    ),
-                }
-                for ep in eps
-            ]
+            "trigger_id": trigger_id,
+            "task": tdef.task,
+            "trigger_config": tdef.trigger_config,
         }
     )
 
@@ -397,23 +587,28 @@ async def handle_list_worker_sessions(request: web.Request) -> web.Response:
     """List worker sessions on disk."""
     session, err = resolve_session(request)
     if err:
-        return err
-
-    if not session.worker_path:
-        return web.json_response({"sessions": []})
-
-    sess_dir = sessions_dir(session)
+        # Fall back to cold session lookup from disk
+        sid = request.match_info["session_id"]
+        sess_dir = cold_sessions_dir(sid)
+        if sess_dir is None:
+            return err
+    else:
+        if not session.worker_path:
+            return web.json_response({"sessions": []})
+        sess_dir = sessions_dir(session)
     if not sess_dir.exists():
         return web.json_response({"sessions": []})
 
     sessions = []
     for d in sorted(sess_dir.iterdir(), reverse=True):
-        if not d.is_dir() or not d.name.startswith("session_"):
+        if not d.is_dir():
+            continue
+        state_path = d / "state.json"
+        if not d.name.startswith("session_") and not state_path.exists():
             continue
 
         entry: dict = {"session_id": d.name}
 
-        state_path = d / "state.json"
         if state_path.exists():
             try:
                 state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -564,48 +759,85 @@ async def handle_messages(request: web.Request) -> web.Response:
     """Get messages for a worker session."""
     session, err = resolve_session(request)
     if err:
-        return err
-
-    if not session.worker_path:
-        return web.json_response({"error": "No worker loaded"}, status=503)
+        # Fall back to cold session lookup from disk
+        sid = request.match_info["session_id"]
+        sess_dir = cold_sessions_dir(sid)
+        if sess_dir is None:
+            return err
+    else:
+        if not session.worker_path:
+            return web.json_response({"error": "No worker loaded"}, status=503)
+        sess_dir = sessions_dir(session)
 
     ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
     ws_id = safe_path_segment(ws_id)
 
-    convs_dir = sessions_dir(session) / ws_id / "conversations"
+    convs_dir = sess_dir / ws_id / "conversations"
     if not convs_dir.exists():
         return web.json_response({"messages": []})
 
     filter_node = request.query.get("node_id")
     all_messages = []
 
-    for node_dir in convs_dir.iterdir():
-        if not node_dir.is_dir():
-            continue
-        if filter_node and node_dir.name != filter_node:
-            continue
-
-        parts_dir = node_dir / "parts"
+    def _collect_msg_parts(parts_dir: Path, node_id: str) -> None:
         if not parts_dir.exists():
-            continue
-
+            return
         for part_file in sorted(parts_dir.iterdir()):
             if part_file.suffix != ".json":
                 continue
             try:
                 part = json.loads(part_file.read_text(encoding="utf-8"))
-                part["_node_id"] = node_dir.name
+                part["_node_id"] = node_id
                 part.setdefault("created_at", part_file.stat().st_mtime)
                 all_messages.append(part)
             except (json.JSONDecodeError, OSError):
                 continue
+
+    # Flat layout: conversations/parts/*.json
+    if not filter_node:
+        _collect_msg_parts(convs_dir / "parts", "worker")
+
+    # Node-based layout: conversations/<node_id>/parts/*.json
+    for node_dir in convs_dir.iterdir():
+        if not node_dir.is_dir() or node_dir.name == "parts":
+            continue
+        if filter_node and node_dir.name != filter_node:
+            continue
+        _collect_msg_parts(node_dir / "parts", node_dir.name)
+
+    # Merge run lifecycle markers from runs.jsonl (for historical dividers)
+    runs_file = sess_dir / ws_id / "runs.jsonl"
+    if runs_file.exists():
+        try:
+            for line in runs_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    all_messages.append(
+                        {
+                            "seq": -1,
+                            "role": "system",
+                            "content": "",
+                            "_node_id": "_run_marker",
+                            "is_run_marker": True,
+                            "run_id": record.get("run_id"),
+                            "run_event": record.get("event"),
+                            "created_at": record.get("created_at", 0),
+                        }
+                    )
+                except json.JSONDecodeError:
+                    continue
+        except OSError:
+            pass
 
     all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
 
     client_only = request.query.get("client_only", "").lower() in ("true", "1")
     if client_only:
         client_facing_nodes: set[str] = set()
-        if session.runner and hasattr(session.runner, "graph"):
+        if session and session.runner and hasattr(session.runner, "graph"):
             for node in session.runner.graph.nodes:
                 if node.client_facing:
                     client_facing_nodes.add(node.id)
@@ -614,63 +846,51 @@ async def handle_messages(request: web.Request) -> web.Response:
             all_messages = [
                 m
                 for m in all_messages
-                if not m.get("is_transition_marker")
-                and m["role"] != "tool"
-                and not (m["role"] == "assistant" and m.get("tool_calls"))
-                and (
-                    (m["role"] == "user" and m.get("is_client_input"))
-                    or (m["role"] == "assistant" and m.get("_node_id") in client_facing_nodes)
+                if m.get("is_run_marker")
+                or (
+                    not m.get("is_transition_marker")
+                    and m["role"] != "tool"
+                    and not (m["role"] == "assistant" and m.get("tool_calls"))
+                    and (
+                        (m["role"] == "user" and m.get("is_client_input"))
+                        or (m["role"] == "assistant" and m.get("_node_id") in client_facing_nodes)
+                    )
                 )
             ]
 
     return web.json_response({"messages": all_messages})
 
 
-async def handle_queen_messages(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/queen-messages — get queen conversation.
+async def handle_session_events_history(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/events/history — persisted eventbus log.
 
-    Reads directly from disk so it works for both live sessions and cold
-    (post-server-restart) sessions — no live session required.
+    Reads ``events.jsonl`` from the session directory on disk so it works for
+    both live sessions and cold (post-server-restart) sessions.  The frontend
+    replays these events through ``sseEventToChatMessage`` to fully reconstruct
+    the UI state on resume.
     """
     session_id = request.match_info["session_id"]
 
     queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
-    convs_dir = queen_dir / "conversations"
-    if not convs_dir.exists():
-        return web.json_response({"messages": [], "session_id": session_id})
+    events_path = queen_dir / "events.jsonl"
+    if not events_path.exists():
+        return web.json_response({"events": [], "session_id": session_id})
 
-    all_messages: list[dict] = []
-    for node_dir in convs_dir.iterdir():
-        if not node_dir.is_dir():
-            continue
-        parts_dir = node_dir / "parts"
-        if not parts_dir.exists():
-            continue
-        for part_file in sorted(parts_dir.iterdir()):
-            if part_file.suffix != ".json":
-                continue
-            try:
-                part = json.loads(part_file.read_text(encoding="utf-8"))
-                part["_node_id"] = node_dir.name
-                # Use file mtime as created_at so frontend can order
-                # queen and worker messages chronologically.
-                part.setdefault("created_at", part_file.stat().st_mtime)
-                all_messages.append(part)
-            except (json.JSONDecodeError, OSError):
-                continue
+    events: list[dict] = []
+    try:
+        with open(events_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return web.json_response({"events": [], "session_id": session_id})
 
-    all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
-
-    # Filter to client-facing messages only
-    all_messages = [
-        m
-        for m in all_messages
-        if not m.get("is_transition_marker")
-        and m["role"] != "tool"
-        and not (m["role"] == "assistant" and m.get("tool_calls"))
-    ]
-
-    return web.json_response({"messages": all_messages, "session_id": session_id})
+    return web.json_response({"events": events, "session_id": session_id})
 
 
 async def handle_session_history(request: web.Request) -> web.Response:
@@ -746,6 +966,7 @@ async def handle_discover(request: web.Request) -> web.Response:
                 "description": entry.description,
                 "category": entry.category,
                 "session_count": entry.session_count,
+                "run_count": entry.run_count,
                 "node_count": entry.node_count,
                 "tool_count": entry.tool_count,
                 "tags": entry.tags,
@@ -783,8 +1004,12 @@ def register_routes(app: web.Application) -> None:
     # Session info
     app.router.add_get("/api/sessions/{session_id}/stats", handle_session_stats)
     app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
+    app.router.add_patch(
+        "/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task
+    )
     app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
-    app.router.add_get("/api/sessions/{session_id}/queen-messages", handle_queen_messages)
+
+    app.router.add_get("/api/sessions/{session_id}/events/history", handle_session_events_history)
 
     # Worker session browsing (session-primary)
     app.router.add_get("/api/sessions/{session_id}/worker-sessions", handle_list_worker_sessions)

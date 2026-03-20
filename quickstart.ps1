@@ -6,7 +6,7 @@
 .DESCRIPTION
     An interactive setup wizard that:
     1. Installs Python dependencies via uv
-    2. Installs Playwright browser for web scraping
+    2. Checks for Chrome/Edge browser for web automation
     3. Helps configure LLM API keys
     4. Verifies everything works
 
@@ -18,6 +18,13 @@
 # Use "Continue" so stderr from external tools (uv, python) does not
 # terminate the script.  Errors are handled via $LASTEXITCODE checks.
 $ErrorActionPreference = "Continue"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$UvHelperPath = Join-Path $ScriptDir "scripts\uv-discovery.ps1"
+
+# Hive LLM router endpoint
+$HiveLlmEndpoint = "https://api.adenhq.com"
+
+. $UvHelperPath
 
 # ============================================================
 # Colors / helpers
@@ -94,7 +101,6 @@ function Prompt-Choice {
         Write-Color -Text "Invalid choice. Please enter 1-$($Options.Count)" -Color Red
     }
 }
-
 
 # ============================================================
 # Windows Defender Exclusion Functions
@@ -276,9 +282,6 @@ function Add-DefenderExclusions {
     }
 }
 
-# Get the directory where this script lives
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-
 # ============================================================
 # Banner
 # ============================================================
@@ -352,10 +355,10 @@ Write-Host ""
 # Check / install uv
 # ============================================================
 
-$uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+$uvInfo = Get-WorkingUvInfo
 
 # If uv not in PATH, check if it exists in default location
-if (-not $uvCmd) {
+if (-not $uvInfo) {
     $uvDir = Join-Path $env:USERPROFILE ".local\bin"
     $uvExePath = Join-Path $uvDir "uv.exe"
 
@@ -371,16 +374,16 @@ if (-not $uvCmd) {
 
         # Refresh PATH for current session
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-        $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+        $uvInfo = Get-WorkingUvInfo
 
-        if ($uvCmd) {
+        if ($uvInfo) {
             Write-Ok "uv is now in PATH"
         }
     }
 }
 
 # If still not found, install it
-if (-not $uvCmd) {
+if (-not $uvInfo) {
     Write-Warn "uv not found. Installing..."
     try {
         # Official uv installer for Windows
@@ -397,13 +400,13 @@ if (-not $uvCmd) {
 
         # Refresh PATH for current session
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "User") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "Machine")
-        $uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+        $uvInfo = Get-WorkingUvInfo
     } catch {
         Write-Color -Text "Error: uv installation failed" -Color Red
         Write-Host "Please install uv manually from https://astral.sh/uv/"
         exit 1
     }
-    if (-not $uvCmd) {
+    if (-not $uvInfo) {
         Write-Color -Text "Error: uv not found after installation" -Color Red
         Write-Host "Please close and reopen PowerShell, then run this script again."
         Write-Host "Or install uv manually from https://astral.sh/uv/"
@@ -412,8 +415,8 @@ if (-not $uvCmd) {
     Write-Ok "uv installed successfully"
 }
 
-$uvVersion = & uv --version
-Write-Ok "uv detected: $uvVersion"
+$UvCmd = $uvInfo.Path
+Write-Ok "uv detected: $($uvInfo.Version)"
 Write-Host ""
 
 # Check for Node.js (needed for frontend dashboard)
@@ -503,7 +506,7 @@ try {
     if (Test-Path "pyproject.toml") {
         Write-Host "  Installing workspace packages... " -NoNewline
 
-        $syncOutput = & uv sync 2>&1
+        $syncOutput = & $UvCmd sync 2>&1
         $syncExitCode = $LASTEXITCODE
 
         if ($syncExitCode -eq 0) {
@@ -518,22 +521,14 @@ try {
         exit 1
     }
 
-    # Install Playwright browser
-    Write-Host "  Installing Playwright browser... " -NoNewline
-    $null = & uv run python -c "import playwright" 2>&1
-    $importExitCode = $LASTEXITCODE
-    if ($importExitCode -eq 0) {
-        $null = & uv run python -m playwright install chromium 2>&1
-        $playwrightExitCode = $LASTEXITCODE
-
-        if ($playwrightExitCode -eq 0) {
-            Write-Ok "ok"
-        } else {
-            Write-Warn "skipped (install manually: uv run python -m playwright install chromium)"
-        }
+    # Keep browser setup scoped to detecting the system browser used by GCU.
+    Write-Host "  Checking for Chrome/Edge browser... " -NoNewline
+    $null = & $UvCmd run python -c "from gcu.browser.chrome_finder import find_chrome; assert find_chrome()" 2>&1
+    $chromeCheckExit = $LASTEXITCODE
+    if ($chromeCheckExit -eq 0) {
+        Write-Ok "ok"
     } else {
-
-        Write-Warn "skipped"
+        Write-Warn "not found - install Chrome or Edge for browser tools"
     }
 } finally {
     Pop-Location
@@ -728,7 +723,7 @@ $imports = @(
 $modulesToCheck = @("framework", "aden_tools", "litellm")
 
 try {
-    $checkOutput = & uv run python scripts/check_requirements.py @modulesToCheck 2>&1 | Out-String
+    $checkOutput = & $UvCmd run python scripts/check_requirements.py @modulesToCheck 2>&1 | Out-String
     $resultJson = $null
     
     # Try to parse JSON result
@@ -773,14 +768,6 @@ if ($importErrors -gt 0) {
 Write-Host ""
 
 # ============================================================
-# Step 4: Verify Claude Code Skills
-# ============================================================
-
-Write-Step -Number "4" -Text "Step 4: Verifying Claude Code skills..."
-
-# (skills check is informational only, shown in final verification)
-
-# ============================================================
 # Provider / model data
 # ============================================================
 
@@ -791,6 +778,7 @@ $ProviderMap = [ordered]@{
     GOOGLE_API_KEY    = @{ Name = "Google AI";           Id = "google" }
     GROQ_API_KEY      = @{ Name = "Groq";               Id = "groq" }
     CEREBRAS_API_KEY  = @{ Name = "Cerebras";            Id = "cerebras" }
+    OPENROUTER_API_KEY = @{ Name = "OpenRouter";          Id = "openrouter" }
     MISTRAL_API_KEY   = @{ Name = "Mistral";             Id = "mistral" }
     TOGETHER_API_KEY  = @{ Name = "Together AI";         Id = "together" }
     DEEPSEEK_API_KEY  = @{ Name = "DeepSeek";            Id = "deepseek" }
@@ -810,38 +798,110 @@ $DefaultModels = @{
 # Model choices: array of hashtables per provider
 $ModelChoices = @{
     anthropic = @(
-        @{ Id = "claude-haiku-4-5-20251001";  Label = "Haiku 4.5 - Fast + cheap (recommended)"; MaxTokens = 8192 },
-        @{ Id = "claude-sonnet-4-20250514";   Label = "Sonnet 4 - Fast + capable";              MaxTokens = 8192 },
-        @{ Id = "claude-sonnet-4-5-20250929"; Label = "Sonnet 4.5 - Best balance";              MaxTokens = 16384 },
-        @{ Id = "claude-opus-4-6";            Label = "Opus 4.6 - Most capable";                MaxTokens = 32768 }
+        @{ Id = "claude-haiku-4-5-20251001";  Label = "Haiku 4.5 - Fast + cheap (recommended)"; MaxTokens = 8192;  MaxContextTokens = 180000 },
+        @{ Id = "claude-sonnet-4-20250514";   Label = "Sonnet 4 - Fast + capable";              MaxTokens = 8192;  MaxContextTokens = 180000 },
+        @{ Id = "claude-sonnet-4-5-20250929"; Label = "Sonnet 4.5 - Best balance";              MaxTokens = 16384; MaxContextTokens = 180000 },
+        @{ Id = "claude-opus-4-6";            Label = "Opus 4.6 - Most capable";                MaxTokens = 32768; MaxContextTokens = 180000 }
     )
     openai = @(
-        @{ Id = "gpt-5-mini"; Label = "GPT-5 Mini - Fast + cheap (recommended)"; MaxTokens = 16384 },
-        @{ Id = "gpt-5.2";   Label = "GPT-5.2 - Most capable";                   MaxTokens = 16384 }
+        @{ Id = "gpt-5-mini"; Label = "GPT-5 Mini - Fast + cheap (recommended)"; MaxTokens = 16384; MaxContextTokens = 120000 },
+        @{ Id = "gpt-5.2";   Label = "GPT-5.2 - Most capable";                   MaxTokens = 16384; MaxContextTokens = 120000 }
     )
     gemini = @(
-        @{ Id = "gemini-3-flash-preview"; Label = "Gemini 3 Flash - Fast (recommended)"; MaxTokens = 8192 },
-        @{ Id = "gemini-3.1-pro-preview";  Label = "Gemini 3.1 Pro - Best quality";        MaxTokens = 8192 }
+        @{ Id = "gemini-3-flash-preview"; Label = "Gemini 3 Flash - Fast (recommended)"; MaxTokens = 8192; MaxContextTokens = 900000 },
+        @{ Id = "gemini-3.1-pro-preview";  Label = "Gemini 3.1 Pro - Best quality";       MaxTokens = 8192; MaxContextTokens = 900000 }
     )
     groq = @(
-        @{ Id = "moonshotai/kimi-k2-instruct-0905"; Label = "Kimi K2 - Best quality (recommended)"; MaxTokens = 8192 },
-        @{ Id = "openai/gpt-oss-120b";              Label = "GPT-OSS 120B - Fast reasoning";        MaxTokens = 8192 }
+        @{ Id = "moonshotai/kimi-k2-instruct-0905"; Label = "Kimi K2 - Best quality (recommended)"; MaxTokens = 8192; MaxContextTokens = 120000 },
+        @{ Id = "openai/gpt-oss-120b";              Label = "GPT-OSS 120B - Fast reasoning";        MaxTokens = 8192; MaxContextTokens = 120000 }
     )
     cerebras = @(
-        @{ Id = "zai-glm-4.7";                    Label = "ZAI-GLM 4.7 - Best quality (recommended)"; MaxTokens = 8192 },
-        @{ Id = "qwen3-235b-a22b-instruct-2507";  Label = "Qwen3 235B - Frontier reasoning";          MaxTokens = 8192 }
+        @{ Id = "zai-glm-4.7";                    Label = "ZAI-GLM 4.7 - Best quality (recommended)"; MaxTokens = 8192; MaxContextTokens = 120000 },
+        @{ Id = "qwen3-235b-a22b-instruct-2507";  Label = "Qwen3 235B - Frontier reasoning";          MaxTokens = 8192; MaxContextTokens = 120000 }
     )
+}
+
+function Normalize-OpenRouterModelId {
+    param([string]$ModelId)
+    $normalized = if ($ModelId) { $ModelId.Trim() } else { "" }
+    if ($normalized -match '(?i)^openrouter/(.+)$') {
+        $normalized = $matches[1]
+    }
+    return $normalized
 }
 
 function Get-ModelSelection {
     param([string]$ProviderId)
 
+    if ($ProviderId -eq "openrouter") {
+        $defaultModel = ""
+        if ($PrevModel -and $PrevProvider -eq $ProviderId) {
+            $defaultModel = Normalize-OpenRouterModelId $PrevModel
+        }
+        Write-Host ""
+        Write-Color -Text "Enter your OpenRouter model id:" -Color White
+        Write-Color -Text "  Paste from openrouter.ai (example: x-ai/grok-4.20-beta)" -Color DarkGray
+        Write-Color -Text "  If calls fail with guardrail/privacy errors: openrouter.ai/settings/privacy" -Color DarkGray
+        Write-Host ""
+        while ($true) {
+            if ($defaultModel) {
+                $rawModel = Read-Host "Model id [$defaultModel]"
+                if ([string]::IsNullOrWhiteSpace($rawModel)) { $rawModel = $defaultModel }
+            } else {
+                $rawModel = Read-Host "Model id"
+            }
+            $normalizedModel = Normalize-OpenRouterModelId $rawModel
+            if (-not [string]::IsNullOrWhiteSpace($normalizedModel)) {
+                $openrouterKey = $null
+                if ($SelectedEnvVar) {
+                    $openrouterKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "Process")
+                    if (-not $openrouterKey) {
+                        $openrouterKey = [System.Environment]::GetEnvironmentVariable($SelectedEnvVar, "User")
+                    }
+                }
+
+                if ($openrouterKey) {
+                    Write-Host "  Verifying model id... " -NoNewline
+                    try {
+                        $modelApiBase = if ($SelectedApiBase) { $SelectedApiBase } else { "https://openrouter.ai/api/v1" }
+                        $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "openrouter" $openrouterKey $modelApiBase $normalizedModel 2>$null
+                        $hcJson = $hcResult | ConvertFrom-Json
+                        if ($hcJson.valid -eq $true) {
+                            if ($hcJson.model) {
+                                $normalizedModel = [string]$hcJson.model
+                            }
+                            Write-Color -Text "ok" -Color Green
+                        } elseif ($hcJson.valid -eq $false) {
+                            Write-Color -Text "failed" -Color Red
+                            Write-Warn $hcJson.message
+                            Write-Host ""
+                            continue
+                        } else {
+                            Write-Color -Text "--" -Color Yellow
+                            Write-Color -Text "  Could not verify model id (network issue). Continuing with your selection." -Color DarkGray
+                        }
+                    } catch {
+                        Write-Color -Text "--" -Color Yellow
+                        Write-Color -Text "  Could not verify model id (network issue). Continuing with your selection." -Color DarkGray
+                    }
+                } else {
+                    Write-Color -Text "  Skipping model verification (OpenRouter key not available in current shell)." -Color DarkGray
+                }
+
+                Write-Host ""
+                Write-Ok "Model: $normalizedModel"
+                return @{ Model = $normalizedModel; MaxTokens = 8192; MaxContextTokens = 120000 }
+            }
+            Write-Color -Text "Model id cannot be empty." -Color Red
+        }
+    }
+
     $choices = $ModelChoices[$ProviderId]
     if (-not $choices -or $choices.Count -eq 0) {
-        return @{ Model = $DefaultModels[$ProviderId]; MaxTokens = 8192 }
+        return @{ Model = $DefaultModels[$ProviderId]; MaxTokens = 8192; MaxContextTokens = 120000 }
     }
     if ($choices.Count -eq 1) {
-        return @{ Model = $choices[0].Id; MaxTokens = $choices[0].MaxTokens }
+        return @{ Model = $choices[0].Id; MaxTokens = $choices[0].MaxTokens; MaxContextTokens = $choices[0].MaxContextTokens }
     }
 
     # Find default index from previous model (if same provider)
@@ -874,7 +934,7 @@ function Get-ModelSelection {
                 $sel = $choices[$num - 1]
                 Write-Host ""
                 Write-Ok "Model: $($sel.Id)"
-                return @{ Model = $sel.Id; MaxTokens = $sel.MaxTokens }
+                return @{ Model = $sel.Id; MaxTokens = $sel.MaxTokens; MaxContextTokens = $sel.MaxContextTokens }
             }
         }
         Write-Color -Text "Invalid choice. Please enter 1-$($choices.Count)" -Color Red
@@ -891,11 +951,13 @@ Write-Step -Number "" -Text "Configuring LLM provider..."
 $HiveConfigDir  = Join-Path $env:USERPROFILE ".hive"
 $HiveConfigFile = Join-Path $HiveConfigDir "configuration.json"
 
-$SelectedProviderId = ""
-$SelectedEnvVar     = ""
-$SelectedModel      = ""
-$SelectedMaxTokens  = 8192
-$SubscriptionMode   = ""
+$SelectedProviderId      = ""
+$SelectedEnvVar          = ""
+$SelectedModel           = ""
+$SelectedMaxTokens       = 8192
+$SelectedMaxContextTokens = 120000
+$SelectedApiBase         = ""
+$SubscriptionMode        = ""
 
 # ── Credential detection (silent — just set flags) ───────────
 $ClaudeCredDetected = $false
@@ -918,16 +980,22 @@ $kimiKey = [System.Environment]::GetEnvironmentVariable("KIMI_API_KEY", "User")
 if (-not $kimiKey) { $kimiKey = $env:KIMI_API_KEY }
 if ($kimiKey) { $KimiCredDetected = $true }
 
+$HiveCredDetected = $false
+$hiveKey = [System.Environment]::GetEnvironmentVariable("HIVE_API_KEY", "User")
+if (-not $hiveKey) { $hiveKey = $env:HIVE_API_KEY }
+if ($hiveKey) { $HiveCredDetected = $true }
+
 # Detect API key providers
-$ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY")
-$ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier")
-$ProviderMenuIds      = @("anthropic", "openai", "gemini", "groq", "cerebras")
+$ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY")
+$ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier", "OpenRouter - Bring any OpenRouter model")
+$ProviderMenuIds      = @("anthropic", "openai", "gemini", "groq", "cerebras", "openrouter")
 $ProviderMenuUrls     = @(
     "https://console.anthropic.com/settings/keys",
     "https://platform.openai.com/api-keys",
     "https://aistudio.google.com/apikey",
     "https://console.groq.com/keys",
-    "https://cloud.cerebras.ai/"
+    "https://cloud.cerebras.ai/",
+    "https://openrouter.ai/keys"
 )
 
 # ── Read previous configuration (if any) ──────────────────────
@@ -948,6 +1016,7 @@ if (Test-Path $HiveConfigFile) {
             elseif ($prevLlm.use_kimi_code_subscription) { $PrevSubMode = "kimi_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.z.ai*") { $PrevSubMode = "zai_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.kimi.com*") { $PrevSubMode = "kimi_code" }
+            elseif ($prevLlm.provider -eq "hive" -or ($prevLlm.api_base -and $prevLlm.api_base -like "*adenhq.com*")) { $PrevSubMode = "hive_llm" }
         }
     } catch { }
 }
@@ -961,6 +1030,7 @@ if ($PrevSubMode -or $PrevProvider) {
         "zai_code"    { if ($ZaiCredDetected)    { $prevCredValid = $true } }
         "codex"       { if ($CodexCredDetected)  { $prevCredValid = $true } }
         "kimi_code"   { if ($KimiCredDetected)   { $prevCredValid = $true } }
+        "hive_llm"    { if ($HiveCredDetected)   { $prevCredValid = $true } }
         default {
             if ($PrevEnvVar) {
                 $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "Process")
@@ -975,14 +1045,16 @@ if ($PrevSubMode -or $PrevProvider) {
             "zai_code"    { $DefaultChoice = "2" }
             "codex"       { $DefaultChoice = "3" }
             "kimi_code"   { $DefaultChoice = "4" }
+            "hive_llm"    { $DefaultChoice = "5" }
         }
         if (-not $DefaultChoice) {
             switch ($PrevProvider) {
-                "anthropic" { $DefaultChoice = "5" }
-                "openai"    { $DefaultChoice = "6" }
-                "gemini"    { $DefaultChoice = "7" }
-                "groq"      { $DefaultChoice = "8" }
-                "cerebras"  { $DefaultChoice = "9" }
+                "anthropic" { $DefaultChoice = "6" }
+                "openai"    { $DefaultChoice = "7" }
+                "gemini"    { $DefaultChoice = "8" }
+                "groq"      { $DefaultChoice = "9" }
+                "cerebras"  { $DefaultChoice = "10" }
+                "openrouter" { $DefaultChoice = "11" }
                 "kimi"      { $DefaultChoice = "4" }
             }
         }
@@ -1022,12 +1094,19 @@ Write-Host ") Kimi Code Subscription     " -NoNewline
 Write-Color -Text "(use your Kimi Code plan)" -Color DarkGray -NoNewline
 if ($KimiCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 
+# 5) Hive LLM
+Write-Host "  " -NoNewline
+Write-Color -Text "5" -Color Cyan -NoNewline
+Write-Host ") Hive LLM                   " -NoNewline
+Write-Color -Text "(use your Hive API key)" -Color DarkGray -NoNewline
+if ($HiveCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
+
 Write-Host ""
 Write-Color -Text "  API key providers:" -Color Cyan
 
-# 5-9) API key providers
+# 6-11) API key providers
 for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
-    $num = $idx + 5
+    $num = $idx + 6
     $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "Process")
     if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "User") }
     Write-Host "  " -NoNewline
@@ -1036,8 +1115,9 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     if ($envVal) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 }
 
+$SkipChoice = 6 + $ProviderMenuEnvVars.Count
 Write-Host "  " -NoNewline
-Write-Color -Text "10" -Color Cyan -NoNewline
+Write-Color -Text "$SkipChoice" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
 Write-Host ""
 
@@ -1048,16 +1128,16 @@ if ($DefaultChoice) {
 
 while ($true) {
     if ($DefaultChoice) {
-        $raw = Read-Host "Enter choice (1-10) [$DefaultChoice]"
+        $raw = Read-Host "Enter choice (1-$SkipChoice) [$DefaultChoice]"
         if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $DefaultChoice }
     } else {
-        $raw = Read-Host "Enter choice (1-10)"
+        $raw = Read-Host "Enter choice (1-$SkipChoice)"
     }
     if ($raw -match '^\d+$') {
         $num = [int]$raw
-        if ($num -ge 1 -and $num -le 10) { break }
+        if ($num -ge 1 -and $num -le $SkipChoice) { break }
     }
-    Write-Color -Text "Invalid choice. Please enter 1-10" -Color Red
+    Write-Color -Text "Invalid choice. Please enter 1-$SkipChoice" -Color Red
 }
 
 switch ($num) {
@@ -1071,20 +1151,22 @@ switch ($num) {
             Write-Host ""
             exit 1
         }
-        $SubscriptionMode   = "claude_code"
-        $SelectedProviderId = "anthropic"
-        $SelectedModel      = "claude-opus-4-6"
-        $SelectedMaxTokens  = 32768
+        $SubscriptionMode        = "claude_code"
+        $SelectedProviderId      = "anthropic"
+        $SelectedModel           = "claude-opus-4-6"
+        $SelectedMaxTokens       = 32768
+        $SelectedMaxContextTokens = 180000
         Write-Host ""
         Write-Ok "Using Claude Code subscription"
     }
     2 {
         # ZAI Code Subscription
-        $SubscriptionMode   = "zai_code"
-        $SelectedProviderId = "openai"
-        $SelectedEnvVar     = "ZAI_API_KEY"
-        $SelectedModel      = "glm-5"
-        $SelectedMaxTokens  = 32768
+        $SubscriptionMode        = "zai_code"
+        $SelectedProviderId      = "openai"
+        $SelectedEnvVar          = "ZAI_API_KEY"
+        $SelectedModel           = "glm-5"
+        $SelectedMaxTokens       = 32768
+        $SelectedMaxContextTokens = 120000
         Write-Host ""
         Write-Ok "Using ZAI Code subscription"
         Write-Color -Text "  Model: glm-5 | API: api.z.ai" -Color DarkGray
@@ -1096,7 +1178,7 @@ switch ($num) {
             Write-Warn "Codex credentials not found. Starting OAuth login..."
             Write-Host ""
             try {
-                & uv run python (Join-Path $ScriptDir "core\codex_oauth.py") 2>&1
+                & $UvCmd run python (Join-Path $ScriptDir "core\codex_oauth.py") 2>&1
                 if ($LASTEXITCODE -eq 0) {
                     $CodexCredDetected = $true
                 } else {
@@ -1113,32 +1195,63 @@ switch ($num) {
             }
         }
         if ($CodexCredDetected) {
-            $SubscriptionMode   = "codex"
-            $SelectedProviderId = "openai"
-            $SelectedModel      = "gpt-5.3-codex"
-            $SelectedMaxTokens  = 16384
+            $SubscriptionMode        = "codex"
+            $SelectedProviderId      = "openai"
+            $SelectedModel           = "gpt-5.3-codex"
+            $SelectedMaxTokens       = 16384
+            $SelectedMaxContextTokens = 120000
             Write-Host ""
             Write-Ok "Using OpenAI Codex subscription"
         }
     }
     4 {
         # Kimi Code Subscription
-        $SubscriptionMode   = "kimi_code"
-        $SelectedProviderId = "kimi"
-        $SelectedEnvVar     = "KIMI_API_KEY"
-        $SelectedModel      = "kimi-k2.5"
-        $SelectedMaxTokens  = 32768
+        $SubscriptionMode        = "kimi_code"
+        $SelectedProviderId      = "kimi"
+        $SelectedEnvVar          = "KIMI_API_KEY"
+        $SelectedModel           = "kimi-k2.5"
+        $SelectedMaxTokens       = 32768
+        $SelectedMaxContextTokens = 120000
         Write-Host ""
         Write-Ok "Using Kimi Code subscription"
         Write-Color -Text "  Model: kimi-k2.5 | API: api.kimi.com/coding" -Color DarkGray
     }
-    { $_ -ge 5 -and $_ -le 9 } {
+    5 {
+        # Hive LLM
+        $SubscriptionMode        = "hive_llm"
+        $SelectedProviderId      = "hive"
+        $SelectedEnvVar          = "HIVE_API_KEY"
+        $SelectedMaxTokens       = 32768
+        $SelectedMaxContextTokens = 120000
+        Write-Host ""
+        Write-Ok "Using Hive LLM"
+        Write-Host ""
+        Write-Host "  Select a model:"
+        Write-Host "  " -NoNewline; Write-Color -Text "1)" -Color Cyan -NoNewline; Write-Host " queen              " -NoNewline; Write-Color -Text "(default - Hive flagship)" -Color DarkGray
+        Write-Host "  " -NoNewline; Write-Color -Text "2)" -Color Cyan -NoNewline; Write-Host " kimi-2.5"
+        Write-Host "  " -NoNewline; Write-Color -Text "3)" -Color Cyan -NoNewline; Write-Host " GLM-5"
+        Write-Host ""
+        $hiveModelChoice = Read-Host "  Enter model choice (1-3) [1]"
+        if (-not $hiveModelChoice) { $hiveModelChoice = "1" }
+        switch ($hiveModelChoice) {
+            "2" { $SelectedModel = "kimi-2.5" }
+            "3" { $SelectedModel = "GLM-5" }
+            default { $SelectedModel = "queen" }
+        }
+        Write-Color -Text "  Model: $SelectedModel | API: $HiveLlmEndpoint" -Color DarkGray
+    }
+    { $_ -ge 6 -and $_ -le 11 } {
         # API key providers
-        $provIdx = $num - 5
+        $provIdx = $num - 6
         $SelectedEnvVar     = $ProviderMenuEnvVars[$provIdx]
         $SelectedProviderId = $ProviderMenuIds[$provIdx]
         $providerName       = $ProviderMenuNames[$provIdx] -replace ' - .*', ''  # strip description
         $signupUrl          = $ProviderMenuUrls[$provIdx]
+        if ($SelectedProviderId -eq "openrouter") {
+            $SelectedApiBase = "https://openrouter.ai/api/v1"
+        } else {
+            $SelectedApiBase = ""
+        }
 
         # Prompt for key (allow replacement if already set) with verification + retry
         while ($true) {
@@ -1167,7 +1280,11 @@ switch ($num) {
                 # Health check the new key
                 Write-Host "  Verifying API key... " -NoNewline
                 try {
-                    $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") $SelectedProviderId $apiKey 2>$null
+                    if ($SelectedApiBase) {
+                        $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") $SelectedProviderId $apiKey $SelectedApiBase 2>$null
+                    } else {
+                        $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") $SelectedProviderId $apiKey 2>$null
+                    }
                     $hcJson = $hcResult | ConvertFrom-Json
                     if ($hcJson.valid -eq $true) {
                         Write-Color -Text "ok" -Color Green
@@ -1205,7 +1322,7 @@ switch ($num) {
             }
         }
     }
-    10 {
+    { $_ -eq $SkipChoice } {
         Write-Host ""
         Write-Warn "Skipped. An LLM API key is required to test and use worker agents."
         Write-Host "  Add your API key later by running:"
@@ -1242,7 +1359,7 @@ if ($SubscriptionMode -eq "zai_code") {
             # Health check the new key
             Write-Host "  Verifying ZAI API key... " -NoNewline
             try {
-                $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "zai" $apiKey "https://api.z.ai/api/coding/paas/v4" 2>$null
+                $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "zai" $apiKey "https://api.z.ai/api/coding/paas/v4" 2>$null
                 $hcJson = $hcResult | ConvertFrom-Json
                 if ($hcJson.valid -eq $true) {
                     Write-Color -Text "ok" -Color Green
@@ -1310,7 +1427,7 @@ if ($SubscriptionMode -eq "kimi_code") {
             # Health check the new key
             Write-Host "  Verifying Kimi API key... " -NoNewline
             try {
-                $hcResult = & uv run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "kimi" $apiKey "https://api.kimi.com/coding" 2>$null
+                $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "kimi" $apiKey "https://api.kimi.com/coding" 2>$null
                 $hcJson = $hcResult | ConvertFrom-Json
                 if ($hcJson.valid -eq $true) {
                     Write-Color -Text "ok" -Color Green
@@ -1346,11 +1463,76 @@ if ($SubscriptionMode -eq "kimi_code") {
     }
 }
 
+# For Hive LLM: prompt for API key with verification + retry
+if ($SubscriptionMode -eq "hive_llm") {
+    while ($true) {
+        $existingHive = [System.Environment]::GetEnvironmentVariable("HIVE_API_KEY", "User")
+        if (-not $existingHive) { $existingHive = $env:HIVE_API_KEY }
+
+        if ($existingHive) {
+            $masked = $existingHive.Substring(0, [Math]::Min(4, $existingHive.Length)) + "..." + $existingHive.Substring([Math]::Max(0, $existingHive.Length - 4))
+            Write-Host ""
+            Write-Color -Text "  $([char]0x2B22) Current Hive key: $masked" -Color Green
+            Write-Host ""
+            $apiKey = Read-Host "Paste a new Hive API key (or press Enter to keep current)"
+        } else {
+            Write-Host ""
+            Write-Host "  Get your API key from: " -NoNewline
+            Write-Color -Text "https://discord.com/invite/hQdU7QDkgR" -Color Cyan
+            Write-Host ""
+            $apiKey = Read-Host "Paste your Hive API key (or press Enter to skip)"
+        }
+
+        if ($apiKey) {
+            [System.Environment]::SetEnvironmentVariable("HIVE_API_KEY", $apiKey, "User")
+            $env:HIVE_API_KEY = $apiKey
+            Write-Host ""
+            Write-Ok "Hive API key saved as User environment variable"
+
+            # Health check the new key
+            Write-Host "  Verifying Hive API key... " -NoNewline
+            try {
+                $hcOutput = & $PythonCmd scripts/check_llm_key.py hive $apiKey "$HiveLlmEndpoint" 2>&1
+                $hcJson = $hcOutput | ConvertFrom-Json
+                if ($hcJson.valid -eq $true) {
+                    Write-Color -Text "ok" -Color Green
+                    break
+                } elseif ($hcJson.valid -eq $false) {
+                    Write-Color -Text "failed" -Color Red
+                    Write-Warn $hcJson.message
+                    [System.Environment]::SetEnvironmentVariable("HIVE_API_KEY", $null, "User")
+                    Remove-Item -Path "Env:\HIVE_API_KEY" -ErrorAction SilentlyContinue
+                    Write-Host ""
+                    Read-Host "  Press Enter to try again"
+                } else {
+                    Write-Color -Text "--" -Color Yellow
+                    Write-Color -Text "  Could not verify key (network issue). The key has been saved." -Color DarkGray
+                    break
+                }
+            } catch {
+                Write-Color -Text "--" -Color Yellow
+                break
+            }
+        } elseif (-not $existingHive) {
+            Write-Host ""
+            Write-Warn "Skipped. Add your Hive API key later:"
+            Write-Color -Text "  [System.Environment]::SetEnvironmentVariable('HIVE_API_KEY', 'your-key', 'User')" -Color Cyan
+            $SelectedEnvVar     = ""
+            $SelectedProviderId = ""
+            $SubscriptionMode   = ""
+            break
+        } else {
+            break
+        }
+    }
+}
+
 # Prompt for model if not already selected (manual provider path)
 if ($SelectedProviderId -and -not $SelectedModel) {
     $modelSel = Get-ModelSelection $SelectedProviderId
-    $SelectedModel     = $modelSel.Model
-    $SelectedMaxTokens = $modelSel.MaxTokens
+    $SelectedModel            = $modelSel.Model
+    $SelectedMaxTokens        = $modelSel.MaxTokens
+    $SelectedMaxContextTokens = $modelSel.MaxContextTokens
 }
 
 # Save configuration
@@ -1367,9 +1549,10 @@ if ($SelectedProviderId) {
 
     $config = @{
         llm = @{
-            provider       = $SelectedProviderId
-            model          = $SelectedModel
-            max_tokens     = $SelectedMaxTokens
+            provider           = $SelectedProviderId
+            model              = $SelectedModel
+            max_tokens         = $SelectedMaxTokens
+            max_context_tokens = $SelectedMaxContextTokens
         }
         created_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss+00:00")
     }
@@ -1384,6 +1567,12 @@ if ($SelectedProviderId) {
     } elseif ($SubscriptionMode -eq "kimi_code") {
         $config.llm["api_base"] = "https://api.kimi.com/coding"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
+    } elseif ($SubscriptionMode -eq "hive_llm") {
+        $config.llm["api_base"] = $HiveLlmEndpoint
+        $config.llm["api_key_env_var"] = $SelectedEnvVar
+    } elseif ($SelectedProviderId -eq "openrouter") {
+        $config.llm["api_base"] = "https://openrouter.ai/api/v1"
+        $config.llm["api_key_env_var"] = $SelectedEnvVar
     } else {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     }
@@ -1395,7 +1584,7 @@ if ($SelectedProviderId) {
 Write-Host ""
 
 # ============================================================
-# Step 5b: Browser Automation (GCU) — always enabled
+# Browser Automation (GCU) — always enabled
 # ============================================================
 
 Write-Host ""
@@ -1420,10 +1609,10 @@ if (Test-Path $HiveConfigFile) {
 Write-Host ""
 
 # ============================================================
-# Step 6: Initialize Credential Store
+# Step 4: Initialize Credential Store
 # ============================================================
 
-Write-Step -Number "5" -Text "Step 5: Initializing credential store..."
+Write-Step -Number "4" -Text "Step 4: Initializing credential store..."
 Write-Color -Text "The credential store encrypts API keys and secrets for your agents." -Color DarkGray
 Write-Host ""
 
@@ -1460,7 +1649,7 @@ if ($credKey) {
 } else {
     Write-Host "  Generating encryption key... " -NoNewline
     try {
-        $generatedKey = & uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>$null
+        $generatedKey = & $UvCmd run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" 2>$null
         if ($LASTEXITCODE -eq 0 -and $generatedKey) {
             Write-Ok "ok"
             $generatedKey = $generatedKey.Trim()
@@ -1509,7 +1698,7 @@ if ($credKey) {
     Write-Ok "Credential store initialized at ~/.hive/credentials/"
 
     Write-Host "  Verifying credential store... " -NoNewline
-    $verifyOut = & uv run python -c "from framework.credentials.storage import EncryptedFileStorage; storage = EncryptedFileStorage(); print('ok')" 2>$null
+    $verifyOut = & $UvCmd run python -c "from framework.credentials.storage import EncryptedFileStorage; storage = EncryptedFileStorage(); print('ok')" 2>$null
     if ($verifyOut -match "ok") {
         Write-Ok "ok"
     } else {
@@ -1519,10 +1708,10 @@ if ($credKey) {
 Write-Host ""
 
 # ============================================================
-# Step 6: Verify Setup
+# Step 5: Verify Setup
 # ============================================================
 
-Write-Step -Number "6" -Text "Step 6: Verifying installation..."
+Write-Step -Number "5" -Text "Step 5: Verifying installation..."
 
 $verifyErrors = 0
 
@@ -1530,7 +1719,7 @@ $verifyErrors = 0
 $verifyModules = @("framework", "aden_tools")
 
 try {
-    $verifyOutput = & uv run python scripts/check_requirements.py @verifyModules 2>&1 | Out-String
+    $verifyOutput = & $UvCmd run python scripts/check_requirements.py @verifyModules 2>&1 | Out-String
     $verifyJson = $null
     
     try {
@@ -1540,7 +1729,7 @@ try {
         # Fall back to basic checks if JSON parsing fails
         foreach ($mod in $verifyModules) {
             Write-Host "  $([char]0x2B21) $mod... " -NoNewline
-            $null = & uv run python -c "import $mod" 2>&1
+            $null = & $UvCmd run python -c "import $mod" 2>&1
             if ($LASTEXITCODE -eq 0) { Write-Ok "ok" }
             else { Write-Fail "failed"; $verifyErrors++ }
         }
@@ -1560,7 +1749,7 @@ try {
 }
 
 Write-Host "  $([char]0x2B21) litellm... " -NoNewline
-$null = & uv run python -c "import litellm" 2>&1
+$null = & $UvCmd run python -c "import litellm" 2>&1
 if ($LASTEXITCODE -eq 0) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
 Write-Host "  $([char]0x2B21) MCP config... " -NoNewline
@@ -1626,10 +1815,10 @@ if ($verifyErrors -gt 0) {
 }
 
 # ============================================================
-# Step 7: Install hive CLI wrapper
+# Step 6: Install hive CLI wrapper
 # ============================================================
 
-Write-Step -Number "7" -Text "Step 7: Installing hive CLI..."
+Write-Step -Number "6" -Text "Step 6: Installing hive CLI..."
 
 # Verify hive.ps1 wrapper exists in project root
 $hivePs1Path = Join-Path $ScriptDir "hive.ps1"
@@ -1683,11 +1872,17 @@ if ($SelectedProviderId) {
         Write-Color -Text "  API: api.z.ai (OpenAI-compatible)" -Color DarkGray
     } elseif ($SubscriptionMode -eq "codex") {
         Write-Ok "OpenAI Codex Subscription -> $SelectedModel"
+    } elseif ($SelectedProviderId -eq "openrouter") {
+        Write-Ok "OpenRouter API Key -> $SelectedModel"
+        Write-Color -Text "  API: openrouter.ai/api/v1 (OpenAI-compatible)" -Color DarkGray
     } else {
         Write-Color -Text "  $SelectedProviderId" -Color Cyan -NoNewline
         Write-Host " -> " -NoNewline
         Write-Color -Text $SelectedModel -Color DarkGray
     }
+    Write-Color -Text "  To use a different model for worker agents, run:" -Color DarkGray
+    Write-Host "     " -NoNewline
+    Write-Color -Text ".\scripts\setup_worker_model.ps1" -Color Cyan
     Write-Host ""
 }
 
@@ -1713,45 +1908,20 @@ if ($CodexAvailable) {
     Write-Host ""
 }
 
-# Auto-launch dashboard or show manual instructions
+# Final instructions and auto-launch
+Write-Host "API keys saved as User environment variables. New terminals pick them up automatically." -ForegroundColor DarkGray
+Write-Host "Launch anytime with " -NoNewline -ForegroundColor DarkGray
+Write-Color -Text "hive open" -Color Cyan -NoNewline
+Write-Host ". Run .\quickstart.ps1 again to reconfigure." -ForegroundColor DarkGray
+Write-Host ""
+
 if ($FrontendBuilt) {
     Write-Color -Text "Launching dashboard..." -Color White
     Write-Host ""
-    Write-Color -Text "  Starting server on http://localhost:8787" -Color DarkGray
-    Write-Color -Text "  Press Ctrl+C to stop" -Color DarkGray
-    Write-Host ""
-    & (Join-Path $ScriptDir "hive.ps1") open
+    & hive open
 } else {
-    Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
-    Write-Host ""
-    Write-Color -Text "  IMPORTANT: Restart your terminal now!" -Color Yellow
-    Write-Host ""
-    Write-Color -Text "═══════════════════════════════════════════════════════" -Color Yellow
-    Write-Host ""
-    Write-Host 'Environment variables (uv, API keys) are now configured, but you need to'
-    Write-Host 'restart your terminal for them to take effect in new sessions.'
-    Write-Host ""
-
-    Write-Color -Text "Run an Agent:" -Color White
-    Write-Host ""
-    Write-Host "  Launch the interactive dashboard to browse and run agents:"
-    Write-Host "  You can start an example agent or an agent built by yourself:"
-    Write-Color -Text "     .\hive.ps1 tui" -Color Cyan
-    Write-Host ""
-
-    if ($SelectedProviderId -or $credKey) {
-        Write-Color -Text "Note:" -Color White
-        Write-Host "- uv has been added to your User PATH"
-        if ($SelectedProviderId -and $SelectedEnvVar) {
-            Write-Host "- $SelectedEnvVar is set for LLM access"
-        }
-        if ($credKey) {
-            Write-Host "- HIVE_CREDENTIAL_KEY is set for credential encryption"
-        }
-        Write-Host "- All variables will persist across reboots"
-        Write-Host ""
-    }
-
-    Write-Color -Text 'Run .\quickstart.ps1 again to reconfigure.' -Color DarkGray
+    Write-Color -Text "Frontend build was skipped or failed." -Color Yellow -NoNewline
+    Write-Host " Launch manually when ready:"
+    Write-Color -Text "     hive open" -Color Cyan
     Write-Host ""
 }

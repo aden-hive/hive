@@ -142,13 +142,17 @@ def save_aden_api_key(key: str) -> None:
     os.environ[ADEN_ENV_VAR] = key
 
 
-def delete_aden_api_key() -> None:
-    """Remove ADEN_API_KEY from the encrypted store and ``os.environ``."""
+def delete_aden_api_key() -> bool:
+    """Remove ADEN_API_KEY from the encrypted store and ``os.environ``.
+
+    Returns True if the key existed and was deleted, False otherwise.
+    """
+    deleted = False
     try:
         from .storage import EncryptedFileStorage
 
         storage = EncryptedFileStorage()
-        storage.delete(ADEN_CREDENTIAL_ID)
+        deleted = storage.delete(ADEN_CREDENTIAL_ID)
     except (FileNotFoundError, PermissionError) as e:
         logger.debug("Could not delete %s from encrypted store: %s", ADEN_CREDENTIAL_ID, e)
     except Exception:
@@ -157,8 +161,8 @@ def delete_aden_api_key() -> None:
             ADEN_CREDENTIAL_ID,
             exc_info=True,
         )
-
     os.environ.pop(ADEN_ENV_VAR, None)
+    return deleted
 
 
 # ---------------------------------------------------------------------------
