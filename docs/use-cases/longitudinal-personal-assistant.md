@@ -25,7 +25,7 @@ In a longitudinal assistant, the user shares vulnerable context over time. A bad
 
 Hive's Judge node provides the right abstraction:
 
-- **Criteria** evaluate specific response properties (does this add scope when the user is stressed? does this engage retrospective analysis at an inappropriate time?)
+- **Criteria** evaluate specific response properties against defined behavioral and safety standards
 - **Principles** enforce absolute constraints that no criterion evaluation can override
 - **Event loop + scheduler** allow both synchronous (pre-delivery) and asynchronous (post-delivery audit) evaluation patterns
 
@@ -37,19 +37,12 @@ The default Shared Memory model (file/RAM) works for session-scoped agents. Long
 
 - **Durable storage** that survives restarts, crashes, and deployments
 - **Semantic retrieval** — not just key lookup, but meaning-based search
-- **Typed entities** (person, place, project, challenge, pattern) with metadata
+- **Typed entities** across multiple life-relevant categories, with extensible metadata
 - **Emotional context** — each entity carries a valence score indicating whether the associated context is energizing or difficult for the user
 
 **Proposed implementation:** PostgreSQL + pgvector as the Shared Memory backend.
 
-```
-entities table:
-  id, user_id, entity_type, name, summary,
-  embedding (vector 1536), emotional_charge (float),
-  domain, metadata (jsonb), last_updated
-```
-
-HNSW indexing enables sub-50ms semantic search across thousands of entities. Upsert-on-conflict ensures continuous memory refinement without duplicates.
+The entity store uses typed entries (people, places, projects, challenges, behavioral patterns), each carrying a vector embedding, emotional valence score, domain tag, and extensible metadata. HNSW indexing enables sub-50ms semantic search across thousands of entities. Upsert-on-conflict ensures continuous memory refinement without duplicates.
 
 **Open question for Hive team:** What is the recommended adapter pattern for external Shared Memory backends? Can PostgreSQL serve as the primary store with full SDK integration, or does the current architecture require routing through the file/RAM layer?
 
@@ -90,7 +83,7 @@ A business process agent can evolve freely: if the new version processes invoice
 
 Partition criteria into two categories:
 - **Evolvable criteria** — can be calibrated by the evolution loop (e.g., response length, vocabulary complexity, follow-up question frequency)
-- **Frozen criteria** — must survive any number of evolution cycles without modification (e.g., "never position the user against themselves," "do not engage retrospective analysis during vulnerable hours")
+- **Frozen criteria** — must survive any number of evolution cycles without modification (e.g., governing safety constraints that protect the user's emotional state and identity)
 
 **Open question for Hive team:** Does the evolution loop support frozen/immutable criteria? If not, what's the recommended pattern for evolution-resistant safety gates?
 
