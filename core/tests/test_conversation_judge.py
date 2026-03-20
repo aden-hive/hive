@@ -38,7 +38,9 @@ from framework.runtime.core import Runtime
 class MockStreamingLLM(LLMProvider):
     """Mock LLM that yields pre-programmed StreamEvent sequences."""
 
-    def __init__(self, scenarios: list[list] | None = None, complete_response: str = ""):
+    def __init__(
+        self, scenarios: list[list] | None = None, complete_response: str = ""
+    ):
         self.scenarios = scenarios or []
         self._call_index = 0
         self.stream_calls: list[dict] = []
@@ -52,7 +54,9 @@ class MockStreamingLLM(LLMProvider):
         tools: list[Tool] | None = None,
         max_tokens: int = 4096,
     ) -> AsyncIterator:
-        self.stream_calls.append({"messages": messages, "system": system, "tools": tools})
+        self.stream_calls.append(
+            {"messages": messages, "system": system, "tools": tools}
+        )
         if not self.scenarios:
             return
         events = self.scenarios[self._call_index % len(self.scenarios)]
@@ -60,9 +64,17 @@ class MockStreamingLLM(LLMProvider):
         for event in events:
             yield event
 
+    async def acomplete(self, messages, system="", **kwargs) -> LLMResponse:
+        self.complete_calls.append({"messages": messages, "system": system})
+        return LLMResponse(
+            content=self.complete_response, model="mock", stop_reason="stop"
+        )
+
     def complete(self, messages, system="", **kwargs) -> LLMResponse:
         self.complete_calls.append({"messages": messages, "system": system})
-        return LLMResponse(content=self.complete_response, model="mock", stop_reason="stop")
+        return LLMResponse(
+            content=self.complete_response, model="mock", stop_reason="stop"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +89,9 @@ def _set_output_scenario(key: str, value: str) -> list:
             tool_name="set_output",
             tool_input={"key": key, "value": value},
         ),
-        FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"),
+        FinishEvent(
+            stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"
+        ),
     ]
 
 
@@ -89,7 +103,9 @@ def _text_then_set_output(text: str, key: str, value: str) -> list:
             tool_name="set_output",
             tool_input={"key": key, "value": value},
         ),
-        FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"),
+        FinishEvent(
+            stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"
+        ),
     ]
 
 
@@ -128,7 +144,9 @@ class TestParseVerdict:
         assert v.feedback == ""
 
     def test_retry_with_feedback(self):
-        v = _parse_verdict("ACTION: RETRY\nCONFIDENCE: 0.6\nFEEDBACK: Research is too shallow.")
+        v = _parse_verdict(
+            "ACTION: RETRY\nCONFIDENCE: 0.6\nFEEDBACK: Research is too shallow."
+        )
         assert v.action == "RETRY"
         assert v.confidence == 0.6
         assert "shallow" in v.feedback
@@ -152,7 +170,9 @@ class TestEvaluatePhaseCompletion:
     @pytest.mark.asyncio
     async def test_accept_on_good_response(self):
         """LLM says ACCEPT → verdict is ACCEPT."""
-        llm = MockStreamingLLM(complete_response="ACTION: ACCEPT\nCONFIDENCE: 0.95\nFEEDBACK:")
+        llm = MockStreamingLLM(
+            complete_response="ACTION: ACCEPT\nCONFIDENCE: 0.95\nFEEDBACK:"
+        )
         conv = NodeConversation(system_prompt="test")
         await conv.add_user_message("Do research on topic X")
         await conv.add_assistant_message("I found 5 high-quality sources on X.")
@@ -192,25 +212,39 @@ class TestEvaluatePhaseCompletion:
         assert "1 source" in verdict.feedback
 
     @pytest.mark.asyncio
-    async def test_llm_failure_defaults_to_accept(self):
-        """When LLM fails, Level 2 should not block (Level 0 already passed)."""
+    async def test_llm_failure_retries_then_accepts(self):
+        """1st failure -> RETRY, 2nd failure -> ACCEPT with 0.0 confidence."""
         llm = MockStreamingLLM()
-        # Make complete() raise an exception
-        llm.complete = MagicMock(side_effect=RuntimeError("LLM unavailable"))
+        llm.acomplete = MagicMock(side_effect=RuntimeError("LLM unavailable"))
 
         conv = NodeConversation(system_prompt="test")
         await conv.add_assistant_message("Done.")
 
-        verdict = await evaluate_phase_completion(
+        # 1st attempt
+        v1 = await evaluate_phase_completion(
             llm=llm,
             conversation=conv,
-            phase_name="Test",
-            phase_description="Test phase",
-            success_criteria="Do the thing",
-            accumulator_state={"result": "done"},
+            phase_name="T",
+            phase_description="D",
+            success_criteria="C",
+            accumulator_state={},
+            _judge_failure_count=0,
         )
-        assert verdict.action == "ACCEPT"
-        assert verdict.confidence == 0.5
+        assert v1.action == "RETRY"
+        assert v1.confidence == 0.0
+
+        # 2nd attempt
+        v2 = await evaluate_phase_completion(
+            llm=llm,
+            conversation=conv,
+            phase_name="T",
+            phase_description="D",
+            success_criteria="C",
+            accumulator_state={},
+            _judge_failure_count=1,
+        )
+        assert v2.action == "ACCEPT"
+        assert v2.confidence == 0.0
 
 
 # ===========================================================================
@@ -299,7 +333,7 @@ class TestLevel2InImplicitJudge:
         call_count = [0]
 
         class SequentialLLM(MockStreamingLLM):
-            def complete(self, messages, system="", **kwargs):
+            async def acomplete(self, messages, system="", **kwargs):
                 idx = call_count[0]
                 call_count[0] += 1
                 resp = complete_responses[idx % len(complete_responses)]
@@ -311,7 +345,9 @@ class TestLevel2InImplicitJudge:
                 _text_then_set_output("Brief research.", "result", "brief"),
                 _text_finish(""),  # triggers judge → Level 2 RETRY
                 # Turn 2: after retry feedback, set output again, stop → Level 2 ACCEPT
-                _text_then_set_output("Much more detailed research.", "result", "detailed"),
+                _text_then_set_output(
+                    "Much more detailed research.", "result", "detailed"
+                ),
                 _text_finish(""),  # triggers judge → Level 2 ACCEPT
             ]
         )
