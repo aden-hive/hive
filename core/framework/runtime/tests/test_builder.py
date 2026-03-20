@@ -221,3 +221,26 @@ class TestBuildResult:
         assert "Second recommendation" in graph.nodes[0].system_prompt
         # First should be gone (replaced)
         assert "First recommendation" not in graph.nodes[0].system_prompt
+
+    def test_improvement_marker_single_occurrence(self, builder: AgentBuilder):
+        """When improvement marker appears only once (corrupted), strip gracefully."""
+        marker = "<!-- builder:improvement -->"
+        graph = FakeGraphSpec(
+            nodes=[FakeNodeSpec(id="n1", system_prompt=f"Base.{marker}trailing")],
+        )
+        plan = ImprovementPlan(recommendations=["New rec."])
+        builder.build(graph, plan)
+        # Old trailing text after single marker is stripped; new block appended
+        assert "New rec" in graph.nodes[0].system_prompt
+        assert "trailing" not in graph.nodes[0].system_prompt
+
+    def test_bump_version_invalid_format(self, builder: AgentBuilder):
+        """Invalid version string gets '.1' appended as fallback."""
+        graph = FakeGraphSpec(
+            nodes=[FakeNodeSpec(id="n1")],
+            version="latest",
+        )
+        plan = ImprovementPlan(recommendations=["Do something."])
+        result = builder.build(graph, plan)
+        assert graph.version == "latest.1"
+        assert result.graph_version_after == "latest.1"
