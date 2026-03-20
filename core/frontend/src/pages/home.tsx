@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot, Radar, Reply, DollarSign, MapPin, Calendar, UserPlus, Twitter } from "lucide-react";
+import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot, Radar, Reply, DollarSign, MapPin, Calendar, UserPlus, Twitter, LayoutDashboard } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import type { LucideIcon } from "lucide-react";
 import { agentsApi } from "@/api/agents";
@@ -160,6 +160,13 @@ export default function Home() {
               <Hexagon className="w-4 h-4 text-primary/60" />
               <span>Try a sample agent</span>
               <ArrowRight className={`w-3.5 h-3.5 transition-transform duration-200 ${showAgents ? "rotate-90" : ""}`} />
+            </button>
+            <button
+              onClick={() => navigate("/dashboard")}
+              className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border border-border/60 text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-primary/[0.03] transition-all"
+            >
+              <LayoutDashboard className="w-4 h-4 text-primary/60" />
+              <span>Dashboard</span>
             </button>
             <button
               onClick={() => navigate("/my-agents")}

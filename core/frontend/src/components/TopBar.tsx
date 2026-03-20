@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Crown, X } from "lucide-react";
+import { Crown, X, LayoutDashboard } from "lucide-react";
 import { sessionsApi } from "@/api/sessions";
 import { loadPersistedTabs, savePersistedTabs, TAB_STORAGE_KEY, type PersistedTabState } from "@/lib/tab-persistence";
 
@@ -92,6 +92,13 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
         <button onClick={() => navigate("/")} className="flex items-center gap-2 hover:opacity-80 transition-opacity flex-shrink-0">
           <Crown className="w-4 h-4 text-primary" />
           <span className="text-sm font-semibold text-primary">Open Hive</span>
+        </button>
+        <button
+          onClick={() => navigate("/dashboard")}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors flex-shrink-0"
+          title="Dashboard"
+        >
+          <LayoutDashboard className="w-3.5 h-3.5" />
         </button>
 
         {tabs.length > 0 && (
