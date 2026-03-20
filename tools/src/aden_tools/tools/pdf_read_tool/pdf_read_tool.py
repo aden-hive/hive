@@ -116,7 +116,7 @@ def register_tools(mcp: FastMCP) -> None:
         try:
             # Check if input is a URL
             is_url = file_path.startswith(("http://", "https://"))
-            
+
             if is_url:
                 # Download PDF from URL to temporary file
                 try:
@@ -126,25 +126,27 @@ def register_tools(mcp: FastMCP) -> None:
                         follow_redirects=True,
                         timeout=60.0,
                     )
-                    
+
                     if response.status_code != 200:
                         return {"error": f"Failed to download PDF: HTTP {response.status_code}"}
-                    
+
                     # Validate content-type
                     content_type = response.headers.get("content-type", "").lower()
                     if "application/pdf" not in content_type:
                         return {
-                            "error": f"URL does not point to a PDF file. Content-Type: {content_type}",
+                            "error": (
+                                f"URL does not point to a PDF file. Content-Type: {content_type}"
+                            ),
                             "content_type": content_type,
                             "url": file_path,
                         }
-                    
+
                     # Save to temporary file
-                    temp_file = tempfile.NamedTemporaryFile(mode='wb', suffix='.pdf', delete=False)
+                    temp_file = tempfile.NamedTemporaryFile(mode="wb", suffix=".pdf", delete=False)
                     temp_file.write(response.content)
                     temp_file.close()
                     path = Path(temp_file.name)
-                    
+
                 except httpx.TimeoutException:
                     return {"error": "PDF download timed out"}
                 except httpx.RequestError as e:
