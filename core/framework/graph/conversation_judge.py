@@ -30,6 +30,45 @@ class PhaseVerdict:
     feedback: str = ""
 
 
+def _handle_judge_failure(
+    phase_name: str,
+    failure_count: int,
+    max_failures: int,
+    reason: str,
+) -> PhaseVerdict:
+    """Handle a judge LLM failure with retry-then-degrade strategy."""
+    attempt = failure_count + 1
+    if attempt >= max_failures:
+        logger.error(
+            "Level 2 judge failed %d/%d times for phase '%s' (%s) "
+            "— accepting with degraded confidence. Quality gate was NOT evaluated.",
+            attempt,
+            max_failures,
+            phase_name,
+            reason,
+        )
+        return PhaseVerdict(
+            action="ACCEPT",
+            confidence=0.0,
+            feedback=(
+                "[SYSTEM] Quality gate skipped — judge LLM failed "
+                f"{attempt} consecutive times ({reason})."
+            ),
+        )
+    logger.warning(
+        "Level 2 judge failed %d/%d for phase '%s' (%s) — requesting retry.",
+        attempt,
+        max_failures,
+        phase_name,
+        reason,
+    )
+    return PhaseVerdict(
+        action="RETRY",
+        confidence=0.0,
+        feedback=f"[SYSTEM] Quality evaluation failed ({reason}). Retrying.",
+    )
+
+
 async def evaluate_phase_completion(
     llm: LLMProvider,
     conversation: NodeConversation,
@@ -38,6 +77,8 @@ async def evaluate_phase_completion(
     success_criteria: str,
     accumulator_state: dict[str, Any],
     max_context_tokens: int = 8_196,
+    _judge_failure_count: int = 0,
+    max_judge_failures: int = 2,
 ) -> PhaseVerdict:
     """Level 2 judge: read the conversation and evaluate quality.
 
@@ -93,16 +134,25 @@ FEEDBACK: (reason if RETRY, empty if ACCEPT)"""
             max_retries=1,
         )
         if not response.content or not response.content.strip():
-            logger.debug("Level 2 judge: empty response, accepting by default")
-            return PhaseVerdict(action="ACCEPT", confidence=0.5, feedback="")
+            return _handle_judge_failure(
+                phase_name,
+                _judge_failure_count,
+                max_judge_failures,
+                reason="empty LLM response",
+            )
         return _parse_verdict(response.content)
     except Exception as e:
-        logger.warning(f"Level 2 judge failed, accepting by default: {e}")
-        # On failure, don't block — Level 0 already passed
-        return PhaseVerdict(action="ACCEPT", confidence=0.5, feedback="")
+        return _handle_judge_failure(
+            phase_name,
+            _judge_failure_count,
+            max_judge_failures,
+            reason=f"{type(e).__name__}: {e}",
+        )
 
 
-def _extract_recent_context(conversation: NodeConversation, max_messages: int = 10) -> str:
+def _extract_recent_context(
+    conversation: NodeConversation, max_messages: int = 10
+) -> str:
     """Extract recent conversation messages for evaluation.
 
     Includes tool-call summaries from assistant messages so the judge
