@@ -11,6 +11,7 @@ from pathlib import Path
 
 from framework.skills.config import SkillsConfig
 from framework.skills.parser import ParsedSkill, parse_skill_md
+from framework.skills.skill_errors import SkillErrorCode, log_skill_error
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +61,14 @@ class DefaultSkillManager:
         self._config = config or SkillsConfig()
         self._skills: dict[str, ParsedSkill] = {}
         self._loaded = False
+        self._error_count = 0
 
     def load(self) -> None:
         """Load all enabled default skill SKILL.md files."""
         if self._loaded:
             return
 
+        error_count = 0
         for skill_name, dir_name in SKILL_REGISTRY.items():
             if not self._config.is_default_enabled(skill_name):
                 logger.info("Default skill '%s' disabled by config", skill_name)
@@ -73,17 +76,34 @@ class DefaultSkillManager:
 
             skill_path = _DEFAULT_SKILLS_DIR / dir_name / "SKILL.md"
             if not skill_path.is_file():
-                logger.error("Default skill SKILL.md not found: %s", skill_path)
+                log_skill_error(
+                    logger,
+                    "error",
+                    SkillErrorCode.SKILL_NOT_FOUND,
+                    what=f"Default skill SKILL.md not found: '{skill_path}'",
+                    why=f"The framework skill '{skill_name}' is missing its SKILL.md file.",
+                    fix="Reinstall the hive framework — this file is part of the package.",
+                )
+                error_count += 1
                 continue
 
             parsed = parse_skill_md(skill_path, source_scope="framework")
             if parsed is None:
-                logger.error("Failed to parse default skill: %s", skill_path)
+                log_skill_error(
+                    logger,
+                    "error",
+                    SkillErrorCode.SKILL_PARSE_ERROR,
+                    what=f"Failed to parse default skill '{skill_name}'",
+                    why=f"parse_skill_md returned None for '{skill_path}'.",
+                    fix="Reinstall the hive framework — this file may be corrupted.",
+                )
+                error_count += 1
                 continue
 
             self._skills[skill_name] = parsed
 
         self._loaded = True
+        self._error_count = error_count
 
     def build_protocols_prompt(self) -> str:
         """Build the combined operational protocols section.
@@ -127,8 +147,23 @@ class DefaultSkillManager:
         """Log which default skills are active and their configuration."""
         if not self._skills:
             logger.info("Default skills: all disabled")
-            return
 
+        # DX-3: Per-skill structured startup log
+        for skill_name in SKILL_REGISTRY:
+            if skill_name in self._skills:
+                overrides = self._config.get_default_overrides(skill_name)
+                status = f"loaded overrides={overrides}" if overrides else "loaded"
+            elif not self._config.is_default_enabled(skill_name):
+                status = "disabled"
+            else:
+                status = "error"
+            logger.info(
+                "skill_startup name=%s scope=framework status=%s",
+                skill_name,
+                status,
+            )
+
+        # Original active skills log line (preserved for backward compatibility)
         active = []
         for skill_name in SKILL_REGISTRY:
             if skill_name in self._skills:
@@ -138,7 +173,21 @@ class DefaultSkillManager:
                 else:
                     active.append(skill_name)
 
-        logger.info("Default skills active: %s", ", ".join(active))
+        if active:
+            logger.info("Default skills active: %s", ", ".join(active))
+
+        # DX-3: Summary line with error count
+        total = len(SKILL_REGISTRY)
+        active_count = len(self._skills)
+        error_count = getattr(self, "_error_count", 0)
+        disabled_count = total - active_count - error_count
+        logger.info(
+            "Skills: %d default (%d active, %d disabled, %d error)",
+            total,
+            active_count,
+            disabled_count,
+            error_count,
+        )
 
     @property
     def active_skill_names(self) -> list[str]:
