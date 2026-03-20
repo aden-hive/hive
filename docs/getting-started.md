@@ -65,7 +65,7 @@ This is the recommended way to create your first agent.
 # Setup already done via quickstart.sh above
 
 # Start Claude Code and build an agent
-Use the coder-tools initialize_and_build_agent tool
+Start Claude Code and run the `initialize_and_build_agent` tool from the coder-tools skill set.
 ```
 
 Follow the interactive prompts to:
