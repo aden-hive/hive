@@ -23,7 +23,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -200,21 +200,21 @@ def _load_from_ide_db() -> tuple[str | None, str | None, float]:
 def _do_token_refresh(refresh_token: str) -> tuple[str, float] | None:
     """POST to Google OAuth endpoint and return ``(new_access_token, expires_at)``.
 
-    Requires the Antigravity OAuth client secret to be configured via:
-    - ``ANTIGRAVITY_CLIENT_SECRET`` environment variable, or
-    - ``llm.antigravity_client_secret`` in ~/.hive/configuration.json
+    The client secret is sourced via ``get_antigravity_client_secret()`` (env var,
+    config file, or npm package fallback). When unavailable the refresh is attempted
+    without it — Google will reject it for web-app clients, but the npm fallback in
+    ``get_antigravity_client_secret()`` should ensure the secret is found at runtime.
 
-    Returns None (skips refresh) when the secret is unavailable.
+    Returns None when the HTTP request fails.
     """
     from framework.config import get_antigravity_client_secret  # noqa: PLC0415
 
     client_secret = get_antigravity_client_secret()
     if not client_secret:
         logger.debug(
-            "Antigravity client secret not configured — skipping token refresh. "
+            "Antigravity client secret not configured — attempting refresh without it. "
             "Set ANTIGRAVITY_CLIENT_SECRET or run quickstart to configure."
         )
-        return None
 
     import urllib.error  # noqa: PLC0415
     import urllib.parse  # noqa: PLC0415
@@ -222,14 +222,14 @@ def _do_token_refresh(refresh_token: str) -> tuple[str, float] | None:
 
     from framework.config import get_antigravity_client_id  # noqa: PLC0415
 
-    body = urllib.parse.urlencode(
-        {
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": get_antigravity_client_id(),
-            "client_secret": client_secret,
-        }
-    ).encode("utf-8")
+    params: dict[str, str] = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": get_antigravity_client_id(),
+    }
+    if client_secret:
+        params["client_secret"] = client_secret
+    body = urllib.parse.urlencode(params).encode("utf-8")
 
     req = urllib.request.Request(
         _TOKEN_URL,
@@ -262,7 +262,10 @@ def _clean_tool_name(name: str) -> str:
     return name[:64]
 
 
-def _to_gemini_contents(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _to_gemini_contents(
+    messages: list[dict[str, Any]],
+    thought_sigs: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     """Convert OpenAI-format messages to Gemini-style ``contents`` array."""
     # Pre-build a map tool_call_id → function_name from assistant messages.
     # Tool result messages (role="tool") only carry tool_call_id, not the name,
@@ -333,15 +336,19 @@ def _to_gemini_contents(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 args = json.loads(fn.get("arguments", "{}") or "{}")
             except (json.JSONDecodeError, TypeError):
                 args = {}
-            parts.append(
-                {
-                    "functionCall": {
-                        "name": fn.get("name", ""),
-                        "args": args,
-                        "id": tc.get("id", str(uuid.uuid4())),
-                    }
+            tc_id = tc.get("id", str(uuid.uuid4()))
+            fc_part: dict[str, Any] = {
+                "functionCall": {
+                    "name": fn.get("name", ""),
+                    "args": args,
+                    "id": tc_id,
                 }
-            )
+            }
+            if thought_sigs:
+                sig = thought_sigs.get(tc_id, "")
+                if sig:
+                    fc_part["thoughtSignature"] = sig  # part-level, not inside functionCall
+            parts.append(fc_part)
 
         if parts:
             contents.append({"role": gemini_role, "parts": parts})
@@ -389,7 +396,11 @@ def _parse_complete_response(raw: dict[str, Any], model: str) -> LLMResponse:
     )
 
 
-def _parse_sse_stream(response: Any, model: str) -> Iterator[StreamEvent]:
+def _parse_sse_stream(
+    response: Any,
+    model: str,
+    on_thought_signature: Callable[[str, str], None] | None = None,
+) -> Iterator[StreamEvent]:
     """Parse Antigravity SSE response line-by-line → StreamEvents.
 
     Each SSE line looks like::
@@ -433,6 +444,10 @@ def _parse_sse_stream(response: Any, model: str) -> Iterator[StreamEvent]:
                     yield TextDeltaEvent(content=delta, snapshot=accumulated)
                 elif "functionCall" in part:
                     fc: dict[str, Any] = part["functionCall"]
+                    tool_use_id = fc.get("id") or str(uuid.uuid4())
+                    thought_sig = part.get("thoughtSignature", "")  # sibling of functionCall
+                    if thought_sig and on_thought_signature:
+                        on_thought_signature(tool_use_id, thought_sig)
                     args = fc.get("args", {})
                     if isinstance(args, str):
                         try:
@@ -440,7 +455,7 @@ def _parse_sse_stream(response: Any, model: str) -> Iterator[StreamEvent]:
                         except json.JSONDecodeError:
                             args = {}
                     yield ToolCallEvent(
-                        tool_use_id=fc.get("id") or str(uuid.uuid4()),
+                        tool_use_id=tool_use_id,
                         tool_name=fc.get("name", ""),
                         tool_input=args,
                     )
@@ -477,6 +492,7 @@ class AntigravityProvider(LLMProvider):
         self._refresh_token: str | None = None
         self._project_id: str = _DEFAULT_PROJECT_ID
         self._token_expires_at: float = 0.0
+        self._thought_sigs: dict[str, str] = {}  # tool_use_id → thoughtSignature
 
         self._init_credentials()
 
@@ -537,7 +553,7 @@ class AntigravityProvider(LLMProvider):
         tools: list[Tool] | None,
         max_tokens: int,
     ) -> dict[str, Any]:
-        contents = _to_gemini_contents(messages)
+        contents = _to_gemini_contents(messages, self._thought_sigs)
         inner: dict[str, Any] = {
             "contents": contents,
             "generationConfig": {"maxOutputTokens": max_tokens},
@@ -669,7 +685,9 @@ class AntigravityProvider(LLMProvider):
             try:
                 body = self._build_body(messages, system, tools, max_tokens)
                 http_resp = self._post(body, streaming=True)
-                for event in _parse_sse_stream(http_resp, self.model):
+                for event in _parse_sse_stream(
+                    http_resp, self.model, self._thought_sigs.__setitem__
+                ):
                     loop.call_soon_threadsafe(queue.put_nowait, event)
             except Exception as exc:
                 logger.error("Antigravity stream error: %s", exc)
