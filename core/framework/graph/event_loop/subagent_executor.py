@@ -130,7 +130,21 @@ async def execute_subagent(
         write_keys=[],  # Read-only!
     )
 
-    # 2b. Set up report callback (one-way channel to parent / event bus)
+    # 2b. Compute instance counter early so the callback and child context
+    # share the same stable node_id for this subagent invocation.
+    if subagent_instance_counter is not None:
+        subagent_instance_counter.setdefault(agent_id, 0)
+        subagent_instance_counter[agent_id] += 1
+        subagent_instance = str(subagent_instance_counter[agent_id])
+    else:
+        subagent_instance = "1"
+
+    if subagent_instance == "1":
+        sa_node_id = f"{ctx.node_id}:subagent:{agent_id}"
+    else:
+        sa_node_id = f"{ctx.node_id}:subagent:{agent_id}:{subagent_instance}"
+
+    # 2c. Set up report callback (one-way channel to parent / event bus)
     subagent_reports: list[dict] = []
 
     async def _report_callback(
@@ -143,7 +157,7 @@ async def execute_subagent(
         if event_bus:
             await event_bus.emit_subagent_report(
                 stream_id=ctx.node_id,
-                node_id=f"{ctx.node_id}:subagent:{agent_id}",
+                node_id=sa_node_id,
                 subagent_id=agent_id,
                 message=message,
                 data=data,
@@ -223,7 +237,7 @@ async def execute_subagent(
     max_iter = min(config.max_iterations, 10)
     subagent_ctx = NodeContext(
         runtime=ctx.runtime,
-        node_id=f"{ctx.node_id}:subagent:{agent_id}",
+        node_id=sa_node_id,
         node_spec=subagent_spec,
         memory=scoped_memory,
         input_data={"task": task, **parent_data},
@@ -248,13 +262,6 @@ async def execute_subagent(
     )
 
     # 5. Create and execute subagent EventLoopNode
-    if subagent_instance_counter is not None:
-        subagent_instance_counter.setdefault(agent_id, 0)
-        subagent_instance_counter[agent_id] += 1
-        subagent_instance = str(subagent_instance_counter[agent_id])
-    else:
-        subagent_instance = "1"
-
     subagent_conv_store = None
     if conversation_store is not None:
         from framework.storage.conversation_store import FileConversationStore

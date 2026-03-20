@@ -10,7 +10,9 @@ Implements the multi-level compaction strategy:
 from __future__ import annotations
 
 import logging
+import os
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from framework.graph.conversation import NodeConversation
@@ -32,6 +34,13 @@ async def compact(
     event_bus: Any | None,  # EventBus
     char_limit: int = LLM_COMPACT_CHAR_LIMIT,
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
+    build_message_inventory_fn: Callable[[NodeConversation], list[dict[str, Any]]] | None = None,
+    publish_context_usage_fn: (
+        Callable[[NodeContext, NodeConversation, str], Awaitable[None]] | None
+    ) = None,
+    write_debug_log_fn: (
+        Callable[[NodeContext, int, int, str, list[dict[str, Any]] | None], None] | None
+    ) = None,
 ) -> None:
     """Run the full compaction pipeline if conversation needs compaction.
 
@@ -41,16 +50,36 @@ async def compact(
     3. LLM summary compaction (recursive split if too large)
     4. Emergency deterministic summary (fallback)
     """
-    if not conversation.needs_compaction():
-        return
-
     ratio_before = conversation.usage_ratio()
-    phase_grad = getattr(ctx, "phase_graduated", False)
+    phase_grad = getattr(ctx, "continuous_mode", False)
+    pre_inventory: list[dict[str, Any]] | None = None
+
+    if ratio_before >= 1.0 and build_message_inventory_fn is not None:
+        pre_inventory = build_message_inventory_fn(conversation)
 
     # --- Step 1: Prune old tool results (free, fast) ---
-    conversation.prune_old_tool_results(keep_recent=4)
+    protect = max(2000, config.max_context_tokens // 12)
+    pruned = await conversation.prune_old_tool_results(
+        protect_tokens=protect,
+        min_prune_tokens=max(1000, protect // 3),
+    )
+    if pruned > 0:
+        logger.info(
+            "Pruned %d old tool results: %.0f%% -> %.0f%%",
+            pruned,
+            ratio_before * 100,
+            conversation.usage_ratio() * 100,
+        )
     if not conversation.needs_compaction():
-        await log_compaction(ctx, conversation, ratio_before, event_bus)
+        await log_compaction(
+            ctx,
+            conversation,
+            ratio_before,
+            event_bus,
+            pre_inventory=pre_inventory,
+            publish_context_usage_fn=publish_context_usage_fn,
+            write_debug_log_fn=write_debug_log_fn,
+        )
         return
 
     # --- Step 2: Standard structure-preserving compaction (free, no LLM) ---
@@ -62,7 +91,15 @@ async def compact(
             phase_graduated=phase_grad,
         )
     if not conversation.needs_compaction():
-        await log_compaction(ctx, conversation, ratio_before, event_bus)
+        await log_compaction(
+            ctx,
+            conversation,
+            ratio_before,
+            event_bus,
+            pre_inventory=pre_inventory,
+            publish_context_usage_fn=publish_context_usage_fn,
+            write_debug_log_fn=write_debug_log_fn,
+        )
         return
 
     # --- Step 3: LLM summary compaction ---
@@ -89,7 +126,15 @@ async def compact(
             logger.warning("LLM compaction failed: %s", e)
 
     if not conversation.needs_compaction():
-        await log_compaction(ctx, conversation, ratio_before, event_bus)
+        await log_compaction(
+            ctx,
+            conversation,
+            ratio_before,
+            event_bus,
+            pre_inventory=pre_inventory,
+            publish_context_usage_fn=publish_context_usage_fn,
+            write_debug_log_fn=write_debug_log_fn,
+        )
         return
 
     # --- Step 4: Emergency deterministic summary (LLM failed/unavailable) ---
@@ -103,7 +148,15 @@ async def compact(
         keep_recent=1,
         phase_graduated=phase_grad,
     )
-    await log_compaction(ctx, conversation, ratio_before, event_bus)
+    await log_compaction(
+        ctx,
+        conversation,
+        ratio_before,
+        event_bus,
+        pre_inventory=pre_inventory,
+        publish_context_usage_fn=publish_context_usage_fn,
+        write_debug_log_fn=write_debug_log_fn,
+    )
 
 
 # --- LLM compaction with binary-search splitting ----------------------
@@ -302,6 +355,14 @@ async def log_compaction(
     conversation: NodeConversation,
     ratio_before: float,
     event_bus: Any | None,
+    *,
+    pre_inventory: list[dict[str, Any]] | None = None,
+    publish_context_usage_fn: (
+        Callable[[NodeContext, NodeConversation, str], Awaitable[None]] | None
+    ) = None,
+    write_debug_log_fn: (
+        Callable[[NodeContext, int, int, str, list[dict[str, Any]] | None], None] | None
+    ) = None,
 ) -> None:
     """Log compaction result to runtime logger and event bus."""
     ratio_after = conversation.usage_ratio()
@@ -336,18 +397,27 @@ async def log_compaction(
     if event_bus:
         from framework.runtime.event_bus import AgentEvent, EventType
 
+        event_data: dict[str, Any] = {
+            "level": level,
+            "usage_before": before_pct,
+            "usage_after": after_pct,
+        }
+        if pre_inventory is not None:
+            event_data["message_inventory"] = pre_inventory
         await event_bus.publish(
             AgentEvent(
                 type=EventType.CONTEXT_COMPACTED,
                 stream_id=ctx.stream_id or ctx.node_id,
                 node_id=ctx.node_id,
-                data={
-                    "level": level,
-                    "usage_before": before_pct,
-                    "usage_after": after_pct,
-                },
+                data=event_data,
             )
         )
+
+    if publish_context_usage_fn is not None:
+        await publish_context_usage_fn(ctx, conversation, "post_compaction")
+
+    if write_debug_log_fn is not None and os.environ.get("HIVE_COMPACTION_DEBUG"):
+        write_debug_log_fn(ctx, before_pct, after_pct, level, pre_inventory)
 
 
 def build_emergency_summary(
