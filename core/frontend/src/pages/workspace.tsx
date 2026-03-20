@@ -2011,6 +2011,8 @@ export default function Workspace() {
                 role,
                 thread: agentType,
                 createdAt: eventCreatedAt,
+                nodeId: event.node_id || undefined,
+                executionId: event.execution_id || undefined,
               });
               return {
                 ...prev,
@@ -2082,6 +2084,8 @@ export default function Workspace() {
                 role,
                 thread: agentType,
                 createdAt: eventCreatedAt,
+                nodeId: event.node_id || undefined,
+                executionId: event.execution_id || undefined,
               });
               return {
                 ...prev,
