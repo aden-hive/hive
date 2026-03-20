@@ -306,6 +306,38 @@ def get_antigravity_client_id() -> str:
     return "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
 
 
+def _read_antigravity_secret_from_npm() -> str | None:
+    """Read the Antigravity OAuth client secret from the globally installed npm package.
+
+    Mirrors the bash ``_read_antigravity_creds_from_npm()`` helper so that users
+    who have ``opencode-antigravity-auth`` installed globally always get the secret
+    at runtime — regardless of whether quickstart wrote it to their config.
+    """
+    import re as _re
+    import subprocess
+    from pathlib import Path as _Path
+
+    candidates: list[_Path] = []
+    try:
+        npm_root = subprocess.check_output(
+            ["npm", "root", "-g"], stderr=subprocess.DEVNULL, timeout=5
+        ).decode().strip()
+        candidates.append(_Path(npm_root) / "opencode-antigravity-auth/dist/src/constants.js")
+    except Exception:
+        pass
+    candidates += [
+        _Path("/opt/homebrew/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js"),
+        _Path("/usr/local/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js"),
+        _Path("/usr/lib/node_modules/opencode-antigravity-auth/dist/src/constants.js"),
+    ]
+    for p in candidates:
+        if p.exists():
+            m = _re.search(r'"(GOCSPX-[^"]+)"', p.read_text(errors="ignore"))
+            if m:
+                return m.group(1)
+    return None
+
+
 def get_antigravity_client_secret() -> str | None:
     """Return the Antigravity OAuth client secret.
 
@@ -313,6 +345,7 @@ def get_antigravity_client_secret() -> str | None:
     1. ``ANTIGRAVITY_CLIENT_SECRET`` environment variable
     2. ``llm.antigravity_client_secret`` in ~/.hive/configuration.json
        (written by quickstart when Antigravity is configured)
+    3. Globally installed ``opencode-antigravity-auth`` npm package (runtime fallback)
 
     Returns None when not found — token refresh will be skipped and
     the caller must use whatever access token is already available.
@@ -320,7 +353,12 @@ def get_antigravity_client_secret() -> str | None:
     env = os.environ.get("ANTIGRAVITY_CLIENT_SECRET")
     if env:
         return env
-    return get_hive_config().get("llm", {}).get("antigravity_client_secret") or None
+    cfg_val = get_hive_config().get("llm", {}).get("antigravity_client_secret") or None
+    if cfg_val:
+        return cfg_val
+    # Runtime fallback: read from globally installed npm package so users who set up
+    # via a path other than the updated quickstart still get the secret automatically.
+    return _read_antigravity_secret_from_npm()
 
 
 def get_gcu_enabled() -> bool:

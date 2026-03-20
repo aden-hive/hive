@@ -200,21 +200,21 @@ def _load_from_ide_db() -> tuple[str | None, str | None, float]:
 def _do_token_refresh(refresh_token: str) -> tuple[str, float] | None:
     """POST to Google OAuth endpoint and return ``(new_access_token, expires_at)``.
 
-    Requires the Antigravity OAuth client secret to be configured via:
-    - ``ANTIGRAVITY_CLIENT_SECRET`` environment variable, or
-    - ``llm.antigravity_client_secret`` in ~/.hive/configuration.json
+    The client secret is sourced via ``get_antigravity_client_secret()`` (env var,
+    config file, or npm package fallback). When unavailable the refresh is attempted
+    without it — Google will reject it for web-app clients, but the npm fallback in
+    ``get_antigravity_client_secret()`` should ensure the secret is found at runtime.
 
-    Returns None (skips refresh) when the secret is unavailable.
+    Returns None when the HTTP request fails.
     """
     from framework.config import get_antigravity_client_secret  # noqa: PLC0415
 
     client_secret = get_antigravity_client_secret()
     if not client_secret:
         logger.debug(
-            "Antigravity client secret not configured — skipping token refresh. "
+            "Antigravity client secret not configured — attempting refresh without it. "
             "Set ANTIGRAVITY_CLIENT_SECRET or run quickstart to configure."
         )
-        return None
 
     import urllib.error  # noqa: PLC0415
     import urllib.parse  # noqa: PLC0415
@@ -222,14 +222,14 @@ def _do_token_refresh(refresh_token: str) -> tuple[str, float] | None:
 
     from framework.config import get_antigravity_client_id  # noqa: PLC0415
 
-    body = urllib.parse.urlencode(
-        {
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": get_antigravity_client_id(),
-            "client_secret": client_secret,
-        }
-    ).encode("utf-8")
+    params: dict[str, str] = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": get_antigravity_client_id(),
+    }
+    if client_secret:
+        params["client_secret"] = client_secret
+    body = urllib.parse.urlencode(params).encode("utf-8")
 
     req = urllib.request.Request(
         _TOKEN_URL,
