@@ -268,11 +268,128 @@ def save_accounts(data: dict[str, Any]) -> None:
     logger.info(f"Saved credentials to {_ACCOUNTS_FILE}")
 
 
+def validate_credentials(access_token: str, project_id: str = _DEFAULT_PROJECT_ID) -> bool:
+    """Test if credentials work by making a simple API call to Antigravity.
+
+    Returns True if credentials are valid, False otherwise.
+    """
+    endpoint = "https://daily-cloudcode-pa.sandbox.googleapis.com"
+    body = {
+        "project": project_id,
+        "model": "gemini-3-flash",
+        "request": {
+            "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
+            "generationConfig": {"maxOutputTokens": 10},
+        },
+        "requestType": "agent",
+        "userAgent": "antigravity",
+        "requestId": "validation-test",
+    }
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/1.18.3",
+        "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    }
+
+    try:
+        req = urllib.request.Request(
+            f"{endpoint}/v1internal:generateContent",
+            data=json.dumps(body).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            json.loads(resp.read())
+            return True
+    except Exception:
+        return False
+
+
+def refresh_access_token(refresh_token: str, client_id: str, client_secret: str | None) -> dict | None:
+    """Refresh the access token using the refresh token."""
+    data = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+        "client_id": client_id,
+    }
+    if client_secret:
+        data["client_secret"] = client_secret
+
+    body = urllib.parse.urlencode(data).encode()
+    req = urllib.request.Request(
+        _OAUTH_TOKEN_URL,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        logger.debug(f"Token refresh failed: {e}")
+        return None
+
+
 def cmd_account_add(args: argparse.Namespace) -> int:
-    """Add a new Antigravity account via OAuth2."""
+    """Add a new Antigravity account via OAuth2.
+
+    First checks if valid credentials already exist. If so, validates them
+    and skips OAuth if they work. Otherwise, proceeds with OAuth flow.
+    """
     client_id = get_client_id()
     client_secret = get_client_secret()
 
+    # Check if credentials already exist
+    accounts_data = load_accounts()
+    accounts = accounts_data.get("accounts", [])
+
+    if accounts:
+        account = next((a for a in accounts if a.get("enabled", True) is not False), accounts[0])
+        access_token = account.get("access")
+        refresh_token_str = account.get("refresh", "")
+        refresh_token = refresh_token_str.split("|")[0] if refresh_token_str else None
+        project_id = refresh_token_str.split("|")[1] if "|" in refresh_token_str else _DEFAULT_PROJECT_ID
+        email = account.get("email", "unknown")
+        expires_ms = account.get("expires", 0)
+        expires_at = expires_ms / 1000.0 if expires_ms else 0.0
+
+        # Check if token is expired or near expiry
+        if access_token and expires_at and time.time() < expires_at - 60:
+            # Token still valid, test it
+            logger.info(f"Found existing credentials for: {email}")
+            logger.info("Validating existing credentials...")
+            if validate_credentials(access_token, project_id):
+                logger.info(f"✓ Credentials valid! Skipping OAuth.")
+                return 0
+            else:
+                logger.info("Credentials failed validation, refreshing...")
+        elif refresh_token:
+            logger.info(f"Found expired credentials for: {email}")
+            logger.info("Attempting token refresh...")
+
+            tokens = refresh_access_token(refresh_token, client_id, client_secret)
+            if tokens:
+                new_access = tokens.get("access_token")
+                expires_in = tokens.get("expires_in", 3600)
+                if new_access:
+                    # Update the account
+                    account["access"] = new_access
+                    account["expires"] = int((time.time() + expires_in) * 1000)
+                    accounts_data["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    save_accounts(accounts_data)
+
+                    # Validate the refreshed token
+                    logger.info("Validating refreshed credentials...")
+                    if validate_credentials(new_access, project_id):
+                        logger.info(f"✓ Credentials refreshed and validated!")
+                        return 0
+                    else:
+                        logger.info("Refreshed token failed validation, proceeding with OAuth...")
+            else:
+                logger.info("Token refresh failed, proceeding with OAuth...")
+
+    # No valid credentials, proceed with OAuth
     if not client_secret:
         logger.warning(
             "No client secret configured. Token refresh may fail.\n"
