@@ -41,6 +41,7 @@ from .aws_s3_tool import register_tools as register_aws_s3
 from .azure_sql_tool import register_tools as register_azure_sql
 from .bigquery_tool import register_tools as register_bigquery
 from .brevo_tool import register_tools as register_brevo
+from .currency_exchange_tool import register_tools as register_currency_exchange
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .calendly_tool import register_tools as register_calendly
@@ -243,6 +244,7 @@ def _register_unverified(
     register_intercom(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_brevo(mcp, credentials=credentials)
+    register_currency_exchange(mcp, credentials=credentials)
     register_bigquery(mcp, credentials=credentials)
     register_calcom(mcp, credentials=credentials)
     register_razorpay(mcp, credentials=credentials)
