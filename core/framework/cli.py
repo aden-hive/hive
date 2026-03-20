@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 
+
 def _configure_paths():
     """Auto-configure sys.path so agents in exports/ are discoverable.
 
@@ -81,13 +82,15 @@ def main():
 
     # Register runner commands (run, info, validate, list, dispatch, shell)
     from framework.runner.cli import register_commands
-
     register_commands(subparsers)
 
     # Register testing commands (test-run, test-debug, test-list, test-stats)
     from framework.testing.cli import register_testing_commands
-
     register_testing_commands(subparsers)
+
+    # NEW: Register model management commands
+    from framework.model_cli import register_model_commands
+    register_model_commands(subparsers)
 
     # Register skill commands (skill list, skill trust, ...)
     from framework.skills.cli import register_skill_commands
@@ -98,6 +101,7 @@ def main():
     from framework.debugger.cli import register_debugger_commands
 
     register_debugger_commands(subparsers)
+
 
     args = parser.parse_args()
 

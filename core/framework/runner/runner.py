@@ -137,7 +137,7 @@ def _read_claude_credentials() -> dict | None:
 
     try:
         with open(CLAUDE_CREDENTIALS_FILE, encoding="utf-8") as f:
-            return json.load(f)
+            return json.loads(f.read())
     except (json.JSONDecodeError, OSError):
         return None
 
@@ -322,7 +322,7 @@ def _read_codex_auth_file() -> dict | None:
         return None
     try:
         with open(CODEX_AUTH_FILE, encoding="utf-8") as f:
-            return json.load(f)
+            return json.loads(f.read())
     except (json.JSONDecodeError, OSError):
         return None
 
@@ -706,6 +706,43 @@ class AgentRunner:
         result = await runner.run({"lead_id": "123"})
     """
 
+    # Provider to environment variable mapping
+    PROVIDER_ENV_MAP = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+        "google": "GEMINI_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "cerebras": "CEREBRAS_API_KEY",
+        "mistral": "MISTRAL_API_KEY",
+        "cohere": "COHERE_API_KEY",
+        "together": "TOGETHER_API_KEY",
+        "together_ai": "TOGETHER_API_KEY",
+        "replicate": "REPLICATE_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "minimax": "MINIMAX_API_KEY",
+        "azure": "AZURE_API_KEY",
+        "ollama": None,  # Local models don't need API keys
+    }
+
+    # Provider to credential store ID mapping
+    PROVIDER_CREDENTIAL_ID_MAP = {
+        "anthropic": "anthropic",
+        "openai": "openai",
+        "gemini": "gemini",
+        "google": "gemini",
+        "groq": "groq",
+        "cerebras": "cerebras",
+        "mistral": "mistral",
+        "cohere": "cohere",
+        "together": "together",
+        "together_ai": "together",
+        "replicate": "replicate",
+        "deepseek": "deepseek",
+        "minimax": "minimax",
+        "azure": "azure",
+    }
+
     @staticmethod
     def _resolve_default_model() -> str:
         """Resolve the default model from ~/.hive/configuration.json."""
@@ -762,12 +799,21 @@ class AgentRunner:
         self._list_accounts = list_accounts
         self._credential_store = credential_store
 
+        # Store the provider from config
+        self.provider = None
+        try:
+            config = get_hive_config()
+            self.provider = config.get("llm", {}).get("provider", "").lower()
+            logger.debug(f"AgentRunner initialized with provider: {self.provider}")
+        except Exception as e:
+            logger.debug(f"Could not load provider from config: {e}")
+
         # Set up storage
         if storage_path:
             self._storage_path = storage_path
             self._temp_dir = None
         else:
-            # Use persistent storage in ~/.hive/agents/{agent_name}/ per RUNTIME_LOGGING.md spec
+            # Use persistent storage in ~/.hive/agents/{agent_name} per RUNTIME_LOGGING.md spec
             home = Path.home()
             default_storage = home / ".hive" / "agents" / agent_path.name
             default_storage.mkdir(parents=True, exist_ok=True)
@@ -1225,19 +1271,19 @@ class AgentRunner:
                         api_base=api_base,
                     )
                 else:
-                    # Fall back to environment variable
-                    # First check api_key_env_var from config (set by quickstart)
-                    api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
-                        self.model
-                    )
+                    # Get the correct environment variable based on provider
+                    api_key_env = self._get_api_key_env_var(self.model)
+                    
+                    # First try environment variable
                     if api_key_env and os.environ.get(api_key_env):
                         self._llm = LiteLLMProvider(
                             model=self.model,
                             api_key=os.environ[api_key_env],
                             api_base=api_base,
                         )
+                        logger.debug(f"Using API key from env var {api_key_env}")
                     else:
-                        # Fall back to credential store
+                        # Try credential store
                         api_key = self._get_api_key_from_credential_store()
                         if api_key:
                             self._llm = LiteLLMProvider(
@@ -1247,9 +1293,10 @@ class AgentRunner:
                             # node._extract_json) can also find it
                             if api_key_env:
                                 os.environ[api_key_env] = api_key
+                                logger.debug(f"Set env var {api_key_env} from credential store")
                         elif api_key_env:
-                            print(f"Warning: {api_key_env} not set. LLM calls will fail.")
-                            print(f"Set it with: export {api_key_env}=your-api-key")
+                            # Don't print warning here - validation will handle it
+                            logger.debug(f"API key not found for {api_key_env}")
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
@@ -1271,7 +1318,10 @@ class AgentRunner:
                         if api_key_env
                         else "Configure an API key for your LLM provider."
                     )
-                    raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
+                    provider_info = f" (provider: {self.provider or 'unknown'})"
+                    raise CredentialError(
+                        f"LLM API key not found for model '{self.model}'{provider_info}. {hint}"
+                    )
 
         # For GCU nodes: auto-register GCU MCP server if needed, then expand tool lists
         has_gcu_nodes = any(node.node_type == "gcu" for node in self.graph.nodes)
@@ -1368,19 +1418,58 @@ class AgentRunner:
         )
 
     def _get_api_key_env_var(self, model: str) -> str | None:
-        """Get the environment variable name for the API key based on model name."""
+        """
+        Get the environment variable name for the API key based on configured provider.
+
+        Args:
+            model: The model name (e.g., "gemini-2.5-flash" or "gemini/gemini-2.5-flash")
+
+        Returns:
+            Environment variable name or None for local models
+        """
+        # If we have a provider from config, use it directly
+        if self.provider and self.provider in self.PROVIDER_ENV_MAP:
+            env_var = self.PROVIDER_ENV_MAP[self.provider]
+            logger.debug(f"Using provider '{self.provider}' -> env var '{env_var}'")
+            return env_var
+
+        # Fallback to model name parsing (for backward compatibility)
         model_lower = model.lower()
 
-        # Map model prefixes to API key environment variables
-        # LiteLLM uses these conventions
-        if model_lower.startswith("cerebras/"):
-            return "CEREBRAS_API_KEY"
-        elif model_lower.startswith("openai/") or model_lower.startswith("gpt-"):
+        # Check if model has provider prefix (e.g., "gemini/gemini-2.5-flash")
+        if "/" in model_lower:
+            provider_part = model_lower.split("/")[0]
+            if provider_part in self.PROVIDER_ENV_MAP:
+                env_var = self.PROVIDER_ENV_MAP[provider_part]
+                logger.debug(f"Extracted provider '{provider_part}' from model -> env var '{env_var}'")
+                return env_var
+
+        # Try to detect from model name patterns
+        if "gpt" in model_lower:
             return "OPENAI_API_KEY"
-        elif model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
+        elif "claude" in model_lower:
             return "ANTHROPIC_API_KEY"
-        elif model_lower.startswith("gemini/") or model_lower.startswith("google/"):
+        elif "gemini" in model_lower:
             return "GEMINI_API_KEY"
+
+        elif "llama" in model_lower or "mixtral" in model_lower:
+            return "GROQ_API_KEY"  # Assumes Groq for Llama models
+        elif self._is_local_model(model_lower):
+            return None
+
+        # Last resort - use OPENAI_API_KEY but log a warning
+        logger.warning(
+            f"Could not determine provider for model '{model}', "
+            f"defaulting to OPENAI_API_KEY. Set provider in config to fix."
+        )
+        return "OPENAI_API_KEY"
+
+    def _get_credential_id_for_provider(self) -> str | None:
+        """Get the credential store ID for the current provider."""
+        if self.provider and self.provider in self.PROVIDER_CREDENTIAL_ID_MAP:
+            return self.PROVIDER_CREDENTIAL_ID_MAP[self.provider]
+        return None
+
         elif model_lower.startswith("mistral/"):
             return "MISTRAL_API_KEY"
         elif model_lower.startswith("groq/"):
@@ -1407,6 +1496,7 @@ class AgentRunner:
             # Default: assume OpenAI-compatible
             return "OPENAI_API_KEY"
 
+
     def _get_api_key_from_credential_store(self) -> str | None:
         """Get the LLM API key from the encrypted credential store.
 
@@ -1415,6 +1505,10 @@ class AgentRunner:
         """
         if not os.environ.get("HIVE_CREDENTIAL_KEY"):
             return None
+
+
+        # Get credential ID from provider
+        cred_id = self._get_credential_id_for_provider()
 
         # Map model prefix to credential store ID
         model_lower = self.model.lower()
@@ -1429,8 +1523,26 @@ class AgentRunner:
             cred_id = "hive"
         # Add more mappings as providers are added to LLM_CREDENTIALS
 
+
         if cred_id is None:
-            return None
+            # Fallback to model name parsing
+            model_lower = self.model.lower()
+            if model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
+                cred_id = "anthropic"
+            elif model_lower.startswith("openai/") or model_lower.startswith("gpt-"):
+                cred_id = "openai"
+            elif model_lower.startswith("gemini/") or model_lower.startswith("google/"):
+                cred_id = "gemini"
+            elif model_lower.startswith("groq/"):
+                cred_id = "groq"
+            elif model_lower.startswith("cerebras/"):
+                cred_id = "cerebras"
+            elif model_lower.startswith("mistral/"):
+                cred_id = "mistral"
+            elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
+                cred_id = "minimax"
+            else:
+                return None
 
         try:
             store = self._credential_store
@@ -1439,7 +1551,8 @@ class AgentRunner:
 
                 store = CredentialStore.with_encrypted_storage()
             return store.get(cred_id)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to get credential from store: {e}")
             return None
 
     @staticmethod
@@ -1886,13 +1999,29 @@ class AgentRunner:
                 node.node_type in ("event_loop", "gcu") for node in self.graph.nodes
             )
             if has_llm_nodes:
+                # Use our fixed provider-based mapping
                 api_key_env = self._get_api_key_env_var(self.model)
                 if api_key_env and not os.environ.get(api_key_env):
-                    if api_key_env not in missing_credentials:
+                    # Try credential store
+                    from framework.credentials import CredentialStore
+                    try:
+                        store = CredentialStore.with_encrypted_storage()
+                        cred_id = self._get_credential_id_for_provider()
+                        if cred_id and store.has_credential(cred_id):
+                            # Credential exists in store, will be loaded during execution
+                            logger.debug(f"Credential {cred_id} found in store")
+                        else:
+                            missing_credentials.append(api_key_env)
+                            provider_info = f" (provider: {self.provider or 'unknown'})"
+                            warnings.append(
+                                f"Agent has LLM nodes but {api_key_env} not set{provider_info} (model: {self.model})"
+                            )
+                    except Exception as e:
+                        logger.debug(f"Credential store check failed: {e}")
                         missing_credentials.append(api_key_env)
-                    warnings.append(
-                        f"Agent has LLM nodes but {api_key_env} not set (model: {self.model})"
-                    )
+                        warnings.append(
+                            f"Agent has LLM nodes but {api_key_env} not set (model: {self.model})"
+                        )
 
         return ValidationResult(
             valid=len(errors) == 0,

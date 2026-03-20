@@ -1,0 +1,29 @@
+{
+  "pipelines": {
+    "cv_screening": {
+      "description": "Smart CV screening pipeline",
+      "required_integrations": ["google_drive", "openai", "email", "calendar", "crm"],
+      "node_types": ["webhook", "googleDrive", "extractFromFile", "openAi", "switch", "email", "googleCalendar", "httpRequest"]
+    },
+    "signal_engine": {
+      "description": "Signal decision engine",
+      "required_integrations": ["openai", "slack", "crm", "email"],
+      "node_types": ["webhook", "openAi", "switch", "slack", "httpRequest", "email"]
+    },
+    "revenue_monitor": {
+      "description": "Revenue leak detector",
+      "required_integrations": ["stripe", "openai", "slack", "crm", "email"],
+      "node_types": ["schedule", "webhook", "httpRequest", "openAi", "switch", "slack", "email"]
+    },
+    "contract_watchdog": {
+      "description": "Contract compliance monitor",
+      "required_integrations": ["google_drive", "openai", "email", "jira", "slack"],
+      "node_types": ["schedule", "webhook", "manual", "googleDrive", "extractFromFile", "openAi", "switch", "email", "httpRequest", "slack"]
+    },
+    "hr_monitor": {
+      "description": "HR risk monitor",
+      "required_integrations": ["hr_system", "project_management", "openai", "slack", "email", "calendar"],
+      "node_types": ["schedule", "webhook", "httpRequest", "openAi", "switch", "slack", "email", "googleCalendar"]
+    }
+  }
+}
