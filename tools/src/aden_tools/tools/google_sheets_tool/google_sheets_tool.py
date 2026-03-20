@@ -412,18 +412,22 @@ def register_tools(
         Returns:
             Dict with update result or error
         """
+        # Credentials check first so missing-creds errors aren't masked
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
         # Accept stringified JSON and deserialize
         import json
 
         if isinstance(values, str):
-            values = json.loads(values)
+            try:
+                values = json.loads(values)
+            except (json.JSONDecodeError, ValueError):
+                return {"error": "values is not valid JSON"}
         if not isinstance(values, list):
             return {
                 "error": f"values must be a 2D list or JSON string, got {type(values).__name__}"
             }
-        client = _get_client()
-        if isinstance(client, dict):
-            return client
         try:
             return client.update_values(spreadsheet_id, range_name, values, value_input_option)
         except httpx.TimeoutException:
@@ -456,18 +460,22 @@ def register_tools(
         Returns:
             Dict with append result or error
         """
+        # Credentials check first so missing-creds errors aren't masked
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
         # Accept stringified JSON and deserialize
         import json
 
         if isinstance(values, str):
-            values = json.loads(values)
+            try:
+                values = json.loads(values)
+            except (json.JSONDecodeError, ValueError):
+                return {"error": "values is not valid JSON"}
         if not isinstance(values, list):
             return {
                 "error": f"values must be a 2D list or JSON string, got {type(values).__name__}"
             }
-        client = _get_client()
-        if isinstance(client, dict):
-            return client
         try:
             return client.append_values(spreadsheet_id, range_name, values, value_input_option)
         except httpx.TimeoutException:
