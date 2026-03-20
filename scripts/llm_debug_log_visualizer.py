@@ -876,7 +876,7 @@ def _run_server(
             if self.path == "/":
                 self._respond(200, "text/html; charset=utf-8", html_bytes)
             elif self.path.startswith("/api/session/"):
-                sid = urllib.parse.unquote(self.path[len("/api/session/"):])
+                sid = urllib.parse.unquote(self.path[len("/api/session/") :])
                 records = sessions.get(sid)
                 if records is None:
                     self._respond(404, "application/json", b"[]")
@@ -917,9 +917,7 @@ def _run_server(
 def main() -> int:
     args = _parse_args()
     records = _discover_records(args.logs_dir.expanduser(), args.limit_files)
-    summaries, sessions = _group_sessions(
-        records, include_tests=args.include_tests
-    )
+    summaries, sessions = _group_sessions(records, include_tests=args.include_tests)
 
     initial_session_id = args.session or (
         summaries[0].execution_id if summaries else ""
