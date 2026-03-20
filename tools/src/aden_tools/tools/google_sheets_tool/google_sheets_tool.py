@@ -414,6 +414,7 @@ def register_tools(
         """
         # Accept stringified JSON and deserialize
         import json
+
         if isinstance(values, str):
             values = json.loads(values)
         if not isinstance(values, list):
@@ -457,6 +458,7 @@ def register_tools(
         """
         # Accept stringified JSON and deserialize
         import json
+
         if isinstance(values, str):
             values = json.loads(values)
         if not isinstance(values, list):
