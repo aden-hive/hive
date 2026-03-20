@@ -3,12 +3,16 @@ Tests for core GraphExecutor execution paths.
 Focused on minimal success and failure scenarios.
 """
 
+import json
+import logging
+
 import pytest
 
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
 from framework.graph.node import NodeResult, NodeSpec
+from framework.utils.io import atomic_write
 
 
 # ---- Dummy runtime (no real logging) ----
@@ -23,6 +27,14 @@ class DummyRuntime:
 
     def report_problem(self, **kwargs):
         pass
+
+
+class DummyMemory:
+    def __init__(self, data):
+        self._data = data
+
+    def read_all(self):
+        return self._data
 
 
 # ---- Fake node that always succeeds ----
@@ -245,3 +257,61 @@ async def test_executor_no_events_without_event_bus():
     result = await executor.execute(graph=graph, goal=goal)
 
     assert result.success is True
+
+
+def test_write_progress_uses_atomic_write_and_updates_state(tmp_path, monkeypatch):
+    runtime = DummyRuntime()
+    executor = GraphExecutor(runtime=runtime, storage_path=tmp_path)
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps({"entry_point": "primary"}), encoding="utf-8")
+    memory = DummyMemory({"foo": "bar"})
+
+    called = {}
+
+    def recording_atomic_write(path, *args, **kwargs):
+        called["path"] = path
+        return atomic_write(path, *args, **kwargs)
+
+    monkeypatch.setattr("framework.graph.executor.atomic_write", recording_atomic_write)
+
+    executor._write_progress(
+        current_node="node-b",
+        path=["node-a", "node-b"],
+        memory=memory,
+        node_visit_counts={"node-a": 1, "node-b": 1},
+    )
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert called["path"] == state_path
+    assert state["entry_point"] == "primary"
+    assert state["progress"]["current_node"] == "node-b"
+    assert state["progress"]["path"] == ["node-a", "node-b"]
+    assert state["progress"]["node_visit_counts"] == {"node-a": 1, "node-b": 1}
+    assert state["progress"]["steps_executed"] == 2
+    assert state["memory"] == {"foo": "bar"}
+    assert state["memory_keys"] == ["foo"]
+    assert "updated_at" in state["timestamps"]
+
+
+def test_write_progress_logs_warning_on_atomic_write_failure(tmp_path, monkeypatch, caplog):
+    runtime = DummyRuntime()
+    executor = GraphExecutor(runtime=runtime, storage_path=tmp_path)
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps({"entry_point": "primary"}), encoding="utf-8")
+    memory = DummyMemory({"foo": "bar"})
+
+    def failing_atomic_write(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("framework.graph.executor.atomic_write", failing_atomic_write)
+
+    with caplog.at_level(logging.WARNING):
+        executor._write_progress(
+            current_node="node-b",
+            path=["node-a", "node-b"],
+            memory=memory,
+            node_visit_counts={"node-a": 1, "node-b": 1},
+        )
+
+    assert "Failed to persist progress state to" in caplog.text
+    assert str(state_path) in caplog.text

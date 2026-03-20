@@ -3,9 +3,8 @@
 Tests the FULL routing chain:
   ExecutionStream → GraphExecutor → EventLoopNode → _execute_subagent
   → _report_callback registers _EscalationReceiver in executor.node_registry
-  → emit CLIENT_INPUT_REQUESTED with escalation_id
-  → subscriber calls stream.inject_input(escalation_id, "done")
-  → ExecutionStream finds _EscalationReceiver in executor.node_registry
+  → emit ESCALATION_REQUESTED (queen handles the escalation)
+  → queen inject_worker_message() finds _EscalationReceiver via get_waiting_nodes()
   → receiver.inject_event("done") unblocks the subagent
   → subagent continues and completes
 """
@@ -227,26 +226,30 @@ async def test_escalation_e2e_through_execution_stream(tmp_path):
     stream_holder: list[ExecutionStream] = []
 
     async def escalation_handler(event: AgentEvent):
-        """Simulate a TUI/runner: when CLIENT_INPUT_REQUESTED arrives with
-        an escalation node_id, inject the user's response via the stream."""
+        """Simulate the queen: when ESCALATION_REQUESTED arrives,
+        find the waiting receiver and inject the response via the stream."""
         all_events.append(event)
-        if event.type == EventType.CLIENT_INPUT_REQUESTED:
-            node_id = event.node_id
-            if ":escalation:" in node_id:
-                escalation_events.append(event)
-                # Small delay to simulate user typing
-                await asyncio.sleep(0.05)
-                # Route through the REAL inject_input chain
-                stream = stream_holder[0]
-                success = await stream.inject_input(node_id, "done logging in")
-                assert success, (
-                    f"inject_input({node_id!r}) returned False — "
-                    "escalation receiver not found in executor.node_registry"
-                )
-                inject_called.set()
+        if event.type == EventType.ESCALATION_REQUESTED:
+            escalation_events.append(event)
+            # Small delay to simulate queen processing
+            await asyncio.sleep(0.05)
+            # Route through the REAL inject_input chain — find the waiting
+            # escalation receiver via get_waiting_nodes() (mirrors what
+            # inject_worker_message does in the queen lifecycle tools).
+            stream = stream_holder[0]
+            waiting = stream.get_waiting_nodes()
+            assert waiting, "Should have a waiting escalation receiver"
+            target_node_id = waiting[0]["node_id"]
+            assert ":escalation:" in target_node_id
+            success = await stream.inject_input(target_node_id, "done logging in")
+            assert success, (
+                f"inject_input({target_node_id!r}) returned False — "
+                "escalation receiver not found in executor.node_registry"
+            )
+            inject_called.set()
 
     bus.subscribe(
-        event_types=[EventType.CLIENT_INPUT_REQUESTED, EventType.CLIENT_OUTPUT_DELTA],
+        event_types=[EventType.ESCALATION_REQUESTED],
         handler=escalation_handler,
     )
 
@@ -297,17 +300,7 @@ async def test_escalation_e2e_through_execution_stream(tmp_path):
     # 3. Escalation event has correct structure
     esc_event = escalation_events[0]
     assert ":escalation:" in esc_event.node_id
-    assert esc_event.data["prompt"] == "Login required for LinkedIn. Please log in manually."
-
-    # 4. CLIENT_OUTPUT_DELTA was emitted for the escalation message
-    output_deltas = [
-        e
-        for e in all_events
-        if e.type == EventType.CLIENT_OUTPUT_DELTA and "Login required" in e.data.get("content", "")
-    ]
-    assert len(output_deltas) >= 1, (
-        "Should have emitted CLIENT_OUTPUT_DELTA with escalation message"
-    )
+    assert esc_event.data["context"] == "Login required for LinkedIn. Please log in manually."
 
     # 5. The parent node got the subagent's result
     assert "result" in result.output
@@ -444,7 +437,7 @@ async def test_escalation_cleanup_after_completion(tmp_path):
     stream_holder: list[ExecutionStream] = []
 
     async def auto_respond(event: AgentEvent):
-        if event.type == EventType.CLIENT_INPUT_REQUESTED and ":escalation:" in event.node_id:
+        if event.type == EventType.ESCALATION_REQUESTED:
             stream = stream_holder[0]
 
             # Snapshot the active executor's node_registry BEFORE responding
@@ -462,10 +455,13 @@ async def test_escalation_cleanup_after_completion(tmp_path):
                 )
 
             await asyncio.sleep(0.02)
-            await stream.inject_input(event.node_id, "ok")
+            # Find the waiting escalation receiver and inject response
+            waiting = stream.get_waiting_nodes()
+            if waiting:
+                await stream.inject_input(waiting[0]["node_id"], "ok")
 
     bus.subscribe(
-        event_types=[EventType.CLIENT_INPUT_REQUESTED],
+        event_types=[EventType.ESCALATION_REQUESTED],
         handler=auto_respond,
     )
 

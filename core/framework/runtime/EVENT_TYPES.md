@@ -454,11 +454,11 @@ An agent has requested handoff to the Hive Coder (via the `escalate` synthetic t
 
 ## Worker Health Monitoring
 
-These events form the **judge → queen → operator** escalation pipeline.
+These events form the **queen → operator** escalation pipeline.
 
 ### `worker_escalation_ticket`
 
-The Worker Health Judge has detected a degradation pattern and is escalating to the Queen.
+A worker degradation pattern has been detected and is being escalated to the Queen.
 
 | Data Field | Type   | Description                          |
 | ---------- | ------ | ------------------------------------ |

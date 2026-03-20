@@ -31,6 +31,8 @@ export interface EntryPoint {
   entry_node: string;
   trigger_type: string;
   trigger_config?: Record<string, unknown>;
+  /** Worker task string when this trigger fires autonomously. */
+  task?: string;
   /** Seconds until the next timer fire (only present for timer entry points). */
   next_fire_in?: number;
 }
@@ -41,6 +43,7 @@ export interface DiscoverEntry {
   description: string;
   category: string;
   session_count: number;
+  run_count: number;
   node_count: number;
   tool_count: number;
   tags: string[];
@@ -191,6 +194,56 @@ export interface GraphTopology {
   entry_points?: EntryPoint[];
 }
 
+// --- Draft graph types (planning phase) ---
+
+export interface DraftNode {
+  id: string;
+  name: string;
+  description: string;
+  node_type: string;
+  tools: string[];
+  input_keys: string[];
+  output_keys: string[];
+  success_criteria: string;
+  sub_agents: string[];
+  /** For decision nodes: the yes/no question evaluated during dissolution. */
+  decision_clause?: string;
+  flowchart_type: string;
+  flowchart_shape: string;
+  flowchart_color: string;
+}
+
+export interface DraftEdge {
+  id: string;
+  source: string;
+  target: string;
+  condition: string;
+  description: string;
+  /** Short label shown on the flowchart edge (e.g. "Yes", "No"). */
+  label?: string;
+}
+
+export interface DraftGraph {
+  agent_name: string;
+  goal: string;
+  description: string;
+  success_criteria: string[];
+  constraints: string[];
+  nodes: DraftNode[];
+  edges: DraftEdge[];
+  entry_node: string;
+  terminal_nodes: string[];
+  flowchart_legend: Record<string, { shape: string; color: string }>;
+}
+
+/** Mapping from runtime graph nodes → original flowchart draft nodes. */
+export interface FlowchartMap {
+  /** runtime_node_id → list of original draft node IDs it absorbed. */
+  map: Record<string, string[]> | null;
+  /** Original draft graph preserved before planning-node dissolution (decision + subagent). */
+  original_draft: DraftGraph | null;
+}
+
 export interface NodeCriteria {
   node_id: string;
   success_criteria: string | null;
@@ -261,6 +314,7 @@ export type EventTypeName =
   | "tool_call_completed"
   | "client_output_delta"
   | "client_input_requested"
+  | "client_input_received"
   | "node_internal_output"
   | "node_input_blocked"
   | "node_stalled"
@@ -270,13 +324,22 @@ export type EventTypeName =
   | "node_retry"
   | "edge_traversed"
   | "context_compacted"
+  | "context_usage_updated"
   | "webhook_received"
   | "custom"
   | "escalation_requested"
   | "worker_loaded"
   | "credentials_required"
   | "queen_phase_changed"
-  | "subagent_report";
+  | "subagent_report"
+  | "draft_graph_updated"
+  | "flowchart_map_updated"
+  | "trigger_available"
+  | "trigger_activated"
+  | "trigger_deactivated"
+  | "trigger_fired"
+  | "trigger_removed"
+  | "trigger_updated";
 
 export interface AgentEvent {
   type: EventTypeName;
@@ -287,4 +350,5 @@ export interface AgentEvent {
   timestamp: string;
   correlation_id: string | null;
   graph_id: string | null;
+  run_id?: string | null;
 }

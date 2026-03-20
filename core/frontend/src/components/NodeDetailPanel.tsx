@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Cpu, Zap, Clock, RotateCcw, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Copy, Check, Terminal, Wrench, BookOpen, GitBranch, Bot } from "lucide-react";
-import type { GraphNode, NodeStatus } from "./AgentGraph";
+import type { GraphNode, NodeStatus } from "./graph-types";
 import type { NodeSpec, ToolInfo, NodeCriteria } from "../api/types";
 import { graphsApi } from "../api/graphs";
 import { logsApi } from "../api/logs";
@@ -28,6 +28,13 @@ export interface SubagentReport {
   status?: "running" | "complete" | "error";
 }
 
+interface ContextUsage {
+  usagePct: number;
+  messageCount: number;
+  estimatedTokens: number;
+  maxTokens: number;
+}
+
 interface NodeDetailPanelProps {
   node: GraphNode | null;
   nodeSpec?: NodeSpec | null;
@@ -38,6 +45,7 @@ interface NodeDetailPanelProps {
   workerSessionId?: string | null;
   nodeLogs?: string[];
   actionPlan?: string;
+  contextUsage?: ContextUsage;
   onClose: () => void;
 }
 
@@ -299,17 +307,17 @@ function SubagentsTab({ subAgentIds, allNodeSpecs, subagentReports }: { subAgent
   );
 }
 
-type Tab = "overview" | "tools" | "logs" | "prompt" | "subagents";
+type Tab = "overview" | "breakdown" | "tools" | "logs" | "subagents";
 
 const tabs: { id: Tab; label: string; Icon: React.FC<{ className?: string }> }[] = [
   { id: "overview", label: "Overview", Icon: ({ className }) => <GitBranch className={className} /> },
+  { id: "breakdown", label: "Breakdown", Icon: ({ className }) => <BookOpen className={className} /> },
   { id: "tools", label: "Tools", Icon: ({ className }) => <Wrench className={className} /> },
   { id: "logs", label: "Logs", Icon: ({ className }) => <Terminal className={className} /> },
-  { id: "prompt", label: "Prompt", Icon: ({ className }) => <BookOpen className={className} /> },
   { id: "subagents", label: "Subagents", Icon: ({ className }) => <Bot className={className} /> },
 ];
 
-export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagentReports, sessionId, graphId, workerSessionId, nodeLogs, actionPlan, onClose }: NodeDetailPanelProps) {
+export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagentReports, sessionId, graphId, workerSessionId, nodeLogs, actionPlan, contextUsage, onClose }: NodeDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [realTools, setRealTools] = useState<ToolInfo[] | null>(null);
   const [realCriteria, setRealCriteria] = useState<NodeCriteria | null>(null);
@@ -331,7 +339,7 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
 
   // Fetch real criteria when Overview tab is active and session is loaded
   useEffect(() => {
-    if (activeTab === "overview" && sessionId && graphId && node) {
+    if (activeTab === "breakdown" && sessionId && graphId && node) {
       graphsApi.nodeCriteria(sessionId, graphId, node.id, workerSessionId || undefined)
         .then(r => setRealCriteria(r))
         .catch(() => setRealCriteria(null));
@@ -389,6 +397,43 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
         </div>
       )}
 
+      {/* Context window usage */}
+      {contextUsage && (
+        <div className="px-4 py-2 border-b border-border/20 flex-shrink-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] text-muted-foreground font-medium">Context</span>
+            <span className="text-[10px] text-muted-foreground/70 ml-auto">
+              {(contextUsage.estimatedTokens / 1000).toFixed(1)}k / {(contextUsage.maxTokens / 1000).toFixed(0)}k tokens
+            </span>
+          </div>
+          <div className="w-full h-1.5 rounded-full bg-muted/50 overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-500 ease-out"
+              style={{
+                width: `${Math.min(contextUsage.usagePct, 100)}%`,
+                backgroundColor: contextUsage.usagePct >= 90
+                  ? "hsl(0,65%,55%)"
+                  : contextUsage.usagePct >= 70
+                    ? "hsl(35,90%,55%)"
+                    : "hsl(45,95%,58%)",
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[10px] text-muted-foreground/60">{contextUsage.messageCount} messages</span>
+            <span className="text-[10px] font-medium ml-auto" style={{
+              color: contextUsage.usagePct >= 90
+                ? "hsl(0,65%,55%)"
+                : contextUsage.usagePct >= 70
+                  ? "hsl(35,90%,55%)"
+                  : "hsl(45,95%,58%)",
+            }}>
+              {contextUsage.usagePct}%
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Tab bar */}
       <div className="flex border-b border-border/30 flex-shrink-0 px-2 pt-1 overflow-x-auto scrollbar-hide">
         {tabs.filter(t => t.id !== "subagents" || (nodeSpec?.sub_agents && nodeSpec.sub_agents.length > 0)).map(tab => (
@@ -410,6 +455,10 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
       {/* Tab content */}
       <div className="flex-1 overflow-auto px-4 py-4 flex flex-col gap-3">
         {activeTab === "overview" && (
+          <SystemPromptTab systemPrompt={nodeSpec?.system_prompt} />
+        )}
+
+        {activeTab === "breakdown" && (
           <>
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Action Plan</p>
             {actionPlan ? (
@@ -487,10 +536,6 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
 
         {activeTab === "logs" && (
           <LogsTab nodeId={node.id} isActive={isActive} sessionId={sessionId} graphId={graphId} workerSessionId={workerSessionId} nodeLogs={nodeLogs} />
-        )}
-
-        {activeTab === "prompt" && (
-          <SystemPromptTab systemPrompt={nodeSpec?.system_prompt} />
         )}
 
         {activeTab === "subagents" && nodeSpec?.sub_agents && (

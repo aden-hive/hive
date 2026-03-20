@@ -4,7 +4,7 @@
  */
 
 import type { ChatMessage } from "@/components/ChatPanel";
-import type { GraphNode } from "@/components/AgentGraph";
+import type { GraphNode } from "@/components/graph-types";
 
 export const TAB_STORAGE_KEY = "hive:workspace-tabs";
 

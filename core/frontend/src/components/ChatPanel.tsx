@@ -1,7 +1,16 @@
-import { memo, useState, useRef, useEffect } from "react";
+import { memo, useState, useRef, useEffect, useMemo } from "react";
 import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
+
+export interface ContextUsageEntry {
+  usagePct: number;
+  messageCount: number;
+  estimatedTokens: number;
+  maxTokens: number;
+}
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
+import MultiQuestionWidget from "@/components/MultiQuestionWidget";
+import ParallelSubagentBubble, { type SubagentGroup } from "@/components/ParallelSubagentBubble";
 
 export interface ChatMessage {
   id: string;
@@ -9,12 +18,18 @@ export interface ChatMessage {
   agentColor: string;
   content: string;
   timestamp: string;
-  type?: "system" | "agent" | "user" | "tool_status" | "worker_input_request";
+  type?: "system" | "agent" | "user" | "tool_status" | "worker_input_request" | "run_divider";
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
   thread?: string;
   /** Epoch ms when this message was first created — used for ordering queen/worker interleaving */
   createdAt?: number;
+  /** Queen phase active when this message was created */
+  phase?: "planning" | "building" | "staging" | "running";
+  /** Backend node_id that produced this message — used for subagent grouping */
+  nodeId?: string;
+  /** Backend execution_id for this message */
+  executionId?: string;
 }
 
 interface ChatPanelProps {
@@ -34,12 +49,18 @@ interface ChatPanelProps {
   pendingQuestion?: string | null;
   /** Options for the pending question */
   pendingOptions?: string[] | null;
+  /** Multiple questions from ask_user_multiple */
+  pendingQuestions?: { id: string; prompt: string; options?: string[] }[] | null;
   /** Called when user submits an answer to the pending question */
   onQuestionSubmit?: (answer: string, isOther: boolean) => void;
+  /** Called when user submits answers to multiple questions */
+  onMultiQuestionSubmit?: (answers: Record<string, string>) => void;
   /** Called when user dismisses the pending question without answering */
   onQuestionDismiss?: () => void;
   /** Queen operating phase — shown as a tag on queen messages */
   queenPhase?: "planning" | "building" | "staging" | "running";
+  /** Context window usage for queen and workers */
+  contextUsage?: Record<string, ContextUsageEntry>;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -149,6 +170,18 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
   const isQueen = msg.role === "queen";
   const color = getColor(msg.agent, msg.role);
 
+  if (msg.type === "run_divider") {
+    return (
+      <div className="flex items-center gap-3 py-2 my-1">
+        <div className="flex-1 h-px bg-border/60" />
+        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+          {msg.content}
+        </span>
+        <div className="flex-1 h-px bg-border/60" />
+      </div>
+    );
+  }
+
   if (msg.type === "system") {
     return (
       <div className="flex justify-center py-1">
@@ -200,13 +233,13 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
             }`}
           >
             {isQueen
-              ? queenPhase === "running"
-                ? "running phase"
-                : queenPhase === "staging"
-                  ? "staging phase"
-                  : queenPhase === "planning"
-                    ? "planning phase"
-                    : "building phase"
+              ? ((msg.phase ?? queenPhase) === "running"
+                ? "running"
+                : (msg.phase ?? queenPhase) === "staging"
+                  ? "staging"
+                  : (msg.phase ?? queenPhase) === "planning"
+                    ? "planning"
+                    : "building")
               : "Worker"}
           </span>
         </div>
@@ -220,9 +253,9 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
       </div>
     </div>
   );
-}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.queenPhase === next.queenPhase);
+}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.msg.phase === next.msg.phase && prev.queenPhase === next.queenPhase);
 
-export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, onQuestionSubmit, onQuestionDismiss, queenPhase }: ChatPanelProps) {
+export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, pendingQuestions, onQuestionSubmit, onMultiQuestionSubmit, onQuestionDismiss, queenPhase, contextUsage }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -232,8 +265,92 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
 
   const threadMessages = messages.filter((m) => {
     if (m.type === "system" && !m.thread) return false;
-    return m.thread === activeThread;
+    if (m.thread !== activeThread) return false;
+    // Hide queen messages whose content is whitespace-only — these are
+    // tool-use-only turns that have no visible text.  During live operation
+    // tool pills provide context, but on resume the pills are gone so
+    // the empty bubble is meaningless.
+    if (m.role === "queen" && !m.type && (!m.content || !m.content.trim())) return false;
+    return true;
   });
+
+  // Group subagent messages into parallel bubbles.
+  // A subagent message has nodeId containing ":subagent:".
+  // The run only ends on hard boundaries (user messages, run_dividers)
+  // so interleaved queen/tool/system messages don't fragment the bubble.
+  type RenderItem =
+    | { kind: "message"; msg: ChatMessage }
+    | { kind: "parallel"; groupId: string; groups: SubagentGroup[] };
+
+  const renderItems = useMemo<RenderItem[]>(() => {
+    const items: RenderItem[] = [];
+    let i = 0;
+    while (i < threadMessages.length) {
+      const msg = threadMessages[i];
+      const isSubagent = msg.nodeId?.includes(":subagent:");
+      if (!isSubagent) {
+        items.push({ kind: "message", msg });
+        i++;
+        continue;
+      }
+
+      // Start a subagent run. Collect all subagent messages, allowing
+      // non-subagent messages in between (they render as normal items
+      // before the bubble). Only break on hard boundaries.
+      const subagentMsgs: ChatMessage[] = [];
+      const interleaved: { idx: number; msg: ChatMessage }[] = [];
+      const firstId = msg.id;
+
+      while (i < threadMessages.length) {
+        const m = threadMessages[i];
+        const isSa = m.nodeId?.includes(":subagent:");
+
+        if (isSa) {
+          subagentMsgs.push(m);
+          i++;
+          continue;
+        }
+
+        // Hard boundary — stop the run
+        if (m.type === "user" || m.type === "run_divider") break;
+
+        // Worker message from a non-subagent node means the graph has
+        // moved on to the next stage.  Close the bubble even if some
+        // subagents are still streaming in the background.
+        if (m.role === "worker" && m.nodeId && !m.nodeId.includes(":subagent:")) break;
+
+        // Soft interruption (queen output, system, tool_status without
+        // nodeId) — render it normally but keep the subagent run going
+        interleaved.push({ idx: items.length + interleaved.length, msg: m });
+        i++;
+      }
+
+      // Emit interleaved messages first (before the bubble)
+      for (const { msg: im } of interleaved) {
+        items.push({ kind: "message", msg: im });
+      }
+
+      // Build the single parallel bubble from all collected subagent msgs
+      if (subagentMsgs.length > 0) {
+        const byNode = new Map<string, ChatMessage[]>();
+        for (const m of subagentMsgs) {
+          const nid = m.nodeId!;
+          if (!byNode.has(nid)) byNode.set(nid, []);
+          byNode.get(nid)!.push(m);
+        }
+        const groups: SubagentGroup[] = [];
+        for (const [nodeId, msgs] of byNode) {
+          groups.push({
+            nodeId,
+            messages: msgs,
+            contextUsage: contextUsage?.[nodeId],
+          });
+        }
+        items.push({ kind: "parallel", groupId: `par-${firstId}`, groups });
+      }
+    }
+    return items;
+  }, [threadMessages, contextUsage]);
 
   // Mark current thread as read
   useEffect(() => {
@@ -280,11 +397,17 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
 
       {/* Messages */}
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto px-5 py-4 space-y-3">
-        {threadMessages.map((msg) => (
-          <div key={msg.id}>
-            <MessageBubble msg={msg} queenPhase={queenPhase} />
-          </div>
-        ))}
+        {renderItems.map((item) =>
+          item.kind === "parallel" ? (
+            <div key={item.groupId}>
+              <ParallelSubagentBubble groupId={item.groupId} groups={item.groups} />
+            </div>
+          ) : (
+            <div key={item.msg.id}>
+              <MessageBubble msg={item.msg} queenPhase={queenPhase} />
+            </div>
+          )
+        )}
 
         {/* Show typing indicator while waiting for first queen response (disabled + empty chat) */}
         {(isWaiting || (disabled && threadMessages.length === 0)) && (
@@ -331,8 +454,65 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
         <div ref={bottomRef} />
       </div>
 
+      {/* Context window usage bar — sits between messages and input */}
+      {(() => {
+        if (!contextUsage) return null;
+        const queenUsage = contextUsage["__queen__"];
+        const workerEntries = Object.entries(contextUsage).filter(([k]) => k !== "__queen__");
+        const workerUsage = workerEntries.length > 0
+          ? workerEntries.reduce((best, [, v]) => (v.usagePct > best.usagePct ? v : best), workerEntries[0][1])
+          : undefined;
+        if (!queenUsage && !workerUsage) return null;
+        return (
+          <div className="flex items-center gap-3 mx-4 px-3 py-1 rounded-lg bg-muted/30 border border-border/20 group/ctx flex-shrink-0">
+            {queenUsage && (
+              <div className="flex items-center gap-2 flex-1 min-w-0" title={`Queen: ${(queenUsage.estimatedTokens / 1000).toFixed(1)}k / ${(queenUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${queenUsage.messageCount} messages`}>
+                <Crown className="w-3 h-3 flex-shrink-0" style={{ color: "hsl(45,95%,58%)" }} />
+                <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden min-w-[60px]">
+                  <div
+                    className="h-full rounded-full transition-all duration-500 ease-out"
+                    style={{
+                      width: `${Math.min(queenUsage.usagePct, 100)}%`,
+                      backgroundColor: queenUsage.usagePct >= 90 ? "hsl(0,65%,55%)" : queenUsage.usagePct >= 70 ? "hsl(35,90%,55%)" : "hsl(45,95%,58%)",
+                    }}
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground/70 flex-shrink-0 tabular-nums">
+                  <span className="group-hover/ctx:hidden">{queenUsage.usagePct}%</span>
+                  <span className="hidden group-hover/ctx:inline">{(queenUsage.estimatedTokens / 1000).toFixed(1)}k / {(queenUsage.maxTokens / 1000).toFixed(0)}k</span>
+                </span>
+              </div>
+            )}
+            {workerUsage && (
+              <div className="flex items-center gap-2 flex-1 min-w-0" title={`Worker: ${(workerUsage.estimatedTokens / 1000).toFixed(1)}k / ${(workerUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${workerUsage.messageCount} messages`}>
+                <Cpu className="w-3 h-3 flex-shrink-0" style={{ color: "hsl(220,60%,55%)" }} />
+                <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden min-w-[60px]">
+                  <div
+                    className="h-full rounded-full transition-all duration-500 ease-out"
+                    style={{
+                      width: `${Math.min(workerUsage.usagePct, 100)}%`,
+                      backgroundColor: workerUsage.usagePct >= 90 ? "hsl(0,65%,55%)" : workerUsage.usagePct >= 70 ? "hsl(35,90%,55%)" : "hsl(220,60%,55%)",
+                    }}
+                  />
+                </div>
+                <span className="text-[10px] text-muted-foreground/70 flex-shrink-0 tabular-nums">
+                  <span className="group-hover/ctx:hidden">{workerUsage.usagePct}%</span>
+                  <span className="hidden group-hover/ctx:inline">{(workerUsage.estimatedTokens / 1000).toFixed(1)}k / {(workerUsage.maxTokens / 1000).toFixed(0)}k</span>
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Input area — question widget replaces textarea when a question is pending */}
-      {pendingQuestion && pendingOptions && onQuestionSubmit ? (
+      {pendingQuestions && pendingQuestions.length >= 2 && onMultiQuestionSubmit ? (
+        <MultiQuestionWidget
+          questions={pendingQuestions}
+          onSubmit={onMultiQuestionSubmit}
+          onDismiss={onQuestionDismiss}
+        />
+      ) : pendingQuestion && pendingOptions && onQuestionSubmit ? (
         <QuestionWidget
           question={pendingQuestion}
           options={pendingOptions}

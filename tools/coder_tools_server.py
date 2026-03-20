@@ -25,6 +25,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+_TOOLS_SRC = Path(__file__).resolve().parent / "src"
+if _TOOLS_SRC.is_dir():
+    tools_src = str(_TOOLS_SRC)
+    if tools_src not in sys.path:
+        sys.path.insert(0, tools_src)
+
 
 def setup_logger():
     if not logger.handlers:
@@ -51,6 +57,12 @@ if "--stdio" in sys.argv:
 
 
 from fastmcp import FastMCP  # noqa: E402
+
+# Import command sanitizer — shared module in aden_tools
+from aden_tools.tools.file_system_toolkits.command_sanitizer import (  # noqa: E402
+    CommandBlockedError,
+    validate_command,
+)
 
 mcp = FastMCP("coder-tools")
 
@@ -208,6 +220,8 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
 
     PYTHONPATH is automatically set to include core/ and exports/.
     Output is truncated at 30K chars with a notice.
+    Commands still execute with shell=True, so the sanitizer blocks
+    explicit nested shell executables but cannot remove shell parsing.
 
     Args:
         command: Shell command to execute
@@ -222,6 +236,11 @@ def run_command(command: str, cwd: str = "", timeout: int = 120) -> str:
 
     try:
         command = _translate_command_for_windows(command)
+        # Validate command against safety blocklist before execution
+        try:
+            validate_command(command)
+        except CommandBlockedError as e:
+            return f"Error: {e}"
         start = time.monotonic()
         result = subprocess.run(
             command,
@@ -334,8 +353,10 @@ def undo_changes(path: str = "") -> str:
 @mcp.tool()
 def list_agent_tools(
     server_config_path: str = "",
-    output_schema: str = "simple",
+    output_schema: str = "summary",
     group: str = "all",
+    credentials: str = "all",
+    service: str = "",
 ) -> str:
     """Discover tools available for agent building, grouped by provider.
 
@@ -343,22 +364,52 @@ def list_agent_tools(
     BEFORE designing an agent to know exactly which tools exist. Only use
     tools from this list in node definitions — never guess or fabricate.
 
+    Progressive disclosure workflow (start narrow, drill in):
+        list_agent_tools()                                        # provider summary
+        list_agent_tools(group="google", output_schema="summary") # service breakdown
+        list_agent_tools(group="google", service="gmail")           # tool names for just gmail
+        list_agent_tools(group="google", service="gmail", output_schema="full")  # full detail
+
     Args:
         server_config_path: Path to mcp_servers.json. Default: tools/mcp_servers.json
             (the standard hive-tools server). Can also point to an agent's config
             to see what tools that specific agent has access to.
-        output_schema: "simple" (default) returns name and description per tool.
-            "full" also includes server and input_schema.
+        output_schema: Controls verbosity of the response.
+            "summary" (default) — provider list with tool counts + credential status. Very compact.
+                When group is specified, shows service-level breakdown within that provider.
+            "names" — tool names only (no descriptions), grouped by provider.
+            "simple" — names + truncated descriptions.
+            "full" — names + descriptions + server + input_schema.
         group: "all" (default) returns all providers. A provider like "google"
             returns only that provider's tools. Legacy prefix filters (e.g. "gmail")
             are still supported.
+        credentials: Filter by credential availability.
+            "all" (default) — show every tool regardless of credential status.
+            "available" — only tools whose credentials are already configured.
+            "unavailable" — only tools that still need credential setup.
+        service: Filter to a specific service within a provider (e.g. service="gmail"
+            when group="google"). Matches tools whose name starts with "<service>_".
 
     Returns:
         JSON with tools grouped by provider.
     """
-    if output_schema not in ("simple", "full"):
+    if output_schema not in ("summary", "names", "simple", "full"):
         return json.dumps(
-            {"error": f"Invalid output_schema: {output_schema!r}. Use 'simple' or 'full'."}
+            {
+                "error": (
+                    f"Invalid output_schema: {output_schema!r}. "
+                    "Use 'summary', 'names', 'simple', or 'full'."
+                )
+            }
+        )
+    if credentials not in ("all", "available", "unavailable"):
+        return json.dumps(
+            {
+                "error": (
+                    f"Invalid credentials: {credentials!r}. "
+                    "Use 'all', 'available', or 'unavailable'."
+                )
+            }
         )
 
     # Resolve config path
@@ -472,6 +523,33 @@ def list_agent_tools(
 
     tool_provider_auth, tool_providers = _build_provider_metadata()
 
+    def _get_available_credential_names() -> set[str]:
+        """Return set of credential spec keys whose env_var is set in the environment."""
+        try:
+            from framework.credentials.validation import ensure_credential_key_env
+
+            ensure_credential_key_env()
+        except Exception:
+            pass
+        try:
+            from aden_tools.credentials import CREDENTIAL_SPECS
+        except ImportError:
+            return set()
+        return {
+            cred_name
+            for cred_name, spec in CREDENTIAL_SPECS.items()
+            if spec.env_var and os.environ.get(spec.env_var)
+        }
+
+    def _tool_credentials_available(tool_name: str, available_creds: set[str]) -> bool:
+        """True if all credentials required by tool_name are available (or tool needs none)."""
+        required = set()
+        for provider_creds in tool_provider_auth.get(tool_name, {}).values():
+            required.update(provider_creds.keys())
+        if not required:
+            return True  # no credentials needed
+        return required.issubset(available_creds)
+
     def _group_by_provider(tools: list[dict]) -> dict[str, dict]:
         """Group tools by provider, including auth metadata and providerless tools."""
         groups: dict[str, dict] = {}
@@ -481,16 +559,20 @@ def list_agent_tools(
             if not providers:
                 providers = ["no_provider"]
 
-            desc = t["description"]
-            if output_schema == "simple" and desc and len(desc) > 200:
-                desc = desc[:200].rsplit(" ", 1)[0] + "..."
-            tool_payload = {
-                "name": t["name"],
-                "description": desc,
-            }
-            if output_schema == "full":
-                tool_payload["server"] = t["server"]
-                tool_payload["input_schema"] = t["input_schema"]
+            if output_schema == "names":
+                # Store just the name string — will be collapsed to flat list below
+                tool_payload: dict | str = t["name"]
+            else:
+                desc = t["description"]
+                if output_schema == "simple" and desc and len(desc) > 200:
+                    desc = desc[:200].rsplit(" ", 1)[0] + "..."
+                tool_payload = {
+                    "name": t["name"],
+                    "description": desc,
+                }
+                if output_schema == "full":
+                    tool_payload["server"] = t["server"]
+                    tool_payload["input_schema"] = t["input_schema"]
 
             for provider in providers:
                 bucket = groups.setdefault(
@@ -502,17 +584,50 @@ def list_agent_tools(
                 )
                 bucket["tools"].append(tool_payload)
 
-                provider_auth = tool_provider_auth.get(t["name"], {}).get(provider, {})
-                for cred_name, auth in provider_auth.items():
-                    bucket["authorization"][cred_name] = auth
+                # Only accumulate full auth metadata for simple/full schemas.
+                # summary/names use compact representations.
+                if output_schema not in ("summary", "names"):
+                    provider_auth = tool_provider_auth.get(t["name"], {}).get(provider, {})
+                    for cred_name, auth in provider_auth.items():
+                        bucket["authorization"][cred_name] = auth
 
-        for _provider, bucket in groups.items():
-            bucket["tools"] = sorted(bucket["tools"], key=lambda x: x["name"])
-            bucket["authorization"] = dict(sorted(bucket["authorization"].items()))
+        for provider, bucket in groups.items():
+            if output_schema == "names":
+                # Collapse to compact structure: flat sorted name list + credential keys only
+                tool_names = sorted(set(bucket["tools"]))
+                cred_keys: set[str] = set()
+                for tn in tool_names:
+                    for prov_creds in tool_provider_auth.get(tn, {}).values():
+                        cred_keys.update(prov_creds.keys())
+                groups[provider] = {
+                    "tool_count": len(tool_names),
+                    "credentials_required": sorted(cred_keys),
+                    "tool_names": tool_names,
+                }
+            else:
+                bucket["tools"] = sorted(bucket["tools"], key=lambda x: x["name"])
+                bucket["authorization"] = dict(sorted(bucket["authorization"].items()))
 
         return dict(sorted(groups.items()))
 
-    provider_groups = _group_by_provider(all_tools)
+    # Compute credential availability once (used for filtering and summary)
+    available_creds: set[str] = (
+        _get_available_credential_names()
+        if credentials != "all" or output_schema == "summary"
+        else set()
+    )
+
+    # Apply credentials filter before grouping (filter tool list)
+    filtered_tools = all_tools
+    if credentials != "all":
+        filtered_tools = [
+            t
+            for t in all_tools
+            if (credentials == "available")
+            == _tool_credentials_available(t["name"], available_creds)
+        ]
+
+    provider_groups = _group_by_provider(filtered_tools)
 
     # Filter to a specific provider (preferred) or legacy prefix (fallback)
     if group != "all":
@@ -520,20 +635,113 @@ def list_agent_tools(
             provider_groups = {group: provider_groups[group]}
         else:
             prefixed_tools = []
-            for t in all_tools:
+            for t in filtered_tools:
                 parts = t["name"].split("_", 1)
                 prefix = parts[0] if len(parts) > 1 else "general"
                 if prefix == group:
                     prefixed_tools.append(t)
             provider_groups = _group_by_provider(prefixed_tools)
 
-    all_names = sorted({t["name"] for p in provider_groups.values() for t in p["tools"]})
-    result: dict = {
-        "total": len(all_names),
-        "tools_by_provider": provider_groups,
-        "tools_by_category": provider_groups,  # backward-compat alias
-        "all_tool_names": all_names,
-    }
+    # Apply service filter (tool name prefix within a provider, e.g. service="gmail")
+    if service:
+        service_prefix = service.rstrip("_") + "_"
+        service_filtered: list[dict] = []
+        for t in filtered_tools:
+            # Only include tools from the already-filtered provider set
+            tool_name = t["name"]
+            in_provider = any(
+                tool_name
+                in p.get(
+                    "tool_names", [tool_entry.get("name") for tool_entry in p.get("tools", [])]
+                )
+                for p in provider_groups.values()
+            )
+            if in_provider and tool_name.startswith(service_prefix):
+                service_filtered.append(t)
+        provider_groups = _group_by_provider(service_filtered)
+
+    def _infer_service(tool_name: str) -> str:
+        """Infer service name from tool name prefix (e.g. 'gmail' from 'gmail_send_message')."""
+        return tool_name.split("_", 1)[0]
+
+    # Summary mode: compact overview with counts + credential status
+    if output_schema == "summary":
+        if group == "all":
+            # Provider-level summary (default first call)
+            full_groups = _group_by_provider(all_tools) if credentials != "all" else provider_groups
+            summary_providers: dict = {}
+            for prov, bucket in full_groups.items():
+                cred_names = bucket.get(
+                    "credentials_required", sorted(bucket.get("authorization", {}).keys())
+                )
+                creds_ok = all(c in available_creds for c in cred_names) if cred_names else True
+                summary_providers[prov] = {
+                    "tool_count": len(bucket.get("tool_names", bucket.get("tools", []))),
+                    "credentials_required": cred_names,
+                    "credentials_available": creds_ok,
+                }
+            result: dict = {
+                "total_tools": sum(v["tool_count"] for v in summary_providers.values()),
+                "providers": summary_providers,
+                "hint": (
+                    "Use list_agent_tools(group='<provider>', "
+                    "output_schema='summary') for service breakdown, "
+                    "list_agent_tools(group='<provider>', service='<service>') for tool names. "
+                    "Filter by credentials='available' to see only ready-to-use tools."
+                ),
+            }
+        else:
+            # Service-level breakdown within a specific provider
+            # Re-build from all filtered tools for this provider (ignore service filter for summary)
+            provider_tool_names: list[str] = []
+            for bucket in provider_groups.values():
+                provider_tool_names.extend(
+                    bucket.get("tool_names", [e.get("name") for e in bucket.get("tools", [])])
+                )
+
+            services: dict = {}
+            for tn in sorted(set(provider_tool_names)):
+                svc = _infer_service(tn)
+                if svc not in services:
+                    svc_creds: set[str] = set()
+                    for prov_creds in tool_provider_auth.get(tn, {}).values():
+                        svc_creds.update(prov_creds.keys())
+                    services[svc] = {"tool_count": 0, "credentials_required": sorted(svc_creds)}
+                services[svc]["tool_count"] += 1
+                # Accumulate credentials for other tools in this service
+                for prov_creds in tool_provider_auth.get(tn, {}).values():
+                    existing = set(services[svc]["credentials_required"])
+                    existing.update(prov_creds.keys())
+                    services[svc]["credentials_required"] = sorted(existing)
+
+            result = {
+                "provider": group,
+                "total_tools": len(provider_tool_names),
+                "services": services,
+                "hint": (
+                    f"Use list_agent_tools(group='{group}', service='<service>') "
+                    "for tool names within a service."
+                ),
+            }
+        if errors:
+            result["errors"] = errors
+        return json.dumps(result, indent=2, default=str)
+
+    if output_schema == "names":
+        # Compact result: no duplication, no all_tool_names list
+        total = sum(p["tool_count"] for p in provider_groups.values())
+        result = {
+            "total": total,
+            "tools_by_provider": provider_groups,
+        }
+    else:
+        all_names = sorted({t["name"] for p in provider_groups.values() for t in p["tools"]})
+        result = {
+            "total": len(all_names),
+            "tools_by_provider": provider_groups,
+            "tools_by_category": provider_groups,  # backward-compat alias
+            "all_tool_names": all_names,
+        }
     if errors:
         result["errors"] = errors
 
@@ -1483,7 +1691,11 @@ def _node_var_name(node_id: str) -> str:
 
 
 @mcp.tool()
-def initialize_and_build_agent(agent_name: str, nodes: str | None = None) -> str:
+def initialize_and_build_agent(
+    agent_name: str,
+    nodes: str | None = None,
+    _draft: dict | None = None,
+) -> str:
     """Scaffold a new agent package with placeholder files.
 
     Creates exports/{agent_name}/ with all files needed for a runnable agent:
@@ -1500,6 +1712,8 @@ def initialize_and_build_agent(agent_name: str, nodes: str | None = None) -> str
         nodes: Comma-separated node names (snake_case or kebab-case).
                If omitted, a single 'start' node is created.
                Example: 'intake,process,review'
+        _draft: Internal. Draft graph metadata from planning phase, used to
+                pre-populate descriptions, goals, and node metadata.
 
     Returns:
         JSON with files written and next steps.
@@ -1518,6 +1732,15 @@ def initialize_and_build_agent(agent_name: str, nodes: str | None = None) -> str
         )
 
     node_list = [n.strip() for n in nodes.split(",") if n.strip()] if nodes else ["start"]
+
+    # Build draft node lookup for pre-populating metadata from planning phase
+    _draft_nodes: dict[str, dict] = {}
+    if _draft and _draft.get("nodes"):
+        for dn in _draft["nodes"]:
+            _draft_nodes[dn.get("id", "")] = dn
+
+    # Extract top-level draft metadata early so it's available for all templates
+    _draft_desc = (_draft.get("description") or "") if _draft else ""
 
     class_name = _snake_to_camel(agent_name)
     human_name = agent_name.replace("_", " ").title()
@@ -1583,7 +1806,7 @@ default_config = RuntimeConfig()
 class AgentMetadata:
     name: str = "{human_name}"
     version: str = "1.0.0"
-    description: str = "TODO: Add agent description."
+    description: str = "{_draft_desc or "TODO: Add agent description."}"
     intro_message: str = "TODO: Add intro message."
 
 
@@ -1598,22 +1821,33 @@ metadata = AgentMetadata()
         var = _node_var_name(node_id)
         node_var_names.append(var)
         is_first = node_id == entry_node
+
+        # Use draft metadata to pre-populate if available
+        dn = _draft_nodes.get(node_id, {})
+        node_name = dn.get("name") or node_id.replace("_", " ").replace("-", " ").title()
+        node_desc = dn.get("description") or "TODO: Describe what this node does."
+        node_type = dn.get("node_type") or "event_loop"
+        node_tools = dn.get("tools") or []
+        node_input_keys = dn.get("input_keys") or []
+        node_output_keys = dn.get("output_keys") or []
+        node_sc = dn.get("success_criteria") or "TODO: Define success criteria."
+
         node_specs.append(f'''\
 {var} = NodeSpec(
     id="{node_id}",
-    name="{node_id.replace("_", " ").replace("-", " ").title()}",
-    description="TODO: Describe what this node does.",
-    node_type="event_loop",
+    name="{node_name}",
+    description="{node_desc}",
+    node_type="{node_type}",
     client_facing={is_first},
     max_node_visits=0,
-    input_keys=[],
-    output_keys=[],
+    input_keys={node_input_keys!r},
+    output_keys={node_output_keys!r},
     nullable_output_keys=[],
-    success_criteria="TODO: Define success criteria.",
+    success_criteria="{node_sc}",
     system_prompt="""\\
 TODO: Add system prompt for this node.
 """,
-    tools=[],
+    tools={node_tools!r},
 )''')
 
     nodes_init = f'''\
@@ -1631,10 +1865,29 @@ __all__ = {node_var_names!r}
     node_imports = ", ".join(node_var_names)
     nodes_list = ", ".join(node_var_names)
 
+    # Use draft edges if available, otherwise generate linear edges
+    _draft_edges = _draft.get("edges", []) if _draft else []
     edge_defs = []
-    for i in range(len(node_list) - 1):
-        src, tgt = node_list[i], node_list[i + 1]
-        edge_defs.append(f"""\
+    if _draft_edges:
+        for de in _draft_edges:
+            eid = de.get("id", f"{de.get('source', '')}-to-{de.get('target', '')}")
+            src = de.get("source", "")
+            tgt = de.get("target", "")
+            cond = de.get("condition", "on_success").upper()
+            desc = de.get("description", "")
+            desc_line = f'\n        description="{desc}",' if desc else ""
+            edge_defs.append(f"""\
+    EdgeSpec(
+        id="{eid}",
+        source="{src}",
+        target="{tgt}",
+        condition=EdgeCondition.{cond},{desc_line}
+        priority=1,
+    ),""")
+    else:
+        for i in range(len(node_list) - 1):
+            src, tgt = node_list[i], node_list[i + 1]
+            edge_defs.append(f"""\
     EdgeSpec(
         id="{src}-to-{tgt}",
         source="{src}",
@@ -1643,6 +1896,59 @@ __all__ = {node_var_names!r}
         priority=1,
     ),""")
     edges_str = "\n".join(edge_defs) if edge_defs else "    # TODO: Add edges"
+
+    # Pre-populate goal from draft metadata
+    _draft_goal = (
+        (_draft.get("goal") or "TODO: Describe the agent's goal.")
+        if _draft
+        else "TODO: Describe the agent's goal."
+    )
+    _draft_sc = (_draft.get("success_criteria") or []) if _draft else []
+    _draft_constraints = (_draft.get("constraints") or []) if _draft else []
+
+    # Build success criteria entries
+    if _draft_sc:
+        sc_entries = "\n".join(
+            f"""\
+        SuccessCriterion(
+            id="sc-{i + 1}",
+            description="{sc}",
+            metric="TODO",
+            target="TODO",
+            weight=1.0,
+        ),"""
+            for i, sc in enumerate(_draft_sc)
+        )
+    else:
+        sc_entries = """\
+        SuccessCriterion(
+            id="sc-1",
+            description="TODO: Define success criterion.",
+            metric="TODO",
+            target="TODO",
+            weight=1.0,
+        ),"""
+
+    # Build constraint entries
+    if _draft_constraints:
+        constraint_entries = "\n".join(
+            f"""\
+        Constraint(
+            id="c-{i + 1}",
+            description="{c}",
+            constraint_type="hard",
+            category="functional",
+        ),"""
+            for i, c in enumerate(_draft_constraints)
+        )
+    else:
+        constraint_entries = """\
+        Constraint(
+            id="c-1",
+            description="TODO: Define constraint.",
+            constraint_type="hard",
+            category="functional",
+        ),"""
 
     _write(
         "agent.py",
@@ -1667,23 +1973,12 @@ from .nodes import {node_imports}
 goal = Goal(
     id="{agent_name}-goal",
     name="{human_name}",
-    description="TODO: Describe the agent's goal.",
+    description="{_draft_goal}",
     success_criteria=[
-        SuccessCriterion(
-            id="sc-1",
-            description="TODO: Define success criterion.",
-            metric="TODO",
-            target="TODO",
-            weight=1.0,
-        ),
+{sc_entries}
     ],
     constraints=[
-        Constraint(
-            id="c-1",
-            description="TODO: Define constraint.",
-            constraint_type="hard",
-            category="functional",
-        ),
+{constraint_entries}
     ],
 )
 
@@ -1981,21 +2276,24 @@ if __name__ == "__main__":
     )
 
     # -- mcp_servers.json --
-    _write(
-        "mcp_servers.json",
-        json.dumps(
-            {
-                "hive-tools": {
-                    "transport": "stdio",
-                    "command": "uv",
-                    "args": ["run", "python", "mcp_server.py", "--stdio"],
-                    "cwd": "../../tools",
-                    "description": "Hive tools MCP server",
-                }
-            },
-            indent=2,
-        ),
-    )
+    mcp_config: dict = {
+        "hive-tools": {
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "mcp_server.py", "--stdio"],
+            "cwd": "../../tools",
+            "description": "Hive tools MCP server",
+        },
+        "gcu-tools": {
+            "transport": "stdio",
+            "command": "uv",
+            "args": ["run", "python", "-m", "gcu.server", "--stdio"],
+            "cwd": "../../tools",
+            "description": "GCU browser automation tools",
+        },
+    }
+
+    _write("mcp_servers.json", json.dumps(mcp_config, indent=2))
 
     # -- tests/conftest.py --
     _write(

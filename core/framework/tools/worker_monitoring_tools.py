@@ -1,20 +1,17 @@
-"""Worker monitoring tools for the Health Judge and Queen triage agents.
+"""Worker monitoring tools for Queen triage agents.
 
 Three tools are registered by ``register_worker_monitoring_tools()``:
 
 - ``get_worker_health_summary`` — reads the worker's session log files and
   returns a compact health snapshot (recent verdicts, step count, timing).
   session_id is optional: if omitted, the most recent active session is
-  auto-discovered from storage. No agent-side configuration required.
-  Used by the Health Judge on every timer tick.
+  auto-discovered from storage.
 
 - ``emit_escalation_ticket`` — validates and publishes an EscalationTicket
   to the shared EventBus as a WORKER_ESCALATION_TICKET event.
-  Used by the Health Judge when it decides to escalate.
 
 - ``notify_operator`` — emits a QUEEN_INTERVENTION_REQUESTED event so the TUI
   can surface a non-disruptive operator notification.
-  Used by the Queen's ticket_triage_node when it decides to intervene.
 
 Usage::
 
@@ -45,8 +42,9 @@ def register_worker_monitoring_tools(
     registry: ToolRegistry,
     event_bus: EventBus,
     storage_path: Path,
-    stream_id: str = "judge",
+    stream_id: str = "monitoring",
     worker_graph_id: str | None = None,
+    default_session_id: str | None = None,
 ) -> int:
     """Register worker monitoring tools bound to *event_bus* and *storage_path*.
 
@@ -55,9 +53,15 @@ def register_worker_monitoring_tools(
         event_bus: The shared EventBus for the worker runtime.
         storage_path: Root storage path of the worker runtime
                       (e.g. ``~/.hive/agents/{name}``).
-        stream_id: Stream ID used when emitting events; defaults to judge's stream.
+        stream_id: Stream ID used when emitting events.
         worker_graph_id: The primary worker graph's ID. Included in health summary
                          so the judge can populate ticket identity fields accurately.
+        default_session_id: When set, ``get_worker_health_summary`` uses this
+                            session ID as the default instead of auto-discovering
+                            the most-recent-by-mtime session. Callers should pass
+                            the queen's own session ID so that after a cold-restore
+                            the monitoring tool reads the correct worker session
+                            rather than a stale orphaned one.
 
     Returns:
         Number of tools registered.
@@ -65,7 +69,7 @@ def register_worker_monitoring_tools(
     from framework.llm.provider import Tool
 
     storage_path = Path(storage_path)
-    # Derive agent identity from storage path so the judge can fill ticket fields.
+    # Derive agent identity from storage path for ticket fields.
     # storage_path is ~/.hive/agents/{agent_name} — the name is the last component.
     _worker_agent_id: str = storage_path.name
     _worker_graph_id: str = worker_graph_id or storage_path.name
@@ -100,23 +104,29 @@ def register_worker_monitoring_tools(
             if not sessions_dir.exists():
                 return json.dumps({"error": "No sessions found — worker has not started yet"})
 
-            candidates = [
-                d for d in sessions_dir.iterdir() if d.is_dir() and (d / "state.json").exists()
-            ]
-            if not candidates:
-                return json.dumps({"error": "No sessions found — worker has not started yet"})
+            # Prefer the queen's own session ID (set at registration time) over
+            # mtime-based discovery, which can pick a stale orphaned session after
+            # a cold-restore when a newer-but-empty session directory exists.
+            if default_session_id and (sessions_dir / default_session_id).is_dir():
+                session_id = default_session_id
+            else:
+                candidates = [
+                    d for d in sessions_dir.iterdir() if d.is_dir() and (d / "state.json").exists()
+                ]
+                if not candidates:
+                    return json.dumps({"error": "No sessions found — worker has not started yet"})
 
-            def _sort_key(d: Path):
-                try:
-                    state = json.loads((d / "state.json").read_text(encoding="utf-8"))
-                    # in_progress/running sorts before completed/failed
-                    priority = 0 if state.get("status", "") in ("in_progress", "running") else 1
-                    return (priority, -d.stat().st_mtime)
-                except Exception:
-                    return (2, 0)
+                def _sort_key(d: Path):
+                    try:
+                        state = json.loads((d / "state.json").read_text(encoding="utf-8"))
+                        # in_progress/running sorts before completed/failed
+                        priority = 0 if state.get("status", "") in ("in_progress", "running") else 1
+                        return (priority, -d.stat().st_mtime)
+                    except Exception:
+                        return (2, 0)
 
-            candidates.sort(key=_sort_key)
-            session_id = candidates[0].name
+                candidates.sort(key=_sort_key)
+                session_id = candidates[0].name
 
         # Resolve log paths
         session_dir = storage_path / "sessions" / session_id
@@ -201,10 +211,9 @@ def register_worker_monitoring_tools(
         description=(
             "Read the worker agent's execution logs and return a compact health snapshot. "
             "Returns worker_agent_id and worker_graph_id (use these for ticket identity fields), "
-            "recent judge verdicts, step count, time since last step, and "
+            "recent verdicts, step count, time since last step, and "
             "a snippet of the most recent LLM output. "
-            "session_id is optional — omit it to auto-discover the most recent active session. "
-            "Use this on every health check to observe trends."
+            "session_id is optional — omit it to auto-discover the most recent active session."
         ),
         parameters={
             "type": "object",
@@ -241,8 +250,7 @@ def register_worker_monitoring_tools(
         """Validate and publish an EscalationTicket to the shared EventBus.
 
         ticket_json must be a JSON string containing all required EscalationTicket
-        fields. The ticket is validated before publishing — this ensures the judge
-        has genuinely filled out all required evidence fields.
+        fields. The ticket is validated before publishing.
 
         Returns a confirmation JSON with the ticket_id on success, or an error.
         """
@@ -257,7 +265,7 @@ def register_worker_monitoring_tools(
         try:
             await event_bus.emit_worker_escalation_ticket(
                 stream_id=stream_id,
-                node_id="judge",
+                node_id="monitoring",
                 ticket=ticket.model_dump(),
             )
             logger.info(
@@ -280,7 +288,6 @@ def register_worker_monitoring_tools(
         name="emit_escalation_ticket",
         description=(
             "Validate and publish a structured EscalationTicket to the shared EventBus. "
-            "The Queen's ticket_receiver entry point will fire and triage the ticket. "
             "ticket_json must be a JSON string with all required EscalationTicket fields: "
             "worker_agent_id, worker_session_id, worker_node_id, worker_graph_id, "
             "severity (low/medium/high/critical), cause, judge_reasoning, suggested_action, "
