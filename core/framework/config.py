@@ -319,9 +319,11 @@ def _read_antigravity_secret_from_npm() -> str | None:
 
     candidates: list[_Path] = []
     try:
-        npm_root = subprocess.check_output(
-            ["npm", "root", "-g"], stderr=subprocess.DEVNULL, timeout=5
-        ).decode().strip()
+        npm_root = (
+            subprocess.check_output(["npm", "root", "-g"], stderr=subprocess.DEVNULL, timeout=5)
+            .decode()
+            .strip()
+        )
         candidates.append(_Path(npm_root) / "opencode-antigravity-auth/dist/src/constants.js")
     except Exception:
         pass
