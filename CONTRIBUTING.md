@@ -332,6 +332,30 @@ make test-live     # Run live API integration tests (requires credentials)
 - **React 18+** with TypeScript
 - **WebSocket** for real-time updates
 - **Tailwind CSS** for styling
+- **Vite** for the local frontend dev server
+
+Frontend setup and workflow:
+
+```bash
+# Fastest way to launch the browser UI from the repo root
+hive open
+
+# Start the API server without opening the browser
+hive serve
+
+# Frontend-only development loop
+cd core/frontend
+npm install
+npm run dev
+
+# Frontend verification
+npm run build
+npm run test
+```
+
+- `hive open` is the easiest way to work on the full dashboard locally.
+- `hive serve` serves the API and built frontend on `http://127.0.0.1:8787` by default.
+- `npm run dev` starts the Vite dev server for frontend-only iteration inside `core/frontend/`.
 
 ### Frontend Dev Workflow
 
