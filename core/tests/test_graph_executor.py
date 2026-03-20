@@ -171,6 +171,9 @@ class FakeEventBus:
     async def emit_node_retry(self, **kwargs):
         self.events.append(("node_retry", kwargs))
 
+    async def emit_goal_achieved(self, **kwargs):
+        self.events.append(("goal_achieved", kwargs))
+
 
 @pytest.mark.asyncio
 
@@ -219,8 +222,10 @@ async def test_executor_skips_events_for_event_loop_nodes():
     result = await executor.execute(graph=graph, goal=goal)
 
     assert result.success is True
-    # No events should have been emitted — event_loop nodes are skipped
-    assert len(event_bus.events) == 0
+    # No node-level events should have been emitted — event_loop nodes are skipped.
+    # Only the graph-level goal_achieved event is expected.
+    node_events = [e for e in event_bus.events if e[0] != "goal_achieved"]
+    assert len(node_events) == 0
 
 
 @pytest.mark.asyncio

@@ -1607,6 +1607,15 @@ class GraphExecutor:
                     execution_quality=exec_quality,
                 )
 
+            if self._event_bus:
+                await self._event_bus.emit_goal_achieved(
+                    stream_id=self._stream_id,
+                    execution_id=self._execution_id,
+                    goal_name=goal.name,
+                    goal_description=goal.description,
+                    output=output,
+                )
+
             return ExecutionResult(
                 success=True,
                 output=output,
