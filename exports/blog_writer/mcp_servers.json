@@ -1,0 +1,15 @@
+{
+  "servers": [
+    {
+      "name": "hive-tools",
+      "description": "Hive tools MCP server providing web_search, web_scrape, and write_to_file",
+      "transport": "stdio",
+      "command": "/Users/nateerickson/Desktop/Aden/hive/.venv/bin/python",
+      "args": ["mcp_server.py", "--stdio"],
+      "cwd": "../../tools",
+      "env": {
+        "PYTHONPATH": "/Users/nateerickson/Desktop/Aden/hive/tools/src:/Users/nateerickson/Desktop/Aden/hive/core"
+      }
+    }
+  ]
+}

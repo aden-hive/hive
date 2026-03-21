@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hive Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>Hive Dashboard</h1>
+        <p class="subtitle">Agent Monitoring & Management</p>
+    </header>
+
+    <main>
+        <section class="stats-bar">
+            <div class="stat">
+                <span class="stat-value" id="total-agents">0</span>
+                <span class="stat-label">Total Agents</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value online" id="online-count">0</span>
+                <span class="stat-label">Online</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value degraded" id="degraded-count">0</span>
+                <span class="stat-label">Degraded</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value offline" id="offline-count">0</span>
+                <span class="stat-label">Offline</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="total-cost">$0.00</span>
+                <span class="stat-label">Cost Today</span>
+            </div>
+        </section>
+
+        <section class="agents-section">
+            <div class="section-header">
+                <h2>Agents</h2>
+                <div class="controls">
+                    <select id="status-filter">
+                        <option value="all">All Status</option>
+                        <option value="online">Online</option>
+                        <option value="degraded">Degraded</option>
+                        <option value="offline">Offline</option>
+                    </select>
+                    <button id="refresh-btn">Refresh</button>
+                </div>
+            </div>
+            <div class="agents-grid" id="agents-grid">
+                <!-- Agent cards will be inserted here -->
+            </div>
+        </section>
+
+        <section class="activity-section">
+            <h2>Recent Activity</h2>
+            <div class="activity-log" id="activity-log">
+                <!-- Activity items will be inserted here -->
+            </div>
+        </section>
+
+        <section class="posts-section">
+            <div class="section-header">
+                <h2>Blog Posts</h2>
+                <button id="refresh-posts-btn">Refresh</button>
+            </div>
+            <div id="posts-list" class="posts-list">
+                <div class="loading-posts">Loading posts...</div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Hive Agent Framework &bull; <span id="last-updated">Never</span></p>
+    </footer>
+
+    <!-- Post Reader Modal -->
+    <div id="post-modal" class="modal-overlay" style="display:none">
+        <div class="modal modal-large">
+            <div class="modal-header">
+                <h3 id="post-modal-title">Blog Post</h3>
+                <button class="modal-close" id="post-modal-close">&times;</button>
+            </div>
+            <div class="modal-body post-body" id="post-modal-content"></div>
+        </div>
+    </div>
+
+    <!-- Send Task Modal -->
+    <div id="task-modal" class="modal-overlay" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Send Task to Blog Writer</h3>
+                <button class="modal-close" id="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <label for="blog-topic">Topic</label>
+                <input type="text" id="blog-topic" placeholder="e.g. The future of renewable energy" autocomplete="off" />
+                <div id="task-status" class="task-status" style="display:none"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="modal-cancel" class="btn-secondary">Cancel</button>
+                <button id="modal-submit" class="btn-primary">Send Task</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
