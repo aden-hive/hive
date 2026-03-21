@@ -54,7 +54,21 @@ def main():
         print(json.dumps({"error": "No modules specified"}), file=sys.stderr)
         sys.exit(1)
 
-    modules_to_check = sys.argv[1:]
+    raw_tokens = sys.argv[1:]
+    modules_to_check: list[str] = []
+    seen = set()
+
+    for token in raw_tokens:
+        for part in token.split(","):
+            name = part.strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            modules_to_check.append(name)
+
+    if not modules_to_check:
+        print(json.dumps({"error": "No modules specified"}), file=sys.stderr)
+        sys.exit(1)
     results = check_imports(modules_to_check)
 
     # Print results as JSON
