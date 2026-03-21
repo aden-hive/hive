@@ -1,0 +1,144 @@
+{
+  "original_draft": {
+    "agent_name": "document_intelligence_agent_team",
+    "goal": "Perform multi-perspective analysis on any document by delegating to three specialist Worker Bee agents (Researcher, Analyst, Strategist), then synthesizing their findings into a cross-referenced intelligence report.",
+    "description": "",
+    "success_criteria": [
+      "All three specialist agents (researcher, analyst, strategist) have been consulted via delegate_to_sub_agent",
+      "Final report includes consensus findings, conflicts between specialists, unique insights, and blind spots",
+      "Prioritized action items are provided with clear next steps",
+      "Report is saved and presented to the user"
+    ],
+    "constraints": [
+      "Never fabricate findings — only report what is found in the provided document",
+      "Every finding must be attributed to its source specialist",
+      "Sub-agents must not use external knowledge beyond the provided document"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Document Intake",
+        "description": "Receives document text from the user and clarifies analysis needs.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [],
+        "output_keys": ["document_text", "analysis_brief"],
+        "success_criteria": "User has provided document text and analysis needs have been clarified.",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "coordinator",
+        "name": "Coordinator (Queen Bee)",
+        "description": "Orchestrates multi-perspective analysis by delegating to specialist sub-agents and synthesizing their findings into a cross-referenced report.",
+        "node_type": "event_loop",
+        "tools": ["save_data", "load_data", "append_data", "list_data_files", "serve_file_to_user"],
+        "input_keys": ["document_text", "analysis_brief"],
+        "output_keys": ["final_report"],
+        "success_criteria": "All three specialists consulted and cross-referenced synthesis report generated.",
+        "sub_agents": ["researcher", "analyst", "strategist"],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      },
+      {
+        "id": "researcher",
+        "name": "Researcher (Worker Bee)",
+        "description": "Extracts entities, facts, dates, figures, and external references from documents.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": ["task"],
+        "output_keys": ["findings"],
+        "success_criteria": "Structured factual extraction complete with confidence flags.",
+        "sub_agents": [],
+        "flowchart_type": "subprocess",
+        "flowchart_shape": "subroutine",
+        "flowchart_color": "#887a48"
+      },
+      {
+        "id": "analyst",
+        "name": "Analyst (Worker Bee)",
+        "description": "Checks internal consistency, detects contradictions, and identifies logical gaps.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": ["task"],
+        "output_keys": ["findings"],
+        "success_criteria": "Internal consistency analysis complete with severity-rated findings.",
+        "sub_agents": [],
+        "flowchart_type": "subprocess",
+        "flowchart_shape": "subroutine",
+        "flowchart_color": "#887a48"
+      },
+      {
+        "id": "strategist",
+        "name": "Strategist (Worker Bee)",
+        "description": "Assesses risks, evaluates implications, and recommends actions.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": ["task"],
+        "output_keys": ["findings"],
+        "success_criteria": "Risk matrix and prioritized action items generated.",
+        "sub_agents": [],
+        "flowchart_type": "subprocess",
+        "flowchart_shape": "subroutine",
+        "flowchart_color": "#887a48"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "intake",
+        "target": "coordinator",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "coordinator",
+        "target": "researcher",
+        "condition": "on_success",
+        "description": "delegate_to_sub_agent",
+        "label": "delegate"
+      },
+      {
+        "id": "edge-2",
+        "source": "coordinator",
+        "target": "analyst",
+        "condition": "on_success",
+        "description": "delegate_to_sub_agent",
+        "label": "delegate"
+      },
+      {
+        "id": "edge-3",
+        "source": "coordinator",
+        "target": "strategist",
+        "condition": "on_success",
+        "description": "delegate_to_sub_agent",
+        "label": "delegate"
+      }
+    ],
+    "entry_node": "intake",
+    "terminal_nodes": ["coordinator"],
+    "flowchart_legend": {
+      "start": {"shape": "stadium", "color": "#8aad3f"},
+      "terminal": {"shape": "stadium", "color": "#b5453a"},
+      "process": {"shape": "rectangle", "color": "#b5a575"},
+      "decision": {"shape": "diamond", "color": "#d89d26"},
+      "io": {"shape": "parallelogram", "color": "#d06818"},
+      "document": {"shape": "document", "color": "#c4b830"},
+      "database": {"shape": "cylinder", "color": "#508878"},
+      "subprocess": {"shape": "subroutine", "color": "#887a48"},
+      "browser": {"shape": "hexagon", "color": "#cc8850"}
+    }
+  },
+  "flowchart_map": {
+    "intake": ["intake"],
+    "coordinator": ["coordinator"],
+    "researcher": ["researcher"],
+    "analyst": ["analyst"],
+    "strategist": ["strategist"]
+  }
+}
