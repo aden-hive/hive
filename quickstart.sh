@@ -1899,6 +1899,7 @@ echo ""
 
 if [ "$FRONTEND_BUILT" = true ]; then
     echo -e "${BOLD}Launching dashboard...${NC}"
+    echo -e "  Dashboard available at: ${CYAN}http://localhost:8787${NC}"
     echo ""
     hive open
 else
