@@ -60,12 +60,53 @@
                 <!-- Activity items will be inserted here -->
             </div>
         </section>
+
+        <section class="posts-section">
+            <div class="section-header">
+                <h2>Blog Posts</h2>
+                <button id="refresh-posts-btn">Refresh</button>
+            </div>
+            <div id="posts-list" class="posts-list">
+                <div class="loading-posts">Loading posts...</div>
+            </div>
+        </section>
     </main>
 
     <footer>
         <p>Hive Agent Framework &bull; <span id="last-updated">Never</span></p>
     </footer>
 
+    <!-- Post Reader Modal -->
+    <div id="post-modal" class="modal-overlay" style="display:none">
+        <div class="modal modal-large">
+            <div class="modal-header">
+                <h3 id="post-modal-title">Blog Post</h3>
+                <button class="modal-close" id="post-modal-close">&times;</button>
+            </div>
+            <div class="modal-body post-body" id="post-modal-content"></div>
+        </div>
+    </div>
+
+    <!-- Send Task Modal -->
+    <div id="task-modal" class="modal-overlay" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Send Task to Blog Writer</h3>
+                <button class="modal-close" id="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <label for="blog-topic">Topic</label>
+                <input type="text" id="blog-topic" placeholder="e.g. The future of renewable energy" autocomplete="off" />
+                <div id="task-status" class="task-status" style="display:none"></div>
+            </div>
+            <div class="modal-footer">
+                <button id="modal-cancel" class="btn-secondary">Cancel</button>
+                <button id="modal-submit" class="btn-primary">Send Task</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
