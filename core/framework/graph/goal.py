@@ -167,14 +167,6 @@ class Goal(BaseModel):
 
         return met_weight >= total_weight * 0.9  # 90% threshold
 
-    def check_constraint(self, constraint_id: str, value: Any) -> bool:
-        """Check if a specific constraint is satisfied."""
-        for c in self.constraints:
-            if c.id == constraint_id:
-                # This would be expanded with actual evaluation logic
-                return True
-        return True
-
     def to_prompt_context(self) -> str:
         """Generate context string for LLM prompts.
 

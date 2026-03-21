@@ -525,6 +525,8 @@ class LiteLLMProvider(LLMProvider):
         self._codex_backend = bool(
             self.api_base and "chatgpt.com/backend-api/codex" in self.api_base
         )
+        # Antigravity routes through a local OpenAI-compatible proxy — no patches needed.
+        self._antigravity = bool(self.api_base and "localhost:8069" in self.api_base)
 
         if litellm is None:
             raise ImportError(

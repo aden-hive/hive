@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from framework.skills.skill_errors import SkillErrorCode, log_skill_error
+
 logger = logging.getLogger(__name__)
 
 # Maximum name length before a warning is logged
@@ -74,17 +76,38 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
     try:
         content = path.read_text(encoding="utf-8")
     except OSError as exc:
-        logger.error("Failed to read %s: %s", path, exc)
+        log_skill_error(
+            logger,
+            "error",
+            SkillErrorCode.SKILL_ACTIVATION_FAILED,
+            what=f"Failed to read '{path}'",
+            why=str(exc),
+            fix="Check the file exists and has read permissions.",
+        )
         return None
 
     if not content.strip():
-        logger.error("Empty SKILL.md: %s", path)
+        log_skill_error(
+            logger,
+            "error",
+            SkillErrorCode.SKILL_PARSE_ERROR,
+            what=f"Invalid SKILL.md at '{path}'",
+            why="The file exists but contains no content.",
+            fix="Add valid YAML frontmatter and a markdown body to the SKILL.md.",
+        )
         return None
 
     # Split on --- delimiters (first two occurrences)
     parts = content.split("---", 2)
     if len(parts) < 3:
-        logger.error("SKILL.md missing YAML frontmatter delimiters (---): %s", path)
+        log_skill_error(
+            logger,
+            "error",
+            SkillErrorCode.SKILL_PARSE_ERROR,
+            what=f"Invalid SKILL.md at '{path}'",
+            why="Missing YAML frontmatter (---).",
+            fix="Wrap the frontmatter with --- on its own line at the top and bottom.",
+        )
         return None
 
     # parts[0] is content before first --- (should be empty or whitespace)
@@ -94,7 +117,14 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
     body = parts[2].strip()
 
     if not raw_yaml:
-        logger.error("Empty YAML frontmatter in %s", path)
+        log_skill_error(
+            logger,
+            "error",
+            SkillErrorCode.SKILL_PARSE_ERROR,
+            what=f"Invalid SKILL.md at '{path}'",
+            why="The --- delimiters are present but the YAML block is empty.",
+            fix="Add at least 'name' and 'description' fields to the frontmatter.",
+        )
         return None
 
     # Parse YAML
@@ -108,19 +138,47 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
         try:
             fixed = _try_fix_yaml(raw_yaml)
             frontmatter = yaml.safe_load(fixed)
-            logger.warning("Fixed YAML parse issues in %s (unquoted colons)", path)
+            log_skill_error(
+                logger,
+                "warning",
+                SkillErrorCode.SKILL_YAML_FIXUP,
+                what=f"Auto-fixed YAML in '{path}'",
+                why="Unquoted colon values detected in frontmatter.",
+                fix='Wrap values containing colons in quotes e.g. description: "Use for: research"',
+            )
         except yaml.YAMLError as exc:
-            logger.error("Unparseable YAML in %s: %s", path, exc)
+            log_skill_error(
+                logger,
+                "error",
+                SkillErrorCode.SKILL_PARSE_ERROR,
+                what=f"Invalid SKILL.md at '{path}'",
+                why=str(exc),
+                fix="Validate the YAML frontmatter at https://yaml-online-parser.appspot.com/",
+            )
             return None
 
     if not isinstance(frontmatter, dict):
-        logger.error("YAML frontmatter is not a mapping in %s", path)
+        log_skill_error(
+            logger,
+            "error",
+            SkillErrorCode.SKILL_PARSE_ERROR,
+            what=f"Invalid SKILL.md at '{path}'",
+            why="YAML frontmatter is not a key-value mapping.",
+            fix="Ensure the frontmatter is valid YAML with key: value pairs.",
+        )
         return None
 
     # Required: description
     description = frontmatter.get("description")
     if not description or not str(description).strip():
-        logger.error("Missing or empty 'description' in %s — skipping skill", path)
+        log_skill_error(
+            logger,
+            "error",
+            SkillErrorCode.SKILL_MISSING_DESCRIPTION,
+            what=f"Missing 'description' in '{path}'",
+            why="The 'description' field is required but is absent or empty.",
+            fix="Add a non-empty 'description' field to the YAML frontmatter.",
+        )
         return None
 
     # Required: name (fallback to parent directory name)
@@ -128,7 +186,14 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
     parent_dir_name = path.parent.name
     if not name or not str(name).strip():
         name = parent_dir_name
-        logger.warning("Missing 'name' in %s — using directory name '%s'", path, name)
+        log_skill_error(
+            logger,
+            "warning",
+            SkillErrorCode.SKILL_NAME_MISMATCH,
+            what=f"Missing 'name' in '{path}' — using directory name '{name}'",
+            why="The 'name' field is absent from the YAML frontmatter.",
+            fix=f"Add 'name: {name}' to the frontmatter to make this explicit.",
+        )
     else:
         name = str(name).strip()
 
@@ -137,11 +202,13 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
         logger.warning("Skill name exceeds %d chars in %s: '%s'", _MAX_NAME_LENGTH, path, name)
 
     if name != parent_dir_name and not name.endswith(f".{parent_dir_name}"):
-        logger.warning(
-            "Skill name '%s' doesn't match parent directory '%s' in %s",
-            name,
-            parent_dir_name,
-            path,
+        log_skill_error(
+            logger,
+            "warning",
+            SkillErrorCode.SKILL_NAME_MISMATCH,
+            what=f"Name mismatch in '{path}'",
+            why=f"Skill name '{name}' doesn't match directory '{parent_dir_name}'.",
+            fix=f"Rename the directory to '{name}' or set name to '{parent_dir_name}'.",
         )
 
     return ParsedSkill(
