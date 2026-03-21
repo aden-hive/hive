@@ -1,4 +1,4 @@
-"""CLI commands for MCP server registry contributor tooling (init, validate, test)."""
+"""CLI commands for MCP server registry (init, validate, test, install, update)."""
 
 from __future__ import annotations
 
@@ -41,6 +41,20 @@ def register_mcp_commands(subparsers: argparse._SubParsersAction) -> None:
 
     test_parser.add_argument("path", help="Path to manifest.json or directory containing it")
     test_parser.set_defaults(func=cmd_test)
+
+    # hive mcp install <source> [--version X]
+    install_parser = mcp_sub.add_parser("install", help="Install an MCP server")
+    install_parser.add_argument("source", help="Path to manifest directory")
+    install_parser.add_argument("--version", default=None, help="Pin a specific version")
+    install_parser.set_defaults(func=cmd_install)
+
+    # hive mcp update <name> [--dry-run]
+    update_parser = mcp_sub.add_parser("update", help="Update an installed MCP server")
+    update_parser.add_argument("name", help="Name of the installed server")
+    update_parser.add_argument(
+        "--dry-run", action="store_true", help="Show changes without applying"
+    )
+    update_parser.set_defaults(func=cmd_update)
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
@@ -245,3 +259,37 @@ def cmd_test(args: argparse.Namespace) -> int:
         return 1
     finally:
         client.disconnect()
+
+
+def cmd_install(args: argparse.Namespace) -> int:
+    """Install an MCP server from a manifest."""
+    from framework.runner.mcp_registry import install_server
+
+    try:
+        entry = install_server(args.source, args.version)
+    except (ValueError, FileNotFoundError, RuntimeError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    name = entry["manifest"]["name"]
+    version = entry["resolved_package_version"]
+    tool_count = len(entry["manifest"]["tools"])
+    print(f"Installed {name} v{version} ({tool_count} tools)")
+    return 0
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    """Update an installed MCP server."""
+    from framework.runner.mcp_registry import update_server
+
+    try:
+        diff = update_server(args.name, dry_run=args.dry_run)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    print(diff.format_report())
+    if diff.has_breaking_changes:
+        print("\nWARNING: Breaking changes detected")
+        return 1
+    return 0

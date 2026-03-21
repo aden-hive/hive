@@ -4,7 +4,13 @@ import argparse
 import json
 from unittest.mock import MagicMock, patch
 
-from framework.runner.mcp_registry_cli import cmd_init, cmd_test, cmd_validate
+from framework.runner.mcp_registry_cli import (
+    cmd_init,
+    cmd_install,
+    cmd_test,
+    cmd_update,
+    cmd_validate,
+)
 
 VALID_MANIFEST = {
     "name": "test-server",
@@ -168,3 +174,73 @@ def test_cmd_test_cleanup_on_failure(tmp_path):
         args = argparse.Namespace(path=str(tmp_path))
         cmd_test(args)
     mock_client.disconnect.assert_called_once()
+
+
+# --- cmd_install tests ---
+
+
+def test_cmd_install_success(tmp_path):
+    srv_dir = tmp_path / "srv"
+    srv_dir.mkdir()
+    (srv_dir / "manifest.json").write_text(json.dumps(VALID_MANIFEST))
+
+    with (
+        patch("framework.runner.mcp_registry.subprocess") as mock_sub,
+        patch("framework.runner.mcp_registry.REGISTRY_DIR", tmp_path),
+        patch("framework.runner.mcp_registry.INSTALLED_JSON", tmp_path / "installed.json"),
+    ):
+        mock_sub.run.return_value = MagicMock(returncode=0, stderr="")
+        args = argparse.Namespace(source=str(srv_dir), version=None)
+        assert cmd_install(args) == 0
+
+
+def test_cmd_install_invalid_manifest(tmp_path):
+    srv_dir = tmp_path / "srv"
+    srv_dir.mkdir()
+    (srv_dir / "manifest.json").write_text('{"name": "BAD"}')
+    args = argparse.Namespace(source=str(srv_dir), version=None)
+    assert cmd_install(args) == 1
+
+
+def test_cmd_install_with_version(tmp_path):
+    srv_dir = tmp_path / "srv"
+    srv_dir.mkdir()
+    (srv_dir / "manifest.json").write_text(json.dumps(VALID_MANIFEST))
+
+    with (
+        patch("framework.runner.mcp_registry.subprocess") as mock_sub,
+        patch("framework.runner.mcp_registry.REGISTRY_DIR", tmp_path),
+        patch("framework.runner.mcp_registry.INSTALLED_JSON", tmp_path / "installed.json"),
+    ):
+        mock_sub.run.return_value = MagicMock(returncode=0, stderr="")
+        args = argparse.Namespace(source=str(srv_dir), version="2.0.0")
+        assert cmd_install(args) == 0
+
+
+# --- cmd_update tests ---
+
+
+def test_cmd_update_not_installed(tmp_path):
+    with patch("framework.runner.mcp_registry.INSTALLED_JSON", tmp_path / "installed.json"):
+        args = argparse.Namespace(name="nope", dry_run=False)
+        assert cmd_update(args) == 1
+
+
+def test_cmd_update_dry_run(tmp_path):
+    entry_data = {
+        "test-server": {
+            "pinned": False,
+            "manifest": {
+                "version": "1.0.0",
+                "tools": [{"name": "do_thing", "inputSchema": {}}],
+            },
+        }
+    }
+    installed_path = tmp_path / "installed.json"
+    installed_path.write_text(json.dumps(entry_data))
+    with (
+        patch("framework.runner.mcp_registry.INSTALLED_JSON", installed_path),
+        patch("framework.runner.mcp_registry.REGISTRY_DIR", tmp_path),
+    ):
+        args = argparse.Namespace(name="test-server", dry_run=True)
+        assert cmd_update(args) == 0

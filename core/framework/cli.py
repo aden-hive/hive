@@ -19,6 +19,8 @@ MCP registry commands:
     hive mcp init [--server-url URL]
     hive mcp validate <path>
     hive mcp test <path>
+    hive mcp install <source> [--version X]
+    hive mcp update <name> [--dry-run]
 """
 
 import argparse
