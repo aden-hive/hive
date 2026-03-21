@@ -401,7 +401,9 @@ def register_mcp_commands(subparsers) -> None:
     init_p.add_argument(
         "--server-url", default=None, help="URL of running server to introspect for tools"
     )
-    init_p.add_argument("--output-dir", default=".", help="Directory to write manifest.json and README.md")
+    init_p.add_argument(
+        "--output-dir", default=".", help="Directory to write manifest.json and README.md"
+    )
     init_p.set_defaults(func=cmd_mcp_init)
 
     # ── validate (contributor tooling) ──

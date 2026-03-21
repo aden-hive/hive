@@ -1,3 +1,5 @@
+"""Tests for MCP manifest schema validation."""
+
 from framework.runner.mcp_manifest_schema import validate_manifest
 
 # Based on the Jira example from PRD section 7.1

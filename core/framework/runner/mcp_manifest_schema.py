@@ -172,11 +172,12 @@ def _suggest_fix(error: jsonschema.ValidationError) -> str | None:
         leaf = str(path_parts[-1])
         # Check compound key first (e.g., "tools.name" for path [tools, 0, name])
         if len(path_parts) >= 2:
-            parent = (
-                str(path_parts[-2])
-                if not isinstance(path_parts[-2], int)
-                else (str(path_parts[-3]) if len(path_parts) >= 3 else "")
-            )
+            if not isinstance(path_parts[-2], int):
+                parent = str(path_parts[-2])
+            elif len(path_parts) >= 3:
+                parent = str(path_parts[-3])
+            else:
+                parent = ""
             compound = f"{parent}.{leaf}"
             if compound in _FIX_SUGGESTIONS:
                 return _FIX_SUGGESTIONS[compound]

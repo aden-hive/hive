@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from io import StringIO
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1448,7 +1448,7 @@ def test_cmd_test_pass(tmp_path):
     (tmp_path / "manifest.json").write_text(json.dumps(VALID_CONTRIBUTOR_MANIFEST))
     mock_client = MagicMock()
     mock_client.list_tools.return_value = [_make_mock_tool("do_thing")]
-    with patch("framework.runner.mcp_registry_cli.MCPClient", return_value=mock_client):
+    with patch("framework.runner.mcp_client.MCPClient", return_value=mock_client):
         args = SimpleNamespace(path=str(tmp_path))
         assert cmd_mcp_test(args) == 0
     mock_client.disconnect.assert_called_once()
@@ -1467,7 +1467,7 @@ def test_cmd_test_missing_tool(tmp_path):
     (tmp_path / "manifest.json").write_text(json.dumps(manifest))
     mock_client = MagicMock()
     mock_client.list_tools.return_value = [_make_mock_tool("search")]
-    with patch("framework.runner.mcp_registry_cli.MCPClient", return_value=mock_client):
+    with patch("framework.runner.mcp_client.MCPClient", return_value=mock_client):
         args = SimpleNamespace(path=str(tmp_path))
         assert cmd_mcp_test(args) == 1
 
@@ -1486,7 +1486,7 @@ def test_cmd_test_cleanup_on_failure(tmp_path):
     (tmp_path / "manifest.json").write_text(json.dumps(VALID_CONTRIBUTOR_MANIFEST))
     mock_client = MagicMock()
     mock_client.list_tools.side_effect = Exception("boom")
-    with patch("framework.runner.mcp_registry_cli.MCPClient", return_value=mock_client):
+    with patch("framework.runner.mcp_client.MCPClient", return_value=mock_client):
         args = SimpleNamespace(path=str(tmp_path))
         cmd_mcp_test(args)
     mock_client.disconnect.assert_called_once()
