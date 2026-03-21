@@ -140,7 +140,19 @@ export default function Home() {
   const [sessions, setSessions] = useState<HistorySession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionSearch, setSessionSearch] = useState("");
+  const [sessionHighlight, setSessionHighlight] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Derived session values — computed early so useEffects can reference them
+  const filteredSessions = sessions.filter((s) => {
+    if (!sessionSearch.trim()) return true;
+    const q = sessionSearch.toLowerCase();
+    return (
+      (s.agent_name || s.agent_path || "").toLowerCase().includes(q) ||
+      (s.last_message || "").toLowerCase().includes(q)
+    );
+  });
+  const sessionGroups = groupByDate(filteredSessions);
 
   // Fetch agents on mount so data is ready when user toggles
   useEffect(() => {
@@ -159,13 +171,37 @@ export default function Home() {
       });
   }, []);
 
-  // Escape closes session modal
+  // Keyboard navigation for session modal
   useEffect(() => {
     if (!sessionModalOpen) return;
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") setSessionModalOpen(false); };
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setSessionModalOpen(false); return; }
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSessionHighlight((p) => Math.min(p + 1, filteredSessions.length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSessionHighlight((p) => Math.max(p - 1, 0));
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (filteredSessions[sessionHighlight]) handleSessionSelect(filteredSessions[sessionHighlight]);
+        return;
+      }
+    };
     document.addEventListener("keydown", h);
     return () => document.removeEventListener("keydown", h);
-  }, [sessionModalOpen]);
+  }, [sessionModalOpen, filteredSessions, sessionHighlight]);
+
+  // Auto-scroll highlighted session row into view
+  useEffect(() => {
+    if (!sessionModalOpen) return;
+    const el = document.querySelector(`[data-session-idx="${sessionHighlight}"]`);
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [sessionHighlight, sessionModalOpen]);
 
   const handleSelect = (agentPath: string) => {
     navigate(`/workspace?agent=${encodeURIComponent(agentPath)}`);
@@ -260,19 +296,9 @@ export default function Home() {
     }
   }
 
-  // Derived values
+  // Derived slash command values
   const filteredCommands = SLASH_COMMANDS.filter((cmd) => cmd.id.startsWith(slashQuery));
   const safeHighlight = Math.min(slashHighlight, filteredCommands.length - 1);
-
-  const filteredSessions = sessions.filter((s) => {
-    if (!sessionSearch.trim()) return true;
-    const q = sessionSearch.toLowerCase();
-    return (
-      (s.agent_name || s.agent_path || "").toLowerCase().includes(q) ||
-      (s.last_message || "").toLowerCase().includes(q)
-    );
-  });
-  const sessionGroups = groupByDate(filteredSessions);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -471,14 +497,14 @@ export default function Home() {
               <input
                 ref={searchInputRef}
                 value={sessionSearch}
-                onChange={(e) => setSessionSearch(e.target.value)}
+                onChange={(e) => { setSessionSearch(e.target.value); setSessionHighlight(0); }}
                 placeholder="Search sessions..."
                 className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
               />
               {sessionSearch && (
                 <button
                   type="button"
-                  onClick={() => setSessionSearch("")}
+                  onClick={() => { setSessionSearch(""); setSessionHighlight(0); }}
                   className="p-1 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-muted/40 transition-colors"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -504,18 +530,23 @@ export default function Home() {
               {!sessionsLoading && sessions.length > 0 && sessionGroups.length === 0 && (
                 <div className="py-12 text-center text-sm text-muted-foreground">No sessions match your search.</div>
               )}
-              {!sessionsLoading &&
-                sessionGroups.map(({ label: gLabel, items }) => (
+              {!sessionsLoading && (() => {
+                let flatIdx = 0;
+                return sessionGroups.map(({ label: gLabel, items }) => (
                   <div key={gLabel}>
                     <p className="px-4 pt-4 pb-1.5 text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">
                       {gLabel}
                     </p>
-                    {items.map((s, i) => (
+                    {items.map((s, i) => {
+                      const idx = flatIdx++;
+                      return (
                       <button
                         key={s.session_id}
                         type="button"
+                        data-session-idx={idx}
                         onClick={() => handleSessionSelect(s)}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+                        onMouseEnter={() => setSessionHighlight(idx)}
+                        className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${idx === sessionHighlight ? "bg-primary/10" : "hover:bg-muted/40"}`}
                       >
                         <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-primary/10 border border-primary/20">
                           <Bot className="w-4 h-4 text-primary/70" />
@@ -531,9 +562,11 @@ export default function Home() {
                           <span>{formatDateTime(s.created_at, s.session_id)}</span>
                         </div>
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
-                ))}
+                ));
+              })()}
             </div>
           </div>
         </div>
