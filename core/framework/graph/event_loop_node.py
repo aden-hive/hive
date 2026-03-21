@@ -478,9 +478,9 @@ class EventLoopNode(NodeProtocol):
         self._config = config or LoopConfig()
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
-        self._injection_queue: asyncio.Queue[
-            tuple[str, bool, list[dict[str, Any]] | None]
-        ] = asyncio.Queue()
+        self._injection_queue: asyncio.Queue[tuple[str, bool, list[dict[str, Any]] | None]] = (
+            asyncio.Queue()
+        )
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Client-facing input blocking state
         self._input_ready = asyncio.Event()
@@ -2169,7 +2169,8 @@ class EventLoopNode(NodeProtocol):
                     _content = _m.get("content")
                     if isinstance(_content, list):
                         _img_count = sum(
-                            1 for _b in _content
+                            1
+                            for _b in _content
                             if isinstance(_b, dict) and _b.get("type") == "image_url"
                         )
                         if _img_count:
@@ -4791,9 +4792,7 @@ class EventLoopNode(NodeProtocol):
                 ]
             await self._conversation_store.write_cursor(cursor)
 
-    async def _drain_injection_queue(
-        self, conversation: NodeConversation, ctx: NodeContext
-    ) -> int:
+    async def _drain_injection_queue(self, conversation: NodeConversation, ctx: NodeContext) -> int:
         """Drain all pending injected events as user messages. Returns count."""
         count = 0
         while not self._injection_queue.empty():

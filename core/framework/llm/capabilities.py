@@ -25,12 +25,12 @@ def _model_name(model: str) -> str:
 # is allowed even though glm-4.6 is denied.
 _VISION_ALLOW_BARE_PREFIXES: tuple[str, ...] = (
     # ZAI/GLM vision models (docs.z.ai/guides/vlm)
-    "glm-4v",      # GLM-4V series (legacy)
-    "glm-4.6v",    # GLM-4.6V, GLM-4.6V-flash, GLM-4.6V-flashx
+    "glm-4v",  # GLM-4V series (legacy)
+    "glm-4.6v",  # GLM-4.6V, GLM-4.6V-flash, GLM-4.6V-flashx
     # DeepSeek vision models
     "deepseek-vl",  # deepseek-vl2, deepseek-vl2-small, deepseek-vl2-tiny
     # MiniMax vision model
-    "minimax-vl",   # minimax-vl-01
+    "minimax-vl",  # minimax-vl-01
 )
 
 # Step 2: provider-level deny — every model from this provider is text-only.
@@ -48,7 +48,7 @@ _TEXT_ONLY_MODEL_BARE_PREFIXES: tuple[str, ...] = (
     # text-only: glm-5, glm-4.6, glm-4.7, glm-4.5, zai-glm-*
     # vision:    glm-4v, glm-4.6v (caught by allow-list above)
     "glm-5",
-    "glm-4.6",   # bare glm-4.6 is text-only; glm-4.6v is caught by allow-list
+    "glm-4.6",  # bare glm-4.6 is text-only; glm-4.6v is caught by allow-list
     "glm-4.7",
     "glm-4.5",
     "zai-glm",

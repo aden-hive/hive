@@ -990,9 +990,7 @@ async def handle_reveal_session_folder(request: web.Request) -> web.Response:
     session_id = request.match_info["session_id"]
 
     session = manager.get_session(session_id)
-    storage_session_id = (
-        (session.queen_resume_from or session.id) if session else session_id
-    )
+    storage_session_id = (session.queen_resume_from or session.id) if session else session_id
     folder = Path.home() / ".hive" / "queen" / "session" / storage_session_id
     folder.mkdir(parents=True, exist_ok=True)
 
