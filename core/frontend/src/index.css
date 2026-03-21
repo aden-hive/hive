@@ -203,3 +203,141 @@
 .animate-in.slide-in-from-bottom {
   animation: slide-in-from-bottom 0.25s ease-out;
 }
+
+/* ── Dashboard Pro Animations ──────────────────────────────────────── */
+
+/* Shimmer effect for card borders */
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.shimmer-border {
+  background: linear-gradient(90deg, transparent 0%, hsl(45 93% 47% / 0.3) 25%, hsl(45 93% 47% / 0.6) 50%, hsl(45 93% 47% / 0.3) 75%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 3s ease-in-out infinite;
+}
+
+/* Glow pulse for active indicators */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 4px hsl(45 93% 47% / 0.3), 0 0 8px hsl(45 93% 47% / 0.1); }
+  50% { box-shadow: 0 0 8px hsl(45 93% 47% / 0.5), 0 0 20px hsl(45 93% 47% / 0.2), 0 0 40px hsl(45 93% 47% / 0.1); }
+}
+.glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Token burn fire effect */
+@keyframes token-burn {
+  0%, 100% { text-shadow: 0 0 4px hsl(25 100% 55% / 0.4), 0 0 8px hsl(35 100% 50% / 0.2); }
+  25% { text-shadow: 0 0 6px hsl(15 100% 55% / 0.5), 0 0 12px hsl(25 100% 50% / 0.3), 0 0 20px hsl(35 100% 50% / 0.1); }
+  50% { text-shadow: 0 0 8px hsl(20 100% 55% / 0.6), 0 0 16px hsl(30 100% 50% / 0.4), 0 0 30px hsl(40 100% 50% / 0.15); }
+  75% { text-shadow: 0 0 6px hsl(10 100% 55% / 0.5), 0 0 14px hsl(20 100% 50% / 0.3); }
+}
+.token-burn {
+  animation: token-burn 2s ease-in-out infinite;
+  color: hsl(35 100% 60%);
+}
+
+/* Gradient text shimmer */
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.gradient-text {
+  background: linear-gradient(135deg, hsl(45 93% 55%), hsl(35 100% 60%), hsl(25 100% 55%), hsl(45 93% 55%));
+  background-size: 300% 300%;
+  animation: gradient-shift 4s ease-in-out infinite;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Donut chart rotation intro */
+@keyframes donut-fill {
+  from { stroke-dashoffset: 314; }
+}
+
+/* Card entrance with stagger */
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.card-enter {
+  animation: card-enter 0.4s ease-out both;
+}
+
+/* Breathing glow for system status */
+@keyframes breathe {
+  0%, 100% { opacity: 0.5; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+.breathe {
+  animation: breathe 2.5s ease-in-out infinite;
+}
+
+/* Progress ring pulse */
+@keyframes ring-pulse {
+  0%, 100% { filter: drop-shadow(0 0 2px hsl(45 93% 47% / 0.3)); }
+  50% { filter: drop-shadow(0 0 8px hsl(45 93% 47% / 0.5)) drop-shadow(0 0 16px hsl(45 93% 47% / 0.2)); }
+}
+
+/* Sparkline draw animation */
+@keyframes sparkline-draw {
+  from { stroke-dashoffset: 200; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* Live indicator dot */
+@keyframes live-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.live-dot {
+  animation: live-dot 1.5s ease-in-out infinite;
+}
+
+/* Fade in up */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Glass card effect */
+.glass-card {
+  background: hsl(240 5% 8% / 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid hsl(0 0% 100% / 0.06);
+}
+.glass-card:hover {
+  border-color: hsl(45 93% 47% / 0.2);
+  background: hsl(240 5% 8% / 0.7);
+}
+
+/* Animated gradient border */
+@keyframes border-rotate {
+  0% { --angle: 0deg; }
+  100% { --angle: 360deg; }
+}
+@property --angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.gradient-border {
+  position: relative;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(from var(--angle), hsl(45 93% 47% / 0.15), hsl(210 70% 55% / 0.15), hsl(270 60% 55% / 0.15), hsl(45 93% 47% / 0.15));
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  animation: border-rotate 6s linear infinite;
+  pointer-events: none;
+}
