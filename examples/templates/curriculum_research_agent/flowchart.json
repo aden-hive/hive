@@ -1,0 +1,144 @@
+{
+  "original_draft": {
+    "agent_name": "curriculum_research_agent",
+    "goal": "Research a given topic and produce an ID-ready content brief with learning objectives, module outline, assessment plan, and curated resources — grounded in current industry standards and aligned to the ADDIE instructional design framework.",
+    "description": "",
+    "success_criteria": [
+      "At least 5 authoritative sources retrieved from recognized professional bodies",
+      "All learning outcomes written using Bloom's Taxonomy verbs appropriate to the education level",
+      "Content brief includes module outline, objectives, assessment plan, and provenance-annotated resource list",
+      "All sources carry domain and retrieval date for audit traceability"
+    ],
+    "constraints": [
+      "Never fabricate sources — only cite URLs returned by Tavily search",
+      "All learning outcomes must reference specific competency standards from the accreditation context",
+      "Every module section must include a provenance block with source URLs and retrieval dates"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Receive the research topic, target audience, education level, and accreditation context from the user. Confirm the scope before proceeding.",
+        "node_type": "event_loop",
+        "tools": ["load_curriculum_brief"],
+        "input_keys": ["topic", "level", "audience", "accreditation_context"],
+        "output_keys": ["topic", "level", "audience", "accreditation_context"],
+        "success_criteria": "The user has confirmed the topic, audience, level, and accreditation context.",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "domain-research",
+        "name": "Domain Research",
+        "description": "Search for current industry standards, regulatory requirements, and best practices using Tavily with domain-scoped queries.",
+        "node_type": "event_loop",
+        "tools": ["tavily_search", "append_data"],
+        "input_keys": ["topic", "accreditation_context"],
+        "output_keys": ["research_results"],
+        "success_criteria": "At least 5 relevant sources have been found and saved.",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "standards-alignment",
+        "name": "Standards Alignment",
+        "description": "Map research findings to specific learning outcomes and competency standards based on the audience level and accreditation requirements.",
+        "node_type": "event_loop",
+        "tools": ["load_data", "append_data"],
+        "input_keys": ["research_results", "level", "audience"],
+        "output_keys": ["aligned_standards"],
+        "success_criteria": "Research findings have been mapped to learning outcomes and competency standards.",
+        "sub_agents": [],
+        "flowchart_type": "database",
+        "flowchart_shape": "cylinder",
+        "flowchart_color": "#508878"
+      },
+      {
+        "id": "addie-synthesis",
+        "name": "ADDIE Synthesis",
+        "description": "Apply the ADDIE instructional design framework to transform aligned standards into a structured module outline with objectives, content structure, and assessment types.",
+        "node_type": "event_loop",
+        "tools": ["load_data", "append_data"],
+        "input_keys": ["aligned_standards", "topic"],
+        "output_keys": ["addie_output"],
+        "success_criteria": "A complete ADDIE-structured curriculum outline has been created.",
+        "sub_agents": [],
+        "flowchart_type": "database",
+        "flowchart_shape": "cylinder",
+        "flowchart_color": "#508878"
+      },
+      {
+        "id": "content-brief",
+        "name": "Content Brief",
+        "description": "Generate and present the final ID-ready content brief to the user, including learning objectives, module outline, assessment plan, and curated resources.",
+        "node_type": "event_loop",
+        "tools": ["load_data", "save_curriculum_brief"],
+        "input_keys": ["addie_output", "topic"],
+        "output_keys": ["content_brief"],
+        "success_criteria": "A complete content brief has been presented to the user and saved as a file.",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "intake",
+        "target": "domain-research",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "domain-research",
+        "target": "standards-alignment",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "standards-alignment",
+        "target": "addie-synthesis",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-3",
+        "source": "addie-synthesis",
+        "target": "content-brief",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "intake",
+    "terminal_nodes": ["content-brief"],
+    "flowchart_legend": {
+      "start": {"shape": "stadium", "color": "#8aad3f"},
+      "terminal": {"shape": "stadium", "color": "#b5453a"},
+      "process": {"shape": "rectangle", "color": "#b5a575"},
+      "decision": {"shape": "diamond", "color": "#d89d26"},
+      "io": {"shape": "parallelogram", "color": "#d06818"},
+      "document": {"shape": "document", "color": "#c4b830"},
+      "database": {"shape": "cylinder", "color": "#508878"},
+      "subprocess": {"shape": "subroutine", "color": "#887a48"},
+      "browser": {"shape": "hexagon", "color": "#cc8850"}
+    }
+  },
+  "flowchart_map": {
+    "intake": ["intake"],
+    "domain-research": ["domain-research"],
+    "standards-alignment": ["standards-alignment"],
+    "addie-synthesis": ["addie-synthesis"],
+    "content-brief": ["content-brief"]
+  }
+}
