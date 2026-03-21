@@ -8,6 +8,7 @@ import {
   Loader2,
   Paperclip,
   X,
+  ChevronDown,
 } from "lucide-react";
 
 export interface ImageContent {
@@ -204,6 +205,87 @@ function ToolActivityRow({ content }: { content: string }) {
   );
 }
 
+const WorkerGroupBubble = memo(
+  function WorkerGroupBubble({
+    workerName,
+    messages,
+    isActive,
+  }: {
+    workerName: string;
+    messages: ChatMessage[];
+    isActive?: boolean;
+  }) {
+    const [collapsed, setCollapsed] = useState(true);
+
+    // Auto-expand the latest group while worker is actively streaming
+    useEffect(() => {
+      if (isActive) setCollapsed(false);
+    }, [isActive]);
+
+    const stepCount = messages.filter((m) => m.role === "worker").length;
+    const color = workerColor;
+
+    return (
+      <div>
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors mb-1.5"
+        >
+          <ChevronDown
+            className={`w-3.5 h-3.5 transition-transform duration-150 ${collapsed ? "-rotate-90" : ""}`}
+          />
+          <div
+            className="w-5 h-5 rounded-md flex items-center justify-center"
+            style={{ backgroundColor: `${color}18`, border: `1px solid ${color}30` }}
+          >
+            <Cpu className="w-3 h-3" style={{ color }} />
+          </div>
+          <span className="font-medium" style={{ color }}>{workerName}</span>
+          <span className="text-muted-foreground/50">
+            — {stepCount} step{stepCount !== 1 ? "s" : ""}
+          </span>
+        </button>
+
+        {!collapsed && (
+          <div className="ml-5 pl-3 border-l border-border/30 space-y-2">
+            {messages.map((m) =>
+              m.type === "tool_status" ? (
+                <ToolActivityRow key={m.id} content={m.content} />
+              ) : (
+                <div key={m.id} className="flex gap-2">
+                  <div
+                    className="w-5 h-5 rounded-md flex-shrink-0 flex items-center justify-center mt-0.5"
+                    style={{ backgroundColor: `${color}18`, border: `1px solid ${color}30` }}
+                  >
+                    <Cpu className="w-3 h-3" style={{ color }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="text-xs font-medium" style={{ color }}>{m.agent}</span>
+                      <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md">
+                        Worker
+                      </span>
+                    </div>
+                    <div className="bg-muted/60 rounded-xl rounded-tl-sm px-3 py-2 text-sm leading-relaxed">
+                      <MarkdownContent content={m.content} />
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+          </div>
+        )}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.workerName === next.workerName &&
+    prev.isActive === next.isActive &&
+    prev.messages.length === next.messages.length &&
+    prev.messages[prev.messages.length - 1]?.content ===
+      next.messages[next.messages.length - 1]?.content,
+);
+
 const MessageBubble = memo(
   function MessageBubble({
     msg,
@@ -374,7 +456,8 @@ export default function ChatPanel({
   // so interleaved queen/tool/system messages don't fragment the bubble.
   type RenderItem =
     | { kind: "message"; msg: ChatMessage }
-    | { kind: "parallel"; groupId: string; groups: SubagentGroup[] };
+    | { kind: "parallel"; groupId: string; groups: SubagentGroup[] }
+    | { kind: "worker-group"; groupId: string; workerName: string; messages: ChatMessage[]; isLast: boolean };
 
   const renderItems = useMemo<RenderItem[]>(() => {
     const items: RenderItem[] = [];
@@ -382,6 +465,24 @@ export default function ChatPanel({
     while (i < threadMessages.length) {
       const msg = threadMessages[i];
       const isSubagent = msg.nodeId?.includes(":subagent:");
+
+      // Group consecutive worker messages (non-subagent) into a collapsible block
+      if (msg.role === "worker" && !isSubagent && !msg.type) {
+        const firstId = msg.id;
+        const workerName = msg.thread || msg.agent;
+        const groupMsgs: ChatMessage[] = [];
+        while (i < threadMessages.length) {
+          const m = threadMessages[i];
+          if (m.nodeId?.includes(":subagent:")) break;
+          if (m.type === "user" || m.type === "run_divider") break;
+          if (m.role === "queen") break;
+          groupMsgs.push(m);
+          i++;
+        }
+        items.push({ kind: "worker-group", groupId: `wg-${firstId}`, workerName, messages: groupMsgs, isLast: false });
+        continue;
+      }
+
       if (!isSubagent) {
         items.push({ kind: "message", msg });
         i++;
@@ -442,6 +543,13 @@ export default function ChatPanel({
           });
         }
         items.push({ kind: "parallel", groupId: `par-${firstId}`, groups });
+      }
+    }
+    // Mark the last worker-group so it can auto-expand during live streaming
+    for (let j = items.length - 1; j >= 0; j--) {
+      if (items[j].kind === "worker-group") {
+        (items[j] as Extract<RenderItem, { kind: "worker-group" }>).isLast = true;
+        break;
       }
     }
     return items;
@@ -527,6 +635,14 @@ export default function ChatPanel({
               <ParallelSubagentBubble
                 groupId={item.groupId}
                 groups={item.groups}
+              />
+            </div>
+          ) : item.kind === "worker-group" ? (
+            <div key={item.groupId}>
+              <WorkerGroupBubble
+                workerName={item.workerName}
+                messages={item.messages}
+                isActive={item.isLast && isWorkerWaiting}
               />
             </div>
           ) : (
