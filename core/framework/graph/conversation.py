@@ -41,6 +41,12 @@ class Message:
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
         if self.role == "user":
+            if self.image_content:
+                blocks: list[dict[str, Any]] = []
+                if self.content:
+                    blocks.append({"type": "text", "text": self.content})
+                blocks.extend(self.image_content)
+                return {"role": "user", "content": blocks}
             return {"role": "user", "content": self.content}
 
         if self.role == "assistant":
@@ -389,6 +395,7 @@ class NodeConversation:
         *,
         is_transition_marker: bool = False,
         is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
     ) -> Message:
         msg = Message(
             seq=self._next_seq,
@@ -397,6 +404,7 @@ class NodeConversation:
             phase_id=self._current_phase,
             is_transition_marker=is_transition_marker,
             is_client_input=is_client_input,
+            image_content=image_content,
         )
         self._messages.append(msg)
         self._next_seq += 1

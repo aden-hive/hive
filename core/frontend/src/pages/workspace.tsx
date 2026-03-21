@@ -2609,7 +2609,7 @@ export default function Workspace() {
     });
 
   // --- handleSend ---
-  const handleSend = useCallback((text: string, thread: string) => {
+  const handleSend = useCallback((text: string, thread: string, images?: import("@/components/ChatPanel").ImageContent[]) => {
     if (!activeSession) return;
     const state = agentStates[activeWorker];
 
@@ -2675,6 +2675,7 @@ export default function Workspace() {
     const userMsg: ChatMessage = {
       id: makeId(), agent: "You", agentColor: "",
       content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
+      images,
     };
     setSessionsByAgent(prev => ({
       ...prev,
@@ -2686,7 +2687,7 @@ export default function Workspace() {
     updateAgentState(activeWorker, { isTyping: true, queenIsTyping: true });
 
     if (state?.sessionId && state?.ready) {
-      executionApi.chat(state.sessionId, text).catch((err: unknown) => {
+      executionApi.chat(state.sessionId, text, images).catch((err: unknown) => {
         const errMsg = err instanceof Error ? err.message : String(err);
         const errorChatMsg: ChatMessage = {
           id: makeId(), agent: "System", agentColor: "",

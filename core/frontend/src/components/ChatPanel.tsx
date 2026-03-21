@@ -1,5 +1,10 @@
 import { memo, useState, useRef, useEffect } from "react";
-import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
+import { Send, Square, Crown, Cpu, Check, Loader2, Paperclip, X } from "lucide-react";
+
+export interface ImageContent {
+  type: "image_url";
+  image_url: { url: string };
+}
 
 export interface ContextUsageEntry {
   usagePct: number;
@@ -25,11 +30,13 @@ export interface ChatMessage {
   createdAt?: number;
   /** Queen phase active when this message was created */
   phase?: "planning" | "building" | "staging" | "running";
+  /** Images attached to a user message */
+  images?: ImageContent[];
 }
 
 interface ChatPanelProps {
   messages: ChatMessage[];
-  onSend: (message: string, thread: string) => void;
+  onSend: (message: string, thread: string, images?: ImageContent[]) => void;
   isWaiting?: boolean;
   /** When true a worker is thinking (not yet streaming) */
   isWorkerWaiting?: boolean;
@@ -195,7 +202,19 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
     return (
       <div className="flex justify-end">
         <div className="max-w-[75%] bg-primary text-primary-foreground text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3">
-          <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+          {msg.images && msg.images.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {msg.images.map((img, i) => (
+                <img
+                  key={i}
+                  src={img.image_url.url}
+                  alt={`attachment ${i + 1}`}
+                  className="max-h-48 max-w-full rounded-lg object-contain"
+                />
+              ))}
+            </div>
+          )}
+          {msg.content && <p className="whitespace-pre-wrap break-words">{msg.content}</p>}
         </div>
       </div>
     );
@@ -252,11 +271,13 @@ const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: Ch
 
 export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, pendingQuestions, onQuestionSubmit, onMultiQuestionSubmit, onQuestionDismiss, queenPhase, contextUsage }: ChatPanelProps) {
   const [input, setInput] = useState("");
+  const [pendingImages, setPendingImages] = useState<ImageContent[]>([]);
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const threadMessages = messages.filter((m) => {
     if (m.type === "system" && !m.thread) return false;
@@ -299,10 +320,26 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
-    onSend(input.trim(), activeThread);
+    if (!input.trim() && pendingImages.length === 0) return;
+    onSend(input.trim(), activeThread, pendingImages.length > 0 ? pendingImages : undefined);
     setInput("");
+    setPendingImages([]);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const url = ev.target?.result as string;
+        setPendingImages((prev) => [...prev, { type: "image_url", image_url: { url } }]);
+      };
+      reader.readAsDataURL(file);
+    });
+    // Reset so the same file can be re-selected
+    e.target.value = "";
   };
 
   return (
@@ -432,7 +469,45 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
         />
       ) : (
         <form onSubmit={handleSubmit} className="p-4">
+          {/* Image preview strip */}
+          {pendingImages.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2 px-1">
+              {pendingImages.map((img, i) => (
+                <div key={i} className="relative group">
+                  <img
+                    src={img.image_url.url}
+                    alt={`preview ${i + 1}`}
+                    className="h-16 w-16 object-cover rounded-lg border border-border"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-3 bg-muted/40 rounded-xl px-4 py-2.5 border border-border focus-within:border-primary/40 transition-colors">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => fileInputRef.current?.click()}
+              className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+              title="Attach image"
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
             <textarea
               ref={textareaRef}
               rows={1}
@@ -464,7 +539,7 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
             ) : (
               <button
                 type="submit"
-                disabled={!input.trim() || disabled}
+                disabled={(!input.trim() && pendingImages.length === 0) || disabled}
                 className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
               >
                 <Send className="w-4 h-4" />

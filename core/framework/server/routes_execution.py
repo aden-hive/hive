@@ -108,7 +108,10 @@ async def handle_chat(request: web.Request) -> web.Response:
     The input box is permanently connected to the queen agent.
     Worker input is handled separately via /worker-input.
 
-    Body: {"message": "hello"}
+    Body: {"message": "hello", "images": [{"type": "image_url", "image_url": {"url": "data:..."}}]}
+
+    The optional ``images`` field accepts a list of OpenAI-format image_url
+    content blocks.  The frontend encodes images as base64 data URIs.
     """
     session, err = resolve_session(request)
     if err:
@@ -116,15 +119,16 @@ async def handle_chat(request: web.Request) -> web.Response:
 
     body = await request.json()
     message = body.get("message", "")
+    image_content = body.get("images") or None  # list[dict] | None
 
-    if not message:
+    if not message and not image_content:
         return web.json_response({"error": "message is required"}, status=400)
 
     queen_executor = session.queen_executor
     if queen_executor is not None:
         node = queen_executor.node_registry.get("queen")
         if node is not None and hasattr(node, "inject_event"):
-            await node.inject_event(message, is_client_input=True)
+            await node.inject_event(message, is_client_input=True, image_content=image_content)
             # Publish to EventBus so the session event log captures user messages
             from framework.runtime.event_bus import AgentEvent, EventType
 
@@ -134,7 +138,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                     stream_id="queen",
                     node_id="queen",
                     execution_id=session.id,
-                    data={"content": message},
+                    data={"content": message, "image_count": len(image_content) if image_content else 0},
                 )
             )
             return web.json_response(

@@ -427,7 +427,9 @@ class EventLoopNode(NodeProtocol):
         self._config = config or LoopConfig()
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
-        self._injection_queue: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
+        self._injection_queue: asyncio.Queue[
+            tuple[str, bool, list[dict[str, Any]] | None]
+        ] = asyncio.Queue()
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Client-facing input blocking state
         self._input_ready = asyncio.Event()
@@ -767,7 +769,7 @@ class EventLoopNode(NodeProtocol):
                 )
 
             # 6b. Drain injection queue
-            await self._drain_injection_queue(conversation)
+            await self._drain_injection_queue(conversation, ctx)
             # 6b1. Drain trigger queue (framework-level signals)
             await self._drain_trigger_queue(conversation)
 
@@ -1893,7 +1895,13 @@ class EventLoopNode(NodeProtocol):
             conversation=conversation if _is_continuous else None,
         )
 
-    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+    async def inject_event(
+        self,
+        content: str,
+        *,
+        is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Inject an external event or user input into the running loop.
 
         The content becomes a user message prepended to the next iteration.
@@ -1909,8 +1917,10 @@ class EventLoopNode(NodeProtocol):
                 human user (e.g. /chat endpoint), False for external events
                 (e.g. worker question forwarded by the frontend).  Controls
                 message formatting in _drain_injection_queue, not wake behavior.
+            image_content: Optional list of image content blocks (OpenAI
+                image_url format) to include alongside the text.
         """
-        await self._injection_queue.put((content, is_client_input))
+        await self._injection_queue.put((content, is_client_input, image_content))
         self._input_ready.set()
 
     async def inject_trigger(self, trigger: TriggerEvent) -> None:
@@ -4674,20 +4684,34 @@ class EventLoopNode(NodeProtocol):
                 ]
             await self._conversation_store.write_cursor(cursor)
 
-    async def _drain_injection_queue(self, conversation: NodeConversation) -> int:
+    async def _drain_injection_queue(
+        self, conversation: NodeConversation, ctx: NodeContext
+    ) -> int:
         """Drain all pending injected events as user messages. Returns count."""
         count = 0
         while not self._injection_queue.empty():
             try:
-                content, is_client_input = self._injection_queue.get_nowait()
+                content, is_client_input, image_content = self._injection_queue.get_nowait()
                 logger.info(
-                    "[drain] injected message (client_input=%s): %s",
+                    "[drain] injected message (client_input=%s, images=%d): %s",
                     is_client_input,
+                    len(image_content) if image_content else 0,
                     content[:200] if content else "(empty)",
                 )
+                # Strip images for models that don't support them in user messages
+                if image_content and ctx.llm:
+                    if not supports_image_tool_results(ctx.llm.model):
+                        logger.info(
+                            "Stripping image_content from user message — model '%s' "
+                            "does not support image input",
+                            ctx.llm.model,
+                        )
+                        image_content = None
                 # Real user input is stored as-is; external events get a prefix
                 if is_client_input:
-                    await conversation.add_user_message(content, is_client_input=True)
+                    await conversation.add_user_message(
+                        content, is_client_input=True, image_content=image_content
+                    )
                 else:
                     await conversation.add_user_message(f"[External event]: {content}")
                 count += 1
