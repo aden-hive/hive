@@ -1,3 +1,5 @@
+"""Tests for MCP registry CLI commands."""
+
 import argparse
 import json
 from unittest.mock import MagicMock, patch
