@@ -26,12 +26,12 @@ def _get_kubeconfig(credentials: CredentialStoreAdapter | None) -> str | None:
 def _init_client(kubeconfig_path: str | None) -> dict[str, Any] | None:
     if not K8S_AVAILABLE:
         return {"error": "kubernetes python package is not installed."}
-    
+
     try:
         if kubeconfig_path and os.path.exists(kubeconfig_path):
             config.load_kube_config(config_file=kubeconfig_path)
         else:
-            config.load_kube_config() 
+            config.load_kube_config()
         return None
     except Exception as e:
         return {"error": f"Failed to initialize Kubernetes client: {str(e)}"}
@@ -44,8 +44,9 @@ def register_tools(mcp: FastMCP, credentials: CredentialStoreAdapter | None = No
         """List pods in a specific Kubernetes namespace to check cluster health."""
         kubeconfig = _get_kubeconfig(credentials)
         err = _init_client(kubeconfig)
-        if err: return err
-        
+        if err:
+            return err
+
         try:
             v1 = client.CoreV1Api()
             pods = v1.list_namespaced_pod(namespace)

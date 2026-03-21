@@ -94,6 +94,7 @@ from .huggingface import HUGGINGFACE_CREDENTIALS
 from .intercom import INTERCOM_CREDENTIALS
 from .jira import JIRA_CREDENTIALS
 from .kafka import KAFKA_CREDENTIALS
+from .kubernetes import KUBERNETES_CREDENTIALS
 from .langfuse import LANGFUSE_CREDENTIALS
 from .linear import LINEAR_CREDENTIALS
 from .lusha import LUSHA_CREDENTIALS
@@ -142,7 +143,6 @@ from .youtube import YOUTUBE_CREDENTIALS
 from .zendesk import ZENDESK_CREDENTIALS
 from .zoho_crm import ZOHO_CRM_CREDENTIALS
 from .zoom import ZOOM_CREDENTIALS
-from .kubernetes import KUBERNETES_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
