@@ -87,6 +87,7 @@ from .huggingface_tool import register_tools as register_huggingface
 from .intercom_tool import register_tools as register_intercom
 from .jira_tool import register_tools as register_jira
 from .kafka_tool import register_tools as register_kafka
+from .kubernetes_tool import register_tools as register_kubernetes
 from .langfuse_tool import register_tools as register_langfuse
 from .linear_tool import register_tools as register_linear
 from .lusha_tool import register_tools as register_lusha
@@ -183,6 +184,7 @@ def _register_verified(
     register_google_docs(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
     register_google_sheets(mcp, credentials=credentials)
+    register_kubernetes(mcp, credentials=credentials)
     register_account_info(mcp, credentials=credentials)
 
     # --- File system toolkits ---

@@ -142,6 +142,7 @@ from .youtube import YOUTUBE_CREDENTIALS
 from .zendesk import ZENDESK_CREDENTIALS
 from .zoho_crm import ZOHO_CRM_CREDENTIALS
 from .zoom import ZOOM_CREDENTIALS
+from .kubernetes import KUBERNETES_CREDENTIALS
 
 # Merged registry of all credentials
 CREDENTIAL_SPECS = {
@@ -220,6 +221,7 @@ CREDENTIAL_SPECS = {
     **ZENDESK_CREDENTIALS,
     **ZOHO_CRM_CREDENTIALS,
     **ZOOM_CREDENTIALS,
+    **KUBERNETES_CREDENTIALS
 }
 
 __all__ = [
@@ -313,4 +315,5 @@ __all__ = [
     "ZENDESK_CREDENTIALS",
     "ZOHO_CRM_CREDENTIALS",
     "ZOOM_CREDENTIALS",
+    "KUBERNETES_CREDENTIALS"
 ]
