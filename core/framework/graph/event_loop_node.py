@@ -142,7 +142,13 @@ class _EscalationReceiver:
         self._response: str | None = None
         self._awaiting_input = True  # So inject_worker_message() can prefer us
 
-    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+    async def inject_event(
+        self,
+        content: str,
+        *,
+        is_client_input: bool = False,
+        image_content: list[dict] | None = None,
+    ) -> None:
         """Called by ExecutionStream.inject_input() when the user responds."""
         self._response = content
         self._event.set()

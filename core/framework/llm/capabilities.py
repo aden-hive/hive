@@ -5,9 +5,9 @@ Vision support rules are derived from official vendor documentation:
 - MiniMax: platform.minimax.io/docs — minimax-vl-01 is vision; M2.x are text-only
 - DeepSeek: api-docs.deepseek.com — deepseek-vl2 is vision; chat/reasoner are text-only
 - Cerebras: inference-docs.cerebras.ai — no vision models at all
-- Groq: console.groq.com/docs/vision — only Llama 4 Scout/Maverick support vision
-- Ollama/LM Studio/vLLM/llama.cpp: local runners that CAN serve vision models
-  (llama3.2-vision, llava, qwen2.5-vl, phi-3.5-vision, etc.) — not denied by default
+- Groq: console.groq.com/docs/vision — vision capable; treat as supported by default
+- Ollama/LM Studio/vLLM/llama.cpp: local runners denied by default; model names
+  don't reliably indicate vision support, so users must configure explicitly
 """
 
 from __future__ import annotations
@@ -37,6 +37,12 @@ _VISION_ALLOW_BARE_PREFIXES: tuple[str, ...] = (
 _TEXT_ONLY_PROVIDER_PREFIXES: tuple[str, ...] = (
     # Cerebras: inference-docs.cerebras.ai lists only text models
     "cerebras/",
+    # Local runners: model names don't reliably indicate vision support
+    "ollama/",
+    "ollama_chat/",
+    "lm_studio/",
+    "vllm/",
+    "llamacpp/",
 )
 
 # Step 3: per-model deny — text-only models within otherwise mixed providers.
@@ -53,11 +59,12 @@ _TEXT_ONLY_MODEL_BARE_PREFIXES: tuple[str, ...] = (
     "glm-4.5",
     "zai-glm",
     # --- DeepSeek ---
-    # text-only: deepseek-chat, deepseek-reasoner
+    # text-only: deepseek-chat, deepseek-coder, deepseek-reasoner
     # vision:    deepseek-vl2 (caught by allow-list above)
     # Note: LiteLLM's deepseek handler may flatten content lists for some models;
     # VL models are allowed through and rely on LiteLLM's native VL support.
     "deepseek-chat",
+    "deepseek-coder",
     "deepseek-reasoner",
     # --- MiniMax ---
     # text-only: minimax-m2.*, minimax-text-*, abab* (legacy)
@@ -76,9 +83,8 @@ def supports_image_tool_results(model: str) -> bool:
     Logic (checked in order):
     1. Vision allow-list  → True  (known vision model, skip all denies)
     2. Provider deny      → False (entire provider is text-only)
-    3. Groq exception     → False unless the model is Llama 4 (Scout/Maverick)
-    4. Model deny         → False (specific text-only model within a mixed provider)
-    5. Default            → True  (assume capable; local runners and unknown models)
+    3. Model deny         → False (specific text-only model within a mixed provider)
+    4. Default            → True  (assume capable; unknown providers and models)
     """
     model_lower = model.lower()
     bare = _model_name(model_lower)
@@ -91,16 +97,10 @@ def supports_image_tool_results(model: str) -> bool:
     if any(model_lower.startswith(p) for p in _TEXT_ONLY_PROVIDER_PREFIXES):
         return False
 
-    # 3. Groq: only Llama 4 models support vision
-    #    console.groq.com/docs/vision — Scout and Maverick are the only vision models
-    if model_lower.startswith("groq/") and "llama-4" not in bare:
-        return False
-
-    # 4. Per-model deny (text-only variants within mixed-capability families)
+    # 3. Per-model deny (text-only variants within mixed-capability families)
     if any(bare.startswith(p) for p in _TEXT_ONLY_MODEL_BARE_PREFIXES):
         return False
 
     # 5. Default: assume vision capable
-    #    Covers: OpenAI, Anthropic, Google, Mistral, Kimi, Ollama/LM Studio/vLLM
-    #    (local runners can serve vision models — user's responsibility to load one)
+    #    Covers: OpenAI, Anthropic, Google, Mistral, Kimi, and other hosted providers
     return True
