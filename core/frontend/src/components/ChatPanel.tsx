@@ -90,6 +90,10 @@ interface ChatPanelProps {
   queenPhase?: "planning" | "building" | "staging" | "running";
   /** Context window usage for queen and workers */
   contextUsage?: Record<string, ContextUsageEntry>;
+  /** Epoch ms when the current worker run started — for elapsed timer */
+  workerStartedAt?: number;
+  /** Duration in ms of the last completed worker run */
+  workerDuration?: number;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -205,31 +209,60 @@ function ToolActivityRow({ content }: { content: string }) {
   );
 }
 
+function formatDuration(ms: number): string {
+  const totalSecs = Math.floor(ms / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+}
+
 const WorkerGroupBubble = memo(
   function WorkerGroupBubble({
     messages,
     isActive,
+    workerStartedAt,
+    workerDuration,
   }: {
     workerName: string;
     messages: ChatMessage[];
     isActive?: boolean;
+    workerStartedAt?: number;
+    workerDuration?: number;
   }) {
     const [collapsed, setCollapsed] = useState(true);
+    const [elapsed, setElapsed] = useState(0);
 
     // Auto-expand the latest group while worker is actively streaming
     useEffect(() => {
       if (isActive) setCollapsed(false);
     }, [isActive]);
 
+    useEffect(() => {
+      if (!isActive || workerStartedAt == null) { setElapsed(0); return; }
+      setElapsed(Math.floor((Date.now() - workerStartedAt) / 1000));
+      const id = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - workerStartedAt) / 1000));
+      }, 1000);
+      return () => clearInterval(id);
+    }, [isActive, workerStartedAt]);
+
     const stepCount = messages.filter((m) => m.role === "worker").length;
     const color = workerColor;
+
+    const label = isActive
+      ? workerStartedAt != null
+        ? `Working for ${formatDuration(elapsed * 1000)}`
+        : "Working"
+      : workerDuration != null
+        ? `Worked for ${formatDuration(workerDuration)}`
+        : "Working";
 
     return (
       <div>
         <style>{`
           @keyframes workerFlow {
-            0%   { background-position: 0% 50%; }
-            100% { background-position: 200% 50%; }
+            0%   { background-position: 200% 50%; }
+            100% { background-position: 0% 50%; }
           }
           .worker-flow-text {
             background: linear-gradient(90deg, #818cf8, #6366f1, #38bdf8, #6366f1, #818cf8);
@@ -255,9 +288,9 @@ const WorkerGroupBubble = memo(
           </div>
           {isActive && <Loader2 className="w-3 h-3 animate-spin" style={{ color }} />}
           {isActive ? (
-            <span className="font-medium worker-flow-text">Working</span>
+            <span className="font-medium worker-flow-text">{label}</span>
           ) : (
-            <span className="font-medium" style={{ color }}>Working</span>
+            <span className="font-medium" style={{ color }}>{label}</span>
           )}
           <span className="text-muted-foreground/50">
             — {stepCount} step{stepCount !== 1 ? "s" : ""}
@@ -299,6 +332,8 @@ const WorkerGroupBubble = memo(
   (prev, next) =>
     prev.workerName === next.workerName &&
     prev.isActive === next.isActive &&
+    prev.workerStartedAt === next.workerStartedAt &&
+    prev.workerDuration === next.workerDuration &&
     prev.messages.length === next.messages.length &&
     prev.messages[prev.messages.length - 1]?.content ===
       next.messages[next.messages.length - 1]?.content,
@@ -445,6 +480,8 @@ export default function ChatPanel({
   onQuestionDismiss,
   queenPhase,
   contextUsage,
+  workerStartedAt,
+  workerDuration,
   supportsImages = true,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
@@ -661,6 +698,8 @@ export default function ChatPanel({
                 workerName={item.workerName}
                 messages={item.messages}
                 isActive={item.isLast && isWorkerWaiting}
+                workerStartedAt={item.isLast ? workerStartedAt : undefined}
+                workerDuration={item.isLast ? workerDuration : undefined}
               />
             </div>
           ) : (
