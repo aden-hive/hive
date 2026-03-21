@@ -1,5 +1,6 @@
 """Agent Runner - load and run exported agents."""
 
+from framework.runner.mcp_registry import MCPRegistry
 from framework.runner.orchestrator import AgentOrchestrator
 from framework.runner.protocol import (
     AgentMessage,
@@ -17,6 +18,7 @@ __all__ = [
     "AgentInfo",
     "ValidationResult",
     "ToolRegistry",
+    "MCPRegistry",
     "tool",
     # Multi-agent
     "AgentOrchestrator",
