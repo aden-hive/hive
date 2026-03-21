@@ -1,0 +1,267 @@
+{
+    "agent": {
+        "id": "document_intelligence_agent_team",
+        "name": "Document Intelligence Agent Team",
+        "version": "1.0.0",
+        "description": "Perform multi-perspective analysis on any document by coordinating three specialist Worker Bee agents (Researcher, Analyst, Strategist). The Queen Bee coordinator delegates analysis tasks, then synthesizes all findings into a cross-referenced intelligence report with consensus detection, conflict flagging, and prioritized action items."
+    },
+    "graph": {
+        "id": "document-intelligence-agent-team-graph",
+        "goal_id": "document-intelligence-consensus",
+        "version": "1.0.0",
+        "entry_node": "intake",
+        "entry_points": {
+            "start": "intake"
+        },
+        "pause_nodes": [],
+        "terminal_nodes": ["coordinator"],
+        "conversation_mode": "continuous",
+        "identity_prompt": "You are a Document Intelligence Agent Team. A Queen Bee coordinator orchestrates three specialist Worker Bee agents — a Researcher, an Analyst, and a Strategist — to deliver comprehensive, multi-perspective analysis of any document, synthesized into a cross-referenced intelligence report.",
+        "nodes": [
+            {
+                "id": "intake",
+                "name": "Document Intake",
+                "description": "Receives document text from the user and clarifies analysis needs.",
+                "node_type": "event_loop",
+                "input_keys": [],
+                "output_keys": [
+                    "document_text",
+                    "analysis_brief"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "User has provided document text and analysis needs have been clarified. Both document_text and analysis_brief outputs are set.",
+                "system_prompt": "You are the intake specialist for a Document Intelligence Agent Team.\n\nSTEP 1 \u2014 COLLECT DOCUMENT:\nAsk the user to paste or describe the document they want analyzed. Be friendly and\nprofessional. Clarify what type of analysis they need (comprehensive, focused on\nspecific aspects, etc.).\n\nSTEP 2 \u2014 PREPARE HANDOFF:\nOnce you have the document and understand the analysis needs:\n1. Use set_output to store \"document_text\" with the full document content\n2. Use set_output to store \"analysis_brief\" with a concise summary of what the\n   user wants analyzed and any specific focus areas\n\nKeep the analysis_brief clear and actionable \u2014 the coordinator will use it to\ninstruct three specialist agents.\n\nIMPORTANT: Do NOT analyze the document yourself. Your job is intake only.",
+                "tools": [],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": true
+            },
+            {
+                "id": "coordinator",
+                "name": "Coordinator (Queen Bee)",
+                "description": "Orchestrates multi-perspective analysis by delegating to specialist sub-agents and synthesizing their findings into a cross-referenced report.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "document_text",
+                    "analysis_brief"
+                ],
+                "output_keys": [
+                    "final_report"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "All three specialists have been consulted via delegate_to_sub_agent. A cross-referenced synthesis report has been generated and presented to the user. final_report is set via set_output.",
+                "system_prompt": "You are the Coordinator (Queen Bee) of a Document Intelligence Agent Team.\nYou manage three specialist Worker Bee agents via the delegate_to_sub_agent tool.\n\nYOUR WORKFLOW:\n1. READ the document_text and analysis_brief from your inputs\n2. DELEGATE to each specialist by calling delegate_to_sub_agent with a clear task:\n\n   a) delegate_to_sub_agent(agent_id=\"researcher\", task=\"<document + instructions>\")\n      \u2192 Researcher extracts entities, facts, dates, figures, external references\n      \u2192 Flags missing information and unverifiable claims\n\n   b) delegate_to_sub_agent(agent_id=\"analyst\", task=\"<document + instructions>\")\n      \u2192 Analyst checks internal consistency across sections\n      \u2192 Detects contradictions, logical gaps, unsupported conclusions\n\n   c) delegate_to_sub_agent(agent_id=\"strategist\", task=\"<document + instructions>\")\n      \u2192 Strategist assesses risks, implications, and actionable recommendations\n      \u2192 Evaluates feasibility and potential impact\n\n3. SYNTHESIZE the three specialists' findings:\n   - Cross-reference findings across all three perspectives\n   - Identify CONSENSUS (claims supported by 2+ specialists)\n   - Flag CONFLICTS (contradictory findings between specialists)\n   - Note UNIQUE INSIGHTS (findings from only one specialist)\n   - Highlight BLIND SPOTS (areas no specialist covered)\n\n4. GENERATE a structured report and present it to the user\n\nREPORT FORMAT:\nPresent the final report directly to the user with these sections:\n## Document Intelligence Report\n\n### Research Findings (Researcher)\n[Key entities, facts, citations extracted]\n\n### Consistency Analysis (Analyst)\n[Internal consistency issues, contradictions found]\n\n### Strategic Assessment (Strategist)\n[Risks, implications, recommended actions]\n\n### Cross-Reference Synthesis\n- **Consensus**: [Points agreed by multiple specialists]\n- **Conflicts**: [Contradictory findings]\n- **Unique Insights**: [Single-specialist findings worth noting]\n- **Blind Spots**: [Areas requiring further investigation]\n\n### Recommended Next Steps\n[Prioritized action items based on the analysis]\n\nIMPORTANT RULES:\n- ALWAYS include the full document text in each delegation task\n- Wait for each specialist's response before proceeding\n- Attribute every finding to its source specialist\n- Use save_data to persist the report for later retrieval\n- After presenting the report, ask if the user wants deeper analysis on any section",
+                "tools": [
+                    "save_data",
+                    "load_data",
+                    "append_data",
+                    "list_data_files",
+                    "serve_file_to_user"
+                ],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": true,
+                "sub_agents": [
+                    "researcher",
+                    "analyst",
+                    "strategist"
+                ]
+            },
+            {
+                "id": "researcher",
+                "name": "Researcher (Worker Bee)",
+                "description": "Extracts entities, facts, dates, figures, and external references from documents.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "task"
+                ],
+                "output_keys": [
+                    "findings"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "Structured factual extraction is complete with confidence flags on all claims. findings is set via set_output.",
+                "system_prompt": "You are the Researcher specialist in a Document Intelligence Agent Team.\n\nYOUR ROLE: Extract and verify factual content from the provided document.\n\nANALYSIS CHECKLIST:\n1. **Key Entities**: People, organizations, locations, products mentioned\n2. **Dates & Timelines**: All temporal references, sequence of events\n3. **Numerical Data**: Figures, statistics, financial amounts, percentages\n4. **Claims & Assertions**: Key claims made in the document\n5. **External References**: Citations, links, referenced documents/standards\n6. **Missing Information**: What SHOULD be in the document but isn't\n7. **Unverifiable Claims**: Assertions that cannot be verified from the document alone\n\nOUTPUT FORMAT:\nUse set_output with key \"findings\" containing a structured summary of your analysis.\nOrganize by the categories above. Be specific \u2014 quote exact text when possible.\n\nRULES:\n- Only analyze what is IN the document \u2014 do not add external knowledge\n- Flag uncertainty levels (high/medium/low confidence)\n- Note any ambiguous language that could be interpreted multiple ways",
+                "tools": [],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "analyst",
+                "name": "Analyst (Worker Bee)",
+                "description": "Checks internal consistency, detects contradictions, and identifies logical gaps.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "task"
+                ],
+                "output_keys": [
+                    "findings"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "Internal consistency analysis is complete with severity-rated findings. findings is set via set_output.",
+                "system_prompt": "You are the Analyst specialist in a Document Intelligence Agent Team.\n\nYOUR ROLE: Evaluate the internal consistency and logical coherence of the document.\n\nANALYSIS CHECKLIST:\n1. **Internal Consistency**: Do different sections agree with each other?\n2. **Contradictions**: Any statements that directly conflict?\n3. **Logical Flow**: Does the argument/narrative follow logically?\n4. **Unsupported Conclusions**: Are conclusions backed by the presented evidence?\n5. **Assumption Gaps**: What unstated assumptions does the document rely on?\n6. **Tone & Framing**: Any shifts in tone that might indicate bias or agenda?\n7. **Completeness**: Are there sections that seem incomplete or rushed?\n\nOUTPUT FORMAT:\nUse set_output with key \"findings\" containing a structured consistency analysis.\nFor each issue found, include:\n- Location in document (section/paragraph reference)\n- Nature of the issue\n- Severity (critical/major/minor)\n- Specific text evidence\n\nRULES:\n- Be thorough but fair \u2014 not every inconsistency is a problem\n- Distinguish between genuine contradictions vs. nuanced positions\n- Note strengths as well as weaknesses",
+                "tools": [],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            },
+            {
+                "id": "strategist",
+                "name": "Strategist (Worker Bee)",
+                "description": "Assesses risks, evaluates implications, and recommends actions.",
+                "node_type": "event_loop",
+                "input_keys": [
+                    "task"
+                ],
+                "output_keys": [
+                    "findings"
+                ],
+                "nullable_output_keys": [],
+                "input_schema": {},
+                "output_schema": {},
+                "success_criteria": "Risk matrix and prioritized action items have been generated. findings is set via set_output.",
+                "system_prompt": "You are the Strategist specialist in a Document Intelligence Agent Team.\n\nYOUR ROLE: Assess risks, implications, and provide actionable recommendations.\n\nANALYSIS CHECKLIST:\n1. **Risk Assessment**: What risks does this document reveal or create?\n   - Likelihood (high/medium/low)\n   - Impact (high/medium/low)\n   - Mitigation options\n2. **Stakeholder Impact**: Who is affected and how?\n3. **Opportunities**: Positive possibilities identified in the document\n4. **Feasibility**: Are proposed plans/actions realistic?\n5. **Dependencies**: What external factors could affect outcomes?\n6. **Timeline Risks**: Are deadlines realistic? What could cause delays?\n7. **Recommended Actions**: Prioritized next steps (immediate/short-term/long-term)\n\nOUTPUT FORMAT:\nUse set_output with key \"findings\" containing a structured strategic assessment.\nUse a risk matrix format where applicable. Each recommendation should include:\n- Action description\n- Priority (P0-P3)\n- Expected outcome\n- Resource requirements\n\nRULES:\n- Be actionable \u2014 vague advice is not useful\n- Consider both upside and downside scenarios\n- Flag any \"red flags\" that require immediate attention",
+                "tools": [],
+                "model": null,
+                "function": null,
+                "routes": {},
+                "max_retries": 3,
+                "retry_on": [],
+                "max_node_visits": 0,
+                "output_model": null,
+                "max_validation_retries": 2,
+                "client_facing": false
+            }
+        ],
+        "edges": [
+            {
+                "id": "intake-to-coordinator",
+                "source": "intake",
+                "target": "coordinator",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
+            }
+        ],
+        "max_steps": 100,
+        "max_retries_per_node": 3,
+        "description": "Perform multi-perspective document analysis by coordinating three specialist Worker Bee agents and synthesizing findings into a cross-referenced intelligence report."
+    },
+    "goal": {
+        "id": "document-intelligence-consensus",
+        "name": "Multi-Perspective Document Intelligence",
+        "description": "Coordinate specialist agents to perform multi-perspective document analysis with cross-reference synthesis and consensus detection.",
+        "status": "draft",
+        "success_criteria": [
+            {
+                "id": "multi-source-analysis",
+                "description": "Document analyzed by at least 3 specialist agents",
+                "metric": "specialist_count",
+                "target": "3",
+                "weight": 0.30,
+                "met": false
+            },
+            {
+                "id": "cross-reference",
+                "description": "Findings cross-referenced across specialists with consensus/conflict detection",
+                "metric": "cross_reference_complete",
+                "target": "true",
+                "weight": 0.35,
+                "met": false
+            },
+            {
+                "id": "structured-report",
+                "description": "Final report includes all required sections: research findings, consistency analysis, strategic assessment, synthesis, and next steps",
+                "metric": "report_completeness",
+                "target": "100%",
+                "weight": 0.25,
+                "met": false
+            },
+            {
+                "id": "actionable-output",
+                "description": "Report includes prioritized action items with clear next steps",
+                "metric": "actionability_score",
+                "target": ">=85%",
+                "weight": 0.10,
+                "met": false
+            }
+        ],
+        "constraints": [
+            {
+                "id": "document-only",
+                "description": "All findings must be grounded in the provided document. Sub-agents must not introduce external knowledge.",
+                "constraint_type": "hard",
+                "category": "quality",
+                "check": ""
+            },
+            {
+                "id": "attribution-required",
+                "description": "Every finding in the final report must be attributed to its source specialist agent.",
+                "constraint_type": "hard",
+                "category": "transparency",
+                "check": ""
+            },
+            {
+                "id": "all-specialists-consulted",
+                "description": "All three specialist agents (researcher, analyst, strategist) must be consulted before generating the final report.",
+                "constraint_type": "hard",
+                "category": "completeness",
+                "check": ""
+            }
+        ],
+        "context": {},
+        "required_capabilities": [],
+        "input_schema": {},
+        "output_schema": {},
+        "version": "1.0.0",
+        "parent_version": null,
+        "evolution_reason": null,
+        "created_at": "2026-03-17 00:00:00.000000",
+        "updated_at": "2026-03-17 00:00:00.000000"
+    },
+    "required_tools": [
+        "save_data",
+        "load_data",
+        "append_data",
+        "list_data_files",
+        "serve_file_to_user"
+    ],
+    "metadata": {
+        "created_at": "2026-03-17T00:00:00.000000",
+        "node_count": 5,
+        "edge_count": 1
+    }
+}
