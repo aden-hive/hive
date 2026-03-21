@@ -232,7 +232,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
     # Verify primary session's state.json exists and has the primary entry_point
     primary_state_path = tmp_path / "sessions" / primary_exec_id / "state.json"
     assert primary_state_path.exists()
-    primary_state = json.loads(primary_state_path.read_text())
+    primary_state = json.loads(primary_state_path.read_text(encoding="utf-8"))
     assert primary_state["entry_point"] == "primary"
 
     # Async stream — simulates a webhook entry point sharing the session
@@ -275,7 +275,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
 
     # State.json should NOT have been overwritten by the async execution
     # (it should still show the primary entry point)
-    final_state = json.loads(primary_state_path.read_text())
+    final_state = json.loads(primary_state_path.read_text(encoding="utf-8"))
     assert final_state["entry_point"] == "primary"
 
     # Verify only ONE session directory exists (not two)

@@ -1,0 +1,42 @@
+name: Weekly bounty leaderboard
+description: Posts the integration bounty leaderboard to Discord every Monday
+
+on:
+  schedule:
+    # Every Monday at 9:00 UTC
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      since_date:
+        description: "Only count PRs merged after this date (YYYY-MM-DD). Leave empty for all-time."
+        required: false
+
+jobs:
+  leaderboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Post leaderboard to Discord
+        run: bun run scripts/bounty-tracker.ts leaderboard
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_BOUNTY_WEBHOOK_URL }}
+          BOT_API_URL: ${{ secrets.BOT_API_URL }}
+          BOT_API_KEY: ${{ secrets.BOT_API_KEY }}
+          LURKR_API_KEY: ${{ secrets.LURKR_API_KEY }}
+          LURKR_GUILD_ID: ${{ secrets.LURKR_GUILD_ID }}
+          SINCE_DATE: ${{ github.event.inputs.since_date || '' }}

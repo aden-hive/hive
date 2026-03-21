@@ -299,6 +299,66 @@ class TestSubagentExecution:
         assert "metadata" in result_data
         assert result_data["metadata"]["agent_id"] == "researcher"
 
+    @pytest.mark.asyncio
+    async def test_gcu_subagent_auto_populates_tools_from_catalog(self, runtime):
+        """GCU subagent with tools=[] should receive all catalog tools (auto-populate).
+
+        GCU nodes declare tools=[] because the runner expands them at setup time.
+        But _execute_subagent filters by subagent_spec.tools, which is still empty.
+        The fix: when subagent is GCU with no declared tools, include all catalog tools.
+        """
+        gcu_spec = NodeSpec(
+            id="browser_worker",
+            name="Browser Worker",
+            description="GCU browser subagent",
+            node_type="gcu",
+            output_keys=["result"],
+            tools=[],  # Empty — expects auto-population
+        )
+
+        parent_spec = NodeSpec(
+            id="parent",
+            name="Parent",
+            description="Orchestrator",
+            node_type="event_loop",
+            output_keys=["result"],
+            sub_agents=["browser_worker"],
+        )
+
+        spy_llm = MockStreamingLLM(
+            [set_output_scenario("result", "scraped"), text_finish_scenario()]
+        )
+
+        browser_tool = Tool(name="browser_snapshot", description="Snapshot")
+
+        node = EventLoopNode(config=LoopConfig(max_iterations=5))
+        memory = SharedMemory()
+        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+
+        ctx = NodeContext(
+            runtime=runtime,
+            node_id="parent",
+            node_spec=parent_spec,
+            memory=scoped,
+            input_data={},
+            llm=spy_llm,
+            available_tools=[],
+            all_tools=[browser_tool],
+            goal_context="",
+            goal=None,
+            node_registry={"browser_worker": gcu_spec},
+        )
+
+        result = await node._execute_subagent(ctx, "browser_worker", "Scrape example.com")
+        assert result.is_error is False
+
+        # Verify subagent LLM received browser tools from catalog
+        assert spy_llm.stream_calls, "LLM should have been called"
+        first_call_tools = spy_llm.stream_calls[0]["tools"]
+        tool_names = {t.name for t in first_call_tools} if first_call_tools else set()
+        assert "browser_snapshot" in tool_names
+        assert "delegate_to_sub_agent" not in tool_names
+
 
 # ---------------------------------------------------------------------------
 # Tests for nested subagent prevention
@@ -600,6 +660,63 @@ class TestReportToParentExecution:
 
         # Metadata should include report_count
         assert result_data["metadata"]["report_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_subagent_tool_events_visible_on_shared_bus(
+        self, runtime, parent_node_spec, subagent_node_spec
+    ):
+        """Subagent internal tool calls should emit TOOL_CALL events on the shared bus."""
+        bus = EventBus()
+        tool_events = []
+
+        async def handler(event):
+            tool_events.append(event)
+
+        bus.subscribe(
+            event_types=[EventType.TOOL_CALL_STARTED, EventType.TOOL_CALL_COMPLETED],
+            handler=handler,
+        )
+
+        subagent_llm = MockStreamingLLM(
+            [
+                set_output_scenario("findings", "Results"),
+                text_finish_scenario(),
+            ]
+        )
+
+        node = EventLoopNode(
+            event_bus=bus,
+            config=LoopConfig(max_iterations=10),
+        )
+
+        memory = SharedMemory()
+        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+
+        ctx = NodeContext(
+            runtime=runtime,
+            node_id="parent",
+            node_spec=parent_node_spec,
+            memory=scoped,
+            input_data={},
+            llm=subagent_llm,
+            available_tools=[],
+            goal_context="",
+            goal=None,
+            node_registry={"researcher": subagent_node_spec},
+        )
+
+        result = await node._execute_subagent(ctx, "researcher", "Do research")
+        assert result.is_error is False
+
+        # Subagent tool calls should appear on the shared bus
+        started = [e for e in tool_events if e.type == EventType.TOOL_CALL_STARTED]
+        completed = [e for e in tool_events if e.type == EventType.TOOL_CALL_COMPLETED]
+        assert len(started) >= 1, "Expected at least one TOOL_CALL_STARTED from subagent"
+        assert len(completed) >= 1, "Expected at least one TOOL_CALL_COMPLETED from subagent"
+
+        # Events should have the namespaced subagent node_id
+        for evt in started + completed:
+            assert "subagent" in evt.node_id, f"Expected namespaced node_id, got: {evt.node_id}"
 
     @pytest.mark.asyncio
     async def test_event_bus_receives_subagent_report(
@@ -970,13 +1087,13 @@ class TestEscalationFlow:
         )
 
     @pytest.mark.asyncio
-    async def test_wait_for_response_emits_client_events(
+    async def test_wait_for_response_emits_escalation_event(
         self,
         runtime,
         parent_node_spec,
         subagent_node_spec,
     ):
-        """Escalation should emit CLIENT_OUTPUT_DELTA and CLIENT_INPUT_REQUESTED events."""
+        """Escalation should emit ESCALATION_REQUESTED to the queen."""
         from framework.graph.event_loop_node import _EscalationReceiver
 
         bus = EventBus()
@@ -986,7 +1103,7 @@ class TestEscalationFlow:
             bus_events.append(event)
 
         bus.subscribe(
-            event_types=[EventType.CLIENT_OUTPUT_DELTA, EventType.CLIENT_INPUT_REQUESTED],
+            event_types=[EventType.ESCALATION_REQUESTED],
             handler=handler,
         )
 
@@ -1034,16 +1151,12 @@ class TestEscalationFlow:
         await node._execute_subagent(ctx, "researcher", "Navigate page with CAPTCHA")
         await injector
 
-        # Should have emitted both events
-        output_deltas = [e for e in bus_events if e.type == EventType.CLIENT_OUTPUT_DELTA]
-        input_requests = [e for e in bus_events if e.type == EventType.CLIENT_INPUT_REQUESTED]
+        # Should have emitted ESCALATION_REQUESTED
+        escalation_events = [e for e in bus_events if e.type == EventType.ESCALATION_REQUESTED]
 
-        assert len(output_deltas) >= 1, "Should emit CLIENT_OUTPUT_DELTA with the message"
-        assert output_deltas[0].data["content"] == "CAPTCHA detected on page"
-        assert output_deltas[0].node_id == "parent"  # Shows as parent talking
-
-        assert len(input_requests) >= 1, "Should emit CLIENT_INPUT_REQUESTED for routing"
-        assert ":escalation:" in input_requests[0].node_id  # Escalation ID for routing
+        assert len(escalation_events) >= 1, "Should emit ESCALATION_REQUESTED"
+        assert escalation_events[0].data["context"] == "CAPTCHA detected on page"
+        assert ":escalation:" in escalation_events[0].node_id
 
     @pytest.mark.asyncio
     async def test_non_blocking_report_still_works(

@@ -432,3 +432,201 @@ def register_tools(
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def zoom_update_meeting(
+        meeting_id: str,
+        topic: str = "",
+        start_time: str = "",
+        duration: int = 0,
+        timezone: str = "",
+        agenda: str = "",
+    ) -> dict:
+        """
+        Update an existing Zoom meeting.
+
+        Args:
+            meeting_id: The Zoom meeting ID (required).
+            topic: New meeting topic/title (optional).
+            start_time: New start time in ISO 8601 format (optional).
+            duration: New duration in minutes (optional, 0 to skip).
+            timezone: New timezone e.g. "America/New_York" (optional).
+            agenda: New meeting description/agenda (optional).
+
+        Returns:
+            Dict with success status or error.
+        """
+        token = _get_token(credentials)
+        if isinstance(token, dict):
+            return token
+
+        if not meeting_id:
+            return {"error": "meeting_id is required"}
+
+        body: dict[str, Any] = {}
+        if topic:
+            body["topic"] = topic
+        if start_time:
+            body["start_time"] = start_time
+        if duration > 0:
+            body["duration"] = duration
+        if timezone:
+            body["timezone"] = timezone
+        if agenda:
+            body["agenda"] = agenda
+
+        if not body:
+            return {"error": "At least one field to update is required"}
+
+        try:
+            resp = httpx.patch(
+                f"{ZOOM_API_BASE}/meetings/{meeting_id}",
+                headers=_headers(token),
+                json=body,
+                timeout=30.0,
+            )
+            # Zoom returns 204 on successful update
+            return _handle_response(resp)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def zoom_list_meeting_participants(
+        meeting_id: str,
+        page_size: int = 30,
+        next_page_token: str = "",
+    ) -> dict:
+        """
+        List participants from a past Zoom meeting.
+
+        Args:
+            meeting_id: The Zoom meeting ID or UUID (required).
+                        For past meetings, use the UUID (double-encode if starts with /).
+            page_size: Number of results per page (max 300, default 30).
+            next_page_token: Pagination token from a previous response.
+
+        Returns:
+            Dict with participants list and pagination info.
+        """
+        token = _get_token(credentials)
+        if isinstance(token, dict):
+            return token
+
+        if not meeting_id:
+            return {"error": "meeting_id is required"}
+
+        try:
+            params: dict[str, Any] = {"page_size": min(page_size, 300)}
+            if next_page_token:
+                params["next_page_token"] = next_page_token
+
+            resp = httpx.get(
+                f"{ZOOM_API_BASE}/past_meetings/{meeting_id}/participants",
+                headers=_headers(token),
+                params=params,
+                timeout=30.0,
+            )
+            result = _handle_response(resp)
+            if "error" in result:
+                return result
+
+            participants = []
+            for p in result.get("participants", []):
+                participants.append(
+                    {
+                        "id": p.get("id"),
+                        "name": p.get("name"),
+                        "user_email": p.get("user_email"),
+                        "join_time": p.get("join_time"),
+                        "leave_time": p.get("leave_time"),
+                        "duration": p.get("duration"),
+                    }
+                )
+
+            output: dict[str, Any] = {
+                "total_records": result.get("total_records", 0),
+                "count": len(participants),
+                "participants": participants,
+            }
+            npt = result.get("next_page_token", "")
+            if npt:
+                output["next_page_token"] = npt
+            return output
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def zoom_list_meeting_registrants(
+        meeting_id: str,
+        status: str = "approved",
+        page_size: int = 30,
+        next_page_token: str = "",
+    ) -> dict:
+        """
+        List registrants for a Zoom meeting (requires registration-enabled meeting).
+
+        Args:
+            meeting_id: The Zoom meeting ID (required).
+            status: Filter by status: "pending", "approved", or "denied" (default "approved").
+            page_size: Number of results per page (max 300, default 30).
+            next_page_token: Pagination token from a previous response.
+
+        Returns:
+            Dict with registrants list and pagination info.
+        """
+        token = _get_token(credentials)
+        if isinstance(token, dict):
+            return token
+
+        if not meeting_id:
+            return {"error": "meeting_id is required"}
+
+        try:
+            params: dict[str, Any] = {
+                "status": status,
+                "page_size": min(page_size, 300),
+            }
+            if next_page_token:
+                params["next_page_token"] = next_page_token
+
+            resp = httpx.get(
+                f"{ZOOM_API_BASE}/meetings/{meeting_id}/registrants",
+                headers=_headers(token),
+                params=params,
+                timeout=30.0,
+            )
+            result = _handle_response(resp)
+            if "error" in result:
+                return result
+
+            registrants = []
+            for r in result.get("registrants", []):
+                registrants.append(
+                    {
+                        "id": r.get("id"),
+                        "email": r.get("email"),
+                        "first_name": r.get("first_name"),
+                        "last_name": r.get("last_name"),
+                        "status": r.get("status"),
+                        "create_time": r.get("create_time"),
+                        "join_url": r.get("join_url"),
+                    }
+                )
+
+            output: dict[str, Any] = {
+                "total_records": result.get("total_records", 0),
+                "count": len(registrants),
+                "registrants": registrants,
+            }
+            npt = result.get("next_page_token", "")
+            if npt:
+                output["next_page_token"] = npt
+            return output
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}

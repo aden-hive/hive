@@ -289,3 +289,155 @@ def register_tools(
             return {"sitemap_url": sitemap_url, "status": "submitted"}
         except Exception as e:
             return {"error": f"Request failed: {e!s}"}
+
+    @mcp.tool()
+    def gsc_top_queries(
+        site_url: str,
+        start_date: str,
+        end_date: str,
+        row_limit: int = 25,
+        search_type: str = "web",
+    ) -> dict[str, Any]:
+        """
+        Get the top search queries for a site sorted by clicks.
+
+        Convenience wrapper around gsc_search_analytics with the 'query'
+        dimension pre-selected and results sorted by clicks descending.
+
+        Args:
+            site_url: Site URL (e.g. "https://example.com")
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            row_limit: Number of top queries (1-25000, default 25)
+            search_type: Search type: web, image, video, news (default: web)
+
+        Returns:
+            Dict with top queries ranked by clicks
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not site_url or not start_date or not end_date:
+            return {"error": "site_url, start_date, and end_date are required"}
+
+        body = {
+            "startDate": start_date,
+            "endDate": end_date,
+            "dimensions": ["query"],
+            "rowLimit": max(1, min(row_limit, 25000)),
+            "type": search_type,
+        }
+
+        encoded = _encode_site(site_url)
+        data = _post(f"sites/{encoded}/searchAnalytics/query", token, body)
+        if "error" in data:
+            return data
+
+        rows = []
+        for r in data.get("rows", []):
+            rows.append(
+                {
+                    "query": r.get("keys", [""])[0],
+                    "clicks": r.get("clicks", 0),
+                    "impressions": r.get("impressions", 0),
+                    "ctr": round(r.get("ctr", 0), 4),
+                    "position": round(r.get("position", 0), 1),
+                }
+            )
+        # Sort by clicks descending
+        rows.sort(key=lambda x: x["clicks"], reverse=True)
+        return {"site_url": site_url, "queries": rows, "count": len(rows)}
+
+    @mcp.tool()
+    def gsc_top_pages(
+        site_url: str,
+        start_date: str,
+        end_date: str,
+        row_limit: int = 25,
+        search_type: str = "web",
+    ) -> dict[str, Any]:
+        """
+        Get the top-performing pages for a site sorted by clicks.
+
+        Convenience wrapper around gsc_search_analytics with the 'page'
+        dimension pre-selected and results sorted by clicks descending.
+
+        Args:
+            site_url: Site URL (e.g. "https://example.com")
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            row_limit: Number of top pages (1-25000, default 25)
+            search_type: Search type: web, image, video, news (default: web)
+
+        Returns:
+            Dict with top pages ranked by clicks
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not site_url or not start_date or not end_date:
+            return {"error": "site_url, start_date, and end_date are required"}
+
+        body = {
+            "startDate": start_date,
+            "endDate": end_date,
+            "dimensions": ["page"],
+            "rowLimit": max(1, min(row_limit, 25000)),
+            "type": search_type,
+        }
+
+        encoded = _encode_site(site_url)
+        data = _post(f"sites/{encoded}/searchAnalytics/query", token, body)
+        if "error" in data:
+            return data
+
+        rows = []
+        for r in data.get("rows", []):
+            rows.append(
+                {
+                    "page": r.get("keys", [""])[0],
+                    "clicks": r.get("clicks", 0),
+                    "impressions": r.get("impressions", 0),
+                    "ctr": round(r.get("ctr", 0), 4),
+                    "position": round(r.get("position", 0), 1),
+                }
+            )
+        rows.sort(key=lambda x: x["clicks"], reverse=True)
+        return {"site_url": site_url, "pages": rows, "count": len(rows)}
+
+    @mcp.tool()
+    def gsc_delete_sitemap(
+        site_url: str,
+        sitemap_url: str,
+    ) -> dict[str, Any]:
+        """
+        Delete a sitemap from Google Search Console.
+
+        Args:
+            site_url: Site URL property (e.g. "https://example.com")
+            sitemap_url: Full sitemap URL to remove
+
+        Returns:
+            Dict with deletion status
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not site_url or not sitemap_url:
+            return {"error": "site_url and sitemap_url are required"}
+
+        encoded_site = _encode_site(site_url)
+        encoded_sitemap = _encode_site(sitemap_url)
+        try:
+            resp = httpx.delete(
+                f"{GSC_API}/sites/{encoded_site}/sitemaps/{encoded_sitemap}",
+                headers=_headers(token),
+                timeout=30.0,
+            )
+            if resp.status_code == 401:
+                return {"error": "Unauthorized. Check your GOOGLE_SEARCH_CONSOLE_TOKEN."}
+            if resp.status_code not in (200, 204):
+                return {"error": f"Google API error {resp.status_code}: {resp.text[:500]}"}
+            return {"sitemap_url": sitemap_url, "status": "deleted"}
+        except Exception as e:
+            return {"error": f"Request failed: {e!s}"}

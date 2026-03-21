@@ -3,7 +3,7 @@ Google Docs Tool - Create and manage Google Docs documents via Google Docs API v
 
 Supports:
 - OAuth2 tokens via the credential store
-- Direct access token (GOOGLE_DOCS_ACCESS_TOKEN)
+- Direct access token (GOOGLE_ACCESS_TOKEN)
 
 API Reference: https://developers.google.com/docs/api/reference/rest
 
@@ -18,7 +18,6 @@ import base64
 import json
 import os
 import re
-import time
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -30,8 +29,6 @@ if TYPE_CHECKING:
 
 GOOGLE_DOCS_API_BASE = "https://docs.googleapis.com/v1"
 GOOGLE_DRIVE_API_BASE = "https://www.googleapis.com/drive/v3"
-GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
-
 # Allowed URL schemes for image insertion
 ALLOWED_IMAGE_SCHEMES = {"https", "http"}
 # Regex pattern for valid URLs
@@ -97,105 +94,6 @@ def _get_document_end_index(doc: dict[str, Any]) -> int:
         end_index = last_element.get("endIndex", 1)
         return end_index - 1  # Insert before the final newline
     return 1
-
-
-def _create_service_account_token(service_account_json: str) -> str | None:
-    """Create an access token from a service account JSON using JWT.
-
-    This implements the OAuth 2.0 service account flow:
-    1. Create a signed JWT
-    2. Exchange it for an access token
-
-    Args:
-        service_account_json: The service account JSON string
-
-    Returns:
-        Access token string, or None if token creation failed
-    """
-    try:
-        sa_data = json.loads(service_account_json)
-    except json.JSONDecodeError:
-        return None
-
-    # Check if this is actually a service account
-    if sa_data.get("type") != "service_account":
-        # Not a service account, check for direct access token
-        return sa_data.get("access_token")
-
-    # Required fields for service account
-    private_key = sa_data.get("private_key")
-    client_email = sa_data.get("client_email")
-    token_uri = sa_data.get("token_uri", GOOGLE_OAUTH_TOKEN_URL)
-
-    if not private_key or not client_email:
-        return None
-
-    # Create JWT header and claims
-    now = int(time.time())
-    header = {"alg": "RS256", "typ": "JWT"}
-    claims = {
-        "iss": client_email,
-        "sub": client_email,
-        "aud": token_uri,
-        "iat": now,
-        "exp": now + 3600,  # 1 hour expiry
-        "scope": (
-            "https://www.googleapis.com/auth/documents "
-            "https://www.googleapis.com/auth/drive.file "
-            "https://www.googleapis.com/auth/drive"
-        ),
-    }
-
-    try:
-        # Try using cryptography library for RSA signing
-        from cryptography.hazmat.backends import default_backend
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import padding
-
-        # Encode header and claims
-        def _b64url_encode(data: bytes) -> str:
-            return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
-
-        header_b64 = _b64url_encode(json.dumps(header).encode())
-        claims_b64 = _b64url_encode(json.dumps(claims).encode())
-        signing_input = f"{header_b64}.{claims_b64}"
-
-        # Load private key and sign
-        private_key_obj = serialization.load_pem_private_key(
-            private_key.encode(), password=None, backend=default_backend()
-        )
-        signature = private_key_obj.sign(
-            signing_input.encode(),
-            padding.PKCS1v15(),
-            hashes.SHA256(),
-        )
-        signature_b64 = _b64url_encode(signature)
-
-        jwt_token = f"{signing_input}.{signature_b64}"
-
-        # Exchange JWT for access token
-        response = httpx.post(
-            token_uri,
-            data={
-                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                "assertion": jwt_token,
-            },
-            timeout=30.0,
-        )
-
-        if response.status_code == 200:
-            token_data = response.json()
-            return token_data.get("access_token")
-
-        return None
-
-    except ImportError:
-        # cryptography not available, cannot sign JWT
-        # Fall back to checking for pre-exchanged token
-        return sa_data.get("access_token")
-    except Exception:
-        # Any signing/exchange error
-        return None
 
 
 class _GoogleDocsClient:
@@ -486,25 +384,16 @@ def register_tools(
         if credentials is not None:
             if account:
                 return credentials.get_by_alias(
-                    "google_docs",
+                    "google",
                     account,
                 )
-            token = credentials.get("google_docs")
+            token = credentials.get("google")
             if token is not None and not isinstance(token, str):
                 raise TypeError(
-                    f"Expected string from credentials.get('google_docs'), "
-                    f"got {type(token).__name__}"
+                    f"Expected string from credentials.get('google'), got {type(token).__name__}"
                 )
             return token
-        # Try environment variables - direct access token first
-        token = os.getenv("GOOGLE_DOCS_ACCESS_TOKEN")
-        if token:
-            return token
-        # Try service account JSON with proper JWT token exchange
-        service_account = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-        if service_account:
-            return _create_service_account_token(service_account)
-        return None
+        return os.getenv("GOOGLE_ACCESS_TOKEN")
 
     def _get_client(account: str = "") -> _GoogleDocsClient | dict[str, str]:
         """Get a Google Docs client, or return an error dict if no credentials."""
@@ -513,9 +402,8 @@ def register_tools(
             return {
                 "error": "Google Docs credentials not configured",
                 "help": (
-                    "Set GOOGLE_DOCS_ACCESS_TOKEN environment variable "
-                    "or configure via credential store. "
-                    "Get credentials at: https://console.cloud.google.com/apis/credentials"
+                    "Set GOOGLE_ACCESS_TOKEN environment variable "
+                    "or configure 'google' via credential store"
                 ),
             }
         return _GoogleDocsClient(token)

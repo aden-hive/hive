@@ -1,12 +1,14 @@
 """MCP Client for connecting to Model Context Protocol servers.
 
 This module provides a client for connecting to MCP servers and invoking their tools.
-Supports both STDIO and HTTP transports using the official MCP Python SDK.
+Supports STDIO, HTTP, UNIX socket, and SSE transports using the official MCP Python SDK.
 """
 
 import asyncio
 import logging
 import os
+import sys
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -20,7 +22,7 @@ class MCPServerConfig:
     """Configuration for an MCP server connection."""
 
     name: str
-    transport: Literal["stdio", "http"]
+    transport: Literal["stdio", "http", "unix", "sse"]
 
     # For STDIO transport
     command: str | None = None
@@ -31,6 +33,7 @@ class MCPServerConfig:
     # For HTTP transport
     url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    socket_path: str | None = None
 
     # Optional metadata
     description: str = ""
@@ -50,7 +53,7 @@ class MCPClient:
     """
     Client for communicating with MCP servers.
 
-    Supports both STDIO and HTTP transports using the official MCP SDK.
+    Supports STDIO, HTTP, UNIX socket, and SSE transports using the official MCP SDK.
     Manages the connection lifecycle and provides methods to list and invoke tools.
     """
 
@@ -66,6 +69,8 @@ class MCPClient:
         self._read_stream = None
         self._write_stream = None
         self._stdio_context = None  # Context manager for stdio_client
+        self._sse_context = None  # Context manager for sse_client
+        self._errlog_handle = None  # Track errlog file handle for cleanup
         self._http_client: httpx.Client | None = None
         self._tools: dict[str, MCPTool] = {}
         self._connected = False
@@ -73,6 +78,8 @@ class MCPClient:
         # Background event loop for persistent STDIO connection
         self._loop = None
         self._loop_thread = None
+        # Serialize STDIO tool calls (avoids races, helps on Windows)
+        self._stdio_call_lock = threading.Lock()
 
     def _run_async(self, coro):
         """
@@ -136,6 +143,10 @@ class MCPClient:
             self._connect_stdio()
         elif self.config.transport == "http":
             self._connect_http()
+        elif self.config.transport == "unix":
+            self._connect_unix()
+        elif self.config.transport == "sse":
+            self._connect_sse()
         else:
             raise ValueError(f"Unsupported transport: {self.config.transport}")
 
@@ -156,11 +167,19 @@ class MCPClient:
             # Create server parameters
             # Always inherit parent environment and merge with any custom env vars
             merged_env = {**os.environ, **(self.config.env or {})}
+            # On Windows, passing cwd can cause WinError 267 ("invalid directory name").
+            # tool_registry passes cwd=None and uses absolute script paths when applicable.
+            cwd = self.config.cwd
+            if os.name == "nt" and cwd is not None:
+                # Avoid passing cwd on Windows; tool_registry should have set cwd=None
+                # and absolute script paths for tools-dir servers. If cwd is still set,
+                # pass None to prevent WinError 267 (caller should use absolute paths).
+                cwd = None
             server_params = StdioServerParameters(
                 command=self.config.command,
                 args=self.config.args,
                 env=merged_env,
-                cwd=self.config.cwd,
+                cwd=cwd,
             )
 
             # Store for later use
@@ -184,10 +203,13 @@ class MCPClient:
                         from mcp.client.stdio import stdio_client
 
                         # Create persistent stdio client context.
-                        # Redirect server stderr to devnull to prevent raw
-                        # output from leaking behind the TUI.
-                        devnull = open(os.devnull, "w")  # noqa: SIM115
-                        self._stdio_context = stdio_client(server_params, errlog=devnull)
+                        # On Windows, use stderr so subprocess startup errors are visible.
+                        if os.name == "nt":
+                            errlog = sys.stderr
+                        else:
+                            self._errlog_handle = open(os.devnull, "w")
+                            errlog = self._errlog_handle
+                        self._stdio_context = stdio_client(server_params, errlog=errlog)
                         (
                             self._read_stream,
                             self._write_stream,
@@ -250,10 +272,94 @@ class MCPClient:
             logger.warning(f"Health check failed for MCP server '{self.config.name}': {e}")
             # Continue anyway, server might not have health endpoint
 
+    def _connect_unix(self) -> None:
+        """Connect to MCP server via UNIX domain socket transport."""
+        if not self.config.url:
+            raise ValueError("url is required for UNIX transport")
+        if not self.config.socket_path:
+            raise ValueError("socket_path is required for UNIX transport")
+
+        self._http_client = httpx.Client(
+            base_url=self.config.url,
+            headers=self.config.headers,
+            timeout=30.0,
+            transport=httpx.HTTPTransport(uds=self.config.socket_path),
+        )
+
+        try:
+            response = self._http_client.get("/health")
+            response.raise_for_status()
+            logger.info(
+                "Connected to MCP server '%s' via UNIX socket at %s",
+                self.config.name,
+                self.config.socket_path,
+            )
+        except Exception as e:
+            logger.warning(f"Health check failed for MCP server '{self.config.name}': {e}")
+            # Continue anyway, server might not have health endpoint
+
+    def _connect_sse(self) -> None:
+        """Connect to MCP server via SSE transport using MCP SDK with persistent session."""
+        if not self.config.url:
+            raise ValueError("url is required for SSE transport")
+
+        try:
+            loop_started = threading.Event()
+            connection_ready = threading.Event()
+            connection_error = []
+
+            def run_event_loop():
+                """Run event loop in background thread."""
+                self._loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self._loop)
+                loop_started.set()
+
+                async def init_connection():
+                    try:
+                        from mcp import ClientSession
+                        from mcp.client.sse import sse_client
+
+                        self._sse_context = sse_client(
+                            self.config.url,
+                            headers=self.config.headers,
+                            timeout=30.0,
+                        )
+                        (
+                            self._read_stream,
+                            self._write_stream,
+                        ) = await self._sse_context.__aenter__()
+
+                        self._session = ClientSession(self._read_stream, self._write_stream)
+                        await self._session.__aenter__()
+                        await self._session.initialize()
+
+                        connection_ready.set()
+                    except Exception as e:
+                        connection_error.append(e)
+                        connection_ready.set()
+
+                self._loop.create_task(init_connection())
+                self._loop.run_forever()
+
+            self._loop_thread = threading.Thread(target=run_event_loop, daemon=True)
+            self._loop_thread.start()
+
+            loop_started.wait(timeout=5)
+            if not loop_started.is_set():
+                raise RuntimeError("Event loop failed to start")
+
+            connection_ready.wait(timeout=10)
+            if connection_error:
+                raise connection_error[0]
+
+            logger.info(f"Connected to MCP server '{self.config.name}' via SSE")
+        except Exception as e:
+            raise RuntimeError(f"Failed to connect to MCP server: {e}") from e
+
     def _discover_tools(self) -> None:
         """Discover available tools from the MCP server."""
         try:
-            if self.config.transport == "stdio":
+            if self.config.transport in {"stdio", "sse"}:
                 tools_list = self._run_async(self._list_tools_stdio_async())
             else:
                 tools_list = self._list_tools_http()
@@ -353,9 +459,38 @@ class MCPClient:
             raise ValueError(f"Unknown tool: {tool_name}")
 
         if self.config.transport == "stdio":
-            return self._run_async(self._call_tool_stdio_async(tool_name, arguments))
+            with self._stdio_call_lock:
+                return self._run_async(self._call_tool_stdio_async(tool_name, arguments))
+        elif self.config.transport == "sse":
+            return self._call_tool_with_retry(
+                lambda: self._run_async(self._call_tool_stdio_async(tool_name, arguments))
+            )
+        elif self.config.transport == "unix":
+            return self._call_tool_with_retry(lambda: self._call_tool_http(tool_name, arguments))
         else:
             return self._call_tool_http(tool_name, arguments)
+
+    def _call_tool_with_retry(self, call: Any) -> Any:
+        """Retry transient MCP transport failures once after reconnecting."""
+        if self.config.transport == "stdio":
+            return call()
+
+        if self.config.transport not in {"unix", "sse"}:
+            return call()
+
+        try:
+            return call()
+        except (httpx.ConnectError, httpx.ReadTimeout) as original_error:
+            logger.warning(
+                "Retrying MCP tool call after transport error from '%s': %s",
+                self.config.name,
+                original_error,
+            )
+            self._reconnect()
+            try:
+                return call()
+            except (httpx.ConnectError, httpx.ReadTimeout) as retry_error:
+                raise original_error from retry_error
 
     async def _call_tool_stdio_async(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         """Call tool via STDIO protocol using persistent session."""
@@ -374,17 +509,30 @@ class MCPClient:
                     error_text = content_item.text
             raise RuntimeError(f"MCP tool '{tool_name}' failed: {error_text}")
 
-        # Extract content
+        # Extract content — preserve image blocks alongside text
         if result.content:
-            # MCP returns content as a list of content items
-            if len(result.content) > 0:
-                content_item = result.content[0]
-                # Check if it's a text content item
-                if hasattr(content_item, "text"):
-                    return content_item.text
-                elif hasattr(content_item, "data"):
-                    return content_item.data
-            return result.content
+            text_parts: list[str] = []
+            image_parts: list[dict[str, Any]] = []
+            for item in result.content:
+                if hasattr(item, "text"):
+                    text_parts.append(item.text)
+                elif hasattr(item, "data") and hasattr(item, "mimeType"):
+                    # MCP ImageContent — preserve as structured image block
+                    image_parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{item.mimeType};base64,{item.data}",
+                            },
+                        }
+                    )
+                elif hasattr(item, "data"):
+                    text_parts.append(str(item.data))
+
+            text = "\n".join(text_parts) if text_parts else ""
+            if image_parts:
+                return {"_text": text, "_images": image_parts}
+            return text if text else None
 
         return None
 
@@ -416,18 +564,24 @@ class MCPClient:
         except Exception as e:
             raise RuntimeError(f"Failed to call tool via HTTP: {e}") from e
 
+    def _reconnect(self) -> None:
+        """Reconnect to the configured MCP server."""
+        logger.info(f"Reconnecting to MCP server '{self.config.name}'...")
+        self.disconnect()
+        self.connect()
+
     _CLEANUP_TIMEOUT = 10
     _THREAD_JOIN_TIMEOUT = 12
 
     async def _cleanup_stdio_async(self) -> None:
-        """Async cleanup for STDIO session and context managers.
+        """Async cleanup for persistent MCP session and context managers.
 
         Cleanup order is critical:
-        - The session must be closed BEFORE the stdio_context because the session
-          depends on the streams provided by stdio_context.
-        - This mirrors the initialization order in _connect_stdio(), where
-          stdio_context is entered first (providing streams), then the session is
-          created with those streams and entered.
+        - The session must be closed BEFORE the transport context manager because the
+          session depends on the streams provided by that context.
+        - This mirrors the initialization order in _connect_stdio() / _connect_sse(),
+          where the transport context is entered first (providing streams), then the
+          session is created with those streams and entered.
         - Do not change this ordering without carefully considering these dependencies.
         """
         # First: close session (depends on stdio_context streams)
@@ -448,13 +602,36 @@ class MCPClient:
             if self._stdio_context:
                 await self._stdio_context.__aexit__(None, None, None)
         except asyncio.CancelledError:
-            logger.warning(
+            logger.debug(
                 "STDIO context cleanup was cancelled; proceeding with best-effort shutdown"
             )
         except Exception as e:
-            logger.warning(f"Error closing STDIO context: {e}")
+            msg = str(e).lower()
+            if "cancel scope" in msg or "different task" in msg:
+                logger.debug("STDIO context teardown (known anyio quirk): %s", e)
+            else:
+                logger.warning(f"Error closing STDIO context: {e}")
         finally:
             self._stdio_context = None
+
+        try:
+            if self._sse_context:
+                await self._sse_context.__aexit__(None, None, None)
+        except asyncio.CancelledError:
+            logger.debug("SSE context cleanup was cancelled; proceeding with best-effort shutdown")
+        except Exception as e:
+            logger.warning(f"Error closing SSE context: {e}")
+        finally:
+            self._sse_context = None
+
+        # Third: close errlog file handle if we opened one
+        if self._errlog_handle is not None:
+            try:
+                self._errlog_handle.close()
+            except Exception as e:
+                logger.debug(f"Error closing errlog handle: {e}")
+            finally:
+                self._errlog_handle = None
 
     def disconnect(self) -> None:
         """Disconnect from the MCP server."""
@@ -522,10 +699,12 @@ class MCPClient:
             # Setting None to None is safe and ensures clean state.
             self._session = None
             self._stdio_context = None
+            self._sse_context = None
             self._read_stream = None
             self._write_stream = None
             self._loop = None
             self._loop_thread = None
+            self._errlog_handle = None
 
         # Clean up HTTP client
         if self._http_client:

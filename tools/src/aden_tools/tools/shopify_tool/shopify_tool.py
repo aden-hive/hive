@@ -459,3 +459,223 @@ def register_tools(
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def shopify_update_product(
+        product_id: str,
+        title: str = "",
+        body_html: str = "",
+        vendor: str = "",
+        product_type: str = "",
+        tags: str = "",
+        status: str = "",
+    ) -> dict:
+        """
+        Update an existing Shopify product.
+
+        Args:
+            product_id: The numeric Shopify product ID (required).
+            title: New product title (optional).
+            body_html: New product description HTML (optional).
+            vendor: New vendor name (optional).
+            product_type: New product type (optional).
+            tags: Comma-separated tags to replace existing tags (optional).
+            status: New status - "active", "archived", or "draft" (optional).
+
+        Returns:
+            Dict with updated product details.
+        """
+        creds = _get_creds(credentials)
+        if isinstance(creds, dict):
+            return creds
+        token, store = creds
+
+        if not product_id:
+            return {"error": "product_id is required"}
+
+        product: dict[str, Any] = {}
+        if title:
+            product["title"] = title
+        if body_html:
+            product["body_html"] = body_html
+        if vendor:
+            product["vendor"] = vendor
+        if product_type:
+            product["product_type"] = product_type
+        if tags:
+            product["tags"] = tags
+        if status:
+            product["status"] = status
+
+        if not product:
+            return {"error": "At least one field to update is required"}
+
+        try:
+            resp = httpx.put(
+                f"{_base_url(store)}/products/{product_id}.json",
+                headers=_headers(token),
+                json={"product": product},
+                timeout=30.0,
+            )
+            result = _handle_response(resp)
+            if "error" in result:
+                return result
+
+            p = result.get("product", {})
+            return {
+                "id": p.get("id"),
+                "title": p.get("title"),
+                "vendor": p.get("vendor"),
+                "product_type": p.get("product_type"),
+                "status": p.get("status"),
+                "tags": p.get("tags"),
+                "updated_at": p.get("updated_at"),
+                "result": "updated",
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def shopify_get_customer(customer_id: str) -> dict:
+        """
+        Get a single Shopify customer by ID.
+
+        Args:
+            customer_id: The numeric Shopify customer ID.
+
+        Returns:
+            Dict with full customer details including addresses and order stats.
+        """
+        creds = _get_creds(credentials)
+        if isinstance(creds, dict):
+            return creds
+        token, store = creds
+
+        if not customer_id:
+            return {"error": "customer_id is required"}
+
+        try:
+            resp = httpx.get(
+                f"{_base_url(store)}/customers/{customer_id}.json",
+                headers=_headers(token),
+                timeout=30.0,
+            )
+            result = _handle_response(resp)
+            if "error" in result:
+                return result
+
+            c = result.get("customer", {})
+            addresses = []
+            for a in c.get("addresses", []):
+                addresses.append(
+                    {
+                        "id": a.get("id"),
+                        "address1": a.get("address1"),
+                        "city": a.get("city"),
+                        "province": a.get("province"),
+                        "country": a.get("country"),
+                        "zip": a.get("zip"),
+                        "default": a.get("default", False),
+                    }
+                )
+
+            return {
+                "id": c.get("id"),
+                "first_name": c.get("first_name"),
+                "last_name": c.get("last_name"),
+                "email": c.get("email"),
+                "phone": c.get("phone"),
+                "orders_count": c.get("orders_count"),
+                "total_spent": c.get("total_spent"),
+                "state": c.get("state"),
+                "tags": c.get("tags"),
+                "note": c.get("note"),
+                "verified_email": c.get("verified_email"),
+                "tax_exempt": c.get("tax_exempt"),
+                "created_at": c.get("created_at"),
+                "updated_at": c.get("updated_at"),
+                "addresses": addresses,
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def shopify_create_draft_order(
+        line_items_json: str,
+        customer_id: str = "",
+        note: str = "",
+        tags: str = "",
+    ) -> dict:
+        """
+        Create a draft order in Shopify.
+
+        Args:
+            line_items_json: JSON array of line items. Each item needs either
+                "variant_id" and "quantity", or "title", "price", and "quantity".
+                Example: '[{"variant_id": 123, "quantity": 2}]'
+            customer_id: Existing customer ID to associate (optional).
+            note: Order note (optional).
+            tags: Comma-separated tags (optional).
+
+        Returns:
+            Dict with created draft order details including invoice URL.
+        """
+        import json as json_mod
+
+        creds = _get_creds(credentials)
+        if isinstance(creds, dict):
+            return creds
+        token, store = creds
+
+        if not line_items_json:
+            return {"error": "line_items_json is required"}
+
+        try:
+            line_items = json_mod.loads(line_items_json)
+        except json_mod.JSONDecodeError:
+            return {"error": "line_items_json must be valid JSON"}
+
+        if not isinstance(line_items, list) or not line_items:
+            return {"error": "line_items_json must be a non-empty JSON array"}
+
+        draft_order: dict[str, Any] = {"line_items": line_items}
+        if customer_id:
+            draft_order["customer"] = {"id": int(customer_id)}
+        if note:
+            draft_order["note"] = note
+        if tags:
+            draft_order["tags"] = tags
+
+        try:
+            resp = httpx.post(
+                f"{_base_url(store)}/draft_orders.json",
+                headers=_headers(token),
+                json={"draft_order": draft_order},
+                timeout=30.0,
+            )
+            result = _handle_response(resp)
+            if "error" in result:
+                return result
+
+            d = result.get("draft_order", {})
+            return {
+                "id": d.get("id"),
+                "name": d.get("name"),
+                "status": d.get("status"),
+                "total_price": d.get("total_price"),
+                "subtotal_price": d.get("subtotal_price"),
+                "total_tax": d.get("total_tax"),
+                "currency": d.get("currency"),
+                "invoice_url": d.get("invoice_url"),
+                "created_at": d.get("created_at"),
+                "line_item_count": len(d.get("line_items", [])),
+                "result": "created",
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}

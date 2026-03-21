@@ -54,6 +54,8 @@ class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, RegisteredTool] = {}
         self._mcp_clients: list[Any] = []  # List of MCPClient instances
+        self._mcp_client_servers: dict[int, str] = {}  # client id -> server name
+        self._mcp_managed_clients: set[int] = set()  # client ids acquired from the manager
         self._session_context: dict[str, Any] = {}  # Auto-injected context for tools
         self._provider_index: dict[str, set[str]] = {}  # provider -> tool names
         # MCP resync tracking
@@ -243,6 +245,13 @@ class ToolRegistry:
         def _wrap_result(tool_use_id: str, result: Any) -> ToolResult:
             if isinstance(result, ToolResult):
                 return result
+            # MCP client returns dict with _images when image content is present
+            if isinstance(result, dict) and "_images" in result:
+                return ToolResult(
+                    tool_use_id=tool_use_id,
+                    content=result.get("_text", ""),
+                    image_content=result["_images"],
+                )
             return ToolResult(
                 tool_use_id=tool_use_id,
                 content=json.dumps(result) if not isinstance(result, str) else result,
@@ -326,6 +335,103 @@ class ToolRegistry:
         """Restore execution context to its previous state."""
         _execution_context.reset(token)
 
+    @staticmethod
+    def resolve_mcp_stdio_config(server_config: dict[str, Any], base_dir: Path) -> dict[str, Any]:
+        """Resolve cwd and script paths for MCP stdio config (Windows compatibility).
+
+        Use this when building MCPServerConfig from a config file (e.g. in
+        list_agent_tools, discover_mcp_tools) so hive-tools and other servers
+        work on Windows. Call with base_dir = directory containing the config.
+        """
+        registry = ToolRegistry()
+        return registry._resolve_mcp_server_config(server_config, base_dir)
+
+    def _resolve_mcp_server_config(
+        self, server_config: dict[str, Any], base_dir: Path
+    ) -> dict[str, Any]:
+        """Resolve cwd and script paths for MCP stdio servers (Windows compatibility).
+
+        On Windows, passing cwd to subprocess can cause WinError 267. We use cwd=None
+        and absolute script paths when the server runs a .py script from the tools dir.
+        If the resolved cwd doesn't exist (e.g. config from ~/.hive/agents/), fall back
+        to Path.cwd() / "tools".
+        """
+        config = dict(server_config)
+        if config.get("transport") != "stdio":
+            return config
+
+        cwd = config.get("cwd")
+        args = list(config.get("args", []))
+        if not cwd and not args:
+            return config
+
+        # Resolve cwd relative to base_dir
+        resolved_cwd: Path | None = None
+        if cwd:
+            if Path(cwd).is_absolute():
+                resolved_cwd = Path(cwd)
+            else:
+                resolved_cwd = (base_dir / cwd).resolve()
+
+        # Find .py script in args (e.g. coder_tools_server.py, files_server.py)
+        script_name = None
+        for i, arg in enumerate(args):
+            if isinstance(arg, str) and arg.endswith(".py"):
+                script_name = arg
+                script_idx = i
+                break
+
+        if resolved_cwd is None:
+            return config
+
+        # If resolved cwd doesn't exist or (when we have a script) doesn't contain it,
+        # try fallback
+        tools_fallback = Path.cwd() / "tools"
+        need_fallback = not resolved_cwd.is_dir()
+        if script_name and not need_fallback:
+            need_fallback = not (resolved_cwd / script_name).exists()
+        if need_fallback:
+            fallback_ok = tools_fallback.is_dir()
+            if script_name:
+                fallback_ok = fallback_ok and (tools_fallback / script_name).exists()
+            else:
+                # No script (e.g. GCU); just need tools dir to exist
+                pass
+            if fallback_ok:
+                resolved_cwd = tools_fallback
+                logger.debug(
+                    "MCP server '%s': using fallback tools dir %s",
+                    config.get("name", "?"),
+                    resolved_cwd,
+                )
+            else:
+                config["cwd"] = str(resolved_cwd)
+                return config
+
+        if not script_name:
+            # No .py script (e.g. GCU uses -m gcu.server); just set cwd
+            config["cwd"] = str(resolved_cwd)
+            return config
+
+        # For coder_tools_server, inject --project-root so writes go to the expected workspace
+        if script_name and "coder_tools" in script_name:
+            project_root = str(resolved_cwd.parent.resolve())
+            args = list(args)
+            if "--project-root" not in args:
+                args.extend(["--project-root", project_root])
+            config["args"] = args
+
+        if os.name == "nt":
+            # Windows: cwd=None avoids WinError 267; use absolute script path
+            config["cwd"] = None
+            abs_script = str((resolved_cwd / script_name).resolve())
+            args = list(config["args"])
+            args[script_idx] = abs_script
+            config["args"] = args
+        else:
+            config["cwd"] = str(resolved_cwd)
+        return config
+
     def load_mcp_config(self, config_path: Path) -> None:
         """
         Load and register MCP servers from a config file.
@@ -340,7 +446,7 @@ class ToolRegistry:
         self._mcp_config_path = Path(config_path)
 
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 config = json.load(f)
         except Exception as e:
             logger.warning(f"Failed to load MCP config from {config_path}: {e}")
@@ -357,14 +463,24 @@ class ToolRegistry:
             server_list = [{"name": name, **cfg} for name, cfg in config.items()]
 
         for server_config in server_list:
-            cwd = server_config.get("cwd")
-            if cwd and not Path(cwd).is_absolute():
-                server_config["cwd"] = str((base_dir / cwd).resolve())
-            try:
-                self.register_mcp_server(server_config)
-            except Exception as e:
-                name = server_config.get("name", "unknown")
-                logger.warning(f"Failed to register MCP server '{name}': {e}")
+            server_config = self._resolve_mcp_server_config(server_config, base_dir)
+            for _attempt in range(2):
+                try:
+                    self.register_mcp_server(server_config)
+                    break
+                except Exception as e:
+                    name = server_config.get("name", "unknown")
+                    if _attempt == 0:
+                        logger.warning(
+                            "MCP server '%s' failed to register, retrying in 2s: %s",
+                            name,
+                            e,
+                        )
+                        import time
+
+                        time.sleep(2)
+                    else:
+                        logger.warning("MCP server '%s' failed after retry: %s", name, e)
 
         # Snapshot credential files and ADEN_API_KEY so we can detect mid-session changes
         self._mcp_cred_snapshot = self._snapshot_credentials()
@@ -373,6 +489,7 @@ class ToolRegistry:
     def register_mcp_server(
         self,
         server_config: dict[str, Any],
+        use_connection_manager: bool = True,
     ) -> int:
         """
         Register an MCP server and discover its tools.
@@ -388,12 +505,14 @@ class ToolRegistry:
                 - url: Server URL (for http)
                 - headers: HTTP headers (for http)
                 - description: Server description (optional)
+            use_connection_manager: When True, reuse a shared client keyed by server name
 
         Returns:
             Number of tools registered from this server
         """
         try:
             from framework.runner.mcp_client import MCPClient, MCPServerConfig
+            from framework.runner.mcp_connection_manager import MCPConnectionManager
 
             # Build config object
             config = MCPServerConfig(
@@ -409,11 +528,18 @@ class ToolRegistry:
             )
 
             # Create and connect client
-            client = MCPClient(config)
-            client.connect()
+            if use_connection_manager:
+                client = MCPConnectionManager.get_instance().acquire(config)
+            else:
+                client = MCPClient(config)
+                client.connect()
 
             # Store client for cleanup
             self._mcp_clients.append(client)
+            client_id = id(client)
+            self._mcp_client_servers[client_id] = config.name
+            if use_connection_manager:
+                self._mcp_managed_clients.add(client_id)
 
             # Register each tool
             server_name = server_config["name"]
@@ -453,7 +579,9 @@ class ToolRegistry:
                             }
                             merged_inputs = {**clean_inputs, **filtered_context}
                             result = client_ref.call_tool(tool_name, merged_inputs)
-                            # MCP tools return content array, extract the result
+                            # MCP client already extracts content (returns str
+                            # or {"_text": ..., "_images": ...} for image results).
+                            # Handle legacy list format from HTTP transport.
                             if isinstance(result, list) and len(result) > 0:
                                 if isinstance(result[0], dict) and "text" in result[0]:
                                     return result[0]["text"]
@@ -480,6 +608,11 @@ class ToolRegistry:
 
         except Exception as e:
             logger.error(f"Failed to register MCP server: {e}")
+            if "Connection closed" in str(e) and os.name == "nt":
+                logger.debug(
+                    "On Windows, check that the MCP subprocess starts (e.g. uv in PATH, "
+                    "script path correct). Worker config uses base_dir = mcp_servers.json parent."
+                )
             return 0
 
     def _convert_mcp_tool_to_framework_tool(self, mcp_tool: Any) -> Tool:
@@ -608,12 +741,7 @@ class ToolRegistry:
         logger.info("%s — resyncing MCP servers", reason)
 
         # 1. Disconnect existing MCP clients
-        for client in self._mcp_clients:
-            try:
-                client.disconnect()
-            except Exception as e:
-                logger.warning(f"Error disconnecting MCP client during resync: {e}")
-        self._mcp_clients.clear()
+        self._cleanup_mcp_clients("during resync")
 
         # 2. Remove MCP-registered tools
         for name in self._mcp_tool_names:
@@ -628,12 +756,28 @@ class ToolRegistry:
 
     def cleanup(self) -> None:
         """Clean up all MCP client connections."""
+        self._cleanup_mcp_clients()
+
+    def _cleanup_mcp_clients(self, context: str = "") -> None:
+        """Disconnect or release all tracked MCP clients for this registry."""
+        if context:
+            context = f" {context}"
+
         for client in self._mcp_clients:
+            client_id = id(client)
+            server_name = self._mcp_client_servers.get(client_id, client.config.name)
             try:
-                client.disconnect()
+                if client_id in self._mcp_managed_clients:
+                    from framework.runner.mcp_connection_manager import MCPConnectionManager
+
+                    MCPConnectionManager.get_instance().release(server_name)
+                else:
+                    client.disconnect()
             except Exception as e:
-                logger.warning(f"Error disconnecting MCP client: {e}")
+                logger.warning(f"Error disconnecting MCP client{context}: {e}")
         self._mcp_clients.clear()
+        self._mcp_client_servers.clear()
+        self._mcp_managed_clients.clear()
 
     def __del__(self):
         """Destructor to ensure cleanup."""

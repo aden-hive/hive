@@ -1,4 +1,4 @@
-"""Google Sheets tool package for Aden Tools."""
+"""Google Sheets integration tool."""
 
 from .google_sheets_tool import register_tools
 

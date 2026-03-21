@@ -33,10 +33,20 @@ class Message:
     is_transition_marker: bool = False
     # True when this message is real human input (from /chat), not a system prompt
     is_client_input: bool = False
+    # Optional image content blocks (e.g. from browser_screenshot)
+    image_content: list[dict[str, Any]] | None = None
+    # True when message contains an activated skill body (AS-10: never prune)
+    is_skill_content: bool = False
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
         if self.role == "user":
+            if self.image_content:
+                blocks: list[dict[str, Any]] = []
+                if self.content:
+                    blocks.append({"type": "text", "text": self.content})
+                blocks.extend(self.image_content)
+                return {"role": "user", "content": blocks}
             return {"role": "user", "content": self.content}
 
         if self.role == "assistant":
@@ -47,6 +57,15 @@ class Message:
 
         # role == "tool"
         content = f"ERROR: {self.content}" if self.is_error else self.content
+        if self.image_content:
+            # Multimodal tool result: text + image content blocks
+            blocks: list[dict[str, Any]] = [{"type": "text", "text": content}]
+            blocks.extend(self.image_content)
+            return {
+                "role": "tool",
+                "tool_call_id": self.tool_use_id,
+                "content": blocks,
+            }
         return {
             "role": "tool",
             "tool_call_id": self.tool_use_id,
@@ -72,6 +91,8 @@ class Message:
             d["is_transition_marker"] = self.is_transition_marker
         if self.is_client_input:
             d["is_client_input"] = self.is_client_input
+        if self.image_content is not None:
+            d["image_content"] = self.image_content
         return d
 
     @classmethod
@@ -87,6 +108,7 @@ class Message:
             phase_id=data.get("phase_id"),
             is_transition_marker=data.get("is_transition_marker", False),
             is_client_input=data.get("is_client_input", False),
+            image_content=data.get("image_content"),
         )
 
 
@@ -307,13 +329,13 @@ class NodeConversation:
     def __init__(
         self,
         system_prompt: str = "",
-        max_history_tokens: int = 32000,
+        max_context_tokens: int = 32000,
         compaction_threshold: float = 0.8,
         output_keys: list[str] | None = None,
         store: ConversationStore | None = None,
     ) -> None:
         self._system_prompt = system_prompt
-        self._max_history_tokens = max_history_tokens
+        self._max_context_tokens = max_context_tokens
         self._compaction_threshold = compaction_threshold
         self._output_keys = output_keys
         self._store = store
@@ -373,6 +395,7 @@ class NodeConversation:
         *,
         is_transition_marker: bool = False,
         is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
     ) -> Message:
         msg = Message(
             seq=self._next_seq,
@@ -381,6 +404,7 @@ class NodeConversation:
             phase_id=self._current_phase,
             is_transition_marker=is_transition_marker,
             is_client_input=is_client_input,
+            image_content=image_content,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -409,6 +433,8 @@ class NodeConversation:
         tool_use_id: str,
         content: str,
         is_error: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
+        is_skill_content: bool = False,
     ) -> Message:
         msg = Message(
             seq=self._next_seq,
@@ -417,6 +443,8 @@ class NodeConversation:
             tool_use_id=tool_use_id,
             is_error=is_error,
             phase_id=self._current_phase,
+            image_content=image_content,
+            is_skill_content=is_skill_content,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -525,16 +553,16 @@ class NodeConversation:
         self._last_api_input_tokens = actual_input_tokens
 
     def usage_ratio(self) -> float:
-        """Current token usage as a fraction of *max_history_tokens*.
+        """Current token usage as a fraction of *max_context_tokens*.
 
-        Returns 0.0 when ``max_history_tokens`` is zero (unlimited).
+        Returns 0.0 when ``max_context_tokens`` is zero (unlimited).
         """
-        if self._max_history_tokens <= 0:
+        if self._max_context_tokens <= 0:
             return 0.0
-        return self.estimate_tokens() / self._max_history_tokens
+        return self.estimate_tokens() / self._max_context_tokens
 
     def needs_compaction(self) -> bool:
-        return self.estimate_tokens() >= self._max_history_tokens * self._compaction_threshold
+        return self.estimate_tokens() >= self._max_context_tokens * self._compaction_threshold
 
     # --- Output-key extraction ---------------------------------------------
 
@@ -610,8 +638,15 @@ class NodeConversation:
                 continue
             if msg.is_error:
                 continue  # never prune errors
+            if msg.is_skill_content:
+                continue  # never prune activated skill instructions (AS-10)
             if msg.content.startswith("[Pruned tool result"):
                 continue  # already pruned
+            # Tiny results (set_output acks, confirmations) — pruning
+            # saves negligible space but makes the LLM think the call
+            # failed, causing costly retries.
+            if len(msg.content) < 100:
+                continue
 
             # Phase-aware: protect current phase messages
             if self._current_phase and msg.phase_id == self._current_phase:
@@ -898,8 +933,9 @@ class NodeConversation:
         # Build reference message
         ref_parts: list[str] = []
         if conv_filename:
+            full_path = str((spill_path / conv_filename).resolve())
             ref_parts.append(
-                f"[Previous conversation saved to '{conv_filename}'. "
+                f"[Previous conversation saved to '{full_path}'. "
                 f"Use load_data('{conv_filename}') to review if needed.]"
             )
         elif not collapsed_msgs:
@@ -1027,7 +1063,7 @@ class NodeConversation:
         await self._store.write_meta(
             {
                 "system_prompt": self._system_prompt,
-                "max_history_tokens": self._max_history_tokens,
+                "max_context_tokens": self._max_context_tokens,
                 "compaction_threshold": self._compaction_threshold,
                 "output_keys": self._output_keys,
             }
@@ -1060,7 +1096,7 @@ class NodeConversation:
 
         conv = cls(
             system_prompt=meta.get("system_prompt", ""),
-            max_history_tokens=meta.get("max_history_tokens", 32000),
+            max_context_tokens=meta.get("max_context_tokens", 32000),
             compaction_threshold=meta.get("compaction_threshold", 0.8),
             output_keys=meta.get("output_keys"),
             store=store,

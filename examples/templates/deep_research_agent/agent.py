@@ -204,8 +204,8 @@ class DeepResearchAgent:
         """Set up the executor with all components."""
         from pathlib import Path
 
-        storage_path = Path.home() / ".hive" / "agents" / "deep_research_agent"
-        storage_path.mkdir(parents=True, exist_ok=True)
+        self._storage_path = Path.home() / ".hive" / "agents" / "deep_research_agent"
+        self._storage_path.mkdir(parents=True, exist_ok=True)
 
         self._tool_registry = ToolRegistry()
 

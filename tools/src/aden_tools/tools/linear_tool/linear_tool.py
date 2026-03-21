@@ -603,6 +603,110 @@ class _LinearClient:
             "total": len(labels_data.get("nodes", [])),
         }
 
+    # --- Cycles ---
+
+    def list_cycles(
+        self,
+        team_id: str,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """List cycles for a team."""
+        query = """
+        query Cycles($filter: CycleFilter, $first: Int) {
+            cycles(filter: $filter, first: $first) {
+                nodes {
+                    id
+                    number
+                    name
+                    startsAt
+                    endsAt
+                    completedAt
+                    progress
+                    scopeHistory
+                    issueCountHistory
+                }
+                pageInfo {
+                    hasNextPage
+                    endCursor
+                }
+            }
+        }
+        """
+        variables: dict[str, Any] = {
+            "first": min(limit, 100),
+            "filter": {"team": {"id": {"eq": team_id}}},
+        }
+        result = self._execute_query(query, variables)
+        if "error" in result:
+            return result
+        cycles_data = result.get("cycles", {})
+        return {
+            "cycles": cycles_data.get("nodes", []),
+            "total": len(cycles_data.get("nodes", [])),
+            "hasNextPage": cycles_data.get("pageInfo", {}).get("hasNextPage", False),
+        }
+
+    def list_issue_comments(
+        self,
+        issue_id: str,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """List comments on a specific issue."""
+        query = """
+        query Issue($id: String!) {
+            issue(id: $id) {
+                comments(first: 50) {
+                    nodes {
+                        id
+                        body
+                        createdAt
+                        updatedAt
+                        user { id name email }
+                    }
+                }
+            }
+        }
+        """
+        result = self._execute_query(query, {"id": issue_id})
+        if "error" in result:
+            return result
+        issue = result.get("issue", {})
+        comments_data = issue.get("comments", {})
+        return {
+            "comments": comments_data.get("nodes", []),
+            "total": len(comments_data.get("nodes", [])),
+        }
+
+    def create_issue_relation(
+        self,
+        issue_id: str,
+        related_issue_id: str,
+        relation_type: str = "related",
+    ) -> dict[str, Any]:
+        """Create a relation between two issues."""
+        mutation = """
+        mutation IssueRelationCreate($input: IssueRelationCreateInput!) {
+            issueRelationCreate(input: $input) {
+                success
+                issueRelation {
+                    id
+                    type
+                    issue { id identifier title }
+                    relatedIssue { id identifier title }
+                }
+            }
+        }
+        """
+        input_data: dict[str, Any] = {
+            "issueId": issue_id,
+            "relatedIssueId": related_issue_id,
+            "type": relation_type,
+        }
+        result = self._execute_query(mutation, {"input": input_data})
+        if "error" in result:
+            return result
+        return result.get("issueRelationCreate", result)
+
     # --- Users ---
 
     def list_users(self) -> dict[str, Any]:
@@ -1226,6 +1330,85 @@ def register_tools(
             return client
         try:
             return client.get_viewer()
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Cycles ---
+
+    @mcp.tool()
+    def linear_cycles_list(
+        team_id: str,
+        limit: int = 50,
+    ) -> dict:
+        """
+        List cycles (sprints) for a Linear team.
+
+        Args:
+            team_id: Team UUID (required)
+            limit: Maximum number of results (1-100, default 50)
+
+        Returns:
+            Dict with cycles list including id, number, name, dates, and progress
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_cycles(team_id=team_id, limit=limit)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def linear_issue_comments_list(issue_id: str) -> dict:
+        """
+        List comments on a Linear issue.
+
+        Args:
+            issue_id: Issue UUID or identifier (e.g., 'ENG-123')
+
+        Returns:
+            Dict with comments list including id, body, author, and timestamps
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_issue_comments(issue_id=issue_id)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def linear_issue_relation_create(
+        issue_id: str,
+        related_issue_id: str,
+        relation_type: str = "related",
+    ) -> dict:
+        """
+        Create a relation between two Linear issues.
+
+        Args:
+            issue_id: Source issue UUID or identifier (required)
+            related_issue_id: Target issue UUID or identifier (required)
+            relation_type: Relation type - "related", "blocks", "duplicate" (default "related")
+
+        Returns:
+            Dict with created relation details
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.create_issue_relation(
+                issue_id=issue_id,
+                related_issue_id=related_issue_id,
+                relation_type=relation_type,
+            )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

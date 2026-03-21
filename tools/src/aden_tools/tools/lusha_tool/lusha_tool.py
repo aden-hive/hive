@@ -303,3 +303,143 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             return data
 
         return data
+
+    @mcp.tool()
+    def lusha_bulk_enrich_persons(
+        details_json: str,
+    ) -> dict:
+        """Bulk enrich multiple persons in a single request.
+
+        Args:
+            details_json: JSON array of person objects. Each object should have
+                at least one of: email, linkedinUrl, or firstName+lastName+companyDomain.
+                Example: [{"email": "j@acme.com"},
+                {"firstName": "Jane", "lastName": "Doe", "companyDomain": "acme.com"}]
+        """
+        import json as _json
+
+        headers = _get_headers()
+        if not headers:
+            return {
+                "error": "LUSHA_API_KEY is required",
+                "help": "Set LUSHA_API_KEY environment variable",
+            }
+
+        try:
+            persons = _json.loads(details_json)
+        except _json.JSONDecodeError as e:
+            return {"error": f"Invalid JSON: {e}"}
+
+        if not isinstance(persons, list) or not persons:
+            return {"error": "details_json must be a non-empty JSON array"}
+        if len(persons) > 50:
+            return {"error": "Maximum 50 persons per request"}
+
+        payload = {"contacts": persons}
+        data = _post(f"{BASE_URL}/v2/person/bulk", headers, payload)
+        if "error" in data:
+            return data
+
+        results = []
+        for p in data.get("data", data.get("contacts", [])):
+            results.append(_extract_person(p))
+        return {"results": results, "count": len(results)}
+
+    @mcp.tool()
+    def lusha_get_technologies(
+        domain: str,
+    ) -> dict:
+        """Get the technology stack used by a company.
+
+        Args:
+            domain: Company domain (e.g. 'acme.com').
+        """
+        headers = _get_headers()
+        if not headers:
+            return {
+                "error": "LUSHA_API_KEY is required",
+                "help": "Set LUSHA_API_KEY environment variable",
+            }
+        if not domain:
+            return {"error": "domain is required"}
+
+        data = _get(f"{BASE_URL}/v2/company", headers, {"domain": domain})
+        if "error" in data:
+            return data
+
+        return {
+            "domain": domain,
+            "company_name": data.get("name") or data.get("companyName", ""),
+            "technologies": data.get("technologies", []),
+            "industry": data.get("industry", ""),
+        }
+
+    @mcp.tool()
+    def lusha_search_decision_makers(
+        company_domains: str,
+        country: str = "",
+        page: int = 0,
+        page_size: int = 20,
+    ) -> dict:
+        """Search for decision makers (VP, C-level, Director) at companies.
+
+        Convenience wrapper around lusha_search_contacts pre-filtered for
+        senior seniority levels (Director, VP, C-level, Owner/Partner).
+
+        Args:
+            company_domains: Comma-separated company domains (e.g. 'acme.com,example.com').
+            country: Country name to filter by (optional).
+            page: Page number (0-indexed, default 0).
+            page_size: Results per page (default 20).
+        """
+        headers = _get_headers()
+        if not headers:
+            return {
+                "error": "LUSHA_API_KEY is required",
+                "help": "Set LUSHA_API_KEY environment variable",
+            }
+        if not company_domains:
+            return {"error": "company_domains is required"}
+
+        contacts_include: dict[str, Any] = {
+            # Seniority levels: 4=Director, 5=VP, 6=C-level, 7=Owner/Partner
+            "seniorities": ["4", "5", "6", "7"],
+        }
+        if country:
+            contacts_include["locations"] = [{"country": country}]
+
+        companies_include: dict[str, Any] = {
+            "domains": [d.strip() for d in company_domains.split(",")],
+        }
+
+        payload: dict[str, Any] = {
+            "pages": {"page": page, "size": min(page_size, 100)},
+            "filters": {
+                "contacts": {"include": contacts_include},
+                "companies": {"include": companies_include},
+            },
+        }
+
+        data = _post(f"{BASE_URL}/prospecting/contact/search", headers, payload)
+        if "error" in data:
+            return data
+
+        contacts = data.get("data", [])
+        return {
+            "count": len(contacts),
+            "total": data.get("total"),
+            "contacts": [
+                {
+                    "id": c.get("contactId"),
+                    "first_name": c.get("firstName"),
+                    "last_name": c.get("lastName"),
+                    "job_title": c.get("jobTitle"),
+                    "seniority": c.get("seniority"),
+                    "department": c.get("department"),
+                    "company_name": c.get("companyName"),
+                    "company_domain": c.get("companyDomain"),
+                    "location": c.get("location"),
+                }
+                for c in contacts
+            ],
+        }

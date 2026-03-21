@@ -338,3 +338,147 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             return {"error": f"HTTP {resp.status_code}: {resp.text[:500]}"}
 
         return {"result": "deleted", "key": key}
+
+    @mcp.tool()
+    def s3_copy_object(
+        source_bucket: str,
+        source_key: str,
+        dest_bucket: str,
+        dest_key: str,
+    ) -> dict:
+        """Copy an object within or between S3 buckets.
+
+        Args:
+            source_bucket: Source S3 bucket name.
+            source_key: Source object key (path).
+            dest_bucket: Destination S3 bucket name.
+            dest_key: Destination object key (path).
+        """
+        cfg = _get_config()
+        if isinstance(cfg, dict):
+            return cfg
+        access_key, secret_key, region = cfg
+        if not source_bucket or not source_key or not dest_bucket or not dest_key:
+            return {"error": "source_bucket, source_key, dest_bucket, and dest_key are required"}
+
+        extra = {"x-amz-copy-source": f"/{source_bucket}/{source_key}"}
+
+        resp = _s3_request(
+            "PUT", dest_bucket, dest_key, access_key, secret_key, region, extra_headers=extra
+        )
+        if resp.status_code >= 400:
+            return {"error": f"HTTP {resp.status_code}: {resp.text[:500]}"}
+
+        return {
+            "result": "copied",
+            "source": f"{source_bucket}/{source_key}",
+            "destination": f"{dest_bucket}/{dest_key}",
+        }
+
+    @mcp.tool()
+    def s3_get_object_metadata(
+        bucket: str,
+        key: str,
+    ) -> dict:
+        """Get object metadata without downloading content (HEAD request).
+
+        Args:
+            bucket: S3 bucket name.
+            key: Object key (path).
+        """
+        cfg = _get_config()
+        if isinstance(cfg, dict):
+            return cfg
+        access_key, secret_key, region = cfg
+        if not bucket or not key:
+            return {"error": "bucket and key are required"}
+
+        resp = _s3_request("HEAD", bucket, key, access_key, secret_key, region)
+        if resp.status_code == 404:
+            return {"error": "Object not found"}
+        if resp.status_code >= 400:
+            return {"error": f"HTTP {resp.status_code}"}
+
+        metadata = {
+            "key": key,
+            "content_type": resp.headers.get("content-type", ""),
+            "content_length": resp.headers.get("content-length"),
+            "last_modified": resp.headers.get("last-modified"),
+            "etag": resp.headers.get("etag"),
+            "storage_class": resp.headers.get("x-amz-storage-class", "STANDARD"),
+        }
+        # Include any x-amz-meta-* custom metadata
+        for header, value in resp.headers.items():
+            if header.lower().startswith("x-amz-meta-"):
+                meta_key = header[len("x-amz-meta-") :]
+                metadata[f"meta_{meta_key}"] = value
+        return metadata
+
+    @mcp.tool()
+    def s3_generate_presigned_url(
+        bucket: str,
+        key: str,
+        expires_in: int = 3600,
+    ) -> dict:
+        """Generate a pre-signed URL for temporary access to an S3 object.
+
+        The URL allows anyone with it to download the object without
+        AWS credentials, until it expires.
+
+        Args:
+            bucket: S3 bucket name.
+            key: Object key (path).
+            expires_in: URL validity in seconds (default 3600 = 1 hour, max 604800 = 7 days).
+        """
+        cfg = _get_config()
+        if isinstance(cfg, dict):
+            return cfg
+        access_key, secret_key, region = cfg
+        if not bucket or not key:
+            return {"error": "bucket and key are required"}
+
+        expires_in = max(1, min(expires_in, 604800))
+
+        now = datetime.datetime.now(datetime.UTC)
+        datestamp = now.strftime("%Y%m%d")
+        amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+        credential_scope = f"{datestamp}/{region}/s3/aws4_request"
+        credential = f"{access_key}/{credential_scope}"
+
+        host = f"{bucket}.s3.{region}.amazonaws.com"
+        path = f"/{key}"
+
+        query_params = {
+            "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+            "X-Amz-Credential": credential,
+            "X-Amz-Date": amz_date,
+            "X-Amz-Expires": str(expires_in),
+            "X-Amz-SignedHeaders": "host",
+        }
+
+        sorted_params = sorted(query_params.items())
+        canonical_qs = "&".join(
+            f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(str(v), safe='')}"
+            for k, v in sorted_params
+        )
+
+        canonical_request = f"GET\n{path}\n{canonical_qs}\nhost:{host}\n\nhost\nUNSIGNED-PAYLOAD"
+
+        string_to_sign = (
+            f"AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n"
+            f"{hashlib.sha256(canonical_request.encode()).hexdigest()}"
+        )
+
+        signing_key = _get_signing_key(secret_key, datestamp, region)
+        signature = hmac.new(
+            signing_key, string_to_sign.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+
+        presigned_url = f"https://{host}{path}?{canonical_qs}&X-Amz-Signature={signature}"
+
+        return {
+            "url": presigned_url,
+            "expires_in": expires_in,
+            "key": key,
+            "bucket": bucket,
+        }

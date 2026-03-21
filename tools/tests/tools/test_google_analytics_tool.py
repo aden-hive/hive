@@ -723,8 +723,8 @@ class TestGaGetTrafficSources:
 class TestToolRegistration:
     """Tests for tool registration in register_all_tools."""
 
-    def test_register_tools_registers_all_four_tools(self):
-        """register_tools registers exactly 4 GA tool functions."""
+    def test_register_tools_registers_all_seven_tools(self):
+        """register_tools registers exactly 7 GA tool functions."""
         mcp = MagicMock()
         registered_fns = {}
         mcp.tool.return_value = lambda fn: registered_fns.update({fn.__name__: fn}) or fn
@@ -736,6 +736,9 @@ class TestToolRegistration:
             "ga_get_realtime",
             "ga_get_top_pages",
             "ga_get_traffic_sources",
+            "ga_get_user_demographics",
+            "ga_get_conversion_events",
+            "ga_get_landing_pages",
         }
         assert set(registered_fns.keys()) == expected_tools
 
@@ -768,4 +771,4 @@ class TestToolRegistration:
 
         register_tools(mcp, credentials=cred_manager)
 
-        assert len(registered_fns) == 4
+        assert len(registered_fns) == 7

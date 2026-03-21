@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from typing import Any
 
 from aiohttp import web
 
@@ -64,15 +65,15 @@ async def handle_trigger(request: web.Request) -> web.Response:
         session_state=session_state,
     )
 
-    # Cancel queen's in-progress LLM turn so it picks up the mode change cleanly
+    # Cancel queen's in-progress LLM turn so it picks up the phase change cleanly
     if session.queen_executor:
         node = session.queen_executor.node_registry.get("queen")
         if node and hasattr(node, "cancel_current_turn"):
             node.cancel_current_turn()
 
-    # Switch queen to running mode (mirrors run_agent_with_input tool behavior)
-    if session.mode_state is not None:
-        await session.mode_state.switch_to_running(source="frontend")
+    # Switch queen to running phase (mirrors run_agent_with_input tool behavior)
+    if session.phase_state is not None:
+        await session.phase_state.switch_to_running(source="frontend")
 
     return web.json_response({"execution_id": execution_id})
 
@@ -107,7 +108,10 @@ async def handle_chat(request: web.Request) -> web.Response:
     The input box is permanently connected to the queen agent.
     Worker input is handled separately via /worker-input.
 
-    Body: {"message": "hello"}
+    Body: {"message": "hello", "images": [{"type": "image_url", "image_url": {"url": "data:..."}}]}
+
+    The optional ``images`` field accepts a list of OpenAI-format image_url
+    content blocks.  The frontend encodes images as base64 data URIs.
     """
     session, err = resolve_session(request)
     if err:
@@ -115,15 +119,31 @@ async def handle_chat(request: web.Request) -> web.Response:
 
     body = await request.json()
     message = body.get("message", "")
+    image_content = body.get("images") or None  # list[dict] | None
 
-    if not message:
+    if not message and not image_content:
         return web.json_response({"error": "message is required"}, status=400)
 
     queen_executor = session.queen_executor
     if queen_executor is not None:
         node = queen_executor.node_registry.get("queen")
         if node is not None and hasattr(node, "inject_event"):
-            await node.inject_event(message, is_client_input=True)
+            await node.inject_event(message, is_client_input=True, image_content=image_content)
+            # Publish to EventBus so the session event log captures user messages
+            from framework.runtime.event_bus import AgentEvent, EventType
+
+            await session.event_bus.publish(
+                AgentEvent(
+                    type=EventType.CLIENT_INPUT_RECEIVED,
+                    stream_id="queen",
+                    node_id="queen",
+                    execution_id=session.id,
+                    data={
+                        "content": message,
+                        "image_count": len(image_content) if image_content else 0,
+                    },
+                )
+            )
             return web.json_response(
                 {
                     "status": "queen",
@@ -131,7 +151,19 @@ async def handle_chat(request: web.Request) -> web.Response:
                 }
             )
 
-    return web.json_response({"error": "Queen not available"}, status=503)
+    # Queen is dead — try to revive her
+    manager: Any = request.app["manager"]
+    try:
+        await manager.revive_queen(session, initial_prompt=message)
+        return web.json_response(
+            {
+                "status": "queen_revived",
+                "delivered": True,
+            }
+        )
+    except Exception as e:
+        logger.error("Failed to revive queen: %s", e)
+        return web.json_response({"error": "Queen not available"}, status=503)
 
 
 async def handle_queen_context(request: web.Request) -> web.Response:
@@ -159,6 +191,20 @@ async def handle_queen_context(request: web.Request) -> web.Response:
         if node is not None and hasattr(node, "inject_event"):
             await node.inject_event(message, is_client_input=False)
             return web.json_response({"status": "queued", "delivered": True})
+
+    # Queen is dead — try to revive her
+    manager: Any = request.app["manager"]
+    try:
+        await manager.revive_queen(session)
+        # After revival, deliver the message
+        queen_executor = session.queen_executor
+        if queen_executor is not None:
+            node = queen_executor.node_registry.get("queen")
+            if node is not None and hasattr(node, "inject_event"):
+                await node.inject_event(message, is_client_input=False)
+                return web.json_response({"status": "queued_revived", "delivered": True})
+    except Exception as e:
+        logger.error("Failed to revive queen for context: %s", e)
 
     return web.json_response({"error": "Queen not available"}, status=503)
 
@@ -288,6 +334,60 @@ async def handle_resume(request: web.Request) -> web.Response:
     )
 
 
+async def handle_pause(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/pause — pause the worker (queen stays alive).
+
+    Mirrors the queen's stop_worker() tool: cancels all active worker
+    executions, pauses timers so nothing auto-restarts, but does NOT
+    touch the queen so she can observe and react to the pause.
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    if not session.worker_runtime:
+        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+
+    runtime = session.worker_runtime
+    cancelled = []
+
+    for graph_id in runtime.list_graphs():
+        reg = runtime.get_graph_registration(graph_id)
+        if reg is None:
+            continue
+        for _ep_id, stream in reg.streams.items():
+            # Signal shutdown on active nodes to abort in-flight LLM streams
+            for executor in stream._active_executors.values():
+                for node in executor.node_registry.values():
+                    if hasattr(node, "signal_shutdown"):
+                        node.signal_shutdown()
+                    if hasattr(node, "cancel_current_turn"):
+                        node.cancel_current_turn()
+
+            for exec_id in list(stream.active_execution_ids):
+                try:
+                    ok = await stream.cancel_execution(exec_id, reason="Execution paused by user")
+                    if ok:
+                        cancelled.append(exec_id)
+                except Exception:
+                    pass
+
+    # Pause timers so the next tick doesn't restart execution
+    runtime.pause_timers()
+
+    # Switch to staging (agent still loaded, ready to re-run)
+    if session.phase_state is not None:
+        await session.phase_state.switch_to_staging(source="frontend")
+
+    return web.json_response(
+        {
+            "stopped": bool(cancelled),
+            "cancelled": cancelled,
+            "timers_paused": True,
+        }
+    )
+
+
 async def handle_stop(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/stop — cancel a running execution.
 
@@ -319,7 +419,9 @@ async def handle_stop(request: web.Request) -> web.Response:
                     if hasattr(node, "cancel_current_turn"):
                         node.cancel_current_turn()
 
-            cancelled = await stream.cancel_execution(execution_id)
+            cancelled = await stream.cancel_execution(
+                execution_id, reason="Execution stopped by user"
+            )
             if cancelled:
                 # Cancel queen's in-progress LLM turn
                 if session.queen_executor:
@@ -328,8 +430,8 @@ async def handle_stop(request: web.Request) -> web.Response:
                         node.cancel_current_turn()
 
                 # Switch to staging (agent still loaded, ready to re-run)
-                if session.mode_state is not None:
-                    await session.mode_state.switch_to_staging(source="frontend")
+                if session.phase_state is not None:
+                    await session.phase_state.switch_to_staging(source="frontend")
 
                 return web.json_response(
                     {
@@ -416,7 +518,7 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/sessions/{session_id}/chat", handle_chat)
     app.router.add_post("/api/sessions/{session_id}/queen-context", handle_queen_context)
     app.router.add_post("/api/sessions/{session_id}/worker-input", handle_worker_input)
-    app.router.add_post("/api/sessions/{session_id}/pause", handle_stop)
+    app.router.add_post("/api/sessions/{session_id}/pause", handle_pause)
     app.router.add_post("/api/sessions/{session_id}/resume", handle_resume)
     app.router.add_post("/api/sessions/{session_id}/stop", handle_stop)
     app.router.add_post("/api/sessions/{session_id}/cancel-queen", handle_cancel_queen)

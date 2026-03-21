@@ -16,6 +16,9 @@ PAGERDUTY_CREDENTIALS = {
             "pagerduty_create_incident",
             "pagerduty_update_incident",
             "pagerduty_list_services",
+            "pagerduty_list_oncalls",
+            "pagerduty_add_incident_note",
+            "pagerduty_list_escalation_policies",
         ],
         required=True,
         startup_required=False,
@@ -37,6 +40,7 @@ PAGERDUTY_CREDENTIALS = {
         tools=[
             "pagerduty_create_incident",
             "pagerduty_update_incident",
+            "pagerduty_add_incident_note",
         ],
         required=False,
         startup_required=False,

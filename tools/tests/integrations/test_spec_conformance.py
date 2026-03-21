@@ -23,7 +23,6 @@ from aden_tools.credentials import (
     EMAIL_CREDENTIALS,
     GITHUB_CREDENTIALS,
     HUBSPOT_CREDENTIALS,
-    LLM_CREDENTIALS,
     SEARCH_CREDENTIALS,
     SLACK_CREDENTIALS,
 )
@@ -206,7 +205,6 @@ class TestSpecsMergedIntoCredentialSpecs:
     """All category credential dicts must be merged into the global CREDENTIAL_SPECS."""
 
     CATEGORY_DICTS = {
-        "LLM_CREDENTIALS": LLM_CREDENTIALS,
         "SEARCH_CREDENTIALS": SEARCH_CREDENTIALS,
         "EMAIL_CREDENTIALS": EMAIL_CREDENTIALS,
         "GITHUB_CREDENTIALS": GITHUB_CREDENTIALS,

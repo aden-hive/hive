@@ -116,10 +116,10 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 ```json
 {
   "mcpServers": {
-    "agent-builder": {
+    "coder-tools": {
       "command": "uv",
-      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
-      "cwd": "core"
+      "args": ["run", "coder_tools_server.py", "--stdio"],
+      "cwd": "tools"
     },
     "tools": {
       "command": "uv",
@@ -130,7 +130,7 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 }
 ```
 
-The tools MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
+The `coder-tools` server provides agent scaffolding via `initialize_and_build_agent` and related tools. The `tools` MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
 
 ## Storage
 
@@ -172,7 +172,7 @@ Add to `.vscode/settings.json`:
 ## Security Best Practices
 
 1. **Never commit API keys** - Use environment variables or `.env` files
-2. **`.env` is git-ignored** - Copy `.env.example` to `.env` at the project root and fill in your values
+2. **If you use a local `.env` file, keep it private** - This repository does not include a root `.env.example`; use your own local `.env` file or shell environment variables for secrets
 3. **Use real provider keys in non-production environments** - validate configuration with low-risk inputs before production rollout
 4. **Credential isolation** - Each tool validates its own credentials at runtime
 

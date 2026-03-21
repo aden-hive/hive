@@ -14,12 +14,16 @@ import os
 import threading
 import time
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from framework.llm.anthropic import AnthropicProvider
-from framework.llm.litellm import LiteLLMProvider, _compute_retry_delay
+from framework.llm.litellm import (
+    OPENROUTER_TOOL_COMPAT_MODEL_CACHE,
+    LiteLLMProvider,
+    _compute_retry_delay,
+)
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 
 
@@ -57,6 +61,34 @@ class TestLiteLLMProviderInit:
             model="gpt-4o-mini", api_key="my-key", api_base="https://my-proxy.com/v1"
         )
         assert provider.api_base == "https://my-proxy.com/v1"
+
+    def test_init_minimax_defaults_api_base(self):
+        """MiniMax should default to the official OpenAI-compatible endpoint."""
+        provider = LiteLLMProvider(model="minimax/MiniMax-M2.1", api_key="my-key")
+        assert provider.api_base == "https://api.minimax.io/v1"
+
+    def test_init_minimax_keeps_custom_api_base(self):
+        """Explicit api_base should win over MiniMax defaults."""
+        provider = LiteLLMProvider(
+            model="minimax/MiniMax-M2.1",
+            api_key="my-key",
+            api_base="https://proxy.example/v1",
+        )
+        assert provider.api_base == "https://proxy.example/v1"
+
+    def test_init_openrouter_defaults_api_base(self):
+        """OpenRouter should default to the official OpenAI-compatible endpoint."""
+        provider = LiteLLMProvider(model="openrouter/x-ai/grok-4.20-beta", api_key="my-key")
+        assert provider.api_base == "https://openrouter.ai/api/v1"
+
+    def test_init_openrouter_keeps_custom_api_base(self):
+        """Explicit api_base should win over OpenRouter defaults."""
+        provider = LiteLLMProvider(
+            model="openrouter/x-ai/grok-4.20-beta",
+            api_key="my-key",
+            api_base="https://proxy.example/v1",
+        )
+        assert provider.api_base == "https://proxy.example/v1"
 
     def test_init_ollama_no_key_needed(self):
         """Test that Ollama models don't require API key."""
@@ -177,6 +209,34 @@ class TestToolConversion:
         assert result["function"]["description"] == "Search the web"
         assert result["function"]["parameters"]["properties"]["query"]["type"] == "string"
         assert result["function"]["parameters"]["required"] == ["query"]
+
+    def test_parse_tool_call_arguments_repairs_truncated_json(self):
+        """Truncated JSON fragments should be repaired into valid tool inputs."""
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+
+        parsed = provider._parse_tool_call_arguments(
+            (
+                '{"question":"What story structure should the agent use?",'
+                '"options":["3-act structure","Beginning-Middle-End","Random paragraph"'
+            ),
+            "ask_user",
+        )
+
+        assert parsed == {
+            "question": "What story structure should the agent use?",
+            "options": [
+                "3-act structure",
+                "Beginning-Middle-End",
+                "Random paragraph",
+            ],
+        }
+
+    def test_parse_tool_call_arguments_raises_when_unrepairable(self):
+        """Completely invalid JSON should fail fast instead of producing _raw loops."""
+        provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
+
+        with pytest.raises(ValueError, match="Failed to parse tool call arguments"):
+            provider._parse_tool_call_arguments('{"question": foo', "ask_user")
 
 
 class TestAnthropicProviderBackwardCompatibility:
@@ -629,6 +689,352 @@ class TestAsyncComplete:
         assert call_thread_ids[0] != main_thread_id, (
             "Base acomplete() should offload sync complete() to a thread pool"
         )
+
+
+class TestMiniMaxStreamFallback:
+    """MiniMax models should use non-stream fallback due to parser incompatibility."""
+
+    @pytest.mark.asyncio
+    async def test_stream_uses_nonstream_fallback_for_minimax(self):
+        """stream() should call acomplete() and synthesize stream events for MiniMax."""
+        from framework.llm.stream_events import FinishEvent, TextDeltaEvent
+
+        provider = LiteLLMProvider(model="minimax-text-01", api_key="test-key")
+
+        mock_response = LLMResponse(
+            content="hello from minimax",
+            model="minimax-text-01",
+            input_tokens=7,
+            output_tokens=4,
+            stop_reason="stop",
+            raw_response=None,
+        )
+        provider.acomplete = AsyncMock(return_value=mock_response)
+
+        events = []
+        async for event in provider.stream(messages=[{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        assert provider.acomplete.await_count == 1
+        assert any(isinstance(e, TextDeltaEvent) for e in events)
+        finish = [e for e in events if isinstance(e, FinishEvent)]
+        assert len(finish) == 1
+        assert finish[0].model == "minimax-text-01"
+
+    def test_is_minimax_model_variants(self):
+        """Recognize both prefixed and plain MiniMax model names."""
+        assert LiteLLMProvider(model="minimax-text-01", api_key="x")._is_minimax_model()
+        assert LiteLLMProvider(model="minimax/minimax-text-01", api_key="x")._is_minimax_model()
+        assert not LiteLLMProvider(model="gpt-4o-mini", api_key="x")._is_minimax_model()
+
+
+class TestOpenRouterToolCompatFallback:
+    """OpenRouter models should fall back when native tool use is unavailable."""
+
+    def teardown_method(self):
+        OPENROUTER_TOOL_COMPAT_MODEL_CACHE.clear()
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_stream_falls_back_to_json_tool_emulation(self, mock_acompletion):
+        """OpenRouter tool-use 404s should emit synthetic ToolCallEvents instead of errors."""
+        from framework.llm.stream_events import FinishEvent, ToolCallEvent
+
+        provider = LiteLLMProvider(
+            model="openrouter/liquid/lfm-2.5-1.2b-thinking:free",
+            api_key="test-key",
+        )
+        tools = [
+            Tool(
+                name="web_search",
+                description="Search the web",
+                parameters={
+                    "properties": {
+                        "query": {"type": "string"},
+                        "num_results": {"type": "integer"},
+                    },
+                    "required": ["query"],
+                },
+            )
+        ]
+
+        compat_response = MagicMock()
+        compat_response.choices = [MagicMock()]
+        compat_response.choices[0].message.content = (
+            '{"assistant_response":"","tool_calls":['
+            '{"name":"web_search","arguments":'
+            '{"query":"Python 3.13 release notes","num_results":3}}'
+            "]}"
+        )
+        compat_response.choices[0].finish_reason = "stop"
+        compat_response.model = provider.model
+        compat_response.usage.prompt_tokens = 18
+        compat_response.usage.completion_tokens = 9
+
+        async def side_effect(*args, **kwargs):
+            if kwargs.get("stream"):
+                raise RuntimeError(
+                    'OpenrouterException - {"error":{"message":"No endpoints found '
+                    "that support tool use. To learn more about provider routing, "
+                    'visit: https://openrouter.ai/docs/guides/routing/provider-selection",'
+                    '"code":404}}'
+                )
+            return compat_response
+
+        mock_acompletion.side_effect = side_effect
+
+        events = []
+        async for event in provider.stream(
+            messages=[{"role": "user", "content": "Search for the Python 3.13 release notes."}],
+            system="Use tools when needed.",
+            tools=tools,
+            max_tokens=256,
+        ):
+            events.append(event)
+
+        tool_calls = [event for event in events if isinstance(event, ToolCallEvent)]
+        assert len(tool_calls) == 1
+        assert tool_calls[0].tool_name == "web_search"
+        assert tool_calls[0].tool_input == {
+            "query": "Python 3.13 release notes",
+            "num_results": 3,
+        }
+        assert tool_calls[0].tool_use_id.startswith("openrouter_compat_")
+
+        finish_events = [event for event in events if isinstance(event, FinishEvent)]
+        assert len(finish_events) == 1
+        assert finish_events[0].stop_reason == "tool_calls"
+        assert finish_events[0].input_tokens == 18
+        assert finish_events[0].output_tokens == 9
+
+        assert mock_acompletion.call_count == 2
+        first_call = mock_acompletion.call_args_list[0].kwargs
+        assert first_call["stream"] is True
+        assert "tools" in first_call
+
+        second_call = mock_acompletion.call_args_list[1].kwargs
+        assert "tools" not in second_call
+        assert "Tool compatibility mode is active" in second_call["messages"][0]["content"]
+        assert provider.model in OPENROUTER_TOOL_COMPAT_MODEL_CACHE
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_stream_tool_compat_parses_textual_tool_calls_and_uses_cache(
+        self,
+        mock_acompletion,
+    ):
+        """Textual tool-call markers should become ToolCallEvents and skip repeat probing."""
+        from framework.llm.stream_events import ToolCallEvent
+
+        provider = LiteLLMProvider(
+            model="openrouter/liquid/lfm-2.5-1.2b-thinking:free",
+            api_key="test-key",
+        )
+        tools = [
+            Tool(
+                name="ask_user_multiple",
+                description="Ask the user a multiple-choice question",
+                parameters={
+                    "properties": {
+                        "options": {"type": "array"},
+                        "question": {"type": "string"},
+                        "prompt": {"type": "string"},
+                    },
+                    "required": ["options", "question", "prompt"],
+                },
+            )
+        ]
+
+        compat_response = MagicMock()
+        compat_response.choices = [MagicMock()]
+        compat_response.choices[0].message.content = (
+            "<|tool_call_start|>"
+            "[ask_user_multiple(options=['Quartet Collaborator', 'Project Advisor'], "
+            "question='Who are you?', prompt='Who are you?')]"
+            "<|tool_call_end|>"
+        )
+        compat_response.choices[0].finish_reason = "stop"
+        compat_response.model = provider.model
+        compat_response.usage.prompt_tokens = 10
+        compat_response.usage.completion_tokens = 5
+
+        call_state = {"count": 0}
+
+        async def side_effect(*args, **kwargs):
+            call_state["count"] += 1
+            if kwargs.get("stream"):
+                raise RuntimeError(
+                    'OpenrouterException - {"error":{"message":"No endpoints found '
+                    'that support tool use.","code":404}}'
+                )
+            return compat_response
+
+        mock_acompletion.side_effect = side_effect
+
+        first_events = []
+        async for event in provider.stream(
+            messages=[{"role": "user", "content": "Who are you?"}],
+            system="Use tools when needed.",
+            tools=tools,
+            max_tokens=128,
+        ):
+            first_events.append(event)
+
+        tool_calls = [event for event in first_events if isinstance(event, ToolCallEvent)]
+        assert len(tool_calls) == 1
+        assert tool_calls[0].tool_name == "ask_user_multiple"
+        assert tool_calls[0].tool_input == {
+            "options": ["Quartet Collaborator", "Project Advisor"],
+            "question": "Who are you?",
+            "prompt": "Who are you?",
+        }
+
+        second_events = []
+        async for event in provider.stream(
+            messages=[{"role": "user", "content": "Who are you?"}],
+            system="Use tools when needed.",
+            tools=tools,
+            max_tokens=128,
+        ):
+            second_events.append(event)
+
+        second_tool_calls = [event for event in second_events if isinstance(event, ToolCallEvent)]
+        assert len(second_tool_calls) == 1
+        assert mock_acompletion.call_count == 3
+        assert mock_acompletion.call_args_list[0].kwargs["stream"] is True
+        assert "stream" not in mock_acompletion.call_args_list[1].kwargs
+        assert "stream" not in mock_acompletion.call_args_list[2].kwargs
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_stream_tool_compat_parses_plain_text_tool_call_lines(
+        self,
+        mock_acompletion,
+    ):
+        """Plain textual tool-call lines should execute as tools, not user-visible text."""
+        from framework.llm.stream_events import FinishEvent, TextDeltaEvent, ToolCallEvent
+
+        provider = LiteLLMProvider(
+            model="openrouter/liquid/lfm-2.5-1.2b-thinking:free",
+            api_key="test-key",
+        )
+        tools = [
+            Tool(
+                name="ask_user",
+                description="Ask the user a single multiple-choice question",
+                parameters={
+                    "properties": {
+                        "question": {"type": "string"},
+                        "options": {"type": "array"},
+                    },
+                    "required": ["question", "options"],
+                },
+            )
+        ]
+
+        compat_response = MagicMock()
+        compat_response.choices = [MagicMock()]
+        compat_response.choices[0].message.content = (
+            "Queen has been loaded. It's ready to assist with your planning needs.\n\n"
+            "ask_user('What would you like to do?', ['Define a new agent', "
+            "'Diagnose an existing agent', 'Explore tools'])"
+        )
+        compat_response.choices[0].finish_reason = "stop"
+        compat_response.model = provider.model
+        compat_response.usage.prompt_tokens = 11
+        compat_response.usage.completion_tokens = 7
+
+        async def side_effect(*args, **kwargs):
+            if kwargs.get("stream"):
+                raise RuntimeError(
+                    'OpenrouterException - {"error":{"message":"No endpoints found '
+                    'that support tool use.","code":404}}'
+                )
+            return compat_response
+
+        mock_acompletion.side_effect = side_effect
+
+        events = []
+        async for event in provider.stream(
+            messages=[{"role": "user", "content": "hello"}],
+            system="Use tools when needed.",
+            tools=tools,
+            max_tokens=128,
+        ):
+            events.append(event)
+
+        tool_calls = [event for event in events if isinstance(event, ToolCallEvent)]
+        assert len(tool_calls) == 1
+        assert tool_calls[0].tool_name == "ask_user"
+        assert tool_calls[0].tool_input == {
+            "question": "What would you like to do?",
+            "options": ["Define a new agent", "Diagnose an existing agent", "Explore tools"],
+        }
+
+        text_events = [event for event in events if isinstance(event, TextDeltaEvent)]
+        assert len(text_events) == 1
+        assert "ask_user(" not in text_events[0].snapshot
+        assert text_events[0].snapshot == (
+            "Queen has been loaded. It's ready to assist with your planning needs."
+        )
+
+        finish_events = [event for event in events if isinstance(event, FinishEvent)]
+        assert len(finish_events) == 1
+        assert finish_events[0].stop_reason == "tool_calls"
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_stream_tool_compat_treats_non_json_as_plain_text(self, mock_acompletion):
+        """If fallback output is not valid JSON, preserve it as assistant text."""
+        from framework.llm.stream_events import FinishEvent, TextDeltaEvent, ToolCallEvent
+
+        provider = LiteLLMProvider(
+            model="openrouter/liquid/lfm-2.5-1.2b-thinking:free",
+            api_key="test-key",
+        )
+        tools = [
+            Tool(
+                name="web_search",
+                description="Search the web",
+                parameters={"properties": {"query": {"type": "string"}}, "required": ["query"]},
+            )
+        ]
+
+        compat_response = MagicMock()
+        compat_response.choices = [MagicMock()]
+        compat_response.choices[0].message.content = "I can answer directly without tools."
+        compat_response.choices[0].finish_reason = "stop"
+        compat_response.model = provider.model
+        compat_response.usage.prompt_tokens = 12
+        compat_response.usage.completion_tokens = 6
+
+        async def side_effect(*args, **kwargs):
+            if kwargs.get("stream"):
+                raise RuntimeError(
+                    'OpenrouterException - {"error":{"message":"No endpoints found '
+                    'that support tool use.","code":404}}'
+                )
+            return compat_response
+
+        mock_acompletion.side_effect = side_effect
+
+        events = []
+        async for event in provider.stream(
+            messages=[{"role": "user", "content": "Say hello."}],
+            system="Be concise.",
+            tools=tools,
+            max_tokens=128,
+        ):
+            events.append(event)
+
+        text_events = [event for event in events if isinstance(event, TextDeltaEvent)]
+        assert len(text_events) == 1
+        assert text_events[0].snapshot == "I can answer directly without tools."
+        assert not any(isinstance(event, ToolCallEvent) for event in events)
+
+        finish_events = [event for event in events if isinstance(event, FinishEvent)]
+        assert len(finish_events) == 1
+        assert finish_events[0].stop_reason == "stop"
 
 
 # ---------------------------------------------------------------------------

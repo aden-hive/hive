@@ -48,6 +48,9 @@ dev = [
 sandbox = [
     "RestrictedPython>=7.0",
 ]
+browser = [
+    "pillow>=10.0.0",
+]
 ocr = [
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
@@ -114,6 +117,10 @@ lint.isort.section-order = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not live'"
+markers = [
+    "live: Tests that call real external APIs (require credentials, never run in CI)",
+]
 
 [dependency-groups]
 dev = [

@@ -8,6 +8,7 @@ while preserving the goal-driven approach.
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
     from framework.graph.goal import Goal
     from framework.llm.provider import LLMProvider, Tool
+    from framework.skills.manager import SkillsManagerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +133,11 @@ class AgentRuntime:
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         event_bus: "EventBus | None" = None,
+        skills_manager_config: "SkillsManagerConfig | None" = None,
+        # Deprecated — pass skills_manager_config instead.
+        skills_catalog_prompt: str = "",
+        protocols_prompt: str = "",
+        skill_dirs: list[str] | None = None,
     ):
         """
         Initialize agent runtime.
@@ -152,13 +159,47 @@ class AgentRuntime:
             event_bus: Optional external EventBus. If provided, the runtime shares
                 this bus instead of creating its own. Used by SessionManager to
                 share a single bus between queen, worker, and judge.
+            skills_catalog_prompt: Available skills catalog for system prompt
+            protocols_prompt: Default skill operational protocols for system prompt
+            skill_dirs: Skill base directories for Tier 3 resource access
+            skills_manager_config: Skill configuration — the runtime owns
+                discovery, loading, and prompt renderation internally.
+            skills_catalog_prompt: Deprecated. Pre-rendered skills catalog.
+            protocols_prompt: Deprecated. Pre-rendered operational protocols.
         """
+        from framework.skills.manager import SkillsManager
+
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
         self._runtime_log_store = runtime_log_store
         self._checkpoint_config = checkpoint_config
         self.accounts_prompt = accounts_prompt
+
+        # --- Skill lifecycle: runtime owns the SkillsManager ---
+        if skills_manager_config is not None:
+            # New path: config-driven, runtime handles loading
+            self._skills_manager = SkillsManager(skills_manager_config)
+            self._skills_manager.load()
+        elif skills_catalog_prompt or protocols_prompt:
+            # Legacy path: caller passed pre-rendered strings
+            import warnings
+
+            warnings.warn(
+                "Passing pre-rendered skills_catalog_prompt/protocols_prompt "
+                "is deprecated. Pass skills_manager_config instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self._skills_manager = SkillsManager.from_precomputed(
+                skills_catalog_prompt, protocols_prompt
+            )
+        else:
+            # Bare constructor: auto-load defaults
+            self._skills_manager = SkillsManager()
+            self._skills_manager.load()
+
+        self.skill_dirs: list[str] = self._skills_manager.allowlisted_dirs
 
         # Primary graph identity
         self._graph_id: str = graph_id or "primary"
@@ -214,6 +255,18 @@ class AgentRuntime:
 
         # Optional greeting shown to user on TUI load (set by AgentRunner)
         self.intro_message: str = ""
+
+    # ------------------------------------------------------------------
+    # Skill prompt accessors (read by ExecutionStream constructors)
+    # ------------------------------------------------------------------
+
+    @property
+    def skills_catalog_prompt(self) -> str:
+        return self._skills_manager.skills_catalog_prompt
+
+    @property
+    def protocols_prompt(self) -> str:
+        return self._skills_manager.protocols_prompt
 
     def register_entry_point(self, spec: EntryPointSpec) -> None:
         """
@@ -292,6 +345,9 @@ class AgentRuntime:
                     accounts_prompt=self._accounts_prompt,
                     accounts_data=self._accounts_data,
                     tool_provider_map=self._tool_provider_map,
+                    skills_catalog_prompt=self.skills_catalog_prompt,
+                    protocols_prompt=self.protocols_prompt,
+                    skill_dirs=self.skill_dirs,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -349,7 +405,7 @@ class AgentRuntime:
                             return
                         # Skip events originating from this graph's own
                         # executions (e.g. guardian should not fire on
-                        # hive_coder failures — only secondary graphs).
+                        # queen failures — only secondary graphs).
                         if _exclude_own and event.graph_id == self._graph_id:
                             return
                         ep_spec = self._entry_points.get(entry_point_id)
@@ -392,18 +448,24 @@ class AgentRuntime:
 
                 tc = spec.trigger_config
                 cron_expr = tc.get("cron")
-                interval = tc.get("interval_minutes")
+                _raw_interval = tc.get("interval_minutes")
+                interval = float(_raw_interval) if _raw_interval is not None else None
                 run_immediately = tc.get("run_immediately", False)
 
                 if cron_expr:
                     # Cron expression mode — takes priority over interval_minutes
                     try:
                         from croniter import croniter
+                    except ImportError as e:
+                        raise RuntimeError(
+                            "croniter is required for cron-based entry points. "
+                            "Install it with: uv pip install croniter"
+                        ) from e
 
-                        # Validate the expression upfront
+                    try:
                         if not croniter.is_valid(cron_expr):
                             raise ValueError(f"Invalid cron expression: {cron_expr}")
-                    except (ImportError, ValueError) as e:
+                    except ValueError as e:
                         logger.warning(
                             "Entry point '%s' has invalid cron config: %s",
                             ep_id,
@@ -543,7 +605,7 @@ class AgentRuntime:
                             ep_id,
                             cron_expr,
                             run_immediately,
-                            idle_timeout=tc.get("idle_timeout_seconds", 300),
+                            idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
                         )()
                     )
                     self._timer_tasks.append(task)
@@ -673,7 +735,7 @@ class AgentRuntime:
                             ep_id,
                             interval,
                             run_immediately,
-                            idle_timeout=tc.get("idle_timeout_seconds", 300),
+                            idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
                         )()
                     )
                     self._timer_tasks.append(task)
@@ -822,7 +884,8 @@ class AgentRuntime:
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
 
-        return await stream.execute(input_data, correlation_id, session_state)
+        run_id = uuid.uuid4().hex[:12]
+        return await stream.execute(input_data, correlation_id, session_state, run_id=run_id)
 
     async def trigger_and_wait(
         self,
@@ -919,6 +982,9 @@ class AgentRuntime:
                 accounts_prompt=self._accounts_prompt,
                 accounts_data=self._accounts_data,
                 tool_provider_map=self._tool_provider_map,
+                skills_catalog_prompt=self.skills_catalog_prompt,
+                protocols_prompt=self.protocols_prompt,
+                skill_dirs=self.skill_dirs,
             )
             if self._running:
                 await stream.start()
@@ -997,7 +1063,8 @@ class AgentRuntime:
             if spec.trigger_type != "timer":
                 continue
             tc = spec.trigger_config
-            interval = tc.get("interval_minutes")
+            _raw_interval = tc.get("interval_minutes")
+            interval = float(_raw_interval) if _raw_interval is not None else None
             run_immediately = tc.get("run_immediately", False)
 
             if interval and interval > 0 and self._running:
@@ -1142,7 +1209,7 @@ class AgentRuntime:
                         ep_id,
                         interval,
                         run_immediately,
-                        idle_timeout=tc.get("idle_timeout_seconds", 300),
+                        idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
                     )()
                 )
                 timer_tasks.append(task)
@@ -1359,8 +1426,8 @@ class AgentRuntime:
                 allowed_keys = set(entry_node.input_keys)
 
         # Search primary graph's streams for an active session.
-        # Skip isolated streams (e.g. health judge) — they have their own
-        # session directories and must never be used as a shared session.
+        # Skip isolated streams — they have their own session directories
+        # and must never be used as a shared session.
         all_streams: list[tuple[str, ExecutionStream]] = []
         for _gid, reg in self._graphs.items():
             for ep_id, stream in reg.streams.items():
@@ -1407,6 +1474,7 @@ class AgentRuntime:
         graph_id: str | None = None,
         *,
         is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Inject user input into a running client-facing node.
 
@@ -1419,6 +1487,8 @@ class AgentRuntime:
             graph_id: Optional graph to search first (defaults to active graph)
             is_client_input: True when the message originates from a real
                 human user (e.g. /chat endpoint), False for external events.
+            image_content: Optional list of image content blocks (OpenAI
+                image_url format) to include alongside the text.
 
         Returns:
             True if input was delivered, False if no matching node found
@@ -1430,7 +1500,9 @@ class AgentRuntime:
         target = graph_id or self._active_graph_id
         if target in self._graphs:
             for stream in self._graphs[target].streams.values():
-                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
+                if await stream.inject_input(
+                    node_id, content, is_client_input=is_client_input, image_content=image_content
+                ):
                     return True
 
         # Then search all other graphs
@@ -1438,7 +1510,9 @@ class AgentRuntime:
             if gid == target:
                 continue
             for stream in reg.streams.values():
-                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
+                if await stream.inject_input(
+                    node_id, content, is_client_input=is_client_input, image_content=image_content
+                ):
                     return True
         return False
 
@@ -1531,6 +1605,11 @@ class AgentRuntime:
                 for executor in stream._active_executors.values():
                     for node_id, node in executor.node_registry.items():
                         if getattr(node, "_awaiting_input", False):
+                            # Skip escalation receivers — those are handled
+                            # by the queen via inject_worker_message(), not
+                            # by the user directly.
+                            if ":escalation:" in node_id:
+                                continue
                             return node_id, graph_id
         return None, None
 
@@ -1692,6 +1771,11 @@ def create_agent_runtime(
     accounts_data: list[dict] | None = None,
     tool_provider_map: dict[str, str] | None = None,
     event_bus: "EventBus | None" = None,
+    skills_manager_config: "SkillsManagerConfig | None" = None,
+    # Deprecated — pass skills_manager_config instead.
+    skills_catalog_prompt: str = "",
+    protocols_prompt: str = "",
+    skill_dirs: list[str] | None = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -1718,6 +1802,13 @@ def create_agent_runtime(
         accounts_data: Raw account data for per-node prompt generation.
         tool_provider_map: Tool name to provider name mapping for account routing.
         event_bus: Optional external EventBus to share with other components.
+        skills_catalog_prompt: Available skills catalog for system prompt.
+        protocols_prompt: Default skill operational protocols for system prompt.
+        skill_dirs: Skill base directories for Tier 3 resource access.
+        skills_manager_config: Skill configuration — the runtime owns
+            discovery, loading, and prompt renderation internally.
+        skills_catalog_prompt: Deprecated. Pre-rendered skills catalog.
+        protocols_prompt: Deprecated. Pre-rendered operational protocols.
 
     Returns:
         Configured AgentRuntime (not yet started)
@@ -1744,6 +1835,10 @@ def create_agent_runtime(
         accounts_data=accounts_data,
         tool_provider_map=tool_provider_map,
         event_bus=event_bus,
+        skills_manager_config=skills_manager_config,
+        skills_catalog_prompt=skills_catalog_prompt,
+        protocols_prompt=protocols_prompt,
+        skill_dirs=skill_dirs,
     )
 
     for spec in entry_points:

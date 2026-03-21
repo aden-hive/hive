@@ -56,6 +56,8 @@ from .email_tool import register_tools as register_email
 from .exa_search_tool import register_tools as register_exa_search
 from .example_tool import register_tools as register_example
 from .excel_tool import register_tools as register_excel
+
+# File system toolkits
 from .file_system_toolkits.apply_diff import register_tools as register_apply_diff
 from .file_system_toolkits.apply_patch import register_tools as register_apply_patch
 from .file_system_toolkits.data_tools import register_tools as register_data_tools
@@ -63,12 +65,11 @@ from .file_system_toolkits.execute_command_tool import (
     register_tools as register_execute_command,
 )
 from .file_system_toolkits.grep_search import register_tools as register_grep_search
+from .file_system_toolkits.hashline_edit import register_tools as register_hashline_edit
 from .file_system_toolkits.list_dir import register_tools as register_list_dir
 from .file_system_toolkits.replace_file_content import (
     register_tools as register_replace_file_content,
 )
-from .file_system_toolkits.view_file import register_tools as register_view_file
-from .file_system_toolkits.write_to_file import register_tools as register_write_to_file
 from .github_tool import register_tools as register_github
 from .gitlab_tool import register_tools as register_gitlab
 from .gmail_tool import register_tools as register_gmail
@@ -154,14 +155,42 @@ def _register_verified(
     register_wikipedia(mcp)
     register_arxiv(mcp)
 
+    # Tools that need credentials (pass credentials if provided)
+    # web_search supports multiple providers (Google, Brave) with auto-detection
+    register_web_search(mcp, credentials=credentials)
+    register_github(mcp, credentials=credentials)
+    # email supports multiple providers (Gmail, Resend)
+    register_email(mcp, credentials=credentials)
+    # Gmail inbox management (read, trash, modify labels)
+    register_gmail(mcp, credentials=credentials)
+    register_hubspot(mcp, credentials=credentials)
+    register_intercom(mcp, credentials=credentials)
+    register_apollo(mcp, credentials=credentials)
+    register_bigquery(mcp, credentials=credentials)
+    register_calcom(mcp, credentials=credentials)
+    register_calendar(mcp, credentials=credentials)
+    register_discord(mcp, credentials=credentials)
+    register_exa_search(mcp, credentials=credentials)
+    register_news(mcp, credentials=credentials)
+    register_razorpay(mcp, credentials=credentials)
+    register_serpapi(mcp, credentials=credentials)
+    register_slack(mcp, credentials=credentials)
+    register_telegram(mcp, credentials=credentials)
+    register_vision(mcp, credentials=credentials)
+    register_google_analytics(mcp, credentials=credentials)
+    register_google_docs(mcp, credentials=credentials)
+    register_google_maps(mcp, credentials=credentials)
+    register_google_sheets(mcp, credentials=credentials)
+    register_account_info(mcp, credentials=credentials)
+
     # --- File system toolkits ---
-    register_view_file(mcp)
-    register_write_to_file(mcp)
     register_list_dir(mcp)
     register_replace_file_content(mcp)
     register_apply_diff(mcp)
     register_apply_patch(mcp)
     register_grep_search(mcp)
+    # hashline_edit: anchor-based editing, pairs with read_file/grep_search hashline mode
+    register_hashline_edit(mcp)
     register_execute_command(mcp)
     register_data_tools(mcp)
     register_csv(mcp)
@@ -182,25 +211,16 @@ def _register_verified(
     register_email(mcp, credentials=credentials)
     register_gmail(mcp, credentials=credentials)
     register_hubspot(mcp, credentials=credentials)
-    register_intercom(mcp, credentials=credentials)
-    register_apollo(mcp, credentials=credentials)
-    register_brevo(mcp, credentials=credentials)
-    register_bigquery(mcp, credentials=credentials)
-    register_calcom(mcp, credentials=credentials)
     register_calendar(mcp, credentials=credentials)
     register_discord(mcp, credentials=credentials)
     register_exa_search(mcp, credentials=credentials)
     register_news(mcp, credentials=credentials)
-    register_razorpay(mcp, credentials=credentials)
-    register_serpapi(mcp, credentials=credentials)
     register_slack(mcp, credentials=credentials)
-    register_stripe(mcp, credentials=credentials)
     register_telegram(mcp, credentials=credentials)
-    register_vision(mcp, credentials=credentials)
     register_google_docs(mcp, credentials=credentials)
     register_google_maps(mcp, credentials=credentials)
+    register_notion(mcp, credentials=credentials)
     register_account_info(mcp, credentials=credentials)
-    register_postgres(mcp, credentials=credentials)
 
 
 def _register_unverified(
@@ -220,6 +240,16 @@ def _register_unverified(
     register_attio(mcp, credentials=credentials)
     register_aws_s3(mcp, credentials=credentials)
     register_azure_sql(mcp, credentials=credentials)
+    register_intercom(mcp, credentials=credentials)
+    register_apollo(mcp, credentials=credentials)
+    register_brevo(mcp, credentials=credentials)
+    register_bigquery(mcp, credentials=credentials)
+    register_calcom(mcp, credentials=credentials)
+    register_razorpay(mcp, credentials=credentials)
+    register_serpapi(mcp, credentials=credentials)
+    register_vision(mcp, credentials=credentials)
+    register_stripe(mcp, credentials=credentials)
+    register_postgres(mcp, credentials=credentials)
     register_calendly(mcp, credentials=credentials)
     register_cloudinary(mcp, credentials=credentials)
     register_confluence(mcp, credentials=credentials)
@@ -239,7 +269,6 @@ def _register_unverified(
     register_microsoft_graph(mcp, credentials=credentials)
     register_mongodb(mcp, credentials=credentials)
     register_n8n(mcp, credentials=credentials)
-    register_notion(mcp, credentials=credentials)
     register_obsidian(mcp, credentials=credentials)
     register_pagerduty(mcp, credentials=credentials)
     register_pinecone(mcp, credentials=credentials)

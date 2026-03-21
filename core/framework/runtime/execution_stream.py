@@ -9,6 +9,7 @@ Each stream has:
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from collections import OrderedDict
@@ -126,6 +127,7 @@ class ExecutionContext:
     input_data: dict[str, Any]
     isolation_level: IsolationLevel
     session_state: dict[str, Any] | None = None  # For resuming from pause
+    run_id: str | None = None  # Unique ID per trigger() invocation
     started_at: datetime = field(default_factory=datetime.now)
     completed_at: datetime | None = None
     status: str = "pending"  # pending, running, completed, failed, paused
@@ -184,6 +186,9 @@ class ExecutionStream:
         accounts_prompt: str = "",
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
+        skills_catalog_prompt: str = "",
+        protocols_prompt: str = "",
+        skill_dirs: list[str] | None = None,
     ):
         """
         Initialize execution stream.
@@ -207,6 +212,9 @@ class ExecutionStream:
             accounts_prompt: Connected accounts block for system prompt injection
             accounts_data: Raw account data for per-node prompt generation
             tool_provider_map: Tool name to provider name mapping for account routing
+            skills_catalog_prompt: Available skills catalog for system prompt
+            protocols_prompt: Default skill operational protocols for system prompt
+            skill_dirs: Skill base directories for Tier 3 resource access
         """
         self.stream_id = stream_id
         self.entry_spec = entry_spec
@@ -228,6 +236,22 @@ class ExecutionStream:
         self._accounts_prompt = accounts_prompt
         self._accounts_data = accounts_data
         self._tool_provider_map = tool_provider_map
+        self._skills_catalog_prompt = skills_catalog_prompt
+        self._protocols_prompt = protocols_prompt
+        self._skill_dirs: list[str] = skill_dirs or []
+
+        _es_logger = logging.getLogger(__name__)
+        if protocols_prompt:
+            _es_logger.info(
+                "ExecutionStream[%s] received protocols_prompt (%d chars)",
+                stream_id,
+                len(protocols_prompt),
+            )
+        else:
+            _es_logger.warning(
+                "ExecutionStream[%s] received EMPTY protocols_prompt",
+                stream_id,
+            )
 
         # Create stream-scoped runtime
         self._runtime = StreamRuntime(
@@ -240,6 +264,7 @@ class ExecutionStream:
         self._active_executions: dict[str, ExecutionContext] = {}
         self._execution_tasks: dict[str, asyncio.Task] = {}
         self._active_executors: dict[str, GraphExecutor] = {}
+        self._cancel_reasons: dict[str, str] = {}
         self._execution_results: OrderedDict[str, ExecutionResult] = OrderedDict()
         self._execution_result_times: dict[str, float] = {}
         self._completion_events: dict[str, asyncio.Event] = {}
@@ -408,6 +433,7 @@ class ExecutionStream:
         content: str,
         *,
         is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Inject user input into a running client-facing EventLoopNode.
 
@@ -419,7 +445,33 @@ class ExecutionStream:
         for executor in self._active_executors.values():
             node = executor.node_registry.get(node_id)
             if node is not None and hasattr(node, "inject_event"):
-                await node.inject_event(content, is_client_input=is_client_input)
+                await node.inject_event(
+                    content, is_client_input=is_client_input, image_content=image_content
+                )
+                return True
+        return False
+
+    async def inject_trigger(
+        self,
+        node_id: str,
+        trigger: Any,
+    ) -> bool:
+        """Inject a trigger event into a running queen EventLoopNode.
+
+        Searches active executors for a node matching ``node_id`` and calls
+        its ``inject_trigger()`` method to wake the queen.
+
+        Args:
+            node_id: The queen EventLoopNode ID.
+            trigger: A ``TriggerEvent`` instance (typed as Any to avoid
+                circular imports with graph layer).
+
+        Returns True if the trigger was delivered, False otherwise.
+        """
+        for executor in self._active_executors.values():
+            node = executor.node_registry.get(node_id)
+            if node is not None and hasattr(node, "inject_trigger"):
+                await node.inject_trigger(trigger)
                 return True
         return False
 
@@ -428,6 +480,7 @@ class ExecutionStream:
         input_data: dict[str, Any],
         correlation_id: str | None = None,
         session_state: dict[str, Any] | None = None,
+        run_id: str | None = None,
     ) -> str:
         """
         Queue an execution and return its ID.
@@ -438,6 +491,7 @@ class ExecutionStream:
             input_data: Input data for this execution
             correlation_id: Optional ID to correlate related executions
             session_state: Optional session state to resume from (with paused_at, memory)
+            run_id: Unique ID for this trigger invocation (for run dividers)
 
         Returns:
             Execution ID for tracking
@@ -464,7 +518,7 @@ class ExecutionStream:
                         node.signal_shutdown()
                     if hasattr(node, "cancel_current_turn"):
                         node.cancel_current_turn()
-            await self.cancel_execution(eid)
+            await self.cancel_execution(eid, reason="Restarted with new execution")
 
         # When resuming, reuse the original session ID so the execution
         # continues in the same session directory instead of creating a new one.
@@ -498,6 +552,7 @@ class ExecutionStream:
             input_data=input_data,
             isolation_level=self.entry_spec.get_isolation_level(),
             session_state=session_state,
+            run_id=run_id,
         )
 
         async with self._lock:
@@ -573,7 +628,9 @@ class ExecutionStream:
                         execution_id=execution_id,
                         input_data=ctx.input_data,
                         correlation_id=ctx.correlation_id,
+                        run_id=ctx.run_id,
                     )
+                self._write_run_event(execution_id, ctx.run_id, "run_started")
 
                 # Create execution-scoped memory
                 self._state_manager.create_memory(
@@ -643,6 +700,9 @@ class ExecutionStream:
                         accounts_prompt=self._accounts_prompt,
                         accounts_data=self._accounts_data,
                         tool_provider_map=self._tool_provider_map,
+                        skills_catalog_prompt=self._skills_catalog_prompt,
+                        protocols_prompt=self._protocols_prompt,
+                        skill_dirs=self._skill_dirs,
                     )
                     # Track executor so inject_input() can reach EventLoopNode instances
                     self._active_executors[execution_id] = executor
@@ -738,6 +798,7 @@ class ExecutionStream:
                             execution_id=execution_id,
                             output=result.output,
                             correlation_id=ctx.correlation_id,
+                            run_id=ctx.run_id,
                         )
                     elif result.paused_at:
                         # The executor returns paused_at on CancelledError but
@@ -755,7 +816,21 @@ class ExecutionStream:
                             execution_id=execution_id,
                             error=result.error or "Unknown error",
                             correlation_id=ctx.correlation_id,
+                            run_id=ctx.run_id,
                         )
+
+                # Write run event for historical restoration
+                if result.success:
+                    self._write_run_event(execution_id, ctx.run_id, "run_completed")
+                elif result.paused_at:
+                    self._write_run_event(execution_id, ctx.run_id, "run_paused")
+                else:
+                    self._write_run_event(
+                        execution_id,
+                        ctx.run_id,
+                        "run_failed",
+                        {"error": result.error or "Unknown error"},
+                    )
 
                 logger.debug(f"Execution {execution_id} completed: success={result.success}")
 
@@ -801,22 +876,25 @@ class ExecutionStream:
                 # Emit SSE event so the frontend knows the execution stopped.
                 # The executor does NOT emit on CancelledError, so there is no
                 # risk of double-emitting.
+                cancel_reason = self._cancel_reasons.pop(execution_id, "Execution cancelled")
                 if self._scoped_event_bus:
                     if has_result and result.paused_at:
                         await self._scoped_event_bus.emit_execution_paused(
                             stream_id=self.stream_id,
                             node_id=result.paused_at,
-                            reason="Execution cancelled",
+                            reason=cancel_reason,
                             execution_id=execution_id,
                         )
                     else:
                         await self._scoped_event_bus.emit_execution_failed(
                             stream_id=self.stream_id,
                             execution_id=execution_id,
-                            error="Execution cancelled",
+                            error=cancel_reason,
                             correlation_id=ctx.correlation_id,
+                            run_id=ctx.run_id,
                         )
 
+                self._write_run_event(execution_id, ctx.run_id, "run_cancelled")
                 # Don't re-raise - we've handled it and saved state
 
             except Exception as e:
@@ -853,7 +931,9 @@ class ExecutionStream:
                         execution_id=execution_id,
                         error=str(e),
                         correlation_id=ctx.correlation_id,
+                        run_id=ctx.run_id,
                     )
+                self._write_run_event(execution_id, ctx.run_id, "run_failed", {"error": str(e)})
 
             finally:
                 # Clean up state
@@ -868,6 +948,36 @@ class ExecutionStream:
                     self._active_executions.pop(execution_id, None)
                     self._completion_events.pop(execution_id, None)
                     self._execution_tasks.pop(execution_id, None)
+
+    def _write_run_event(
+        self,
+        execution_id: str,
+        run_id: str | None,
+        event: str,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Append a run lifecycle event to runs.jsonl for historical restoration."""
+        if not self._session_store or not run_id:
+            return
+        import json as _json
+
+        session_dir = self._session_store.get_session_path(execution_id)
+        runs_file = session_dir / "runs.jsonl"
+        now = datetime.now()
+        record = {
+            "run_id": run_id,
+            "event": event,
+            "timestamp": now.isoformat(),
+            "created_at": now.timestamp(),
+        }
+        if extra:
+            record.update(extra)
+        try:
+            runs_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(runs_file, "a", encoding="utf-8") as f:
+                f.write(_json.dumps(record) + "\n")
+        except OSError:
+            pass  # Non-critical — don't break execution
 
     async def _write_session_state(
         self,
@@ -961,6 +1071,9 @@ class ExecutionStream:
             if error:
                 state.result.error = error
 
+            # Stamp the owning process ID for cross-process stale detection
+            state.pid = os.getpid()
+
             # Write state.json
             await self._session_store.write_state(execution_id, state)
             logger.debug(f"Wrote state.json for session {execution_id} (status={status})")
@@ -972,8 +1085,8 @@ class ExecutionStream:
     def _create_modified_graph(self) -> "GraphSpec":
         """Create a graph with the entry point overridden.
 
-        Preserves the original graph's entry_points and async_entry_points
-        so that validation correctly considers ALL entry nodes reachable.
+        Preserves the original graph's entry_points so that validation
+        correctly considers ALL entry nodes reachable.
         Each stream only executes from its own entry_node, but the full
         graph must validate with all entry points accounted for.
         """
@@ -998,7 +1111,6 @@ class ExecutionStream:
             version=self.graph.version,
             entry_node=self.entry_spec.entry_node,  # Use our entry point
             entry_points=merged_entry_points,
-            async_entry_points=self.graph.async_entry_points,
             terminal_nodes=self.graph.terminal_nodes,
             pause_nodes=self.graph.pause_nodes,
             nodes=self.graph.nodes,
@@ -1054,18 +1166,24 @@ class ExecutionStream:
         """Get execution context."""
         return self._active_executions.get(execution_id)
 
-    async def cancel_execution(self, execution_id: str) -> bool:
+    async def cancel_execution(self, execution_id: str, *, reason: str | None = None) -> bool:
         """
         Cancel a running execution.
 
         Args:
             execution_id: Execution to cancel
+            reason: Human-readable reason for the cancellation (e.g.
+                "Stopped by queen", "User requested pause"). If not
+                provided, defaults to "Execution cancelled".
 
         Returns:
             True if cancelled, False if not found
         """
         task = self._execution_tasks.get(execution_id)
         if task and not task.done():
+            # Store the reason so the CancelledError handler can use it
+            # when emitting the pause/fail event.
+            self._cancel_reasons[execution_id] = reason or "Execution cancelled"
             task.cancel()
             # Wait briefly for the task to finish. Don't block indefinitely —
             # the task may be stuck in a long LLM API call that doesn't

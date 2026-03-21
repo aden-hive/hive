@@ -295,3 +295,126 @@ def register_tools(
                 }
             )
         return {"results": results, "count": data.get("count", len(results))}
+
+    @mcp.tool()
+    def zendesk_get_ticket_comments(
+        ticket_id: int,
+        page_size: int = 25,
+    ) -> dict[str, Any]:
+        """
+        List comments on a Zendesk ticket (conversation history).
+
+        Args:
+            ticket_id: Zendesk ticket ID (required)
+            page_size: Number of comments per page (1-100, default 25)
+
+        Returns:
+            Dict with comments list (id, body, author_id, public, created_at)
+        """
+        subdomain, email, token = _get_credentials(credentials)
+        if not subdomain or not email or not token:
+            return _auth_error()
+        if not ticket_id:
+            return {"error": "ticket_id is required"}
+
+        url = f"{_base_url(subdomain)}/tickets/{ticket_id}/comments"
+        params = {"page[size]": max(1, min(page_size, 100))}
+        data = _request("get", url, email, token, params=params)
+        if "error" in data:
+            return data
+
+        comments = []
+        for c in data.get("comments", []):
+            comments.append(
+                {
+                    "id": c.get("id"),
+                    "body": (c.get("body") or "")[:500],
+                    "author_id": c.get("author_id"),
+                    "public": c.get("public", True),
+                    "created_at": c.get("created_at", ""),
+                }
+            )
+        return {"ticket_id": ticket_id, "comments": comments, "count": len(comments)}
+
+    @mcp.tool()
+    def zendesk_add_ticket_comment(
+        ticket_id: int,
+        body: str,
+        public: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Add a comment to an existing Zendesk ticket.
+
+        Args:
+            ticket_id: Zendesk ticket ID (required)
+            body: Comment text (required)
+            public: Whether the comment is visible to the requester (default True).
+                    Set to False for an internal note.
+
+        Returns:
+            Dict with updated ticket info and confirmation
+        """
+        subdomain, email, token = _get_credentials(credentials)
+        if not subdomain or not email or not token:
+            return _auth_error()
+        if not ticket_id or not body:
+            return {"error": "ticket_id and body are required"}
+
+        ticket: dict[str, Any] = {
+            "comment": {"body": body, "public": public},
+        }
+
+        url = f"{_base_url(subdomain)}/tickets/{ticket_id}"
+        data = _request("put", url, email, token, json={"ticket": ticket})
+        if "error" in data:
+            return data
+
+        t = data.get("ticket", {})
+        return {
+            "id": t.get("id"),
+            "subject": t.get("subject", ""),
+            "status": t.get("status", ""),
+            "result": "comment_added",
+        }
+
+    @mcp.tool()
+    def zendesk_list_users(
+        role: str = "",
+        page_size: int = 25,
+    ) -> dict[str, Any]:
+        """
+        List users in Zendesk.
+
+        Args:
+            role: Filter by role: end-user, agent, admin (optional)
+            page_size: Number of users per page (1-100, default 25)
+
+        Returns:
+            Dict with users list (id, name, email, role, active)
+        """
+        subdomain, email, token = _get_credentials(credentials)
+        if not subdomain or not email or not token:
+            return _auth_error()
+
+        url = f"{_base_url(subdomain)}/users"
+        params: dict[str, Any] = {"page[size]": max(1, min(page_size, 100))}
+        if role:
+            params["role"] = role
+
+        data = _request("get", url, email, token, params=params)
+        if "error" in data:
+            return data
+
+        users = []
+        for u in data.get("users", []):
+            users.append(
+                {
+                    "id": u.get("id"),
+                    "name": u.get("name", ""),
+                    "email": u.get("email", ""),
+                    "role": u.get("role", ""),
+                    "active": u.get("active", False),
+                    "created_at": u.get("created_at", ""),
+                }
+            )
+        return {"users": users, "count": len(users)}

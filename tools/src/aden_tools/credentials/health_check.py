@@ -233,7 +233,7 @@ class OAuthBearerHealthChecker:
     """Generic health checker for OAuth2 Bearer token credentials.
 
     Validates by making a GET request with ``Authorization: Bearer <token>``
-    to the given endpoint.  Reused for Google Gmail, Google Calendar, and as
+    to the given endpoint.  Reused for Google Docs, Intercom, and as
     the automatic fallback for any credential spec that defines a
     ``health_check_endpoint`` but has no dedicated checker.
     """
@@ -478,23 +478,83 @@ class BaseHttpHealthChecker:
             )
 
 
-class GoogleCalendarHealthChecker(OAuthBearerHealthChecker):
-    """Health checker for Google Calendar OAuth tokens."""
+class GoogleHealthChecker:
+    """Health checker for Google OAuth tokens (Gmail, Calendar, Sheets)."""
 
-    def __init__(self):
-        super().__init__(
-            endpoint="https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1",
-            service_name="Google Calendar",
-        )
+    ENDPOINTS: dict[str, str] = {
+        "gmail": "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        "calendar": "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+        "sheets": "https://sheets.googleapis.com/v4/spreadsheets/healthcheck_nonexistent",
+    }
+    TIMEOUT = 10.0
 
-    def _extract_identity(self, data: dict) -> dict[str, str]:
-        # Primary calendar ID is the user's email
-        for item in data.get("items", []):
-            if item.get("primary"):
-                cal_id = item.get("id", "")
-                if "@" in cal_id:
-                    return {"email": cal_id}
-        return {}
+    def check(self, access_token: str) -> HealthCheckResult:
+        """
+        Validate Google OAuth token against Gmail, Calendar, and Sheets APIs.
+
+        Hits a lightweight endpoint for each service. A 401 on any endpoint
+        means the token is invalid (fail fast). A 403 means the token lacks
+        that service's scope. For Sheets, a 404 counts as success (scope is
+        valid, the spreadsheet just doesn't exist).
+        """
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json",
+        }
+        missing_scopes: list[str] = []
+
+        try:
+            with httpx.Client(timeout=self.TIMEOUT) as client:
+                for scope, url in self.ENDPOINTS.items():
+                    params = {"maxResults": "1"} if scope == "calendar" else {}
+                    response = client.get(url, headers=headers, params=params)
+
+                    if response.status_code == 401:
+                        return HealthCheckResult(
+                            valid=False,
+                            message="Google token is invalid or expired",
+                            details={"status_code": 401},
+                        )
+                    if response.status_code == 403:
+                        missing_scopes.append(scope)
+                        continue
+                    # Sheets returns 404 for a non-existent spreadsheet — that's fine,
+                    # it means the token + scope are valid.
+                    if response.status_code in (200, 404):
+                        continue
+                    # Unexpected status — not a scope issue, but not healthy either
+                    return HealthCheckResult(
+                        valid=False,
+                        message=f"Google {scope} API returned status {response.status_code}",
+                        details={"status_code": response.status_code, "scope": scope},
+                    )
+
+            if missing_scopes:
+                return HealthCheckResult(
+                    valid=False,
+                    message=f"Google token lacks scopes for: {', '.join(missing_scopes)}",
+                    details={"status_code": 403, "missing_scopes": missing_scopes},
+                )
+
+            return HealthCheckResult(
+                valid=True,
+                message="Google credentials valid (Gmail, Calendar, Sheets)",
+            )
+        except httpx.TimeoutException:
+            return HealthCheckResult(
+                valid=False,
+                message="Google API request timed out",
+                details={"error": "timeout"},
+            )
+        except httpx.RequestError as e:
+            error_msg = str(e)
+            if "Bearer" in error_msg or "Authorization" in error_msg:
+                error_msg = "Request failed (details redacted for security)"
+            return HealthCheckResult(
+                valid=False,
+                message=f"Failed to connect to Google: {error_msg}",
+                details={"error": error_msg},
+            )
 
 
 class GoogleSearchHealthChecker:
@@ -567,54 +627,50 @@ class GoogleSearchHealthChecker:
 
 
 class SlackHealthChecker:
-    """Health checker for Slack bot tokens."""
+    """Health checker for Slack Bot tokens."""
 
     ENDPOINT = "https://slack.com/api/auth.test"
     TIMEOUT = 10.0
 
     def check(self, bot_token: str) -> HealthCheckResult:
         """
-        Validate Slack bot token by calling auth.test.
+        Validate Slack Bot token via auth.test API.
 
-        Makes a POST request to auth.test to verify the token works.
+        This is Slack's recommended way to verify a token.
         """
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
                 response = client.post(
                     self.ENDPOINT,
-                    headers={"Authorization": f"Bearer {bot_token}"},
+                    headers={
+                        "Authorization": f"Bearer {bot_token}",
+                        "Content-Type": "application/json",
+                    },
                 )
 
-                if response.status_code != 200:
-                    return HealthCheckResult(
-                        valid=False,
-                        message=f"Slack API returned HTTP {response.status_code}",
-                        details={"status_code": response.status_code},
-                    )
-
-                data = response.json()
-                if data.get("ok"):
-                    identity: dict[str, str] = {}
-                    if data.get("team"):
-                        identity["workspace"] = data["team"]
-                    if data.get("user"):
-                        identity["username"] = data["user"]
-                    return HealthCheckResult(
-                        valid=True,
-                        message="Slack bot token valid",
-                        details={
-                            "team": data.get("team"),
-                            "user": data.get("user"),
-                            "bot_id": data.get("bot_id"),
-                            "identity": identity,
-                        },
-                    )
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("ok"):
+                        return HealthCheckResult(
+                            valid=True,
+                            message=f"Slack token valid (team: {data.get('team', 'unknown')})",
+                            details={
+                                "team": data.get("team"),
+                                "user": data.get("user"),
+                                "team_id": data.get("team_id"),
+                            },
+                        )
+                    else:
+                        return HealthCheckResult(
+                            valid=False,
+                            message=f"Slack token invalid: {data.get('error', 'unknown error')}",
+                            details={"slack_error": data.get("error")},
+                        )
                 else:
-                    error = data.get("error", "unknown_error")
                     return HealthCheckResult(
                         valid=False,
-                        message=f"Slack token invalid: {error}",
-                        details={"error": error},
+                        message=f"Slack API returned status {response.status_code}",
+                        details={"status_code": response.status_code},
                     )
         except httpx.TimeoutException:
             return HealthCheckResult(
@@ -625,49 +681,50 @@ class SlackHealthChecker:
         except httpx.RequestError as e:
             return HealthCheckResult(
                 valid=False,
-                message=f"Failed to connect to Slack: {e}",
+                message=f"Failed to connect to Slack API: {e}",
                 details={"error": str(e)},
             )
 
 
 class CalendlyHealthChecker:
-    """Health checker for Calendly API tokens."""
+    """Health checker for Calendly Personal Access Tokens."""
 
     ENDPOINT = "https://api.calendly.com/users/me"
     TIMEOUT = 10.0
 
-    def check(self, api_token: str) -> HealthCheckResult:
+    def check(self, pat: str) -> HealthCheckResult:
         """
-        Validate Calendly token by calling /users/me.
-
-        Makes a GET request to verify the token works.
+        Validate Calendly PAT by fetching the authenticated user.
         """
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
                 response = client.get(
                     self.ENDPOINT,
                     headers={
-                        "Authorization": f"Bearer {api_token}",
-                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {pat}",
+                        "Accept": "application/json",
                     },
                 )
 
                 if response.status_code == 200:
+                    data = response.json()
+                    user = data.get("resource", {})
+                    name = user.get("name", "unknown")
                     return HealthCheckResult(
                         valid=True,
-                        message="Calendly token valid",
-                        details={},
+                        message=f"Calendly PAT valid (user: {name})",
+                        details={"name": name, "email": user.get("email")},
                     )
                 elif response.status_code == 401:
                     return HealthCheckResult(
                         valid=False,
-                        message="Calendly token is invalid or expired",
+                        message="Calendly PAT is invalid or expired",
                         details={"status_code": 401},
                     )
                 elif response.status_code == 403:
                     return HealthCheckResult(
                         valid=False,
-                        message="Calendly token access forbidden",
+                        message="Calendly PAT lacks required scopes",
                         details={"status_code": 403},
                     )
                 else:
@@ -690,101 +747,22 @@ class CalendlyHealthChecker:
             )
 
 
-class AnthropicHealthChecker:
-    """Health checker for Anthropic API credentials."""
-
-    ENDPOINT = "https://api.anthropic.com/v1/messages"
-    TIMEOUT = 10.0
-
-    def check(self, api_key: str) -> HealthCheckResult:
-        """
-        Validate Anthropic API key without consuming tokens.
-
-        Sends a deliberately invalid request (empty messages) to the messages endpoint.
-        A 401 means invalid key; 400 (bad request) means the key authenticated
-        but the payload was rejected — confirming the key is valid without
-        generating any tokens. 429 (rate limited) also indicates a valid key.
-        """
-        try:
-            with httpx.Client(timeout=self.TIMEOUT) as client:
-                response = client.post(
-                    self.ENDPOINT,
-                    headers={
-                        "x-api-key": api_key,
-                        "anthropic-version": "2023-06-01",
-                        "Content-Type": "application/json",
-                    },
-                    # Empty messages triggers 400 (not 200), so no tokens are consumed.
-                    json={
-                        "model": "claude-sonnet-4-20250514",
-                        "max_tokens": 1,
-                        "messages": [],
-                    },
-                )
-
-                if response.status_code == 200:
-                    return HealthCheckResult(
-                        valid=True,
-                        message="Anthropic API key valid",
-                    )
-                elif response.status_code == 401:
-                    return HealthCheckResult(
-                        valid=False,
-                        message="Anthropic API key is invalid",
-                        details={"status_code": 401},
-                    )
-                elif response.status_code == 429:
-                    # Rate limited but key is valid
-                    return HealthCheckResult(
-                        valid=True,
-                        message="Anthropic API key valid (rate limited)",
-                        details={"status_code": 429, "rate_limited": True},
-                    )
-                elif response.status_code == 400:
-                    # Bad request but key authenticated - key is valid
-                    return HealthCheckResult(
-                        valid=True,
-                        message="Anthropic API key valid",
-                        details={"status_code": 400},
-                    )
-                else:
-                    return HealthCheckResult(
-                        valid=False,
-                        message=f"Anthropic API returned status {response.status_code}",
-                        details={"status_code": response.status_code},
-                    )
-        except httpx.TimeoutException:
-            return HealthCheckResult(
-                valid=False,
-                message="Anthropic API request timed out",
-                details={"error": "timeout"},
-            )
-        except httpx.RequestError as e:
-            return HealthCheckResult(
-                valid=False,
-                message=f"Failed to connect to Anthropic API: {e}",
-                details={"error": str(e)},
-            )
-
-
 class GitHubHealthChecker:
-    """Health checker for GitHub Personal Access Token."""
+    """Health checker for GitHub Personal Access Tokens."""
 
     ENDPOINT = "https://api.github.com/user"
     TIMEOUT = 10.0
 
-    def check(self, access_token: str) -> HealthCheckResult:
+    def check(self, token: str) -> HealthCheckResult:
         """
-        Validate GitHub token by fetching the authenticated user.
-
-        Returns the authenticated username on success.
+        Validate GitHub PAT by fetching the authenticated user.
         """
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
                 response = client.get(
                     self.ENDPOINT,
                     headers={
-                        "Authorization": f"Bearer {access_token}",
+                        "Authorization": f"Bearer {token}",
                         "Accept": "application/vnd.github+json",
                         "X-GitHub-Api-Version": "2022-11-28",
                     },
@@ -793,13 +771,10 @@ class GitHubHealthChecker:
                 if response.status_code == 200:
                     data = response.json()
                     username = data.get("login", "unknown")
-                    identity: dict[str, str] = {}
-                    if username and username != "unknown":
-                        identity["username"] = username
                     return HealthCheckResult(
                         valid=True,
-                        message=f"GitHub token valid (authenticated as {username})",
-                        details={"username": username, "identity": identity},
+                        message=f"GitHub token valid (user: {username})",
+                        details={"username": username},
                     )
                 elif response.status_code == 401:
                     return HealthCheckResult(
@@ -810,7 +785,7 @@ class GitHubHealthChecker:
                 elif response.status_code == 403:
                     return HealthCheckResult(
                         valid=False,
-                        message="GitHub token lacks required permissions",
+                        message="GitHub token lacks required scopes",
                         details={"status_code": 403},
                     )
                 else:
@@ -834,34 +809,32 @@ class GitHubHealthChecker:
 
 
 class DiscordHealthChecker:
-    """Health checker for Discord bot tokens."""
+    """Health checker for Discord Bot tokens."""
 
     ENDPOINT = "https://discord.com/api/v10/users/@me"
     TIMEOUT = 10.0
 
     def check(self, bot_token: str) -> HealthCheckResult:
         """
-        Validate Discord bot token by fetching the bot's user info.
+        Validate Discord Bot token by fetching bot user info.
         """
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
                 response = client.get(
                     self.ENDPOINT,
-                    headers={"Authorization": f"Bot {bot_token}"},
+                    headers={
+                        "Authorization": f"Bot {bot_token}",
+                        "Accept": "application/json",
+                    },
                 )
 
                 if response.status_code == 200:
                     data = response.json()
                     username = data.get("username", "unknown")
-                    identity: dict[str, str] = {}
-                    if username and username != "unknown":
-                        identity["username"] = username
-                    if data.get("id"):
-                        identity["account_id"] = data["id"]
                     return HealthCheckResult(
                         valid=True,
                         message=f"Discord bot token valid (bot: {username})",
-                        details={"username": username, "id": data.get("id"), "identity": identity},
+                        details={"username": username, "bot": data.get("bot", True)},
                     )
                 elif response.status_code == 401:
                     return HealthCheckResult(
@@ -872,7 +845,7 @@ class DiscordHealthChecker:
                 elif response.status_code == 403:
                     return HealthCheckResult(
                         valid=False,
-                        message="Discord bot token lacks required permissions",
+                        message="Discord bot token lacks required intents/permissions",
                         details={"status_code": 403},
                     )
                 else:
@@ -896,7 +869,7 @@ class DiscordHealthChecker:
 
 
 class ResendHealthChecker:
-    """Health checker for Resend API credentials."""
+    """Health checker for Resend API keys."""
 
     ENDPOINT = "https://api.resend.com/domains"
     TIMEOUT = 10.0
@@ -904,8 +877,6 @@ class ResendHealthChecker:
     def check(self, api_key: str) -> HealthCheckResult:
         """
         Validate Resend API key by listing domains.
-
-        A successful response confirms the key is valid.
         """
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
@@ -955,61 +926,57 @@ class ResendHealthChecker:
 
 
 class GoogleMapsHealthChecker:
-    """Health checker for Google Maps Platform API key."""
+    """Health checker for Google Maps API keys."""
 
     ENDPOINT = "https://maps.googleapis.com/maps/api/geocode/json"
     TIMEOUT = 10.0
 
     def check(self, api_key: str) -> HealthCheckResult:
         """
-        Validate Google Maps API key with a lightweight geocode request.
-
-        Makes a minimal geocode request for a well-known address to verify
-        the key is valid and the Geocoding API is enabled.
+        Validate Google Maps API key with a minimal geocoding request.
         """
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
                 response = client.get(
                     self.ENDPOINT,
                     params={
-                        "address": "1600 Amphitheatre Parkway",
                         "key": api_key,
+                        "address": "1600 Amphitheatre Parkway, Mountain View, CA",
                     },
                 )
 
-                if response.status_code != 200:
+                if response.status_code == 200:
+                    data = response.json()
+                    status = data.get("status", "")
+
+                    if status == "OK":
+                        return HealthCheckResult(
+                            valid=True,
+                            message="Google Maps API key valid",
+                        )
+                    elif status == "REQUEST_DENIED":
+                        return HealthCheckResult(
+                            valid=False,
+                            message="Google Maps API key is invalid or restricted",
+                            details={"status": status},
+                        )
+                    elif status == "OVER_QUERY_LIMIT":
+                        return HealthCheckResult(
+                            valid=True,
+                            message="Google Maps API key valid (quota exceeded)",
+                            details={"rate_limited": True},
+                        )
+                    else:
+                        return HealthCheckResult(
+                            valid=False,
+                            message=f"Google Maps API returned status: {status}",
+                            details={"status": status},
+                        )
+                else:
                     return HealthCheckResult(
                         valid=False,
                         message=f"Google Maps API returned HTTP {response.status_code}",
                         details={"status_code": response.status_code},
-                    )
-
-                data = response.json()
-                status = data.get("status", "UNKNOWN_ERROR")
-
-                if status == "OK":
-                    return HealthCheckResult(
-                        valid=True,
-                        message="Google Maps API key valid",
-                    )
-                elif status == "REQUEST_DENIED":
-                    return HealthCheckResult(
-                        valid=False,
-                        message="Google Maps API key is invalid or Geocoding API not enabled",
-                        details={"status": status},
-                    )
-                elif status in ("OVER_DAILY_LIMIT", "OVER_QUERY_LIMIT"):
-                    # Quota exceeded but key itself is valid
-                    return HealthCheckResult(
-                        valid=True,
-                        message="Google Maps API key valid (quota exceeded)",
-                        details={"status": status, "rate_limited": True},
-                    )
-                else:
-                    return HealthCheckResult(
-                        valid=False,
-                        message=f"Google Maps API returned status: {status}",
-                        details={"status": status},
                     )
         except httpx.TimeoutException:
             return HealthCheckResult(
@@ -1026,25 +993,21 @@ class GoogleMapsHealthChecker:
 
 
 class LushaHealthChecker:
-    """Health checker for Lusha API credentials."""
+    """Health checker for Lusha API keys."""
 
-    ENDPOINT = "https://api.lusha.com/account/usage"
+    ENDPOINT = "https://api.lusha.com/person"
     TIMEOUT = 10.0
 
     def check(self, api_key: str) -> HealthCheckResult:
         """
-        Validate Lusha API key by checking account usage endpoint.
-
-        This is a lightweight authenticated request that confirms API access.
+        Validate Lusha API key with a minimal person lookup.
         """
         try:
             with httpx.Client(timeout=self.TIMEOUT) as client:
                 response = client.get(
                     self.ENDPOINT,
-                    headers={
-                        "api_key": api_key,
-                        "Accept": "application/json",
-                    },
+                    headers={"api_key": api_key, "Accept": "application/json"},
+                    params={"firstName": "test", "lastName": "test", "company": "test"},
                 )
 
                 if response.status_code == 200:
@@ -1058,17 +1021,11 @@ class LushaHealthChecker:
                         message="Lusha API key is invalid",
                         details={"status_code": 401},
                     )
-                elif response.status_code == 403:
-                    return HealthCheckResult(
-                        valid=False,
-                        message="Lusha API key lacks required permissions",
-                        details={"status_code": 403},
-                    )
                 elif response.status_code == 429:
                     return HealthCheckResult(
                         valid=True,
-                        message="Lusha API key valid (rate/credit limited)",
-                        details={"status_code": 429, "rate_limited": True},
+                        message="Lusha API key valid (rate limited)",
+                        details={"rate_limited": True},
                     )
                 else:
                     return HealthCheckResult(
@@ -1090,20 +1047,6 @@ class LushaHealthChecker:
             )
 
 
-class GoogleGmailHealthChecker(OAuthBearerHealthChecker):
-    """Health checker for Google Gmail OAuth tokens."""
-
-    def __init__(self):
-        super().__init__(
-            endpoint="https://gmail.googleapis.com/gmail/v1/users/me/profile",
-            service_name="Gmail",
-        )
-
-    def _extract_identity(self, data: dict) -> dict[str, str]:
-        email = data.get("emailAddress")
-        return {"email": email} if email else {}
-
-
 # --- New checkers using BaseHttpHealthChecker ---
 
 
@@ -1123,16 +1066,6 @@ class ExaSearchHealthChecker(BaseHttpHealthChecker):
 
     def _build_json_body(self, credential_value: str) -> dict:
         return {"query": "test", "numResults": 1}
-
-
-class GoogleDocsHealthChecker(OAuthBearerHealthChecker):
-    """Health checker for Google Docs OAuth tokens."""
-
-    def __init__(self):
-        super().__init__(
-            endpoint="https://docs.googleapis.com/v1/documents/1",
-            service_name="Google Docs",
-        )
 
 
 class CalcomHealthChecker(BaseHttpHealthChecker):
@@ -1260,33 +1193,161 @@ class IntercomHealthChecker(OAuthBearerHealthChecker):
         )
 
 
+# --- Simple Bearer-auth checkers ---
+
+
+class ApifyHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.apify.com/v2/users/me"
+    SERVICE_NAME = "Apify"
+
+
+class AsanaHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://app.asana.com/api/1.0/users/me"
+    SERVICE_NAME = "Asana"
+
+
+class AttioHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.attio.com/v2/workspace_members"
+    SERVICE_NAME = "Attio"
+
+
+class DockerHubHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://hub.docker.com/v2/user/login"
+    SERVICE_NAME = "Docker Hub"
+
+
+class GoogleSearchConsoleHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://www.googleapis.com/webmasters/v3/sites"
+    SERVICE_NAME = "Google Search Console"
+
+
+class HuggingFaceHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://huggingface.co/api/whoami-v2"
+    SERVICE_NAME = "Hugging Face"
+
+
+class LinearHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.linear.app/graphql"
+    SERVICE_NAME = "Linear"
+
+
+class MicrosoftGraphHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://graph.microsoft.com/v1.0/me"
+    SERVICE_NAME = "Microsoft Graph"
+
+
+class PineconeHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.pinecone.io/indexes"
+    SERVICE_NAME = "Pinecone"
+
+
+class VercelHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.vercel.com/v2/user"
+    SERVICE_NAME = "Vercel"
+
+
+# --- Custom-header auth checkers ---
+
+
+class GitLabHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://gitlab.com/api/v4/user"
+    SERVICE_NAME = "GitLab"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_HEADER
+    AUTH_HEADER_NAME = "PRIVATE-TOKEN"
+    AUTH_HEADER_TEMPLATE = "{token}"
+
+
+class NotionHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.notion.com/v1/users/me"
+    SERVICE_NAME = "Notion"
+
+    def _build_headers(self, credential_value: str) -> dict[str, str]:
+        headers = super()._build_headers(credential_value)
+        headers["Notion-Version"] = "2022-06-28"
+        return headers
+
+
+# --- Basic-auth checkers ---
+
+
+class GreenhouseHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://harvest.greenhouse.io/v1/jobs?per_page=1"
+    SERVICE_NAME = "Greenhouse"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_BASIC
+
+
+# --- Query-param auth checkers ---
+
+
+class PipedriveHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.pipedrive.com/v1/users/me"
+    SERVICE_NAME = "Pipedrive"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_QUERY
+    AUTH_QUERY_PARAM_NAME = "api_token"
+
+
+class TrelloKeyHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.trello.com/1/members/me"
+    SERVICE_NAME = "Trello"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_QUERY
+    AUTH_QUERY_PARAM_NAME = "key"
+
+
+class TrelloTokenHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.trello.com/1/members/me"
+    SERVICE_NAME = "Trello"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_QUERY
+    AUTH_QUERY_PARAM_NAME = "token"
+
+
+class YouTubeHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://www.googleapis.com/youtube/v3/videoCategories?part=snippet&regionCode=US"
+    SERVICE_NAME = "YouTube"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_QUERY
+    AUTH_QUERY_PARAM_NAME = "key"
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
-    "discord": DiscordHealthChecker(),
-    "hubspot": HubSpotHealthChecker(),
-    "zoho_crm": ZohoCRMHealthChecker(),
-    "brave_search": BraveSearchHealthChecker(),
-    "google_calendar_oauth": GoogleCalendarHealthChecker(),
-    "google": GoogleGmailHealthChecker(),
-    "slack": SlackHealthChecker(),
-    "calendly_pat": CalendlyHealthChecker(),
-    "google_search": GoogleSearchHealthChecker(),
-    "google_maps": GoogleMapsHealthChecker(),
-    "anthropic": AnthropicHealthChecker(),
-    "github": GitHubHealthChecker(),
-    "intercom": IntercomHealthChecker(),
-    "resend": ResendHealthChecker(),
-    "lusha_api_key": LushaHealthChecker(),
-    "stripe": StripeHealthChecker(),
-    "exa_search": ExaSearchHealthChecker(),
-    "google_docs": GoogleDocsHealthChecker(),
-    "calcom": CalcomHealthChecker(),
-    "serpapi": SerpApiHealthChecker(),
+    "apify": ApifyHealthChecker(),
     "apollo": ApolloHealthChecker(),
-    "telegram": TelegramHealthChecker(),
-    "newsdata": NewsdataHealthChecker(),
-    "finlight": FinlightHealthChecker(),
+    "asana": AsanaHealthChecker(),
+    "attio": AttioHealthChecker(),
+    "brave_search": BraveSearchHealthChecker(),
     "brevo": BrevoHealthChecker(),
+    "calcom": CalcomHealthChecker(),
+    "calendly_pat": CalendlyHealthChecker(),
+    "discord": DiscordHealthChecker(),
+    "docker_hub": DockerHubHealthChecker(),
+    "exa_search": ExaSearchHealthChecker(),
+    "finlight": FinlightHealthChecker(),
+    "github": GitHubHealthChecker(),
+    "gitlab_token": GitLabHealthChecker(),
+    "google": GoogleHealthChecker(),
+    "google_maps": GoogleMapsHealthChecker(),
+    "google_search": GoogleSearchHealthChecker(),
+    "google_search_console": GoogleSearchConsoleHealthChecker(),
+    "greenhouse_token": GreenhouseHealthChecker(),
+    "hubspot": HubSpotHealthChecker(),
+    "huggingface": HuggingFaceHealthChecker(),
+    "intercom": IntercomHealthChecker(),
+    "linear": LinearHealthChecker(),
+    "lusha_api_key": LushaHealthChecker(),
+    "microsoft_graph": MicrosoftGraphHealthChecker(),
+    "newsdata": NewsdataHealthChecker(),
+    "notion_token": NotionHealthChecker(),
+    "pinecone": PineconeHealthChecker(),
+    "pipedrive": PipedriveHealthChecker(),
+    "resend": ResendHealthChecker(),
+    "serpapi": SerpApiHealthChecker(),
+    "slack": SlackHealthChecker(),
+    "stripe": StripeHealthChecker(),
+    "telegram": TelegramHealthChecker(),
+    "trello_key": TrelloKeyHealthChecker(),
+    "trello_token": TrelloTokenHealthChecker(),
+    "vercel": VercelHealthChecker(),
+    "youtube": YouTubeHealthChecker(),
+    "zoho_crm": ZohoCRMHealthChecker(),
 }
 
 

@@ -50,6 +50,16 @@ def _patch(url: str, headers: dict, body: dict) -> dict:
     return resp.json()
 
 
+def _delete(url: str, headers: dict, params: dict | None = None) -> dict:
+    """Send a DELETE request."""
+    resp = httpx.delete(url, headers=headers, params=params, timeout=30)
+    if resp.status_code >= 400:
+        return {"error": f"HTTP {resp.status_code}: {resp.text[:500]}"}
+    if not resp.content:
+        return {"status": "ok"}
+    return resp.json()
+
+
 def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
     """Register Airtable tools."""
 
@@ -321,5 +331,136 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
                     ],
                 }
                 for t in tables
+            ],
+        }
+
+    @mcp.tool()
+    def airtable_delete_records(
+        base_id: str,
+        table_name: str,
+        record_ids: str,
+    ) -> dict:
+        """Delete records from an Airtable table (up to 10 per request).
+
+        Args:
+            base_id: The Airtable base ID (starts with 'app').
+            table_name: Table name or ID.
+            record_ids: Comma-separated record IDs to delete (e.g. 'recABC,recDEF').
+        """
+        hdrs = _get_headers()
+        if hdrs is None:
+            return {
+                "error": "AIRTABLE_PAT is required",
+                "help": "Set AIRTABLE_PAT env var with your Airtable personal access token",
+            }
+        if not base_id or not table_name or not record_ids:
+            return {"error": "base_id, table_name, and record_ids are required"}
+
+        ids = [rid.strip() for rid in record_ids.split(",") if rid.strip()]
+        if len(ids) > 10:
+            return {"error": "maximum 10 records per request"}
+
+        url = f"{BASE_URL}/{base_id}/{table_name}"
+        # Airtable DELETE uses repeated records[] query params
+        params = [("records[]", rid) for rid in ids]
+        resp = httpx.delete(url, headers=hdrs, params=params, timeout=30)
+        if resp.status_code >= 400:
+            return {"error": f"HTTP {resp.status_code}: {resp.text[:500]}"}
+
+        data = resp.json()
+        deleted = data.get("records", [])
+        return {
+            "result": "deleted",
+            "count": len(deleted),
+            "deleted_ids": [r.get("id", "") for r in deleted if r.get("deleted")],
+        }
+
+    @mcp.tool()
+    def airtable_search_records(
+        base_id: str,
+        table_name: str,
+        field_name: str,
+        search_value: str,
+        max_records: int = 100,
+    ) -> dict:
+        """Search records by matching a field value using an Airtable formula.
+
+        Args:
+            base_id: The Airtable base ID (starts with 'app').
+            table_name: Table name or ID.
+            field_name: The field name to search in.
+            search_value: The value to search for (exact match or FIND for partial).
+            max_records: Maximum number of records to return (default 100).
+        """
+        hdrs = _get_headers()
+        if hdrs is None:
+            return {
+                "error": "AIRTABLE_PAT is required",
+                "help": "Set AIRTABLE_PAT env var with your Airtable personal access token",
+            }
+        if not base_id or not table_name or not field_name or not search_value:
+            return {"error": "base_id, table_name, field_name, and search_value are required"}
+
+        # Use FIND for case-insensitive partial match
+        escaped = search_value.replace('"', '\\"')
+        formula = f'FIND(LOWER("{escaped}"), LOWER({{{field_name}}}))'
+
+        params: dict[str, Any] = {
+            "filterByFormula": formula,
+            "maxRecords": str(max_records),
+        }
+
+        url = f"{BASE_URL}/{base_id}/{table_name}"
+        data = _get(url, hdrs, params)
+        if "error" in data:
+            return data
+
+        records = data.get("records", [])
+        return {
+            "count": len(records),
+            "records": [
+                {
+                    "id": r["id"],
+                    "fields": r.get("fields", {}),
+                    "created_time": r.get("createdTime"),
+                }
+                for r in records
+            ],
+        }
+
+    @mcp.tool()
+    def airtable_list_collaborators(
+        base_id: str,
+    ) -> dict:
+        """List collaborators who have access to an Airtable base.
+
+        Args:
+            base_id: The Airtable base ID (starts with 'app').
+        """
+        hdrs = _get_headers()
+        if hdrs is None:
+            return {
+                "error": "AIRTABLE_PAT is required",
+                "help": "Set AIRTABLE_PAT env var with your Airtable personal access token",
+            }
+        if not base_id:
+            return {"error": "base_id is required"}
+
+        # Uses the meta API endpoint for base sharing
+        url = f"https://api.airtable.com/v0/meta/bases/{base_id}/collaborators"
+        data = _get(url, hdrs)
+        if "error" in data:
+            return data
+
+        collabs = data.get("collaborators", [])
+        return {
+            "count": len(collabs),
+            "collaborators": [
+                {
+                    "user_id": c.get("userId", ""),
+                    "email": c.get("email", ""),
+                    "permission_level": c.get("permissionLevel", ""),
+                }
+                for c in collabs
             ],
         }

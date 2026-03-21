@@ -5,6 +5,7 @@ Uses aiohttp TestClient with mocked sessions to test all endpoints
 without requiring actual LLM calls or agent loading.
 """
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,8 +14,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+from framework.runtime.triggers import TriggerDefinition
 from framework.server.app import create_app
 from framework.server.session_manager import Session
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+EXAMPLE_AGENT_PATH = REPO_ROOT / "examples" / "templates" / "deep_research_agent"
 
 # ---------------------------------------------------------------------------
 # Mock helpers
@@ -37,6 +42,7 @@ class MockNodeSpec:
     client_facing: bool = False
     success_criteria: str | None = None
     system_prompt: str | None = None
+    sub_agents: list = field(default_factory=list)
 
 
 @dataclass
@@ -67,6 +73,7 @@ class MockEntryPoint:
     name: str = "Default"
     entry_node: str = "start"
     trigger_type: str = "manual"
+    trigger_config: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -74,6 +81,7 @@ class MockStream:
     is_awaiting_input: bool = False
     _execution_tasks: dict = field(default_factory=dict)
     _active_executors: dict = field(default_factory=dict)
+    active_execution_ids: set = field(default_factory=set)
 
     async def cancel_execution(self, execution_id: str) -> bool:
         return execution_id in self._execution_tasks
@@ -117,6 +125,9 @@ class MockRuntime:
     async def inject_input(self, node_id, content, graph_id=None, *, is_client_input=False):
         return True
 
+    def pause_timers(self):
+        pass
+
     async def get_goal_progress(self):
         return {"progress": 0.5, "criteria": []}
 
@@ -125,6 +136,9 @@ class MockRuntime:
 
     def get_stats(self):
         return {"running": True, "executions": 1}
+
+    def get_timer_next_fire_in(self, ep_id):
+        return None
 
 
 class MockAgentInfo:
@@ -160,6 +174,7 @@ def _make_session(
     runner.intro_message = "Test intro"
 
     mock_event_bus = MagicMock()
+    mock_event_bus.publish = AsyncMock()
     mock_llm = MagicMock()
 
     queen_executor = _make_queen_executor() if with_queen else None
@@ -198,11 +213,8 @@ def tmp_agent_dir(tmp_path, monkeypatch):
     return tmp_path, agent_name, base
 
 
-@pytest.fixture
-def sample_session(tmp_agent_dir):
-    """Create a sample session with state.json, checkpoints, and conversations."""
-    tmp_path, agent_name, base = tmp_agent_dir
-    session_id = "session_20260220_120000_abc12345"
+def _write_sample_session(base: Path, session_id: str):
+    """Create a sample worker session on disk."""
     session_dir = base / "sessions" / session_id
 
     # state.json
@@ -283,6 +295,20 @@ def sample_session(tmp_agent_dir):
     return session_id, session_dir, state
 
 
+@pytest.fixture
+def sample_session(tmp_agent_dir):
+    """Create a sample session with state.json, checkpoints, and conversations."""
+    _tmp_path, _agent_name, base = tmp_agent_dir
+    return _write_sample_session(base, "session_20260220_120000_abc12345")
+
+
+@pytest.fixture
+def custom_id_session(tmp_agent_dir):
+    """Create a sample session that uses a custom non-session_* ID."""
+    _tmp_path, _agent_name, base = tmp_agent_dir
+    return _write_sample_session(base, "my-custom-session")
+
+
 def _make_app_with_session(session):
     """Create an aiohttp app with a pre-loaded session."""
     app = create_app()
@@ -338,6 +364,35 @@ class TestHealth:
 
 
 class TestSessionCRUD:
+    @pytest.mark.asyncio
+    async def test_create_session_with_worker_forwards_session_id(self):
+        app = create_app()
+        manager = app["manager"]
+        manager.create_session_with_worker = AsyncMock(
+            return_value=_make_session(agent_id="my-custom-session")
+        )
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions",
+                json={
+                    "session_id": "my-custom-session",
+                    "agent_path": str(EXAMPLE_AGENT_PATH),
+                },
+            )
+            data = await resp.json()
+
+        assert resp.status == 201
+        assert data["session_id"] == "my-custom-session"
+        manager.create_session_with_worker.assert_awaited_once_with(
+            str(EXAMPLE_AGENT_PATH.resolve()),
+            agent_id=None,
+            session_id="my-custom-session",
+            model=None,
+            initial_prompt=None,
+            queen_resume_from=None,
+        )
+
     @pytest.mark.asyncio
     async def test_list_sessions_empty(self):
         app = create_app()
@@ -431,6 +486,70 @@ class TestSessionCRUD:
             assert resp.status == 200
             data = await resp.json()
             assert "primary" in data["graphs"]
+
+    @pytest.mark.asyncio
+    async def test_update_trigger_task(self, tmp_path):
+        session = _make_session(tmp_dir=tmp_path)
+        session.available_triggers["daily"] = TriggerDefinition(
+            id="daily",
+            trigger_type="timer",
+            trigger_config={"cron": "0 5 * * *"},
+            task="Old task",
+        )
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.patch(
+                "/api/sessions/test_agent/triggers/daily",
+                json={"task": "New task"},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["task"] == "New task"
+            assert data["trigger_config"]["cron"] == "0 5 * * *"
+            assert session.available_triggers["daily"].task == "New task"
+
+    @pytest.mark.asyncio
+    async def test_update_trigger_cron_restarts_active_timer(self, tmp_path):
+        session = _make_session(tmp_dir=tmp_path)
+        session.available_triggers["daily"] = TriggerDefinition(
+            id="daily",
+            trigger_type="timer",
+            trigger_config={"cron": "0 5 * * *"},
+            task="Run task",
+            active=True,
+        )
+        session.active_trigger_ids.add("daily")
+        session.active_timer_tasks["daily"] = asyncio.create_task(asyncio.sleep(60))
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.patch(
+                "/api/sessions/test_agent/triggers/daily",
+                json={"trigger_config": {"cron": "0 6 * * *"}},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["trigger_config"]["cron"] == "0 6 * * *"
+            assert "daily" in session.active_timer_tasks
+            assert session.active_timer_tasks["daily"] is not None
+            assert session.available_triggers["daily"].trigger_config["cron"] == "0 6 * * *"
+            session.active_timer_tasks["daily"].cancel()
+
+    @pytest.mark.asyncio
+    async def test_update_trigger_cron_rejects_invalid_expression(self, tmp_path):
+        session = _make_session(tmp_dir=tmp_path)
+        session.available_triggers["daily"] = TriggerDefinition(
+            id="daily",
+            trigger_type="timer",
+            trigger_config={"cron": "0 5 * * *"},
+            task="Run task",
+        )
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.patch(
+                "/api/sessions/test_agent/triggers/daily",
+                json={"trigger_config": {"cron": "not a cron"}},
+            )
+            assert resp.status == 400
 
 
 class TestExecution:
@@ -537,18 +656,8 @@ class TestExecution:
             assert resp.status == 400
 
     @pytest.mark.asyncio
-    async def test_pause_not_found(self):
-        session = _make_session()
-        app = _make_app_with_session(session)
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.post(
-                "/api/sessions/test_agent/pause",
-                json={"execution_id": "nonexistent"},
-            )
-            assert resp.status == 404
-
-    @pytest.mark.asyncio
-    async def test_pause_missing_execution_id(self):
+    async def test_pause_no_active_executions(self):
+        """Pause with no active executions returns stopped=False."""
         session = _make_session()
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
@@ -556,7 +665,26 @@ class TestExecution:
                 "/api/sessions/test_agent/pause",
                 json={},
             )
-            assert resp.status == 400
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["stopped"] is False
+            assert data["cancelled"] == []
+            assert data["timers_paused"] is True
+
+    @pytest.mark.asyncio
+    async def test_pause_does_not_cancel_queen(self):
+        """Pause should stop the worker but leave the queen running."""
+        session = _make_session()
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/pause",
+                json={},
+            )
+            assert resp.status == 200
+            # Queen's cancel_current_turn should NOT have been called
+            queen_node = session.queen_executor.node_registry["queen"]
+            queen_node.cancel_current_turn.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_goal_progress(self):
@@ -748,6 +876,22 @@ class TestWorkerSessions:
             assert data["sessions"][0]["session_id"] == session_id
             assert data["sessions"][0]["status"] == "paused"
             assert data["sessions"][0]["steps"] == 5
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_includes_custom_id(self, custom_id_session, tmp_agent_dir):
+        session_id, session_dir, state = custom_id_session
+        tmp_path, agent_name, base = tmp_agent_dir
+
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        app = _make_app_with_session(session)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/sessions/test_agent/worker-sessions")
+            assert resp.status == 200
+            data = await resp.json()
+            assert len(data["sessions"]) == 1
+            assert data["sessions"][0]["session_id"] == session_id
+            assert data["sessions"][0]["status"] == "paused"
 
     @pytest.mark.asyncio
     async def test_list_sessions_empty(self, tmp_agent_dir):
@@ -1267,6 +1411,28 @@ class TestLogs:
             assert data["logs"][0]["run_id"] == session_id
 
     @pytest.mark.asyncio
+    async def test_logs_list_summaries_with_custom_id(self, custom_id_session, tmp_agent_dir):
+        session_id, session_dir, state = custom_id_session
+        tmp_path, agent_name, base = tmp_agent_dir
+
+        from framework.runtime.runtime_log_store import RuntimeLogStore
+
+        log_store = RuntimeLogStore(base)
+        session = _make_session(
+            tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
+            log_store=log_store,
+        )
+        app = _make_app_with_session(session)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/sessions/test_agent/logs")
+            assert resp.status == 200
+            data = await resp.json()
+            assert "logs" in data
+            assert len(data["logs"]) >= 1
+            assert data["logs"][0]["run_id"] == session_id
+
+    @pytest.mark.asyncio
     async def test_logs_session_summary(self, sample_session, tmp_agent_dir):
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
@@ -1543,3 +1709,106 @@ class TestErrorMiddleware:
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/nonexistent")
             assert resp.status == 404
+
+
+class TestCleanupStaleActiveSessions:
+    """Tests for _cleanup_stale_active_sessions with two-layer protection."""
+
+    def _make_manager(self):
+        from framework.server.session_manager import SessionManager
+
+        return SessionManager()
+
+    def _write_state(self, session_dir: Path, status: str, pid: int | None = None) -> None:
+        session_dir.mkdir(parents=True, exist_ok=True)
+        state: dict = {"status": status, "session_id": session_dir.name}
+        if pid is not None:
+            state["pid"] = pid
+        (session_dir / "state.json").write_text(json.dumps(state))
+
+    def _read_state(self, session_dir: Path) -> dict:
+        return json.loads((session_dir / "state.json").read_text())
+
+    def test_stale_session_is_cancelled(self, tmp_path, monkeypatch):
+        """Truly stale active sessions (no live tracking, no PID) get cancelled."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        agent_path = Path("my_agent")
+        sessions_dir = tmp_path / ".hive" / "agents" / "my_agent" / "sessions"
+        session_dir = sessions_dir / "session_stale_001"
+
+        self._write_state(session_dir, "active")
+
+        mgr = self._make_manager()
+        mgr._cleanup_stale_active_sessions(agent_path)
+
+        state = self._read_state(session_dir)
+        assert state["status"] == "cancelled"
+        assert "Stale session" in state["result"]["error"]
+
+    def test_live_in_memory_session_is_skipped(self, tmp_path, monkeypatch):
+        """Sessions tracked in self._sessions must NOT be cancelled (Layer 1)."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        agent_path = Path("my_agent")
+        sessions_dir = tmp_path / ".hive" / "agents" / "my_agent" / "sessions"
+        session_dir = sessions_dir / "session_live_002"
+
+        self._write_state(session_dir, "active")
+
+        mgr = self._make_manager()
+        # Simulate a live session in the manager's in-memory map
+        mgr._sessions["session_live_002"] = MagicMock()
+
+        mgr._cleanup_stale_active_sessions(agent_path)
+
+        state = self._read_state(session_dir)
+        assert state["status"] == "active", "Live in-memory session should NOT be cancelled"
+
+    def test_session_with_live_pid_is_skipped(self, tmp_path, monkeypatch):
+        """Sessions whose owning PID is still alive must NOT be cancelled (Layer 2)."""
+        import os
+
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        agent_path = Path("my_agent")
+        sessions_dir = tmp_path / ".hive" / "agents" / "my_agent" / "sessions"
+        session_dir = sessions_dir / "session_pid_003"
+
+        # Use the current process PID — guaranteed to be alive
+        self._write_state(session_dir, "active", pid=os.getpid())
+
+        mgr = self._make_manager()
+        mgr._cleanup_stale_active_sessions(agent_path)
+
+        state = self._read_state(session_dir)
+        assert state["status"] == "active", "Session with live PID should NOT be cancelled"
+
+    def test_session_with_dead_pid_is_cancelled(self, tmp_path, monkeypatch):
+        """Sessions whose owning PID is dead should be cancelled."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        agent_path = Path("my_agent")
+        sessions_dir = tmp_path / ".hive" / "agents" / "my_agent" / "sessions"
+        session_dir = sessions_dir / "session_dead_004"
+
+        # Use a PID that is almost certainly not running
+        self._write_state(session_dir, "active", pid=999999999)
+
+        mgr = self._make_manager()
+        mgr._cleanup_stale_active_sessions(agent_path)
+
+        state = self._read_state(session_dir)
+        assert state["status"] == "cancelled"
+        assert "Stale session" in state["result"]["error"]
+
+    def test_paused_session_is_never_touched(self, tmp_path, monkeypatch):
+        """Paused sessions should remain intact regardless of PID or tracking."""
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        agent_path = Path("my_agent")
+        sessions_dir = tmp_path / ".hive" / "agents" / "my_agent" / "sessions"
+        session_dir = sessions_dir / "session_paused_005"
+
+        self._write_state(session_dir, "paused")
+
+        mgr = self._make_manager()
+        mgr._cleanup_stale_active_sessions(agent_path)
+
+        state = self._read_state(session_dir)
+        assert state["status"] == "paused", "Paused sessions must remain untouched"

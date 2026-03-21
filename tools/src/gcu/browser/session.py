@@ -1,8 +1,9 @@
 """
 Browser session management.
 
-Manages Playwright browser instances with support for multiple profiles,
-each with independent browser context and multiple tabs.
+Connects to system-installed Chrome/Edge via CDP for browser automation.
+Each session launches a Chrome subprocess with ``--remote-debugging-port``
+and connects Playwright as a CDP client.
 
 Supports three session types:
 - Standard: Single browser with ephemeral or persistent context
@@ -13,8 +14,11 @@ Supports three session types:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import os
+import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -165,43 +169,133 @@ VALID_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
 # ---------------------------------------------------------------------------
 # Shared browser for agent contexts
 # ---------------------------------------------------------------------------
-# All agent sessions share this single browser process. Created via
-# chromium.launch() (not persistent context) so we can call
-# browser.new_context() multiple times with different storage states.
+# All agent sessions share this single Chrome process + CDP connection.
+# We can call browser.new_context() multiple times with different storage states.
 
 _shared_browser: Browser | None = None
 _shared_playwright: Any = None
+_shared_chrome_process: Any = None  # ChromeProcess | None (avoid circular import)
+_shared_cdp_port: int | None = None
 
-# Chrome flags shared between all browser launches
-_CHROME_ARGS = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-blink-features=AutomationControlled",
-    "--no-first-run",
-    "--no-default-browser-check",
-]
+# ---------------------------------------------------------------------------
+# Dynamic viewport sizing
+# ---------------------------------------------------------------------------
+
+DEFAULT_VIEWPORT_SCALE = 0.8
+_FALLBACK_WIDTH = 1920
+_FALLBACK_HEIGHT = 1080
+
+
+def _detect_screen_resolution() -> tuple[int, int] | None:
+    """Detect primary monitor resolution using platform-native tools.
+
+    Returns (width, height) or None if detection fails (headless, no display).
+    """
+    if sys.platform == "darwin":
+        try:
+            import subprocess
+
+            out = subprocess.check_output(
+                ["system_profiler", "SPDisplaysDataType"],
+                text=True,
+                timeout=5,
+            )
+            import re
+
+            match = re.search(r"Resolution:\s+(\d+)\s*x\s*(\d+)", out)
+            if match:
+                return int(match.group(1)), int(match.group(2))
+        except Exception:
+            pass
+    elif sys.platform == "win32":
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+        except Exception:
+            pass
+    else:
+        # Linux — try xrandr
+        try:
+            import subprocess
+
+            out = subprocess.check_output(
+                ["xrandr", "--current"],
+                text=True,
+                timeout=5,
+            )
+            import re
+
+            match = re.search(r"(\d+)x(\d+)\s+\d+\.\d+\*", out)
+            if match:
+                return int(match.group(1)), int(match.group(2))
+        except Exception:
+            pass
+    return None
+
+
+def _get_viewport(scale: float | None = None) -> dict[str, int]:
+    """Compute viewport as a percentage of the primary monitor resolution.
+
+    Falls back to 1920x1080 if screen detection fails (e.g. headless server).
+    Scale priority: explicit arg > env var > config file > default (0.8).
+    """
+    if scale is None:
+        env_scale = os.environ.get("HIVE_BROWSER_VIEWPORT_SCALE")
+        if env_scale:
+            try:
+                scale = float(env_scale)
+            except ValueError:
+                logger.warning("Invalid HIVE_BROWSER_VIEWPORT_SCALE=%r, using default", env_scale)
+    if scale is None:
+        try:
+            from framework.config import get_gcu_viewport_scale
+
+            scale = get_gcu_viewport_scale()
+        except ImportError:
+            scale = DEFAULT_VIEWPORT_SCALE
+    scale = max(0.1, min(1.0, scale))
+
+    resolution = _detect_screen_resolution()
+    if resolution:
+        w, h = resolution
+        logger.debug("Detected screen resolution: %dx%d", w, h)
+    else:
+        w, h = _FALLBACK_WIDTH, _FALLBACK_HEIGHT
+        logger.debug("Could not detect screen resolution, using default %dx%d", w, h)
+
+    return {"width": int(w * scale), "height": int(h * scale)}
 
 
 async def get_shared_browser(headless: bool = True) -> Browser:
     """Get or create the shared browser instance for agent contexts."""
-    global _shared_browser, _shared_playwright
+    global _shared_browser, _shared_playwright, _shared_chrome_process, _shared_cdp_port
 
     if _shared_browser and _shared_browser.is_connected():
         return _shared_browser
 
-    _shared_playwright = await async_playwright().start()
-    _shared_browser = await _shared_playwright.chromium.launch(
+    from .chrome_launcher import launch_chrome
+    from .port_manager import allocate_port
+
+    cdp_port = allocate_port("__shared__")
+    _shared_cdp_port = cdp_port
+    _shared_chrome_process = await launch_chrome(
+        cdp_port=cdp_port,
+        user_data_dir=None,  # ephemeral
         headless=headless,
-        args=_CHROME_ARGS,
     )
-    logger.info("Started shared browser for agent contexts")
+    _shared_playwright = await async_playwright().start()
+    _shared_browser = await _shared_playwright.chromium.connect_over_cdp(
+        _shared_chrome_process.cdp_url
+    )
+    logger.info("Started shared browser for agent contexts (system Chrome)")
     return _shared_browser
 
 
 async def close_shared_browser() -> None:
     """Close the shared browser and clean up all agent contexts."""
-    global _shared_browser, _shared_playwright
+    global _shared_browser, _shared_playwright, _shared_chrome_process, _shared_cdp_port
 
     if _shared_browser:
         await _shared_browser.close()
@@ -211,6 +305,30 @@ async def close_shared_browser() -> None:
     if _shared_playwright:
         await _shared_playwright.stop()
         _shared_playwright = None
+
+    if _shared_chrome_process:
+        await _shared_chrome_process.kill()
+        _shared_chrome_process = None
+
+    if _shared_cdp_port is not None:
+        from .port_manager import release_port
+
+        release_port(_shared_cdp_port)
+        _shared_cdp_port = None
+
+
+@dataclass
+class TabMeta:
+    """Metadata for a tracked browser tab."""
+
+    created_at: float
+    """Unix timestamp when the tab was registered."""
+
+    origin: str
+    """Who opened this tab: "agent", "popup", "user", or "startup"."""
+
+    opener_url: str | None = None
+    """URL of the page that triggered the popup (popup origin only)."""
 
 
 @dataclass
@@ -234,6 +352,8 @@ class BrowserSession:
     pages: dict[str, Page] = field(default_factory=dict)
     active_page_id: str | None = None
     console_messages: dict[str, list[dict]] = field(default_factory=dict)
+    page_meta: dict[str, TabMeta] = field(default_factory=dict)
+    ref_maps: dict[str, dict] = field(default_factory=dict)  # target_id → RefMap
     _playwright: Any = None
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -245,6 +365,9 @@ class BrowserSession:
     # Session type: "standard" (default) or "agent" (ephemeral context from shared browser)
     session_type: str = "standard"
 
+    # Chrome subprocess handle (standard sessions only)
+    _chrome_process: Any = None  # ChromeProcess | None
+
     def _is_running(self) -> bool:
         """Check if browser is currently running."""
         if self.session_type == "agent":
@@ -254,9 +377,7 @@ class BrowserSession:
                 and self.browser is not None
                 and self.browser.is_connected()
             )
-        if self.persistent:
-            # Persistent context doesn't have a separate browser object
-            return self.context is not None
+        # Both persistent and ephemeral now have a browser object via CDP
         return self.browser is not None and self.browser.is_connected()
 
     async def _health_check(self) -> None:
@@ -316,9 +437,18 @@ class BrowserSession:
                 pass
             self._playwright = None
 
+        if self._chrome_process:
+            try:
+                await self._chrome_process.kill()
+            except Exception:
+                pass
+            self._chrome_process = None
+
         self.pages.clear()
         self.active_page_id = None
         self.console_messages.clear()
+        self.page_meta.clear()
+        self.ref_maps.clear()
 
     async def start(self, headless: bool = True, persistent: bool = True) -> dict:
         """
@@ -343,18 +473,11 @@ class BrowserSession:
                     "cdp_port": self.cdp_port,
                 }
 
+            from .chrome_launcher import launch_chrome
+            from .port_manager import allocate_port
+
             self._playwright = await async_playwright().start()
             self.persistent = persistent
-
-            # Common Chrome flags
-            chrome_args = [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--no-first-run",
-                "--no-default-browser-check",
-            ]
 
             if persistent:
                 # Get storage path from environment (set by AgentRunner)
@@ -370,66 +493,82 @@ class BrowserSession:
                     )
 
                 self.user_data_dir.mkdir(parents=True, exist_ok=True)
-
-                # Allocate CDP port
-                from .port_manager import allocate_port
-
-                self.cdp_port = allocate_port(self.profile)
-                chrome_args.append(f"--remote-debugging-port={self.cdp_port}")
-
-                logger.info(
-                    f"Starting persistent browser: profile={self.profile}, "
-                    f"user_data_dir={self.user_data_dir}, cdp_port={self.cdp_port}"
-                )
-
-                # Use launch_persistent_context for true Chrome profile persistence
-                # Note: Returns BrowserContext directly, no separate Browser object
-                self.context = await self._playwright.chromium.launch_persistent_context(
-                    user_data_dir=str(self.user_data_dir),
-                    headless=headless,
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent=BROWSER_USER_AGENT,
-                    locale="en-US",
-                    args=chrome_args,
-                )
-                self.browser = None  # No separate browser object with persistent context
-
-                # Inject stealth script to hide automation detection
-                await self.context.add_init_script(STEALTH_SCRIPT)
-
-                # Register existing pages from restored session
-                for page in self.context.pages:
-                    target_id = f"tab_{id(page)}"
-                    self.pages[target_id] = page
-                    self.console_messages[target_id] = []
-                    page.on("console", lambda msg, tid=target_id: self._capture_console(tid, msg))
-                    if self.active_page_id is None:
-                        self.active_page_id = target_id
-
-                # Set branded Hive start page on the first blank page
-                if self.context.pages:
-                    first_page = self.context.pages[0]
-                    url = first_page.url
-                    # Only set branded content if it's a blank/new tab page
-                    if url in ("", "about:blank", "chrome://newtab/"):
-                        await first_page.set_content(HIVE_START_PAGE)
             else:
-                # Ephemeral mode - original behavior
-                logger.info(f"Starting ephemeral browser: profile={self.profile}")
-                self.browser = await self._playwright.chromium.launch(
-                    headless=headless,
-                    args=chrome_args,
-                )
-                self.context = await self.browser.new_context(
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent=BROWSER_USER_AGENT,
-                    locale="en-US",
-                )
+                self.user_data_dir = None  # chrome_launcher creates a temp dir
 
-                # Inject stealth script to hide automation detection
-                await self.context.add_init_script(STEALTH_SCRIPT)
+            # Allocate CDP port for system Chrome
+            self.cdp_port = allocate_port(self.profile)
+
+            logger.info(
+                f"Starting {'persistent' if persistent else 'ephemeral'} browser: "
+                f"profile={self.profile}, user_data_dir={self.user_data_dir}, "
+                f"cdp_port={self.cdp_port}"
+            )
+
+            # Launch system Chrome and connect via CDP
+            logger.info("start(): launching Chrome...")
+            try:
+                self._chrome_process = await launch_chrome(
+                    cdp_port=self.cdp_port,
+                    user_data_dir=self.user_data_dir,
+                    headless=headless,
+                    extra_args=[f"--user-agent={BROWSER_USER_AGENT}"],
+                )
+                logger.info("start(): Chrome launched, connecting CDP...")
+                self.browser = await self._playwright.chromium.connect_over_cdp(
+                    self._chrome_process.cdp_url
+                )
+            except Exception as exc:
+                logger.error(f"Browser launch failed: {exc}")
+                await self._cleanup_after_failed_start()
+                raise
+
+            self.context = self.browser.contexts[0]
+            logger.info(
+                f"start(): CDP connected: contexts={len(self.browser.contexts)}, "
+                f"pages={len(self.context.pages)}"
+            )
+
+            # Inject stealth script to hide automation detection
+            await self.context.add_init_script(STEALTH_SCRIPT)
+
+            # Close ALL pages/contexts Chrome opened on startup (session
+            # restore, about:blank, new-tab page, etc.) and create a single
+            # clean page we fully control.
+            viewport = _get_viewport()
+
+            for ctx in self.browser.contexts[1:]:
+                try:
+                    await ctx.close()
+                except Exception:
+                    pass
+
+            logger.info("start(): closing %d initial pages...", len(self.context.pages))
+            for page in list(self.context.pages):
+                try:
+                    await page.close()
+                except Exception:
+                    pass
+
+            logger.info("start(): creating new page...")
+            first_page = await self.context.new_page()
+            logger.info("start(): setting viewport...")
+            await first_page.set_viewport_size(viewport)
+
+            # Register the clean page
+            target_id = f"tab_{id(first_page)}"
+            self._register_page(first_page, target_id, origin="startup")
+
+            # Set branded Hive start page on the initial tab
+            logger.info("start(): setting Hive start page content...")
+            await first_page.set_content(HIVE_START_PAGE)
+
+            # Auto-track pages opened by popups / target="_blank" links
+            # (attached after setup so it doesn't fire during startup)
+            self.context.on("page", self._handle_popup_page)
 
             # Health check: confirm the browser is actually responsive
+            logger.info("start(): running health check...")
             try:
                 await self._health_check()
             except Exception as exc:
@@ -474,12 +613,19 @@ class BrowserSession:
                 if self._playwright:
                     await self._playwright.stop()
                     self._playwright = None
+
+                # Kill the Chrome subprocess
+                if self._chrome_process:
+                    await self._chrome_process.kill()
+                    self._chrome_process = None
             else:
                 self.browser = None  # Drop reference to shared browser
 
             self.pages.clear()
             self.active_page_id = None
             self.console_messages.clear()
+            self.page_meta.clear()
+            self.ref_maps.clear()
             self.user_data_dir = None
             self.persistent = False
 
@@ -518,7 +664,7 @@ class BrowserSession:
         # Create an isolated context stamped with the snapshot
         context = await browser.new_context(
             storage_state=storage_state,
-            viewport={"width": 1920, "height": 1080},
+            viewport=_get_viewport(),
             user_agent=BROWSER_USER_AGENT,
             locale="en-US",
         )
@@ -530,6 +676,10 @@ class BrowserSession:
             context=context,
             session_type="agent",
         )
+
+        # Auto-track pages opened by popups / target="_blank" links
+        context.on("page", session._handle_popup_page)
+
         logger.info(f"Created agent session '{agent_id}' from profile '{source_session.profile}'")
         return session
 
@@ -578,12 +728,7 @@ class BrowserSession:
 
         page = await self.context.new_page()
         target_id = f"tab_{id(page)}"
-        self.pages[target_id] = page
-        self.active_page_id = target_id
-        self.console_messages[target_id] = []
-
-        # Set up console message capture
-        page.on("console", lambda msg: self._capture_console(target_id, msg))
+        self._register_page(page, target_id, origin="agent")
 
         await page.goto(url, wait_until=wait_until, timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
 
@@ -609,10 +754,7 @@ class BrowserSession:
             # Nothing to steal focus from — just open normally
             page = await self.context.new_page()
             target_id = f"tab_{id(page)}"
-            self.pages[target_id] = page
-            self.active_page_id = target_id
-            self.console_messages[target_id] = []
-            page.on("console", lambda msg: self._capture_console(target_id, msg))
+            self._register_page(page, target_id, origin="agent")
             await page.goto(url, wait_until=wait_until, timeout=DEFAULT_NAVIGATION_TIMEOUT_MS)
             return {
                 "ok": True,
@@ -646,10 +788,8 @@ class BrowserSession:
             await cdp.detach()
 
         target_id = f"tab_{id(page)}"
-        self.pages[target_id] = page
         # Don't update active_page_id — the whole point is to stay on the current tab
-        self.console_messages[target_id] = []
-        page.on("console", lambda msg: self._capture_console(target_id, msg))
+        self._register_page(page, target_id, set_active=False, origin="agent")
 
         return {
             "ok": True,
@@ -658,6 +798,72 @@ class BrowserSession:
             "title": await page.title(),
             "background": True,
         }
+
+    def _handle_page_close(self, target_id: str) -> None:
+        """Clean up session state when a page is closed (by user or programmatically)."""
+        self.pages.pop(target_id, None)
+        self.console_messages.pop(target_id, None)
+        self.page_meta.pop(target_id, None)
+        self.ref_maps.pop(target_id, None)
+
+        if self.active_page_id == target_id:
+            self.active_page_id = next(iter(self.pages), None)
+            if self.active_page_id:
+                logger.info("Active tab %s closed, switched to %s", target_id, self.active_page_id)
+            else:
+                logger.warning("Active tab %s closed, no remaining tabs", target_id)
+
+    def _handle_popup_page(self, page: Page) -> None:
+        """Auto-register pages opened by popups or target="_blank" links.
+
+        Attached as a persistent listener via ``context.on("page", ...)``.
+        Skips pages already tracked (e.g. created by ``open_tab``).
+        """
+        # context.on("page") fires for ALL new pages, including ones
+        # created explicitly by open_tab / _open_tab_background.
+        # Check identity to avoid double-registration.
+        for existing in self.pages.values():
+            if existing is page:
+                return
+        # Capture the opener's URL as context for the popup origin
+        opener_url: str | None = None
+        active_page = self.get_active_page()
+        if active_page:
+            try:
+                opener_url = active_page.url
+            except Exception:
+                pass
+        target_id = f"tab_{id(page)}"
+        self._register_page(
+            page, target_id, set_active=False, origin="popup", opener_url=opener_url
+        )
+        logger.info("Auto-registered popup page: %s (url=%s)", target_id, page.url)
+
+    def _register_page(
+        self,
+        page: Page,
+        target_id: str,
+        *,
+        set_active: bool = True,
+        origin: str = "user",
+        opener_url: str | None = None,
+    ) -> None:
+        """Register a page in the session with all necessary event listeners."""
+        if target_id in self.pages:
+            if set_active:
+                self.active_page_id = target_id
+            return
+        self.pages[target_id] = page
+        self.console_messages[target_id] = []
+        self.page_meta[target_id] = TabMeta(
+            created_at=time.time(),
+            origin=origin,
+            opener_url=opener_url,
+        )
+        page.on("console", lambda msg, tid=target_id: self._capture_console(tid, msg))
+        page.on("close", lambda tid=target_id: self._handle_page_close(tid))
+        if set_active:
+            self.active_page_id = target_id
 
     def _capture_console(self, target_id: str, msg: Any) -> None:
         """Capture console messages for a tab."""
@@ -678,6 +884,7 @@ class BrowserSession:
         page = self.pages.pop(tid)
         await page.close()
         self.console_messages.pop(tid, None)
+        self.page_meta.pop(tid, None)
 
         if self.active_page_id == tid:
             self.active_page_id = next(iter(self.pages), None)
@@ -695,15 +902,19 @@ class BrowserSession:
 
     async def list_tabs(self) -> list[dict]:
         """List all open tabs with their metadata."""
+        now = time.time()
         tabs = []
         for tid, page in self.pages.items():
             try:
+                meta = self.page_meta.get(tid)
                 tabs.append(
                     {
                         "targetId": tid,
                         "url": page.url,
                         "title": await page.title(),
                         "active": tid == self.active_page_id,
+                        "origin": meta.origin if meta else "unknown",
+                        "age_seconds": int(now - meta.created_at) if meta else None,
                     }
                 )
             except Exception:
@@ -729,14 +940,57 @@ class BrowserSession:
 
 _sessions: dict[str, BrowserSession] = {}
 
+# ContextVar that lets the framework inject a per-subagent profile without
+# changing any tool signatures.  Each asyncio Task (including those spawned
+# by asyncio.gather) inherits a *copy* of the current context, so concurrent
+# GCU subagents each see their own value here.
+_active_profile: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "hive_gcu_profile", default="default"
+)
 
-def get_session(profile: str = "default") -> BrowserSession:
-    """Get or create a browser session for a profile."""
-    if profile not in _sessions:
-        _sessions[profile] = BrowserSession(profile=profile)
-    return _sessions[profile]
+
+def set_active_profile(profile: str) -> contextvars.Token:
+    """Set the active browser profile for the current async context.
+
+    Returns a token that can be passed to ``_active_profile.reset()`` to
+    restore the previous value when the subagent finishes.
+    """
+    return _active_profile.set(profile)
+
+
+def get_session(profile: str | None = None) -> BrowserSession:
+    """Get or create a browser session for a profile.
+
+    If *profile* is not given, the value set by :func:`set_active_profile`
+    for the current async context is used (default: ``"default"``).  This
+    allows the framework to automatically route concurrent GCU subagents to
+    separate browser contexts without any changes to tool call sites.
+    """
+    resolved = profile if profile is not None else _active_profile.get()
+    if resolved not in _sessions:
+        _sessions[resolved] = BrowserSession(profile=resolved)
+    return _sessions[resolved]
 
 
 def get_all_sessions() -> dict[str, BrowserSession]:
     """Get all registered sessions."""
     return _sessions
+
+
+async def shutdown_all_browsers() -> None:
+    """Stop all browser sessions and the shared browser.
+
+    Called at server shutdown to kill orphaned Chrome processes.
+    """
+    for name, session in list(_sessions.items()):
+        try:
+            await session.stop()
+            logger.info("Stopped browser session: %s", name)
+        except Exception as exc:
+            logger.warning("Error stopping session %s: %s", name, exc)
+    _sessions.clear()
+
+    try:
+        await close_shared_browser()
+    except Exception as exc:
+        logger.warning("Error closing shared browser: %s", exc)

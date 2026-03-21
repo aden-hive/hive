@@ -51,6 +51,24 @@ def _get(endpoint: str, token: str, params: dict | None = None) -> dict[str, Any
         return {"error": f"Docker Hub request failed: {e!s}"}
 
 
+def _delete(endpoint: str, token: str) -> dict[str, Any]:
+    try:
+        resp = httpx.delete(f"{HUB_API}/{endpoint}", headers=_headers(token), timeout=30.0)
+        if resp.status_code == 401:
+            return {"error": "Unauthorized. Check your DOCKER_HUB_TOKEN."}
+        if resp.status_code == 404:
+            return {"error": "Not found"}
+        if resp.status_code == 204 or not resp.content:
+            return {"status": "deleted"}
+        if resp.status_code >= 400:
+            return {"error": f"Docker Hub API error {resp.status_code}: {resp.text[:500]}"}
+        return resp.json()
+    except httpx.TimeoutException:
+        return {"error": "Request to Docker Hub timed out"}
+    except Exception as e:
+        return {"error": f"Docker Hub request failed: {e!s}"}
+
+
 def _auth_error() -> dict[str, Any]:
     return {
         "error": "DOCKER_HUB_TOKEN not set",
@@ -230,3 +248,116 @@ def register_tools(
             "is_private": data.get("is_private", False),
             "full_description": full_desc,
         }
+
+    @mcp.tool()
+    def docker_hub_get_tag_detail(
+        repository: str,
+        tag: str,
+    ) -> dict[str, Any]:
+        """
+        Get detailed information about a specific image tag.
+
+        Args:
+            repository: Full repository name (e.g. "library/nginx" or "myuser/myapp")
+            tag: Tag name (e.g. "latest", "v1.0")
+
+        Returns:
+            Dict with tag details including images with architecture, OS, size, digest
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not repository or not tag:
+            return {"error": "repository and tag are required"}
+
+        data = _get(f"repositories/{repository}/tags/{tag}", token)
+        if "error" in data:
+            return data
+
+        images = []
+        for img in data.get("images", []):
+            images.append(
+                {
+                    "architecture": img.get("architecture", ""),
+                    "os": img.get("os", ""),
+                    "size": img.get("size", 0),
+                    "digest": img.get("digest", ""),
+                    "status": img.get("status", ""),
+                    "last_pushed": img.get("last_pushed", ""),
+                }
+            )
+        return {
+            "repository": repository,
+            "tag": data.get("name", tag),
+            "full_size": data.get("full_size", 0),
+            "last_updated": data.get("last_updated", ""),
+            "last_updater_username": data.get("last_updater_username", ""),
+            "images": images,
+            "image_count": len(images),
+        }
+
+    @mcp.tool()
+    def docker_hub_delete_tag(
+        repository: str,
+        tag: str,
+    ) -> dict[str, Any]:
+        """
+        Delete a specific tag from a Docker Hub repository.
+
+        Args:
+            repository: Full repository name (e.g. "myuser/myapp")
+            tag: Tag name to delete (e.g. "old-version")
+
+        Returns:
+            Dict with deletion status
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not repository or not tag:
+            return {"error": "repository and tag are required"}
+
+        data = _delete(f"repositories/{repository}/tags/{tag}", token)
+        if "error" in data:
+            return data
+
+        return {"repository": repository, "tag": tag, "status": "deleted"}
+
+    @mcp.tool()
+    def docker_hub_list_webhooks(
+        repository: str,
+    ) -> dict[str, Any]:
+        """
+        List webhooks configured for a Docker Hub repository.
+
+        Args:
+            repository: Full repository name (e.g. "myuser/myapp")
+
+        Returns:
+            Dict with webhooks list (name, hook_url, active, expect_final_callback)
+        """
+        token = _get_token(credentials)
+        if not token:
+            return _auth_error()
+        if not repository:
+            return {"error": "repository is required"}
+
+        data = _get(f"repositories/{repository}/webhooks", token)
+        if "error" in data:
+            return data
+
+        webhooks = []
+        for wh in data.get("results", []):
+            hooks = wh.get("webhooks", [])
+            webhook_urls = [h.get("hook_url", "") for h in hooks]
+            webhooks.append(
+                {
+                    "id": wh.get("id", ""),
+                    "name": wh.get("name", ""),
+                    "active": wh.get("active", False),
+                    "expect_final_callback": wh.get("expect_final_callback", False),
+                    "hook_urls": webhook_urls,
+                    "created_at": wh.get("created_date", ""),
+                }
+            )
+        return {"repository": repository, "webhooks": webhooks, "count": len(webhooks)}

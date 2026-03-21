@@ -1141,6 +1141,117 @@ class _SlackClient:
             "note": "For exact member count, paginate through users.list",
         }
 
+    def get_channel_info(self, channel: str) -> dict[str, Any]:
+        """Get detailed information about a channel."""
+        response = httpx.get(
+            f"{SLACK_API_BASE}/conversations.info",
+            headers=self._headers,
+            params={"channel": channel},
+            timeout=30.0,
+        )
+        data = self._handle_response(response)
+        if "error" in data:
+            return data
+
+        ch = data.get("channel", {})
+        return {
+            "id": ch.get("id"),
+            "name": ch.get("name"),
+            "is_channel": ch.get("is_channel"),
+            "is_private": ch.get("is_private"),
+            "is_archived": ch.get("is_archived"),
+            "is_general": ch.get("is_general"),
+            "topic": (ch.get("topic") or {}).get("value", ""),
+            "purpose": (ch.get("purpose") or {}).get("value", ""),
+            "num_members": ch.get("num_members"),
+            "creator": ch.get("creator"),
+            "created": ch.get("created"),
+        }
+
+    def list_files(
+        self,
+        channel: str | None = None,
+        user: str | None = None,
+        types: str | None = None,
+        count: int = 20,
+        page: int = 1,
+    ) -> dict[str, Any]:
+        """List files shared in the workspace."""
+        params: dict[str, Any] = {
+            "count": min(count, 100),
+            "page": page,
+        }
+        if channel:
+            params["channel"] = channel
+        if user:
+            params["user"] = user
+        if types:
+            params["types"] = types
+
+        response = httpx.get(
+            f"{SLACK_API_BASE}/files.list",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        data = self._handle_response(response)
+        if "error" in data:
+            return data
+
+        files = []
+        for f in data.get("files", []):
+            files.append(
+                {
+                    "id": f.get("id"),
+                    "name": f.get("name"),
+                    "title": f.get("title"),
+                    "mimetype": f.get("mimetype"),
+                    "filetype": f.get("filetype"),
+                    "size": f.get("size"),
+                    "user": f.get("user"),
+                    "created": f.get("created"),
+                    "permalink": f.get("permalink"),
+                }
+            )
+
+        paging = data.get("paging", {})
+        return {
+            "files": files,
+            "count": len(files),
+            "total": paging.get("total", len(files)),
+            "page": paging.get("page", 1),
+            "pages": paging.get("pages", 1),
+        }
+
+    def get_file_info(self, file_id: str) -> dict[str, Any]:
+        """Get detailed information about a file."""
+        response = httpx.get(
+            f"{SLACK_API_BASE}/files.info",
+            headers=self._headers,
+            params={"file": file_id},
+            timeout=30.0,
+        )
+        data = self._handle_response(response)
+        if "error" in data:
+            return data
+
+        f = data.get("file", {})
+        return {
+            "id": f.get("id"),
+            "name": f.get("name"),
+            "title": f.get("title"),
+            "mimetype": f.get("mimetype"),
+            "filetype": f.get("filetype"),
+            "size": f.get("size"),
+            "user": f.get("user"),
+            "created": f.get("created"),
+            "permalink": f.get("permalink"),
+            "url_private": f.get("url_private"),
+            "channels": f.get("channels", []),
+            "shares": list((f.get("shares") or {}).get("public", {}).keys())[:10],
+            "comments_count": f.get("comments_count", 0),
+        }
+
 
 def register_tools(
     mcp: FastMCP,
@@ -2904,6 +3015,100 @@ def register_tools(
             return client
         try:
             return client.get_team_stats()
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_get_channel_info(
+        channel: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Get detailed information about a Slack channel.
+
+        Args:
+            channel: Channel ID (e.g., "C1234567890")
+            account: Optional account alias for multi-workspace setups
+
+        Returns:
+            Dict with channel details including name, topic, purpose, member count
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        if not channel:
+            return {"error": "channel is required"}
+        try:
+            return client.get_channel_info(channel)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_list_files(
+        channel: str = "",
+        user: str = "",
+        types: str = "",
+        count: int = 20,
+        page: int = 1,
+        account: str = "",
+    ) -> dict:
+        """
+        List files shared in the Slack workspace.
+
+        Args:
+            channel: Filter by channel ID (optional)
+            user: Filter by user ID (optional)
+            types: Filter by file type - comma-separated: spaces, snippets,
+                   images, gdocs, zips, pdfs (optional)
+            count: Number of files per page (1-100, default 20)
+            page: Page number (default 1)
+            account: Optional account alias for multi-workspace setups
+
+        Returns:
+            Dict with files list including name, type, size, and permalink
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_files(
+                channel=channel or None,
+                user=user or None,
+                types=types or None,
+                count=count,
+                page=page,
+            )
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_get_file_info(
+        file_id: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Get detailed information about a Slack file.
+
+        Args:
+            file_id: The file ID (e.g., "F1234567890")
+            account: Optional account alias for multi-workspace setups
+
+        Returns:
+            Dict with file details including name, type, size, permalink, and sharing info
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        if not file_id:
+            return {"error": "file_id is required"}
+        try:
+            return client.get_file_info(file_id)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

@@ -9,7 +9,14 @@ from .base import CredentialSpec
 NEWS_CREDENTIALS = {
     "newsdata": CredentialSpec(
         env_var="NEWSDATA_API_KEY",
-        tools=["news_search", "news_headlines", "news_by_company"],
+        tools=[
+            "news_search",
+            "news_headlines",
+            "news_by_company",
+            "news_latest",
+            "news_by_source",
+            "news_by_topic",
+        ],
         node_types=[],
         required=True,
         startup_required=False,

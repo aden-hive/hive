@@ -262,6 +262,16 @@ class NodeSpec(BaseModel):
         ),
     )
 
+    # Opt out of judge evaluation entirely (no feedback injected, loop continues normally)
+    skip_judge: bool = Field(
+        default=False,
+        description=(
+            "When True, the implicit judge is bypassed entirely — no feedback is "
+            "injected and the loop continues naturally. Intended for conversational "
+            "nodes (e.g., the queen) that should never receive tool-use pressure."
+        ),
+    )
+
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
 
@@ -549,6 +559,22 @@ class NodeContext:
     # the queen to switch between building-mode and running-mode tools.
     dynamic_tools_provider: Any = None  # Callable[[], list[Tool]] | None
 
+    # Dynamic prompt provider — when set, EventLoopNode checks each
+    # iteration and updates the system prompt if it changed.  Used by
+    # the queen to switch between phase-specific prompts (building /
+    # staging / running) without restarting the conversation.
+    dynamic_prompt_provider: Any = None  # Callable[[], str] | None
+
+    # Skill system prompts — injected by the skill discovery pipeline
+    skills_catalog_prompt: str = ""  # Available skills XML catalog
+    protocols_prompt: str = ""  # Default skill operational protocols
+    skill_dirs: list[str] = field(default_factory=list)  # Skill base dirs for resource access
+
+    # Per-iteration metadata provider — when set, EventLoopNode merges
+    # the returned dict into node_loop_iteration event data.  Used by
+    # the queen to record the current phase per iteration.
+    iteration_metadata_provider: Any = None  # Callable[[], dict] | None
+
 
 @dataclass
 class NodeResult:
@@ -585,7 +611,6 @@ class NodeResult:
         Generate a human-readable summary of this node's execution and output.
 
         This is like toString() - it describes what the node produced in its current state.
-        Uses Haiku to intelligently summarize complex outputs.
         """
         if not self.success:
             return f"❌ Failed: {self.error}"
@@ -593,59 +618,13 @@ class NodeResult:
         if not self.output:
             return "✓ Completed (no output)"
 
-        # Use Haiku to generate intelligent summary
-        import os
-
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-
-        if not api_key:
-            # Fallback: simple key-value listing
-            parts = [f"✓ Completed with {len(self.output)} outputs:"]
-            for key, value in list(self.output.items())[:5]:  # Limit to 5 keys
-                value_str = str(value)[:100]
-                if len(str(value)) > 100:
-                    value_str += "..."
-                parts.append(f"  • {key}: {value_str}")
-            return "\n".join(parts)
-
-        # Use Haiku to generate intelligent summary
-        try:
-            import json
-
-            import anthropic
-
-            node_context = ""
-            if node_spec:
-                node_context = f"\nNode: {node_spec.name}\nPurpose: {node_spec.description}"
-
-            output_json = json.dumps(self.output, indent=2, default=str)[:2000]
-            prompt = (
-                f"Generate a 1-2 sentence human-readable summary of "
-                f"what this node produced.{node_context}\n\n"
-                f"Node output:\n{output_json}\n\n"
-                "Provide a concise, clear summary that a human can quickly "
-                "understand. Focus on the key information produced."
-            )
-
-            client = anthropic.Anthropic(api_key=api_key)
-            message = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=200,
-                messages=[{"role": "user", "content": prompt}],
-            )
-
-            summary = message.content[0].text.strip()
-            return f"✓ {summary}"
-
-        except Exception:
-            # Fallback on error
-            parts = [f"✓ Completed with {len(self.output)} outputs:"]
-            for key, value in list(self.output.items())[:3]:
-                value_str = str(value)[:80]
-                if len(str(value)) > 80:
-                    value_str += "..."
-                parts.append(f"  • {key}: {value_str}")
-            return "\n".join(parts)
+        parts = [f"✓ Completed with {len(self.output)} outputs:"]
+        for key, value in list(self.output.items())[:5]:  # Limit to 5 keys
+            value_str = str(value)[:100]
+            if len(str(value)) > 100:
+                value_str += "..."
+            parts.append(f"  • {key}: {value_str}")
+        return "\n".join(parts)
 
 
 class NodeProtocol(ABC):

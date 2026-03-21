@@ -61,6 +61,32 @@ def _get(path: str, token: str, params: dict[str, Any] | None = None) -> dict[st
         return {"error": f"Greenhouse request failed: {e!s}"}
 
 
+def _post(path: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Make an authenticated POST to the Greenhouse Harvest API."""
+    try:
+        resp = httpx.post(
+            f"{API_BASE}{path}",
+            headers={
+                "Authorization": _auth_header(token),
+                "Content-Type": "application/json",
+                "On-Behalf-Of": "",
+            },
+            json=body,
+            timeout=30.0,
+        )
+        if resp.status_code == 401:
+            return {"error": "Unauthorized. Check your Greenhouse API token."}
+        if resp.status_code == 403:
+            return {"error": "Forbidden. Your API key may lack the required permissions."}
+        if resp.status_code not in (200, 201):
+            return {"error": f"Greenhouse API error {resp.status_code}: {resp.text[:500]}"}
+        return resp.json()
+    except httpx.TimeoutException:
+        return {"error": "Request to Greenhouse timed out"}
+    except Exception as e:
+        return {"error": f"Greenhouse request failed: {e!s}"}
+
+
 def _auth_error() -> dict[str, Any]:
     return {
         "error": "GREENHOUSE_API_TOKEN not set",
@@ -349,3 +375,144 @@ def register_tools(
             "rejected_at": data.get("rejected_at"),
             "last_activity_at": data.get("last_activity_at", ""),
         }
+
+    @mcp.tool()
+    def greenhouse_list_offers(
+        application_id: int = 0,
+        per_page: int = 50,
+        page: int = 1,
+    ) -> dict[str, Any]:
+        """
+        List offers in Greenhouse.
+
+        Args:
+            application_id: Filter by application ID (optional, 0 = all)
+            per_page: Results per page (1-500, default 50)
+            page: Page number (default 1)
+
+        Returns:
+            Dict with offers list (id, status, version, start_date, created_at)
+        """
+        token = _get_credentials(credentials)
+        if not token:
+            return _auth_error()
+
+        params: dict[str, Any] = {
+            "per_page": max(1, min(per_page, 500)),
+            "page": max(1, page),
+        }
+
+        if application_id:
+            path = f"/applications/{application_id}/offers"
+        else:
+            path = "/offers"
+
+        data = _get(path, token, params)
+        if isinstance(data, dict) and "error" in data:
+            return data
+
+        offers = []
+        for o in data if isinstance(data, list) else []:
+            offers.append(
+                {
+                    "id": o.get("id"),
+                    "application_id": o.get("application_id"),
+                    "version": o.get("version"),
+                    "status": o.get("status", ""),
+                    "starts_at": o.get("starts_at", ""),
+                    "created_at": o.get("created_at", ""),
+                    "updated_at": o.get("updated_at", ""),
+                    "sent_at": o.get("sent_at"),
+                    "resolved_at": o.get("resolved_at"),
+                }
+            )
+        return {"offers": offers, "count": len(offers)}
+
+    @mcp.tool()
+    def greenhouse_add_candidate_note(
+        candidate_id: int,
+        body: str,
+        visibility: str = "public",
+    ) -> dict[str, Any]:
+        """
+        Add a note to a candidate in Greenhouse.
+
+        Args:
+            candidate_id: Greenhouse candidate ID (required)
+            body: Note content text (required)
+            visibility: Note visibility: 'public' or 'private' (default 'public')
+
+        Returns:
+            Dict with created note details
+        """
+        token = _get_credentials(credentials)
+        if not token:
+            return _auth_error()
+        if not candidate_id or not body:
+            return {"error": "candidate_id and body are required"}
+
+        payload: dict[str, Any] = {
+            "body": body,
+            "visibility": visibility,
+        }
+
+        data = _post(f"/candidates/{candidate_id}/activity_feed/notes", token, payload)
+        if isinstance(data, dict) and "error" in data:
+            return data
+
+        return {
+            "id": data.get("id"),
+            "body": data.get("body", ""),
+            "visibility": data.get("visibility", ""),
+            "created_at": data.get("created_at", ""),
+            "status": "created",
+        }
+
+    @mcp.tool()
+    def greenhouse_list_scorecards(
+        application_id: int,
+        per_page: int = 50,
+        page: int = 1,
+    ) -> dict[str, Any]:
+        """
+        List scorecards for a specific application.
+
+        Args:
+            application_id: Greenhouse application ID (required)
+            per_page: Results per page (1-500, default 50)
+            page: Page number (default 1)
+
+        Returns:
+            Dict with scorecards list (id, interviewer, overall_recommendation, submitted_at)
+        """
+        token = _get_credentials(credentials)
+        if not token:
+            return _auth_error()
+        if not application_id:
+            return {"error": "application_id is required"}
+
+        params: dict[str, Any] = {
+            "per_page": max(1, min(per_page, 500)),
+            "page": max(1, page),
+        }
+
+        data = _get(f"/applications/{application_id}/scorecards", token, params)
+        if isinstance(data, dict) and "error" in data:
+            return data
+
+        scorecards = []
+        for sc in data if isinstance(data, list) else []:
+            interviewer = sc.get("interviewer") or {}
+            scorecards.append(
+                {
+                    "id": sc.get("id"),
+                    "interviewer_name": interviewer.get("name", ""),
+                    "interviewer_id": interviewer.get("id"),
+                    "overall_recommendation": sc.get("overall_recommendation", ""),
+                    "submitted_at": sc.get("submitted_at", ""),
+                    "interview": (sc.get("interview") or {}).get("name", ""),
+                    "created_at": sc.get("created_at", ""),
+                    "updated_at": sc.get("updated_at", ""),
+                }
+            )
+        return {"scorecards": scorecards, "count": len(scorecards)}

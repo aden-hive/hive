@@ -956,6 +956,106 @@ class _StripeClient:
         pm = self._stripe().payment_methods.detach(payment_method_id)
         return self._format_payment_method(pm)
 
+    # --- Disputes ---
+
+    def list_disputes(
+        self,
+        limit: int = 10,
+        starting_after: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": min(limit, 100)}
+        if starting_after:
+            params["starting_after"] = starting_after
+        result = self._stripe().disputes.list(params)
+        return {
+            "has_more": result.has_more,
+            "disputes": [self._format_dispute(d) for d in result.data],
+        }
+
+    def _format_dispute(self, d: Any) -> dict[str, Any]:
+        return {
+            "id": d.id,
+            "amount": d.amount,
+            "currency": d.currency,
+            "charge": d.charge,
+            "payment_intent": d.payment_intent,
+            "reason": d.reason,
+            "status": d.status,
+            "created": d.created,
+            "evidence_due_by": (
+                getattr(d, "evidence_details", {}).get("due_by")
+                if hasattr(d, "evidence_details") and d.evidence_details
+                else None
+            ),
+        }
+
+    # --- Events ---
+
+    def list_events(
+        self,
+        type_filter: str | None = None,
+        limit: int = 10,
+        starting_after: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"limit": min(limit, 100)}
+        if type_filter:
+            params["type"] = type_filter
+        if starting_after:
+            params["starting_after"] = starting_after
+        result = self._stripe().events.list(params)
+        return {
+            "has_more": result.has_more,
+            "events": [
+                {
+                    "id": e.id,
+                    "type": e.type,
+                    "created": e.created,
+                    "object_id": (
+                        e.data.object.get("id")
+                        if hasattr(e.data, "object") and isinstance(e.data.object, dict)
+                        else getattr(getattr(e.data, "object", None), "id", None)
+                    ),
+                }
+                for e in result.data
+            ],
+        }
+
+    # --- Checkout Sessions ---
+
+    def create_checkout_session(
+        self,
+        line_items: list[dict[str, Any]],
+        mode: str = "payment",
+        success_url: str = "",
+        cancel_url: str = "",
+        customer_id: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {
+            "line_items": line_items,
+            "mode": mode,
+        }
+        if success_url:
+            params["success_url"] = success_url
+        if cancel_url:
+            params["cancel_url"] = cancel_url
+        if customer_id:
+            params["customer"] = customer_id
+        if metadata:
+            params["metadata"] = metadata
+        session = self._stripe().checkout.sessions.create(params)
+        return {
+            "id": session.id,
+            "url": session.url,
+            "mode": session.mode,
+            "status": session.status,
+            "payment_status": session.payment_status,
+            "customer": session.customer,
+            "amount_total": session.amount_total,
+            "currency": session.currency,
+            "created": session.created,
+        }
+
     def _format_payment_method(self, pm: Any) -> dict[str, Any]:
         card = None
         if pm.card:
@@ -2558,5 +2658,130 @@ def register_tools(
             return {"error": "Invalid payment_method_id. Must start with: pm_"}
         try:
             return client.detach_payment_method(payment_method_id)
+        except stripe.StripeError as e:
+            return _stripe_error(e)
+
+    # --- Dispute Tools ---
+
+    @mcp.tool()
+    def stripe_list_disputes(
+        limit: int = 10,
+        starting_after: str | None = None,
+    ) -> dict:
+        """
+        List payment disputes (chargebacks).
+
+        Args:
+            limit: Number of disputes to fetch (1-100, default 10)
+            starting_after: Cursor for pagination (dispute ID)
+
+        Returns:
+            Dict with disputes list including id, amount, reason, status
+
+        Example:
+            stripe_list_disputes(limit=20)
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_disputes(limit, starting_after)
+        except stripe.StripeError as e:
+            return _stripe_error(e)
+
+    # --- Event Tools ---
+
+    @mcp.tool()
+    def stripe_list_events(
+        type_filter: str | None = None,
+        limit: int = 10,
+        starting_after: str | None = None,
+    ) -> dict:
+        """
+        List recent API events (webhooks, state changes).
+
+        Args:
+            type_filter: Filter by event type (e.g. "charge.succeeded",
+                         "invoice.payment_failed", "customer.subscription.updated")
+            limit: Number of events to fetch (1-100, default 10)
+            starting_after: Cursor for pagination (event ID)
+
+        Returns:
+            Dict with events list including id, type, created, object_id
+
+        Example:
+            stripe_list_events(type_filter="charge.succeeded", limit=5)
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_events(type_filter, limit, starting_after)
+        except stripe.StripeError as e:
+            return _stripe_error(e)
+
+    # --- Checkout Session Tools ---
+
+    @mcp.tool()
+    def stripe_create_checkout_session(
+        line_items_json: str,
+        mode: str = "payment",
+        success_url: str = "",
+        cancel_url: str = "",
+        customer_id: str | None = None,
+        metadata: dict[str, str] | None = None,
+    ) -> dict:
+        """
+        Create a Stripe Checkout session for hosted payment.
+
+        Args:
+            line_items_json: JSON array of line items. Each needs "price" (price ID)
+                and "quantity". Example: '[{"price": "price_abc", "quantity": 1}]'
+            mode: Session mode - "payment" (one-time), "subscription", or "setup"
+                  (default "payment")
+            success_url: URL to redirect to on success (optional)
+            cancel_url: URL to redirect to on cancellation (optional)
+            customer_id: Existing customer ID to associate (optional, starts with "cus_")
+            metadata: Key-value metadata to attach (optional)
+
+        Returns:
+            Dict with checkout session details including URL
+
+        Example:
+            stripe_create_checkout_session('[{"price":"price_abc","quantity":1}]',
+                                           success_url="https://example.com/thanks")
+        """
+        import json as json_mod
+
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+
+        if not line_items_json:
+            return {"error": "line_items_json is required"}
+
+        try:
+            line_items = json_mod.loads(line_items_json)
+        except json_mod.JSONDecodeError:
+            return {"error": "line_items_json must be valid JSON"}
+
+        if not isinstance(line_items, list) or not line_items:
+            return {"error": "line_items_json must be a non-empty JSON array"}
+
+        if mode not in ("payment", "subscription", "setup"):
+            return {"error": "mode must be one of: payment, subscription, setup"}
+
+        if customer_id and not customer_id.startswith("cus_"):
+            return {"error": "Invalid customer_id. Must start with: cus_"}
+
+        try:
+            return client.create_checkout_session(
+                line_items=line_items,
+                mode=mode,
+                success_url=success_url,
+                cancel_url=cancel_url,
+                customer_id=customer_id,
+                metadata=metadata,
+            )
         except stripe.StripeError as e:
             return _stripe_error(e)

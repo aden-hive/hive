@@ -1,6 +1,6 @@
 """Pre-load validation for agent graphs.
 
-Runs structural and credential checks before MCP servers are spawned.
+Runs structural, credential, and skill-trust checks before MCP servers are spawned.
 Fails fast with actionable error messages.
 """
 
@@ -40,8 +40,10 @@ def validate_graph_structure(graph: GraphSpec) -> list[str]:
 
     Delegates to GraphSpec.validate() which checks entry/terminal nodes,
     edge references, reachability, fan-out rules, and GCU constraints.
+    Returns only errors (warnings are not blocking).
     """
-    return graph.validate()
+    result = graph.validate()
+    return result["errors"]
 
 
 def validate_credentials(
@@ -166,6 +168,9 @@ def run_preload_validation(
     Order:
     1. Graph structure (includes GCU subagent-only checks) — non-recoverable
     2. Credentials — potentially recoverable via interactive setup
+
+    Skill discovery and trust gating (AS-13) happen later in runner._setup()
+    so they have access to agent-level skill configuration.
 
     Raises PreloadValidationError for structural issues.
     Raises CredentialError for credential issues.

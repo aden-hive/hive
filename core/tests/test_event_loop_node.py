@@ -31,6 +31,7 @@ from framework.llm.stream_events import (
 )
 from framework.runtime.core import Runtime
 from framework.runtime.event_bus import EventBus, EventType
+from framework.server.session_manager import Session, SessionManager
 from framework.storage.conversation_store import FileConversationStore
 
 # ---------------------------------------------------------------------------
@@ -137,7 +138,16 @@ def memory():
     return SharedMemory()
 
 
-def build_ctx(runtime, node_spec, memory, llm, tools=None, input_data=None, goal_context=""):
+def build_ctx(
+    runtime,
+    node_spec,
+    memory,
+    llm,
+    tools=None,
+    input_data=None,
+    goal_context="",
+    stream_id=None,
+):
     """Build a NodeContext for testing."""
     return NodeContext(
         runtime=runtime,
@@ -148,6 +158,7 @@ def build_ctx(runtime, node_spec, memory, llm, tools=None, input_data=None, goal
         llm=llm,
         available_tools=tools or [],
         goal_context=goal_context,
+        stream_id=stream_id,
     )
 
 
@@ -707,6 +718,195 @@ class TestClientFacingBlocking:
         for call in llm.stream_calls:
             tool_names = [t.name for t in (call["tools"] or [])]
             assert "ask_user" not in tool_names
+
+    @pytest.mark.asyncio
+    async def test_escalate_available_for_worker_stream(self, runtime, memory):
+        """Workers should receive escalate synthetic tool."""
+        spec = NodeSpec(
+            id="internal",
+            name="Internal",
+            description="internal node",
+            node_type="event_loop",
+            output_keys=[],
+        )
+        llm = MockStreamingLLM(scenarios=[text_scenario("thinking...")])
+        node = EventLoopNode(config=LoopConfig(max_iterations=2))
+        ctx = build_ctx(runtime, spec, memory, llm, stream_id="worker")
+
+        await node.execute(ctx)
+
+        assert llm._call_index >= 1
+        tool_names = [t.name for t in (llm.stream_calls[0]["tools"] or [])]
+        assert "escalate" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_escalate_not_available_for_queen_stream(self, runtime, memory):
+        """Queen stream should not receive escalate tool."""
+        spec = NodeSpec(
+            id="queen",
+            name="Queen",
+            description="queen node",
+            node_type="event_loop",
+            output_keys=[],
+        )
+        llm = MockStreamingLLM(scenarios=[text_scenario("monitoring...")])
+        node = EventLoopNode(config=LoopConfig(max_iterations=2))
+        ctx = build_ctx(runtime, spec, memory, llm, stream_id="queen")
+
+        await node.execute(ctx)
+
+        assert llm._call_index >= 1
+        tool_names = [t.name for t in (llm.stream_calls[0]["tools"] or [])]
+        assert "escalate" not in tool_names
+
+
+class TestEscalate:
+    @pytest.mark.asyncio
+    async def test_escalate_emits_event(self, runtime, node_spec, memory):
+        """escalate() should publish ESCALATION_REQUESTED and block for queen guidance."""
+        node_spec.output_keys = []
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "escalate",
+                    {
+                        "reason": "tool failure",
+                        "context": "HTTP 401 from upstream",
+                    },
+                    tool_use_id="escalate_1",
+                ),
+                text_scenario("Escalated to queen."),
+            ]
+        )
+        bus = EventBus()
+        received = []
+
+        async def capture(event):
+            received.append(event)
+
+        bus.subscribe(event_types=[EventType.ESCALATION_REQUESTED], handler=capture)
+
+        ctx = build_ctx(runtime, node_spec, memory, llm, stream_id="worker")
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Acknowledged, proceed.")
+
+        task = asyncio.create_task(queen_reply())
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Acknowledged, proceed.")
+
+        task = asyncio.create_task(queen_reply())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert len(received) == 1
+        assert received[0].type == EventType.ESCALATION_REQUESTED
+        assert received[0].data["reason"] == "tool failure"
+        assert "HTTP 401" in received[0].data["context"]
+
+    @pytest.mark.asyncio
+    async def test_escalate_handoff_reaches_queen(self, runtime, node_spec, memory):
+        """Worker escalation should be routed to queen via SessionManager handoff sub."""
+        node_spec.output_keys = []
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "escalate",
+                    {
+                        "reason": "blocked",
+                        "context": "dependency missing",
+                    },
+                    tool_use_id="escalate_1",
+                ),
+                text_scenario("Escalation sent."),
+            ]
+        )
+        bus = EventBus()
+
+        manager = SessionManager()
+        session = Session(id="handoff_test", event_bus=bus, llm=object(), loaded_at=0.0)
+        queen_node = MagicMock()
+        queen_node.inject_event = AsyncMock()
+        queen_executor = MagicMock()
+        queen_executor.node_registry = {"queen": queen_node}
+        manager._subscribe_worker_handoffs(session, queen_executor)
+
+        ctx = build_ctx(runtime, node_spec, memory, llm, stream_id="worker")
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Queen acknowledges escalation.")
+
+        task = asyncio.create_task(queen_reply())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        queen_node.inject_event.assert_awaited_once()
+        injected = queen_node.inject_event.await_args.args[0]
+        kwargs = queen_node.inject_event.await_args.kwargs
+        assert "[WORKER_ESCALATION_REQUEST]" in injected
+        assert "stream_id: worker" in injected
+        assert "node_id: test_loop" in injected
+        assert "reason: blocked" in injected
+        assert "dependency missing" in injected
+        assert kwargs["is_client_input"] is False
+
+    @pytest.mark.asyncio
+    async def test_escalate_waits_for_queen_input_and_skips_judge(self, runtime, node_spec, memory):
+        """escalate() should block for queen input before judge evaluation."""
+        node_spec.output_keys = ["result"]
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "escalate",
+                    {
+                        "reason": "need direction",
+                        "context": "conflicting constraints",
+                    },
+                    tool_use_id="escalate_1",
+                ),
+                tool_call_scenario(
+                    "set_output",
+                    {"key": "result", "value": "resolved after queen guidance"},
+                    tool_use_id="set_1",
+                ),
+                text_scenario("Completed."),
+            ]
+        )
+        bus = EventBus()
+        client_input_events = []
+
+        async def capture_input(event):
+            client_input_events.append(event)
+
+        bus.subscribe(event_types=[EventType.CLIENT_INPUT_REQUESTED], handler=capture_input)
+
+        judge = AsyncMock(spec=JudgeProtocol)
+        judge.evaluate = AsyncMock(return_value=JudgeVerdict(action="ACCEPT"))
+
+        ctx = build_ctx(runtime, node_spec, memory, llm, stream_id="worker")
+        node = EventLoopNode(judge=judge, event_bus=bus, config=LoopConfig(max_iterations=5))
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            assert judge.evaluate.await_count == 0
+            await node.inject_event("Use fallback mode and continue.")
+
+        task = asyncio.create_task(queen_reply())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["result"] == "resolved after queen guidance"
+        assert judge.evaluate.await_count >= 1
+        assert len(client_input_events) == 0
 
 
 # ===========================================================================
@@ -1331,6 +1531,34 @@ class TestTransientErrorRetry:
         assert llm._call_index == 1  # only tried once
 
     @pytest.mark.asyncio
+    async def test_client_facing_non_transient_error_does_not_crash(
+        self, runtime, node_spec, memory
+    ):
+        """Client-facing non-transient errors should wait for input, not crash on token vars."""
+        node_spec.output_keys = []
+        node_spec.client_facing = True
+        llm = ErrorThenSuccessLLM(
+            error=ValueError("bad request: blocked by policy"),
+            fail_count=100,  # always fails
+            success_scenario=text_scenario("unreachable"),
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(
+            config=LoopConfig(
+                max_iterations=1,
+                max_stream_retries=0,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        node._await_user_input = AsyncMock(return_value=None)
+
+        result = await node.execute(ctx)
+
+        assert result.success is False
+        assert "Max iterations" in (result.error or "")
+        node._await_user_input.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_transient_error_exhausts_retries(self, runtime, node_spec, memory):
         """Transient errors that exhaust retries should raise."""
         node_spec.output_keys = []
@@ -1573,9 +1801,9 @@ class TestIsToolDoomLoop:
 
     def test_different_args_no_doom(self):
         node = EventLoopNode(config=LoopConfig(tool_doom_loop_threshold=3))
-        fp1 = [("search", '{"q": "a"}')]
-        fp2 = [("search", '{"q": "b"}')]
-        fp3 = [("search", '{"q": "c"}')]
+        fp1 = [("search", '{"q": "deploy kubernetes cluster to production"}')]
+        fp2 = [("read_file", '{"path": "/etc/nginx/nginx.conf"}')]
+        fp3 = [("execute", '{"command": "SELECT * FROM users WHERE active=true"}')]
         is_doom, _ = node._is_tool_doom_loop([fp1, fp2, fp3])
         assert is_doom is False
 
@@ -1703,6 +1931,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
@@ -1758,12 +1987,79 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
         assert result.success is True
         assert len(doom_events) == 1
         assert "search" in doom_events[0].data["description"]
+
+    @pytest.mark.asyncio
+    async def test_client_facing_worker_doom_loop_escalates_to_queen(
+        self,
+        runtime,
+        memory,
+    ):
+        """Client-facing worker doom loops should escalate instead of blocking for user input."""
+        spec = NodeSpec(
+            id="worker",
+            name="Worker",
+            description="worker node",
+            node_type="event_loop",
+            output_keys=[],
+            client_facing=True,
+        )
+        judge = AsyncMock(spec=JudgeProtocol)
+        eval_count = 0
+
+        async def judge_eval(*args, **kwargs):
+            nonlocal eval_count
+            eval_count += 1
+            if eval_count >= 4:
+                return JudgeVerdict(action="ACCEPT")
+            return JudgeVerdict(action="RETRY")
+
+        judge.evaluate = judge_eval
+
+        llm = ToolRepeatLLM("search", {"q": "hello"}, tool_turns=3)
+        bus = EventBus()
+        escalation_events: list = []
+        bus.subscribe(
+            event_types=[EventType.ESCALATION_REQUESTED],
+            handler=lambda e: escalation_events.append(e),
+        )
+
+        def tool_exec(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content="result",
+                is_error=False,
+            )
+
+        ctx = build_ctx(
+            runtime,
+            spec,
+            memory,
+            llm,
+            tools=[Tool(name="search", description="s", parameters={})],
+            stream_id="worker",
+        )
+        node = EventLoopNode(
+            judge=judge,
+            tool_executor=tool_exec,
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=10,
+                tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
+            ),
+        )
+        result = await node.execute(ctx)
+
+        assert result.success is True
+        assert len(escalation_events) >= 1
+        assert escalation_events[0].data["reason"] == "Tool doom loop detected"
 
     @pytest.mark.asyncio
     async def test_doom_loop_disabled(
@@ -1808,6 +2104,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_enabled=False,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
@@ -1896,6 +2193,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
@@ -1958,6 +2256,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)

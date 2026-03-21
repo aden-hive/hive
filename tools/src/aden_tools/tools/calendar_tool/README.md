@@ -28,7 +28,7 @@ For quick testing, get a token from the [Google OAuth Playground](https://develo
 4. Set the environment variable:
 
 ```bash
-export GOOGLE_CALENDAR_ACCESS_TOKEN="your-access-token"
+export GOOGLE_ACCESS_TOKEN="your-access-token"
 ```
 
 **Note:** Access tokens from OAuth Playground expire after ~1 hour. For production, use Aden OAuth.
@@ -224,7 +224,7 @@ All tools return a dict with either success data or an error:
 ```json
 {
     "error": "Calendar credentials not configured",
-    "help": "Set GOOGLE_CALENDAR_ACCESS_TOKEN environment variable"
+    "help": "Set GOOGLE_ACCESS_TOKEN environment variable"
 }
 ```
 

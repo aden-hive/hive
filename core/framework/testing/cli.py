@@ -190,6 +190,7 @@ def cmd_test_run(args: argparse.Namespace) -> int:
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             env=env,
             timeout=600,  # 10 minute timeout
         )
@@ -248,6 +249,7 @@ def cmd_test_debug(args: argparse.Namespace) -> int:
     try:
         result = subprocess.run(
             cmd,
+            encoding="utf-8",
             env=env,
             timeout=120,  # 2 minute timeout for single test
         )
