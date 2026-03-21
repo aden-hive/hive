@@ -288,7 +288,10 @@ async function restoreSessionMessages(
           flowchartMap = mapData.map ?? null;
           originalDraft = mapData.original_draft ?? null;
         }
-        const msg = sseEventToChatMessage(evt, thread, agentDisplayName);
+        const nodeLabel = evt.stream_id !== "queen" && evt.node_id
+          ? formatAgentDisplayName(evt.node_id)
+          : (evt.stream_id === "queen" ? "Queen Bee" : agentDisplayName);
+        const msg = sseEventToChatMessage(evt, thread, nodeLabel);
         if (!msg) continue;
         if (evt.stream_id === "queen") {
           msg.role = "queen";
@@ -1715,7 +1718,10 @@ export default function Workspace() {
         case "client_input_received":
         case "client_input_requested":
         case "llm_text_delta": {
-          const chatMsg = sseEventToChatMessage(event, agentType, displayName, currentTurn);
+          const nodeDisplayName = !isQueen && event.node_id
+            ? formatAgentDisplayName(event.node_id)
+            : displayName;
+          const chatMsg = sseEventToChatMessage(event, agentType, nodeDisplayName, currentTurn);
           if (isQueen) console.log('[QUEEN] chatMsg:', chatMsg?.id, chatMsg?.content?.slice(0, 50), 'turn:', currentTurn);
           if (chatMsg && !suppressQueenMessages) {
             // Queen emits multiple client_output_delta / llm_text_delta snapshots
@@ -1831,7 +1837,7 @@ export default function Workspace() {
               if (prompt) {
                 const workerInputMsg: ChatMessage = {
                   id: `worker-input-${eid}-${event.node_id || Date.now()}`,
-                  agent: displayName || event.node_id || "Worker",
+                  agent: (event.node_id ? formatAgentDisplayName(event.node_id) : displayName) || "Worker",
                   agentColor: "",
                   content: prompt,
                   timestamp: "",
@@ -2008,7 +2014,7 @@ export default function Workspace() {
               const allDone = tools.length > 0 && tools.every(t => t.done);
               upsertChatMessage(agentType, {
                 id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
-                agent: agentDisplayName || event.node_id || "Agent",
+                agent: (event.node_id ? formatAgentDisplayName(event.node_id) : agentDisplayName) || "Agent",
                 agentColor: "",
                 content: JSON.stringify({ tools, allDone }),
                 timestamp: "",
@@ -2081,7 +2087,7 @@ export default function Workspace() {
               const allDone = tools.length > 0 && tools.every(t => t.done);
               upsertChatMessage(agentType, {
                 id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
-                agent: agentDisplayName || event.node_id || "Agent",
+                agent: (event.node_id ? formatAgentDisplayName(event.node_id) : agentDisplayName) || "Agent",
                 agentColor: "",
                 content: JSON.stringify({ tools, allDone }),
                 timestamp: "",

@@ -207,7 +207,6 @@ function ToolActivityRow({ content }: { content: string }) {
 
 const WorkerGroupBubble = memo(
   function WorkerGroupBubble({
-    workerName,
     messages,
     isActive,
   }: {
@@ -227,6 +226,22 @@ const WorkerGroupBubble = memo(
 
     return (
       <div>
+        {isActive && (
+          <style>{`
+            @keyframes workerFlow {
+              0%   { background-position: 0% 50%; }
+              100% { background-position: 200% 50%; }
+            }
+            .worker-flow-text {
+              background: linear-gradient(90deg, #818cf8, #6366f1, #38bdf8, #6366f1, #818cf8);
+              background-size: 200% auto;
+              animation: workerFlow 2s linear infinite;
+              -webkit-background-clip: text;
+              -webkit-text-fill-color: transparent;
+              background-clip: text;
+            }
+          `}</style>
+        )}
         <button
           onClick={() => setCollapsed((c) => !c)}
           className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors mb-1.5"
@@ -240,7 +255,12 @@ const WorkerGroupBubble = memo(
           >
             <Cpu className="w-3 h-3" style={{ color }} />
           </div>
-          <span className="font-medium" style={{ color }}>{workerName}</span>
+          {isActive && <Loader2 className="w-3 h-3 animate-spin" style={{ color }} />}
+          {isActive ? (
+            <span className="font-medium worker-flow-text">Working</span>
+          ) : (
+            <span className="font-medium" style={{ color }}>Working</span>
+          )}
           <span className="text-muted-foreground/50">
             — {stepCount} step{stepCount !== 1 ? "s" : ""}
           </span>
@@ -469,7 +489,7 @@ export default function ChatPanel({
       // Group consecutive worker messages (non-subagent) into a collapsible block
       if (msg.role === "worker" && !isSubagent && !msg.type) {
         const firstId = msg.id;
-        const workerName = msg.thread || msg.agent;
+        const workerName = msg.agent || msg.thread || "Worker";
         const groupMsgs: ChatMessage[] = [];
         while (i < threadMessages.length) {
           const m = threadMessages[i];
