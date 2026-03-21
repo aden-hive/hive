@@ -462,29 +462,80 @@ class ToolRegistry:
             # Treat top-level keys as server names
             server_list = [{"name": name, **cfg} for name, cfg in config.items()]
 
-        for server_config in server_list:
-            server_config = self._resolve_mcp_server_config(server_config, base_dir)
-            for _attempt in range(2):
-                try:
-                    self.register_mcp_server(server_config)
-                    break
-                except Exception as e:
-                    name = server_config.get("name", "unknown")
-                    if _attempt == 0:
-                        logger.warning(
-                            "MCP server '%s' failed to register, retrying in 2s: %s",
-                            name,
-                            e,
-                        )
-                        import time
-
-                        time.sleep(2)
-                    else:
-                        logger.warning("MCP server '%s' failed after retry: %s", name, e)
+        resolved_server_list = [
+            self._resolve_mcp_server_config(server_config, base_dir)
+            for server_config in server_list
+        ]
+        self.load_registry_servers(resolved_server_list, log_summary=False)
 
         # Snapshot credential files and ADEN_API_KEY so we can detect mid-session changes
         self._mcp_cred_snapshot = self._snapshot_credentials()
         self._mcp_aden_key_snapshot = os.environ.get("ADEN_API_KEY")
+
+    def _register_mcp_server_with_retry(
+        self,
+        server_config: dict[str, Any],
+    ) -> tuple[bool, int, str | None]:
+        """Register a single MCP server with one retry for transient failures."""
+        name = server_config.get("name", "unknown")
+        last_error: str | None = None
+
+        for attempt in range(2):
+            try:
+                count = self.register_mcp_server(server_config)
+                if count > 0:
+                    return True, count, None
+                last_error = "registered 0 tools"
+            except Exception as exc:
+                last_error = str(exc)
+
+            if attempt == 0:
+                logger.warning(
+                    "MCP server '%s' failed to register, retrying in 2s: %s",
+                    name,
+                    last_error,
+                )
+                import time
+
+                time.sleep(2)
+            else:
+                logger.warning("MCP server '%s' failed after retry: %s", name, last_error)
+
+        return False, 0, last_error
+
+    def load_registry_servers(
+        self,
+        server_list: list[dict[str, Any]],
+        *,
+        log_summary: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Register resolved registry-selected MCP servers with retry and status tracking."""
+        results: list[dict[str, Any]] = []
+
+        for server_config in server_list:
+            name = server_config.get("name", "unknown")
+            success, tools_loaded, error = self._register_mcp_server_with_retry(server_config)
+            result = {
+                "server": name,
+                "status": "loaded" if success else "skipped",
+                "tools_loaded": tools_loaded,
+                "skipped_reason": None if success else (error or "unknown error"),
+            }
+            results.append(result)
+
+            if log_summary:
+                logger.info(
+                    "MCP registry server resolution",
+                    extra={
+                        "event": "mcp_registry_server_resolution",
+                        "server": result["server"],
+                        "status": result["status"],
+                        "tools_loaded": result["tools_loaded"],
+                        "skipped_reason": result["skipped_reason"],
+                    },
+                )
+
+        return results
 
     def register_mcp_server(
         self,
@@ -524,6 +575,7 @@ class ToolRegistry:
                 cwd=server_config.get("cwd"),
                 url=server_config.get("url"),
                 headers=server_config.get("headers", {}),
+                socket_path=server_config.get("socket_path"),
                 description=server_config.get("description", ""),
             )
 

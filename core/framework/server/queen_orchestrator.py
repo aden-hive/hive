@@ -62,6 +62,7 @@ async def create_queen(
     from framework.agents.queen.nodes.thinking_hook import select_expert_persona
     from framework.graph.event_loop_node import HookContext, HookResult
     from framework.graph.executor import GraphExecutor
+    from framework.runner.mcp_registry import MCPRegistry
     from framework.runner.tool_registry import ToolRegistry
     from framework.runtime.core import Runtime
     from framework.runtime.event_bus import AgentEvent, EventType
@@ -85,6 +86,16 @@ async def create_queen(
             logger.info("Queen: loaded MCP tools from %s", mcp_config)
         except Exception:
             logger.warning("Queen: MCP config failed to load", exc_info=True)
+
+    try:
+        registry = MCPRegistry()
+        registry.initialize()
+        registry_configs = registry.load_agent_selection(queen_pkg_dir)
+        if registry_configs:
+            results = queen_registry.load_registry_servers(registry_configs)
+            logger.info("Queen: loaded MCP registry servers: %s", results)
+    except Exception:
+        logger.warning("Queen: MCP registry config failed to load", exc_info=True)
 
     # ---- Phase state --------------------------------------------------
     initial_phase = "staging" if worker_identity else "planning"

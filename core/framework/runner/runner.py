@@ -1121,6 +1121,9 @@ class AgentRunner:
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
 
+        # Auto-discover registry-selected MCP servers from mcp_registry.json
+        self._load_registry_mcp_servers(agent_path)
+
     @staticmethod
     def _import_agent_module(agent_path: Path):
         """Import an agent package from its directory path.
@@ -1423,6 +1426,45 @@ class AgentRunner:
     def _load_mcp_servers_from_config(self, config_path: Path) -> None:
         """Load and register MCP servers from a configuration file."""
         self._tool_registry.load_mcp_config(config_path)
+
+    def _load_registry_mcp_servers(self, agent_path: Path) -> None:
+        """Load and register MCP servers selected via ``mcp_registry.json``."""
+        from framework.runner.mcp_registry import MCPRegistry
+
+        try:
+            registry = MCPRegistry()
+            registry.initialize()
+            server_configs = registry.load_agent_selection(agent_path)
+        except Exception as exc:
+            logger.warning(
+                "Failed to load MCP registry servers for '%s': %s",
+                agent_path.name,
+                exc,
+            )
+            return
+
+        if not server_configs:
+            return
+
+        results = self._tool_registry.load_registry_servers(server_configs)
+        loaded = [result for result in results if result["status"] == "loaded"]
+        skipped = [result for result in results if result["status"] != "loaded"]
+
+        logger.info(
+            "Loaded %d/%d MCP registry server(s) for agent '%s'",
+            len(loaded),
+            len(results),
+            agent_path.name,
+        )
+        if skipped:
+            logger.info(
+                "Skipped MCP registry servers for agent '%s': %s",
+                agent_path.name,
+                [
+                    {"server": result["server"], "reason": result["skipped_reason"]}
+                    for result in skipped
+                ],
+            )
 
     def set_approval_callback(self, callback: Callable) -> None:
         """
