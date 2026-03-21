@@ -138,7 +138,10 @@ async def handle_chat(request: web.Request) -> web.Response:
                     stream_id="queen",
                     node_id="queen",
                     execution_id=session.id,
-                    data={"content": message, "image_count": len(image_content) if image_content else 0},
+                    data={
+                        "content": message,
+                        "image_count": len(image_content) if image_content else 0,
+                    },
                 )
             )
             return web.json_response(
