@@ -1561,6 +1561,22 @@ def _open_browser(url: str) -> None:
         pass  # Best-effort — don't crash if browser can't open
 
 
+def _format_subprocess_output(output: str | bytes | None, limit: int = 2000) -> str:
+    """Return subprocess output as trimmed text safe for console logging."""
+    if not output:
+        return ""
+
+    if isinstance(output, bytes):
+        text = output.decode(errors="replace")
+    else:
+        text = output
+
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
 def _build_frontend() -> bool:
     """Build the frontend if source is newer than dist. Returns True if dist exists."""
     import subprocess
@@ -1596,18 +1612,25 @@ def _build_frontend() -> bool:
 
     # Need to build
     print("Building frontend...")
+    npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
     try:
+        # Incremental tsc caches can drift across branch changes and block builds.
+        for cache_file in frontend_dir.glob("tsconfig*.tsbuildinfo"):
+            cache_file.unlink(missing_ok=True)
+
         # Ensure deps are installed
         subprocess.run(
-            ["npm", "install", "--no-fund", "--no-audit"],
+            [npm_cmd, "install", "--no-fund", "--no-audit"],
             encoding="utf-8",
+            errors="replace",
             cwd=frontend_dir,
             check=True,
             capture_output=True,
         )
         subprocess.run(
-            ["npm", "run", "build"],
+            [npm_cmd, "run", "build"],
             encoding="utf-8",
+            errors="replace",
             cwd=frontend_dir,
             check=True,
             capture_output=True,
@@ -1618,8 +1641,14 @@ def _build_frontend() -> bool:
         print("Node.js not found — skipping frontend build.")
         return dist_dir.is_dir()
     except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.decode(errors="replace") if exc.stderr else ""
-        print(f"Frontend build failed: {stderr[:500]}")
+        stdout = _format_subprocess_output(exc.stdout)
+        stderr = _format_subprocess_output(exc.stderr)
+        cmd = " ".join(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else str(exc.cmd)
+        details = "\n".join(part for part in [stdout, stderr] if part).strip()
+        if details:
+            print(f"Frontend build failed while running {cmd}:\n{details}")
+        else:
+            print(f"Frontend build failed while running {cmd} (exit {exc.returncode}).")
         return dist_dir.is_dir()
 
 

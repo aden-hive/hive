@@ -66,6 +66,32 @@ function Write-Fail {
     Write-Color -Text "  X $Text" -Color Red
 }
 
+function Write-CommandFailureDetails {
+    param(
+        [object[]]$Output,
+        [int]$Tail = 40
+    )
+
+    $lines = @($Output | Where-Object { $_ -ne $null } | ForEach-Object { "$_" })
+    if ($lines.Count -eq 0) {
+        return
+    }
+
+    $start = [Math]::Max(0, $lines.Count - $Tail)
+    if ($start -gt 0) {
+        Write-Host "    ... showing last $($lines.Count - $start) lines ..." -ForegroundColor DarkGray
+    }
+
+    for ($i = $start; $i -lt $lines.Count; $i++) {
+        Write-Host "    $($lines[$i])" -ForegroundColor DarkGray
+    }
+}
+
+function Test-FrontendDistReady {
+    param([string]$RootDir)
+    return (Test-Path (Join-Path $RootDir "core\frontend\dist\index.html"))
+}
+
 function Prompt-YesNo {
     param(
         [string]$Prompt,
@@ -540,6 +566,7 @@ Write-Host ""
 
 # Build frontend (if Node.js is available)
 $FrontendBuilt = $false
+$FrontendDistReady = Test-FrontendDistReady -RootDir $ScriptDir
 if ($NodeAvailable) {
     Write-Step -Number "" -Text "Building frontend dashboard..."
     Write-Host ""
@@ -548,30 +575,33 @@ if ($NodeAvailable) {
         Write-Host "  Installing npm packages... " -NoNewline
         Push-Location $frontendDir
         try {
-            $null = & npm install --no-fund --no-audit 2>&1
+            $installOutput = & npm install --no-fund --no-audit 2>&1
             if ($LASTEXITCODE -eq 0) {
                 Write-Ok "ok"
                 # Clean stale tsbuildinfo cache — tsc -b incremental builds fail
                 # silently when these are out of sync with source files
                 Get-ChildItem -Path $frontendDir -Filter "tsconfig*.tsbuildinfo" -ErrorAction SilentlyContinue | Remove-Item -Force
                 Write-Host "  Building frontend... " -NoNewline
-                $null = & npm run build 2>&1
+                $buildOutput = & npm run build 2>&1
                 if ($LASTEXITCODE -eq 0) {
                     Write-Ok "ok"
                     Write-Ok "Frontend built -> core/frontend/dist/"
                     $FrontendBuilt = $true
+                    $FrontendDistReady = $true
                 } else {
                     Write-Warn "build failed"
-                    Write-Host "    Run 'cd core\frontend && npm run build' manually to debug." -ForegroundColor DarkGray
+                    Write-CommandFailureDetails -Output $buildOutput -Tail 60
+                    Write-Host "    Quickstart will still try '.\hive.ps1 open' if Hive can rebuild the dashboard." -ForegroundColor DarkGray
                 }
             } else {
                 Write-Warn "npm install failed"
-                $NodeAvailable = $false
+                Write-CommandFailureDetails -Output $installOutput -Tail 60
             }
         } finally {
             Pop-Location
         }
     }
+    $FrontendDistReady = Test-FrontendDistReady -RootDir $ScriptDir
     Write-Host ""
 }
 
@@ -2016,13 +2046,21 @@ Write-Color -Text "hive open" -Color Cyan -NoNewline
 Write-Host ". Run .\quickstart.ps1 again to reconfigure." -ForegroundColor DarkGray
 Write-Host ""
 
-if ($FrontendBuilt) {
-    Write-Color -Text "Launching dashboard..." -Color White
+if ($FrontendDistReady -or $NodeAvailable) {
+    if ($FrontendDistReady) {
+        Write-Color -Text "Launching dashboard..." -Color White
+    } else {
+        Write-Color -Text "Launching dashboard (retrying frontend build via hive open)..." -Color White
+    }
     Write-Host ""
-    & hive open
+    & $hivePs1Path open
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Dashboard launch failed"
+        Write-Host "  Run '.\hive.ps1 open' manually to inspect the error." -ForegroundColor DarkGray
+    }
 } else {
-    Write-Color -Text "Frontend build was skipped or failed." -Color Yellow -NoNewline
+    Write-Color -Text "Frontend build was skipped or failed, and no built dashboard is available." -Color Yellow -NoNewline
     Write-Host " Launch manually when ready:"
-    Write-Color -Text "     hive open" -Color Cyan
+    Write-Color -Text "     .\hive.ps1 open" -Color Cyan
     Write-Host ""
 }
