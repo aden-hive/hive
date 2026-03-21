@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -36,6 +37,56 @@ from framework.runtime.event_bus import EventBus
 from framework.runtime.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
+
+
+async def _describe_images_as_text(image_content: list[dict[str, Any]]) -> str | None:
+    """Describe images using the best available vision model.
+
+    Called when the queen's model lacks vision support.  Tries vision-capable
+    models in priority order based on available API keys and returns a bracketed
+    description to inject into the message text, or None if no vision model is
+    reachable.
+    """
+    import litellm
+
+    # Build content blocks: prompt + all images
+    blocks: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": (
+                "Describe the following image(s) concisely but with enough detail "
+                "that a text-only AI assistant can understand the content and context."
+            ),
+        }
+    ]
+    blocks.extend(image_content)
+
+    # Ordered candidates based on available env vars
+    candidates: list[str] = []
+    if os.environ.get("OPENAI_API_KEY"):
+        candidates.append("gpt-4o-mini")
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        candidates.append("claude-3-haiku-20240307")
+    if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
+        candidates.append("gemini/gemini-1.5-flash")
+
+    for model in candidates:
+        try:
+            response = await litellm.acompletion(
+                model=model,
+                messages=[{"role": "user", "content": blocks}],
+                max_tokens=512,
+            )
+            description = (response.choices[0].message.content or "").strip()
+            if description:
+                count = len(image_content)
+                label = "image" if count == 1 else f"{count} images"
+                return f"[{label} attached — description: {description}]"
+        except Exception as exc:
+            logger.debug("Vision fallback model '%s' failed: %s", model, exc)
+            continue
+
+    return None
 
 
 @dataclass
@@ -2111,6 +2162,23 @@ class EventLoopNode(NodeProtocol):
                 await self._compact(ctx, conversation, accumulator)
 
             messages = conversation.to_llm_messages()
+
+            # Debug: log whether the last user message contains image blocks
+            for _m in reversed(messages):
+                if _m.get("role") == "user":
+                    _content = _m.get("content")
+                    if isinstance(_content, list):
+                        _img_count = sum(
+                            1 for _b in _content
+                            if isinstance(_b, dict) and _b.get("type") == "image_url"
+                        )
+                        if _img_count:
+                            logger.info(
+                                "[%s] LLM call: last user message has %d image block(s)",
+                                node_id,
+                                _img_count,
+                            )
+                    break
 
             # Defensive guard: ensure messages don't end with an assistant
             # message.  The Anthropic API rejects "assistant message prefill"
@@ -4737,14 +4805,19 @@ class EventLoopNode(NodeProtocol):
                     len(image_content) if image_content else 0,
                     content[:200] if content else "(empty)",
                 )
-                # Strip images for models that don't support them in user messages
+                # For models that don't support images, fall back to a text description
                 if image_content and ctx.llm:
                     if not supports_image_tool_results(ctx.llm.model):
                         logger.info(
-                            "Stripping image_content from user message — model '%s' "
-                            "does not support image input",
+                            "Model '%s' does not support images — attempting vision fallback",
                             ctx.llm.model,
                         )
+                        description = await _describe_images_as_text(image_content)
+                        if description:
+                            content = f"{content}\n\n{description}" if content else description
+                            logger.info("[drain] image described as text via vision fallback")
+                        else:
+                            logger.info("[drain] no vision fallback available — images dropped")
                         image_content = None
                 # Real user input is stored as-is; external events get a prefix
                 if is_client_input:

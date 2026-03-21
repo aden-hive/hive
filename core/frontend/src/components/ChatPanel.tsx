@@ -67,6 +67,8 @@ interface ChatPanelProps {
   activeThread: string;
   /** When true, the input is disabled (e.g. during loading) */
   disabled?: boolean;
+  /** When false, the image attach button is hidden (model lacks vision support) */
+  supportsImages?: boolean;
   /** Called when user clicks the stop button to cancel the queen's current turn */
   onCancel?: () => void;
   /** Pending question from ask_user — replaces textarea when present */
@@ -343,6 +345,7 @@ export default function ChatPanel({
   onQuestionDismiss,
   queenPhase,
   contextUsage,
+  supportsImages = true,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<ImageContent[]>([]);
@@ -737,10 +740,10 @@ export default function ChatPanel({
             />
             <button
               type="button"
-              disabled={disabled}
-              onClick={() => fileInputRef.current?.click()}
+              disabled={disabled || !supportsImages}
+              onClick={() => supportsImages && fileInputRef.current?.click()}
               className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-              title="Attach image"
+              title={supportsImages ? "Attach image" : "Image not supported by the current model"}
             >
               <Paperclip className="w-4 h-4" />
             </button>
