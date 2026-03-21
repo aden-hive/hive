@@ -226,22 +226,20 @@ const WorkerGroupBubble = memo(
 
     return (
       <div>
-        {isActive && (
-          <style>{`
-            @keyframes workerFlow {
-              0%   { background-position: 0% 50%; }
-              100% { background-position: 200% 50%; }
-            }
-            .worker-flow-text {
-              background: linear-gradient(90deg, #818cf8, #6366f1, #38bdf8, #6366f1, #818cf8);
-              background-size: 200% auto;
-              animation: workerFlow 2s linear infinite;
-              -webkit-background-clip: text;
-              -webkit-text-fill-color: transparent;
-              background-clip: text;
-            }
-          `}</style>
-        )}
+        <style>{`
+          @keyframes workerFlow {
+            0%   { background-position: 0% 50%; }
+            100% { background-position: 200% 50%; }
+          }
+          .worker-flow-text {
+            background: linear-gradient(90deg, #818cf8, #6366f1, #38bdf8, #6366f1, #818cf8);
+            background-size: 200% auto;
+            animation: workerFlow 2s linear infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+          }
+        `}</style>
         <button
           onClick={() => setCollapsed((c) => !c)}
           className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors mb-1.5"

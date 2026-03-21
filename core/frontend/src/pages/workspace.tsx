@@ -3228,7 +3228,7 @@ export default function Workspace() {
                 onCancel={handleCancelQueen}
                 activeThread={activeWorker}
                 isWaiting={(activeAgentState?.queenIsTyping && !activeAgentState?.isStreaming) ?? false}
-                isWorkerWaiting={(activeAgentState?.workerIsTyping && !activeAgentState?.isStreaming) ?? false}
+                isWorkerWaiting={activeAgentState?.workerIsTyping ?? false}
                 isBusy={activeAgentState?.queenIsTyping ?? false}
                 disabled={
                   (activeAgentState?.loading ?? true) ||
