@@ -206,3 +206,80 @@ def test_register_mcp_server_direct_client_when_manager_disabled(monkeypatch):
     registry.cleanup()
 
     assert created_clients[0].disconnect_calls == 1
+
+
+def test_load_registry_servers_retries_when_registration_returns_zero(monkeypatch):
+    registry = ToolRegistry()
+    attempts = {"count": 0}
+
+    def fake_register(server_config, use_connection_manager=True):
+        attempts["count"] += 1
+        return 0 if attempts["count"] == 1 else 2
+
+    monkeypatch.setattr(registry, "register_mcp_server", fake_register)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    results = registry.load_registry_servers(
+        [{"name": "jira", "transport": "http", "url": "http://localhost:4010"}],
+        log_summary=False,
+    )
+
+    assert attempts["count"] == 2
+    assert results == [
+        {
+            "server": "jira",
+            "status": "loaded",
+            "tools_loaded": 2,
+            "skipped_reason": None,
+        }
+    ]
+
+
+def test_load_registry_servers_marks_failures_as_skipped(monkeypatch):
+    registry = ToolRegistry()
+
+    monkeypatch.setattr(registry, "register_mcp_server", lambda *args, **kwargs: 0)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    results = registry.load_registry_servers(
+        [{"name": "jira", "transport": "http", "url": "http://localhost:4010"}],
+        log_summary=False,
+    )
+
+    assert results == [
+        {
+            "server": "jira",
+            "status": "skipped",
+            "tools_loaded": 0,
+            "skipped_reason": "registered 0 tools",
+        }
+    ]
+
+
+def test_load_registry_servers_emits_structured_log_fields(monkeypatch):
+    registry = ToolRegistry()
+    captured_logs: list[tuple[str, dict | None]] = []
+
+    monkeypatch.setattr(registry, "register_mcp_server", lambda *args, **kwargs: 2)
+    monkeypatch.setattr(
+        "framework.runner.tool_registry.logger.info",
+        lambda message, *args, **kwargs: captured_logs.append((message, kwargs.get("extra"))),
+    )
+
+    registry.load_registry_servers(
+        [{"name": "jira", "transport": "http", "url": "http://localhost:4010"}],
+        log_summary=True,
+    )
+
+    assert captured_logs == [
+        (
+            "MCP registry server resolution",
+            {
+                "event": "mcp_registry_server_resolution",
+                "server": "jira",
+                "status": "loaded",
+                "tools_loaded": 2,
+                "skipped_reason": None,
+            },
+        )
+    ]
