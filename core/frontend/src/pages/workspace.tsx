@@ -1760,7 +1760,7 @@ export default function Workspace() {
 
           // Mark streaming when LLM text is actively arriving
           if (event.type === "llm_text_delta" || event.type === "client_output_delta") {
-            updateAgentState(agentType, { isStreaming: true, ...(isQueen ? {} : { workerIsTyping: false }) });
+            updateAgentState(agentType, { isStreaming: true });
           }
 
           if (event.type === "llm_text_delta" && !isQueen && event.node_id) {
