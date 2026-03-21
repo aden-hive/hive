@@ -99,6 +99,11 @@ def main():
 
     register_debugger_commands(subparsers)
 
+    # Register MCP registry commands (mcp init, mcp validate, mcp test)
+    from framework.runner.mcp_registry_cli import register_mcp_commands
+
+    register_mcp_commands(subparsers)
+
     args = parser.parse_args()
 
     if hasattr(args, "func"):
