@@ -30,6 +30,8 @@ from typing import Any
 # ContextVar is thread-safe and async-safe - perfect for concurrent agent execution
 trace_context: ContextVar[dict[str, Any] | None] = ContextVar("trace_context", default=None)
 
+_STANDARD_LOG_RECORD_FIELDS = set(logging.makeLogRecord({}).__dict__)
+
 # ANSI escape code pattern (matches \033[...m or \x1b[...m)
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*m|\033\[[0-9;]*m")
 
@@ -91,6 +93,14 @@ class StructuredFormatter(logging.Formatter):
         model = getattr(record, "model", None)
         if model is not None:
             log_entry["model"] = model
+
+        # Preserve arbitrary structured fields passed via ``extra=...``.
+        for key, value in record.__dict__.items():
+            if key in _STANDARD_LOG_RECORD_FIELDS or key.startswith("_"):
+                continue
+            if key in log_entry:
+                continue
+            log_entry[key] = value
 
         # Add exception info if present (strip ANSI codes from exception text too)
         if record.exc_info:
