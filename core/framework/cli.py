@@ -14,6 +14,11 @@ Testing commands:
     hive test-debug <agent_path> <test_name>
     hive test-list <agent_path>
     hive test-stats <agent_path>
+
+MCP registry commands:
+    hive mcp init [--server-url URL]
+    hive mcp validate <path>
+    hive mcp test <path>
 """
 
 import argparse
