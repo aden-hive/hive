@@ -23,6 +23,7 @@ from framework.llm.litellm import (
     OPENROUTER_TOOL_COMPAT_MODEL_CACHE,
     LiteLLMProvider,
     _compute_retry_delay,
+    is_rate_limit_error,
 )
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 
@@ -450,15 +451,15 @@ class TestComputeRetryDelay:
 
     def test_fallback_exponential_backoff(self):
         """No exception -> exponential backoff."""
-        assert _compute_retry_delay(0) == 2  # 2 * 2^0
-        assert _compute_retry_delay(1) == 4  # 2 * 2^1
-        assert _compute_retry_delay(2) == 8  # 2 * 2^2
-        assert _compute_retry_delay(3) == 16  # 2 * 2^3
+        assert _compute_retry_delay(0) == 1  # 2^0
+        assert _compute_retry_delay(1) == 2  # 2^1
+        assert _compute_retry_delay(2) == 4  # 2^2
+        assert _compute_retry_delay(3) == 8  # 2^3
 
     def test_max_delay_cap(self):
         """Backoff should be capped at RATE_LIMIT_MAX_DELAY."""
-        # 2 * 2^10 = 2048, should be capped at 120
-        assert _compute_retry_delay(10) == 120
+        # 2^10 = 1024, should be capped at 60
+        assert _compute_retry_delay(10) == 60
 
     def test_custom_max_delay(self):
         """Custom max_delay should be respected."""
@@ -508,12 +509,12 @@ class TestComputeRetryDelay:
         """Exception with response=None should fall back to exponential."""
         exc = Exception("test")
         exc.response = None  # type: ignore[attr-defined]
-        assert _compute_retry_delay(0, exception=exc) == 2  # exponential fallback
+        assert _compute_retry_delay(0, exception=exc) == 1  # exponential fallback
 
     def test_exception_without_response_attr(self):
         """Exception without .response attr should fall back to exponential."""
         exc = ValueError("no response attr")
-        assert _compute_retry_delay(0, exception=exc) == 2
+        assert _compute_retry_delay(0, exception=exc) == 1
 
     def test_negative_retry_after_clamped_to_zero(self):
         """Negative retry-after should be clamped to 0."""
@@ -528,7 +529,7 @@ class TestComputeRetryDelay:
     def test_invalid_retry_after_falls_back(self):
         """Non-numeric, non-date retry-after should fall back to exponential."""
         exc = _make_exception_with_headers({"retry-after": "not-a-number-or-date"})
-        assert _compute_retry_delay(0, exception=exc) == 2  # exponential fallback
+        assert _compute_retry_delay(0, exception=exc) == 1  # exponential fallback
 
     def test_invalid_retry_after_ms_falls_back_to_retry_after(self):
         """Invalid retry-after-ms should fall through to retry-after."""
@@ -543,12 +544,58 @@ class TestComputeRetryDelay:
     def test_retry_after_capped_at_max_delay(self):
         """Server-provided delay should be capped at max_delay."""
         exc = _make_exception_with_headers({"retry-after": "3600"})
-        assert _compute_retry_delay(0, exception=exc) == 120  # capped
+        assert _compute_retry_delay(0, exception=exc) == 60  # capped
 
     def test_retry_after_ms_capped_at_max_delay(self):
         """Server-provided ms delay should be capped at max_delay."""
         exc = _make_exception_with_headers({"retry-after-ms": "300000"})  # 300s
-        assert _compute_retry_delay(0, exception=exc) == 120  # capped
+        assert _compute_retry_delay(0, exception=exc) == 60  # capped
+
+    def test_retry_delay_hint_from_error_text(self):
+        """retryDelay hints in provider errors should override fallback backoff."""
+        exc = Exception('{"retryDelay":"12s"}')
+        assert _compute_retry_delay(0, exception=exc) == 12.0
+
+    def test_please_retry_hint_from_error_text(self):
+        """Please retry hints in provider errors should override fallback backoff."""
+        exc = Exception("Please retry in 7s due to quota")
+        assert _compute_retry_delay(0, exception=exc) == 7.0
+
+    def test_jitter_is_added_when_requested(self):
+        """Optional jitter should add 0-1 seconds to base delay."""
+        with patch("framework.llm.litellm.random.uniform", return_value=0.5):
+            assert _compute_retry_delay(2, add_jitter=True) == 4.5
+
+
+class TestIsRateLimitError:
+    """Test is_rate_limit_error() classification."""
+
+    def test_detects_429_status_code_attr(self):
+        exc = Exception("boom")
+        exc.status_code = 429  # type: ignore[attr-defined]
+        assert is_rate_limit_error(exc) is True
+
+    def test_detects_429_response_status_code(self):
+        exc = Exception("boom")
+        response = MagicMock()
+        response.status_code = 429
+        exc.response = response  # type: ignore[attr-defined]
+        assert is_rate_limit_error(exc) is True
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "RESOURCE_EXHAUSTED: too many requests",
+            "rate limit reached",
+            "quota exceeded for this key",
+            "request failed with 429",
+        ],
+    )
+    def test_detects_rate_limit_message_snippets(self, message: str):
+        assert is_rate_limit_error(Exception(message)) is True
+
+    def test_non_rate_limit_error_returns_false(self):
+        assert is_rate_limit_error(Exception("invalid auth token")) is False
 
 
 def _make_exception_with_headers(headers: dict[str, str]) -> BaseException:
