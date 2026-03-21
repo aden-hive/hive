@@ -12,6 +12,7 @@ dependencies = [
   "mcp>=1.0.0",
   "fastmcp>=2.0.0",
   "croniter>=1.4.0",
+  "jsonschema>=4.20.0",
   "tools",
 ]
 

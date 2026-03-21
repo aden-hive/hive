@@ -1329,3 +1329,164 @@ def test_security_notice_persisted_on_successful_install(
 
     assert rc == 0
     assert sentinel.exists()
+
+
+# ── Contributor tooling tests (init, validate, test) ──────────────
+
+
+VALID_CONTRIBUTOR_MANIFEST = {
+    "name": "test-server",
+    "display_name": "Test Server",
+    "version": "0.1.0",
+    "description": "A test MCP server",
+    "author": {"name": "Test", "github": "testuser"},
+    "maintainer": {"github": "testuser"},
+    "repository": "https://github.com/testuser/test-server",
+    "license": "MIT",
+    "status": "community",
+    "transport": {"supported": ["stdio"], "default": "stdio"},
+    "install": {"pip": "test-server"},
+    "stdio": {"command": "uvx", "args": ["test-server"]},
+    "tools": [{"name": "do_thing", "description": "Does a thing"}],
+}
+
+
+def test_validate_valid_manifest(tmp_path):
+    from framework.runner.mcp_registry_cli import cmd_mcp_validate
+
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(VALID_CONTRIBUTOR_MANIFEST))
+    args = SimpleNamespace(path=str(path))
+    assert cmd_mcp_validate(args) == 0
+
+
+def test_validate_invalid_manifest(tmp_path):
+    from framework.runner.mcp_registry_cli import cmd_mcp_validate
+
+    manifest = {"name": "BAD NAME"}
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest))
+    args = SimpleNamespace(path=str(path))
+    assert cmd_mcp_validate(args) == 1
+
+
+def test_validate_directory_path(tmp_path):
+    from framework.runner.mcp_registry_cli import cmd_mcp_validate
+
+    (tmp_path / "manifest.json").write_text(json.dumps(VALID_CONTRIBUTOR_MANIFEST))
+    args = SimpleNamespace(path=str(tmp_path))
+    assert cmd_mcp_validate(args) == 0
+
+
+def test_validate_missing_file():
+    from framework.runner.mcp_registry_cli import cmd_mcp_validate
+
+    args = SimpleNamespace(path="/nonexistent/manifest.json")
+    assert cmd_mcp_validate(args) == 1
+
+
+def test_validate_invalid_json(tmp_path):
+    from framework.runner.mcp_registry_cli import cmd_mcp_validate
+
+    path = tmp_path / "manifest.json"
+    path.write_text("not json {{{")
+    args = SimpleNamespace(path=str(path))
+    assert cmd_mcp_validate(args) == 1
+
+
+def test_init_creates_manifest(tmp_path):
+    from framework.runner.mcp_registry_cli import cmd_mcp_init
+
+    user_inputs = ["my-server", "My Server", "A test server", "stdio", "my-server-pkg"]
+    with patch("builtins.input", side_effect=user_inputs):
+        args = SimpleNamespace(server_url=None, output_dir=str(tmp_path))
+        result = cmd_mcp_init(args)
+    assert result == 0
+    assert (tmp_path / "manifest.json").exists()
+    assert (tmp_path / "README.md").exists()
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    from framework.runner.mcp_manifest_schema import validate_manifest
+
+    assert validate_manifest(manifest) == []
+
+
+def test_init_with_server_url(tmp_path):
+    from framework.runner.mcp_registry_cli import cmd_mcp_init
+
+    mock_response_data = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+            "tools": [{"name": "search", "description": "Search things", "inputSchema": {}}]
+        },
+    }
+    user_inputs = ["my-server", "My Server", "A test server", "http", "my-server-pkg"]
+    with (
+        patch("builtins.input", side_effect=user_inputs),
+        patch("httpx.post") as mock_post,
+    ):
+        mock_post.return_value.json.return_value = mock_response_data
+        mock_post.return_value.status_code = 200
+        args = SimpleNamespace(server_url="http://localhost:4000", output_dir=str(tmp_path))
+        result = cmd_mcp_init(args)
+    assert result == 0
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert len(manifest["tools"]) == 1
+    assert manifest["tools"][0]["name"] == "search"
+
+
+def _make_mock_tool(name, description=""):
+    tool = MagicMock()
+    tool.name = name
+    tool.description = description
+    return tool
+
+
+def test_cmd_test_pass(tmp_path):
+    from framework.runner.mcp_registry_cli import cmd_mcp_test
+
+    (tmp_path / "manifest.json").write_text(json.dumps(VALID_CONTRIBUTOR_MANIFEST))
+    mock_client = MagicMock()
+    mock_client.list_tools.return_value = [_make_mock_tool("do_thing")]
+    with patch("framework.runner.mcp_registry_cli.MCPClient", return_value=mock_client):
+        args = SimpleNamespace(path=str(tmp_path))
+        assert cmd_mcp_test(args) == 0
+    mock_client.disconnect.assert_called_once()
+
+
+def test_cmd_test_missing_tool(tmp_path):
+    from framework.runner.mcp_registry_cli import cmd_mcp_test
+
+    manifest = {
+        **VALID_CONTRIBUTOR_MANIFEST,
+        "tools": [
+            {"name": "search", "description": "Search"},
+            {"name": "create", "description": "Create"},
+        ],
+    }
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    mock_client = MagicMock()
+    mock_client.list_tools.return_value = [_make_mock_tool("search")]
+    with patch("framework.runner.mcp_registry_cli.MCPClient", return_value=mock_client):
+        args = SimpleNamespace(path=str(tmp_path))
+        assert cmd_mcp_test(args) == 1
+
+
+def test_cmd_test_invalid_manifest(tmp_path):
+    from framework.runner.mcp_registry_cli import cmd_mcp_test
+
+    (tmp_path / "manifest.json").write_text('{"name": "BAD"}')
+    args = SimpleNamespace(path=str(tmp_path))
+    assert cmd_mcp_test(args) == 1
+
+
+def test_cmd_test_cleanup_on_failure(tmp_path):
+    from framework.runner.mcp_registry_cli import cmd_mcp_test
+
+    (tmp_path / "manifest.json").write_text(json.dumps(VALID_CONTRIBUTOR_MANIFEST))
+    mock_client = MagicMock()
+    mock_client.list_tools.side_effect = Exception("boom")
+    with patch("framework.runner.mcp_registry_cli.MCPClient", return_value=mock_client):
+        args = SimpleNamespace(path=str(tmp_path))
+        cmd_mcp_test(args)
+    mock_client.disconnect.assert_called_once()
