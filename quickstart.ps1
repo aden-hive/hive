@@ -2019,7 +2019,7 @@ Write-Host ""
 if ($FrontendBuilt) {
     Write-Color -Text "Launching dashboard..." -Color White
     Write-Host ""
-    & hive open
+    & .\hive.ps1 open
 } else {
     Write-Color -Text "Frontend build was skipped or failed." -Color Yellow -NoNewline
     Write-Host " Launch manually when ready:"
