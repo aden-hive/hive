@@ -50,6 +50,9 @@ SAFE_FUNCTIONS = {
     "round": round,
     "all": all,
     "any": any,
+    "isinstance": isinstance,
+    "issubclass": issubclass,
+    "type": type,
 }
 
 
