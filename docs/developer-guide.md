@@ -74,8 +74,9 @@ The setup script performs these actions:
 1. Checks Python version (3.11+)
 2. Installs `framework` package from `/core` (editable mode)
 3. Installs `aden_tools` package from `/tools` (editable mode)
-4. Fixes package compatibility (upgrades openai for litellm)
-5. Verifies all installations
+4. Prompts for a default LLM provider, including Hive LLM and OpenRouter
+5. Fixes package compatibility (upgrades openai for litellm)
+6. Verifies all installations
 
 ### API Keys (Optional)
 
@@ -85,6 +86,8 @@ For running agents with real LLMs:
 # Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
 export ANTHROPIC_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"        # Optional
+export OPENROUTER_API_KEY="your-key-here"    # Optional, for OpenRouter models
+export HIVE_API_KEY="your-key-here"          # Optional, for Hive LLM
 export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search tool
 ```
 
@@ -92,7 +95,11 @@ Get API keys:
 
 - **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
 - **OpenAI**: [platform.openai.com](https://platform.openai.com/)
+- **OpenRouter**: [openrouter.ai/keys](https://openrouter.ai/keys)
+- **Hive LLM**: [Hive Discord](https://discord.com/invite/hQdU7QDkgR)
 - **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
+
+For OpenRouter and Hive LLM configuration snippets, see [configuration.md](./configuration.md).
 
 ### Install Claude Code Skills
 
@@ -177,7 +184,7 @@ hive/                                    # Repository root
 │   │   ├── builder/                     # Agent builder utilities
 │   │   ├── credentials/                 # Credential management
 │   │   ├── graph/                       # GraphExecutor - executes node graphs
-│   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, etc.)
+│   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, OpenRouter, Hive, etc.)
 │   │   ├── mcp/                         # MCP server integration
 │   │   ├── runner/                      # AgentRunner - loads and runs agents
 |   |   ├── observability/               # Structured logging - human-readable and machine-parseable tracing
@@ -633,6 +640,8 @@ def my_custom_tool(param1: str, param2: int) -> Dict[str, Any]:
 # Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
 export ANTHROPIC_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"
+export OPENROUTER_API_KEY="your-key-here"
+export HIVE_API_KEY="your-key-here"
 export BRAVE_SEARCH_API_KEY="your-key-here"
 
 # Or create .env file (not committed to git)

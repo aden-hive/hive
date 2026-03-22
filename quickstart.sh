@@ -1792,15 +1792,27 @@ echo ""
 # Ensure ~/.local/bin exists and is in PATH
 mkdir -p "$HOME/.local/bin"
 
-# Create/update symlink
+# Git Bash on Windows may materialize `ln -s` as a plain file copy.
+# Use a launcher shim there, but prefer a real symlink on Linux/macOS.
 HIVE_SCRIPT="$SCRIPT_DIR/hive"
 HIVE_LINK="$HOME/.local/bin/hive"
+HIVE_SCRIPT_ESCAPED=$(printf '%q' "$HIVE_SCRIPT")
 
 if [ -L "$HIVE_LINK" ] || [ -e "$HIVE_LINK" ]; then
     rm -f "$HIVE_LINK"
 fi
 
-ln -s "$HIVE_SCRIPT" "$HIVE_LINK"
+if [ -n "$MSYSTEM" ] || [ -n "$MINGW_PREFIX" ]; then
+    cat > "$HIVE_LINK" <<EOF
+#!/usr/bin/env bash
+set -e
+HIVE_SCRIPT=$HIVE_SCRIPT_ESCAPED
+exec "\$HIVE_SCRIPT" "\$@"
+EOF
+    chmod +x "$HIVE_LINK"
+else
+    ln -s "$HIVE_SCRIPT" "$HIVE_LINK"
+fi
 echo -e "${GREEN}  ✓ hive CLI installed to ~/.local/bin/hive${NC}"
 
 # Check if ~/.local/bin is in PATH
@@ -1894,15 +1906,15 @@ if [ "$CODEX_AVAILABLE" = true ]; then
 fi
 
 echo -e "${DIM}API keys saved to ${CYAN}$SHELL_RC_FILE${NC}${DIM}. New terminals pick them up automatically.${NC}"
-echo -e "${DIM}Launch anytime with ${CYAN}hive open${NC}${DIM}. Run ./quickstart.sh again to reconfigure.${NC}"
+echo -e "${DIM}Launch anytime from this project root with ${CYAN}./hive open${NC}${DIM}. Run ./quickstart.sh again to reconfigure.${NC}"
 echo ""
 
 if [ "$FRONTEND_BUILT" = true ]; then
     echo -e "${BOLD}Launching dashboard...${NC}"
     echo ""
-    hive open
+    "$SCRIPT_DIR/hive" open
 else
     echo -e "${YELLOW}Frontend build was skipped or failed.${NC} Launch manually when ready:"
-    echo -e "     ${CYAN}hive open${NC}"
+    echo -e "     ${CYAN}./hive open${NC}"
     echo ""
 fi
