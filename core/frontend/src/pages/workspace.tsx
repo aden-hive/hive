@@ -3370,6 +3370,7 @@ export default function Workspace() {
                 pendingQuestion={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestion : null}
                 pendingOptions={activeAgentState?.awaitingInput ? activeAgentState.pendingOptions : null}
                 pendingQuestions={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestions : null}
+                pendingQuestionSource={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestionSource : null}
                 onQuestionSubmit={
                   activeAgentState?.pendingQuestionSource === "queen"
                     ? handleQueenQuestionAnswer

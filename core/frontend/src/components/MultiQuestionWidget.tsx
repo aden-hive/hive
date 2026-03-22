@@ -11,9 +11,11 @@ export interface MultiQuestionWidgetProps {
   questions: QuestionItem[];
   onSubmit: (answers: Record<string, string>) => void;
   onDismiss?: () => void;
+  /** Visual source: worker nodes render in indigo, queen renders in primary (yellow) */
+  source?: "queen" | "worker";
 }
 
-export default function MultiQuestionWidget({ questions, onSubmit, onDismiss }: MultiQuestionWidgetProps) {
+export default function MultiQuestionWidget({ questions, onSubmit, onDismiss, source = "queen" }: MultiQuestionWidgetProps) {
   // Per-question state: selected index (null = nothing, options.length = "Other")
   const [selections, setSelections] = useState<(number | null)[]>(
     () => questions.map(() => null),
@@ -23,6 +25,29 @@ export default function MultiQuestionWidget({ questions, onSubmit, onDismiss }: 
   );
   const [submitted, setSubmitted] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const isWorker = source === "worker";
+  const accent = isWorker
+    ? {
+        icon: "bg-indigo-500/10 border-indigo-500/20",
+        iconText: "text-indigo-400",
+        selectedOption: "border-indigo-500 bg-indigo-500/10",
+        hoverOption: "hover:border-indigo-400/40",
+        selectedInput: "border-indigo-500 bg-indigo-500/10",
+        hoverInput: "hover:border-indigo-400/40",
+        focusInput: "focus:border-indigo-500",
+        btn: "bg-indigo-500 hover:bg-indigo-500/90 text-white",
+      }
+    : {
+        icon: "bg-primary/10 border-primary/20",
+        iconText: "text-primary",
+        selectedOption: "border-primary bg-primary/10",
+        hoverOption: "hover:border-primary/40",
+        selectedInput: "border-primary bg-primary/10",
+        hoverInput: "hover:border-primary/40",
+        focusInput: "focus:border-primary",
+        btn: "bg-primary hover:bg-primary/90 text-primary-foreground",
+      };
 
   // Scroll the first unanswered question into view when it changes
   useEffect(() => {
@@ -74,8 +99,8 @@ export default function MultiQuestionWidget({ questions, onSubmit, onDismiss }: 
       <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
         {/* Header */}
         <div className="px-5 pt-4 pb-2 flex items-center gap-3">
-          <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
-            <MessageCircleQuestion className="w-3.5 h-3.5 text-primary" />
+          <div className={`w-7 h-7 rounded-lg ${accent.icon} border flex items-center justify-center flex-shrink-0`}>
+            <MessageCircleQuestion className={`w-3.5 h-3.5 ${accent.iconText}`} />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-foreground">
@@ -129,8 +154,8 @@ export default function MultiQuestionWidget({ questions, onSubmit, onDismiss }: 
                         }}
                         className={`w-full text-left px-4 py-2 rounded-lg border text-sm transition-colors ${
                           sel === oi
-                            ? "border-primary bg-primary/10 text-foreground"
-                            : "border-border/60 bg-muted/20 text-foreground hover:border-primary/40 hover:bg-muted/40"
+                            ? `${accent.selectedOption} text-foreground`
+                            : `border-border/60 bg-muted/20 text-foreground ${accent.hoverOption} hover:bg-muted/40`
                         }`}
                       >
                         {opt}
@@ -161,8 +186,8 @@ export default function MultiQuestionWidget({ questions, onSubmit, onDismiss }: 
                       placeholder="Type a custom response..."
                       className={`w-full px-4 py-2 rounded-lg border border-dashed text-sm transition-colors bg-transparent placeholder:text-muted-foreground focus:outline-none ${
                         isOtherSelected
-                          ? "border-primary bg-primary/10 text-foreground"
-                          : "border-border text-muted-foreground hover:border-primary/40"
+                          ? `${accent.selectedInput} text-foreground`
+                          : `border-border text-muted-foreground ${accent.hoverInput}`
                       }`}
                     />
                   </>
@@ -190,7 +215,7 @@ export default function MultiQuestionWidget({ questions, onSubmit, onDismiss }: 
                       });
                     }}
                     placeholder="Type your answer..."
-                    className="w-full px-4 py-2 rounded-lg border text-sm transition-colors bg-transparent placeholder:text-muted-foreground focus:outline-none border-border text-foreground hover:border-primary/40 focus:border-primary"
+                    className={`w-full px-4 py-2 rounded-lg border text-sm transition-colors bg-transparent placeholder:text-muted-foreground focus:outline-none border-border text-foreground ${accent.hoverInput} ${accent.focusInput}`}
                   />
                 )}
               </div>
@@ -203,7 +228,7 @@ export default function MultiQuestionWidget({ questions, onSubmit, onDismiss }: 
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium ${accent.btn} disabled:opacity-30 disabled:cursor-not-allowed transition-colors`}
           >
             <Send className="w-3.5 h-3.5" />
             Submit All

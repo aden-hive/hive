@@ -94,6 +94,8 @@ interface ChatPanelProps {
   workerStartedAt?: number;
   /** Duration in ms of the last completed worker run */
   workerDuration?: number;
+  /** Whether the pending question originated from a worker node or the queen */
+  pendingQuestionSource?: "queen" | "worker" | null;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -267,7 +269,7 @@ const WorkerGroupBubble = memo(
           .worker-flow-text {
             background: linear-gradient(90deg, #818cf8, #6366f1, #38bdf8, #6366f1, #818cf8);
             background-size: 200% auto;
-            animation: workerFlow 2s linear infinite;
+            animation: workerFlow 1.2s linear infinite;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
@@ -484,6 +486,7 @@ export default function ChatPanel({
   contextUsage,
   workerStartedAt,
   workerDuration,
+  pendingQuestionSource,
   supportsImages = true,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
@@ -877,6 +880,7 @@ export default function ChatPanel({
           questions={pendingQuestions}
           onSubmit={onMultiQuestionSubmit}
           onDismiss={onQuestionDismiss}
+          source={pendingQuestionSource ?? "queen"}
         />
       ) : pendingQuestion && pendingOptions && onQuestionSubmit ? (
         <QuestionWidget
@@ -884,6 +888,7 @@ export default function ChatPanel({
           options={pendingOptions}
           onSubmit={onQuestionSubmit}
           onDismiss={onQuestionDismiss}
+          source={pendingQuestionSource ?? "queen"}
         />
       ) : (
         <form onSubmit={handleSubmit} className="p-4">
