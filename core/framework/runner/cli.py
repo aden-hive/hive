@@ -286,6 +286,89 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     open_parser.add_argument("--debug", action="store_true", help="Enable DEBUG log level")
     open_parser.set_defaults(func=cmd_open)
 
+    # version-list command
+    vlist_parser = subparsers.add_parser(
+        "version-list",
+        help="List design versions for an agent",
+        description="List all saved design versions with lifecycle state and timestamps.",
+    )
+    vlist_parser.add_argument("agent_path", type=str, help="Path to agent folder")
+    vlist_parser.add_argument(
+        "--starred", action="store_true", help="Show only starred/promoted versions"
+    )
+    vlist_parser.add_argument(
+        "--state",
+        type=str,
+        choices=["draft", "candidate", "validated", "promoted", "archived"],
+        help="Filter by lifecycle state",
+    )
+    vlist_parser.set_defaults(func=cmd_version_list)
+
+    # version-show command
+    vshow_parser = subparsers.add_parser(
+        "version-show",
+        help="Show details of a specific design version",
+        description="Display full details of a saved design version.",
+    )
+    vshow_parser.add_argument("agent_path", type=str, help="Path to agent folder")
+    vshow_parser.add_argument(
+        "version_id", type=str, help="Version ID (e.g., v_20260321_143022_abc12345)"
+    )
+    vshow_parser.set_defaults(func=cmd_version_show)
+
+
+def cmd_version_list(args: argparse.Namespace) -> None:
+    """Handle version-list command."""
+    from framework.schemas.design_version import DesignLifecycleState
+    from framework.storage.design_version_store import DesignVersionStore
+
+    agent_path = Path(args.agent_path).resolve()
+    if not agent_path.is_dir():
+        print(f"Error: {agent_path} is not a directory")
+        sys.exit(1)
+
+    store = DesignVersionStore(agent_path)
+    state_filter = DesignLifecycleState(args.state) if args.state else None
+    starred_filter = True if args.starred else None
+
+    versions = asyncio.run(
+        store.list_versions(lifecycle_state=state_filter, starred=starred_filter)
+    )
+
+    if not versions:
+        print("No versions found.")
+        return
+
+    for v in versions:
+        star = "*" if v.starred else " "
+        print(f"  {star} {v.version_id}  [{v.lifecycle_state}]  {v.created_at}  {v.description}")
+
+
+def cmd_version_show(args: argparse.Namespace) -> None:
+    """Handle version-show command."""
+    from framework.storage.design_version_store import DesignVersionStore
+
+    agent_path = Path(args.agent_path).resolve()
+    store = DesignVersionStore(agent_path)
+    version = asyncio.run(store.load_version(args.version_id))
+
+    if version is None:
+        print(f"Version {args.version_id} not found.")
+        sys.exit(1)
+
+    integrity = "valid" if version.verify() else "CORRUPTED"
+    print(f"Version:     {version.version_id}")
+    print(f"State:       {version.lifecycle_state}")
+    print(f"Created:     {version.created_at}")
+    print(f"Parent:      {version.parent_version_id or '(none)'}")
+    print(f"Starred:     {'yes' if version.starred else 'no'}")
+    print(f"Checksum:    {version.checksum} ({integrity})")
+    print(f"Description: {version.description}")
+    print(f"Nodes:       {len(version.graph_spec.get('nodes', []))}")
+    print(f"Edges:       {len(version.graph_spec.get('edges', []))}")
+    if version.quality_metrics:
+        print(f"Metrics:     {json.dumps(version.quality_metrics, indent=2)}")
+
 
 def _load_resume_state(
     agent_path: str, session_id: str, checkpoint_id: str | None = None

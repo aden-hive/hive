@@ -186,3 +186,32 @@ class TestDesignVersionIndex:
         version = DesignVersion.create(graph_spec={}, goal={})
         assert version.checksum
         assert version.verify() is True
+
+
+# === CLI REGISTRATION ===
+
+
+class TestVersionCLI:
+    def test_version_list_subcommand_registers(self):
+        """Verify version-list subcommand is registered without errors."""
+        import argparse
+
+        from framework.runner.cli import register_commands
+
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers()
+        register_commands(subparsers)
+        args = parser.parse_args(["version-list", "/tmp/fake-agent"])
+        assert hasattr(args, "func")
+
+    def test_version_show_subcommand_registers(self):
+        """Verify version-show subcommand is registered without errors."""
+        import argparse
+
+        from framework.runner.cli import register_commands
+
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers()
+        register_commands(subparsers)
+        args = parser.parse_args(["version-show", "/tmp/fake-agent", "v_test"])
+        assert hasattr(args, "func")
