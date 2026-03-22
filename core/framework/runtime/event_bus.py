@@ -52,8 +52,63 @@ def _open_event_log() -> IO[str] | None:
     return open(path, "a", encoding="utf-8")  # noqa: SIM115
 
 
-_event_log_file: IO[str] | None = None
-_event_log_ready = False  # lazy init guard
+class _EventDebugLog:
+    """Async-safe singleton for the debug event log file.
+
+    Replaces the previous module-level globals that were vulnerable to a race
+    condition: multiple concurrent ``publish()`` coroutines could both see the
+    ``_event_log_ready`` flag as ``False`` and open duplicate file handles,
+    leaking the first one.
+
+    The singleton uses an ``asyncio.Lock`` to guarantee one-time initialisation,
+    and exposes a ``close()`` method for orderly shutdown.
+    """
+
+    _instance: "_EventDebugLog | None" = None
+    _init_lock: asyncio.Lock | None = None
+
+    def __init__(self) -> None:
+        self._file: IO[str] | None = None
+
+    @classmethod
+    async def get(cls) -> "_EventDebugLog":
+        """Return the singleton, lazily opening the log file on first call."""
+        if cls._init_lock is None:
+            cls._init_lock = asyncio.Lock()
+        async with cls._init_lock:
+            if cls._instance is None:
+                inst = cls()
+                inst._file = _open_event_log()
+                cls._instance = inst
+            return cls._instance
+
+    def write_event(self, event: "AgentEvent") -> None:
+        """Serialise and append *event* to the debug log."""
+        if self._file is None:
+            return
+        try:
+            line = json.dumps(event.to_dict(), default=str)
+            self._file.write(line + "\n")
+            self._file.flush()
+        except Exception:
+            pass  # never break event delivery
+
+    def close(self) -> None:
+        """Flush and close the underlying file handle."""
+        if self._file is not None:
+            try:
+                self._file.close()
+            except Exception:
+                pass
+            self._file = None
+
+    @classmethod
+    def reset(cls) -> None:
+        """Close and discard the singleton (for testing)."""
+        if cls._instance is not None:
+            cls._instance.close()
+            cls._instance = None
+        cls._init_lock = None
 
 
 class EventType(StrEnum):
@@ -289,7 +344,7 @@ class EventBus:
         logger.info("Session event log → %s (iteration_offset=%d)", path, iteration_offset)
 
     def close_session_log(self) -> None:
-        """Close the per-session event log file."""
+        """Close the per-session event log file and the debug event log."""
         # Flush any pending output snapshots before closing
         self._flush_pending_snapshots()
         if self._session_log is not None:
@@ -298,6 +353,8 @@ class EventBus:
             except Exception:
                 pass
             self._session_log = None
+        # Also close the debug event log to avoid leaking file handles.
+        _EventDebugLog.reset()
 
     # Event types that are high-frequency streaming deltas — accumulated rather
     # than written individually to the session log.
@@ -466,19 +523,12 @@ class EventBus:
             if len(self._event_history) > self._max_history:
                 self._event_history = self._event_history[-self._max_history :]
 
-        # Write event to JSONL file (gated by HIVE_DEBUG_EVENTS env var)
+        # Write event to JSONL debug log (gated by HIVE_DEBUG_EVENTS env var).
+        # Uses an async-safe singleton to avoid the race condition where
+        # concurrent publish() calls could open duplicate file handles.
         if _DEBUG_EVENTS_ENABLED:
-            global _event_log_file, _event_log_ready  # noqa: PLW0603
-            if not _event_log_ready:
-                _event_log_file = _open_event_log()
-                _event_log_ready = True
-            if _event_log_file is not None:
-                try:
-                    line = json.dumps(event.to_dict(), default=str)
-                    _event_log_file.write(line + "\n")
-                    _event_log_file.flush()
-                except Exception:
-                    pass  # never break event delivery
+            debug_log = await _EventDebugLog.get()
+            debug_log.write_event(event)
 
         # Per-session persistent log (always-on when set_session_log was called).
         # Streaming deltas are coalesced: client_output_delta and llm_text_delta
