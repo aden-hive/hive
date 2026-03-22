@@ -162,6 +162,9 @@ class EventType(StrEnum):
     TRIGGER_REMOVED = "trigger_removed"
     TRIGGER_UPDATED = "trigger_updated"
 
+    # Design versioning (agent design snapshots for reproducibility)
+    DESIGN_VERSION_SAVED = "design_version_saved"
+
 
 @dataclass
 class AgentEvent:
