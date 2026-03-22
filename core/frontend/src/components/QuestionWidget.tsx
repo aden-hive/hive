@@ -28,13 +28,13 @@ export default function QuestionWidget({ question, options, onSubmit, onDismiss,
   const isWorker = source === "worker";
   const accent = isWorker
     ? {
-        icon: "bg-indigo-500/10 border-indigo-500/20",
-        iconText: "text-indigo-400",
-        selectedOption: "border-indigo-500 bg-indigo-500/10",
-        hoverOption: "hover:border-indigo-400/40",
-        selectedInput: "border-indigo-500 bg-indigo-500/10",
-        hoverInput: "hover:border-indigo-400/40",
-        btn: "bg-indigo-500 hover:bg-indigo-500/90 text-white",
+        icon: "bg-[hsl(220,60%,55%)]/10 border-[hsl(220,60%,55%)]/20",
+        iconText: "text-[hsl(220,60%,55%)]",
+        selectedOption: "border-[hsl(220,60%,55%)] bg-[hsl(220,60%,55%)]/10",
+        hoverOption: "hover:border-[hsl(220,60%,55%)]/40",
+        selectedInput: "border-[hsl(220,60%,55%)] bg-[hsl(220,60%,55%)]/10",
+        hoverInput: "hover:border-[hsl(220,60%,55%)]/40",
+        btn: "bg-[hsl(220,60%,55%)] hover:bg-[hsl(220,60%,55%)]/90 text-white",
       }
     : {
         icon: "bg-primary/10 border-primary/20",

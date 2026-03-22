@@ -780,6 +780,25 @@ export default function ChatPanel({
             </div>
           </div>
         )}
+        {/* Worker question widget — inline in chat flow, not at input area */}
+        {pendingQuestionSource === "worker" && (
+          pendingQuestions && pendingQuestions.length >= 2 && onMultiQuestionSubmit ? (
+            <MultiQuestionWidget
+              questions={pendingQuestions}
+              onSubmit={onMultiQuestionSubmit}
+              onDismiss={onQuestionDismiss}
+              source="worker"
+            />
+          ) : pendingQuestion && pendingOptions && onQuestionSubmit ? (
+            <QuestionWidget
+              question={pendingQuestion}
+              options={pendingOptions}
+              onSubmit={onQuestionSubmit}
+              onDismiss={onQuestionDismiss}
+              source="worker"
+            />
+          ) : null
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -872,23 +891,27 @@ export default function ChatPanel({
         );
       })()}
 
-      {/* Input area — question widget replaces textarea when a question is pending */}
-      {pendingQuestions &&
+      {/* Input area — question widget replaces textarea for queen questions only */}
+      {pendingQuestionSource === "queen" &&
+      pendingQuestions &&
       pendingQuestions.length >= 2 &&
       onMultiQuestionSubmit ? (
         <MultiQuestionWidget
           questions={pendingQuestions}
           onSubmit={onMultiQuestionSubmit}
           onDismiss={onQuestionDismiss}
-          source={pendingQuestionSource ?? "queen"}
+          source="queen"
         />
-      ) : pendingQuestion && pendingOptions && onQuestionSubmit ? (
+      ) : pendingQuestionSource === "queen" &&
+        pendingQuestion &&
+        pendingOptions &&
+        onQuestionSubmit ? (
         <QuestionWidget
           question={pendingQuestion}
           options={pendingOptions}
           onSubmit={onQuestionSubmit}
           onDismiss={onQuestionDismiss}
-          source={pendingQuestionSource ?? "queen"}
+          source="queen"
         />
       ) : (
         <form onSubmit={handleSubmit} className="p-4">

@@ -1923,16 +1923,15 @@ export default function Workspace() {
               : null;
             if (isQueen) {
               const prompt = (event.data?.prompt as string) || "";
-              const isAutoBlock = !prompt && !options && !questions;
-              // Queen auto-block (empty prompt, no options) should not
-              // overwrite a pending worker question — the worker's
-              // QuestionWidget must stay visible.  Use the updater form
-              // to read the latest state and avoid stale-closure races
+              // All queen input_required events must not overwrite an active worker
+              // question — the worker's QuestionWidget must stay visible.  Use the
+              // updater form to read the latest state and avoid stale-closure races
               // when worker and queen events arrive in the same batch.
               setAgentStates(prev => {
                 const cur = prev[agentType] || defaultAgentState();
                 const workerQuestionActive = cur.pendingQuestionSource === "worker";
-                if (isAutoBlock && workerQuestionActive) {
+                if (workerQuestionActive) {
+                  // Never overwrite an active worker question with any queen question
                   return {
                     ...prev, [agentType]: {
                       ...cur,
