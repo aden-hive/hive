@@ -245,6 +245,13 @@ class ToolRegistry:
         def _wrap_result(tool_use_id: str, result: Any) -> ToolResult:
             if isinstance(result, ToolResult):
                 return result
+            # MCP client returns dict with _images when image content is present
+            if isinstance(result, dict) and "_images" in result:
+                return ToolResult(
+                    tool_use_id=tool_use_id,
+                    content=result.get("_text", ""),
+                    image_content=result["_images"],
+                )
             return ToolResult(
                 tool_use_id=tool_use_id,
                 content=json.dumps(result) if not isinstance(result, str) else result,
@@ -572,7 +579,9 @@ class ToolRegistry:
                             }
                             merged_inputs = {**clean_inputs, **filtered_context}
                             result = client_ref.call_tool(tool_name, merged_inputs)
-                            # MCP tools return content array, extract the result
+                            # MCP client already extracts content (returns str
+                            # or {"_text": ..., "_images": ...} for image results).
+                            # Handle legacy list format from HTTP transport.
                             if isinstance(result, list) and len(result) > 0:
                                 if isinstance(result[0], dict) and "text" in result[0]:
                                     return result[0]["text"]

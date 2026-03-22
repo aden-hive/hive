@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -24,6 +25,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from framework.graph.conversation import ConversationStore, NodeConversation
 from framework.graph.node import NodeContext, NodeProtocol, NodeResult
+from framework.llm.capabilities import supports_image_tool_results
 from framework.llm.provider import Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
     FinishEvent,
@@ -35,6 +37,48 @@ from framework.runtime.event_bus import EventBus
 from framework.runtime.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
+
+
+async def _describe_images_as_text(image_content: list[dict[str, Any]]) -> str | None:
+    """Describe images using the best available vision model."""
+    import litellm
+
+    blocks: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": (
+                "Describe the following image(s) concisely but with enough detail "
+                "that a text-only AI assistant can understand the content and context."
+            ),
+        }
+    ]
+    blocks.extend(image_content)
+
+    candidates: list[str] = []
+    if os.environ.get("OPENAI_API_KEY"):
+        candidates.append("gpt-4o-mini")
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        candidates.append("claude-3-haiku-20240307")
+    if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
+        candidates.append("gemini/gemini-1.5-flash")
+
+    for model in candidates:
+        try:
+            response = await litellm.acompletion(
+                model=model,
+                messages=[{"role": "user", "content": blocks}],
+                max_tokens=512,
+            )
+            description = (response.choices[0].message.content or "").strip()
+            if description:
+                count = len(image_content)
+                label = "image" if count == 1 else f"{count} images"
+                return f"[{label} attached - description: {description}]"
+        except Exception as exc:
+            logger.debug("Vision fallback model '%s' failed: %s", model, exc)
+            continue
+
+    return None
 
 
 @dataclass
@@ -90,7 +134,13 @@ class _EscalationReceiver:
         self._response: str | None = None
         self._awaiting_input = True  # So inject_worker_message() can prefer us
 
-    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+    async def inject_event(
+        self,
+        content: str,
+        *,
+        is_client_input: bool = False,
+        image_content: list[dict] | None = None,
+    ) -> None:
         """Called by ExecutionStream.inject_input() when the user responds."""
         self._response = content
         self._event.set()
@@ -426,7 +476,9 @@ class EventLoopNode(NodeProtocol):
         self._config = config or LoopConfig()
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
-        self._injection_queue: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
+        self._injection_queue: asyncio.Queue[tuple[str, bool, list[dict[str, Any]] | None]] = (
+            asyncio.Queue()
+        )
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Client-facing input blocking state
         self._input_ready = asyncio.Event()
@@ -784,7 +836,7 @@ class EventLoopNode(NodeProtocol):
                 )
 
             # 6b. Drain injection queue
-            await self._drain_injection_queue(conversation)
+            await self._drain_injection_queue(conversation, ctx)
             # 6b1. Drain trigger queue (framework-level signals)
             await self._drain_trigger_queue(conversation)
 
@@ -1910,7 +1962,13 @@ class EventLoopNode(NodeProtocol):
             conversation=conversation if _is_continuous else None,
         )
 
-    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+    async def inject_event(
+        self,
+        content: str,
+        *,
+        is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Inject an external event or user input into the running loop.
 
         The content becomes a user message prepended to the next iteration.
@@ -1926,8 +1984,9 @@ class EventLoopNode(NodeProtocol):
                 human user (e.g. /chat endpoint), False for external events
                 (e.g. worker question forwarded by the frontend).  Controls
                 message formatting in _drain_injection_queue, not wake behavior.
+            image_content: Optional list of OpenAI-style image blocks to attach.
         """
-        await self._injection_queue.put((content, is_client_input))
+        await self._injection_queue.put((content, is_client_input, image_content))
         self._input_ready.set()
 
     async def inject_trigger(self, trigger: TriggerEvent) -> None:
@@ -2770,10 +2829,20 @@ class EventLoopNode(NodeProtocol):
                     real_tool_results.append(tool_entry)
                     logged_tool_calls.append(tool_entry)
 
+                image_content = result.image_content
+                if image_content and ctx.llm and not supports_image_tool_results(ctx.llm.model):
+                    logger.info(
+                        "Stripping image_content from tool result; "
+                        "model '%s' does not support images in tool results",
+                        ctx.llm.model,
+                    )
+                    image_content = None
+
                 await conversation.add_tool_result(
                     tool_use_id=tc.tool_use_id,
                     content=result.content,
                     is_error=result.is_error,
+                    image_content=image_content,
                     is_skill_content=result.is_skill_content,
                 )
                 if (
@@ -3103,6 +3172,7 @@ class EventLoopNode(NodeProtocol):
             tool_executor=self._tool_executor,
             tc=tc,
             timeout=self._config.tool_call_timeout_seconds,
+            skill_dirs=getattr(self, "_skill_dirs", []),
         )
 
     def _record_learning(self, key: str, value: Any) -> None:
@@ -3523,13 +3593,15 @@ class EventLoopNode(NodeProtocol):
             recent_tool_fingerprints=recent_tool_fingerprints,
         )
 
-    async def _drain_injection_queue(self, conversation: NodeConversation) -> int:
+    async def _drain_injection_queue(self, conversation: NodeConversation, ctx: NodeContext) -> int:
         """Drain all pending injected events as user messages. Returns count."""
         from framework.graph.event_loop.cursor_persistence import drain_injection_queue
 
         return await drain_injection_queue(
             queue=self._injection_queue,
             conversation=conversation,
+            ctx=ctx,
+            describe_images_as_text_fn=_describe_images_as_text,
         )
 
     async def _drain_trigger_queue(self, conversation: NodeConversation) -> int:

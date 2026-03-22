@@ -10,11 +10,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from framework.graph.conversation import NodeConversation
 from framework.graph.node import NodeContext
+from framework.llm.capabilities import supports_image_tool_results
 
 logger = logging.getLogger(__name__)
 
@@ -130,20 +132,43 @@ async def write_cursor(
 async def drain_injection_queue(
     queue: asyncio.Queue,
     conversation: NodeConversation,
+    *,
+    ctx: NodeContext,
+    describe_images_as_text_fn: (
+        Callable[[list[dict[str, Any]]], Awaitable[str | None]] | None
+    ) = None,
 ) -> int:
     """Drain all pending injected events as user messages. Returns count."""
     count = 0
     while not queue.empty():
         try:
-            content, is_client_input = queue.get_nowait()
+            content, is_client_input, image_content = queue.get_nowait()
             logger.info(
-                "[drain] injected message (client_input=%s): %s",
+                "[drain] injected message (client_input=%s, images=%d): %s",
                 is_client_input,
+                len(image_content) if image_content else 0,
                 content[:200] if content else "(empty)",
             )
+            if image_content and ctx.llm and not supports_image_tool_results(ctx.llm.model):
+                logger.info(
+                    "Model '%s' does not support images; attempting vision fallback",
+                    ctx.llm.model,
+                )
+                if describe_images_as_text_fn is not None:
+                    description = await describe_images_as_text_fn(image_content)
+                    if description:
+                        content = f"{content}\n\n{description}" if content else description
+                        logger.info("[drain] image described as text via vision fallback")
+                    else:
+                        logger.info("[drain] no vision fallback available; images dropped")
+                image_content = None
             # Real user input is stored as-is; external events get a prefix
             if is_client_input:
-                await conversation.add_user_message(content, is_client_input=True)
+                await conversation.add_user_message(
+                    content,
+                    is_client_input=True,
+                    image_content=image_content,
+                )
             else:
                 await conversation.add_user_message(f"[External event]: {content}")
             count += 1

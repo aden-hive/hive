@@ -10,6 +10,7 @@ import logging
 from xml.sax.saxutils import escape
 
 from framework.skills.parser import ParsedSkill
+from framework.skills.skill_errors import SkillErrorCode, log_skill_error
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,14 @@ class SkillCatalog:
         for name in skill_names:
             skill = self.get(name)
             if skill is None:
-                logger.warning("Pre-activated skill '%s' not found in catalog", name)
+                log_skill_error(
+                    logger,
+                    "warning",
+                    SkillErrorCode.SKILL_NOT_FOUND,
+                    what=f"Pre-activated skill '{name}' not found in catalog",
+                    why="The skill was listed for pre-activation but was not discovered.",
+                    fix=f"Check that a SKILL.md for '{name}' exists in a scanned directory.",
+                )
                 continue
             if self.is_activated(name):
                 continue  # Already activated, skip duplicate

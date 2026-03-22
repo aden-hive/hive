@@ -96,8 +96,7 @@ class SessionManager:
 
         Internal helper — use create_session() or create_session_with_worker().
         """
-        from framework.config import RuntimeConfig
-        from framework.llm.litellm import LiteLLMProvider
+        from framework.config import RuntimeConfig, get_hive_config
         from framework.runtime.event_bus import EventBus
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -111,12 +110,20 @@ class SessionManager:
         rc = RuntimeConfig(model=model or self._model or RuntimeConfig().model)
 
         # Session owns these — shared with queen and worker
-        llm = LiteLLMProvider(
-            model=rc.model,
-            api_key=rc.api_key,
-            api_base=rc.api_base,
-            **rc.extra_kwargs,
-        )
+        llm_config = get_hive_config().get("llm", {})
+        if llm_config.get("use_antigravity_subscription"):
+            from framework.llm.antigravity import AntigravityProvider
+
+            llm = AntigravityProvider(model=rc.model)
+        else:
+            from framework.llm.litellm import LiteLLMProvider
+
+            llm = LiteLLMProvider(
+                model=rc.model,
+                api_key=rc.api_key,
+                api_base=rc.api_base,
+                **rc.extra_kwargs,
+            )
         event_bus = EventBus()
 
         session = Session(
@@ -313,17 +320,25 @@ class SessionManager:
             # with the correct worker credentials so _setup() doesn't fall back
             # to the queen's llm config (which may be a different provider).
             if worker_model and not model:
-                from framework.llm.litellm import LiteLLMProvider
+                from framework.config import get_hive_config
 
-                worker_api_key = get_worker_api_key()
-                worker_api_base = get_worker_api_base()
-                worker_extra = get_worker_llm_extra_kwargs()
-                runner._llm = LiteLLMProvider(
-                    model=resolved_model,
-                    api_key=worker_api_key,
-                    api_base=worker_api_base,
-                    **worker_extra,
-                )
+                worker_llm_cfg = get_hive_config().get("worker_llm", {})
+                if worker_llm_cfg.get("use_antigravity_subscription"):
+                    from framework.llm.antigravity import AntigravityProvider
+
+                    runner._llm = AntigravityProvider(model=resolved_model)
+                else:
+                    from framework.llm.litellm import LiteLLMProvider
+
+                    worker_api_key = get_worker_api_key()
+                    worker_api_base = get_worker_api_base()
+                    worker_extra = get_worker_llm_extra_kwargs()
+                    runner._llm = LiteLLMProvider(
+                        model=resolved_model,
+                        api_key=worker_api_key,
+                        api_base=worker_api_base,
+                        **worker_extra,
+                    )
 
             # Setup with session's event bus
             if runner._agent_runtime is None:

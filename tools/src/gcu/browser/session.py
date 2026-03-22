@@ -353,6 +353,7 @@ class BrowserSession:
     active_page_id: str | None = None
     console_messages: dict[str, list[dict]] = field(default_factory=dict)
     page_meta: dict[str, TabMeta] = field(default_factory=dict)
+    ref_maps: dict[str, dict] = field(default_factory=dict)  # target_id → RefMap
     _playwright: Any = None
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -447,6 +448,7 @@ class BrowserSession:
         self.active_page_id = None
         self.console_messages.clear()
         self.page_meta.clear()
+        self.ref_maps.clear()
 
     async def start(self, headless: bool = True, persistent: bool = True) -> dict:
         """
@@ -623,6 +625,7 @@ class BrowserSession:
             self.active_page_id = None
             self.console_messages.clear()
             self.page_meta.clear()
+            self.ref_maps.clear()
             self.user_data_dir = None
             self.persistent = False
 
@@ -801,6 +804,7 @@ class BrowserSession:
         self.pages.pop(target_id, None)
         self.console_messages.pop(target_id, None)
         self.page_meta.pop(target_id, None)
+        self.ref_maps.pop(target_id, None)
 
         if self.active_page_id == target_id:
             self.active_page_id = next(iter(self.pages), None)

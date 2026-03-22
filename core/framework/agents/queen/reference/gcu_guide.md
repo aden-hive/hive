@@ -150,7 +150,7 @@ Call all three subagents in a single response to run them in parallel:
 
 ## GCU Anti-Patterns
 
-- Using `browser_screenshot` to read text (use `browser_snapshot`)
+- Using `browser_screenshot` to read text (use `browser_snapshot` instead; screenshots are for visual context only)
 - Re-navigating after scrolling (resets scroll position)
 - Attempting login on auth walls
 - Forgetting `target_id` in multi-tab scenarios

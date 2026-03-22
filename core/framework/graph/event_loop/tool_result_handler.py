@@ -273,6 +273,8 @@ def truncate_tool_result(
             tool_use_id=result.tool_use_id,
             content=truncated,
             is_error=False,
+            image_content=result.image_content,
+            is_skill_content=result.is_skill_content,
         )
 
     spill_dir = spillover_dir
@@ -345,6 +347,8 @@ def truncate_tool_result(
             tool_use_id=result.tool_use_id,
             content=content,
             is_error=False,
+            image_content=result.image_content,
+            is_skill_content=result.is_skill_content,
         )
 
     # No spillover_dir — truncate in-place if needed
@@ -387,6 +391,8 @@ def truncate_tool_result(
             tool_use_id=result.tool_use_id,
             content=truncated,
             is_error=False,
+            image_content=result.image_content,
+            is_skill_content=result.is_skill_content,
         )
 
     return result
@@ -396,6 +402,7 @@ async def execute_tool(
     tool_executor: Any,  # Callable[[ToolUse], ToolResult | Awaitable[ToolResult]] | None
     tc: ToolCallEvent,
     timeout: float,
+    skill_dirs: list[str] | None = None,
 ) -> ToolResult:
     """Execute a tool call, handling both sync and async executors.
 
@@ -410,6 +417,29 @@ async def execute_tool(
             content=f"No tool executor configured for '{tc.tool_name}'",
             is_error=True,
         )
+
+    skill_dirs = skill_dirs or []
+    skill_read_tools = {"view_file", "load_data", "read_file"}
+    if tc.tool_name in skill_read_tools and skill_dirs:
+        raw_path = tc.tool_input.get("path", "")
+        if raw_path:
+            resolved = Path(raw_path).resolve(strict=False)
+            resolved_roots = [Path(skill_dir).resolve(strict=False) for skill_dir in skill_dirs]
+            if any(resolved.is_relative_to(root) for root in resolved_roots):
+                try:
+                    content = resolved.read_text(encoding="utf-8")
+                except Exception as exc:
+                    return ToolResult(
+                        tool_use_id=tc.tool_use_id,
+                        content=f"Could not read skill resource '{raw_path}': {exc}",
+                        is_error=True,
+                    )
+                return ToolResult(
+                    tool_use_id=tc.tool_use_id,
+                    content=content,
+                    is_skill_content=resolved.name == "SKILL.md",
+                )
+
     tool_use = ToolUse(id=tc.tool_use_id, name=tc.tool_name, input=tc.tool_input)
 
     async def _run() -> ToolResult:
