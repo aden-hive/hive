@@ -518,3 +518,110 @@ class TestEdgeConditionPatterns:
         """Some edges use constant expressions."""
         assert safe_eval("True") is True
         assert safe_eval("1 == 1") is True
+
+
+# ---------------------------------------------------------------------------
+# Security: attribute access restricted to safe types
+# ---------------------------------------------------------------------------
+
+
+class TestAttributeTypeSafety:
+    """Verify that attribute access and method dispatch are restricted to safe
+    primitive types, preventing sandbox escape via custom objects."""
+
+    def test_custom_object_attr_blocked(self):
+        """Attribute access on custom objects must be blocked."""
+
+        class Custom:
+            name = "dangerous"
+
+        with pytest.raises(ValueError, match="Attribute access on type 'Custom'"):
+            safe_eval("x.name", {"x": Custom()})
+
+    def test_custom_object_get_method_blocked(self):
+        """A custom object with a .get() method must NOT be treated like a dict."""
+
+        class Sneaky:
+            def get(self, key, default=None):
+                return "pwned"
+
+        with pytest.raises(ValueError, match="Attribute access on type 'Sneaky'"):
+            safe_eval("x.get('key')", {"x": Sneaky()})
+
+    def test_dict_get_still_works(self):
+        """dict.get() must still work after the type restriction."""
+        assert safe_eval("d.get('a', 0)", {"d": {"a": 42}}) == 42
+
+    def test_dict_keys_still_works(self):
+        result = safe_eval("list(d.keys())", {"d": {"x": 1}})
+        assert result == ["x"]
+
+    def test_dict_values_still_works(self):
+        result = safe_eval("list(d.values())", {"d": {"x": 1}})
+        assert result == [1]
+
+    def test_dict_items_still_works(self):
+        result = safe_eval("list(d.items())", {"d": {"x": 1}})
+        assert result == [("x", 1)]
+
+    def test_string_lower_still_works(self):
+        assert safe_eval("s.lower()", {"s": "HELLO"}) == "hello"
+
+    def test_string_upper_still_works(self):
+        assert safe_eval("s.upper()", {"s": "hello"}) == "HELLO"
+
+    def test_string_strip_still_works(self):
+        assert safe_eval("s.strip()", {"s": "  hi  "}) == "hi"
+
+    def test_string_split_still_works(self):
+        assert safe_eval("s.split(',')", {"s": "a,b"}) == ["a", "b"]
+
+    def test_method_on_wrong_type_blocked(self):
+        """Calling a dict method name on a non-dict type must be blocked."""
+        # list has no .get(), but even if it did, it should be blocked
+        with pytest.raises((ValueError, AttributeError)):
+            safe_eval("x.get(0)", {"x": [1, 2, 3]})
+
+    def test_string_get_blocked(self):
+        """Calling .get() on a string must be blocked (get is dict-only)."""
+        with pytest.raises((ValueError, AttributeError)):
+            safe_eval("s.get('a')", {"s": "hello"})
+
+    def test_list_lower_blocked(self):
+        """Calling .lower() on a list must be blocked (lower is str-only)."""
+        with pytest.raises((ValueError, AttributeError)):
+            safe_eval("x.lower()", {"x": [1, 2]})
+
+    def test_nested_dict_access_works(self):
+        """Nested dict access via subscript + method should still work."""
+        ctx = {"data": {"inner": {"key": "value"}}}
+        assert safe_eval("data['inner'].get('key')", ctx) == "value"
+
+    def test_chained_guard_pattern_works(self):
+        """Real-world guard pattern: None check then .get()."""
+        ctx = {"output": {"results": [1, 2]}}
+        result = safe_eval(
+            "output.get('results') is not None and len(output['results']) > 0",
+            ctx,
+        )
+        assert result is True
+
+    def test_chained_guard_pattern_short_circuits(self):
+        """Guard pattern short-circuits when key is missing."""
+        ctx = {"output": {}}
+        result = safe_eval(
+            "output.get('results') is not None and len(output['results']) > 0",
+            ctx,
+        )
+        assert result is False
+
+    def test_pydantic_model_blocked(self):
+        """Pydantic-like objects in context must not leak attributes."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class Config:
+            api_key: str = "secret-123"
+
+        with pytest.raises(ValueError, match="Attribute access on type 'Config'"):
+            safe_eval("cfg.api_key", {"cfg": Config()})

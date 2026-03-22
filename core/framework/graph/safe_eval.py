@@ -2,6 +2,25 @@ import ast
 import operator
 from typing import Any
 
+# Types that are allowed for attribute access and method dispatch.
+# Objects not in this set cannot have their attributes read or methods called,
+# preventing sandbox escape via custom objects in the evaluation context.
+_SAFE_ATTR_TYPES = (dict, list, tuple, set, str, int, float, bool, type(None))
+
+# Mapping of allowed method names to the receiver types they may be called on.
+# This prevents a custom object with a `.get()` method from being treated like
+# a dict inside the sandbox.
+_SAFE_METHOD_RECEIVERS: dict[str, tuple[type, ...]] = {
+    "get": (dict,),
+    "keys": (dict,),
+    "values": (dict,),
+    "items": (dict,),
+    "lower": (str,),
+    "upper": (str,),
+    "strip": (str,),
+    "split": (str,),
+}
+
 # Safe operators whitelist
 SAFE_OPERATORS = {
     ast.Add: operator.add,
@@ -163,21 +182,14 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
         val = self.visit(node.value)
 
-        # Safe attribute access: only allow if it's in the dict (if val is dict)
-        # or it's a safe property of a basic type?
-        # Actually, for flexibility, people often use dot access for dicts in these expressions.
-        # But standard Python dict doesn't support dot access.
-        # If val is a dict, Attribute access usually fails in Python unless wrapped.
-        # If the user context provides objects, we might want to allow attribute access.
-        # BUT we must be careful not to allow access to dangerous things like __class__ etc.
-        # The check starts_with("_") covers __class__, __init__, etc.
+        # Only allow attribute access on safe primitive types to prevent sandbox
+        # escape via custom objects in the evaluation context.
+        if not isinstance(val, _SAFE_ATTR_TYPES):
+            raise ValueError(f"Attribute access on type '{type(val).__name__}' is not allowed")
 
         try:
             return getattr(val, node.attr)
         except AttributeError:
-            # Fallback: maybe it's a dict and they want dot access?
-            # (Only if we want to support that sugar, usually not standard python)
-            # Let's stick to standard python behavior + strict private check.
             pass
 
         raise AttributeError(f"Object has no attribute '{node.attr}'")
@@ -203,22 +215,17 @@ class SafeEvalVisitor(ast.NodeVisitor):
         # Allowing method calls on strings/lists (split, join, get) is commonly needed.
 
         if isinstance(node.func, ast.Attribute):
-            # Method call.
-            # Allow basic safe methods?
-            # For security, start strict. Only helper functions.
-            # Re-visiting: User might want 'output.get("key")'.
+            # Method call — validate both the method name AND the receiver type.
             method_name = node.func.attr
-            if method_name in [
-                "get",
-                "keys",
-                "values",
-                "items",
-                "lower",
-                "upper",
-                "strip",
-                "split",
-            ]:
-                is_safe = True
+            allowed_types = _SAFE_METHOD_RECEIVERS.get(method_name)
+            if allowed_types is not None:
+                # Resolve the receiver to check its type.  Because visit_Attribute
+                # already restricts to _SAFE_ATTR_TYPES, we know *val* is a
+                # primitive, but we still verify the receiver matches the
+                # expected type for this specific method name.
+                receiver = self.visit(node.func.value)
+                if isinstance(receiver, allowed_types):
+                    is_safe = True
 
         if not is_safe and func not in SAFE_FUNCTIONS.values():
             raise ValueError("Call to function/method is not allowed")
