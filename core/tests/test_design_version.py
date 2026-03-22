@@ -1,7 +1,5 @@
 """Tests for design version schemas — creation, checksum, lifecycle transitions."""
 
-import pytest
-
 from framework.schemas.design_version import (
     DesignLifecycleState,
     DesignVersion,

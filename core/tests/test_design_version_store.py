@@ -7,7 +7,6 @@ import pytest
 from framework.schemas.design_version import (
     DesignLifecycleState,
     DesignVersion,
-    DesignVersionIndex,
 )
 from framework.storage.design_version_store import DesignVersionStore
 
