@@ -1300,6 +1300,11 @@ class TrelloTokenHealthChecker(BaseHttpHealthChecker):
     AUTH_QUERY_PARAM_NAME = "token"
 
 
+class TodoistHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.todoist.com/rest/v2/projects"
+    SERVICE_NAME = "Todoist"
+
+
 class YouTubeHealthChecker(BaseHttpHealthChecker):
     ENDPOINT = "https://www.googleapis.com/youtube/v3/videoCategories?part=snippet&regionCode=US"
     SERVICE_NAME = "YouTube"
@@ -1343,6 +1348,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "slack": SlackHealthChecker(),
     "stripe": StripeHealthChecker(),
     "telegram": TelegramHealthChecker(),
+    "todoist_token": TodoistHealthChecker(),
     "trello_key": TrelloKeyHealthChecker(),
     "trello_token": TrelloTokenHealthChecker(),
     "vercel": VercelHealthChecker(),

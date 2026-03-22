@@ -92,6 +92,7 @@ class TestHealthCheckerRegistry:
             "slack",
             "stripe",
             "telegram",
+            "todoist_token",
             "trello_key",
             "trello_token",
             "vercel",
