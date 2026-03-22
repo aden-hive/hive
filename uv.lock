@@ -3530,6 +3530,7 @@ databricks = [
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pytest-xdist" },
 ]
 excel = [
     { name = "openpyxl" },
@@ -3587,6 +3588,7 @@ requires-dist = [
     { name = "pytesseract", marker = "extra == 'ocr'", specifier = ">=0.3.10" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
+    { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "resend", specifier = ">=2.0.0" },
