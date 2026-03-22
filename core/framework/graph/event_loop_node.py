@@ -317,6 +317,32 @@ class LoopConfig:
         if self.hooks is None:
             object.__setattr__(self, "hooks", {})
 
+        # Validate numeric fields to catch misconfigurations early instead of
+        # producing silent misbehaviour at runtime (infinite loops, broken tool
+        # execution, etc.).
+        if self.max_iterations < 1:
+            raise ValueError(f"max_iterations must be >= 1, got {self.max_iterations}")
+        if self.max_tool_calls_per_turn < 1:
+            raise ValueError(
+                f"max_tool_calls_per_turn must be >= 1, got {self.max_tool_calls_per_turn}"
+            )
+        if self.tool_call_overflow_margin < 0.0:
+            raise ValueError(
+                f"tool_call_overflow_margin must be >= 0.0, got {self.tool_call_overflow_margin}"
+            )
+        if self.stall_detection_threshold < 1:
+            raise ValueError(
+                f"stall_detection_threshold must be >= 1, got {self.stall_detection_threshold}"
+            )
+        if self.max_context_tokens < 1:
+            raise ValueError(f"max_context_tokens must be >= 1, got {self.max_context_tokens}")
+        if self.max_stream_retries < 0:
+            raise ValueError(f"max_stream_retries must be >= 0, got {self.max_stream_retries}")
+        if self.tool_doom_loop_threshold < 1:
+            raise ValueError(
+                f"tool_doom_loop_threshold must be >= 1, got {self.tool_doom_loop_threshold}"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Hook types

@@ -2392,3 +2392,64 @@ class TestSubagentAccumulatorMemory:
         # Should return None (not raise PermissionError)
         assert scoped.read("tweet_content") is None
         assert scoped.read("user_request") == "hi"
+
+
+# ---------------------------------------------------------------------------
+# LoopConfig validation
+# ---------------------------------------------------------------------------
+
+
+class TestLoopConfigValidation:
+    """Verify that LoopConfig rejects invalid values at construction time."""
+
+    def test_default_config_valid(self):
+        """Default values must pass validation."""
+        config = LoopConfig()
+        assert config.max_iterations == 50
+
+    def test_custom_valid_config(self):
+        config = LoopConfig(max_iterations=10, max_tool_calls_per_turn=5)
+        assert config.max_iterations == 10
+        assert config.max_tool_calls_per_turn == 5
+
+    def test_max_iterations_zero_rejected(self):
+        with pytest.raises(ValueError, match="max_iterations"):
+            LoopConfig(max_iterations=0)
+
+    def test_max_iterations_negative_rejected(self):
+        with pytest.raises(ValueError, match="max_iterations"):
+            LoopConfig(max_iterations=-1)
+
+    def test_max_tool_calls_per_turn_zero_rejected(self):
+        with pytest.raises(ValueError, match="max_tool_calls_per_turn"):
+            LoopConfig(max_tool_calls_per_turn=0)
+
+    def test_tool_call_overflow_margin_negative_rejected(self):
+        with pytest.raises(ValueError, match="tool_call_overflow_margin"):
+            LoopConfig(tool_call_overflow_margin=-0.1)
+
+    def test_tool_call_overflow_margin_zero_allowed(self):
+        """Zero margin is valid — means no overflow tolerance."""
+        config = LoopConfig(tool_call_overflow_margin=0.0)
+        assert config.tool_call_overflow_margin == 0.0
+
+    def test_stall_detection_threshold_zero_rejected(self):
+        with pytest.raises(ValueError, match="stall_detection_threshold"):
+            LoopConfig(stall_detection_threshold=0)
+
+    def test_max_context_tokens_zero_rejected(self):
+        with pytest.raises(ValueError, match="max_context_tokens"):
+            LoopConfig(max_context_tokens=0)
+
+    def test_max_stream_retries_negative_rejected(self):
+        with pytest.raises(ValueError, match="max_stream_retries"):
+            LoopConfig(max_stream_retries=-1)
+
+    def test_max_stream_retries_zero_allowed(self):
+        """Zero retries is valid — disables retry logic."""
+        config = LoopConfig(max_stream_retries=0)
+        assert config.max_stream_retries == 0
+
+    def test_tool_doom_loop_threshold_zero_rejected(self):
+        with pytest.raises(ValueError, match="tool_doom_loop_threshold"):
+            LoopConfig(tool_doom_loop_threshold=0)
