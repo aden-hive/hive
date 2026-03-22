@@ -515,7 +515,11 @@ Add to `.vscode/settings.json`:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENROUTER_API_KEY="your-openrouter-key"  # Optional
+export HIVE_API_KEY="your-hive-key"              # Optional
 ```
+
+Quickstart also supports selecting OpenRouter and Hive LLM interactively. See [configuration.md](./configuration.md) for the full configuration examples.
 
 ### Optional Configuration
 
