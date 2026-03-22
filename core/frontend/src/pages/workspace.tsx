@@ -740,6 +740,9 @@ export default function Workspace() {
   // Using a ref avoids stale-closure bugs when multiple SSE events
   // arrive in the same React batch.
   const turnCounterRef = useRef<Record<string, number>>({});
+  // Tracks active tool calls per agent synchronously — avoids stale agentStates closure
+  // in tool_call_completed (which fires before tool_call_started's setState commits).
+  const activeToolCallsRef = useRef<Record<string, Record<string, { name: string; done: boolean; streamId: string }>>>({});
   // Per-agent queen phase ref — used to stamp each message with the phase
   // it was created in (avoids stale-closure when phase change and message
   // events arrive in the same React batch).
@@ -1780,6 +1783,7 @@ export default function Workspace() {
               upsertChatMessage(agentType, dividerMsg);
             }
             turnCounterRef.current[turnKey] = currentTurn + 1;
+            activeToolCallsRef.current[agentType] = {};
             updateAgentState(agentType, {
               isTyping: true,
               isStreaming: false,
@@ -2031,6 +2035,7 @@ export default function Workspace() {
 
         case "node_loop_iteration":
           turnCounterRef.current[turnKey] = currentTurn + 1;
+          activeToolCallsRef.current[agentType] = {};
           if (isQueen) {
             updateAgentState(agentType, { isStreaming: false, activeToolCalls: {}, awaitingInput: false, pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
           } else {
@@ -2135,32 +2140,30 @@ export default function Workspace() {
             }
 
             // Track active (in-flight) tools and upsert activity row into chat
+            // upsertChatMessage must be called outside any state updater (React purity requirement)
+            // Use activeToolCallsRef (not agentStates) to avoid stale-closure: tool_call_completed
+            // can fire before the setState from tool_call_started commits in React 18.
             const sid = event.stream_id;
-            setAgentStates(prev => {
-              const state = prev[agentType];
-              if (!state) return prev;
-              const newActive = { ...state.activeToolCalls, [toolUseId]: { name: toolName, done: false, streamId: sid } };
-              // Only include tools from this stream in the pill
-              const tools = Object.values(newActive).filter(t => t.streamId === sid).map(t => ({ name: t.name, done: t.done }));
-              const allDone = tools.length > 0 && tools.every(t => t.done);
-              upsertChatMessage(agentType, {
-                id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
-                agent: (event.node_id ? formatAgentDisplayName(event.node_id) : agentDisplayName) || "Agent",
-                agentColor: "",
-                content: JSON.stringify({ tools, allDone }),
-                timestamp: "",
-                type: "tool_status",
-                role,
-                thread: agentType,
-                createdAt: eventCreatedAt,
-                nodeId: event.node_id || undefined,
-                executionId: event.execution_id || undefined,
-              });
-              return {
-                ...prev,
-                [agentType]: { ...state, isStreaming: false, activeToolCalls: newActive },
-              };
+            const currentActive = activeToolCallsRef.current[agentType] || {};
+            const newActive = { ...currentActive, [toolUseId]: { name: toolName, done: false, streamId: sid } };
+            activeToolCallsRef.current[agentType] = newActive; // sync update
+            // Only include tools from this stream in the pill
+            const tools = Object.values(newActive).filter(t => t.streamId === sid).map(t => ({ name: t.name, done: t.done }));
+            const allDone = tools.length > 0 && tools.every(t => t.done);
+            upsertChatMessage(agentType, {
+              id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
+              agent: (event.node_id ? formatAgentDisplayName(event.node_id) : agentDisplayName) || "Agent",
+              agentColor: "",
+              content: JSON.stringify({ tools, allDone }),
+              timestamp: "",
+              type: "tool_status",
+              role,
+              thread: agentType,
+              createdAt: eventCreatedAt,
+              nodeId: event.node_id || undefined,
+              executionId: event.execution_id || undefined,
             });
+            updateAgentState(agentType, { isStreaming: false, activeToolCalls: newActive });
           } else {
             console.log('[TOOL_PILL] SKIPPED: no node_id', event.node_id);
           }
@@ -2206,34 +2209,32 @@ export default function Workspace() {
             }
 
             // Mark tool as done and update activity row
+            // upsertChatMessage must be called outside any state updater (React purity requirement)
+            // Use activeToolCallsRef (not agentStates) to avoid stale-closure: this handler can
+            // fire before the setState from tool_call_started commits in React 18.
             const sid = event.stream_id;
-            setAgentStates(prev => {
-              const state = prev[agentType];
-              if (!state) return prev;
-              const updated = { ...state.activeToolCalls };
-              if (updated[toolUseId]) {
-                updated[toolUseId] = { ...updated[toolUseId], done: true };
-              }
-              const tools = Object.values(updated).filter(t => t.streamId === sid).map(t => ({ name: t.name, done: t.done }));
-              const allDone = tools.length > 0 && tools.every(t => t.done);
-              upsertChatMessage(agentType, {
-                id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
-                agent: (event.node_id ? formatAgentDisplayName(event.node_id) : agentDisplayName) || "Agent",
-                agentColor: "",
-                content: JSON.stringify({ tools, allDone }),
-                timestamp: "",
-                type: "tool_status",
-                role,
-                thread: agentType,
-                createdAt: eventCreatedAt,
-                nodeId: event.node_id || undefined,
-                executionId: event.execution_id || undefined,
-              });
-              return {
-                ...prev,
-                [agentType]: { ...state, activeToolCalls: updated },
-              };
+            const currentActive = activeToolCallsRef.current[agentType] || {};
+            const updated = { ...currentActive };
+            if (updated[toolUseId]) {
+              updated[toolUseId] = { ...updated[toolUseId], done: true };
+            }
+            activeToolCallsRef.current[agentType] = updated; // sync update
+            const tools = Object.values(updated).filter(t => t.streamId === sid).map(t => ({ name: t.name, done: t.done }));
+            const allDone = tools.length > 0 && tools.every(t => t.done);
+            upsertChatMessage(agentType, {
+              id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
+              agent: (event.node_id ? formatAgentDisplayName(event.node_id) : agentDisplayName) || "Agent",
+              agentColor: "",
+              content: JSON.stringify({ tools, allDone }),
+              timestamp: "",
+              type: "tool_status",
+              role,
+              thread: agentType,
+              createdAt: eventCreatedAt,
+              nodeId: event.node_id || undefined,
+              executionId: event.execution_id || undefined,
             });
+            updateAgentState(agentType, { activeToolCalls: updated });
           }
           break;
         }

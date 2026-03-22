@@ -336,7 +336,9 @@ const WorkerGroupBubble = memo(
     prev.workerDuration === next.workerDuration &&
     prev.messages.length === next.messages.length &&
     prev.messages[prev.messages.length - 1]?.content ===
-      next.messages[next.messages.length - 1]?.content,
+      next.messages[next.messages.length - 1]?.content &&
+    prev.messages.filter(m => m.type === "tool_status").map(m => m.content).join("\0") ===
+      next.messages.filter(m => m.type === "tool_status").map(m => m.content).join("\0"),
 );
 
 const MessageBubble = memo(
@@ -512,7 +514,7 @@ export default function ChatPanel({
   type RenderItem =
     | { kind: "message"; msg: ChatMessage }
     | { kind: "parallel"; groupId: string; groups: SubagentGroup[] }
-    | { kind: "worker-group"; groupId: string; workerName: string; messages: ChatMessage[]; isLast: boolean };
+    | { kind: "worker-group"; groupId: string; workerName: string; messages: ChatMessage[]; isLast: boolean; workerDuration?: number };
 
   const renderItems = useMemo<RenderItem[]>(() => {
     const items: RenderItem[] = [];
@@ -534,7 +536,13 @@ export default function ChatPanel({
           groupMsgs.push(m);
           i++;
         }
-        items.push({ kind: "worker-group", groupId: `wg-${firstId}`, workerName, messages: groupMsgs, isLast: false });
+        const firstCreatedAt = groupMsgs[0]?.createdAt;
+        const lastCreatedAt = groupMsgs[groupMsgs.length - 1]?.createdAt;
+        const inlineDuration =
+          firstCreatedAt != null && lastCreatedAt != null && lastCreatedAt > firstCreatedAt
+            ? lastCreatedAt - firstCreatedAt
+            : undefined;
+        items.push({ kind: "worker-group", groupId: `wg-${firstId}`, workerName, messages: groupMsgs, isLast: false, workerDuration: inlineDuration });
         continue;
       }
 
@@ -699,7 +707,7 @@ export default function ChatPanel({
                 messages={item.messages}
                 isActive={item.isLast && isWorkerWaiting}
                 workerStartedAt={item.isLast ? workerStartedAt : undefined}
-                workerDuration={item.isLast ? workerDuration : undefined}
+                workerDuration={item.isLast ? workerDuration : item.workerDuration}
               />
             </div>
           ) : (
