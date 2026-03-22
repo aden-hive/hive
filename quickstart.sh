@@ -1710,8 +1710,7 @@ echo ""
 mkdir -p "$HOME/.local/bin"
 
 # Git Bash on Windows may materialize `ln -s` as a plain file copy.
-# Install a small launcher shim instead so `~/.local/bin/hive` always
-# delegates to this repo's wrapper.
+# Use a launcher shim there, but prefer a real symlink on Linux/macOS.
 HIVE_SCRIPT="$SCRIPT_DIR/hive"
 HIVE_LINK="$HOME/.local/bin/hive"
 HIVE_SCRIPT_ESCAPED=$(printf '%q' "$HIVE_SCRIPT")
@@ -1720,13 +1719,17 @@ if [ -L "$HIVE_LINK" ] || [ -e "$HIVE_LINK" ]; then
     rm -f "$HIVE_LINK"
 fi
 
-cat > "$HIVE_LINK" <<EOF
+if [ -n "$MSYSTEM" ] || [ -n "$MINGW_PREFIX" ]; then
+    cat > "$HIVE_LINK" <<EOF
 #!/usr/bin/env bash
 set -e
 HIVE_SCRIPT=$HIVE_SCRIPT_ESCAPED
 exec "\$HIVE_SCRIPT" "\$@"
 EOF
-chmod +x "$HIVE_LINK"
+    chmod +x "$HIVE_LINK"
+else
+    ln -s "$HIVE_SCRIPT" "$HIVE_LINK"
+fi
 echo -e "${GREEN}  ✓ hive CLI installed to ~/.local/bin/hive${NC}"
 
 # Check if ~/.local/bin is in PATH
