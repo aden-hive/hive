@@ -146,6 +146,15 @@ class TestBlockedPatterns:
             "rm -rf ..",
             "rm -rf C:\\",
             "rm -f -r /",
+            # rm with -- end-of-options separator
+            "rm -rf -- /",
+            "rm -f -- ~",
+            "rm -r -- ..",
+            # Windows delete variants
+            "del /F /S /Q C:\\Users",
+            "rmdir /S /Q C:\\Temp",
+            "rd /s /q C:\\Temp",
+            "rd /S /Q D:\\",
             # sudo
             "sudo apt install something",
             "sudo rm -rf /var/log",
@@ -229,6 +238,25 @@ class TestEdgeCases:
         """rm of a specific file (not root/home) should pass."""
         validate_command("rm temp.txt")
         validate_command("rm -f output.log")
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            # rd/rmdir without /s flag — removing a specific empty dir is fine
+            "rd output",
+            "rd build/artifacts",
+            "rmdir empty_dir",
+            # del without /s flag — removing a single file is fine
+            "del temp.txt",
+            "del /F locked_file.txt",
+            # rm with -- but targeting a plain file, not root/home
+            "rm -- odd-named-file.txt",
+            "rm -f -- temp.log",
+        ],
+    )
+    def test_benign_delete_commands_pass(self, cmd):
+        """Delete commands that target specific files/dirs (not root) should pass."""
+        validate_command(cmd)
 
     def test_python_without_c_flag_is_safe(self):
         """python script.py is safe; only python -c is blocked."""

@@ -93,11 +93,14 @@ _BLOCKED_EXECUTABLES: list[str] = [
 # These catch dangerous flags and argument combos even when the
 # executable itself isn't blocked (e.g. python -c '...').
 _BLOCKED_PATTERNS: list[re.Pattern[str]] = [
-    # rm with force/recursive flags targeting root or broad paths
-    re.compile(r"\brm\s+(-[rRf]+\s+)*(/|~|\.\.|C:\\)", re.IGNORECASE),
+    # rm with force/recursive flags targeting root or broad paths;
+    # optional -- end-of-options separator before the path
+    re.compile(r"\brm\s+(-[rRf]+\s+)*(--\s+)?(/|~|\.\.|C:\\)", re.IGNORECASE),
     # del /s /q (Windows recursive delete)
     re.compile(r"\bdel\s+.*/[sS]", re.IGNORECASE),
     re.compile(r"\brmdir\s+/[sS]", re.IGNORECASE),
+    # rd (alias for rmdir on Windows) with /s recursive flag
+    re.compile(r"\brd\s+/[sS]", re.IGNORECASE),
     # dd writing to disks/partitions
     re.compile(r"\bdd\s+.*\bof=\s*/dev/", re.IGNORECASE),
     # chmod 777 / chmod -R 777
