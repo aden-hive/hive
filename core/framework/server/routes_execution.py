@@ -50,7 +50,10 @@ async def handle_trigger(request: web.Request) -> web.Response:
         except Exception as e:
             logger.warning("MCP resync failed: %s", e)
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
     entry_point_id = body.get("entry_point_id", "default")
     input_data = body.get("input_data", {})
     session_state = body.get("session_state") or {}
@@ -90,7 +93,10 @@ async def handle_inject(request: web.Request) -> web.Response:
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
     node_id = body.get("node_id")
     content = body.get("content", "")
     graph_id = body.get("graph_id")
@@ -117,7 +123,10 @@ async def handle_chat(request: web.Request) -> web.Response:
     if err:
         return err
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
     message = body.get("message", "")
     image_content = body.get("images") or None  # list[dict] | None
 
@@ -179,7 +188,10 @@ async def handle_queen_context(request: web.Request) -> web.Response:
     if err:
         return err
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
     message = body.get("message", "")
 
     if not message:
@@ -221,7 +233,10 @@ async def handle_worker_input(request: web.Request) -> web.Response:
     if err:
         return err
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
     message = body.get("message", "")
 
     if not message:
@@ -274,7 +289,10 @@ async def handle_resume(request: web.Request) -> web.Response:
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
     worker_session_id = body.get("session_id")
     checkpoint_id = body.get("checkpoint_id")
 
@@ -400,7 +418,10 @@ async def handle_stop(request: web.Request) -> web.Response:
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
     execution_id = body.get("execution_id")
 
     if not execution_id:
@@ -455,7 +476,10 @@ async def handle_replay(request: web.Request) -> web.Response:
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
     worker_session_id = body.get("session_id")
     checkpoint_id = body.get("checkpoint_id")
 

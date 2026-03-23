@@ -55,7 +55,10 @@ async def handle_save_credential(request: web.Request) -> web.Response:
 
     Body: {"credential_id": "...", "keys": {"key_name": "value", ...}}
     """
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
 
     credential_id = body.get("credential_id")
     keys = body.get("keys")
@@ -124,7 +127,10 @@ async def handle_check_agent(request: web.Request) -> web.Response:
 
     Body: {"agent_path": "...", "verify": true}
     """
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
     agent_path = body.get("agent_path")
     verify = body.get("verify", True)
 
