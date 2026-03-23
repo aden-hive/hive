@@ -240,7 +240,7 @@ def _register_unverified(
     register_intercom(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_brevo(mcp, credentials=credentials)
-    register_currency_exchange(mcp, credentials=credentials)
+    register_currency_exchange(mcp)
     register_bigquery(mcp, credentials=credentials)
     register_calcom(mcp, credentials=credentials)
     register_razorpay(mcp, credentials=credentials)
@@ -322,3 +322,4 @@ def register_all_tools(
 
 
 __all__ = ["register_all_tools"]
+
