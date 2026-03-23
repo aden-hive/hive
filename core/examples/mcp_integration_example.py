@@ -79,7 +79,7 @@ async def example_3_config_file():
     # Copy example config (in practice, you'd place this in your agent folder)
     import shutil
 
-    shutil.copy("examples/mcp_servers.json", test_agent_path / "mcp_servers.json")
+    shutil.copy(Path(__file__).parent / "mcp_servers.json", test_agent_path / "mcp_servers.json")
 
     # Load agent - MCP servers will be auto-discovered
     runner = AgentRunner.load(test_agent_path)

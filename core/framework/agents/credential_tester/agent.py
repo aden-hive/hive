@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from framework.runner import AgentRunner
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Goal
 # ---------------------------------------------------------------------------
@@ -111,7 +113,11 @@ def _list_aden_accounts() -> list[dict]:
             for c in integrations
             if c.status == "active"
         ]
+    except (ImportError, OSError) as exc:
+        logger.debug("Could not list Aden accounts: %s", exc)
+        return []
     except Exception:
+        logger.warning("Unexpected error listing Aden accounts", exc_info=True)
         return []
 
 
@@ -123,7 +129,11 @@ def _list_local_accounts() -> list[dict]:
         return [
             info.to_account_dict() for info in LocalCredentialRegistry.default().list_accounts()
         ]
+    except ImportError as exc:
+        logger.debug("Local credential registry unavailable: %s", exc)
+        return []
     except Exception:
+        logger.warning("Unexpected error listing local accounts", exc_info=True)
         return []
 
 
@@ -144,7 +154,11 @@ def _list_env_fallback_accounts() -> list[dict]:
         from framework.credentials.storage import EncryptedFileStorage
 
         encrypted_ids: set[str] = set(EncryptedFileStorage().list_all())
+    except (ImportError, OSError) as exc:
+        logger.debug("Could not read encrypted store: %s", exc)
+        encrypted_ids = set()
     except Exception:
+        logger.warning("Unexpected error reading encrypted store", exc_info=True)
         encrypted_ids = set()
 
     def _is_configured(cred_name: str, spec) -> bool:
@@ -304,8 +318,10 @@ def _activate_local_account(credential_id: str, alias: str) -> None:
 
             if key:
                 os.environ[spec.env_var] = key
+    except (ImportError, KeyError, OSError) as exc:
+        logger.debug("Could not inject credentials: %s", exc)
     except Exception:
-        pass
+        logger.warning("Unexpected error injecting credentials", exc_info=True)
 
 
 def _configure_aden_node(
