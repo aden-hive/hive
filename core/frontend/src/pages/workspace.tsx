@@ -2957,9 +2957,34 @@ export default function Workspace() {
   // --- handleQueenQuestionAnswer: submit queen's own question answer via /chat ---
   // The queen asked the question herself, so she already has context — just send the raw answer.
   const handleQueenQuestionAnswer = useCallback((answer: string, _isOther: boolean) => {
+    const state = agentStates[activeWorker];
+    const questionText = state?.pendingQuestion || "";
+
+    // Insert a visible question message before the reply so ChatPanel can render
+    // the Discord-style reply thread (question bubble left, reply bubble right).
+    if (questionText && activeSession) {
+      const questionMsg: ChatMessage = {
+        id: makeId(),
+        agent: state?.displayName || "Queen Bee",
+        agentColor: "",
+        content: questionText,
+        timestamp: "",
+        type: "worker_input_request",
+        role: "queen",
+        thread: activeWorker, // must match activeThread so it passes the thread filter
+        createdAt: Date.now() - 1,
+      };
+      setSessionsByAgent(prev => ({
+        ...prev,
+        [activeWorker]: prev[activeWorker].map(s =>
+          s.id === activeSession.id ? { ...s, messages: [...s.messages, questionMsg] } : s
+        ),
+      }));
+    }
+
     updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
     handleSend(answer, activeWorker);
-  }, [activeWorker, handleSend, updateAgentState]);
+  }, [activeWorker, activeSession, agentStates, handleSend, setSessionsByAgent, updateAgentState]);
 
   // --- handleMultiQuestionAnswer: submit answers to ask_user_multiple ---
   const handleMultiQuestionAnswer = useCallback((answers: Record<string, string>) => {

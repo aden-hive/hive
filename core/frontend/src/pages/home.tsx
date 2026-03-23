@@ -178,12 +178,12 @@ export default function Home() {
       if (e.key === "Escape") { setSessionModalOpen(false); return; }
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSessionHighlight((p) => Math.min(p + 1, filteredSessions.length - 1));
+        setSessionHighlight((p) => (p + 1) % filteredSessions.length);
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        setSessionHighlight((p) => Math.max(p - 1, 0));
+        setSessionHighlight((p) => (p - 1 + filteredSessions.length) % filteredSessions.length);
         return;
       }
       if (e.key === "Enter") {
@@ -390,6 +390,13 @@ export default function Home() {
             >
               <Bot className="w-4 h-4 text-primary/60" />
               <span>My Agents</span>
+            </button>
+            <button
+              onClick={openSessionModal}
+              className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border border-border/60 text-muted-foreground hover:text-foreground hover:border-primary/30 hover:bg-primary/[0.03] transition-all"
+            >
+              <RotateCcw className="w-4 h-4 text-primary/60" />
+              <span>Resume session</span>
             </button>
           </div>
 
