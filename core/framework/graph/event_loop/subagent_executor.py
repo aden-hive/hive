@@ -11,10 +11,19 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from framework.graph.conversation import ConversationStore
+from framework.graph.event_loop.judge_pipeline import SubagentJudge
+from framework.graph.event_loop.types import LoopConfig, OutputAccumulator
+from framework.graph.node import NodeContext, SharedMemory
 from framework.llm.provider import ToolResult, ToolUse
+from framework.runtime.event_bus import EventBus
+
+if TYPE_CHECKING:
+    from framework.graph.event_loop_node import EventLoopNode
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +44,13 @@ class EscalationReceiver:
         self._response: str | None = None
         self._awaiting_input = True  # So inject_worker_message() can prefer us
 
-    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+    async def inject_event(
+        self,
+        content: str,
+        *,
+        is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Called by ExecutionStream.inject_input() when the user responds."""
         self._response = content
         self._event.set()
@@ -47,15 +62,17 @@ class EscalationReceiver:
 
 
 async def execute_subagent(
-    ctx: Any,  # NodeContext
+    ctx: NodeContext,
     agent_id: str,
     task: str,
     *,
-    accumulator: Any | None = None,  # OutputAccumulator
-    event_bus: Any | None = None,  # EventBus
-    config: Any = None,  # LoopConfig
-    tool_executor: Any | None = None,  # Callable
-    conversation_store: Any | None = None,  # ConversationStore
+    config: LoopConfig,
+    event_loop_node_cls: type[EventLoopNode],
+    escalation_receiver_cls: type[EscalationReceiver],
+    accumulator: OutputAccumulator | None = None,
+    event_bus: EventBus | None = None,
+    tool_executor: Callable[[ToolUse], ToolResult | Awaitable[ToolResult]] | None = None,
+    conversation_store: ConversationStore | None = None,
     subagent_instance_counter: dict[str, int] | None = None,
 ) -> ToolResult:
     """Execute a subagent and return the result as a ToolResult.
@@ -80,8 +97,6 @@ async def execute_subagent(
     Returns:
         ToolResult with structured JSON output.
     """
-    from framework.graph.node import NodeContext, SharedMemory
-
     # Log subagent invocation start
     logger.info(
         "\n" + "=" * 60 + "\n"
@@ -177,10 +192,8 @@ async def execute_subagent(
         # Create isolated receiver and register for input routing
         import uuid
 
-        from framework.graph.event_loop_node import _EscalationReceiver
-
         escalation_id = f"{ctx.node_id}:escalation:{uuid.uuid4().hex[:8]}"
-        receiver = _EscalationReceiver()
+        receiver = escalation_receiver_cls()
         registry = ctx.shared_node_registry
 
         registry[escalation_id] = receiver
@@ -278,10 +291,7 @@ async def execute_subagent(
     if config.spillover_dir:
         subagent_spillover = str(Path(config.spillover_dir) / agent_id / subagent_instance)
 
-    # Import here to avoid circular imports at module level
-    from framework.graph.event_loop_node import EventLoopNode, LoopConfig, SubagentJudge
-
-    subagent_node = EventLoopNode(
+    subagent_node = event_loop_node_cls(
         event_bus=event_bus,
         judge=SubagentJudge(task=task, max_iterations=max_iter),
         config=LoopConfig(

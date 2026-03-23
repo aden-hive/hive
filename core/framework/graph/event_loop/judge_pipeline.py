@@ -1,33 +1,66 @@
-"""Judge evaluation pipeline for the event loop.
-
-Contains the turn evaluation logic (implicit judge + custom judge dispatch)
-and the SubagentJudge implementation.
-"""
+"""Judge evaluation pipeline for the event loop."""
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from collections.abc import Callable
 
 from framework.graph.conversation import NodeConversation
+from framework.graph.event_loop.types import JudgeProtocol, JudgeVerdict, OutputAccumulator
 from framework.graph.node import NodeContext
 
 logger = logging.getLogger(__name__)
 
 
+class SubagentJudge:
+    """Judge for subagent execution."""
+
+    def __init__(self, task: str, max_iterations: int = 10):
+        self._task = task
+        self._max_iterations = max_iterations
+
+    async def evaluate(self, context: dict[str, object]) -> JudgeVerdict:
+        missing = context.get("missing_keys", [])
+        if not isinstance(missing, list) or not missing:
+            return JudgeVerdict(action="ACCEPT", feedback="")
+
+        iteration = context.get("iteration", 0)
+        if not isinstance(iteration, int):
+            iteration = 0
+        remaining = self._max_iterations - iteration - 1
+
+        if remaining <= 3:
+            urgency = (
+                f"URGENT: Only {remaining} iterations left. "
+                f"Stop all other work and call set_output NOW for: {missing}"
+            )
+        elif remaining <= self._max_iterations // 2:
+            urgency = (
+                f"WARNING: {remaining} iterations remaining. "
+                f"You must call set_output for: {missing}"
+            )
+        else:
+            urgency = f"Missing output keys: {missing}. Use set_output to provide them."
+
+        return JudgeVerdict(action="RETRY", feedback=f"Your task: {self._task}\n{urgency}")
+
+
 async def judge_turn(
     *,
     mark_complete_flag: bool,
-    judge: Any | None,  # JudgeProtocol
+    judge: JudgeProtocol | None,
     ctx: NodeContext,
     conversation: NodeConversation,
-    accumulator: Any,  # OutputAccumulator
+    accumulator: OutputAccumulator,
     assistant_text: str,
-    tool_results: list[dict],
+    tool_results: list[dict[str, object]],
     iteration: int,
-    get_missing_output_keys_fn: Any,  # Callable
+    get_missing_output_keys_fn: Callable[
+        [OutputAccumulator, list[str] | None, list[str] | None],
+        list[str],
+    ],
     max_context_tokens: int,
-) -> Any:  # JudgeVerdict
+) -> JudgeVerdict:
     """Evaluate the current state using judge or implicit logic.
 
     Evaluation levels (in order):
@@ -41,8 +74,6 @@ async def judge_turn(
     feedback message.  Any non-None feedback (including ``""``) means a
     real evaluation occurred and will be logged into the conversation.
     """
-    from framework.graph.event_loop_node import JudgeVerdict
-
     # --- Level 0: short-circuits (no evaluation) -----------------------
 
     if mark_complete_flag:

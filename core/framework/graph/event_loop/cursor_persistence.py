@@ -14,7 +14,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from framework.graph.conversation import NodeConversation
+from framework.graph.conversation import ConversationStore, NodeConversation
+from framework.graph.event_loop.types import LoopConfig, OutputAccumulator, TriggerEvent
 from framework.graph.node import NodeContext
 from framework.llm.capabilities import supports_image_tool_results
 
@@ -26,16 +27,16 @@ class RestoredState:
     """State recovered from a previous checkpoint."""
 
     conversation: NodeConversation
-    accumulator: Any  # OutputAccumulator
+    accumulator: OutputAccumulator
     start_iteration: int
     recent_responses: list[str]
     recent_tool_fingerprints: list[list[tuple[str, str]]]
 
 
 async def restore(
-    conversation_store: Any | None,  # ConversationStore
+    conversation_store: ConversationStore | None,
     ctx: NodeContext,
-    config: Any,  # LoopConfig
+    config: LoopConfig,
 ) -> RestoredState | None:
     """Attempt to restore from a previous checkpoint.
 
@@ -45,9 +46,6 @@ async def restore(
     """
     if conversation_store is None:
         return None
-
-    # Import here to avoid circular imports at module level
-    from framework.graph.event_loop_node import OutputAccumulator
 
     # In isolated mode, filter parts by phase_id so the node only sees
     # its own messages in the shared flat conversation store.  In
@@ -94,10 +92,10 @@ async def restore(
 
 
 async def write_cursor(
-    conversation_store: Any | None,  # ConversationStore
+    conversation_store: ConversationStore | None,
     ctx: NodeContext,
     conversation: NodeConversation,
-    accumulator: Any,  # OutputAccumulator
+    accumulator: OutputAccumulator,
     iteration: int,
     *,
     recent_responses: list[str] | None = None,
@@ -186,9 +184,6 @@ async def drain_trigger_queue(
     Multiple triggers are merged so the LLM sees them atomically and can
     reason about all pending triggers before acting.
     """
-    # Import here to avoid circular imports at module level
-    from framework.graph.event_loop_node import TriggerEvent
-
     triggers: list[TriggerEvent] = []
     while not queue.empty():
         try:

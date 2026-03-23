@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
 
+from framework.graph.conversation import NodeConversation
+from framework.graph.event_loop.types import HookContext
 from framework.graph.node import NodeContext
 from framework.runtime.event_bus import EventBus
 
@@ -166,6 +167,38 @@ async def publish_loop_completed(
         )
 
 
+async def publish_context_usage(
+    event_bus: EventBus | None,
+    ctx: NodeContext,
+    conversation: NodeConversation,
+    trigger: str,
+) -> None:
+    """Emit a CONTEXT_USAGE_UPDATED event with current context window state."""
+    if not event_bus:
+        return
+
+    from framework.runtime.event_bus import AgentEvent, EventType
+
+    estimated = conversation.estimate_tokens()
+    max_tokens = conversation._max_context_tokens
+    ratio = estimated / max_tokens if max_tokens > 0 else 0.0
+    await event_bus.publish(
+        AgentEvent(
+            type=EventType.CONTEXT_USAGE_UPDATED,
+            stream_id=ctx.stream_id or ctx.node_id,
+            node_id=ctx.node_id,
+            data={
+                "usage_ratio": round(ratio, 4),
+                "usage_pct": round(ratio * 100),
+                "message_count": conversation.message_count,
+                "estimated_tokens": estimated,
+                "max_context_tokens": max_tokens,
+                "trigger": trigger,
+            },
+        )
+    )
+
+
 async def publish_stalled(
     event_bus: EventBus | None,
     stream_id: str,
@@ -294,7 +327,7 @@ async def publish_output_key_set(
 async def run_hooks(
     hooks_config: dict[str, list],
     event: str,
-    conversation: Any,  # NodeConversation
+    conversation: NodeConversation,
     trigger: str | None = None,
 ) -> None:
     """Run all registered hooks for *event*, applying their results.
@@ -305,9 +338,6 @@ async def run_hooks(
     Hooks run in registration order; each sees the prompt as left by the
     previous hook.
     """
-    # Import here to avoid circular deps at module level
-    from framework.graph.event_loop_node import HookContext
-
     hook_list = hooks_config.get(event, [])
     if not hook_list:
         return

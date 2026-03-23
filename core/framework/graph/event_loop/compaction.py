@@ -9,14 +9,19 @@ Implements the multi-level compaction strategy:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
-from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from framework.graph.conversation import NodeConversation
+from framework.graph.event_loop.event_publishing import publish_context_usage
+from framework.graph.event_loop.types import LoopConfig, OutputAccumulator
 from framework.graph.node import NodeContext
+from framework.runtime.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -28,19 +33,12 @@ LLM_COMPACT_MAX_DEPTH: int = 10
 async def compact(
     ctx: NodeContext,
     conversation: NodeConversation,
-    accumulator: Any | None,  # OutputAccumulator
+    accumulator: OutputAccumulator | None,
     *,
-    config: Any,  # LoopConfig
-    event_bus: Any | None,  # EventBus
+    config: LoopConfig,
+    event_bus: EventBus | None,
     char_limit: int = LLM_COMPACT_CHAR_LIMIT,
     max_depth: int = LLM_COMPACT_MAX_DEPTH,
-    build_message_inventory_fn: Callable[[NodeConversation], list[dict[str, Any]]] | None = None,
-    publish_context_usage_fn: (
-        Callable[[NodeContext, NodeConversation, str], Awaitable[None]] | None
-    ) = None,
-    write_debug_log_fn: (
-        Callable[[NodeContext, int, int, str, list[dict[str, Any]] | None], None] | None
-    ) = None,
 ) -> None:
     """Run the full compaction pipeline if conversation needs compaction.
 
@@ -54,8 +52,8 @@ async def compact(
     phase_grad = getattr(ctx, "continuous_mode", False)
     pre_inventory: list[dict[str, Any]] | None = None
 
-    if ratio_before >= 1.0 and build_message_inventory_fn is not None:
-        pre_inventory = build_message_inventory_fn(conversation)
+    if ratio_before >= 1.0:
+        pre_inventory = build_message_inventory(conversation)
 
     # --- Step 1: Prune old tool results (free, fast) ---
     protect = max(2000, config.max_context_tokens // 12)
@@ -77,8 +75,6 @@ async def compact(
             ratio_before,
             event_bus,
             pre_inventory=pre_inventory,
-            publish_context_usage_fn=publish_context_usage_fn,
-            write_debug_log_fn=write_debug_log_fn,
         )
         return
 
@@ -97,8 +93,6 @@ async def compact(
             ratio_before,
             event_bus,
             pre_inventory=pre_inventory,
-            publish_context_usage_fn=publish_context_usage_fn,
-            write_debug_log_fn=write_debug_log_fn,
         )
         return
 
@@ -132,8 +126,6 @@ async def compact(
             ratio_before,
             event_bus,
             pre_inventory=pre_inventory,
-            publish_context_usage_fn=publish_context_usage_fn,
-            write_debug_log_fn=write_debug_log_fn,
         )
         return
 
@@ -154,8 +146,6 @@ async def compact(
         ratio_before,
         event_bus,
         pre_inventory=pre_inventory,
-        publish_context_usage_fn=publish_context_usage_fn,
-        write_debug_log_fn=write_debug_log_fn,
     )
 
 
@@ -165,7 +155,7 @@ async def compact(
 async def llm_compact(
     ctx: NodeContext,
     messages: list,
-    accumulator: Any | None = None,
+    accumulator: OutputAccumulator | None = None,
     _depth: int = 0,
     *,
     char_limit: int = LLM_COMPACT_CHAR_LIMIT,
@@ -249,7 +239,7 @@ async def llm_compact(
 async def _llm_compact_split(
     ctx: NodeContext,
     messages: list,
-    accumulator: Any | None,
+    accumulator: OutputAccumulator | None,
     _depth: int,
     *,
     char_limit: int = LLM_COMPACT_CHAR_LIMIT,
@@ -302,7 +292,7 @@ def format_messages_for_summary(messages: list) -> str:
 
 def build_llm_compaction_prompt(
     ctx: NodeContext,
-    accumulator: Any | None,  # OutputAccumulator
+    accumulator: OutputAccumulator | None,
     formatted_messages: str,
     *,
     max_context_tokens: int = 128_000,
@@ -350,19 +340,133 @@ def build_llm_compaction_prompt(
     )
 
 
+def build_message_inventory(conversation: NodeConversation) -> list[dict[str, Any]]:
+    """Build a per-message size inventory for debug logging."""
+    inventory: list[dict[str, Any]] = []
+    for message in conversation.messages:
+        content_chars = len(message.content)
+        tool_call_args_chars = 0
+        tool_name = None
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                args = tool_call.get("function", {}).get("arguments", "")
+                tool_call_args_chars += (
+                    len(args) if isinstance(args, str) else len(json.dumps(args))
+                )
+            names = [
+                tool_call.get("function", {}).get("name", "?") for tool_call in message.tool_calls
+            ]
+            tool_name = ", ".join(names)
+        elif message.role == "tool" and message.tool_use_id:
+            for previous in conversation.messages:
+                if previous.tool_calls:
+                    for tool_call in previous.tool_calls:
+                        if tool_call.get("id") == message.tool_use_id:
+                            tool_name = tool_call.get("function", {}).get("name", "?")
+                            break
+                if tool_name:
+                    break
+        entry: dict[str, Any] = {
+            "seq": message.seq,
+            "role": message.role,
+            "content_chars": content_chars,
+        }
+        if tool_call_args_chars:
+            entry["tool_call_args_chars"] = tool_call_args_chars
+        if tool_name:
+            entry["tool"] = tool_name
+        if message.is_error:
+            entry["is_error"] = True
+        if message.phase_id:
+            entry["phase"] = message.phase_id
+        if content_chars > 2000:
+            entry["preview"] = message.content[:200] + "…"
+        inventory.append(entry)
+    return inventory
+
+
+def write_compaction_debug_log(
+    ctx: NodeContext,
+    before_pct: int,
+    after_pct: int,
+    level: str,
+    inventory: list[dict[str, Any]] | None,
+) -> None:
+    """Write detailed compaction analysis to ~/.hive/compaction_log/."""
+    log_dir = Path.home() / ".hive" / "compaction_log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%f")
+    node_label = ctx.node_id.replace("/", "_")
+    log_path = log_dir / f"{ts}_{node_label}.md"
+
+    lines: list[str] = [
+        f"# Compaction Debug — {ctx.node_id}",
+        f"**Time:** {datetime.now(UTC).isoformat()}",
+        f"**Node:** {ctx.node_spec.name} (`{ctx.node_id}`)",
+    ]
+    if ctx.stream_id:
+        lines.append(f"**Stream:** {ctx.stream_id}")
+    lines.append(f"**Level:** {level}")
+    lines.append(f"**Usage:** {before_pct}% → {after_pct}%")
+    lines.append("")
+
+    if inventory:
+        total_chars = sum(
+            entry.get("content_chars", 0) + entry.get("tool_call_args_chars", 0)
+            for entry in inventory
+        )
+        lines.append(
+            "## Pre-Compaction Message Inventory "
+            f"({len(inventory)} messages, {total_chars:,} total chars)"
+        )
+        lines.append("")
+        ranked = sorted(
+            inventory,
+            key=lambda entry: entry.get("content_chars", 0) + entry.get("tool_call_args_chars", 0),
+            reverse=True,
+        )
+        lines.append("| # | seq | role | tool | chars | % of total | flags |")
+        lines.append("|---|-----|------|------|------:|------------|-------|")
+        for i, entry in enumerate(ranked, 1):
+            chars = entry.get("content_chars", 0) + entry.get("tool_call_args_chars", 0)
+            pct = (chars / total_chars * 100) if total_chars else 0
+            tool = entry.get("tool", "")
+            flags: list[str] = []
+            if entry.get("is_error"):
+                flags.append("error")
+            if entry.get("phase"):
+                flags.append(f"phase={entry['phase']}")
+            lines.append(
+                f"| {i} | {entry['seq']} | {entry['role']} | {tool} "
+                f"| {chars:,} | {pct:.1f}% | {', '.join(flags)} |"
+            )
+
+        large = [entry for entry in ranked if entry.get("preview")]
+        if large:
+            lines.append("")
+            lines.append("### Large message previews")
+            for entry in large:
+                lines.append(
+                    f"\n**seq={entry['seq']}** ({entry['role']}, {entry.get('tool', '')}):"
+                )
+                lines.append(f"```\n{entry['preview']}\n```")
+    lines.append("")
+
+    try:
+        log_path.write_text("\n".join(lines), encoding="utf-8")
+        logger.debug("Compaction debug log written to %s", log_path)
+    except OSError:
+        logger.debug("Failed to write compaction debug log to %s", log_path)
+
+
 async def log_compaction(
     ctx: NodeContext,
     conversation: NodeConversation,
     ratio_before: float,
-    event_bus: Any | None,
+    event_bus: EventBus | None,
     *,
     pre_inventory: list[dict[str, Any]] | None = None,
-    publish_context_usage_fn: (
-        Callable[[NodeContext, NodeConversation, str], Awaitable[None]] | None
-    ) = None,
-    write_debug_log_fn: (
-        Callable[[NodeContext, int, int, str, list[dict[str, Any]] | None], None] | None
-    ) = None,
 ) -> None:
     """Log compaction result to runtime logger and event bus."""
     ratio_after = conversation.usage_ratio()
@@ -413,18 +517,17 @@ async def log_compaction(
             )
         )
 
-    if publish_context_usage_fn is not None:
-        await publish_context_usage_fn(ctx, conversation, "post_compaction")
+    await publish_context_usage(event_bus, ctx, conversation, "post_compaction")
 
-    if write_debug_log_fn is not None and os.environ.get("HIVE_COMPACTION_DEBUG"):
-        write_debug_log_fn(ctx, before_pct, after_pct, level, pre_inventory)
+    if os.environ.get("HIVE_COMPACTION_DEBUG"):
+        write_compaction_debug_log(ctx, before_pct, after_pct, level, pre_inventory)
 
 
 def build_emergency_summary(
     ctx: NodeContext,
-    accumulator: Any | None = None,  # OutputAccumulator
+    accumulator: OutputAccumulator | None = None,
     conversation: NodeConversation | None = None,
-    config: Any | None = None,  # LoopConfig
+    config: LoopConfig | None = None,
 ) -> str:
     """Build a structured emergency compaction summary.
 
