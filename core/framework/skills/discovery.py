@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from framework.skills.parser import ParsedSkill, parse_skill_md
+from framework.skills.skill_errors import SkillErrorCode, log_skill_error
 
 logger = logging.getLogger(__name__)
 
@@ -172,11 +173,13 @@ class SkillDiscovery:
         for skill in skills:
             if skill.name in seen:
                 existing = seen[skill.name]
-                logger.warning(
-                    "Skill name collision: '%s' from %s overrides %s",
-                    skill.name,
-                    skill.location,
-                    existing.location,
+                log_skill_error(
+                    logger,
+                    "warning",
+                    SkillErrorCode.SKILL_COLLISION,
+                    what=f"Skill name collision: '{skill.name}'",
+                    why=f"'{skill.location}' overrides '{existing.location}'.",
+                    fix="Rename one of the conflicting skill directories to use a unique name.",
                 )
             seen[skill.name] = skill
 

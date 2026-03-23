@@ -16,6 +16,7 @@ from playwright.async_api import (
 )
 
 from ..highlight import highlight_element
+from ..refs import resolve_selector
 from ..session import DEFAULT_TIMEOUT_MS, get_session
 
 
@@ -52,6 +53,10 @@ def register_advanced_tools(mcp: FastMCP) -> None:
                 return {"ok": False, "error": "No active tab"}
 
             if selector:
+                try:
+                    selector = resolve_selector(selector, session, target_id)
+                except ValueError as e:
+                    return {"ok": False, "error": str(e)}
                 await page.wait_for_selector(selector, timeout=timeout_ms)
                 return {"ok": True, "action": "wait", "condition": "selector", "selector": selector}
             elif text:
@@ -122,6 +127,11 @@ def register_advanced_tools(mcp: FastMCP) -> None:
             if not page:
                 return {"ok": False, "error": "No active tab"}
 
+            try:
+                selector = resolve_selector(selector, session, target_id)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
+
             element = await page.wait_for_selector(selector, timeout=timeout_ms)
             if not element:
                 return {"ok": False, "error": f"Element not found: {selector}"}
@@ -159,6 +169,11 @@ def register_advanced_tools(mcp: FastMCP) -> None:
             page = session.get_page(target_id)
             if not page:
                 return {"ok": False, "error": "No active tab"}
+
+            try:
+                selector = resolve_selector(selector, session, target_id)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
 
             element = await page.wait_for_selector(selector, timeout=timeout_ms)
             if not element:
@@ -237,6 +252,11 @@ def register_advanced_tools(mcp: FastMCP) -> None:
             for path in file_paths:
                 if not Path(path).exists():
                     return {"ok": False, "error": f"File not found: {path}"}
+
+            try:
+                selector = resolve_selector(selector, session, target_id)
+            except ValueError as e:
+                return {"ok": False, "error": str(e)}
 
             await highlight_element(page, selector)
 

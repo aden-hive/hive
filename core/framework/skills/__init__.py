@@ -12,6 +12,7 @@ from framework.skills.discovery import DiscoveryConfig, SkillDiscovery
 from framework.skills.manager import SkillsManager, SkillsManagerConfig
 from framework.skills.models import TrustStatus
 from framework.skills.parser import ParsedSkill, parse_skill_md
+from framework.skills.skill_errors import SkillError, SkillErrorCode, log_skill_error
 from framework.skills.trust import TrustedRepoStore, TrustGate
 
 __all__ = [
@@ -28,4 +29,7 @@ __all__ = [
     "TrustedRepoStore",
     "TrustStatus",
     "parse_skill_md",
+    "SkillError",
+    "SkillErrorCode",
+    "log_skill_error",
 ]

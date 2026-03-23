@@ -146,6 +146,16 @@ class SkillsManager:
         default_mgr.load()
         default_mgr.log_active_skills()
         protocols_prompt = default_mgr.build_protocols_prompt()
+        # DX-3: Community skill startup summary
+        if self._config.project_root is not None and not self._config.skip_community_discovery:
+            community_count = len(catalog._skills) if catalog_prompt else 0
+            pre_activated_count = len(skills_config.skills) if skills_config.skills else 0
+            logger.info(
+                "Skills: %d community (%d catalog, %d pre-activated)",
+                community_count,
+                community_count,
+                pre_activated_count,
+            )
 
         # 3. Cache
         self._catalog_prompt = catalog_prompt

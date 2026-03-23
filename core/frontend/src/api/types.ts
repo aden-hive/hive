@@ -14,6 +14,8 @@ export interface LiveSession {
   intro_message?: string;
   /** Queen operating phase — "planning", "building", "staging", or "running" */
   queen_phase?: "planning" | "building" | "staging" | "running";
+  /** Whether the queen's LLM supports image content in messages */
+  queen_supports_images?: boolean;
   /** Present in 409 conflict responses when worker is still loading */
   loading?: boolean;
 }

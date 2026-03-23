@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff, X } from "lucide-react";
+import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff, X, FolderOpen } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import DraftGraph from "@/components/DraftGraph";
 import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
@@ -354,6 +354,8 @@ interface AgentBackendState {
   pendingQuestionSource: "queen" | "worker" | null;
   /** Per-node context window usage (from context_usage_updated events) */
   contextUsage: Record<string, { usagePct: number; messageCount: number; estimatedTokens: number; maxTokens: number }>;
+  /** Whether the queen's LLM supports image content — false disables the attach button */
+  queenSupportsImages: boolean;
 }
 
 function defaultAgentState(): AgentBackendState {
@@ -392,6 +394,7 @@ function defaultAgentState(): AgentBackendState {
     pendingQuestions: null,
     pendingQuestionSource: null,
     contextUsage: {},
+    queenSupportsImages: true,
   };
 }
 
@@ -923,6 +926,7 @@ export default function Workspace() {
           queenReady: true,
           queenPhase: qPhase,
           queenBuilding: qPhase === "building",
+          queenSupportsImages: liveSession.queen_supports_images !== false,
           // Restore flowchart overlay from persisted events
           ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
           ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
@@ -1122,6 +1126,7 @@ export default function Workspace() {
         displayName,
         queenPhase: initialPhase,
         queenBuilding: initialPhase === "building",
+        queenSupportsImages: session.queen_supports_images !== false,
         // Restore flowchart overlay from persisted events
         ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
         ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
@@ -2613,7 +2618,7 @@ export default function Workspace() {
     });
 
   // --- handleSend ---
-  const handleSend = useCallback((text: string, thread: string) => {
+  const handleSend = useCallback((text: string, thread: string, images?: import("@/components/ChatPanel").ImageContent[]) => {
     if (!activeSession) return;
     const state = agentStates[activeWorker];
 
@@ -2679,6 +2684,7 @@ export default function Workspace() {
     const userMsg: ChatMessage = {
       id: makeId(), agent: "You", agentColor: "",
       content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
+      images,
     };
     setSessionsByAgent(prev => ({
       ...prev,
@@ -2690,7 +2696,7 @@ export default function Workspace() {
     updateAgentState(activeWorker, { isTyping: true, queenIsTyping: true });
 
     if (state?.sessionId && state?.ready) {
-      executionApi.chat(state.sessionId, text).catch((err: unknown) => {
+      executionApi.chat(state.sessionId, text, images).catch((err: unknown) => {
         const errMsg = err instanceof Error ? err.message : String(err);
         const errorChatMsg: ChatMessage = {
           id: makeId(), agent: "System", agentColor: "",
@@ -3106,6 +3112,16 @@ export default function Workspace() {
           <KeyRound className="w-3.5 h-3.5" />
           Credentials
         </button>
+        {activeAgentState?.sessionId && (
+          <button
+            onClick={() => sessionsApi.revealFolder(activeAgentState.sessionId!).catch(() => {})}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
+            title="Open session data folder"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            Data
+          </button>
+        )}
       </TopBar>
 
       {/* Main content area */}
@@ -3224,6 +3240,7 @@ export default function Workspace() {
                 onMultiQuestionSubmit={handleMultiQuestionAnswer}
                 onQuestionDismiss={handleQuestionDismiss}
                 contextUsage={activeAgentState?.contextUsage}
+                supportsImages={activeAgentState?.queenSupportsImages ?? true}
               />
             )}
           </div>

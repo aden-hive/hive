@@ -16,6 +16,8 @@ from framework.llm.provider import Tool, ToolResult, ToolUse
 
 logger = logging.getLogger(__name__)
 
+_INPUT_LOG_MAX_LEN = 500
+
 # Per-execution context overrides.  Each asyncio task (and thus each
 # concurrent graph execution) gets its own copy, so there are no races
 # when multiple ExecutionStreams run in parallel.
@@ -245,6 +247,13 @@ class ToolRegistry:
         def _wrap_result(tool_use_id: str, result: Any) -> ToolResult:
             if isinstance(result, ToolResult):
                 return result
+            # MCP client returns dict with _images when image content is present
+            if isinstance(result, dict) and "_images" in result:
+                return ToolResult(
+                    tool_use_id=tool_use_id,
+                    content=result.get("_text", ""),
+                    image_content=result["_images"],
+                )
             return ToolResult(
                 tool_use_id=tool_use_id,
                 content=json.dumps(result) if not isinstance(result, str) else result,
@@ -271,6 +280,17 @@ class ToolRegistry:
                             r = await result
                             return _wrap_result(tool_use.id, r)
                         except Exception as exc:
+                            inputs_str = json.dumps(tool_use.input, default=str)
+                            if len(inputs_str) > _INPUT_LOG_MAX_LEN:
+                                inputs_str = inputs_str[:_INPUT_LOG_MAX_LEN] + "...(truncated)"
+                            logger.error(
+                                "Async tool '%s' failed (tool_use_id=%s): %s\nInputs: %s",
+                                tool_use.name,
+                                tool_use.id,
+                                exc,
+                                inputs_str,
+                                exc_info=True,
+                            )
                             return ToolResult(
                                 tool_use_id=tool_use.id,
                                 content=json.dumps({"error": str(exc)}),
@@ -281,6 +301,17 @@ class ToolRegistry:
 
                 return _wrap_result(tool_use.id, result)
             except Exception as e:
+                inputs_str = json.dumps(tool_use.input, default=str)
+                if len(inputs_str) > _INPUT_LOG_MAX_LEN:
+                    inputs_str = inputs_str[:_INPUT_LOG_MAX_LEN] + "...(truncated)"
+                logger.error(
+                    "Tool '%s' execution failed for tool_use_id=%s: %s\nInputs: %s",
+                    tool_use.name,
+                    tool_use.id,
+                    e,
+                    inputs_str,
+                    exc_info=True,
+                )
                 return ToolResult(
                     tool_use_id=tool_use.id,
                     content=json.dumps({"error": str(e)}),
@@ -572,14 +603,25 @@ class ToolRegistry:
                             }
                             merged_inputs = {**clean_inputs, **filtered_context}
                             result = client_ref.call_tool(tool_name, merged_inputs)
-                            # MCP tools return content array, extract the result
+                            # MCP client already extracts content (returns str
+                            # or {"_text": ..., "_images": ...} for image results).
+                            # Handle legacy list format from HTTP transport.
                             if isinstance(result, list) and len(result) > 0:
                                 if isinstance(result[0], dict) and "text" in result[0]:
                                     return result[0]["text"]
                                 return result[0]
                             return result
                         except Exception as e:
-                            logger.error(f"MCP tool '{tool_name}' execution failed: {e}")
+                            inputs_str = json.dumps(inputs, default=str)
+                            if len(inputs_str) > _INPUT_LOG_MAX_LEN:
+                                inputs_str = inputs_str[:_INPUT_LOG_MAX_LEN] + "...(truncated)"
+                            logger.error(
+                                "MCP tool '%s' execution failed: %s\nInputs: %s",
+                                tool_name,
+                                e,
+                                inputs_str,
+                                exc_info=True,
+                            )
                             return {"error": str(e)}
 
                     return executor

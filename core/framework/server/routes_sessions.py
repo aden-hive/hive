@@ -28,6 +28,8 @@ import contextlib
 import json
 import logging
 import shutil
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -51,8 +53,11 @@ def _get_manager(request: web.Request) -> SessionManager:
 
 def _session_to_live_dict(session) -> dict:
     """Serialize a live Session to the session-primary JSON shape."""
+    from framework.llm.capabilities import supports_image_tool_results
+
     info = session.worker_info
     phase_state = getattr(session, "phase_state", None)
+    queen_model: str = getattr(getattr(session, "runner", None), "model", "") or ""
     return {
         "session_id": session.id,
         "worker_id": session.worker_id,
@@ -68,6 +73,7 @@ def _session_to_live_dict(session) -> dict:
         "queen_phase": phase_state.phase
         if phase_state
         else ("staging" if session.worker_runtime else "planning"),
+        "queen_supports_images": supports_image_tool_results(queen_model) if queen_model else True,
     }
 
 
@@ -978,6 +984,29 @@ async def handle_discover(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def handle_reveal_session_folder(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/reveal — open session data folder in the OS file manager."""
+    manager: SessionManager = request.app["manager"]
+    session_id = request.match_info["session_id"]
+
+    session = manager.get_session(session_id)
+    storage_session_id = (session.queen_resume_from or session.id) if session else session_id
+    folder = Path.home() / ".hive" / "queen" / "session" / storage_session_id
+    folder.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(folder)])
+        elif sys.platform == "win32":
+            subprocess.Popen(["explorer", str(folder)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder)])
+    except Exception as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+
+    return web.json_response({"path": str(folder)})
+
+
 # ------------------------------------------------------------------
 # Route registration
 # ------------------------------------------------------------------
@@ -1002,6 +1031,7 @@ def register_routes(app: web.Application) -> None:
     app.router.add_delete("/api/sessions/{session_id}/worker", handle_unload_worker)
 
     # Session info
+    app.router.add_post("/api/sessions/{session_id}/reveal", handle_reveal_session_folder)
     app.router.add_get("/api/sessions/{session_id}/stats", handle_session_stats)
     app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
     app.router.add_patch(
