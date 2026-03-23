@@ -282,12 +282,6 @@ const WorkerGroupBubble = memo(
           <ChevronDown
             className={`w-3.5 h-3.5 transition-transform duration-150 ${collapsed ? "-rotate-90" : ""}`}
           />
-          <div
-            className="w-5 h-5 rounded-md flex items-center justify-center"
-            style={{ backgroundColor: `${color}18`, border: `1px solid ${color}30` }}
-          >
-            <Cpu className="w-3 h-3" style={{ color }} />
-          </div>
           {isActive && <Loader2 className="w-3 h-3 animate-spin" style={{ color }} />}
           {isActive ? (
             <span className="font-medium worker-flow-text">{label}</span>
@@ -323,7 +317,11 @@ const WorkerGroupBubble = memo(
                   <div className="flex-1 min-w-0">
                     {!isContinuation && (
                       <div className="flex items-center gap-1.5 mb-0.5">
-                        <span className="text-xs font-medium" style={{ color }}>{m.agent}</span>
+                        {isActive ? (
+                          <span className="text-xs font-medium worker-flow-text">{m.agent}</span>
+                        ) : (
+                          <span className="text-xs font-medium" style={{ color }}>{m.agent}</span>
+                        )}
                         <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md">
                           Worker
                         </span>
