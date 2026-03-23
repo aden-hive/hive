@@ -1,0 +1,15 @@
+{
+    "name": "email-reply-agent",
+    "version": "1.0.0",
+    "description": "Filter unreplied emails, confirm recipients, send personalized replies.",
+    "entry_point": "agent:default_agent",
+    "metadata": {
+        "name": "Email Reply Agent",
+        "version": "1.0.0",
+        "description": "Filter unreplied emails, confirm recipients, send personalized replies.",
+        "intro_message": "Tell me which emails you want to reply to (e.g., 'emails from @company.com in the last week').",
+        "tags": ["email", "automation", "reply"]
+    },
+    "dependencies": [],
+    "config": {}
+}
