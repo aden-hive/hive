@@ -23,7 +23,7 @@ API Reference: https://www.exchangerate-api.com/docs/overview
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 from fastmcp import FastMCP
@@ -167,10 +167,6 @@ def register_tools(
         Returns:
             API key string, or None if not configured
         """
-        if credentials is not None:
-            key = credentials.get("exchangerate")
-            if key:
-                return str(key)
         return os.getenv("EXCHANGERATE_API_KEY")
 
     def _get_client() -> _CurrencyExchangeClient | dict[str, str]:

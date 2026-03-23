@@ -20,9 +20,6 @@ from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
 
-if TYPE_CHECKING:
-    from aden_tools.credentials import CredentialStoreAdapter
-
 # ---------------------------------------------------------------------------
 # Verified tools (stable, on main)
 # ---------------------------------------------------------------------------
@@ -226,7 +223,6 @@ def _register_verified(
 
 def _register_unverified(
     mcp: FastMCP,
-    credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """Register unverified (new/community) tools."""
     # --- No credentials ---
