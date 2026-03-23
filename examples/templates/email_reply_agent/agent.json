@@ -1,0 +1,198 @@
+{
+  "agent": {
+    "id": "email_reply_agent",
+    "name": "Email Reply Agent",
+    "version": "1.0.0",
+    "description": "Filter unreplied emails by user criteria, confirm recipients, send personalized replies."
+  },
+  "graph": {
+    "id": "email-reply-graph",
+    "goal_id": "email-reply-goal",
+    "version": "1.0.0",
+    "entry_node": "intake",
+    "entry_points": {
+      "start": "intake"
+    },
+    "pause_nodes": [],
+    "terminal_nodes": [],
+    "conversation_mode": "continuous",
+    "identity_prompt": "You are a helpful email reply assistant that filters unreplied emails and sends personalized responses.",
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Gather email filter criteria from user",
+        "node_type": "event_loop",
+        "input_keys": ["batch_complete", "restart"],
+        "output_keys": ["filter_criteria"],
+        "nullable_output_keys": ["batch_complete", "restart"],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are an intake specialist for email replies. Your ONLY job is to gather filter criteria and call set_output.\n\nIf the user has already provided criteria in their message, IMMEDIATELY call:\nset_output(\"filter_criteria\", {\"sender_pattern\": \"...\", \"date_range\": \"...\", \"max_results\": 50, \"tone_guidance\": \"...\"})\n\nDO NOT:\n- Read files\n- Search files\n- List directories\n- Ask for confirmation if criteria are already provided\n\nIf you need more information, ask ONE brief question. Otherwise, call set_output immediately.\n\nAfter batch_complete or restart, acknowledge and ask for next criteria.",
+        "tools": [],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": "Filter criteria is specific enough to search Gmail (sender, subject, date range, or keywords)."
+      },
+      {
+        "id": "search",
+        "name": "Search Emails",
+        "description": "Search Gmail for unreplied emails matching filter criteria",
+        "node_type": "event_loop",
+        "input_keys": ["filter_criteria"],
+        "output_keys": ["email_list"],
+        "nullable_output_keys": [],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a Gmail search agent. Find unreplied emails matching the user's filter criteria.\n\n## Workflow:\n1. Build Gmail search query from filter_criteria:\n   - Use \"is:unread\" to find unreplied (standard proxy for unreplied)\n   - Add sender: from:(pattern) if sender_pattern provided\n   - Add subject: subject:(keywords) if subject_keywords provided\n   - Add after: after:YYYY/MM/DD if date_range provided\n   - Limit to max_results (default 50)\n2. Call gmail_list_messages with the query\n3. For each message_id, call gmail_get_message to get full content (sender, subject, body)\n4. Build a structured list of emails\n\n## Output:\nset_output(\"email_list\", JSON list with fields for each email:\n- message_id\n- sender (email address)\n- sender_name (if available)\n- subject\n- snippet (first 200 chars of body)\n- received_date (ISO format)\n)\n\nIf no emails found, set empty array: set_output(\"email_list\", [])",
+        "tools": ["gmail_list_messages", "gmail_get_message", "gmail_batch_get_messages"],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": false,
+        "success_criteria": "Found unreplied emails matching criteria with sender, subject, snippet, message_id."
+      },
+      {
+        "id": "confirm-draft",
+        "name": "Confirm & Reply",
+        "description": "Present emails for confirmation, send personalized replies",
+        "node_type": "event_loop",
+        "input_keys": ["email_list", "filter_criteria"],
+        "output_keys": ["batch_complete", "restart"],
+        "nullable_output_keys": ["batch_complete", "restart"],
+        "input_schema": {},
+        "output_schema": {},
+        "system_prompt": "You are a Gmail reply assistant. Present emails for confirmation, then send personalized replies.\n\n**STEP 1 — Present for confirmation (text only, NO tool calls):**\n1. Show the email list in readable format:\n   - #. Sender Name <email> - Subject (Date)\n   - Snippet: first 150 chars\n2. Ask: \"These are the emails to reply to. Confirm? Any tone preferences or specific messages?\"\n3. Wait for user response\n\n**STEP 2 — Handle user response:**\n\nIf user CONFIRMS (says yes, go ahead, sounds good, etc.):\nFor EACH email in email_list:\n1. Read the subject and snippet\n2. Use tone_guidance from filter_criteria + any user-specified preferences\n3. Call gmail_reply_email with:\n   - message_id: the email's message_id\n   - html: personalized 2-4 sentence reply based on email context\n   (The tool automatically handles recipient, subject, and threading)\n4. After all replies sent, call: set_output(\"batch_complete\", True)\n\nIf user wants to CHANGE LOGIC/FILTER (says change filter, different criteria, not these emails, wrong emails, etc.):\n1. Acknowledge their request\n2. Call: set_output(\"restart\", True)\n\nPersonalization rules:\n- Reference specific details from their email (questions asked, topics mentioned)\n- Match their formality level (formal→formal, casual→casual)\n- If tone_guidance specifies style, follow it\n- Keep replies concise but warm",
+        "tools": ["gmail_reply_email"],
+        "model": null,
+        "function": null,
+        "routes": {},
+        "max_retries": 3,
+        "retry_on": [],
+        "max_node_visits": 0,
+        "output_model": null,
+        "max_validation_retries": 2,
+        "client_facing": true,
+        "success_criteria": "User confirmed recipients and personalized replies sent for each."
+      }
+    ],
+    "edges": [
+      {
+        "id": "intake-to-search",
+        "source": "intake",
+        "target": "search",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "search-to-confirm",
+        "source": "search",
+        "target": "confirm-draft",
+        "condition": "on_success",
+        "condition_expr": null,
+        "priority": 1,
+        "input_mapping": {}
+      },
+      {
+        "id": "confirm-to-intake-on-restart",
+        "source": "confirm-draft",
+        "target": "intake",
+        "condition": "conditional",
+        "condition_expr": "restart == True",
+        "priority": 2,
+        "input_mapping": {}
+      },
+      {
+        "id": "confirm-to-intake-on-complete",
+        "source": "confirm-draft",
+        "target": "intake",
+        "condition": "conditional",
+        "condition_expr": "batch_complete == True",
+        "priority": 1,
+        "input_mapping": {}
+      }
+    ],
+    "max_steps": 500,
+    "max_retries_per_node": 3,
+    "description": "Filter unreplied emails by user criteria, confirm recipients, send personalized replies."
+  },
+  "goal": {
+    "id": "email-reply-goal",
+    "name": "Email Reply Agent",
+    "description": "Filter unreplied emails by user criteria, confirm recipients, send personalized replies.",
+    "status": "draft",
+    "success_criteria": [
+      {
+        "id": "sc-filter",
+        "description": "Accurately finds unreplied emails matching user criteria",
+        "metric": "Precision of email filtering",
+        "target": "90%",
+        "weight": 0.35,
+        "met": false
+      },
+      {
+        "id": "sc-confirm",
+        "description": "User confirms recipient list before sending",
+        "metric": "Confirmation rate",
+        "target": "100%",
+        "weight": 0.25,
+        "met": false
+      },
+      {
+        "id": "sc-personalize",
+        "description": "Replies are personalized based on email content and tone guidance",
+        "metric": "User satisfaction with reply relevance",
+        "target": "85%",
+        "weight": 0.40,
+        "met": false
+      }
+    ],
+    "constraints": [
+      {
+        "id": "c-privacy",
+        "description": "Never send emails without explicit user confirmation; always present recipient list and get approval first",
+        "constraint_type": "hard",
+        "category": "functional",
+        "check": ""
+      },
+      {
+        "id": "c-batch",
+        "description": "Process up to 50 emails per batch",
+        "constraint_type": "hard",
+        "category": "functional",
+        "check": ""
+      }
+    ],
+    "context": {},
+    "required_capabilities": [],
+    "input_schema": {},
+    "output_schema": {},
+    "version": "1.0.0",
+    "parent_version": null,
+    "evolution_reason": null
+  },
+  "required_tools": [
+    "gmail_list_messages",
+    "gmail_get_message",
+    "gmail_batch_get_messages",
+    "gmail_reply_email"
+  ],
+  "metadata": {
+    "node_count": 3,
+    "edge_count": 4
+  }
+}
