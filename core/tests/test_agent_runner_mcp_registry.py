@@ -1,10 +1,12 @@
 """Tests for AgentRunner MCP registry integration."""
 
+import json
 from pathlib import Path
 
 from framework.graph.edge import GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import NodeSpec
+from framework.runner.mcp_registry import MCPRegistry
 from framework.runner.runner import AgentRunner
 
 
@@ -188,3 +190,54 @@ def test_agent_runner_survives_malformed_registry_json(tmp_path, monkeypatch):
     )
 
     assert any("Failed to load MCP registry servers" in w for w in warnings)
+
+
+def test_integration_real_registry_to_agent_runner(tmp_path, monkeypatch):
+    """Integration: real MCPRegistry on disk → mcp_registry.json → AgentRunner."""
+    # Set up a real registry with a local server
+    registry_base = tmp_path / "mcp_registry"
+    registry = MCPRegistry(base_path=registry_base)
+    registry.initialize()
+    registry.add_local(name="jira", transport="http", url="http://localhost:4010")
+
+    # Write mcp_registry.json in the agent dir
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    (agent_dir / "mcp_registry.json").write_text(
+        json.dumps({"include": ["jira"]}), encoding="utf-8"
+    )
+
+    # Patch MCPRegistry to use our tmp_path base, but keep real logic
+    original_init = MCPRegistry.__init__
+
+    def patched_init(self, base_path=None):
+        original_init(self, base_path=registry_base)
+
+    monkeypatch.setattr(MCPRegistry, "__init__", patched_init)
+    monkeypatch.setattr(
+        "framework.runner.runner.run_preload_validation",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(AgentRunner, "_resolve_default_model", staticmethod(lambda: "test-model"))
+
+    registered: list[dict] = []
+    monkeypatch.setattr(
+        "framework.runner.tool_registry.ToolRegistry.register_mcp_server",
+        lambda self, server_config, use_connection_manager=True: (
+            registered.append(server_config) or 1
+        ),
+    )
+
+    AgentRunner(
+        agent_path=agent_dir,
+        graph=_make_graph(),
+        goal=Goal(id="goal-1", name="Goal", description="desc"),
+        storage_path=tmp_path / "storage",
+        interactive=False,
+        skip_credential_validation=True,
+    )
+
+    assert len(registered) == 1
+    assert registered[0]["name"] == "jira"
+    assert registered[0]["transport"] == "http"
+    assert registered[0]["url"] == "http://localhost:4010"
