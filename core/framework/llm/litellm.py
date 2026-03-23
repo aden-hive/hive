@@ -270,8 +270,17 @@ def _estimate_tokens(model: str, messages: list[dict]) -> tuple[int, str]:
         except Exception:
             pass
 
-    # Fallback: rough estimate based on character count (~4 chars per token)
-    total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+    # Fallback: rough estimate based on character count (~4 chars per token).
+    # Include tool_calls arguments which can dominate token usage.
+    total_chars = 0
+    for m in messages:
+        total_chars += len(str(m.get("content", "") or ""))
+        for tc in m.get("tool_calls", []):
+            func = tc.get("function", {})
+            total_chars += len(func.get("name", ""))
+            total_chars += len(func.get("arguments", ""))
+        if m.get("tool_call_id"):
+            total_chars += len(str(m["tool_call_id"]))
     return total_chars // 4, "estimate"
 
 

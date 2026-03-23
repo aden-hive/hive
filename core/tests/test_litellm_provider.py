@@ -23,6 +23,7 @@ from framework.llm.litellm import (
     OPENROUTER_TOOL_COMPAT_MODEL_CACHE,
     LiteLLMProvider,
     _compute_retry_delay,
+    _estimate_tokens,
 )
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 
@@ -1084,3 +1085,54 @@ class TestIsLocalModel:
         from framework.runner.runner import AgentRunner
 
         assert AgentRunner._is_local_model(model) is False
+
+
+class TestEstimateTokens:
+    """Tests for the _estimate_tokens fallback character-count path."""
+
+    def test_content_only_messages(self):
+        """Basic content-only messages are estimated correctly."""
+        messages = [{"role": "user", "content": "a" * 400}]
+        # litellm may not be available in test env; patch it out to force fallback
+        with patch("framework.llm.litellm.litellm", None):
+            count, method = _estimate_tokens("gpt-4o", messages)
+        assert method == "estimate"
+        assert count == 100  # 400 chars // 4
+
+    def test_tool_calls_included_in_estimate(self):
+        """tool_calls arguments are included in the character count."""
+        arguments = '{"query": "' + "x" * 200 + '"}'
+        messages = [
+            {
+                "role": "assistant",
+                "content": "ok",  # 2 chars
+                "tool_calls": [
+                    {"function": {"name": "search", "arguments": arguments}}
+                ],
+            }
+        ]
+        with patch("framework.llm.litellm.litellm", None):
+            count, method = _estimate_tokens("gpt-4o", messages)
+        assert method == "estimate"
+        # 2 (content) + 6 (name) + len(arguments) = 2 + 6 + len(arguments)
+        expected_chars = 2 + len("search") + len(arguments)
+        assert count == expected_chars // 4
+
+    def test_no_tool_calls_same_as_before(self):
+        """Messages without tool_calls produce the same result as content-only path."""
+        messages = [{"role": "user", "content": "hello world"}]
+        with patch("framework.llm.litellm.litellm", None):
+            count, method = _estimate_tokens("gpt-4o", messages)
+        assert method == "estimate"
+        assert count == len("hello world") // 4
+
+    def test_tool_call_id_included(self):
+        """tool_call_id field contributes to the character count."""
+        tool_call_id = "call_" + "a" * 20
+        messages = [
+            {"role": "tool", "content": "", "tool_call_id": tool_call_id}
+        ]
+        with patch("framework.llm.litellm.litellm", None):
+            count, method = _estimate_tokens("gpt-4o", messages)
+        assert method == "estimate"
+        assert count == len(tool_call_id) // 4
