@@ -148,7 +148,6 @@ class _CurrencyExchangeClient:
 
 def register_tools(
     mcp: FastMCP,
-    credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """
     Register Currency Exchange tools with the MCP server.
@@ -160,8 +159,6 @@ def register_tools(
 
     Args:
         mcp: FastMCP server instance to register tools on
-        credentials: Optional credential store for managed API keys.
-                     Falls back to EXCHANGERATE_API_KEY environment variable.
     """
 
     def _get_api_key() -> str | None:
@@ -171,10 +168,6 @@ def register_tools(
         Returns:
             API key string, or None if not configured
         """
-        if credentials is not None:
-            key = credentials.get("exchangerate")
-            if key:
-                return str(key)
         return os.getenv("EXCHANGERATE_API_KEY")
 
     def _get_client() -> _CurrencyExchangeClient | dict[str, str]:

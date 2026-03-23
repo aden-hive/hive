@@ -41,12 +41,12 @@ from .aws_s3_tool import register_tools as register_aws_s3
 from .azure_sql_tool import register_tools as register_azure_sql
 from .bigquery_tool import register_tools as register_bigquery
 from .brevo_tool import register_tools as register_brevo
-from .currency_exchange_tool import register_tools as register_currency_exchange
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .calendly_tool import register_tools as register_calendly
 from .cloudinary_tool import register_tools as register_cloudinary
 from .confluence_tool import register_tools as register_confluence
+from .currency_exchange_tool import register_tools as register_currency_exchange
 from .csv_tool import register_tools as register_csv
 from .databricks_tool import register_tools as register_databricks
 from .discord_tool import register_tools as register_discord
