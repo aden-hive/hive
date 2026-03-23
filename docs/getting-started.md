@@ -192,8 +192,9 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 2. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
 3. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
 4. **Build Agents**: Use the coder-tools `initialize_and_build_agent` tool in Claude Code
-5. **Custom Tools**: Learn to integrate MCP servers
-6. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
+5. **Skills Guide**: See [skills-user-guide.md](./skills-user-guide.md) for install, authoring, and tuning workflows
+6. **Custom Tools**: Learn to integrate MCP servers
+7. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
 
 ## Troubleshooting
 

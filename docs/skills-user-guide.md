@@ -2,11 +2,29 @@
 
 This guide covers how to use, create, and manage Agent Skills in the Hive framework. Agent Skills follow the open [Agent Skills standard](https://agentskills.io) — skills written for Claude Code, Cursor, or other compatible agents work in Hive unchanged.
 
+## Phase 4 deliverables (split into subpages)
+
+For the Phase 4 “Documentation Deliverables” (`#6371`), the authoritative content is being moved
+into `docs/skills/*.md` as separate pages:
+
+- [Install and use your first skill](./skills/install-first-skill.md)
+- [Write your first skill](./skills/write-first-skill.md)
+- [Port a skill](./skills/port-skill.md)
+- [Default skills reference](./skills/default-skills-reference.md)
+- [Tuning default skills](./skills/tuning-default-skills.md)
+- [Starter pack guide](./skills/starter-pack-guide.md)
+
+The remaining Phase 4 deliverables (skill cookbook and evaluating skill quality) are tracked
+separately and will be added in a later pass.
+
 ## What are skills?
 
 Skills are folders containing a `SKILL.md` file that teaches an agent how to perform a specific task. They can also bundle scripts, templates, and reference materials. Skills are loaded on demand — the agent sees a lightweight catalog at startup and pulls in full instructions only when relevant.
 
 ## Quick start
+
+> TODO(#6369): Replace command snippets in this section after `hive skill` command flags and output are frozen.
+> TODO(#6370): Replace registry and starter-pack examples after registry defaults are finalized.
 
 ### Install a skill
 
@@ -50,6 +68,18 @@ USER SKILLS
     Multi-step web research with source verification.
     /home/user/.hive/skills/deep-research/SKILL.md
 ```
+
+### Install from registry (planned CLI flow)
+
+When Phase 2 and Phase 3 are finalized, the default install flow will be:
+
+```bash
+hive skill install <skill-name>
+hive skill search <query>
+hive skill info <skill-name>
+```
+
+Until those dependencies are finalized, use local skill directories in `.hive/skills/` or `.agents/skills/`.
 
 ## Where to put skills
 
@@ -256,6 +286,17 @@ Hive ships with six built-in operational skills that provide runtime resilience.
 | `hive.error-recovery` | Structured error classification and recovery |
 | `hive.task-decomposition` | Break complex tasks into subtasks |
 
+### Default skills reference
+
+| Skill | Typical trigger | Shared memory expectation | Main tuning knobs |
+|-------|------------------|---------------------------|-------------------|
+| `hive.note-taking` | Multi-step tasks with intermediate findings | Stores concise investigation notes | verbosity, section format, checkpoint cadence |
+| `hive.batch-ledger` | Processing a list of items (files, tickets, rows) | Stores item status and retry metadata | batch size, retry policy, completion threshold |
+| `hive.context-preservation` | Long sessions near context pressure | Stores compressed state snapshots | snapshot frequency, summary depth |
+| `hive.quality-monitor` | Deliverables requiring quality bars | Stores self-check results and open risks | check interval, strictness, stop-on-fail |
+| `hive.error-recovery` | Tool failures and runtime exceptions | Stores error type, mitigation, and retry decisions | max retries, fallback policy |
+| `hive.task-decomposition` | Broad or ambiguous requests | Stores task breakdown and progress map | decomposition depth, merge policy |
+
 ### Disable default skills
 
 In your agent configuration:
@@ -271,6 +312,97 @@ default_skills = {
     "_all": {"enabled": False},
 }
 ```
+
+## Tuning default skills
+
+Use tuning when you want to keep the safety/value of operational skills while adapting behavior to workload.
+
+Use disable only when:
+- A skill causes measurable noise for a specific agent profile.
+- A policy or environment constraint makes the behavior invalid.
+
+Prefer configure over disable when:
+- You only need less verbosity or lower frequency.
+- You want guardrails, but in a narrower scope.
+
+Suggested tuning sequence:
+1. Keep all defaults enabled in baseline runs.
+2. Measure latency, output quality, and retries over representative tasks.
+3. Reduce the noisiest skill settings first (not all at once).
+4. Re-run the same workload and compare deltas.
+5. Disable only if measured regressions are not recoverable by tuning.
+
+> TODO(#6369): Add concrete `hive skill doctor --defaults` and config examples once command UX is finalized.
+
+## Skill cookbook
+
+The cookbook is a set of annotated examples contributors can copy and adapt.
+
+### Example 1: Research synthesis skill
+
+- Goal: produce source-backed answers with explicit citation standards.
+- Pattern: instruction-heavy `SKILL.md` + optional reference style guide.
+- Validation focus: source quality checks and citation formatting.
+
+### Example 2: Triage and classification skill
+
+- Goal: classify incoming items into stable categories with rationale.
+- Pattern: deterministic rubric section + confidence threshold policy.
+- Validation focus: consistency across edge-case samples.
+
+### Example 3: Outreach drafting skill
+
+- Goal: draft concise personalized outreach with tone constraints.
+- Pattern: template-driven body + red-flag checks before output.
+- Validation focus: tone compliance and prohibited-content checks.
+
+> TODO(#6370): Link cookbook examples to starter packs once pack definitions are finalized in the registry repo.
+
+## Evaluating skill quality
+
+A practical evaluation loop:
+1. Define the skill goal and non-goals.
+2. Build a small eval set of representative prompts.
+3. Add pass/fail assertions (format, safety, correctness, policy).
+4. Run evals after every material skill change.
+5. Track regressions and iterate with focused fixes.
+
+Quality dimensions to score:
+- Activation precision: does the agent activate the skill when it should?
+- Instruction adherence: does behavior follow the declared procedure?
+- Robustness: does it handle edge cases and recover from tool errors?
+- Output quality: is output accurate, clear, and policy-compliant?
+
+> TODO(#6369): Add `hive skill test` command examples after final CLI behavior lands.
+
+## Port a skill from Claude Code or Cursor
+
+Hive is compatible with Agent Skills format used by other clients.
+
+Porting checklist:
+1. Copy the skill directory to `.agents/skills/<skill-name>/` or `.hive/skills/<skill-name>/`.
+2. Confirm frontmatter fields are valid and `name` matches directory name.
+3. Verify relative references for `scripts/`, `references/`, and `assets/`.
+4. Run local validation and resolve any schema mismatches.
+5. Test activation against a prompt that should trigger the skill.
+
+> TODO(#6369): Replace "local validation" wording with exact `hive skill validate` flow and output.
+
+## Starter packs
+
+Starter packs bundle multiple complementary skills for common workflows.
+
+Use packs when:
+- You are onboarding quickly and want a tested baseline.
+- Your team needs a consistent setup across projects.
+
+Pack lifecycle:
+1. Discover a pack by workflow.
+2. Install pack contents.
+3. Enable/disable individual skills for your agent profile.
+4. Run a smoke test on one representative task.
+
+> TODO(#6370): Add exact pack names, install commands, and pack metadata fields after registry pack format is finalized.
 
 ## Environment variables
 
@@ -288,3 +420,12 @@ Skills written for any Agent Skills-compatible agent work in Hive:
 - Skills installed at `~/.agents/skills/` are visible to all compatible agents on your machine.
 
 See the [Agent Skills specification](https://agentskills.io/specification) for the full format reference.
+
+## Documentation release checklist
+
+Before marking documentation "ready for review" for Phase 4:
+- Confirm `#6369` command names, flags, and behavior are stable.
+- Confirm `#6370` registry structure, packs, and index behavior are stable.
+- Re-run all command snippets and update output blocks.
+- Replace every TODO anchor tied to `#6369` and `#6370`.
+- Get at least one non-author review on the docs set.

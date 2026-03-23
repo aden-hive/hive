@@ -4,6 +4,10 @@
 
 The `hive serve` HTTP server and the CLI commands (`hive run`, `hive shell`, `hive tui`) are two access layers built on top of the **same runtime primitives**. There is no separate "server runtime" — the HTTP server is a thin REST/SSE translation layer that delegates every operation to the same `AgentRunner`, `AgentRuntime`, `GraphExecutor`, and storage subsystems that the CLI uses directly.
 
+Skill lifecycle commands (for example, `hive skill list/install/validate`) follow the same principle: CLI surfaces should remain thin wrappers over shared discovery/validation/runtime primitives.
+
+> TODO(#6369): Add finalized command-to-runtime mapping once `hive skill` Phase 2 CLI behavior is frozen.
+
 ---
 
 ## Architecture Overview
