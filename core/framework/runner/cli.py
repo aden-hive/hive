@@ -401,6 +401,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"Error parsing --input JSON: {e}", file=sys.stderr)
             return 1
     elif args.input_file:
+        input_path = Path(args.input_file)
+        if input_path.is_dir():
+            print(
+                f"Error: input file is a directory, not a file: {args.input_file}",
+                file=sys.stderr,
+            )
+            return 1
         try:
             with open(args.input_file, encoding="utf-8") as f:
                 context = json.load(f)
