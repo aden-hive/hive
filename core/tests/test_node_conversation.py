@@ -238,6 +238,21 @@ class TestNodeConversation:
         assert conv.needs_compaction() is True
 
     @pytest.mark.asyncio
+    async def test_needs_compaction_unlimited_context(self):
+        """needs_compaction returns False when max_context_tokens=0 (unlimited)."""
+        conv = NodeConversation(max_context_tokens=0)
+        await conv.add_user_message("x" * 10000)
+        assert conv.needs_compaction() is False
+
+    @pytest.mark.asyncio
+    async def test_needs_compaction_unlimited_context_with_actual_tokens(self):
+        """needs_compaction returns False even after update_token_count when unlimited."""
+        conv = NodeConversation(max_context_tokens=0)
+        await conv.add_user_message("hello")
+        conv.update_token_count(999999)
+        assert conv.needs_compaction() is False
+
+    @pytest.mark.asyncio
     async def test_compact_replaces_with_summary(self):
         """keep_recent=0 replaces all messages; empty conversation is a no-op."""
         conv = NodeConversation()

@@ -562,6 +562,8 @@ class NodeConversation:
         return self.estimate_tokens() / self._max_context_tokens
 
     def needs_compaction(self) -> bool:
+        if self._max_context_tokens <= 0:
+            return False
         return self.estimate_tokens() >= self._max_context_tokens * self._compaction_threshold
 
     # --- Output-key extraction ---------------------------------------------
