@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
 
+if TYPE_CHECKING:
+    from aden_tools.credentials import CredentialStoreAdapter
 # ---------------------------------------------------------------------------
 # Verified tools (stable, on main)
 # ---------------------------------------------------------------------------
