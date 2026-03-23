@@ -257,7 +257,7 @@ const WorkerGroupBubble = memo(
         : "Working"
       : workerDuration != null
         ? `Worked for ${formatDuration(workerDuration)}`
-        : "Working";
+        : "Worked";
 
     return (
       <div>
