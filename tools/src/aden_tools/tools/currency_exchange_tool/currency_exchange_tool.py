@@ -28,9 +28,6 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from fastmcp import FastMCP
 
-if TYPE_CHECKING:
-    from aden_tools.credentials import CredentialStoreAdapter
-
 # Base URL for ExchangeRate-API v6
 EXCHANGERATE_API_BASE = "https://v6.exchangerate-api.com/v6"
 
@@ -148,7 +145,6 @@ class _CurrencyExchangeClient:
 
 def register_tools(
     mcp: FastMCP,
-    credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """
     Register Currency Exchange tools with the MCP server.
