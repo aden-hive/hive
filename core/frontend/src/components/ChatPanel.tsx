@@ -301,31 +301,41 @@ const WorkerGroupBubble = memo(
 
         {!collapsed && (
           <div className="ml-5 pl-3 border-l border-border/30 space-y-2">
-            {messages.map((m) =>
-              m.type === "tool_status" ? (
-                <ToolActivityRow key={m.id} content={m.content} />
-              ) : (
+            {messages.map((m, idx) => {
+              if (m.type === "tool_status") return <ToolActivityRow key={m.id} content={m.content} />;
+              const filtered = messages.slice(0, idx).filter((x) => x.type !== "tool_status");
+              const prevContent = filtered[filtered.length - 1];
+              const isContinuation = prevContent != null && prevContent.agent === m.agent;
+              return (
                 <div key={m.id} className="flex gap-2">
-                  <div
-                    className="w-5 h-5 rounded-md flex-shrink-0 flex items-center justify-center mt-0.5"
-                    style={{ backgroundColor: `${color}18`, border: `1px solid ${color}30` }}
-                  >
-                    <Cpu className="w-3 h-3" style={{ color }} />
+                  <div className="w-5 flex-shrink-0 flex flex-col items-center">
+                    {isContinuation ? (
+                      <div className="w-px flex-1 bg-border/40 mt-0.5" />
+                    ) : (
+                      <div
+                        className="w-5 h-5 rounded-md flex items-center justify-center mt-0.5"
+                        style={{ backgroundColor: `${color}18`, border: `1px solid ${color}30` }}
+                      >
+                        <Cpu className="w-3 h-3" style={{ color }} />
+                      </div>
+                    )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <span className="text-xs font-medium" style={{ color }}>{m.agent}</span>
-                      <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md">
-                        Worker
-                      </span>
-                    </div>
+                    {!isContinuation && (
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-xs font-medium" style={{ color }}>{m.agent}</span>
+                        <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md">
+                          Worker
+                        </span>
+                      </div>
+                    )}
                     <div className="bg-muted/60 rounded-xl rounded-tl-sm px-3 py-2 text-sm leading-relaxed">
                       <MarkdownContent content={m.content} />
                     </div>
                   </div>
                 </div>
-              )
-            )}
+              );
+            })}
           </div>
         )}
       </div>
