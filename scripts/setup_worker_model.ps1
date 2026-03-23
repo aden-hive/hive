@@ -236,9 +236,9 @@ function Get-ModelSelection {
 # Main
 # ============================================================
 
-$uvInfo = Find-Uv
+$uvInfo = Get-WorkingUvInfo
 if (-not $uvInfo) {
-    Write-Color -Text "uv not found. Run quickstart.ps1 first." -Color Red
+    Write-Color -Text "uv is not installed or is not runnable. Run .\quickstart.ps1 first." -Color Red
     exit 1
 }
 $UvCmd = $uvInfo.Path
