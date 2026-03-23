@@ -90,6 +90,20 @@ class TestLiteLLMProviderInit:
         )
         assert provider.api_base == "https://proxy.example/v1"
 
+    def test_init_novita_defaults_api_base(self):
+        """Novita should default to the official OpenAI-compatible endpoint."""
+        provider = LiteLLMProvider(model="novita/moonshotai/kimi-k2.5", api_key="my-key")
+        assert provider.api_base == "https://api.novita.ai/openai"
+
+    def test_init_novita_keeps_custom_api_base(self):
+        """Explicit api_base should win over Novita defaults."""
+        provider = LiteLLMProvider(
+            model="novita/moonshotai/kimi-k2.5",
+            api_key="my-key",
+            api_base="https://proxy.example/v1",
+        )
+        assert provider.api_base == "https://proxy.example/v1"
+
     def test_init_ollama_no_key_needed(self):
         """Test that Ollama models don't require API key."""
         with patch.dict(os.environ, {}, clear=True):

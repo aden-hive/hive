@@ -164,6 +164,7 @@ RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
 MINIMAX_API_BASE = "https://api.minimax.io/v1"
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
+NOVITA_API_BASE = "https://api.novita.ai/openai"
 
 # Providers that accept cache_control on message content blocks.
 # Anthropic: native ephemeral caching. MiniMax & Z-AI/GLM: pass-through to their APIs.
@@ -547,6 +548,8 @@ class LiteLLMProvider(LLMProvider):
             return MINIMAX_API_BASE
         if model_lower.startswith("openrouter/"):
             return OPENROUTER_API_BASE
+        if model_lower.startswith("novita/"):
+            return NOVITA_API_BASE
         if model_lower.startswith("kimi/"):
             return KIMI_API_BASE
         if model_lower.startswith("hive/"):

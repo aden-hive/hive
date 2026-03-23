@@ -70,6 +70,7 @@ $ProviderMap = [ordered]@{
     MISTRAL_API_KEY   = @{ Name = "Mistral";             Id = "mistral" }
     TOGETHER_API_KEY  = @{ Name = "Together AI";         Id = "together" }
     DEEPSEEK_API_KEY  = @{ Name = "DeepSeek";            Id = "deepseek" }
+    NOVITA_API_KEY    = @{ Name = "Novita AI";           Id = "novita" }
 }
 
 $DefaultModels = @{
@@ -81,6 +82,7 @@ $DefaultModels = @{
     mistral     = "mistral-large-latest"
     together_ai = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
     deepseek    = "deepseek-chat"
+    novita      = "moonshotai/kimi-k2.5"
 }
 
 # Model choices: array of hashtables per provider
@@ -106,6 +108,11 @@ $ModelChoices = @{
     cerebras = @(
         @{ Id = "zai-glm-4.7";                    Label = "ZAI-GLM 4.7 - Best quality (recommended)"; MaxTokens = 8192; MaxContextTokens = 120000 },
         @{ Id = "qwen3-235b-a22b-instruct-2507";  Label = "Qwen3 235B - Frontier reasoning";          MaxTokens = 8192; MaxContextTokens = 120000 }
+    )
+    novita = @(
+        @{ Id = "moonshotai/kimi-k2.5";   Label = "Kimi K2.5 - Best value (recommended)"; MaxTokens = 32768; MaxContextTokens = 240000 },
+        @{ Id = "zai-org/glm-5";          Label = "GLM-5 - Reasoning model";              MaxTokens = 32768; MaxContextTokens = 180000 },
+        @{ Id = "minimax/minimax-m2.5";   Label = "MiniMax M2.5 - Cost-effective";        MaxTokens = 32768; MaxContextTokens = 180000 }
     )
 }
 
@@ -312,16 +319,17 @@ if (-not $hiveKey) { $hiveKey = $env:HIVE_API_KEY }
 if ($hiveKey) { $HiveCredDetected = $true }
 
 # Detect API key providers
-$ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY")
-$ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier", "OpenRouter - Bring any OpenRouter model")
-$ProviderMenuIds      = @("anthropic", "openai", "gemini", "groq", "cerebras", "openrouter")
+$ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY", "NOVITA_API_KEY")
+$ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier", "OpenRouter - Bring any OpenRouter model", "Novita AI - Best value LLMs")
+$ProviderMenuIds      = @("anthropic", "openai", "gemini", "groq", "cerebras", "openrouter", "novita")
 $ProviderMenuUrls     = @(
     "https://console.anthropic.com/settings/keys",
     "https://platform.openai.com/api-keys",
     "https://aistudio.google.com/apikey",
     "https://console.groq.com/keys",
     "https://cloud.cerebras.ai/",
-    "https://openrouter.ai/keys"
+    "https://openrouter.ai/keys",
+    "https://novita.ai/settings/key-management"
 )
 
 # -- Read previous worker_llm configuration (if any) ---------

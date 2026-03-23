@@ -305,6 +305,28 @@ def check_gemini(api_key: str, **_: str) -> dict:
     return {"valid": False, "message": f"Gemini API returned status {r.status_code}"}
 
 
+NOVITA_API_BASE = "https://api.novita.ai/openai"
+
+
+def check_novita(
+    api_key: str, api_base: str = "https://api.novita.ai/openai", **_: str
+) -> dict:
+    """Validate Novita AI key against GET /models."""
+    endpoint = f"{api_base.rstrip('/')}/models"
+    with httpx.Client(timeout=TIMEOUT) as client:
+        r = client.get(endpoint, headers={"Authorization": f"Bearer {api_key}"})
+    if r.status_code in (200, 429):
+        return {"valid": True, "message": "Novita API key valid"}
+    if r.status_code == 401:
+        return {"valid": False, "message": "Invalid Novita API key"}
+    if r.status_code == 403:
+        return {"valid": False, "message": "Novita API key lacks permissions"}
+    return {
+        "valid": False,
+        "message": f"Novita API returned status {r.status_code}",
+    }
+
+
 PROVIDERS = {
     "anthropic": lambda key, **kw: check_anthropic(key),
     "openai": lambda key, **kw: check_openai_compatible(
@@ -319,6 +341,7 @@ PROVIDERS = {
     ),
     "openrouter": lambda key, **kw: check_openrouter(key, **kw),
     "minimax": lambda key, **kw: check_minimax(key),
+    "novita": lambda key, **kw: check_novita(key, **kw),
     # Kimi For Coding uses an Anthropic-compatible endpoint; check via /v1/messages
     # with empty messages (same as check_anthropic, triggers 400 not 401).
     "kimi": lambda key, **kw: check_anthropic_compatible(
@@ -359,6 +382,8 @@ def main() -> None:
             result = check_minimax(api_key, api_base)
         elif api_base and provider_id == "openrouter":
             result = check_openrouter(api_key, api_base)
+        elif api_base and provider_id == "novita":
+            result = check_novita(api_key, api_base)
         elif api_base and provider_id == "kimi":
             # Kimi uses an Anthropic-compatible endpoint; check via /v1/messages
             result = check_anthropic_compatible(

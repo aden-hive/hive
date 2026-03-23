@@ -73,6 +73,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["MISTRAL_API_KEY"]="Mistral"
         ["TOGETHER_API_KEY"]="Together AI"
         ["DEEPSEEK_API_KEY"]="DeepSeek"
+        ["NOVITA_API_KEY"]="Novita AI"
     )
 
     declare -A PROVIDER_IDS=(
@@ -87,6 +88,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["MISTRAL_API_KEY"]="mistral"
         ["TOGETHER_API_KEY"]="together"
         ["DEEPSEEK_API_KEY"]="deepseek"
+        ["NOVITA_API_KEY"]="novita"
     )
 
     declare -A DEFAULT_MODELS=(
@@ -99,6 +101,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["mistral"]="mistral-large-latest"
         ["together_ai"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
         ["deepseek"]="deepseek-chat"
+        ["novita"]="moonshotai/kimi-k2.5"
     )
 
     declare -A MODEL_CHOICES_ID=(
@@ -114,6 +117,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["groq:1"]="openai/gpt-oss-120b"
         ["cerebras:0"]="zai-glm-4.7"
         ["cerebras:1"]="qwen3-235b-a22b-instruct-2507"
+        ["novita:0"]="moonshotai/kimi-k2.5"
+        ["novita:1"]="zai-org/glm-5"
+        ["novita:2"]="minimax/minimax-m2.5"
     )
 
     declare -A MODEL_CHOICES_LABEL=(
@@ -129,6 +135,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["groq:1"]="GPT-OSS 120B - Fast reasoning"
         ["cerebras:0"]="ZAI-GLM 4.7 - Best quality (recommended)"
         ["cerebras:1"]="Qwen3 235B - Frontier reasoning"
+        ["novita:0"]="Kimi K2.5 - Best value (recommended)"
+        ["novita:1"]="GLM-5 - Reasoning model"
+        ["novita:2"]="MiniMax M2.5 - Cost-effective"
     )
 
     declare -A MODEL_CHOICES_MAXTOKENS=(
@@ -144,6 +153,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["groq:1"]=8192
         ["cerebras:0"]=8192
         ["cerebras:1"]=8192
+        ["novita:0"]=32768
+        ["novita:1"]=32768
+        ["novita:2"]=32768
     )
 
     declare -A MODEL_CHOICES_MAXCONTEXTTOKENS=(
@@ -159,6 +171,9 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["groq:1"]=120000
         ["cerebras:0"]=120000
         ["cerebras:1"]=120000
+        ["novita:0"]=240000
+        ["novita:1"]=180000
+        ["novita:2"]=180000
     )
 
     declare -A MODEL_CHOICES_COUNT=(
@@ -167,6 +182,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["gemini"]=2
         ["groq"]=2
         ["cerebras"]=2
+        ["novita"]=3
     )
 
     get_provider_name()  { echo "${PROVIDER_NAMES[$1]}"; }
@@ -179,12 +195,12 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     get_model_choice_maxcontexttokens() { echo "${MODEL_CHOICES_MAXCONTEXTTOKENS[$1:$2]}"; }
 else
     # Bash 3.2 fallback
-    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
-    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "OpenRouter" "Mistral" "Together AI" "DeepSeek")
-    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras openrouter mistral together deepseek)
+    PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY NOVITA_API_KEY)
+    PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "OpenRouter" "Mistral" "Together AI" "DeepSeek" "Novita AI")
+    PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras openrouter mistral together deepseek novita)
 
-    MODEL_PROVIDER_IDS=(anthropic openai minimax gemini groq cerebras mistral together_ai deepseek)
-    MODEL_DEFAULTS=("claude-haiku-4-5-20251001" "gpt-5-mini" "MiniMax-M2.5" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+    MODEL_PROVIDER_IDS=(anthropic openai minimax gemini groq cerebras mistral together_ai deepseek novita)
+    MODEL_DEFAULTS=("claude-haiku-4-5-20251001" "gpt-5-mini" "MiniMax-M2.5" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat" "moonshotai/kimi-k2.5")
 
     get_provider_name() {
         local env_var="$1"; local i=0
@@ -208,11 +224,11 @@ else
         done
     }
 
-    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-haiku-4-5-20251001" "claude-sonnet-4-20250514" "claude-sonnet-4-5-20250929" "claude-opus-4-6" "gpt-5-mini" "gpt-5.2" "gemini-3-flash-preview" "gemini-3.1-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Haiku 4.5 - Fast + cheap (recommended for workers)" "Sonnet 4 - Fast + capable" "Sonnet 4.5 - Best balance" "Opus 4.6 - Most capable" "GPT-5 Mini - Fast + cheap (recommended for workers)" "GPT-5.2 - Most capable" "Gemini 3 Flash - Fast (recommended for workers)" "Gemini 3.1 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
-    MC_MAXTOKENS=(8192 8192 16384 32768 16384 16384 8192 8192 8192 8192 8192 8192)
-    MC_MAXCONTEXTTOKENS=(180000 180000 180000 180000 120000 120000 900000 900000 120000 120000 120000 120000)
+    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini groq groq cerebras cerebras novita novita novita)
+    MC_IDS=("claude-haiku-4-5-20251001" "claude-sonnet-4-20250514" "claude-sonnet-4-5-20250929" "claude-opus-4-6" "gpt-5-mini" "gpt-5.2" "gemini-3-flash-preview" "gemini-3.1-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507" "moonshotai/kimi-k2.5" "zai-org/glm-5" "minimax/minimax-m2.5")
+    MC_LABELS=("Haiku 4.5 - Fast + cheap (recommended for workers)" "Sonnet 4 - Fast + capable" "Sonnet 4.5 - Best balance" "Opus 4.6 - Most capable" "GPT-5 Mini - Fast + cheap (recommended for workers)" "GPT-5.2 - Most capable" "Gemini 3 Flash - Fast (recommended for workers)" "Gemini 3.1 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning" "Kimi K2.5 - Best value (recommended)" "GLM-5 - Reasoning model" "MiniMax M2.5 - Cost-effective")
+    MC_MAXTOKENS=(8192 8192 16384 32768 16384 16384 8192 8192 8192 8192 8192 8192 32768 32768 32768)
+    MC_MAXCONTEXTTOKENS=(180000 180000 180000 180000 120000 120000 900000 900000 120000 120000 120000 120000 240000 180000 180000)
 
     get_model_choice_count() {
         local p="$1"; local cnt=0; local i=0
@@ -714,6 +730,7 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
                 groq)      DEFAULT_CHOICE=11 ;;
                 cerebras)  DEFAULT_CHOICE=12 ;;
                 openrouter) DEFAULT_CHOICE=13 ;;
+                novita)    DEFAULT_CHOICE=14 ;;
                 minimax)   DEFAULT_CHOICE=4 ;;
                 kimi)      DEFAULT_CHOICE=5 ;;
                 hive)      DEFAULT_CHOICE=6 ;;
@@ -780,8 +797,8 @@ echo ""
 echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 
 # 8-13) API key providers — show (credential detected) if key already set
-PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY)
-PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model")
+PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY NOVITA_API_KEY)
+PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model" "Novita AI - Best value LLMs")
 for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     num=$((idx + 8))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
@@ -1010,6 +1027,13 @@ case $choice in
         PROVIDER_NAME="OpenRouter"
         SIGNUP_URL="https://openrouter.ai/keys"
         ;;
+    14)
+        SELECTED_ENV_VAR="NOVITA_API_KEY"
+        SELECTED_PROVIDER_ID="novita"
+        SELECTED_API_BASE="https://api.novita.ai/openai"
+        PROVIDER_NAME="Novita AI"
+        SIGNUP_URL="https://novita.ai/settings/key-management"
+        ;;
     "$SKIP_CHOICE")
         echo ""
         echo -e "${YELLOW}Skipped.${NC} Worker model not configured."
@@ -1176,6 +1200,8 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SUBSCRIPTION_MODE" = "hive_llm" ]; then
         save_worker_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
+        save_worker_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+    elif [ "$SELECTED_PROVIDER_ID" = "novita" ]; then
         save_worker_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     else
         save_worker_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null || SAVE_OK=false
