@@ -7,7 +7,7 @@ tooling, CI gates, and hive skill doctor.
 
 from __future__ import annotations
 
-import os
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -139,7 +139,7 @@ def validate_strict(path: Path) -> ValidationResult:
     if scripts_dir.is_dir():
         for script_path in sorted(scripts_dir.iterdir()):
             if script_path.is_file():
-                if not os.access(script_path, os.X_OK):
+                if not (script_path.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)):
                     errors.append(
                         f"Script not executable: {script_path.name}. Run: chmod +x {script_path}"
                     )
