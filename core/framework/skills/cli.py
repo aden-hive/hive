@@ -11,11 +11,13 @@ Commands:
   hive skill update           — refresh registry cache or re-install a skill
   hive skill search           — search registry by name/tag/description
   hive skill fork             — create local editable copy of a skill
+  hive skill test             — run skill in isolation or execute its eval suite
   hive skill trust            — permanently trust a project repo's skills
 """
 
 from __future__ import annotations
 
+import json as _json
 import os
 import shutil
 import subprocess
@@ -71,6 +73,7 @@ def register_skill_commands(subparsers) -> None:
         metavar="PATH",
         help="Project directory to scan (default: current directory)",
     )
+    list_parser.add_argument("--json", action="store_true", help="Output as JSON")
     list_parser.set_defaults(func=cmd_skill_list)
 
     # hive skill install
@@ -109,11 +112,13 @@ def register_skill_commands(subparsers) -> None:
         metavar="NAME",
         help="Override the skill directory name on install",
     )
+    install_parser.add_argument("--json", action="store_true", help="Output as JSON")
     install_parser.set_defaults(func=cmd_skill_install)
 
     # hive skill remove
     remove_parser = skill_sub.add_parser("remove", help="Uninstall a skill")
     remove_parser.add_argument("name", help="Skill name to remove")
+    remove_parser.add_argument("--json", action="store_true", help="Output as JSON")
     remove_parser.set_defaults(func=cmd_skill_remove)
 
     # hive skill info
@@ -125,6 +130,7 @@ def register_skill_commands(subparsers) -> None:
         metavar="PATH",
         help="Project directory to scan (default: current directory)",
     )
+    info_parser.add_argument("--json", action="store_true", help="Output as JSON")
     info_parser.set_defaults(func=cmd_skill_info)
 
     # hive skill init
@@ -146,6 +152,7 @@ def register_skill_commands(subparsers) -> None:
         "validate", help="Strictly validate a SKILL.md against the Agent Skills spec"
     )
     validate_parser.add_argument("path", help="Path to SKILL.md or its parent directory")
+    validate_parser.add_argument("--json", action="store_true", help="Output as JSON")
     validate_parser.set_defaults(func=cmd_skill_validate)
 
     # hive skill doctor
@@ -168,6 +175,7 @@ def register_skill_commands(subparsers) -> None:
         default=None,
         metavar="PATH",
     )
+    doctor_parser.add_argument("--json", action="store_true", help="Output as JSON")
     doctor_parser.set_defaults(func=cmd_skill_doctor)
 
     # hive skill update
@@ -181,6 +189,7 @@ def register_skill_commands(subparsers) -> None:
         default=None,
         help="Skill name to update (default: refresh registry cache only)",
     )
+    update_parser.add_argument("--json", action="store_true", help="Output as JSON")
     update_parser.set_defaults(func=cmd_skill_update)
 
     # hive skill search
@@ -188,6 +197,7 @@ def register_skill_commands(subparsers) -> None:
         "search", help="Search the skill registry by name, tag, or description"
     )
     search_parser.add_argument("query", help="Search query string")
+    search_parser.add_argument("--json", action="store_true", help="Output as JSON")
     search_parser.set_defaults(func=cmd_skill_search)
 
     # hive skill fork
@@ -217,7 +227,29 @@ def register_skill_commands(subparsers) -> None:
         default=None,
         metavar="PATH",
     )
+    fork_parser.add_argument("--json", action="store_true", help="Output as JSON")
     fork_parser.set_defaults(func=cmd_skill_fork)
+
+    # hive skill test
+    test_parser = skill_sub.add_parser(
+        "test", help="Run a skill in isolation or execute its eval suite (CLI-9)"
+    )
+    test_parser.add_argument("path", help="Path to SKILL.md or its parent directory")
+    test_parser.add_argument(
+        "--input",
+        dest="input_json",
+        default=None,
+        metavar="JSON",
+        help='JSON input to pass to the skill, e.g. \'{"prompt": "..."}\'',
+    )
+    test_parser.add_argument(
+        "--model",
+        default=None,
+        metavar="MODEL",
+        help="Override the LLM model (default: claude-haiku-4-5-20251001)",
+    )
+    test_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    test_parser.set_defaults(func=cmd_skill_test)
 
     # hive skill trust
     trust_parser = skill_sub.add_parser(
@@ -242,6 +274,24 @@ def cmd_skill_list(args) -> int:
 
     project_dir = Path(args.project_dir).resolve() if args.project_dir else Path.cwd()
     skills = SkillDiscovery(DiscoveryConfig(project_root=project_dir)).discover()
+
+    if getattr(args, "json", False):
+        print(
+            _json.dumps(
+                {
+                    "skills": [
+                        {
+                            "name": s.name,
+                            "description": s.description,
+                            "scope": s.source_scope,
+                            "location": s.location,
+                        }
+                        for s in skills
+                    ]
+                }
+            )
+        )
+        return 0
 
     if not skills:
         print("No skills discovered.")
@@ -287,10 +337,13 @@ def cmd_skill_install(args) -> int:
     if args.pack:
         return _install_pack(args.pack, target_dir, args.version)
 
+    use_json = getattr(args, "json", False)
+
     # hive skill install --from <url> [--name <name>]
     if args.from_url:
         skill_name = args.install_name or _derive_name_from_url(args.from_url)
-        print(f"Installing '{skill_name}' from {args.from_url} ...", flush=True)
+        if not use_json:
+            print(f"Installing '{skill_name}' from {args.from_url} ...", flush=True)
         try:
             dest = install_from_git(
                 git_url=args.from_url,
@@ -299,12 +352,18 @@ def cmd_skill_install(args) -> int:
                 target_dir=target_dir,
             )
         except SkillError as exc:
-            print(f"Error: {exc.what}", file=sys.stderr)
-            print(f"  Why: {exc.why}", file=sys.stderr)
-            print(f"  Fix: {exc.fix}", file=sys.stderr)
+            if use_json:
+                print(_json.dumps({"error": exc.what, "why": exc.why, "fix": exc.fix}))
+            else:
+                print(f"Error: {exc.what}", file=sys.stderr)
+                print(f"  Why: {exc.why}", file=sys.stderr)
+                print(f"  Fix: {exc.fix}", file=sys.stderr)
             return 1
-        print(f"✓ Installed: {skill_name}")
-        print(f"  Location: {dest}")
+        if use_json:
+            print(_json.dumps({"name": skill_name, "location": str(dest)}))
+        else:
+            print(f"✓ Installed: {skill_name}")
+            print(f"  Location: {dest}")
         return 0
 
     # hive skill install <name>  (registry lookup)
@@ -313,35 +372,64 @@ def cmd_skill_install(args) -> int:
         client = RegistryClient()
         entry = client.get_skill_entry(args.name_or_url)
         if entry is None:
-            print(
-                f"Error: skill '{args.name_or_url}' not found in registry.",
-                file=sys.stderr,
-            )
-            print(
-                "  The registry may be unavailable, or the skill name is incorrect.",
-                file=sys.stderr,
-            )
-            print(
-                "  Install from a git URL directly: hive skill install --from <url>",
-                file=sys.stderr,
-            )
+            if use_json:
+                print(
+                    _json.dumps(
+                        {
+                            "error": f"skill '{args.name_or_url}' not found in registry",
+                            "why": "Registry may be unavailable or skill name is incorrect.",
+                            "fix": "hive skill install --from <url>",
+                        }
+                    )
+                )
+            else:
+                print(
+                    f"Error: skill '{args.name_or_url}' not found in registry.",
+                    file=sys.stderr,
+                )
+                print(
+                    "  The registry may be unavailable, or the skill name is incorrect.",
+                    file=sys.stderr,
+                )
+                print(
+                    "  Install from a git URL directly: hive skill install --from <url>",
+                    file=sys.stderr,
+                )
             return 1
-        print(f"Installing '{name}' from registry ...")
+        if not use_json:
+            print(f"Installing '{name}' from registry ...")
         try:
             dest = install_from_registry(entry, target_dir=target_dir, version=args.version)
         except SkillError as exc:
-            print(f"Error: {exc.what}", file=sys.stderr)
-            print(f"  Why: {exc.why}", file=sys.stderr)
-            print(f"  Fix: {exc.fix}", file=sys.stderr)
+            if use_json:
+                print(_json.dumps({"error": exc.what, "why": exc.why, "fix": exc.fix}))
+            else:
+                print(f"Error: {exc.what}", file=sys.stderr)
+                print(f"  Why: {exc.why}", file=sys.stderr)
+                print(f"  Fix: {exc.fix}", file=sys.stderr)
             return 1
-        print(f"✓ Installed: {name}")
-        print(f"  Location: {dest}")
+        if use_json:
+            print(_json.dumps({"name": name, "location": str(dest)}))
+        else:
+            print(f"✓ Installed: {name}")
+            print(f"  Location: {dest}")
         return 0
 
-    print("Error: specify a skill name, --from <url>, or --pack <name>.", file=sys.stderr)
-    print("  Usage: hive skill install <name>", file=sys.stderr)
-    print("         hive skill install --from <git-url>", file=sys.stderr)
-    print("         hive skill install --pack <pack-name>", file=sys.stderr)
+    if use_json:
+        print(
+            _json.dumps(
+                {
+                    "error": "No install target specified",
+                    "why": "Provide a skill name, --from <url>, or --pack <name>.",
+                    "fix": "hive skill install --help",
+                }
+            )
+        )
+    else:
+        print("Error: specify a skill name, --from <url>, or --pack <name>.", file=sys.stderr)
+        print("  Usage: hive skill install <name>", file=sys.stderr)
+        print("         hive skill install --from <git-url>", file=sys.stderr)
+        print("         hive skill install --pack <pack-name>", file=sys.stderr)
     return 1
 
 
@@ -350,20 +438,39 @@ def cmd_skill_remove(args) -> int:
     from framework.skills.installer import remove_skill
     from framework.skills.skill_errors import SkillError
 
+    use_json = getattr(args, "json", False)
+
     try:
         removed = remove_skill(args.name)
     except SkillError as exc:
-        print(f"Error: {exc.what}", file=sys.stderr)
-        print(f"  Why: {exc.why}", file=sys.stderr)
-        print(f"  Fix: {exc.fix}", file=sys.stderr)
+        if use_json:
+            print(_json.dumps({"error": exc.what, "why": exc.why, "fix": exc.fix}))
+        else:
+            print(f"Error: {exc.what}", file=sys.stderr)
+            print(f"  Why: {exc.why}", file=sys.stderr)
+            print(f"  Fix: {exc.fix}", file=sys.stderr)
         return 1
 
     if not removed:
-        print(f"Error: skill '{args.name}' not found in ~/.hive/skills/.", file=sys.stderr)
-        print("  Use 'hive skill list' to see installed skills.", file=sys.stderr)
+        if use_json:
+            print(
+                _json.dumps(
+                    {
+                        "error": f"skill '{args.name}' not found",
+                        "why": "Skill is not installed in ~/.hive/skills/.",
+                        "fix": "hive skill list",
+                    }
+                )
+            )
+        else:
+            print(f"Error: skill '{args.name}' not found in ~/.hive/skills/.", file=sys.stderr)
+            print("  Use 'hive skill list' to see installed skills.", file=sys.stderr)
         return 1
 
-    print(f"✓ Removed: {args.name}")
+    if use_json:
+        print(_json.dumps({"name": args.name, "removed": True}))
+    else:
+        print(f"✓ Removed: {args.name}")
     return 0
 
 
@@ -372,11 +479,40 @@ def cmd_skill_info(args) -> int:
     from framework.skills.discovery import DiscoveryConfig, SkillDiscovery
     from framework.skills.registry import RegistryClient
 
+    use_json = getattr(args, "json", False)
     project_dir = Path(args.project_dir).resolve() if args.project_dir else Path.cwd()
     skills = SkillDiscovery(DiscoveryConfig(project_root=project_dir)).discover()
     match = next((s for s in skills if s.name == args.name), None)
 
     if match:
+        base = Path(match.base_dir)
+        sub_files: dict[str, list[str]] = {}
+        for sub in ("scripts", "references", "assets"):
+            sub_dir = base / sub
+            if sub_dir.is_dir():
+                files = sorted(f.name for f in sub_dir.iterdir() if f.is_file())
+                if files:
+                    sub_files[sub] = files
+
+        if use_json:
+            print(
+                _json.dumps(
+                    {
+                        "name": match.name,
+                        "description": match.description,
+                        "scope": match.source_scope,
+                        "location": match.location,
+                        "installed": True,
+                        "license": match.license,
+                        "compatibility": match.compatibility or [],
+                        "allowed_tools": match.allowed_tools or [],
+                        "tags": list(match.metadata.get("tags", [])) if match.metadata else [],
+                        **dict(sub_files),
+                    }
+                )
+            )
+            return 0
+
         print(f"\n{match.name}")
         print("─" * 40)
         print(f"  Description:   {match.description}")
@@ -392,20 +528,31 @@ def cmd_skill_info(args) -> int:
             tags = match.metadata.get("tags", [])
             if tags:
                 print(f"  Tags:          {', '.join(str(t) for t in tags)}")
-        # List scripts and references if present
-        base = Path(match.base_dir)
-        for sub in ("scripts", "references", "assets"):
-            sub_dir = base / sub
-            if sub_dir.is_dir():
-                files = sorted(f.name for f in sub_dir.iterdir() if f.is_file())
-                if files:
-                    print(f"  {sub.capitalize():13s}: {', '.join(files)}")
+        for sub, files in sub_files.items():
+            print(f"  {sub.capitalize():13s}: {', '.join(files)}")
         return 0
 
     # Not installed locally — try registry
     client = RegistryClient()
     entry = client.get_skill_entry(args.name)
     if entry:
+        if use_json:
+            print(
+                _json.dumps(
+                    {
+                        "name": entry.get("name", args.name),
+                        "description": entry.get("description", ""),
+                        "installed": False,
+                        "version": entry.get("version", "unknown"),
+                        "author": entry.get("author", "unknown"),
+                        "trust_tier": entry.get("trust_tier", "community"),
+                        "license": entry.get("license"),
+                        "tags": entry.get("tags", []),
+                    }
+                )
+            )
+            return 0
+
         print(f"\n{entry.get('name', args.name)}  (not installed)")
         print("─" * 40)
         print(f"  Description:   {entry.get('description', '')}")
@@ -419,7 +566,16 @@ def cmd_skill_info(args) -> int:
         print(f"\n  Install with: hive skill install {args.name}")
         return 0
 
-    print(f"Error: skill '{args.name}' not found locally or in registry.", file=sys.stderr)
+    if use_json:
+        print(
+            _json.dumps(
+                {
+                    "error": f"skill '{args.name}' not found locally or in registry",
+                }
+            )
+        )
+    else:
+        print(f"Error: skill '{args.name}' not found locally or in registry.", file=sys.stderr)
     return 1
 
 
@@ -468,6 +624,19 @@ def cmd_skill_validate(args) -> int:
 
     result = validate_strict(path)
 
+    if getattr(args, "json", False):
+        print(
+            _json.dumps(
+                {
+                    "path": str(path),
+                    "passed": result.passed,
+                    "errors": result.errors,
+                    "warnings": result.warnings,
+                }
+            )
+        )
+        return 0 if result.passed else 1
+
     for warning in result.warnings:
         print(f"  [WARN]  {warning}")
     for error in result.errors:
@@ -492,14 +661,26 @@ def cmd_skill_doctor(args) -> int:
     from framework.skills.discovery import DiscoveryConfig, SkillDiscovery
     from framework.skills.parser import parse_skill_md
 
+    use_json = getattr(args, "json", False)
     overall_errors = 0
 
     if args.defaults:
-        print("\nFRAMEWORK DEFAULT SKILLS")
-        print("─" * 40)
+        if not use_json:
+            print("\nFRAMEWORK DEFAULT SKILLS")
+            print("─" * 40)
+        skill_results = []
         for skill_name, dir_name in SKILL_REGISTRY.items():
             skill_md = _DEFAULT_SKILLS_DIR / dir_name / "SKILL.md"
-            overall_errors += _doctor_skill_file(skill_name, skill_md, parse_skill_md)
+            if use_json:
+                report = _doctor_skill_file(
+                    skill_name, skill_md, parse_skill_md, json_mode=True, scope="framework"
+                )
+                overall_errors += len(report["errors"])
+                skill_results.append(report)
+            else:
+                overall_errors += _doctor_skill_file(skill_name, skill_md, parse_skill_md)
+        if use_json:
+            print(_json.dumps({"skills": skill_results, "total_errors": overall_errors}))
         return 0 if overall_errors == 0 else 1
 
     # Discover skills for doctor
@@ -514,21 +695,49 @@ def cmd_skill_doctor(args) -> int:
 
             candidate = USER_SKILLS_DIR / args.name / "SKILL.md"
             if candidate.exists():
+                if use_json:
+                    report = _doctor_skill_file(
+                        args.name, candidate, parse_skill_md, json_mode=True, scope="user"
+                    )
+                    print(_json.dumps({"skills": [report], "total_errors": len(report["errors"])}))
+                    return 1 if report["errors"] else 0
                 print(f"\nChecking skill: {args.name}  [user]")
                 overall_errors += _doctor_skill_file(args.name, candidate, parse_skill_md)
                 print()
                 print(f"✗ {overall_errors} error(s) found.")
                 return 1
-            print(f"Error: skill '{args.name}' not found.", file=sys.stderr)
+            if use_json:
+                print(_json.dumps({"error": f"skill '{args.name}' not found"}))
+            else:
+                print(f"Error: skill '{args.name}' not found.", file=sys.stderr)
             return 1
 
     if not skills:
-        print("No skills discovered.")
+        if use_json:
+            print(_json.dumps({"skills": [], "total_errors": 0}))
+        else:
+            print("No skills discovered.")
         return 0
 
+    skill_results = []
     for skill in skills:
-        print(f"\nChecking skill: {skill.name}  [{skill.source_scope}]")
-        overall_errors += _doctor_skill_file(skill.name, Path(skill.location), parse_skill_md)
+        if use_json:
+            report = _doctor_skill_file(
+                skill.name,
+                Path(skill.location),
+                parse_skill_md,
+                json_mode=True,
+                scope=skill.source_scope,
+            )
+            overall_errors += len(report["errors"])
+            skill_results.append(report)
+        else:
+            print(f"\nChecking skill: {skill.name}  [{skill.source_scope}]")
+            overall_errors += _doctor_skill_file(skill.name, Path(skill.location), parse_skill_md)
+
+    if use_json:
+        print(_json.dumps({"skills": skill_results, "total_errors": overall_errors}))
+        return 0 if overall_errors == 0 else 1
 
     print()
     if overall_errors == 0:
@@ -548,27 +757,53 @@ def cmd_skill_update(args) -> int:
     from framework.skills.registry import RegistryClient
     from framework.skills.skill_errors import SkillError
 
+    use_json = getattr(args, "json", False)
     client = RegistryClient()
 
     if not args.name:
         # Refresh cache only
-        print("Refreshing registry cache ...")
+        if not use_json:
+            print("Refreshing registry cache ...")
         index = client.fetch_index(force_refresh=True)
         if index is None:
-            print("Warning: registry unavailable — could not refresh cache.", file=sys.stderr)
+            if use_json:
+                print(
+                    _json.dumps(
+                        {
+                            "status": "unavailable",
+                            "warning": "registry unavailable — could not refresh cache",
+                        }
+                    )
+                )
+            else:
+                print("Warning: registry unavailable — could not refresh cache.", file=sys.stderr)
             return 0  # Non-fatal
         count = len(index.get("skills", []))
-        print(f"✓ Registry cache updated ({count} skills).")
+        if use_json:
+            print(_json.dumps({"status": "refreshed", "skill_count": count}))
+        else:
+            print(f"✓ Registry cache updated ({count} skills).")
         return 0
 
     # Update a specific skill
     entry = client.get_skill_entry(args.name)
     if entry is None:
-        print(
-            f"Error: skill '{args.name}' not found in registry — cannot update.",
-            file=sys.stderr,
-        )
-        print("  Check your network connection or verify the skill name.", file=sys.stderr)
+        if use_json:
+            print(
+                _json.dumps(
+                    {
+                        "error": f"skill '{args.name}' not found in registry",
+                        "why": "Registry may be unavailable or skill name is incorrect.",
+                        "fix": "Check your network connection or verify the skill name.",
+                    }
+                )
+            )
+        else:
+            print(
+                f"Error: skill '{args.name}' not found in registry — cannot update.",
+                file=sys.stderr,
+            )
+            print("  Check your network connection or verify the skill name.", file=sys.stderr)
         return 1
 
     registry_version = entry.get("version")
@@ -576,7 +811,6 @@ def cmd_skill_update(args) -> int:
     installed_skill_md = installed_dir / "SKILL.md"
 
     if installed_skill_md.exists():
-        # Check installed version
         import yaml
 
         try:
@@ -588,10 +822,21 @@ def cmd_skill_update(args) -> int:
             installed_version = None
 
         if installed_version and installed_version == registry_version:
-            print(f"✓ '{args.name}' is already at version {registry_version}.")
+            if use_json:
+                print(
+                    _json.dumps(
+                        {
+                            "name": args.name,
+                            "status": "up_to_date",
+                            "version": registry_version,
+                        }
+                    )
+                )
+            else:
+                print(f"✓ '{args.name}' is already at version {registry_version}.")
             return 0
 
-        if not installed_version:
+        if not installed_version and not use_json:
             print(
                 f"Warning: installed skill '{args.name}' has no version field — "
                 "cannot compare. Re-installing.",
@@ -599,19 +844,35 @@ def cmd_skill_update(args) -> int:
             )
 
     # Remove and reinstall
-    print(f"Updating '{args.name}' ...")
+    if not use_json:
+        print(f"Updating '{args.name}' ...")
     try:
         remove_skill(args.name)
         dest = install_from_registry(entry, target_dir=USER_SKILLS_DIR)
     except SkillError as exc:
-        print(f"Error: {exc.what}", file=sys.stderr)
-        print(f"  Why: {exc.why}", file=sys.stderr)
-        print(f"  Fix: {exc.fix}", file=sys.stderr)
+        if use_json:
+            print(_json.dumps({"error": exc.what, "why": exc.why, "fix": exc.fix}))
+        else:
+            print(f"Error: {exc.what}", file=sys.stderr)
+            print(f"  Why: {exc.why}", file=sys.stderr)
+            print(f"  Fix: {exc.fix}", file=sys.stderr)
         return 1
 
     new_version = registry_version or "unknown"
-    print(f"✓ Updated '{args.name}' to version {new_version}.")
-    print(f"  Location: {dest}")
+    if use_json:
+        print(
+            _json.dumps(
+                {
+                    "name": args.name,
+                    "status": "updated",
+                    "version": new_version,
+                    "location": str(dest),
+                }
+            )
+        )
+    else:
+        print(f"✓ Updated '{args.name}' to version {new_version}.")
+        print(f"  Location: {dest}")
     return 0
 
 
@@ -619,21 +880,53 @@ def cmd_skill_search(args) -> int:
     """Search the skill registry by name, tag, or description."""
     from framework.skills.registry import RegistryClient
 
+    use_json = getattr(args, "json", False)
     client = RegistryClient()
     # Trigger a fetch to check availability
     index = client.fetch_index()
     if index is None:
-        print(
-            f"Error: registry unavailable — cannot search for '{args.query}'.",
-            file=sys.stderr,
-        )
-        print(
-            "  Install from a git URL directly: hive skill install --from <url>",
-            file=sys.stderr,
-        )
+        if use_json:
+            print(
+                _json.dumps(
+                    {
+                        "error": "registry unavailable",
+                        "query": args.query,
+                        "fix": "hive skill install --from <url>",
+                    }
+                )
+            )
+        else:
+            print(
+                f"Error: registry unavailable — cannot search for '{args.query}'.",
+                file=sys.stderr,
+            )
+            print(
+                "  Install from a git URL directly: hive skill install --from <url>",
+                file=sys.stderr,
+            )
         return 1
 
     results = client.search(args.query)
+
+    if use_json:
+        print(
+            _json.dumps(
+                {
+                    "query": args.query,
+                    "results": [
+                        {
+                            "name": e.get("name", ""),
+                            "description": e.get("description", ""),
+                            "trust_tier": e.get("trust_tier", "community"),
+                            "tags": e.get("tags", []),
+                        }
+                        for e in results
+                    ],
+                }
+            )
+        )
+        return 0
+
     if not results:
         print(f"No skills found matching '{args.query}'.")
         return 0
@@ -655,20 +948,24 @@ def cmd_skill_fork(args) -> int:
     from framework.skills.installer import USER_SKILLS_DIR, fork_skill
     from framework.skills.skill_errors import SkillError
 
+    use_json = getattr(args, "json", False)
     project_dir = Path(args.project_dir).resolve() if args.project_dir else Path.cwd()
     skills = SkillDiscovery(DiscoveryConfig(project_root=project_dir)).discover()
     source = next((s for s in skills if s.name == args.name), None)
 
     if source is None:
-        print(f"Error: skill '{args.name}' not found.", file=sys.stderr)
-        print("  Use 'hive skill list' to see available skills.", file=sys.stderr)
+        if use_json:
+            print(_json.dumps({"error": f"skill '{args.name}' not found"}))
+        else:
+            print(f"Error: skill '{args.name}' not found.", file=sys.stderr)
+            print("  Use 'hive skill list' to see available skills.", file=sys.stderr)
         return 1
 
     new_name = args.new_name or f"{args.name}-fork"
     target_dir = Path(args.target_dir).resolve() if args.target_dir else USER_SKILLS_DIR
     dest = target_dir / new_name
 
-    if not args.yes:
+    if not args.yes and not use_json:
         answer = _prompt_yes_no(f"Fork '{args.name}' to {dest}? [y/N] ")
         if not answer:
             print("Aborted.")
@@ -677,15 +974,300 @@ def cmd_skill_fork(args) -> int:
     try:
         result = fork_skill(source, new_name, target_dir)
     except SkillError as exc:
-        print(f"Error: {exc.what}", file=sys.stderr)
-        print(f"  Why: {exc.why}", file=sys.stderr)
-        print(f"  Fix: {exc.fix}", file=sys.stderr)
+        if use_json:
+            print(_json.dumps({"error": exc.what, "why": exc.why, "fix": exc.fix}))
+        else:
+            print(f"Error: {exc.what}", file=sys.stderr)
+            print(f"  Why: {exc.why}", file=sys.stderr)
+            print(f"  Fix: {exc.fix}", file=sys.stderr)
         return 1
 
-    print(f"✓ Forked '{args.name}' → '{new_name}'")
-    print(f"  Location: {result}")
-    print("  Edit SKILL.md to customise, then run: hive skill validate")
+    if use_json:
+        print(_json.dumps({"source": args.name, "new_name": new_name, "location": str(result)}))
+    else:
+        print(f"✓ Forked '{args.name}' → '{new_name}'")
+        print(f"  Location: {result}")
+        print("  Edit SKILL.md to customise, then run: hive skill validate")
     return 0
+
+
+def cmd_skill_test(args) -> int:
+    """Run a skill in isolation or execute its eval suite (CLI-9).
+
+    Three progressive modes:
+      1. Structural (always): validate_strict + doctor checks — no API key needed.
+      2. Invocation (--input): inject skill body as system, run prompt through Claude.
+      3. Eval suite (evals/ present): run each eval case + LLM-judge assertions.
+    """
+    from framework.skills.parser import parse_skill_md
+    from framework.skills.validator import validate_strict
+
+    use_json = getattr(args, "json", False)
+
+    # ── 1. Resolve path ──────────────────────────────────────────────────────
+    path = Path(args.path)
+    if path.is_dir():
+        path = path / "SKILL.md"
+
+    # ── 2. Structural validation (always) ────────────────────────────────────
+    vresult = validate_strict(path)
+    structural = {
+        "passed": vresult.passed,
+        "errors": vresult.errors,
+        "warnings": vresult.warnings,
+    }
+
+    if not use_json:
+        for w in vresult.warnings:
+            print(f"  [WARN]  {w}")
+        for e in vresult.errors:
+            print(f"  [ERROR] {e}")
+
+    if not vresult.passed:
+        if use_json:
+            print(_json.dumps({"path": str(path), "skill": None, "structural": structural}))
+        else:
+            print(f"✗ {path} — structural validation failed. Fix errors before testing.")
+        return 1
+
+    # ── 3. Parse the skill ───────────────────────────────────────────────────
+    skill = parse_skill_md(path, source_scope="user")
+    if skill is None:
+        if use_json:
+            print(
+                _json.dumps(
+                    {
+                        "path": str(path),
+                        "skill": None,
+                        "structural": {
+                            "passed": False,
+                            "errors": ["parse_skill_md returned None"],
+                            "warnings": [],
+                        },
+                    }
+                )
+            )
+        else:
+            print(f"✗ {path} — skill could not be parsed.", file=sys.stderr)
+        return 1
+
+    evals_dir = path.parent / "evals"
+    has_evals = evals_dir.is_dir() and any(evals_dir.glob("*.json"))
+    has_input = args.input_json is not None
+
+    # ── 4. Structural-only mode (no LLM needed) ───────────────────────────────
+    if not has_input and not has_evals:
+        doctor_errors = _doctor_skill_file(
+            skill.name, path, parse_skill_md, json_mode=use_json, scope="user"
+        )
+        if use_json:
+            print(
+                _json.dumps(
+                    {
+                        "path": str(path),
+                        "skill": skill.name,
+                        "structural": structural,
+                        "doctor": doctor_errors,
+                    }
+                )
+            )
+            return 0 if (structural["passed"] and not doctor_errors.get("errors")) else 1
+        if doctor_errors == 0:
+            print(f"✓ {skill.name} — structurally valid and healthy.")
+            print("  No evals/ directory found. Use --input <json> for a live invocation test.")
+        else:
+            print(f"✗ {skill.name} — {doctor_errors} doctor error(s) found.")
+        return 0 if doctor_errors == 0 else 1
+
+    # ── 5. Initialize LLM provider ────────────────────────────────────────────
+    provider = None
+    provider_error = None
+    try:
+        from framework.llm.anthropic import AnthropicProvider
+
+        model = getattr(args, "model", None) or "claude-haiku-4-5-20251001"
+        provider = AnthropicProvider(model=model)
+    except Exception as exc:
+        provider_error = str(exc)
+
+    if provider is None and has_input:
+        # --input was explicitly requested but we have no provider — hard error
+        if use_json:
+            print(
+                _json.dumps(
+                    {
+                        "path": str(path),
+                        "skill": skill.name,
+                        "error": f"Cannot initialize LLM provider: {provider_error}",
+                        "fix": "Set ANTHROPIC_API_KEY to enable live invocation.",
+                    }
+                )
+            )
+        else:
+            print(f"Error: Cannot initialize LLM provider: {provider_error}", file=sys.stderr)
+            print("  Set ANTHROPIC_API_KEY to enable live invocation.", file=sys.stderr)
+        return 1
+
+    result: dict = {
+        "path": str(path),
+        "skill": skill.name,
+        "structural": structural,
+    }
+    overall_failed = 0
+
+    # ── 6. Invocation mode (--input) ──────────────────────────────────────────
+    if has_input and provider is not None:
+        raw = args.input_json
+        try:
+            data = _json.loads(raw)
+        except ValueError:
+            data = raw
+        prompt = data.get("prompt", raw) if isinstance(data, dict) else str(data)
+
+        if not use_json:
+            print(f"\nRunning '{skill.name}' with provided input ...")
+        try:
+            response = provider.complete(
+                messages=[{"role": "user", "content": prompt}],
+                system=skill.body,
+                max_tokens=2048,
+            )
+            if not use_json:
+                print("\n── Response ──────────────────────────────────────────────────")
+                print(response.content)
+                print("──────────────────────────────────────────────────────────────")
+            result["invocation"] = {
+                "prompt": prompt,
+                "response": response.content,
+                "model": response.model,
+            }
+        except Exception as exc:
+            if not use_json:
+                print(f"Error during invocation: {exc}", file=sys.stderr)
+            result["invocation"] = {"prompt": prompt, "error": str(exc)}
+            overall_failed += 1
+
+    # ── 7. Eval suite ─────────────────────────────────────────────────────────
+    if has_evals:
+        if provider is None:
+            # Degrade gracefully: structural passed, just warn about evals
+            if not use_json:
+                n = len(list(evals_dir.glob("*.json")))
+                print(
+                    f"\nWarning: ANTHROPIC_API_KEY not set — skipping {n} eval file(s).",
+                    file=sys.stderr,
+                )
+        else:
+            from framework.testing.llm_judge import LLMJudge
+
+            judge = LLMJudge(llm_provider=provider)
+            eval_results = []
+
+            for eval_file in sorted(evals_dir.glob("*.json")):
+                try:
+                    eval_data = _json.loads(eval_file.read_text(encoding="utf-8"))
+                except Exception as exc:
+                    if not use_json:
+                        print(f"  [ERROR] Cannot parse {eval_file.name}: {exc}", file=sys.stderr)
+                    overall_failed += 1
+                    continue
+
+                for eval_case in eval_data.get("evals", []):
+                    case_id = eval_case.get("id", "?")
+                    eval_prompt = eval_case.get("prompt", "")
+
+                    if not use_json:
+                        truncated = eval_prompt[:60] + ("..." if len(eval_prompt) > 60 else "")
+                        print(f"\nEval #{case_id}: {truncated}")
+
+                    try:
+                        response = provider.complete(
+                            messages=[{"role": "user", "content": eval_prompt}],
+                            system=skill.body,
+                            max_tokens=2048,
+                        )
+                        skill_response = response.content
+                    except Exception as exc:
+                        if not use_json:
+                            print(f"  [ERROR] Invocation failed: {exc}", file=sys.stderr)
+                        eval_results.append(
+                            {
+                                "id": case_id,
+                                "prompt": eval_prompt,
+                                "error": str(exc),
+                                "passed": False,
+                            }
+                        )
+                        overall_failed += 1
+                        continue
+
+                    assertion_results = []
+                    case_failed = False
+                    for assertion in eval_case.get("assertions", []):
+                        try:
+                            judged = judge.evaluate(
+                                constraint=assertion,
+                                source_document=eval_prompt,
+                                summary=skill_response,
+                                criteria=(
+                                    "Evaluate whether the skill response satisfies the assertion."
+                                ),
+                            )
+                            passes = judged.get("passes", False)
+                            explanation = judged.get("explanation", "")
+                        except Exception as exc:
+                            passes = False
+                            explanation = f"Judge error: {exc}"
+
+                        assertion_results.append(
+                            {
+                                "text": assertion,
+                                "passes": passes,
+                                "explanation": explanation,
+                            }
+                        )
+                        if not passes:
+                            case_failed = True
+                            overall_failed += 1
+
+                        if not use_json:
+                            icon = "✓" if passes else "✗"
+                            print(f"  {icon} {assertion}")
+                            if not passes:
+                                print(f"    → {explanation}")
+
+                    eval_results.append(
+                        {
+                            "id": case_id,
+                            "prompt": eval_prompt,
+                            "response": skill_response,
+                            "assertions": assertion_results,
+                            "passed": not case_failed,
+                        }
+                    )
+
+            passed_count = sum(1 for e in eval_results if e.get("passed"))
+            failed_count = len(eval_results) - passed_count
+            result["evals"] = eval_results
+            result["total_evals"] = len(eval_results)
+            result["total_passed"] = passed_count
+            result["total_failed"] = failed_count
+
+            if not use_json:
+                print(f"\n{passed_count}/{len(eval_results)} eval(s) passed.")
+
+    # ── 8. Output ─────────────────────────────────────────────────────────────
+    if use_json:
+        print(_json.dumps(result))
+
+    if not use_json:
+        print()
+        if overall_failed == 0:
+            print(f"✓ {skill.name} — all tests passed.")
+        else:
+            print(f"✗ {skill.name} — {overall_failed} failure(s).")
+
+    return 0 if overall_failed == 0 else 1
 
 
 def cmd_skill_trust(args) -> int:
@@ -795,17 +1377,37 @@ def _derive_name_from_url(url: str) -> str:
     return last[:-4] if last.endswith(".git") else last
 
 
-def _doctor_skill_file(skill_name: str, skill_md: Path, parse_fn) -> int:
-    """Run doctor checks on a single skill file. Returns error count."""
-    errors = 0
+def _doctor_skill_file(
+    skill_name: str,
+    skill_md: Path,
+    parse_fn,
+    json_mode: bool = False,
+    scope: str = "unknown",
+):
+    """Run doctor checks on a single skill file.
+
+    Returns int (error count) when json_mode=False, or a dict report when json_mode=True.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
 
     # Check 1: SKILL.md parseable
     parsed = parse_fn(skill_md)
     if parsed is None:
-        print(f"  ✗ SKILL.md not parseable: {skill_md}")
-        errors += 1
-        return errors
-    print("  ✓ SKILL.md parseable")
+        msg = f"SKILL.md not parseable: {skill_md}"
+        if json_mode:
+            errors.append(msg)
+            return {
+                "name": skill_name,
+                "scope": scope,
+                "parseable": False,
+                "errors": errors,
+                "warnings": warnings,
+            }
+        print(f"  ✗ {msg}")
+        return 1
+    if not json_mode:
+        print("  ✓ SKILL.md parseable")
 
     base_dir = skill_md.parent
 
@@ -815,12 +1417,12 @@ def _doctor_skill_file(skill_name: str, skill_md: Path, parse_fn) -> int:
         for script in sorted(scripts_dir.iterdir()):
             if script.is_file():
                 if not script.exists():
-                    print(f"  ✗ Script missing: {script.name}")
-                    errors += 1
+                    msg = f"Script missing: {script.name}"
+                    errors.append(msg) if json_mode else print(f"  ✗ {msg}")
                 elif not os.access(script, os.X_OK):
-                    print(f"  ✗ Script not executable: {script.name}  (run: chmod +x {script})")
-                    errors += 1
-                else:
+                    msg = f"Script not executable: {script.name}  (run: chmod +x {script})"
+                    errors.append(msg) if json_mode else print(f"  ✗ {msg}")
+                elif not json_mode:
                     print(f"  ✓ Script executable: {script.name}")
 
     # Check 3: references readable
@@ -829,9 +1431,9 @@ def _doctor_skill_file(skill_name: str, skill_md: Path, parse_fn) -> int:
         for ref in sorted(references_dir.iterdir()):
             if ref.is_file():
                 if not os.access(ref, os.R_OK):
-                    print(f"  ✗ Reference not readable: {ref.name}")
-                    errors += 1
-                else:
+                    msg = f"Reference not readable: {ref.name}"
+                    errors.append(msg) if json_mode else print(f"  ✗ {msg}")
+                elif not json_mode:
                     print(f"  ✓ Reference readable: {ref.name}")
 
     # Check 4: allowed-tools available on PATH (warning, not error)
@@ -839,9 +1441,18 @@ def _doctor_skill_file(skill_name: str, skill_md: Path, parse_fn) -> int:
         for tool in parsed.allowed_tools:
             tool_name = tool.split("/")[-1].split("(")[0].strip()
             if tool_name and shutil.which(tool_name) is None:
-                print(f"  ! Tool not found in PATH: {tool_name}  (may be an MCP tool — OK)")
+                msg = f"Tool not found in PATH: {tool_name}  (may be an MCP tool — OK)"
+                warnings.append(msg) if json_mode else print(f"  ! {msg}")
 
-    return errors
+    if json_mode:
+        return {
+            "name": skill_name,
+            "scope": scope,
+            "parseable": True,
+            "errors": errors,
+            "warnings": warnings,
+        }
+    return len(errors)
 
 
 def _prompt_yes_no(prompt: str) -> bool:
