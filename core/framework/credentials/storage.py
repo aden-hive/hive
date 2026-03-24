@@ -145,18 +145,27 @@ class EncryptedFileStorage(CredentialStorage):
         self._key_env_var = key_env_var
 
         # Get or generate encryption key
+        # Priority: explicit arg > env var > key file > generate & save
+        self._key_file = self.base_path.parent / ".credential_key"
         if encryption_key:
             self._key = encryption_key
         else:
             key_str = os.environ.get(key_env_var)
             if key_str:
                 self._key = key_str.encode()
+            elif self._key_file.exists():
+                self._key = self._key_file.read_text().strip().encode()
+                logger.debug("Loaded encryption key from %s", self._key_file)
             else:
-                # Generate new key
                 self._key = Fernet.generate_key()
-                logger.warning(
-                    f"Generated new encryption key. To persist credentials across restarts, "
-                    f"set {key_env_var}={self._key.decode()}"
+                self._key_file.parent.mkdir(parents=True, exist_ok=True)
+                self._key_file.write_text(self._key.decode())
+                os.chmod(self._key_file, 0o600)
+                logger.info(
+                    "Generated new encryption key and saved to %s. "
+                    "You can also override this by setting the %s environment variable.",
+                    self._key_file,
+                    key_env_var,
                 )
 
         self._fernet = Fernet(self._key)
