@@ -217,36 +217,6 @@ Follow the prompts to:
 
 This step establishes the core concepts and rules needed before building an agent.
 
-### 4. Apply Agent Patterns
-
-```
-claude> pattern guidance
-```
-
-Follow the prompts to:
-
-1. Apply best-practice agent design patterns
-2. Add pause/resume flows for multi-turn interactions
-3. Improve robustness with routing, fallbacks, and retries
-4. Avoid common anti-patterns during agent construction
-
-This step helps optimize agent design before final testing.
-
-### 5. Test Your Agent
-
-```
-claude> test workflow
-```
-
-Follow the prompts to:
-
-1. Generate test guidelines for constraints and success criteria
-2. Write agent tests directly under `exports/{agent}/tests/`
-3. Run goal-based evaluation tests
-4. Debug failing tests and iterate on agent improvements
-
-This step verifies that the agent meets its goals before production use.
-
 ## Troubleshooting
 
 ### "externally-managed-environment" error (PEP 668)
