@@ -49,7 +49,7 @@ def maybe_show_install_notice() -> None:
     """
     if INSTALL_NOTICE_SENTINEL.exists():
         return
-    print(_INSTALL_NOTICE)
+    print(_INSTALL_NOTICE, flush=True)
     try:
         INSTALL_NOTICE_SENTINEL.parent.mkdir(parents=True, exist_ok=True)
         INSTALL_NOTICE_SENTINEL.touch()
@@ -293,14 +293,14 @@ def _git_clone_shallow(git_url: str, target: Path, version: str | None = None) -
             what=f"git clone timed out for {git_url}",
             why="The clone operation took longer than 60 seconds.",
             fix="Check your network connection and retry.",
-        )
+        ) from None
     except (FileNotFoundError, OSError) as exc:
         raise SkillError(
             code=SkillErrorCode.SKILL_ACTIVATION_FAILED,
             what=f"Cannot run git for {git_url}",
             why=str(exc),
             fix="Ensure git is installed and on PATH.",
-        )
+        ) from exc
 
     if result.returncode != 0:
         stderr = result.stderr.strip()
@@ -314,9 +314,7 @@ def _git_clone_shallow(git_url: str, target: Path, version: str | None = None) -
 
 def _copy_skill_dir(src: Path, dst: Path) -> None:
     """Copy a skill directory, ignoring VCS and cache artifacts."""
-    ignore = shutil.ignore_patterns(
-        ".git", "__pycache__", "*.pyc", ".venv", "venv", "node_modules"
-    )
+    ignore = shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".venv", "venv", "node_modules")
     shutil.copytree(src, dst, ignore=ignore)
 
 

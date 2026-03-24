@@ -11,7 +11,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from framework.skills.parser import _MAX_NAME_LENGTH, parse_skill_md
+from framework.skills.parser import _MAX_NAME_LENGTH
 
 
 @dataclass
@@ -141,8 +141,7 @@ def validate_strict(path: Path) -> ValidationResult:
             if script_path.is_file():
                 if not os.access(script_path, os.X_OK):
                     errors.append(
-                        f"Script not executable: {script_path.name}. "
-                        f"Run: chmod +x {script_path}"
+                        f"Script not executable: {script_path.name}. Run: chmod +x {script_path}"
                     )
 
     # 12. allowed-tools entries are non-empty strings — warning if malformed
@@ -153,9 +152,7 @@ def validate_strict(path: Path) -> ValidationResult:
         else:
             for tool in allowed_tools:
                 if not isinstance(tool, str) or not tool.strip():
-                    warnings.append(
-                        f"'allowed-tools' entry {tool!r} is not a non-empty string."
-                    )
+                    warnings.append(f"'allowed-tools' entry {tool!r} is not a non-empty string.")
 
     # 13. compatibility is a list of strings — error if malformed
     compatibility = frontmatter.get("compatibility")
@@ -165,9 +162,7 @@ def validate_strict(path: Path) -> ValidationResult:
         else:
             for item in compatibility:
                 if not isinstance(item, str):
-                    errors.append(
-                        f"'compatibility' entry {item!r} is not a string."
-                    )
+                    errors.append(f"'compatibility' entry {item!r} is not a string.")
 
     # 14. metadata is a dict — error if malformed
     metadata = frontmatter.get("metadata")

@@ -191,9 +191,7 @@ def register_skill_commands(subparsers) -> None:
     search_parser.set_defaults(func=cmd_skill_search)
 
     # hive skill fork
-    fork_parser = skill_sub.add_parser(
-        "fork", help="Create a local editable copy of a skill"
-    )
+    fork_parser = skill_sub.add_parser("fork", help="Create a local editable copy of a skill")
     fork_parser.add_argument("name", help="Skill name to fork")
     fork_parser.add_argument(
         "--name",
@@ -281,6 +279,7 @@ def cmd_skill_install(args) -> int:
     from framework.skills.skill_errors import SkillError
 
     maybe_show_install_notice()
+    sys.stdout.flush()
 
     target_dir = USER_SKILLS_DIR
 
@@ -291,7 +290,7 @@ def cmd_skill_install(args) -> int:
     # hive skill install --from <url> [--name <name>]
     if args.from_url:
         skill_name = args.install_name or _derive_name_from_url(args.from_url)
-        print(f"Installing '{skill_name}' from {args.from_url} ...")
+        print(f"Installing '{skill_name}' from {args.from_url} ...", flush=True)
         try:
             dest = install_from_git(
                 git_url=args.from_url,
@@ -489,7 +488,7 @@ def cmd_skill_validate(args) -> int:
 
 def cmd_skill_doctor(args) -> int:
     """Health-check skills: parseable, scripts executable, tools available."""
-    from framework.skills.defaults import SKILL_REGISTRY, _DEFAULT_SKILLS_DIR
+    from framework.skills.defaults import _DEFAULT_SKILLS_DIR, SKILL_REGISTRY
     from framework.skills.discovery import DiscoveryConfig, SkillDiscovery
     from framework.skills.parser import parse_skill_md
 
@@ -510,6 +509,16 @@ def cmd_skill_doctor(args) -> int:
     if args.name:
         skills = [s for s in skills if s.name == args.name]
         if not skills:
+            # Skill failed to parse (e.g. missing description) — look for the file directly
+            from framework.skills.installer import USER_SKILLS_DIR
+
+            candidate = USER_SKILLS_DIR / args.name / "SKILL.md"
+            if candidate.exists():
+                print(f"\nChecking skill: {args.name}  [user]")
+                overall_errors += _doctor_skill_file(args.name, candidate, parse_skill_md)
+                print()
+                print(f"✗ {overall_errors} error(s) found.")
+                return 1
             print(f"Error: skill '{args.name}' not found.", file=sys.stderr)
             return 1
 
@@ -796,7 +805,7 @@ def _doctor_skill_file(skill_name: str, skill_md: Path, parse_fn) -> int:
         print(f"  ✗ SKILL.md not parseable: {skill_md}")
         errors += 1
         return errors
-    print(f"  ✓ SKILL.md parseable")
+    print("  ✓ SKILL.md parseable")
 
     base_dir = skill_md.parent
 

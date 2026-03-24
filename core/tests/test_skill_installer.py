@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from framework.skills.installer import (
-    INSTALL_NOTICE_SENTINEL,
-    USER_SKILLS_DIR,
     fork_skill,
     install_from_git,
-    install_from_registry,
     maybe_show_install_notice,
     remove_skill,
 )
@@ -55,6 +51,7 @@ class TestInstallFromGit:
         def fake_clone(git_url, target_path, version=None):
             # Simulate git clone by copying source_repo into target_path
             import shutil
+
             if target_path.exists():
                 shutil.rmtree(target_path)
             shutil.copytree(source_repo, target_path)
@@ -87,6 +84,7 @@ class TestInstallFromGit:
 
         def fake_clone(git_url, target_path, version=None):
             import shutil
+
             if target_path.exists():
                 shutil.rmtree(target_path)
             shutil.copytree(empty_repo, target_path)
@@ -126,8 +124,10 @@ class TestInstallFromGit:
             return d
 
         def failing_clone(git_url, target_path, version=None):
+            from framework.skills.skill_errors import SkillErrorCode as SEC
+
             raise SkillError(
-                code=__import__("framework.skills.skill_errors", fromlist=["SkillErrorCode"]).SkillErrorCode.SKILL_ACTIVATION_FAILED,
+                code=SEC.SKILL_ACTIVATION_FAILED,
                 what="clone failed",
                 why="network error",
                 fix="check network",
@@ -167,7 +167,7 @@ class TestRemoveSkill:
 
     def test_raises_on_permission_error(self, tmp_path):
         skills_dir = tmp_path / "skills"
-        skill_dir = _make_skill_dir(skills_dir, "locked-skill")
+        _make_skill_dir(skills_dir, "locked-skill")
 
         with patch("shutil.rmtree", side_effect=OSError("permission denied")):
             with pytest.raises(SkillError) as exc_info:
@@ -194,6 +194,7 @@ class TestForkSkill:
         dest = fork_skill(source, "forked", target_parent)
 
         import yaml
+
         content = (dest / "SKILL.md").read_text(encoding="utf-8")
         parts = content.split("---", 2)
         fm = yaml.safe_load(parts[1])

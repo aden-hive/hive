@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from urllib.error import URLError
 
 import pytest
 
-from framework.skills.registry import RegistryClient, _CACHE_TTL_SECONDS
+from framework.skills.registry import _CACHE_TTL_SECONDS, RegistryClient
 
 _SAMPLE_INDEX = {
     "version": 1,
@@ -85,7 +85,11 @@ class TestFetchIndex:
         (cache_dir / "metadata.json").write_text(json.dumps(meta))
 
         fetch_called = []
-        with patch.object(client, "_http_fetch", side_effect=lambda *a, **kw: fetch_called.append(1)):
+
+        def _no_fetch(*a, **kw):
+            fetch_called.append(1)
+
+        with patch.object(client, "_http_fetch", side_effect=_no_fetch):
             result = client.fetch_index()
 
         assert not fetch_called, "Should not hit network when cache is fresh"

@@ -7,19 +7,15 @@ from __future__ import annotations
 
 from argparse import Namespace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from framework.skills.cli import (
     cmd_skill_doctor,
-    cmd_skill_fork,
     cmd_skill_info,
     cmd_skill_init,
     cmd_skill_install,
     cmd_skill_remove,
     cmd_skill_search,
-    cmd_skill_update,
     cmd_skill_validate,
 )
 
@@ -116,6 +112,7 @@ class TestCmdSkillDoctor:
         args = Namespace(name=None, defaults=False, project_dir=str(tmp_path))
         with patch("framework.skills.discovery.SkillDiscovery.discover") as mock_discover:
             from framework.skills.parser import ParsedSkill
+
             mock_discover.return_value = [
                 ParsedSkill(
                     name="my-skill",
@@ -171,7 +168,9 @@ class TestCmdSkillInstall:
             version=None,
         )
 
-        with patch("framework.skills.installer.install_from_git", return_value=installed_path) as mock_install:
+        with patch(
+            "framework.skills.installer.install_from_git", return_value=installed_path
+        ) as mock_install:
             result = cmd_skill_install(args)
 
         mock_install.assert_called_once()
@@ -203,7 +202,9 @@ class TestCmdSkillInstall:
         sentinel.touch()
         monkeypatch.setattr("framework.skills.installer.INSTALL_NOTICE_SENTINEL", sentinel)
 
-        args = Namespace(name_or_url=None, from_url=None, pack=None, install_name=None, version=None)
+        args = Namespace(
+            name_or_url=None, from_url=None, pack=None, install_name=None, version=None
+        )
         result = cmd_skill_install(args)
         assert result == 1
 
@@ -215,7 +216,7 @@ class TestCmdSkillRemove:
         skill_dir.mkdir(parents=True)
 
         with patch("framework.skills.installer.USER_SKILLS_DIR", skills_dir):
-            with patch("framework.skills.installer.remove_skill", return_value=True) as mock_remove:
+            with patch("framework.skills.installer.remove_skill", return_value=True):
                 args = Namespace(name="my-skill")
                 result = cmd_skill_remove(args)
 

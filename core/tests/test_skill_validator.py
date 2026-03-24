@@ -5,10 +5,7 @@ One test per strict check — happy path plus each individual failure mode.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-
-import pytest
 
 from framework.skills.validator import validate_strict
 
