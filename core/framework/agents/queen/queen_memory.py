@@ -226,7 +226,11 @@ def read_session_context(session_dir: Path, max_messages: int = 80) -> str:
                 elif content:
                     label = "user" if role == "user" else "queen"
                     lines.append(f"[{label}]: {content[:600]}")
+            except (KeyError, TypeError) as exc:
+                logger.debug("Skipping malformed conversation message: %s", exc)
+                continue
             except Exception:
+                logger.warning("Unexpected error parsing conversation message", exc_info=True)
                 continue
         if lines:
             parts.append("## Conversation\n\n" + "\n".join(lines))
@@ -395,5 +399,5 @@ async def consolidate_queen_memory(
                 f"session: {session_id}\ntime: {datetime.now().isoformat()}\n\n{tb}",
                 encoding="utf-8",
             )
-        except Exception:
-            pass
+        except OSError:
+            pass  # Cannot write error file; original exception already logged

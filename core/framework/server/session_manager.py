@@ -96,8 +96,7 @@ class SessionManager:
 
         Internal helper — use create_session() or create_session_with_worker().
         """
-        from framework.config import RuntimeConfig
-        from framework.llm.litellm import LiteLLMProvider
+        from framework.config import RuntimeConfig, get_hive_config
         from framework.runtime.event_bus import EventBus
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -111,12 +110,20 @@ class SessionManager:
         rc = RuntimeConfig(model=model or self._model or RuntimeConfig().model)
 
         # Session owns these — shared with queen and worker
-        llm = LiteLLMProvider(
-            model=rc.model,
-            api_key=rc.api_key,
-            api_base=rc.api_base,
-            **rc.extra_kwargs,
-        )
+        llm_config = get_hive_config().get("llm", {})
+        if llm_config.get("use_antigravity_subscription"):
+            from framework.llm.antigravity import AntigravityProvider
+
+            llm = AntigravityProvider(model=rc.model)
+        else:
+            from framework.llm.litellm import LiteLLMProvider
+
+            llm = LiteLLMProvider(
+                model=rc.model,
+                api_key=rc.api_key,
+                api_base=rc.api_base,
+                **rc.extra_kwargs,
+            )
         event_bus = EventBus()
 
         session = Session(
@@ -287,7 +294,17 @@ class SessionManager:
         try:
             # Blocking I/O — load in executor
             loop = asyncio.get_running_loop()
-            resolved_model = model or self._model
+
+            # Prioritize: explicit model arg > worker-specific model > session default
+            from framework.config import (
+                get_preferred_worker_model,
+                get_worker_api_base,
+                get_worker_api_key,
+                get_worker_llm_extra_kwargs,
+            )
+
+            worker_model = get_preferred_worker_model()
+            resolved_model = model or worker_model or self._model
             runner = await loop.run_in_executor(
                 None,
                 lambda: AgentRunner.load(
@@ -298,6 +315,30 @@ class SessionManager:
                     credential_store=self._credential_store,
                 ),
             )
+
+            # If a worker-specific model is configured, build an LLM provider
+            # with the correct worker credentials so _setup() doesn't fall back
+            # to the queen's llm config (which may be a different provider).
+            if worker_model and not model:
+                from framework.config import get_hive_config
+
+                worker_llm_cfg = get_hive_config().get("worker_llm", {})
+                if worker_llm_cfg.get("use_antigravity_subscription"):
+                    from framework.llm.antigravity import AntigravityProvider
+
+                    runner._llm = AntigravityProvider(model=resolved_model)
+                else:
+                    from framework.llm.litellm import LiteLLMProvider
+
+                    worker_api_key = get_worker_api_key()
+                    worker_api_base = get_worker_api_base()
+                    worker_extra = get_worker_llm_extra_kwargs()
+                    runner._llm = LiteLLMProvider(
+                        model=resolved_model,
+                        api_key=worker_api_key,
+                        api_base=worker_api_base,
+                        **worker_extra,
+                    )
 
             # Setup with session's event bus
             if runner._agent_runtime is None:
@@ -793,10 +834,11 @@ class SessionManager:
             exec_id = event.execution_id
 
             if event.type == _ET.EXECUTION_STARTED:
-                # New run on this execution_id — reset cooldown so the first
-                # iteration always produces a mid-run snapshot.
+                # New run on this execution_id — start the cooldown timer so
+                # mid-run snapshots don't fire immediately at session start.
+                # The first snapshot will happen after _DIGEST_COOLDOWN seconds.
                 if exec_id:
-                    _last_digest.pop(exec_id, None)
+                    _last_digest[exec_id] = _time.monotonic()
 
             elif event.type in (
                 _ET.EXECUTION_COMPLETED,
@@ -923,6 +965,7 @@ class SessionManager:
         # then use max+1 as offset so resumed sessions produce monotonically
         # increasing iteration values — preventing frontend message ID collisions.
         iteration_offset = 0
+        last_phase = ""
         events_path = queen_dir / "events.jsonl"
         try:
             if events_path.exists():
@@ -934,17 +977,25 @@ class SessionManager:
                             continue
                         try:
                             evt = json.loads(line)
-                            it = evt.get("data", {}).get("iteration")
+                            data = evt.get("data", {})
+                            it = data.get("iteration")
                             if isinstance(it, int) and it > max_iter:
                                 max_iter = it
+                            # Track the latest queen phase from QUEEN_PHASE_CHANGED events
+                            if evt.get("type") == "queen_phase_changed":
+                                phase = data.get("phase")
+                                if phase:
+                                    last_phase = phase
                         except (json.JSONDecodeError, TypeError):
                             continue
                 if max_iter >= 0:
                     iteration_offset = max_iter + 1
                     logger.info(
-                        "Session '%s' resuming with iteration_offset=%d (from events.jsonl max)",
+                        "Session '%s' resuming with iteration_offset=%d"
+                        " (from events.jsonl max), last phase: %s",
                         session.id,
                         iteration_offset,
+                        last_phase or "unknown",
                     )
         except OSError:
             pass
@@ -996,10 +1047,17 @@ class SessionManager:
         _consolidation_session_dir = queen_dir
 
         async def _on_compaction(_event) -> None:
+            # Only consolidate on queen compactions — worker and subagent
+            # compactions are frequent and don't warrant a memory update.
+            if getattr(_event, "stream_id", None) != "queen":
+                return
             from framework.agents.queen.queen_memory import consolidate_queen_memory
 
-            await consolidate_queen_memory(
-                session.id, _consolidation_session_dir, _consolidation_llm
+            asyncio.create_task(
+                consolidate_queen_memory(
+                    session.id, _consolidation_session_dir, _consolidation_llm
+                ),
+                name=f"queen-memory-consolidation-{session.id}",
             )
 
         from framework.runtime.event_bus import EventType as _ET

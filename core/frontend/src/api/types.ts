@@ -14,6 +14,8 @@ export interface LiveSession {
   intro_message?: string;
   /** Queen operating phase — "planning", "building", "staging", or "running" */
   queen_phase?: "planning" | "building" | "staging" | "running";
+  /** Whether the queen's LLM supports image content in messages */
+  queen_supports_images?: boolean;
   /** Present in 409 conflict responses when worker is still loading */
   loading?: boolean;
 }
@@ -324,6 +326,7 @@ export type EventTypeName =
   | "node_retry"
   | "edge_traversed"
   | "context_compacted"
+  | "context_usage_updated"
   | "webhook_received"
   | "custom"
   | "escalation_requested"

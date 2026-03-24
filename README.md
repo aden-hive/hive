@@ -41,7 +41,8 @@ Generate a swarm of worker agents with a coding agent(queen) that control them. 
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
-https://github.com/user-attachments/assets/aad3a035-e7b3-4cac-b13d-4a83c7002c30
+
+https://github.com/user-attachments/assets/bf10edc3-06ba-48b6-98ba-d069b15fb69d
 
 
 ## Who Is Hive For?
@@ -74,7 +75,7 @@ Use Hive when you need:
 - **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
 - **[Changelog](https://github.com/aden-hive/hive/releases)** - Latest updates and releases
 - **[Roadmap](docs/roadmap.md)** - Upcoming features and plans
-- **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
+- **[Report Issues](https://github.com/aden-hive/hive/issues)** - Bug reports and feature requests
 - **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Quick Start
@@ -109,7 +110,7 @@ This sets up:
 - **framework** - Core agent runtime and graph executor (in `core/.venv`)
 - **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
 - **credential store** - Encrypted API key storage (`~/.hive/credentials`)
-- **LLM provider** - Interactive default model configuration
+- **LLM provider** - Interactive default model configuration, including Hive LLM and OpenRouter
 - All required Python dependencies with `uv`
 
 - Finally, it will open the Hive interface in your browser
@@ -148,7 +149,7 @@ Now you can run an agent by selecting the agent (either an existing agent or exa
 <a href="https://github.com/aden-hive/hive/tree/main/tools/src/aden_tools/tools"><img width="100%" alt="Integration" src="https://github.com/user-attachments/assets/a1573f93-cf02-4bb8-b3d5-b305b05b1e51" /></a>
 Hive is built to be model-agnostic and system-agnostic.
 
-- **LLM flexibility** - Hive Framework is designed to support various types of LLMs, including hosted and local models through LiteLLM-compatible providers.
+- **LLM flexibility** - Hive Framework supports Anthropic, OpenAI, OpenRouter, Hive LLM, and other hosted or local models through LiteLLM-compatible providers.
 - **Business system connectivity** - Hive Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
 
 ## Why Aden
@@ -376,7 +377,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 **Q: What LLM providers does Hive support?**
 
-Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name. We recommend using Claude, GLM and Gemini as they have the best performance.
+Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, OpenRouter, and Hive LLM. Simply set the appropriate API key environment variable and specify the model name. See [docs/configuration.md](docs/configuration.md) for provider-specific configuration examples.
 
 **Q: Can I use Hive with local AI models like Ollama?**
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -24,6 +25,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from framework.graph.conversation import ConversationStore, NodeConversation
 from framework.graph.node import NodeContext, NodeProtocol, NodeResult
+from framework.llm.capabilities import supports_image_tool_results
 from framework.llm.provider import Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
     FinishEvent,
@@ -35,6 +37,56 @@ from framework.runtime.event_bus import EventBus
 from framework.runtime.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
+
+
+async def _describe_images_as_text(image_content: list[dict[str, Any]]) -> str | None:
+    """Describe images using the best available vision model.
+
+    Called when the queen's model lacks vision support.  Tries vision-capable
+    models in priority order based on available API keys and returns a bracketed
+    description to inject into the message text, or None if no vision model is
+    reachable.
+    """
+    import litellm
+
+    # Build content blocks: prompt + all images
+    blocks: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": (
+                "Describe the following image(s) concisely but with enough detail "
+                "that a text-only AI assistant can understand the content and context."
+            ),
+        }
+    ]
+    blocks.extend(image_content)
+
+    # Ordered candidates based on available env vars
+    candidates: list[str] = []
+    if os.environ.get("OPENAI_API_KEY"):
+        candidates.append("gpt-4o-mini")
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        candidates.append("claude-3-haiku-20240307")
+    if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
+        candidates.append("gemini/gemini-1.5-flash")
+
+    for model in candidates:
+        try:
+            response = await litellm.acompletion(
+                model=model,
+                messages=[{"role": "user", "content": blocks}],
+                max_tokens=512,
+            )
+            description = (response.choices[0].message.content or "").strip()
+            if description:
+                count = len(image_content)
+                label = "image" if count == 1 else f"{count} images"
+                return f"[{label} attached — description: {description}]"
+        except Exception as exc:
+            logger.debug("Vision fallback model '%s' failed: %s", model, exc)
+            continue
+
+    return None
 
 
 @dataclass
@@ -90,7 +142,13 @@ class _EscalationReceiver:
         self._response: str | None = None
         self._awaiting_input = True  # So inject_worker_message() can prefer us
 
-    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+    async def inject_event(
+        self,
+        content: str,
+        *,
+        is_client_input: bool = False,
+        image_content: list[dict] | None = None,
+    ) -> None:
         """Called by ExecutionStream.inject_input() when the user responds."""
         self._response = content
         self._event.set()
@@ -426,7 +484,9 @@ class EventLoopNode(NodeProtocol):
         self._config = config or LoopConfig()
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
-        self._injection_queue: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
+        self._injection_queue: asyncio.Queue[tuple[str, bool, list[dict[str, Any]] | None]] = (
+            asyncio.Queue()
+        )
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Client-facing input blocking state
         self._input_ready = asyncio.Event()
@@ -467,6 +527,8 @@ class EventLoopNode(NodeProtocol):
         stream_id = ctx.stream_id or ctx.node_id
         node_id = ctx.node_id
         execution_id = ctx.execution_id or ""
+        # Store skill dirs for AS-9 file-read interception in _execute_tool
+        self._skill_dirs: list[str] = ctx.skill_dirs
 
         # Verdict counters for runtime logging
         _accept_count = _retry_count = _escalate_count = _continue_count = 0
@@ -531,12 +593,28 @@ class EventLoopNode(NodeProtocol):
                 _restored_recent_responses = restored.recent_responses
                 _restored_tool_fingerprints = restored.recent_tool_fingerprints
 
-                # Refresh the system prompt with full 3-layer composition.
-                # The stored prompt may be stale after code changes or when
-                # runtime-injected context (e.g. worker identity) has changed.
-                # On resume, we rebuild identity + narrative + focus so the LLM
-                # understands the session history, not just the node directive.
-                from framework.graph.prompt_composer import compose_system_prompt
+                # Refresh the system prompt with full composition including
+                # execution preamble and node-type preamble.  The stored
+                # prompt may be stale after code changes or when runtime-
+                # injected context (e.g. worker identity) has changed.
+                from framework.graph.prompt_composer import (
+                    EXECUTION_SCOPE_PREAMBLE,
+                    compose_system_prompt,
+                )
+
+                _exec_preamble = None
+                if (
+                    not ctx.is_subagent_mode
+                    and ctx.node_spec.node_type in ("event_loop", "gcu")
+                    and ctx.node_spec.output_keys
+                ):
+                    _exec_preamble = EXECUTION_SCOPE_PREAMBLE
+
+                _node_type_preamble = None
+                if ctx.node_spec.node_type == "gcu":
+                    from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
+
+                    _node_type_preamble = GCU_BROWSER_SYSTEM_PROMPT
 
                 _current_prompt = compose_system_prompt(
                     identity_prompt=ctx.identity_prompt or None,
@@ -545,6 +623,8 @@ class EventLoopNode(NodeProtocol):
                     accounts_prompt=ctx.accounts_prompt or None,
                     skills_catalog_prompt=ctx.skills_catalog_prompt or None,
                     protocols_prompt=ctx.protocols_prompt or None,
+                    execution_preamble=_exec_preamble,
+                    node_type_preamble=_node_type_preamble,
                 )
                 if conversation.system_prompt != _current_prompt:
                     conversation.update_system_prompt(_current_prompt)
@@ -764,7 +844,7 @@ class EventLoopNode(NodeProtocol):
                 )
 
             # 6b. Drain injection queue
-            await self._drain_injection_queue(conversation)
+            await self._drain_injection_queue(conversation, ctx)
             # 6b1. Drain trigger queue (framework-level signals)
             await self._drain_trigger_queue(conversation)
 
@@ -806,6 +886,13 @@ class EventLoopNode(NodeProtocol):
                 execution_id,
                 extra_data=_iter_meta,
             )
+            # Sync max_context_tokens from live config so mid-session model
+            # switches are reflected in compaction decisions and the UI bar.
+            from framework.config import get_max_context_tokens as _live_mct
+
+            conversation._max_context_tokens = _live_mct()
+
+            await self._publish_context_usage(ctx, conversation, "iteration_start")
 
             # 6d. Pre-turn compaction check (tiered)
             _compacted_this_iter = False
@@ -1883,7 +1970,13 @@ class EventLoopNode(NodeProtocol):
             conversation=conversation if _is_continuous else None,
         )
 
-    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+    async def inject_event(
+        self,
+        content: str,
+        *,
+        is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Inject an external event or user input into the running loop.
 
         The content becomes a user message prepended to the next iteration.
@@ -1899,8 +1992,10 @@ class EventLoopNode(NodeProtocol):
                 human user (e.g. /chat endpoint), False for external events
                 (e.g. worker question forwarded by the frontend).  Controls
                 message formatting in _drain_injection_queue, not wake behavior.
+            image_content: Optional list of image content blocks (OpenAI
+                image_url format) to include alongside the text.
         """
-        await self._injection_queue.put((content, is_client_input))
+        await self._injection_queue.put((content, is_client_input, image_content))
         self._input_ready.set()
 
     async def inject_trigger(self, trigger: TriggerEvent) -> None:
@@ -2073,6 +2168,24 @@ class EventLoopNode(NodeProtocol):
                 await self._compact(ctx, conversation, accumulator)
 
             messages = conversation.to_llm_messages()
+
+            # Debug: log whether the last user message contains image blocks
+            for _m in reversed(messages):
+                if _m.get("role") == "user":
+                    _content = _m.get("content")
+                    if isinstance(_content, list):
+                        _img_count = sum(
+                            1
+                            for _b in _content
+                            if isinstance(_b, dict) and _b.get("type") == "image_url"
+                        )
+                        if _img_count:
+                            logger.info(
+                                "[%s] LLM call: last user message has %d image block(s)",
+                                node_id,
+                                _img_count,
+                            )
+                    break
 
             # Defensive guard: ensure messages don't end with an assistant
             # message.  The Anthropic API rejects "assistant message prefill"
@@ -2477,6 +2590,27 @@ class EventLoopNode(NodeProtocol):
                     results_by_id[tc.tool_use_id] = result
 
                 elif tc.tool_name == "delegate_to_sub_agent":
+                    # Guard: in continuous mode the LLM may see delegate
+                    # calls from a previous node's conversation history and
+                    # attempt to re-use the tool on a node that doesn't own
+                    # it.  Only accept if the tool was actually offered.
+                    if not any(t.name == "delegate_to_sub_agent" for t in tools):
+                        logger.warning(
+                            "[%s] LLM called delegate_to_sub_agent but tool "
+                            "was not offered to this node — rejecting",
+                            node_id,
+                        )
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: delegate_to_sub_agent is not available "
+                                "on this node. This tool belongs to a different "
+                                "node in the workflow."
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                        continue
                     # --- Framework-level subagent delegation ---
                     # Queue for parallel execution in Phase 2
                     logger.info(
@@ -2722,10 +2856,22 @@ class EventLoopNode(NodeProtocol):
                     real_tool_results.append(tool_entry)
                     logged_tool_calls.append(tool_entry)
 
+                # Strip image content for models that can't handle it
+                image_content = result.image_content
+                if image_content and ctx.llm and not supports_image_tool_results(ctx.llm.model):
+                    logger.info(
+                        "Stripping image_content from tool result — model '%s' "
+                        "does not support images in tool results",
+                        ctx.llm.model,
+                    )
+                    image_content = None
+
                 await conversation.add_tool_result(
                     tool_use_id=tc.tool_use_id,
                     content=result.content,
                     is_error=result.is_error,
+                    image_content=image_content,
+                    is_skill_content=result.is_skill_content,
                 )
                 if (
                     tc.tool_name in ("ask_user", "ask_user_multiple")
@@ -2833,6 +2979,8 @@ class EventLoopNode(NodeProtocol):
                         pruned,
                         conversation.usage_ratio() * 100,
                     )
+
+            await self._publish_context_usage(ctx, conversation, "post_tool_results")
 
             # If the turn requested external input (ask_user or queen handoff),
             # return immediately so the outer loop can block before judge eval.
@@ -3549,6 +3697,33 @@ class EventLoopNode(NodeProtocol):
                 content=f"No tool executor configured for '{tc.tool_name}'",
                 is_error=True,
             )
+
+        # AS-9: Intercept file-read tools for skill directories — bypass session sandbox
+        _SKILL_READ_TOOLS = {"view_file", "load_data", "read_file"}
+        skill_dirs = getattr(self, "_skill_dirs", [])
+        if tc.tool_name in _SKILL_READ_TOOLS and skill_dirs:
+            _path = tc.tool_input.get("path", "")
+            if _path:
+                import os
+                from pathlib import Path as _Path
+
+                _resolved = os.path.realpath(os.path.abspath(_path))
+                if any(_resolved.startswith(os.path.realpath(d)) for d in skill_dirs):
+                    try:
+                        _content = _Path(_resolved).read_text(encoding="utf-8")
+                        _is_skill_md = _resolved.endswith("SKILL.md")
+                        return ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=_content,
+                            is_skill_content=_is_skill_md,  # AS-10: protect SKILL.md reads
+                        )
+                    except Exception as _exc:
+                        return ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=f"Could not read skill resource '{_path}': {_exc}",
+                            is_error=True,
+                        )
+
         tool_use = ToolUse(id=tc.tool_use_id, name=tc.tool_name, input=tc.tool_input)
         timeout = self._config.tool_call_timeout_seconds
 
@@ -3836,6 +4011,7 @@ class EventLoopNode(NodeProtocol):
                 tool_use_id=result.tool_use_id,
                 content=truncated,
                 is_error=False,
+                image_content=result.image_content,
             )
 
         spill_dir = self._config.spillover_dir
@@ -3908,6 +4084,7 @@ class EventLoopNode(NodeProtocol):
                 tool_use_id=result.tool_use_id,
                 content=content,
                 is_error=False,
+                image_content=result.image_content,
             )
 
         # No spillover_dir — truncate in-place if needed
@@ -3950,6 +4127,7 @@ class EventLoopNode(NodeProtocol):
                 tool_use_id=result.tool_use_id,
                 content=truncated,
                 is_error=False,
+                image_content=result.image_content,
             )
 
         return result
@@ -3980,6 +4158,12 @@ class EventLoopNode(NodeProtocol):
         ratio_before = conversation.usage_ratio()
         phase_grad = getattr(ctx, "continuous_mode", False)
 
+        # Capture pre-compaction message inventory when over budget,
+        # since compaction mutates the conversation in place.
+        pre_inventory: list[dict[str, Any]] | None = None
+        if ratio_before >= 1.0:
+            pre_inventory = self._build_message_inventory(conversation)
+
         # --- Step 1: Prune old tool results (free, no LLM) ---
         protect = max(2000, self._config.max_context_tokens // 12)
         pruned = await conversation.prune_old_tool_results(
@@ -3994,7 +4178,7 @@ class EventLoopNode(NodeProtocol):
                 conversation.usage_ratio() * 100,
             )
         if not conversation.needs_compaction():
-            await self._log_compaction(ctx, conversation, ratio_before)
+            await self._log_compaction(ctx, conversation, ratio_before, pre_inventory)
             return
 
         # --- Step 2: Standard structure-preserving compaction (free, no LLM) ---
@@ -4007,7 +4191,7 @@ class EventLoopNode(NodeProtocol):
                 phase_graduated=phase_grad,
             )
         if not conversation.needs_compaction():
-            await self._log_compaction(ctx, conversation, ratio_before)
+            await self._log_compaction(ctx, conversation, ratio_before, pre_inventory)
             return
 
         # --- Step 3: LLM summary compaction ---
@@ -4034,7 +4218,7 @@ class EventLoopNode(NodeProtocol):
                 logger.warning("LLM compaction failed: %s", e)
 
         if not conversation.needs_compaction():
-            await self._log_compaction(ctx, conversation, ratio_before)
+            await self._log_compaction(ctx, conversation, ratio_before, pre_inventory)
             return
 
         # --- Step 4: Emergency deterministic summary (LLM failed/unavailable) ---
@@ -4048,7 +4232,7 @@ class EventLoopNode(NodeProtocol):
             keep_recent=1,
             phase_graduated=phase_grad,
         )
-        await self._log_compaction(ctx, conversation, ratio_before)
+        await self._log_compaction(ctx, conversation, ratio_before, pre_inventory)
 
     # --- LLM compaction with binary-search splitting ----------------------
 
@@ -4210,13 +4394,59 @@ class EventLoopNode(NodeProtocol):
             "re-doing work.\n"
         )
 
+    @staticmethod
+    def _build_message_inventory(
+        conversation: NodeConversation,
+    ) -> list[dict[str, Any]]:
+        """Build a per-message size inventory for debug logging."""
+        inventory: list[dict[str, Any]] = []
+        for m in conversation.messages:
+            content_chars = len(m.content)
+            tc_chars = 0
+            tool_name = None
+            if m.tool_calls:
+                for tc in m.tool_calls:
+                    args = tc.get("function", {}).get("arguments", "")
+                    tc_chars += len(args) if isinstance(args, str) else len(json.dumps(args))
+                names = [tc.get("function", {}).get("name", "?") for tc in m.tool_calls]
+                tool_name = ", ".join(names)
+            elif m.role == "tool" and m.tool_use_id:
+                for prev in conversation.messages:
+                    if prev.tool_calls:
+                        for tc in prev.tool_calls:
+                            if tc.get("id") == m.tool_use_id:
+                                tool_name = tc.get("function", {}).get("name", "?")
+                                break
+                    if tool_name:
+                        break
+            entry: dict[str, Any] = {
+                "seq": m.seq,
+                "role": m.role,
+                "content_chars": content_chars,
+            }
+            if tc_chars:
+                entry["tool_call_args_chars"] = tc_chars
+            if tool_name:
+                entry["tool"] = tool_name
+            if m.is_error:
+                entry["is_error"] = True
+            if m.phase_id:
+                entry["phase"] = m.phase_id
+            if content_chars > 2000:
+                entry["preview"] = m.content[:200] + "…"
+            inventory.append(entry)
+        return inventory
+
     async def _log_compaction(
         self,
         ctx: NodeContext,
         conversation: NodeConversation,
         ratio_before: float,
+        pre_inventory: list[dict[str, Any]] | None = None,
     ) -> None:
-        """Log compaction result to runtime logger and event bus."""
+        """Log compaction result to runtime logger, event bus, and debug file."""
+        import os as _os
+
         ratio_after = conversation.usage_ratio()
         before_pct = round(ratio_before * 100)
         after_pct = round(ratio_after * 100)
@@ -4249,18 +4479,102 @@ class EventLoopNode(NodeProtocol):
         if self._event_bus:
             from framework.runtime.event_bus import AgentEvent, EventType
 
+            event_data: dict[str, Any] = {
+                "level": level,
+                "usage_before": before_pct,
+                "usage_after": after_pct,
+            }
+            if pre_inventory is not None:
+                event_data["message_inventory"] = pre_inventory
             await self._event_bus.publish(
                 AgentEvent(
                     type=EventType.CONTEXT_COMPACTED,
                     stream_id=ctx.stream_id or ctx.node_id,
                     node_id=ctx.node_id,
-                    data={
-                        "level": level,
-                        "usage_before": before_pct,
-                        "usage_after": after_pct,
-                    },
+                    data=event_data,
                 )
             )
+
+        # Emit post-compaction usage update
+        await self._publish_context_usage(ctx, conversation, "post_compaction")
+
+        # Write detailed debug log to ~/.hive/compaction_log/ when enabled
+        if _os.environ.get("HIVE_COMPACTION_DEBUG"):
+            self._write_compaction_debug_log(ctx, before_pct, after_pct, level, pre_inventory)
+
+    @staticmethod
+    def _write_compaction_debug_log(
+        ctx: NodeContext,
+        before_pct: int,
+        after_pct: int,
+        level: str,
+        inventory: list[dict[str, Any]] | None,
+    ) -> None:
+        """Write detailed compaction analysis to ~/.hive/compaction_log/."""
+        log_dir = Path.home() / ".hive" / "compaction_log"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%f")
+        node_label = ctx.node_id.replace("/", "_")
+        log_path = log_dir / f"{ts}_{node_label}.md"
+
+        lines: list[str] = [
+            f"# Compaction Debug — {ctx.node_id}",
+            f"**Time:** {datetime.now(UTC).isoformat()}",
+            f"**Node:** {ctx.node_spec.name} (`{ctx.node_id}`)",
+        ]
+        if ctx.stream_id:
+            lines.append(f"**Stream:** {ctx.stream_id}")
+        lines.append(f"**Level:** {level}")
+        lines.append(f"**Usage:** {before_pct}% → {after_pct}%")
+        lines.append("")
+
+        if inventory:
+            total_chars = sum(
+                e.get("content_chars", 0) + e.get("tool_call_args_chars", 0) for e in inventory
+            )
+            lines.append(
+                f"## Pre-Compaction Message Inventory "
+                f"({len(inventory)} messages, {total_chars:,} total chars)"
+            )
+            lines.append("")
+            ranked = sorted(
+                inventory,
+                key=lambda e: e.get("content_chars", 0) + e.get("tool_call_args_chars", 0),
+                reverse=True,
+            )
+            lines.append("| # | seq | role | tool | chars | % of total | flags |")
+            lines.append("|---|-----|------|------|------:|------------|-------|")
+            for i, entry in enumerate(ranked, 1):
+                chars = entry.get("content_chars", 0) + entry.get("tool_call_args_chars", 0)
+                pct = (chars / total_chars * 100) if total_chars else 0
+                tool = entry.get("tool", "")
+                flags = []
+                if entry.get("is_error"):
+                    flags.append("error")
+                if entry.get("phase"):
+                    flags.append(f"phase={entry['phase']}")
+                lines.append(
+                    f"| {i} | {entry['seq']} | {entry['role']} | {tool} "
+                    f"| {chars:,} | {pct:.1f}% | {', '.join(flags)} |"
+                )
+
+            large = [e for e in ranked if e.get("preview")]
+            if large:
+                lines.append("")
+                lines.append("### Large message previews")
+                for entry in large:
+                    lines.append(
+                        f"\n**seq={entry['seq']}** ({entry['role']}, {entry.get('tool', '')}):"
+                    )
+                    lines.append(f"```\n{entry['preview']}\n```")
+        lines.append("")
+
+        try:
+            log_path.write_text("\n".join(lines), encoding="utf-8")
+            logger.debug("Compaction debug log written to %s", log_path)
+        except OSError:
+            logger.debug("Failed to write compaction debug log to %s", log_path)
 
     def _build_emergency_summary(
         self,
@@ -4484,20 +4798,37 @@ class EventLoopNode(NodeProtocol):
                 ]
             await self._conversation_store.write_cursor(cursor)
 
-    async def _drain_injection_queue(self, conversation: NodeConversation) -> int:
+    async def _drain_injection_queue(self, conversation: NodeConversation, ctx: NodeContext) -> int:
         """Drain all pending injected events as user messages. Returns count."""
         count = 0
         while not self._injection_queue.empty():
             try:
-                content, is_client_input = self._injection_queue.get_nowait()
+                content, is_client_input, image_content = self._injection_queue.get_nowait()
                 logger.info(
-                    "[drain] injected message (client_input=%s): %s",
+                    "[drain] injected message (client_input=%s, images=%d): %s",
                     is_client_input,
+                    len(image_content) if image_content else 0,
                     content[:200] if content else "(empty)",
                 )
+                # For models that don't support images, fall back to a text description
+                if image_content and ctx.llm:
+                    if not supports_image_tool_results(ctx.llm.model):
+                        logger.info(
+                            "Model '%s' does not support images — attempting vision fallback",
+                            ctx.llm.model,
+                        )
+                        description = await _describe_images_as_text(image_content)
+                        if description:
+                            content = f"{content}\n\n{description}" if content else description
+                            logger.info("[drain] image described as text via vision fallback")
+                        else:
+                            logger.info("[drain] no vision fallback available — images dropped")
+                        image_content = None
                 # Real user input is stored as-is; external events get a prefix
                 if is_client_input:
-                    await conversation.add_user_message(content, is_client_input=True)
+                    await conversation.add_user_message(
+                        content, is_client_input=True, image_content=image_content
+                    )
                 else:
                     await conversation.add_user_message(f"[External event]: {content}")
                 count += 1
@@ -4665,6 +4996,36 @@ class EventLoopNode(NodeProtocol):
                 conversation.update_system_prompt(result.system_prompt)
             if result.inject:
                 await conversation.add_user_message(result.inject)
+
+    async def _publish_context_usage(
+        self,
+        ctx: NodeContext,
+        conversation: NodeConversation,
+        trigger: str,
+    ) -> None:
+        """Emit a CONTEXT_USAGE_UPDATED event with current context window state."""
+        if not self._event_bus:
+            return
+        from framework.runtime.event_bus import AgentEvent, EventType
+
+        estimated = conversation.estimate_tokens()
+        max_tokens = conversation._max_context_tokens
+        ratio = estimated / max_tokens if max_tokens > 0 else 0.0
+        await self._event_bus.publish(
+            AgentEvent(
+                type=EventType.CONTEXT_USAGE_UPDATED,
+                stream_id=ctx.stream_id or ctx.node_id,
+                node_id=ctx.node_id,
+                data={
+                    "usage_ratio": round(ratio, 4),
+                    "usage_pct": round(ratio * 100),
+                    "message_count": conversation.message_count,
+                    "estimated_tokens": estimated,
+                    "max_context_tokens": max_tokens,
+                    "trigger": trigger,
+                },
+            )
+        )
 
     async def _publish_iteration(
         self,
@@ -4950,7 +5311,20 @@ class EventLoopNode(NodeProtocol):
             write_keys=[],  # Read-only!
         )
 
-        # 2b. Set up report callback (one-way channel to parent / event bus)
+        # 2b. Compute instance counter early so node_id is available for the
+        # report callback and the NodeContext.  Each delegation to the same
+        # agent_id gets a unique suffix (instance 1 has no suffix for backward
+        # compat; instance 2+ appends ":N").
+        self._subagent_instance_counter.setdefault(agent_id, 0)
+        self._subagent_instance_counter[agent_id] += 1
+        _sa_instance = self._subagent_instance_counter[agent_id]
+        if _sa_instance > 1:
+            sa_node_id = f"{ctx.node_id}:subagent:{agent_id}:{_sa_instance}"
+        else:
+            sa_node_id = f"{ctx.node_id}:subagent:{agent_id}"
+        subagent_instance = str(_sa_instance)
+
+        # 2c. Set up report callback (one-way channel to parent / event bus)
         subagent_reports: list[dict] = []
 
         async def _report_callback(
@@ -4963,7 +5337,7 @@ class EventLoopNode(NodeProtocol):
             if self._event_bus:
                 await self._event_bus.emit_subagent_report(
                     stream_id=ctx.node_id,
-                    node_id=f"{ctx.node_id}:subagent:{agent_id}",
+                    node_id=sa_node_id,
                     subagent_id=agent_id,
                     message=message,
                     data=data,
@@ -5053,7 +5427,7 @@ class EventLoopNode(NodeProtocol):
         max_iter = min(self._config.max_iterations, 10)
         subagent_ctx = NodeContext(
             runtime=ctx.runtime,
-            node_id=f"{ctx.node_id}:subagent:{agent_id}",
+            node_id=sa_node_id,
             node_spec=subagent_spec,
             memory=scoped_memory,
             input_data={"task": task, **parent_data},
@@ -5081,10 +5455,7 @@ class EventLoopNode(NodeProtocol):
         # Derive a conversation store for the subagent from the parent's store.
         # Each invocation gets a unique path so that repeated delegate calls
         # (e.g. one per profile) don't restore a stale completed conversation.
-        self._subagent_instance_counter.setdefault(agent_id, 0)
-        self._subagent_instance_counter[agent_id] += 1
-        subagent_instance = str(self._subagent_instance_counter[agent_id])
-
+        # (Instance counter was computed earlier in step 2b.)
         subagent_conv_store = None
         if self._conversation_store is not None:
             from framework.storage.conversation_store import FileConversationStore

@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import ReactDOM from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff, X } from "lucide-react";
+import { Plus, KeyRound, Sparkles, Layers, ChevronLeft, Bot, Loader2, WifiOff, X, FolderOpen } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import DraftGraph from "@/components/DraftGraph";
 import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
@@ -352,6 +352,10 @@ interface AgentBackendState {
   pendingQuestions: { id: string; prompt: string; options?: string[] }[] | null;
   /** Whether the pending question came from queen or worker */
   pendingQuestionSource: "queen" | "worker" | null;
+  /** Per-node context window usage (from context_usage_updated events) */
+  contextUsage: Record<string, { usagePct: number; messageCount: number; estimatedTokens: number; maxTokens: number }>;
+  /** Whether the queen's LLM supports image content — false disables the attach button */
+  queenSupportsImages: boolean;
 }
 
 function defaultAgentState(): AgentBackendState {
@@ -389,6 +393,8 @@ function defaultAgentState(): AgentBackendState {
     pendingOptions: null,
     pendingQuestions: null,
     pendingQuestionSource: null,
+    contextUsage: {},
+    queenSupportsImages: true,
   };
 }
 
@@ -630,6 +636,10 @@ export default function Workspace() {
   // it was created in (avoids stale-closure when phase change and message
   // events arrive in the same React batch).
   const queenPhaseRef = useRef<Record<string, string>>({});
+  // Accumulated queen text across inner_turns within the same iteration.
+  // Key: `${agentType}:${execution_id}:${iteration}`, value: { [inner_turn]: snapshot }.
+  // This lets us merge all inner_turn text into one chat bubble per iteration.
+  const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
   // Timestamp when designingDraft was set — used to enforce minimum spinner duration.
   const designingDraftSinceRef = useRef<Record<string, number>>({});
   const designingDraftTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -916,6 +926,7 @@ export default function Workspace() {
           queenReady: true,
           queenPhase: qPhase,
           queenBuilding: qPhase === "building",
+          queenSupportsImages: liveSession.queen_supports_images !== false,
           // Restore flowchart overlay from persisted events
           ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
           ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
@@ -1115,6 +1126,7 @@ export default function Workspace() {
         displayName,
         queenPhase: initialPhase,
         queenBuilding: initialPhase === "building",
+        queenSupportsImages: session.queen_supports_images !== false,
         // Restore flowchart overlay from persisted events
         ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
         ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
@@ -1707,14 +1719,29 @@ export default function Workspace() {
           if (isQueen) console.log('[QUEEN] chatMsg:', chatMsg?.id, chatMsg?.content?.slice(0, 50), 'turn:', currentTurn);
           if (chatMsg && !suppressQueenMessages) {
             // Queen emits multiple client_output_delta / llm_text_delta snapshots
-            // across iterations and inner tool-loop turns.  Build a stable ID that
-            // groups streaming deltas for the *same* output (same execution +
-            // iteration + inner_turn) into one bubble, while keeping distinct
-            // outputs as separate bubbles so earlier text isn't overwritten.
+            // across iterations and inner tool-loop turns.  Merge all inner_turns
+            // within the same iteration into ONE bubble so the queen's multi-step
+            // tool loop (text → tool → text → tool → text) appears as one cohesive
+            // message rather than many small fragments.
             if (isQueen && (event.type === "client_output_delta" || event.type === "llm_text_delta") && event.execution_id) {
               const iter = event.data?.iteration ?? 0;
-              const inner = event.data?.inner_turn ?? 0;
-              chatMsg.id = `queen-stream-${event.execution_id}-${iter}-${inner}`;
+              const inner = (event.data?.inner_turn as number) ?? 0;
+              const iterKey = `${agentType}:${event.execution_id}:${iter}`;
+
+              // Store the latest snapshot for this inner_turn
+              if (!queenIterTextRef.current[iterKey]) {
+                queenIterTextRef.current[iterKey] = {};
+              }
+              const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
+              queenIterTextRef.current[iterKey][inner] = snapshot;
+
+              // Concatenate all inner_turn snapshots in order
+              const parts = queenIterTextRef.current[iterKey];
+              const sortedInners = Object.keys(parts).map(Number).sort((a, b) => a - b);
+              chatMsg.content = sortedInners.map(k => parts[k]).join("\n");
+
+              // Single ID per iteration — no inner_turn in the ID
+              chatMsg.id = `queen-stream-${event.execution_id}-${iter}`;
             }
             if (isQueen) {
               chatMsg.role = role;
@@ -1989,6 +2016,8 @@ export default function Workspace() {
                 role,
                 thread: agentType,
                 createdAt: eventCreatedAt,
+                nodeId: event.node_id || undefined,
+                executionId: event.execution_id || undefined,
               });
               return {
                 ...prev,
@@ -2060,6 +2089,8 @@ export default function Workspace() {
                 role,
                 thread: agentType,
                 createdAt: eventCreatedAt,
+                nodeId: event.node_id || undefined,
+                executionId: event.execution_id || undefined,
               });
               return {
                 ...prev,
@@ -2133,6 +2164,29 @@ export default function Workspace() {
             const usageBefore = (event.data?.usage_before as number) ?? "?";
             const usageAfter = (event.data?.usage_after as number) ?? "?";
             appendNodeLog(agentType, event.node_id, `${ts} INFO  Context compacted: ${usageBefore}% -> ${usageAfter}%`);
+          }
+          break;
+
+        case "context_usage_updated": {
+            const streamKey = isQueen ? "__queen__" : (event.node_id || streamId);
+            const usagePct = (event.data?.usage_pct as number) ?? 0;
+            const messageCount = (event.data?.message_count as number) ?? 0;
+            const estimatedTokens = (event.data?.estimated_tokens as number) ?? 0;
+            const maxTokens = (event.data?.max_context_tokens as number) ?? 0;
+            setAgentStates(prev => {
+              const state = prev[agentType];
+              if (!state) return prev;
+              return {
+                ...prev,
+                [agentType]: {
+                  ...state,
+                  contextUsage: {
+                    ...state.contextUsage,
+                    [streamKey]: { usagePct, messageCount, estimatedTokens, maxTokens },
+                  },
+                },
+              };
+            });
           }
           break;
 
@@ -2564,7 +2618,7 @@ export default function Workspace() {
     });
 
   // --- handleSend ---
-  const handleSend = useCallback((text: string, thread: string) => {
+  const handleSend = useCallback((text: string, thread: string, images?: import("@/components/ChatPanel").ImageContent[]) => {
     if (!activeSession) return;
     const state = agentStates[activeWorker];
 
@@ -2630,6 +2684,7 @@ export default function Workspace() {
     const userMsg: ChatMessage = {
       id: makeId(), agent: "You", agentColor: "",
       content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
+      images,
     };
     setSessionsByAgent(prev => ({
       ...prev,
@@ -2641,7 +2696,7 @@ export default function Workspace() {
     updateAgentState(activeWorker, { isTyping: true, queenIsTyping: true });
 
     if (state?.sessionId && state?.ready) {
-      executionApi.chat(state.sessionId, text).catch((err: unknown) => {
+      executionApi.chat(state.sessionId, text, images).catch((err: unknown) => {
         const errMsg = err instanceof Error ? err.message : String(err);
         const errorChatMsg: ChatMessage = {
           id: makeId(), agent: "System", agentColor: "",
@@ -3057,6 +3112,16 @@ export default function Workspace() {
           <KeyRound className="w-3.5 h-3.5" />
           Credentials
         </button>
+        {activeAgentState?.sessionId && (
+          <button
+            onClick={() => sessionsApi.revealFolder(activeAgentState.sessionId!).catch(() => {})}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
+            title="Open session data folder"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            Data
+          </button>
+        )}
       </TopBar>
 
       {/* Main content area */}
@@ -3174,6 +3239,8 @@ export default function Workspace() {
                 }
                 onMultiQuestionSubmit={handleMultiQuestionAnswer}
                 onQuestionDismiss={handleQuestionDismiss}
+                contextUsage={activeAgentState?.contextUsage}
+                supportsImages={activeAgentState?.queenSupportsImages ?? true}
               />
             )}
           </div>
@@ -3377,6 +3444,7 @@ export default function Workspace() {
                   workerSessionId={null}
                   nodeLogs={activeAgentState?.nodeLogs[resolvedSelectedNode.id] || []}
                   actionPlan={activeAgentState?.nodeActionPlans[resolvedSelectedNode.id]}
+                  contextUsage={activeAgentState?.contextUsage[resolvedSelectedNode.id]}
                   onClose={() => setSelectedNode(null)}
                 />
               )}

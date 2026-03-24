@@ -61,6 +61,150 @@ def get_preferred_model() -> str:
     return "anthropic/claude-sonnet-4-20250514"
 
 
+def get_preferred_worker_model() -> str | None:
+    """Return the user's preferred worker LLM model, or None if not configured.
+
+    Reads from the ``worker_llm`` section of ~/.hive/configuration.json.
+    Returns None when no worker-specific model is set, so callers can
+    fall back to the default (queen) model via ``get_preferred_model()``.
+    """
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if worker_llm.get("provider") and worker_llm.get("model"):
+        provider = str(worker_llm["provider"])
+        model = str(worker_llm["model"]).strip()
+        if provider.lower() == "openrouter" and model.lower().startswith("openrouter/"):
+            model = model[len("openrouter/") :]
+        if model:
+            return f"{provider}/{model}"
+    return None
+
+
+def get_worker_api_key() -> str | None:
+    """Return the API key for the worker LLM, falling back to the default key."""
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if not worker_llm:
+        return get_api_key()
+
+    # Worker-specific subscription / env var
+    if worker_llm.get("use_claude_code_subscription"):
+        try:
+            from framework.runner.runner import get_claude_code_token
+
+            token = get_claude_code_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
+    if worker_llm.get("use_codex_subscription"):
+        try:
+            from framework.runner.runner import get_codex_token
+
+            token = get_codex_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
+    if worker_llm.get("use_kimi_code_subscription"):
+        try:
+            from framework.runner.runner import get_kimi_code_token
+
+            token = get_kimi_code_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
+    if worker_llm.get("use_antigravity_subscription"):
+        try:
+            from framework.runner.runner import get_antigravity_token
+
+            token = get_antigravity_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
+    api_key_env_var = worker_llm.get("api_key_env_var")
+    if api_key_env_var:
+        return os.environ.get(api_key_env_var)
+
+    # Fall back to default key
+    return get_api_key()
+
+
+def get_worker_api_base() -> str | None:
+    """Return the api_base for the worker LLM, falling back to the default."""
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if not worker_llm:
+        return get_api_base()
+
+    if worker_llm.get("use_codex_subscription"):
+        return "https://chatgpt.com/backend-api/codex"
+    if worker_llm.get("use_kimi_code_subscription"):
+        return "https://api.kimi.com/coding"
+    if worker_llm.get("use_antigravity_subscription"):
+        # Antigravity uses AntigravityProvider directly — no api_base needed.
+        return None
+    if worker_llm.get("api_base"):
+        return worker_llm["api_base"]
+    if str(worker_llm.get("provider", "")).lower() == "openrouter":
+        return OPENROUTER_API_BASE
+    return None
+
+
+def get_worker_llm_extra_kwargs() -> dict[str, Any]:
+    """Return extra kwargs for the worker LLM provider."""
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if not worker_llm:
+        return get_llm_extra_kwargs()
+
+    if worker_llm.get("use_claude_code_subscription"):
+        api_key = get_worker_api_key()
+        if api_key:
+            return {
+                "extra_headers": {"authorization": f"Bearer {api_key}"},
+            }
+    if worker_llm.get("use_codex_subscription"):
+        api_key = get_worker_api_key()
+        if api_key:
+            headers: dict[str, str] = {
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "CodexBar",
+            }
+            try:
+                from framework.runner.runner import get_codex_account_id
+
+                account_id = get_codex_account_id()
+                if account_id:
+                    headers["ChatGPT-Account-Id"] = account_id
+            except ImportError:
+                pass
+            return {
+                "extra_headers": headers,
+                "store": False,
+                "allowed_openai_params": ["store"],
+            }
+    return {}
+
+
+def get_worker_max_tokens() -> int:
+    """Return max_tokens for the worker LLM, falling back to default."""
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if worker_llm and "max_tokens" in worker_llm:
+        return worker_llm["max_tokens"]
+    return get_max_tokens()
+
+
+def get_worker_max_context_tokens() -> int:
+    """Return max_context_tokens for the worker LLM, falling back to default."""
+    worker_llm = get_hive_config().get("worker_llm", {})
+    if worker_llm and "max_context_tokens" in worker_llm:
+        return worker_llm["max_context_tokens"]
+    return get_max_context_tokens()
+
+
 def get_max_tokens() -> int:
     """Return the configured max_tokens, falling back to DEFAULT_MAX_TOKENS."""
     return get_hive_config().get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
@@ -120,11 +264,102 @@ def get_api_key() -> str | None:
         except ImportError:
             pass
 
+    # Antigravity subscription: read OAuth token from accounts JSON
+    if llm.get("use_antigravity_subscription"):
+        try:
+            from framework.runner.runner import get_antigravity_token
+
+            token = get_antigravity_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
         return os.environ.get(api_key_env_var)
     return None
+
+
+# OAuth credentials for Antigravity are fetched from the opencode-antigravity-auth project.
+# This project reverse-engineered and published the public OAuth credentials
+# for Google's Antigravity/Cloud Code Assist API.
+# Source: https://github.com/NoeFabris/opencode-antigravity-auth
+_ANTIGRAVITY_CREDENTIALS_URL = (
+    "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/dev/src/constants.ts"
+)
+_antigravity_credentials_cache: tuple[str | None, str | None] = (None, None)
+
+
+def _fetch_antigravity_credentials() -> tuple[str | None, str | None]:
+    """Fetch OAuth client ID and secret from the public npm package source on GitHub."""
+    global _antigravity_credentials_cache
+    if _antigravity_credentials_cache[0] and _antigravity_credentials_cache[1]:
+        return _antigravity_credentials_cache
+
+    import re
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(
+            _ANTIGRAVITY_CREDENTIALS_URL, headers={"User-Agent": "Hive/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            content = resp.read().decode("utf-8")
+            id_match = re.search(r'ANTIGRAVITY_CLIENT_ID\s*=\s*"([^"]+)"', content)
+            secret_match = re.search(r'ANTIGRAVITY_CLIENT_SECRET\s*=\s*"([^"]+)"', content)
+            client_id = id_match.group(1) if id_match else None
+            client_secret = secret_match.group(1) if secret_match else None
+            if client_id and client_secret:
+                _antigravity_credentials_cache = (client_id, client_secret)
+            return client_id, client_secret
+    except Exception as e:
+        logger.debug("Failed to fetch Antigravity credentials from public source: %s", e)
+    return None, None
+
+
+def get_antigravity_client_id() -> str:
+    """Return the Antigravity OAuth application client ID.
+
+    Checked in order:
+    1. ``ANTIGRAVITY_CLIENT_ID`` environment variable
+    2. ``llm.antigravity_client_id`` in ~/.hive/configuration.json
+    3. Fetch from public source (opencode-antigravity-auth project on GitHub)
+    """
+    env = os.environ.get("ANTIGRAVITY_CLIENT_ID")
+    if env:
+        return env
+    cfg_val = get_hive_config().get("llm", {}).get("antigravity_client_id")
+    if cfg_val:
+        return cfg_val
+    # Fetch from public source
+    client_id, _ = _fetch_antigravity_credentials()
+    if client_id:
+        return client_id
+    raise RuntimeError("Could not obtain Antigravity OAuth client ID")
+
+
+def get_antigravity_client_secret() -> str | None:
+    """Return the Antigravity OAuth client secret.
+
+    Checked in order:
+    1. ``ANTIGRAVITY_CLIENT_SECRET`` environment variable
+    2. ``llm.antigravity_client_secret`` in ~/.hive/configuration.json
+    3. Fetch from public source (opencode-antigravity-auth project on GitHub)
+
+    Returns None when not found — token refresh will be skipped and
+    the caller must use whatever access token is already available.
+    """
+    env = os.environ.get("ANTIGRAVITY_CLIENT_SECRET")
+    if env:
+        return env
+    cfg_val = get_hive_config().get("llm", {}).get("antigravity_client_secret") or None
+    if cfg_val:
+        return cfg_val
+    # Fetch from public source
+    _, secret = _fetch_antigravity_credentials()
+    return secret
 
 
 def get_gcu_enabled() -> bool:
@@ -149,6 +384,9 @@ def get_api_base() -> str | None:
     if llm.get("use_kimi_code_subscription"):
         # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
         return "https://api.kimi.com/coding"
+    if llm.get("use_antigravity_subscription"):
+        # Antigravity uses AntigravityProvider directly — no api_base needed.
+        return None
     if llm.get("api_base"):
         return llm["api_base"]
     if str(llm.get("provider", "")).lower() == "openrouter":

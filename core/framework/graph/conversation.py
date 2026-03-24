@@ -33,10 +33,20 @@ class Message:
     is_transition_marker: bool = False
     # True when this message is real human input (from /chat), not a system prompt
     is_client_input: bool = False
+    # Optional image content blocks (e.g. from browser_screenshot)
+    image_content: list[dict[str, Any]] | None = None
+    # True when message contains an activated skill body (AS-10: never prune)
+    is_skill_content: bool = False
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
         if self.role == "user":
+            if self.image_content:
+                blocks: list[dict[str, Any]] = []
+                if self.content:
+                    blocks.append({"type": "text", "text": self.content})
+                blocks.extend(self.image_content)
+                return {"role": "user", "content": blocks}
             return {"role": "user", "content": self.content}
 
         if self.role == "assistant":
@@ -47,6 +57,15 @@ class Message:
 
         # role == "tool"
         content = f"ERROR: {self.content}" if self.is_error else self.content
+        if self.image_content:
+            # Multimodal tool result: text + image content blocks
+            blocks: list[dict[str, Any]] = [{"type": "text", "text": content}]
+            blocks.extend(self.image_content)
+            return {
+                "role": "tool",
+                "tool_call_id": self.tool_use_id,
+                "content": blocks,
+            }
         return {
             "role": "tool",
             "tool_call_id": self.tool_use_id,
@@ -72,6 +91,8 @@ class Message:
             d["is_transition_marker"] = self.is_transition_marker
         if self.is_client_input:
             d["is_client_input"] = self.is_client_input
+        if self.image_content is not None:
+            d["image_content"] = self.image_content
         return d
 
     @classmethod
@@ -87,6 +108,7 @@ class Message:
             phase_id=data.get("phase_id"),
             is_transition_marker=data.get("is_transition_marker", False),
             is_client_input=data.get("is_client_input", False),
+            image_content=data.get("image_content"),
         )
 
 
@@ -373,6 +395,7 @@ class NodeConversation:
         *,
         is_transition_marker: bool = False,
         is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
     ) -> Message:
         msg = Message(
             seq=self._next_seq,
@@ -381,6 +404,7 @@ class NodeConversation:
             phase_id=self._current_phase,
             is_transition_marker=is_transition_marker,
             is_client_input=is_client_input,
+            image_content=image_content,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -409,6 +433,8 @@ class NodeConversation:
         tool_use_id: str,
         content: str,
         is_error: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
+        is_skill_content: bool = False,
     ) -> Message:
         msg = Message(
             seq=self._next_seq,
@@ -417,6 +443,8 @@ class NodeConversation:
             tool_use_id=tool_use_id,
             is_error=is_error,
             phase_id=self._current_phase,
+            image_content=image_content,
+            is_skill_content=is_skill_content,
         )
         self._messages.append(msg)
         self._next_seq += 1
@@ -610,6 +638,8 @@ class NodeConversation:
                 continue
             if msg.is_error:
                 continue  # never prune errors
+            if msg.is_skill_content:
+                continue  # never prune activated skill instructions (AS-10)
             if msg.content.startswith("[Pruned tool result"):
                 continue  # already pruned
             # Tiny results (set_output acks, confirmations) — pruning

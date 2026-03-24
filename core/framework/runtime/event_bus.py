@@ -117,6 +117,7 @@ class EventType(StrEnum):
 
     # Context management
     CONTEXT_COMPACTED = "context_compacted"
+    CONTEXT_USAGE_UPDATED = "context_usage_updated"
 
     # External triggers
     WEBHOOK_RECEIVED = "webhook_received"
@@ -534,8 +535,8 @@ class EventBus:
             async with self._semaphore:
                 try:
                     await handler(event)
-                except Exception as e:
-                    logger.error(f"Handler error for {event.type}: {e}")
+                except Exception:
+                    logger.exception(f"Handler error for {event.type}")
 
         # Run all handlers concurrently
         await asyncio.gather(*[run_handler(h) for h in handlers], return_exceptions=True)

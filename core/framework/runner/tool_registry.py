@@ -16,6 +16,8 @@ from framework.llm.provider import Tool, ToolResult, ToolUse
 
 logger = logging.getLogger(__name__)
 
+_INPUT_LOG_MAX_LEN = 500
+
 # Per-execution context overrides.  Each asyncio task (and thus each
 # concurrent graph execution) gets its own copy, so there are no races
 # when multiple ExecutionStreams run in parallel.
@@ -64,7 +66,8 @@ class ToolRegistry:
         self._mcp_cred_snapshot: set[str] = set()  # Credential filenames at MCP load time
         self._mcp_aden_key_snapshot: str | None = None  # ADEN_API_KEY value at MCP load time
         self._mcp_server_tools: dict[str, set[str]] = {}  # server name -> tool names
-        self._mcp_registry_selection: dict[str, Any] | None = None  # for resync
+        # Agent dir for re-loading registry MCP after credential resync.
+        self._mcp_registry_agent_path: Path | None = None
 
     def register(
         self,
@@ -246,6 +249,13 @@ class ToolRegistry:
         def _wrap_result(tool_use_id: str, result: Any) -> ToolResult:
             if isinstance(result, ToolResult):
                 return result
+            # MCP client returns dict with _images when image content is present
+            if isinstance(result, dict) and "_images" in result:
+                return ToolResult(
+                    tool_use_id=tool_use_id,
+                    content=result.get("_text", ""),
+                    image_content=result["_images"],
+                )
             return ToolResult(
                 tool_use_id=tool_use_id,
                 content=json.dumps(result) if not isinstance(result, str) else result,
@@ -272,6 +282,17 @@ class ToolRegistry:
                             r = await result
                             return _wrap_result(tool_use.id, r)
                         except Exception as exc:
+                            inputs_str = json.dumps(tool_use.input, default=str)
+                            if len(inputs_str) > _INPUT_LOG_MAX_LEN:
+                                inputs_str = inputs_str[:_INPUT_LOG_MAX_LEN] + "...(truncated)"
+                            logger.error(
+                                "Async tool '%s' failed (tool_use_id=%s): %s\nInputs: %s",
+                                tool_use.name,
+                                tool_use.id,
+                                exc,
+                                inputs_str,
+                                exc_info=True,
+                            )
                             return ToolResult(
                                 tool_use_id=tool_use.id,
                                 content=json.dumps({"error": str(exc)}),
@@ -282,6 +303,17 @@ class ToolRegistry:
 
                 return _wrap_result(tool_use.id, result)
             except Exception as e:
+                inputs_str = json.dumps(tool_use.input, default=str)
+                if len(inputs_str) > _INPUT_LOG_MAX_LEN:
+                    inputs_str = inputs_str[:_INPUT_LOG_MAX_LEN] + "...(truncated)"
+                logger.error(
+                    "Tool '%s' execution failed for tool_use_id=%s: %s\nInputs: %s",
+                    tool_use.name,
+                    tool_use.id,
+                    e,
+                    inputs_str,
+                    exc_info=True,
+                )
                 return ToolResult(
                     tool_use_id=tool_use.id,
                     content=json.dumps({"error": str(e)}),
@@ -456,107 +488,127 @@ class ToolRegistry:
             # Treat top-level keys as server names
             server_list = [{"name": name, **cfg} for name, cfg in config.items()]
 
-        for server_config in server_list:
-            server_config = self._resolve_mcp_server_config(server_config, base_dir)
-            for _attempt in range(2):
-                try:
-                    self.register_mcp_server(server_config)
-                    break
-                except Exception as e:
-                    name = server_config.get("name", "unknown")
-                    if _attempt == 0:
-                        logger.warning(
-                            "MCP server '%s' failed to register, retrying in 2s: %s",
-                            name,
-                            e,
-                        )
-                        import time
-
-                        time.sleep(2)
-                    else:
-                        logger.warning("MCP server '%s' failed after retry: %s", name, e)
+        resolved_server_list = [
+            self._resolve_mcp_server_config(server_config, base_dir)
+            for server_config in server_list
+        ]
+        # Ordered first-wins for duplicate tool names across servers; keep tools.py tools.
+        self.load_registry_servers(
+            resolved_server_list,
+            log_summary=False,
+            preserve_existing_tools=True,
+            log_collisions=False,
+        )
 
         # Snapshot credential files and ADEN_API_KEY so we can detect mid-session changes
         self._mcp_cred_snapshot = self._snapshot_credentials()
         self._mcp_aden_key_snapshot = os.environ.get("ADEN_API_KEY")
 
+    def _register_mcp_server_with_retry(
+        self,
+        server_config: dict[str, Any],
+        *,
+        preserve_existing_tools: bool = True,
+        tool_cap: int | None = None,
+        log_collisions: bool = False,
+    ) -> tuple[bool, int, str | None]:
+        """Register a single MCP server with one retry for transient failures."""
+        name = server_config.get("name", "unknown")
+        last_error: str | None = None
+
+        for attempt in range(2):
+            try:
+                count = self.register_mcp_server(
+                    server_config,
+                    preserve_existing_tools=preserve_existing_tools,
+                    tool_cap=tool_cap,
+                    log_collisions=log_collisions,
+                )
+                if count > 0:
+                    return True, count, None
+                last_error = "registered 0 tools"
+            except Exception as exc:
+                last_error = str(exc)
+
+            if attempt == 0:
+                logger.warning(
+                    "MCP server '%s' failed to register, retrying in 2s: %s",
+                    name,
+                    last_error,
+                )
+                import time
+
+                time.sleep(2)
+            else:
+                logger.warning("MCP server '%s' failed after retry: %s", name, last_error)
+
+        return False, 0, last_error
+
     def load_registry_servers(
         self,
+        server_list: list[dict[str, Any]],
         *,
-        include: list[str] | None = None,
-        tags: list[str] | None = None,
-        exclude: list[str] | None = None,
-        profile: str | None = None,
+        log_summary: bool = True,
+        preserve_existing_tools: bool = True,
         max_tools: int | None = None,
-        versions: dict[str, str] | None = None,
-    ) -> int:
+        log_collisions: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Register MCP servers from a resolved config list (registry and/or static).
+
+        ``preserve_existing_tools`` enforces first-wins tool names (FR-100): later
+        servers skip names already taken— including tools from ``mcp_servers.json``
+        or ``tools.py`` when those were loaded first.
+
+        ``max_tools`` caps how many *new* tool names are registered across this batch
+        (collisions do not consume the cap). When ``log_collisions`` is True, skipped
+        duplicate names emit a warning (FR-101).
         """
-        Resolve and load MCP servers based on `mcp_registry.json` selection.
+        results: list[dict[str, Any]] = []
+        tools_added_batch = 0
 
-        Implements:
-        - deterministic server order (resolved by resolver)
-        - first-wins tool collisions (existing tools are preserved)
-        - `max_tools` cap on *newly registered* tools from registry servers
-        """
-
-        from framework.runner.mcp_registry_resolver import resolve_registry_servers
-
-        self._mcp_registry_selection = {
-            "include": include,
-            "tags": tags,
-            "exclude": exclude,
-            "profile": profile,
-            "max_tools": max_tools,
-            "versions": versions,
-        }
-
-        resolved_servers = resolve_registry_servers(
-            include=include,
-            tags=tags,
-            exclude=exclude,
-            profile=profile,
-            max_tools=max_tools,
-            versions=versions or {},
-        )
-        if not resolved_servers:
-            logger.warning("MCP registry selection resolved to 0 servers; nothing to load")
-            return 0
-
-        tools_added = 0
-        repo_root = Path(__file__).resolve().parents[3]
-
-        for server_cfg in resolved_servers:
-            if not isinstance(server_cfg, dict):
-                continue
-
-            if max_tools is not None and tools_added >= max_tools:
-                break
-
-            # Normalize stdio config so scripts/cwd behave like mcp_servers.json loading.
-            server_cfg = self._resolve_mcp_server_config(server_cfg, repo_root)
-
-            remaining = None
+        for server_config in server_list:
+            remaining: int | None = None
             if max_tools is not None:
-                remaining = max_tools - tools_added
+                remaining = max_tools - tools_added_batch
                 if remaining <= 0:
                     break
 
-            added = self.register_mcp_server(
-                server_cfg,
-                preserve_existing_tools=True,
+            name = server_config.get("name", "unknown")
+            success, tools_loaded, error = self._register_mcp_server_with_retry(
+                server_config,
+                preserve_existing_tools=preserve_existing_tools,
                 tool_cap=remaining,
-                log_collisions=True,
+                log_collisions=log_collisions,
             )
-            tools_added += added
+            tools_added_batch += tools_loaded
+            result = {
+                "server": name,
+                "status": "loaded" if success else "skipped",
+                "tools_loaded": tools_loaded,
+                "skipped_reason": None if success else (error or "unknown error"),
+            }
+            results.append(result)
 
-        return tools_added
+            if log_summary:
+                logger.info(
+                    "MCP registry server resolution",
+                    extra={
+                        "event": "mcp_registry_server_resolution",
+                        "server": result["server"],
+                        "status": result["status"],
+                        "tools_loaded": result["tools_loaded"],
+                        "skipped_reason": result["skipped_reason"],
+                    },
+                )
+
+        return results
 
     def register_mcp_server(
         self,
         server_config: dict[str, Any],
-        use_connection_manager: bool = False,
+        use_connection_manager: bool = True,
         *,
-        preserve_existing_tools: bool = False,
+        preserve_existing_tools: bool = True,
         tool_cap: int | None = None,
         log_collisions: bool = False,
     ) -> int:
@@ -575,6 +627,9 @@ class ToolRegistry:
                 - headers: HTTP headers (for http)
                 - description: Server description (optional)
             use_connection_manager: When True, reuse a shared client keyed by server name
+            preserve_existing_tools: If True, do not replace tools already in the registry.
+            tool_cap: Max tools to newly register from this server (None = unlimited).
+            log_collisions: If True, log when this server skips a tool name already taken.
 
         Returns:
             Number of tools registered from this server
@@ -593,6 +648,7 @@ class ToolRegistry:
                 cwd=server_config.get("cwd"),
                 url=server_config.get("url"),
                 headers=server_config.get("headers", {}),
+                socket_path=server_config.get("socket_path"),
                 description=server_config.get("description", ""),
             )
 
@@ -665,14 +721,25 @@ class ToolRegistry:
                             }
                             merged_inputs = {**clean_inputs, **filtered_context}
                             result = client_ref.call_tool(tool_name, merged_inputs)
-                            # MCP tools return content array, extract the result
+                            # MCP client already extracts content (returns str
+                            # or {"_text": ..., "_images": ...} for image results).
+                            # Handle legacy list format from HTTP transport.
                             if isinstance(result, list) and len(result) > 0:
                                 if isinstance(result[0], dict) and "text" in result[0]:
                                     return result[0]["text"]
                                 return result[0]
                             return result
                         except Exception as e:
-                            logger.error(f"MCP tool '{tool_name}' execution failed: {e}")
+                            inputs_str = json.dumps(inputs, default=str)
+                            if len(inputs_str) > _INPUT_LOG_MAX_LEN:
+                                inputs_str = inputs_str[:_INPUT_LOG_MAX_LEN] + "...(truncated)"
+                            logger.error(
+                                "MCP tool '%s' execution failed: %s\nInputs: %s",
+                                tool_name,
+                                e,
+                                inputs_str,
+                                exc_info=True,
+                            )
                             return {"error": str(e)}
 
                     return executor
@@ -792,6 +859,37 @@ class ToolRegistry:
     # MCP credential resync
     # ------------------------------------------------------------------
 
+    def set_mcp_registry_agent_path(self, agent_path: Path | None) -> None:
+        """Remember agent dir so registry MCP servers reload after credential resync."""
+        self._mcp_registry_agent_path = None if agent_path is None else Path(agent_path)
+
+    def reload_registry_mcp_servers_after_resync(self) -> None:
+        """Re-run ``mcp_registry.json`` resolution and register servers (post-resync)."""
+        if self._mcp_registry_agent_path is None:
+            return
+        from framework.runner.mcp_registry import MCPRegistry
+
+        try:
+            reg = MCPRegistry()
+            reg.initialize()
+            configs, selection_max_tools = reg.load_agent_selection(self._mcp_registry_agent_path)
+        except Exception as exc:
+            logger.warning(
+                "Failed to reload MCP registry servers after resync for '%s': %s",
+                self._mcp_registry_agent_path.name,
+                exc,
+            )
+            return
+        if not configs:
+            return
+        self.load_registry_servers(
+            configs,
+            log_summary=True,
+            preserve_existing_tools=True,
+            log_collisions=True,
+            max_tools=selection_max_tools,
+        )
+
     def _snapshot_credentials(self) -> set[str]:
         """Return the set of credential filenames currently on disk."""
         try:
@@ -841,9 +939,8 @@ class ToolRegistry:
 
         # 3. Re-load MCP servers (spawns fresh subprocesses with new credentials)
         self.load_mcp_config(self._mcp_config_path)
-        if self._mcp_registry_selection is not None:
-            # Re-apply the same registry selection (preserves tool collision semantics).
-            self.load_registry_servers(**self._mcp_registry_selection)
+        if self._mcp_registry_agent_path is not None:
+            self.reload_registry_mcp_servers_after_resync()
 
         logger.info("MCP server resync complete")
         return True

@@ -69,7 +69,13 @@ class TestSkillCatalog:
 
     def test_to_prompt_xml_generation(self):
         skills = [
-            _make_skill("alpha", "Alpha skill", "project", location="/p/alpha/SKILL.md"),
+            _make_skill(
+                "alpha",
+                "Alpha skill",
+                "project",
+                location="/p/alpha/SKILL.md",
+                base_dir="/p/alpha",
+            ),
             _make_skill("beta", "Beta skill", "user", location="/u/beta/SKILL.md"),
         ]
         catalog = SkillCatalog(skills)
@@ -81,6 +87,7 @@ class TestSkillCatalog:
         assert "<name>beta</name>" in prompt
         assert "<description>Alpha skill</description>" in prompt
         assert "<location>/p/alpha/SKILL.md</location>" in prompt
+        assert "<base_dir>/p/alpha</base_dir>" in prompt
 
     def test_to_prompt_sorted_by_name(self):
         skills = [
