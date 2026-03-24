@@ -4,7 +4,6 @@ from aden_tools.tools.pushover_tool.pushover_tool import register_tools
 
 
 class TestRegisterTools:
-
     def setup_method(self):
         self.mcp = MagicMock()
         self.tools = {}
