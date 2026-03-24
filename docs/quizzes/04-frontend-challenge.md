@@ -237,7 +237,7 @@ Provide specific techniques and code examples for each.
 2. Name it `aden-frontend-YOURNAME.md`
 3. Include code files as separate Gist files
 4. If you created working code, include a CodeSandbox/StackBlitz link
-5. Email to `careers@adenhq.com`
+5. Email to `contact@adenhq.com`
    - Subject: `[Frontend Challenge] Your Name`
 
 ---
