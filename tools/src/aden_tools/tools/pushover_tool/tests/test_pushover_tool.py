@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
+
 from aden_tools.tools.pushover_tool.pushover_tool import register_tools
+
 
 class TestRegisterTools:
 
