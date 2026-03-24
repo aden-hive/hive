@@ -75,7 +75,7 @@ Use Hive when you need:
 - **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
 - **[Changelog](https://github.com/aden-hive/hive/releases)** - Latest updates and releases
 - **[Roadmap](docs/roadmap.md)** - Upcoming features and plans
-- **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
+- **[Report Issues](https://github.com/aden-hive/hive/issues)** - Bug reports and feature requests
 - **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Quick Start
