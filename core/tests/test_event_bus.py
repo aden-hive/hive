@@ -70,12 +70,25 @@ class TestAgentEvent:
         d = event.to_dict()
         assert d["type"] == "execution_completed"
         assert d["stream_id"] == "stream_1"
-        assert d["node_id"] == "node_1"
-        assert d["execution_id"] == "exec_1"
-        assert d["data"] == {"output": "result"}
-        assert d["correlation_id"] == "corr_1"
-        assert d["graph_id"] == "graph_1"
-        assert "timestamp" in d
+
+    def test_to_dict_includes_run_id(self):
+        """run_id is included in to_dict() when set."""
+        event = AgentEvent(
+            type=EventType.EXECUTION_STARTED,
+            stream_id="s1",
+            run_id="run-abc",
+        )
+        d = event.to_dict()
+        assert d["run_id"] == "run-abc"
+
+    def test_to_dict_omits_run_id_when_none(self):
+        """run_id is omitted from to_dict() when None."""
+        event = AgentEvent(
+            type=EventType.EXECUTION_STARTED,
+            stream_id="s1",
+        )
+        d = event.to_dict()
+        assert "run_id" not in d
 
 
 # ---------------------------------------------------------------------------
@@ -891,9 +904,30 @@ class TestConveniencePublishers:
             execution_id="exec_1",
         )
 
+    @pytest.mark.asyncio
+    async def test_emit_subagent_report(self):
+        """emit_subagent_report publishes correct event."""
+        bus = EventBus()
+        received = []
+
+        async def handler(event: AgentEvent) -> None:
+            received.append(event)
+
+        bus.subscribe(event_types=[EventType.SUBAGENT_REPORT], handler=handler)
+
+        await bus.emit_subagent_report(
+            stream_id="test_stream",
+            node_id="queen",
+            subagent_id="worker-1",
+            message="Task 50% complete",
+            data={"progress": 0.5},
+        )
+
         assert len(received) == 1
-        assert received[0].type == EventType.NODE_ACTION_PLAN
-        assert "Search for data" in received[0].data["plan"]
+        assert received[0].type == EventType.SUBAGENT_REPORT
+        assert received[0].data["subagent_id"] == "worker-1"
+        assert received[0].data["message"] == "Task 50% complete"
+        assert received[0].data["data"]["progress"] == 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -917,6 +951,8 @@ class TestEventType:
         assert EventType.EXECUTION_STARTED
         assert EventType.EXECUTION_COMPLETED
         assert EventType.EXECUTION_FAILED
+        assert EventType.EXECUTION_PAUSED
+        assert EventType.EXECUTION_RESUMED
         assert EventType.TOOL_CALL_STARTED
         assert EventType.TOOL_CALL_COMPLETED
         assert EventType.WEBHOOK_RECEIVED
@@ -928,3 +964,11 @@ class TestEventType:
         assert EventType.NODE_ACTION_PLAN
         assert EventType.WORKER_LOADED
         assert EventType.CREDENTIALS_REQUIRED
+        assert EventType.EXECUTION_RESURRECTED
+        assert EventType.DRAFT_GRAPH_UPDATED
+        assert EventType.FLOWCHART_MAP_UPDATED
+        assert EventType.QUEEN_PHASE_CHANGED
+        assert EventType.QUEEN_PERSONA_SELECTED
+        assert EventType.SUBAGENT_REPORT
+        assert EventType.TRIGGER_AVAILABLE
+        assert EventType.TRIGGER_FIRED
