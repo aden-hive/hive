@@ -92,6 +92,7 @@ from .huggingface import HUGGINGFACE_CREDENTIALS
 from .intercom import INTERCOM_CREDENTIALS
 from .jira import JIRA_CREDENTIALS
 from .kafka import KAFKA_CREDENTIALS
+from .kubernetes import KUBERNETES_CREDENTIALS
 from .langfuse import LANGFUSE_CREDENTIALS
 from .linear import LINEAR_CREDENTIALS
 from .lusha import LUSHA_CREDENTIALS
@@ -217,6 +218,7 @@ CREDENTIAL_SPECS = {
     **ZENDESK_CREDENTIALS,
     **ZOHO_CRM_CREDENTIALS,
     **ZOOM_CREDENTIALS,
+    **KUBERNETES_CREDENTIALS
 }
 
 __all__ = [
@@ -309,4 +311,5 @@ __all__ = [
     "ZENDESK_CREDENTIALS",
     "ZOHO_CRM_CREDENTIALS",
     "ZOOM_CREDENTIALS",
+    "KUBERNETES_CREDENTIALS"
 ]
