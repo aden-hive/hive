@@ -92,6 +92,24 @@ uv run python -m framework test-list <agent_path>
 
 For detailed testing workflows, see [developer-guide.md](../docs/developer-guide.md).
 
+### MCP Server Registry Tools
+
+Contributor tooling for creating, validating, and testing MCP server manifests:
+
+```bash
+# Scaffold a new manifest interactively
+hive mcp init
+
+# Scaffold with server introspection (pre-fills tools list)
+hive mcp init --server-url http://localhost:4010
+
+# Validate a manifest against the registry schema
+hive mcp validate path/to/manifest.json
+
+# Test a server against its manifest (starts server, checks tools)
+hive mcp test path/to/manifest.json
+```
+
 ### Analyzing Agent Behavior with Builder
 
 The BuilderQuery interface allows you to analyze agent runs and identify improvements:
