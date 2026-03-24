@@ -137,6 +137,32 @@ def append_episodic_entry(content: str) -> None:
     with ep_path.open("a", encoding="utf-8") as f:
         f.write(block)
 
+    # Immediately create a bare index entry (no enrichment — that happens at
+    # consolidation time).  Wrapped so any indexing failure never interrupts
+    # the diary write.
+    try:
+        _post_append_index_hook(today.strftime("%Y-%m-%d"), timestamp, content.strip())
+    except Exception:
+        logger.warning("queen_memory: index hook failed on diary append", exc_info=True)
+
+
+def _post_append_index_hook(date_str: str, timestamp: str, prose: str) -> None:
+    """Create a bare MemoryEntry in the index for a freshly-appended diary section."""
+    from framework.agents.queen.queen_memory_index import (
+        get_entry,
+        index_entry_from_diary_section,
+        load_index,
+        put_entry,
+        save_index,
+    )
+
+    index = load_index()
+    entry_id = f"{date_str}:{timestamp}"
+    if get_entry(index, entry_id) is None:
+        entry = index_entry_from_diary_section(date_str, timestamp, prose)
+        put_entry(index, entry)
+        save_index(index)
+
 
 def seed_if_missing() -> None:
     """Create MEMORY.md with a blank template if it doesn't exist yet."""
@@ -311,9 +337,10 @@ async def consolidate_queen_memory(
         llm: LLMProvider instance (must support acomplete()).
     """
     try:
+        logger.info("queen_memory: consolidation triggered for session %s", session_id)
         session_context = read_session_context(session_dir)
         if not session_context:
-            logger.debug("queen_memory: no session context, skipping consolidation")
+            logger.info("queen_memory: no session context found, skipping")
             return
 
         logger.info("queen_memory: consolidating memory for session %s ...", session_id)
@@ -388,6 +415,14 @@ async def consolidate_queen_memory(
                 len(diary_entry),
             )
 
+        # Update the memory index for today's entries: enrich, embed, link,
+        # and optionally evolve neighbour metadata.  Wrapped so failures never
+        # block or disrupt the main consolidation path.
+        try:
+            await _update_index_after_consolidation(today.strftime("%Y-%m-%d"), llm)
+        except Exception:
+            logger.warning("queen_memory: index update failed after consolidation", exc_info=True)
+
     except Exception:
         tb = traceback.format_exc()
         logger.exception("queen_memory: consolidation failed")
@@ -401,3 +436,68 @@ async def consolidate_queen_memory(
             )
         except OSError:
             pass  # Cannot write error file; original exception already logged
+
+
+async def _update_index_after_consolidation(date_str: str, llm: object) -> None:
+    """Enrich, embed, link, and evolve today's memory index entries.
+
+    Called after the main semantic/diary LLM writes complete.  All failures
+    are silently logged — this function must never propagate exceptions.
+    """
+    from framework.agents.queen.queen_memory_index import (
+        embed_text,
+        embeddings_enabled,
+        get_embed_model,
+        link_entry,
+        load_index,
+        maybe_evolve_neighbors,
+        put_entry,
+        rebuild_index_for_date,
+        save_index,
+    )
+
+    # Phase 1 — ensure all diary sections are in the index and enriched
+    await rebuild_index_for_date(date_str, llm=llm)
+
+    if not embeddings_enabled():
+        logger.debug("queen_memory: embeddings not configured, skipping embed/link/evolve")
+        return  # Phases 2-5 require embeddings
+
+    logger.info("queen_memory: running embed/link/evolve for %s", date_str)
+    # Phases 2-5 — embed, link, evolve any entries still missing vectors
+    index = load_index()
+    entries = index.get("entries", {})
+    newly_embedded: list[str] = []
+
+    for entry_id, raw in entries.items():
+        if not entry_id.startswith(date_str):
+            continue
+        if raw.get("embedding") is not None:
+            continue
+        prose = raw.get("summary", "")
+        if not prose:
+            continue
+        vec = await embed_text(prose)
+        if vec is not None:
+            raw["embedding"] = vec
+            index["embed_model"] = get_embed_model()
+            index["embed_dim"] = len(vec)
+            newly_embedded.append(entry_id)
+
+    if newly_embedded:
+        save_index(index)
+
+    # Phase 3 — cross-reference linking for newly embedded entries
+    for entry_id in newly_embedded:
+        linked = link_entry(index, entry_id)
+        # Phase 5 — memory evolution for top neighbours
+        if linked:
+            await maybe_evolve_neighbors(entry_id, linked, index, llm)
+
+    if newly_embedded:
+        save_index(index)
+        logger.debug(
+            "queen_memory: indexed %d new embedding(s) for %s",
+            len(newly_embedded),
+            date_str,
+        )

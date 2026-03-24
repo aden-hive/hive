@@ -362,6 +362,48 @@ def get_antigravity_client_secret() -> str | None:
     return secret
 
 
+def get_embed_model() -> str | None:
+    """Return the configured embedding model string, or None if not set.
+
+    Reads from the ``embedding`` section of ~/.hive/configuration.json:
+
+        {
+          "embedding": {
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "api_key_env_var": "OPENAI_API_KEY"
+          }
+        }
+
+    Returns a litellm-compatible ``"provider/model"`` string, e.g.
+    ``"openai/text-embedding-3-small"``.
+    Falls back to the ``HIVE_EMBED_MODEL`` environment variable for
+    backward compatibility.
+    """
+    embed = get_hive_config().get("embedding", {})
+    if embed.get("provider") and embed.get("model"):
+        provider = str(embed["provider"]).strip()
+        model = str(embed["model"]).strip()
+        if provider and model:
+            return f"{provider}/{model}"
+    return os.environ.get("HIVE_EMBED_MODEL") or None
+
+
+def get_embed_api_key() -> str | None:
+    """Return the API key for the embedding provider, or None if not set."""
+    embed = get_hive_config().get("embedding", {})
+    api_key_env_var = embed.get("api_key_env_var")
+    if api_key_env_var:
+        return os.environ.get(api_key_env_var)
+    return None
+
+
+def get_embed_api_base() -> str | None:
+    """Return a custom api_base for the embedding provider, or None."""
+    embed = get_hive_config().get("embedding", {})
+    return embed.get("api_base") or None
+
+
 def get_gcu_enabled() -> bool:
     """Return whether GCU (browser automation) is enabled in user config."""
     return get_hive_config().get("gcu_enabled", True)
@@ -436,7 +478,7 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# RuntimeConfig – shared across agent templates
+# RuntimeConfig - shared across agent templates
 # ---------------------------------------------------------------------------
 
 
