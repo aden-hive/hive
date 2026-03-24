@@ -34,6 +34,32 @@ class _FakeHttpClient:
         self.closed = True
 
 
+class TestDiscoverTools:
+
+      def test_http(self, monkeypatch):
+
+            client = MCPClient(MCPServerConfig(name="test", transport="http"))
+            monkeypatch.setattr(client, "_list_tools_http", lambda: [{"name": "tool1", "description": "example", "inputSchema": {}}])
+
+            client._discover_tools()
+            assert "tool1" in client._tools
+
+      def test_stdio(self, monkeypatch):
+
+            client = MCPClient(MCPServerConfig(name="test", transport="stdio"))
+            monkeypatch.setattr(client, "_list_tools_stdio_async", lambda: [{"name": "tool2"}])
+            monkeypatch.setattr(client, "_run_async", lambda coro: coro)
+
+            client._discover_tools()
+            assert "tool2" in client._tools
+
+      def test_invalid_return(self, monkeypatch):
+            client = MCPClient(MCPServerConfig(name="test", transport="http"))
+            monkeypatch.setattr(client, "_list_tools_http", lambda: None)
+
+            with pytest.raises(TypeError): client._discover_tools()
+
+
 def test_connect_unix_transport_uses_socket_path(monkeypatch):
     created = {}
 

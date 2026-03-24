@@ -357,30 +357,22 @@ class MCPClient:
             raise RuntimeError(f"Failed to connect to MCP server: {e}") from e
 
     def _discover_tools(self) -> None:
-        """Discover available tools from the MCP server."""
-        try:
-            if self.config.transport in {"stdio", "sse"}:
-                tools_list = self._run_async(self._list_tools_stdio_async())
-            else:
-                tools_list = self._list_tools_http()
+          """Discover available tools from the MCP server."""
 
-            self._tools = {}
-            for tool_data in tools_list:
-                tool = MCPTool(
-                    name=tool_data["name"],
-                    description=tool_data.get("description", ""),
-                    input_schema=tool_data.get("inputSchema", {}),
-                    server_name=self.config.name,
-                )
-                self._tools[tool.name] = tool
+          if self.config.transport in {"stdio", "sse"}:
+              tools_list = self._run_async(self._list_tools_stdio_async())
 
-            tool_names = list(self._tools.keys())
-            logger.info(
-                f"Discovered {len(self._tools)} tools from '{self.config.name}': {tool_names}"
-            )
-        except Exception as e:
-            logger.error(f"Failed to discover tools from '{self.config.name}': {e}")
-            raise
+          elif self.config.transport in {"http", "unix"}:
+              tools_list = self._list_tools_http()
+
+          # _run_async is not strictly typed and may propagate unexpected values
+          if not isinstance(tools_list, list): raise TypeError(f"Expected tools_list to be a list, got {type(tools_list)}")
+
+          self._tools = {} # reset to avoid mixing tools from previous connections
+
+          for tool_data in tools_list:
+              tool = MCPTool(name = tool_data["name"], description = tool_data.get("description", ""), input_schema = tool_data.get("inputSchema", {}), server_name = self.config.name)
+              self._tools[tool.name] = tool
 
     async def _list_tools_stdio_async(self) -> list[dict]:
         """List tools via STDIO protocol using persistent session."""
