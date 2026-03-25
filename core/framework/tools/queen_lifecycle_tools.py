@@ -118,6 +118,8 @@ class QueenPhaseState:
 
     # Default skill operational protocols — appended to every phase prompt
     protocols_prompt: str = ""
+    # Community skills catalog (XML) — appended after protocols
+    skills_catalog_prompt: str = ""
 
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
@@ -144,6 +146,8 @@ class QueenPhaseState:
 
         memory = format_for_injection()
         parts = [base]
+        if self.skills_catalog_prompt:
+            parts.append(self.skills_catalog_prompt)
         if self.protocols_prompt:
             parts.append(self.protocols_prompt)
         if memory:

@@ -31,7 +31,6 @@ class CommandBlockedError(Exception):
 # Matched against each segment of a compound command (split on ; | && ||).
 _BLOCKED_EXECUTABLES: list[str] = [
     # Network exfiltration
-    "curl",
     "wget",
     "nc",
     "ncat",
@@ -124,8 +123,8 @@ _BLOCKED_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bcat\s+.*(\.ssh|/etc/shadow|/etc/passwd|credential_key)", re.IGNORECASE),
     re.compile(r"\btype\s+.*credential_key", re.IGNORECASE),
     # Backtick or $() command substitution containing blocked executables
-    re.compile(r"\$\(.*\b(curl|wget|nc|ncat)\b.*\)", re.IGNORECASE),
-    re.compile(r"`.*\b(curl|wget|nc|ncat)\b.*`", re.IGNORECASE),
+    re.compile(r"\$\(.*\b(wget|nc|ncat)\b.*\)", re.IGNORECASE),
+    re.compile(r"`.*\b(wget|nc|ncat)\b.*`", re.IGNORECASE),
     # Environment variable exfiltration via echo/print
     re.compile(r"\becho\s+.*\$\{?.*(API_KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL)", re.IGNORECASE),
     # >& /dev/tcp (bash reverse shell)

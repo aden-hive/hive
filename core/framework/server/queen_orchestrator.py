@@ -233,11 +233,17 @@ async def create_queen(
 
     # ---- Default skill protocols -------------------------------------
     try:
-        from framework.skills.manager import SkillsManager
+        from framework.skills.manager import SkillsManager, SkillsManagerConfig
 
-        _queen_skills_mgr = SkillsManager()
+        # Pass project_root so user-scope skills (~/.hive/skills/, ~/.agents/skills/)
+        # are discovered. Queen has no agent-specific project root, so we use its
+        # own directory — the value just needs to be non-None to enable user-scope scanning.
+        _queen_skills_mgr = SkillsManager(
+            SkillsManagerConfig(project_root=Path(__file__).parent)
+        )
         _queen_skills_mgr.load()
         phase_state.protocols_prompt = _queen_skills_mgr.protocols_prompt
+        phase_state.skills_catalog_prompt = _queen_skills_mgr.skills_catalog_prompt
     except Exception:
         logger.debug("Queen skill loading failed (non-fatal)", exc_info=True)
 
