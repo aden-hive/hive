@@ -213,9 +213,13 @@ def test_install_duplicate_fails(registry, sample_index):
 
 
 def test_security_notice_shown_only_once(registry_home):
+    from framework.runner.mcp_registry_cli import _mark_security_notice_shown
+
     err1, err2 = StringIO(), StringIO()
     with patch("sys.stderr", err1):
         _print_security_notice_if_first_use(registry_home)
+    # Simulate successful install persisting the sentinel
+    _mark_security_notice_shown(registry_home)
     with patch("sys.stderr", err2):
         _print_security_notice_if_first_use(registry_home)
 
@@ -1256,3 +1260,72 @@ def test_integration_real_registry_install_list_info_remove(tmp_path, monkeypatc
 
     finally:
         cli_mod._get_registry = cli_mod_get_registry
+
+
+# ── list --json masks secrets ────────────────────────────────────
+
+
+@pytest.mark.usefixtures("_patch_get_registry")
+def test_list_json_masks_override_secrets(registry, sample_index):
+    """list --json must not leak actual override values."""
+    registry.install("jira")
+    registry.set_override("jira", "JIRA_API_TOKEN", "super-secret", override_type="env")
+
+    args = SimpleNamespace(available=False, output_json=True)
+    rc, out, _ = _capture(cmd_mcp_list, args)
+
+    assert rc == 0
+    assert "super-secret" not in out
+    data = json.loads(out)
+    assert data[0]["overrides"]["env"]["JIRA_API_TOKEN"] == "<set>"
+
+
+# ── update preserves enabled state ──────────────────────────────
+
+
+@pytest.mark.usefixtures("_patch_get_registry")
+def test_update_preserves_disabled_state(registry, sample_index):
+    """update <name> must not re-enable a disabled server."""
+    registry.install("jira")
+    registry.disable("jira")
+    assert registry.get_server("jira")["enabled"] is False
+
+    args = SimpleNamespace(name="jira")
+    rc, out, _ = _capture(cmd_mcp_update, args)
+
+    assert rc == 0
+    server = registry.get_server("jira")
+    assert server["enabled"] is False
+
+
+# ── security notice sentinel after success ───────────────────────
+
+
+@pytest.mark.usefixtures("_patch_get_registry")
+def test_security_notice_not_persisted_on_failed_install(registry, registry_home, sample_index):
+    """Sentinel must not be written if install fails."""
+    sentinel = registry_home / ".security_notice_shown"
+    assert not sentinel.exists()
+
+    # Install a server that doesn't exist in the index
+    args = SimpleNamespace(name="nonexistent", version=None, transport=None)
+    rc, _, _ = _capture(cmd_mcp_install, args)
+
+    assert rc == 1
+    assert not sentinel.exists()
+
+
+@pytest.mark.usefixtures("_patch_get_registry")
+def test_security_notice_persisted_on_successful_install(
+    registry, registry_home, sample_index, monkeypatch
+):
+    """Sentinel must be written after a successful install."""
+    monkeypatch.setattr("builtins.input", lambda prompt: "")
+    sentinel = registry_home / ".security_notice_shown"
+    assert not sentinel.exists()
+
+    args = SimpleNamespace(name="jira", version=None, transport=None)
+    rc, _, _ = _capture(cmd_mcp_install, args)
+
+    assert rc == 0
+    assert sentinel.exists()

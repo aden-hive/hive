@@ -79,11 +79,20 @@ _NOTICE_SENTINEL = ".security_notice_shown"
 
 
 def _print_security_notice_if_first_use(registry_base: Path) -> None:
-    """Print a one-time security notice on first registry install."""
+    """Print a one-time security notice on first registry install.
+
+    Only prints the notice. Call _mark_security_notice_shown() after
+    a successful install to persist the sentinel.
+    """
     sentinel = registry_base / _NOTICE_SENTINEL
     if sentinel.exists():
         return
     print(f"\n  {_SECURITY_NOTICE}\n", file=sys.stderr)
+
+
+def _mark_security_notice_shown(registry_base: Path) -> None:
+    """Persist the security notice sentinel after a successful install."""
+    sentinel = registry_base / _NOTICE_SENTINEL
     try:
         sentinel.touch()
     except OSError:
@@ -388,6 +397,8 @@ def cmd_mcp_install(args) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    _mark_security_notice_shown(registry._base)
+
     version_str = entry.get("manifest_version", "")
     transport = entry.get("transport", "")
     print(f"✓ Installed {args.name} v{version_str} ({transport})")
@@ -538,7 +549,23 @@ def cmd_mcp_list(args) -> int:
     else:
         entries = registry.list_installed()
         if args.output_json:
-            _emit_json(entries)
+            # Mask override secrets before emitting
+            safe_entries = []
+            for entry in entries:
+                safe = dict(entry)
+                overrides = safe.get("overrides", {})
+                masked = {}
+                if overrides.get("env"):
+                    masked["env"] = dict.fromkeys(overrides["env"], "<set>")
+                else:
+                    masked["env"] = {}
+                if overrides.get("headers"):
+                    masked["headers"] = dict.fromkeys(overrides["headers"], "<set>")
+                else:
+                    masked["headers"] = {}
+                safe["overrides"] = masked
+                safe_entries.append(safe)
+            _emit_json(safe_entries)
         else:
             _render_installed_table(entries)
 
@@ -845,6 +872,7 @@ def _cmd_mcp_update_server(name: str) -> int:
     old_version = server.get("manifest_version", "unknown")
     transport = server.get("transport")
     overrides = server.get("overrides", {})
+    was_enabled = server.get("enabled", True)
 
     # Save the full entry before removing so we can restore on failure
     saved_entry = dict(server)
@@ -866,11 +894,13 @@ def _cmd_mcp_update_server(name: str) -> int:
 
     new_version = entry.get("manifest_version", "unknown")
 
-    # Restore overrides from the previous installation
+    # Restore prior state from the previous installation
     for key, value in overrides.get("env", {}).items():
         registry.set_override(name, key, value, override_type="env")
     for key, value in overrides.get("headers", {}).items():
         registry.set_override(name, key, value, override_type="headers")
+    if not was_enabled:
+        registry.disable(name)
 
     if old_version == new_version:
         print(f"✓ {name} is already at v{new_version}")
