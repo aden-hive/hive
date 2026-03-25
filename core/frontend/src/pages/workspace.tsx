@@ -1964,23 +1964,7 @@ export default function Workspace() {
               // message bubble.  For auto-block (empty prompt), the worker's text
               // was already streamed via client_output_delta — just activate the
               // reply box below the last worker message.
-              const eid = event.execution_id ?? "";
               const prompt = (event.data?.prompt as string) || "";
-              if (prompt) {
-                const workerInputMsg: ChatMessage = {
-                  id: `worker-input-${eid}-${event.node_id || Date.now()}`,
-                  agent: (event.node_id ? formatAgentDisplayName(event.node_id) : displayName) || "Worker",
-                  agentColor: "",
-                  content: prompt,
-                  timestamp: "",
-                  type: "worker_input_request",
-                  role: "worker",
-                  thread: agentType,
-                  createdAt: eventCreatedAt,
-                };
-                console.log('[CLIENT_INPUT_REQ] creating worker_input_request msg:', workerInputMsg.id, 'content:', prompt.slice(0, 80));
-                upsertChatMessage(agentType, workerInputMsg);
-              }
               updateAgentState(agentType, {
                 awaitingInput: true,
                 isTyping: false,
@@ -2909,6 +2893,13 @@ export default function Workspace() {
     const question = state?.pendingQuestion || "";
     const opts = state?.pendingOptions;
 
+    // Queen questions route through /chat, not workerInput
+    if (state?.pendingQuestionSource === "queen") {
+      updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
+      handleSend(answer, activeWorker);
+      return;
+    }
+
     if (isOther) {
       // "Other" free-text → route through queen for evaluation
       updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
@@ -2953,38 +2944,6 @@ export default function Workspace() {
       }
     }
   }, [activeWorker, activeSession, agentStates, handleWorkerReply, handleSend, updateAgentState, setSessionsByAgent]);
-
-  // --- handleQueenQuestionAnswer: submit queen's own question answer via /chat ---
-  // The queen asked the question herself, so she already has context — just send the raw answer.
-  const handleQueenQuestionAnswer = useCallback((answer: string, _isOther: boolean) => {
-    const state = agentStates[activeWorker];
-    const questionText = state?.pendingQuestion || "";
-
-    // Insert a visible question message before the reply so ChatPanel can render
-    // the Discord-style reply thread (question bubble left, reply bubble right).
-    if (questionText && activeSession) {
-      const questionMsg: ChatMessage = {
-        id: makeId(),
-        agent: state?.displayName || "Queen Bee",
-        agentColor: "",
-        content: questionText,
-        timestamp: "",
-        type: "worker_input_request",
-        role: "queen",
-        thread: activeWorker, // must match activeThread so it passes the thread filter
-        createdAt: Date.now() - 1,
-      };
-      setSessionsByAgent(prev => ({
-        ...prev,
-        [activeWorker]: prev[activeWorker].map(s =>
-          s.id === activeSession.id ? { ...s, messages: [...s.messages, questionMsg] } : s
-        ),
-      }));
-    }
-
-    updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
-    handleSend(answer, activeWorker);
-  }, [activeWorker, activeSession, agentStates, handleSend, setSessionsByAgent, updateAgentState]);
 
   // --- handleMultiQuestionAnswer: submit answers to ask_user_multiple ---
   const handleMultiQuestionAnswer = useCallback((answers: Record<string, string>) => {
@@ -3395,11 +3354,7 @@ export default function Workspace() {
                 pendingOptions={activeAgentState?.awaitingInput ? activeAgentState.pendingOptions : null}
                 pendingQuestions={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestions : null}
                 pendingQuestionSource={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestionSource : null}
-                onQuestionSubmit={
-                  activeAgentState?.pendingQuestionSource === "queen"
-                    ? handleQueenQuestionAnswer
-                    : handleWorkerQuestionAnswer
-                }
+                onQuestionSubmit={handleWorkerQuestionAnswer}
                 onMultiQuestionSubmit={handleMultiQuestionAnswer}
                 onQuestionDismiss={handleQuestionDismiss}
                 contextUsage={activeAgentState?.contextUsage}

@@ -40,7 +40,6 @@ export interface ChatMessage {
     | "agent"
     | "user"
     | "tool_status"
-    | "worker_input_request"
     | "run_divider";
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
@@ -352,37 +351,6 @@ const WorkerGroupBubble = memo(
       next.messages.filter(m => m.type === "tool_status").map(m => m.content).join("\0"),
 );
 
-function QuestionReplyBubble({ question, reply }: { question: ChatMessage; reply: ChatMessage }) {
-  const color = getColor(question.agent, question.role);
-  const displayName = question.role === "queen" ? "Queen Bee" : question.agent;
-  const isWorkerQuestion = question.role === "worker";
-  return (
-    <div className="flex justify-end">
-      <div className="max-w-[80%] flex flex-col items-end gap-0">
-        {/* Quoted question card */}
-        <div
-          className="rounded-2xl rounded-br-sm px-4 py-2.5 border w-full"
-          style={{ backgroundColor: `${color}0f`, borderColor: `${color}28` }}
-        >
-          <div className="flex items-center gap-1.5 mb-1">
-            <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-            <span className="text-xs font-semibold" style={{ color }}>{displayName}</span>
-          </div>
-          <p className="text-sm text-muted-foreground leading-relaxed">{question.content}</p>
-        </div>
-        {/* Thread connector line */}
-        <div className="self-end mr-5 w-0.5 h-3 rounded-full opacity-40" style={{ backgroundColor: color }} />
-        {/* User reply bubble — blue for worker questions, yellow/primary for queen */}
-        <div
-          className={`text-sm leading-relaxed rounded-2xl rounded-tr-sm rounded-br-md px-4 py-3${isWorkerQuestion ? " text-white" : " bg-primary text-primary-foreground"}`}
-          style={isWorkerQuestion ? { backgroundColor: color } : undefined}
-        >
-          <p className="whitespace-pre-wrap break-words">{reply.content}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 const MessageBubble = memo(
   function MessageBubble({
@@ -420,32 +388,6 @@ const MessageBubble = memo(
 
     if (msg.type === "tool_status") {
       return <ToolActivityRow content={msg.content} />;
-    }
-
-    if (msg.type === "worker_input_request") {
-      const qColor = getColor(msg.agent, msg.role);
-      return (
-        <div className="flex gap-3 items-start">
-          <div
-            className="flex-shrink-0 w-7 h-7 rounded-xl flex items-center justify-center text-base font-medium"
-            style={{ backgroundColor: `${qColor}18`, border: `1.5px solid ${qColor}35`, color: qColor }}
-          >
-            ?
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <span className="text-xs font-medium" style={{ color: qColor }}>{msg.agent}</span>
-              <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md">asks</span>
-            </div>
-            <div
-              className="rounded-xl rounded-tl-sm px-3 py-2 text-sm leading-relaxed"
-              style={{ backgroundColor: `${qColor}10`, border: `1px solid ${qColor}25` }}
-            >
-              <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-            </div>
-          </div>
-        </div>
-      );
     }
 
     if (isUser) {
@@ -584,13 +526,11 @@ export default function ChatPanel({
   type RenderItem =
     | { kind: "message"; msg: ChatMessage }
     | { kind: "parallel"; groupId: string; groups: SubagentGroup[] }
-    | { kind: "worker-group"; groupId: string; workerName: string; messages: ChatMessage[]; isLast: boolean; workerDuration?: number }
-    | { kind: "question-reply"; question: ChatMessage; reply: ChatMessage };
+    | { kind: "worker-group"; groupId: string; workerName: string; messages: ChatMessage[]; isLast: boolean; workerDuration?: number };
 
   const renderItems = useMemo<RenderItem[]>(() => {
     const items: RenderItem[] = [];
     let i = 0;
-    let pendingQuestion: ChatMessage | undefined;
     while (i < threadMessages.length) {
       const msg = threadMessages[i];
       const isSubagent = msg.nodeId?.includes(":subagent:");
@@ -603,7 +543,7 @@ export default function ChatPanel({
         while (i < threadMessages.length) {
           const m = threadMessages[i];
           if (m.nodeId?.includes(":subagent:")) break;
-          if (m.type === "user" || m.type === "run_divider" || m.type === "worker_input_request") break;
+          if (m.type === "user" || m.type === "run_divider") break;
           if (m.role === "queen") break;
           groupMsgs.push(m);
           i++;
@@ -619,18 +559,6 @@ export default function ChatPanel({
       }
 
       if (!isSubagent) {
-        if (msg.type === "run_divider") pendingQuestion = undefined;
-        if (msg.type === "worker_input_request") {
-          pendingQuestion = msg; // tracked silently — shown only as quoted context in the reply
-          i++;
-          continue;
-        }
-        if (msg.type === "user" && pendingQuestion) {
-          items.push({ kind: "question-reply", question: pendingQuestion, reply: msg });
-          pendingQuestion = undefined;
-          i++;
-          continue;
-        }
         items.push({ kind: "message", msg });
         i++;
         continue;
@@ -793,10 +721,6 @@ export default function ChatPanel({
                 workerStartedAt={item.isLast ? workerStartedAt : undefined}
                 workerDuration={item.isLast ? workerDuration : item.workerDuration}
               />
-            </div>
-          ) : item.kind === "question-reply" ? (
-            <div key={item.question.id}>
-              <QuestionReplyBubble question={item.question} reply={item.reply} />
             </div>
           ) : (
             <div key={item.msg.id}>
