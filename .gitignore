@@ -13,6 +13,10 @@ out/
 .env
 .env.local
 .env.*.local
+.venv
+/venv
+tools/src/uv.lock
+
 
 # User configuration (copied from .example)
 config.yaml
@@ -68,9 +72,6 @@ temp/
 exports/*
 
 .claude/settings.local.json
-
-.venv
-/venv
 
 docs/github-issues/*
 core/tests/*dumps/*
