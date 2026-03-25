@@ -11,7 +11,8 @@ Commands:
     hive mcp config <name>            Set env/header overrides
     hive mcp search <query>           Search the registry index
     hive mcp health [name]            Check server health
-    hive mcp update                   Refresh the registry index
+    hive mcp update                   Refresh index and update installed servers
+    hive mcp update <name>            Update a single installed server
 """
 
 from __future__ import annotations
@@ -169,6 +170,8 @@ def _find_agents_using_server(registry, name: str) -> list[str]:
     """
     agent_dirs: list[Path] = []
     # parents: [0]=runner, [1]=framework, [2]=core, [3]=hive (project root)
+    # NOTE: This path arithmetic assumes running from the source tree layout.
+    # It will not resolve correctly if installed via pip into site-packages.
     project_root = Path(__file__).resolve().parents[3]
     core_dir = Path(__file__).resolve().parents[2]
 
@@ -265,6 +268,20 @@ def _render_available_table(entries: list[dict]) -> None:
         if len(desc) > 60:
             desc = desc[:57] + "..."
         print(f"  {entry['name']:<{name_w}}  {version:<9}  {status:<10}  {desc}")
+
+
+def _mask_overrides(overrides: dict) -> dict:
+    """Replace override values with '<set>' markers. Shared by all output paths."""
+    masked: dict[str, dict[str, str]] = {}
+    if overrides.get("env"):
+        masked["env"] = dict.fromkeys(overrides["env"], "<set>")
+    else:
+        masked["env"] = {}
+    if overrides.get("headers"):
+        masked["headers"] = dict.fromkeys(overrides["headers"], "<set>")
+    else:
+        masked["headers"] = {}
+    return masked
 
 
 def _emit_json(data: Any) -> None:
@@ -549,21 +566,10 @@ def cmd_mcp_list(args) -> int:
     else:
         entries = registry.list_installed()
         if args.output_json:
-            # Mask override secrets before emitting
             safe_entries = []
             for entry in entries:
                 safe = dict(entry)
-                overrides = safe.get("overrides", {})
-                masked = {}
-                if overrides.get("env"):
-                    masked["env"] = dict.fromkeys(overrides["env"], "<set>")
-                else:
-                    masked["env"] = {}
-                if overrides.get("headers"):
-                    masked["headers"] = dict.fromkeys(overrides["headers"], "<set>")
-                else:
-                    masked["headers"] = {}
-                safe["overrides"] = masked
+                safe["overrides"] = _mask_overrides(safe.get("overrides", {}))
                 safe_entries.append(safe)
             _emit_json(safe_entries)
         else:
@@ -592,24 +598,13 @@ def cmd_mcp_info(args) -> int:
         server["used_by_agents"] = agents
 
     if args.output_json:
-        # Mask secret values before emitting JSON
         safe = dict(server)
-        overrides = safe.get("overrides", {})
-        masked_overrides = {}
-        if overrides.get("env"):
-            masked_overrides["env"] = dict.fromkeys(overrides["env"], "<set>")
-        else:
-            masked_overrides["env"] = {}
-        if overrides.get("headers"):
-            masked_overrides["headers"] = dict.fromkeys(overrides["headers"], "<set>")
-        else:
-            masked_overrides["headers"] = {}
-        safe["overrides"] = masked_overrides
+        safe["overrides"] = _mask_overrides(safe.get("overrides", {}))
         _emit_json(safe)
         return 0
 
     manifest = server.get("manifest", {})
-    overrides = server.get("overrides", {})
+    overrides = _mask_overrides(server.get("overrides", {}))
     tools = manifest.get("tools", [])
     status = manifest.get("status", "community")
     hive_block = manifest.get("hive", {})
@@ -698,9 +693,9 @@ def cmd_mcp_config(args) -> int:
                 file=sys.stderr,
             )
             return 1
-        overrides = server.get("overrides", {})
-        env_o = overrides.get("env", {})
-        header_o = overrides.get("headers", {})
+        masked = _mask_overrides(server.get("overrides", {}))
+        env_o = masked.get("env", {})
+        header_o = masked.get("headers", {})
         if not env_o and not header_o:
             print(f"No overrides set for {args.name}.")
             print(f"Set one with: hive mcp config {args.name} --set KEY=VALUE")
@@ -793,10 +788,10 @@ def cmd_mcp_health(args) -> int:
 
 def cmd_mcp_update(args) -> int:
     """Update a single server, or refresh the index and update all registry servers."""
-    if args.name:
-        return _cmd_mcp_update_server(args.name)
-
     registry = _get_registry()
+
+    if args.name:
+        return _cmd_mcp_update_server(args.name, registry)
 
     # Step 1: refresh the registry index
     try:
@@ -824,20 +819,21 @@ def cmd_mcp_update(args) -> int:
     errors = 0
     for server in registry_servers:
         name = server["name"]
-        rc = _cmd_mcp_update_server(name)
+        rc = _cmd_mcp_update_server(name, registry)
         if rc != 0:
             errors += 1
 
     return 1 if errors else 0
 
 
-def _cmd_mcp_update_server(name: str) -> int:
+def _cmd_mcp_update_server(name: str, registry=None) -> int:
     """Bridge: reinstall a server from the latest index.
 
     This is a temporary bridge until #6355 adds proper version diffing,
     tool-signature change detection, and --dry-run support.
     """
-    registry = _get_registry()
+    if registry is None:
+        registry = _get_registry()
 
     server = registry.get_server(name)
     if server is None:
