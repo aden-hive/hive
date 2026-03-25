@@ -93,8 +93,6 @@ interface ChatPanelProps {
   workerStartedAt?: number;
   /** Duration in ms of the last completed worker run */
   workerDuration?: number;
-  /** Whether the pending question originated from a worker node or the queen */
-  pendingQuestionSource?: "queen" | "worker" | null;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -495,7 +493,6 @@ export default function ChatPanel({
   contextUsage,
   workerStartedAt,
   workerDuration,
-  pendingQuestionSource,
   supportsImages = true,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
@@ -789,25 +786,6 @@ export default function ChatPanel({
             </div>
           </div>
         )}
-        {/* Worker question widget — inline in chat flow, not at input area */}
-        {pendingQuestionSource === "worker" && (
-          pendingQuestions && pendingQuestions.length >= 2 && onMultiQuestionSubmit ? (
-            <MultiQuestionWidget
-              questions={pendingQuestions}
-              onSubmit={onMultiQuestionSubmit}
-              onDismiss={onQuestionDismiss}
-              source="worker"
-            />
-          ) : pendingQuestion && pendingOptions && onQuestionSubmit ? (
-            <QuestionWidget
-              question={pendingQuestion}
-              options={pendingOptions}
-              onSubmit={onQuestionSubmit}
-              onDismiss={onQuestionDismiss}
-              source="worker"
-            />
-          ) : null
-        )}
         <div ref={bottomRef} />
       </div>
 
@@ -900,9 +878,8 @@ export default function ChatPanel({
         );
       })()}
 
-      {/* Input area — question widget replaces textarea for queen questions only */}
-      {pendingQuestionSource === "queen" &&
-      pendingQuestions &&
+      {/* Input area — question widget replaces textarea when a question is pending */}
+      {pendingQuestions &&
       pendingQuestions.length >= 2 &&
       onMultiQuestionSubmit ? (
         <MultiQuestionWidget
@@ -911,8 +888,7 @@ export default function ChatPanel({
           onDismiss={onQuestionDismiss}
           source="queen"
         />
-      ) : pendingQuestionSource === "queen" &&
-        pendingQuestion &&
+      ) : pendingQuestion &&
         pendingOptions &&
         onQuestionSubmit ? (
         <QuestionWidget

@@ -2765,8 +2765,8 @@ export default function Workspace() {
     // If worker is awaiting free-text input (no options / no QuestionWidget),
     // route the message directly to the worker instead of the queen.
     if (agentStates[activeWorker]?.awaitingInput && agentStates[activeWorker]?.pendingQuestionSource === "worker" && !agentStates[activeWorker]?.pendingOptions) {
-      const state = agentStates[activeWorker];
-      if (state?.sessionId && state?.ready) {
+      const workerState = agentStates[activeWorker];
+      if (workerState?.sessionId && workerState?.ready) {
         const userMsg: ChatMessage = {
           id: makeId(), agent: "You", agentColor: "",
           content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
@@ -2778,7 +2778,7 @@ export default function Workspace() {
           ),
         }));
         updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
-        executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
+        executionApi.workerInput(workerState.sessionId, text).catch((err: unknown) => {
           const errMsg = err instanceof Error ? err.message : String(err);
           const errorChatMsg: ChatMessage = {
             id: makeId(), agent: "System", agentColor: "",
@@ -2853,8 +2853,6 @@ export default function Workspace() {
     if (!activeSession) return;
     const state = agentStates[activeWorker];
     if (!state?.sessionId || !state?.ready) return;
-
-    // Add user reply to chat thread
     const userMsg: ChatMessage = {
       id: makeId(), agent: "You", agentColor: "",
       content: text, timestamp: "", type: "user", thread: activeWorker, createdAt: Date.now(),
@@ -2865,10 +2863,7 @@ export default function Workspace() {
         s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
       ),
     }));
-
-    // Clear awaiting state optimistically
     updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
-
     executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
       const errMsg = err instanceof Error ? err.message : String(err);
       const errorChatMsg: ChatMessage = {
@@ -2884,7 +2879,7 @@ export default function Workspace() {
       }));
       updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
     });
-  }, [activeWorker, activeSession, agentStates, updateAgentState]);
+  }, [activeWorker, activeSession, agentStates, updateAgentState, setSessionsByAgent]);
 
   // --- handleWorkerQuestionAnswer: route predefined answers direct to worker, "Other" through queen ---
   const handleWorkerQuestionAnswer = useCallback((answer: string, isOther: boolean) => {
@@ -2892,13 +2887,6 @@ export default function Workspace() {
     const state = agentStates[activeWorker];
     const question = state?.pendingQuestion || "";
     const opts = state?.pendingOptions;
-
-    // Queen questions route through /chat, not workerInput
-    if (state?.pendingQuestionSource === "queen") {
-      updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
-      handleSend(answer, activeWorker);
-      return;
-    }
 
     if (isOther) {
       // "Other" free-text → route through queen for evaluation
@@ -2944,6 +2932,13 @@ export default function Workspace() {
       }
     }
   }, [activeWorker, activeSession, agentStates, handleWorkerReply, handleSend, updateAgentState, setSessionsByAgent]);
+
+  // --- handleQueenQuestionAnswer: submit queen's own question answer via /chat ---
+  // The queen asked the question herself, so she already has context — just send the raw answer.
+  const handleQueenQuestionAnswer = useCallback((answer: string, _isOther: boolean) => {
+    updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
+    handleSend(answer, activeWorker);
+  }, [activeWorker, handleSend, updateAgentState]);
 
   // --- handleMultiQuestionAnswer: submit answers to ask_user_multiple ---
   const handleMultiQuestionAnswer = useCallback((answers: Record<string, string>) => {
@@ -3353,8 +3348,11 @@ export default function Workspace() {
                 pendingQuestion={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestion : null}
                 pendingOptions={activeAgentState?.awaitingInput ? activeAgentState.pendingOptions : null}
                 pendingQuestions={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestions : null}
-                pendingQuestionSource={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestionSource : null}
-                onQuestionSubmit={handleWorkerQuestionAnswer}
+                onQuestionSubmit={
+                  activeAgentState?.pendingQuestionSource === "queen"
+                    ? handleQueenQuestionAnswer
+                    : handleWorkerQuestionAnswer
+                }
                 onMultiQuestionSubmit={handleMultiQuestionAnswer}
                 onQuestionDismiss={handleQuestionDismiss}
                 contextUsage={activeAgentState?.contextUsage}
