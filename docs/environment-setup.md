@@ -66,40 +66,6 @@ source .venv/bin/activate
 ./quickstart.sh
 ```
 
-## Manual Setup (Alternative)
-
-If you prefer to set up manually or the script fails:
-
-### 1. Sync Workspace Dependencies
-
-```bash
-# From repository root - this creates a single .venv at the root
-uv sync
-```
-
-> **Note:** The `uv sync` command uses the workspace configuration in `pyproject.toml` to install both `core` (framework) and `tools` (aden_tools) packages together. This is the recommended approach over individual `pip install -e` commands which may fail due to circular dependencies.
-
-### 2. Activate the Virtual Environment
-
-```bash
-# Linux/macOS
-source .venv/bin/activate
-
-# Windows (PowerShell)
-.venv\Scripts\Activate.ps1
-```
-
-### 3. Verify Installation
-
-```bash
-uv run python -c "import framework; print('✓ framework OK')"
-uv run python -c "import aden_tools; print('✓ aden_tools OK')"
-uv run python -c "import litellm; print('✓ litellm OK')"
-```
-
-> **Windows Tip:**
-> If the verification commands fail on Windows, disable "App Execution Aliases" in Windows Settings → Apps → App Execution Aliases.
-
 ## Requirements
 
 ### Python Version
@@ -118,47 +84,6 @@ uv run python -c "import litellm; print('✓ litellm OK')"
 ### API Keys
 
 We recommend using `quickstart.sh` for LLM API credential setup and the credentials UI/tooling for tool credentials.
-
-## Running Agents
-
-The `hive` CLI is the primary interface for running agents:
-
-```bash
-# Browse and run agents interactively (Recommended)
-hive tui
-
-# Run a specific agent
-hive run exports/my_agent --input '{"task": "Your input here"}'
-
-# Run with TUI dashboard
-hive run exports/my_agent --tui
-```
-
-### CLI Command Reference
-
-| Command                | Description                                                             |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `hive tui`             | Browse agents and launch TUI dashboard                                  |
-| `hive run <path>`      | Execute an agent (`--tui`, `--model`, `--mock`, `--quiet`, `--verbose`) |
-| `hive shell [path]`    | Interactive REPL (`--multi`, `--no-approve`)                            |
-| `hive info <path>`     | Show agent details                                                      |
-| `hive validate <path>` | Validate agent structure                                                |
-| `hive list [dir]`      | List available agents                                                   |
-| `hive dispatch [dir]`  | Multi-agent orchestration                                               |
-
-### Using Python directly (alternative)
-
-```bash
-# From /hive/ directory
-PYTHONPATH=exports uv run python -m agent_name COMMAND
-```
-
-Windows (PowerShell):
-
-```powershell
-$env:PYTHONPATH="core;exports"
-python -m agent_name COMMAND
-```
 
 ## Building New Agents and Run Flow
 
@@ -454,30 +379,53 @@ hive tui
 hive run exports/your_agent_name --input '{"task": "..."}'
 ```
 
-## IDE Setup
+## Testing with Dummy Agents
 
-### VSCode
+The repository includes a suite of dummy agents under `core/tests/dummy_agents/` for end-to-end testing against real LLM providers. These are **not** part of CI — they make real API calls and are meant to be run manually to verify the executor works correctly.
 
-Add to `.vscode/settings.json`:
+### Running the Tests
 
-```json
-{
-  "python.analysis.extraPaths": [
-    "${workspaceFolder}/core",
-    "${workspaceFolder}/exports"
-  ],
-  "python.autoComplete.extraPaths": [
-    "${workspaceFolder}/core",
-    "${workspaceFolder}/exports"
-  ]
-}
+```bash
+cd core && uv run python tests/dummy_agents/run_all.py
 ```
 
-### PyCharm
+The script auto-detects available LLM credentials and prompts you to pick a provider. You need at least one of:
 
-1. Open Project Settings → Project Structure
-2. Mark `core` as Sources Root
-3. Mark `exports` as Sources Root
+- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
+- `GEMINI_API_KEY`
+- `ZAI_API_KEY`
+- A Claude Code, Codex, or Kimi subscription
+
+For verbose output with live LLM logs, tool calls, and node traversal details:
+
+```bash
+cd core && uv run python tests/dummy_agents/run_all.py --verbose
+```
+
+### What's Covered
+
+| Agent          | Tests | Coverage                                          |
+| -------------- | ----- | ------------------------------------------------- |
+| echo           | 2     | Single-node lifecycle, basic `set_output`          |
+| pipeline       | 4     | Multi-node traversal, `input_mapping`, conversation modes |
+| branch         | 3     | Conditional edges, LLM-driven routing              |
+| parallel_merge | 4     | Fan-out/fan-in, failure strategies                  |
+| retry          | 4     | Retry mechanics, exhaustion, `ON_FAILURE` edges     |
+| feedback_loop  | 3     | Feedback cycles, `max_node_visits`                  |
+| worker         | 4     | Real MCP tools (`example_tool`, `get_current_time`, `save_data`/`load_data`) |
+
+Typical runtime is 1–3 minutes depending on provider latency.
+
+### Running Individual Test Files
+
+You can also run a specific dummy agent test with pytest directly:
+
+```bash
+cd core && uv run pytest tests/dummy_agents/test_echo.py -v
+```
+
+> **Note:** Individual pytest runs require the LLM provider to be configured via the `conftest.py` fixture. The `run_all.py` script handles this automatically.
 
 ## Environment Variables
 
@@ -500,54 +448,6 @@ export HIVE_CREDENTIAL_KEY="your-fernet-key"
 # Agent storage location (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
 ```
-
-## Opencode Setup
-
-[Opencode](https://github.com/opencode-ai/opencode) is fully supported as a coding agent.
-
-### Automatic Setup
-
-Run the quickstart script in the root directory:
-
-```bash
-./quickstart.sh
-```
-
-## Codex Setup
-
-[OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+) is supported with project-level config:
-
-- `.codex/config.toml` — MCP server configuration
-
-These files are tracked in git and available on clone. To use Codex with Hive:
-
-1. Run `codex` in the repo root
-2. Start the configured MCP-assisted workflow
-
-Quick verification:
-
-```bash
-test -f .codex/config.toml && echo "OK: Codex config" || echo "MISSING: .codex/config.toml"
-echo "OK: .codex/config.toml and MCP tools configured"
-```
-
-## Additional Resources
-
-- **Framework Documentation:** [core/README.md](../core/README.md)
-- **Tools Documentation:** [tools/README.md](../tools/README.md)
-- **Example Agents:** [examples/](../examples/)
-- **Agent Building Guide:** [docs/developer-guide.md](./developer-guide.md)
-- **Testing Guide:** [core/README.md](../core/README.md)
-
-## Contributing
-
-When contributing agent packages:
-
-1. Place agents in `exports/agent_name/`
-2. Follow the standard agent structure (see existing agents)
-3. Include README.md with usage instructions
-4. Add tests if using `test workflow`
-5. Document required environment variables
 
 ## Support
 
