@@ -619,8 +619,9 @@ def test_load_agent_selection(tmp_path: Path):
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
     (agent_dir / "mcp_registry.json").write_text(json.dumps({"include": ["jira", "slack"]}))
-    dicts = registry.load_agent_selection(agent_dir)
-    assert len(dicts) == 2 and all("transport" in d for d in dicts)
+    dicts, max_tools = registry.load_agent_selection(agent_dir)
+    assert len(dicts) == 2 and max_tools is None
+    assert all("transport" in d for d in dicts)
 
 
 def test_load_agent_selection_no_file(tmp_path: Path):
@@ -628,7 +629,7 @@ def test_load_agent_selection_no_file(tmp_path: Path):
     registry.initialize()
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
-    assert registry.load_agent_selection(agent_dir) == []
+    assert registry.load_agent_selection(agent_dir) == ([], None)
 
 
 @pytest.mark.parametrize(
@@ -648,9 +649,9 @@ def test_load_agent_selection_rejects_wrong_types(tmp_path: Path, field, bad_val
     agent_dir = tmp_path / "agent"
     agent_dir.mkdir()
     (agent_dir / "mcp_registry.json").write_text(json.dumps({field: bad_value}))
-    configs = registry.load_agent_selection(agent_dir)
+    configs, max_tools = registry.load_agent_selection(agent_dir)
     # All bad fields are dropped, so resolve_for_agent gets no criteria and returns []
-    assert configs == []
+    assert configs == [] and max_tools is None
 
 
 # ── run_health_check ────────────────────────────────────────────────
