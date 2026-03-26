@@ -25,7 +25,6 @@ from typing import Any
 from framework.graph.conversation import ConversationStore, NodeConversation
 from framework.graph.event_loop import types as event_loop_types
 from framework.graph.event_loop.compaction import (
-    _llm_compact_split,
     build_emergency_summary,
     build_llm_compaction_prompt,
     compact,
@@ -3076,24 +3075,6 @@ class EventLoopNode(NodeProtocol):
         appended once at the top-level call (``_depth == 0``).
         """
         return await llm_compact(
-            ctx=ctx,
-            messages=messages,
-            accumulator=accumulator,
-            _depth=_depth,
-            char_limit=self._LLM_COMPACT_CHAR_LIMIT,
-            max_depth=self._LLM_COMPACT_MAX_DEPTH,
-            max_context_tokens=self._config.max_context_tokens,
-        )
-
-    async def _llm_compact_split(
-        self,
-        ctx: NodeContext,
-        messages: list,
-        accumulator: OutputAccumulator | None,
-        _depth: int,
-    ) -> str:
-        """Split messages in half and summarise each half independently."""
-        return await _llm_compact_split(
             ctx=ctx,
             messages=messages,
             accumulator=accumulator,
