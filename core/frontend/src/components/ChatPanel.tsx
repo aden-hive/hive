@@ -1,5 +1,19 @@
-import { memo, useState, useRef, useEffect } from "react";
-import { Send, Square, Crown, Cpu, Check, Loader2 } from "lucide-react";
+import { memo, useState, useRef, useEffect, useMemo } from "react";
+import {
+  Send,
+  Square,
+  Crown,
+  Cpu,
+  Check,
+  Loader2,
+  Paperclip,
+  X,
+} from "lucide-react";
+
+export interface ImageContent {
+  type: "image_url";
+  image_url: { url: string };
+}
 
 export interface ContextUsageEntry {
   usagePct: number;
@@ -10,6 +24,9 @@ export interface ContextUsageEntry {
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
 import MultiQuestionWidget from "@/components/MultiQuestionWidget";
+import ParallelSubagentBubble, {
+  type SubagentGroup,
+} from "@/components/ParallelSubagentBubble";
 
 export interface ChatMessage {
   id: string;
@@ -17,7 +34,13 @@ export interface ChatMessage {
   agentColor: string;
   content: string;
   timestamp: string;
-  type?: "system" | "agent" | "user" | "tool_status" | "worker_input_request" | "run_divider";
+  type?:
+    | "system"
+    | "agent"
+    | "user"
+    | "tool_status"
+    | "worker_input_request"
+    | "run_divider";
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
   thread?: string;
@@ -25,11 +48,17 @@ export interface ChatMessage {
   createdAt?: number;
   /** Queen phase active when this message was created */
   phase?: "planning" | "building" | "staging" | "running";
+  /** Images attached to a user message */
+  images?: ImageContent[];
+  /** Backend node_id that produced this message — used for subagent grouping */
+  nodeId?: string;
+  /** Backend execution_id for this message */
+  executionId?: string;
 }
 
 interface ChatPanelProps {
   messages: ChatMessage[];
-  onSend: (message: string, thread: string) => void;
+  onSend: (message: string, thread: string, images?: ImageContent[]) => void;
   isWaiting?: boolean;
   /** When true a worker is thinking (not yet streaming) */
   isWorkerWaiting?: boolean;
@@ -38,6 +67,8 @@ interface ChatPanelProps {
   activeThread: string;
   /** When true, the input is disabled (e.g. during loading) */
   disabled?: boolean;
+  /** When false, the image attach button is hidden (model lacks vision support) */
+  supportsImages?: boolean;
   /** Called when user clicks the stop button to cancel the queen's current turn */
   onCancel?: () => void;
   /** Pending question from ask_user — replaces textarea when present */
@@ -45,7 +76,9 @@ interface ChatPanelProps {
   /** Options for the pending question */
   pendingOptions?: string[] | null;
   /** Multiple questions from ask_user_multiple */
-  pendingQuestions?: { id: string; prompt: string; options?: string[] }[] | null;
+  pendingQuestions?:
+    | { id: string; prompt: string; options?: string[] }[]
+    | null;
   /** Called when user submits an answer to the pending question */
   onQuestionSubmit?: (answer: string, isOther: boolean) => void;
   /** Called when user submits answers to multiple questions */
@@ -81,7 +114,8 @@ const TOOL_HEX = [
 
 function toolHex(name: string): string {
   let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  for (let i = 0; i < name.length; i++)
+    hash = (hash * 31 + name.charCodeAt(i)) | 0;
   return TOOL_HEX[Math.abs(hash) % TOOL_HEX.length];
 }
 
@@ -129,12 +163,18 @@ function ToolActivityRow({ content }: { content: string }) {
             <span
               key={`run-${p.name}`}
               className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full"
-              style={{ color: hex, backgroundColor: `${hex}18`, border: `1px solid ${hex}35` }}
+              style={{
+                color: hex,
+                backgroundColor: `${hex}18`,
+                border: `1px solid ${hex}35`,
+              }}
             >
               <Loader2 className="w-2.5 h-2.5 animate-spin" />
               {p.name}
               {p.count > 1 && (
-                <span className="text-[10px] font-medium opacity-70">×{p.count}</span>
+                <span className="text-[10px] font-medium opacity-70">
+                  ×{p.count}
+                </span>
               )}
             </span>
           );
@@ -145,7 +185,11 @@ function ToolActivityRow({ content }: { content: string }) {
             <span
               key={`done-${p.name}`}
               className="inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full"
-              style={{ color: hex, backgroundColor: `${hex}18`, border: `1px solid ${hex}35` }}
+              style={{
+                color: hex,
+                backgroundColor: `${hex}18`,
+                border: `1px solid ${hex}35`,
+              }}
             >
               <Check className="w-2.5 h-2.5" />
               {p.name}
@@ -160,103 +204,157 @@ function ToolActivityRow({ content }: { content: string }) {
   );
 }
 
-const MessageBubble = memo(function MessageBubble({ msg, queenPhase }: { msg: ChatMessage; queenPhase?: "planning" | "building" | "staging" | "running" }) {
-  const isUser = msg.type === "user";
-  const isQueen = msg.role === "queen";
-  const color = getColor(msg.agent, msg.role);
+const MessageBubble = memo(
+  function MessageBubble({
+    msg,
+    queenPhase,
+  }: {
+    msg: ChatMessage;
+    queenPhase?: "planning" | "building" | "staging" | "running";
+  }) {
+    const isUser = msg.type === "user";
+    const isQueen = msg.role === "queen";
+    const color = getColor(msg.agent, msg.role);
 
-  if (msg.type === "run_divider") {
-    return (
-      <div className="flex items-center gap-3 py-2 my-1">
-        <div className="flex-1 h-px bg-border/60" />
-        <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-          {msg.content}
-        </span>
-        <div className="flex-1 h-px bg-border/60" />
-      </div>
-    );
-  }
-
-  if (msg.type === "system") {
-    return (
-      <div className="flex justify-center py-1">
-        <span className="text-[11px] text-muted-foreground bg-muted/60 px-3 py-1.5 rounded-full">
-          {msg.content}
-        </span>
-      </div>
-    );
-  }
-
-  if (msg.type === "tool_status") {
-    return <ToolActivityRow content={msg.content} />;
-  }
-
-  if (isUser) {
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[75%] bg-primary text-primary-foreground text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3">
-          <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+    if (msg.type === "run_divider") {
+      return (
+        <div className="flex items-center gap-3 py-2 my-1">
+          <div className="flex-1 h-px bg-border/60" />
+          <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+            {msg.content}
+          </span>
+          <div className="flex-1 h-px bg-border/60" />
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  return (
-    <div className="flex gap-3">
-      <div
-        className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center`}
-        style={{
-          backgroundColor: `${color}18`,
-          border: `1.5px solid ${color}35`,
-          boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
-        }}
-      >
-        {isQueen ? (
-          <Crown className="w-4 h-4" style={{ color }} />
-        ) : (
-          <Cpu className="w-3.5 h-3.5" style={{ color }} />
-        )}
-      </div>
-      <div className={`flex-1 min-w-0 ${isQueen ? "max-w-[85%]" : "max-w-[75%]"}`}>
-        <div className="flex items-center gap-2 mb-1">
-          <span className={`font-medium ${isQueen ? "text-sm" : "text-xs"}`} style={{ color }}>
-            {msg.agent}
+    if (msg.type === "system") {
+      return (
+        <div className="flex justify-center py-1">
+          <span className="text-[11px] text-muted-foreground bg-muted/60 px-3 py-1.5 rounded-full">
+            {msg.content}
           </span>
-          <span
-            className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
-              isQueen ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
-            }`}
-          >
-            {isQueen
-              ? ((msg.phase ?? queenPhase) === "running"
-                ? "running"
-                : (msg.phase ?? queenPhase) === "staging"
-                  ? "staging"
-                  : (msg.phase ?? queenPhase) === "planning"
-                    ? "planning"
-                    : "building")
-              : "Worker"}
-          </span>
+        </div>
+      );
+    }
+
+    if (msg.type === "tool_status") {
+      return <ToolActivityRow content={msg.content} />;
+    }
+
+    if (isUser) {
+      return (
+        <div className="flex justify-end">
+          <div className="max-w-[75%] bg-primary text-primary-foreground text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3">
+            {msg.images && msg.images.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {msg.images.map((img, i) => (
+                  <img
+                    key={i}
+                    src={img.image_url.url}
+                    alt={`attachment ${i + 1}`}
+                    className="max-h-48 max-w-full rounded-lg object-contain"
+                  />
+                ))}
+              </div>
+            )}
+            {msg.content && (
+              <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex gap-3">
+        <div
+          className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center`}
+          style={{
+            backgroundColor: `${color}18`,
+            border: `1.5px solid ${color}35`,
+            boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
+          }}
+        >
+          {isQueen ? (
+            <Crown className="w-4 h-4" style={{ color }} />
+          ) : (
+            <Cpu className="w-3.5 h-3.5" style={{ color }} />
+          )}
         </div>
         <div
-          className={`text-sm leading-relaxed rounded-2xl rounded-tl-md px-4 py-3 ${
-            isQueen ? "border border-primary/20 bg-primary/5" : "bg-muted/60"
-          }`}
+          className={`flex-1 min-w-0 ${isQueen ? "max-w-[85%]" : "max-w-[75%]"}`}
         >
-          <MarkdownContent content={msg.content} />
+          <div className="flex items-center gap-2 mb-1">
+            <span
+              className={`font-medium ${isQueen ? "text-sm" : "text-xs"}`}
+              style={{ color }}
+            >
+              {msg.agent}
+            </span>
+            <span
+              className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
+                isQueen
+                  ? "bg-primary/15 text-primary"
+                  : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {isQueen
+                ? (msg.phase ?? queenPhase) === "running"
+                  ? "running"
+                  : (msg.phase ?? queenPhase) === "staging"
+                    ? "staging"
+                    : (msg.phase ?? queenPhase) === "planning"
+                      ? "planning"
+                      : "building"
+                : "Worker"}
+            </span>
+          </div>
+          <div
+            className={`text-sm leading-relaxed rounded-2xl rounded-tl-md px-4 py-3 ${
+              isQueen ? "border border-primary/20 bg-primary/5" : "bg-muted/60"
+            }`}
+          >
+            <MarkdownContent content={msg.content} />
+          </div>
         </div>
       </div>
-    </div>
-  );
-}, (prev, next) => prev.msg.id === next.msg.id && prev.msg.content === next.msg.content && prev.msg.phase === next.msg.phase && prev.queenPhase === next.queenPhase);
+    );
+  },
+  (prev, next) =>
+    prev.msg.id === next.msg.id &&
+    prev.msg.content === next.msg.content &&
+    prev.msg.phase === next.msg.phase &&
+    prev.queenPhase === next.queenPhase,
+);
 
-export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting, isBusy, activeThread, disabled, onCancel, pendingQuestion, pendingOptions, pendingQuestions, onQuestionSubmit, onMultiQuestionSubmit, onQuestionDismiss, queenPhase, contextUsage }: ChatPanelProps) {
+export default function ChatPanel({
+  messages,
+  onSend,
+  isWaiting,
+  isWorkerWaiting,
+  isBusy,
+  activeThread,
+  disabled,
+  onCancel,
+  pendingQuestion,
+  pendingOptions,
+  pendingQuestions,
+  onQuestionSubmit,
+  onMultiQuestionSubmit,
+  onQuestionDismiss,
+  queenPhase,
+  contextUsage,
+  supportsImages = true,
+}: ChatPanelProps) {
   const [input, setInput] = useState("");
+  const [pendingImages, setPendingImages] = useState<ImageContent[]>([]);
   const [readMap, setReadMap] = useState<Record<string, number>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const threadMessages = messages.filter((m) => {
     if (m.type === "system" && !m.thread) return false;
@@ -265,9 +363,89 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
     // tool-use-only turns that have no visible text.  During live operation
     // tool pills provide context, but on resume the pills are gone so
     // the empty bubble is meaningless.
-    if (m.role === "queen" && !m.type && (!m.content || !m.content.trim())) return false;
+    if (m.role === "queen" && !m.type && (!m.content || !m.content.trim()))
+      return false;
     return true;
   });
+
+  // Group subagent messages into parallel bubbles.
+  // A subagent message has nodeId containing ":subagent:".
+  // The run only ends on hard boundaries (user messages, run_dividers)
+  // so interleaved queen/tool/system messages don't fragment the bubble.
+  type RenderItem =
+    | { kind: "message"; msg: ChatMessage }
+    | { kind: "parallel"; groupId: string; groups: SubagentGroup[] };
+
+  const renderItems = useMemo<RenderItem[]>(() => {
+    const items: RenderItem[] = [];
+    let i = 0;
+    while (i < threadMessages.length) {
+      const msg = threadMessages[i];
+      const isSubagent = msg.nodeId?.includes(":subagent:");
+      if (!isSubagent) {
+        items.push({ kind: "message", msg });
+        i++;
+        continue;
+      }
+
+      // Start a subagent run. Collect all subagent messages, allowing
+      // non-subagent messages in between (they render as normal items
+      // before the bubble). Only break on hard boundaries.
+      const subagentMsgs: ChatMessage[] = [];
+      const interleaved: { idx: number; msg: ChatMessage }[] = [];
+      const firstId = msg.id;
+
+      while (i < threadMessages.length) {
+        const m = threadMessages[i];
+        const isSa = m.nodeId?.includes(":subagent:");
+
+        if (isSa) {
+          subagentMsgs.push(m);
+          i++;
+          continue;
+        }
+
+        // Hard boundary — stop the run
+        if (m.type === "user" || m.type === "run_divider") break;
+
+        // Worker message from a non-subagent node means the graph has
+        // moved on to the next stage.  Close the bubble even if some
+        // subagents are still streaming in the background.
+        if (m.role === "worker" && m.nodeId && !m.nodeId.includes(":subagent:"))
+          break;
+
+        // Soft interruption (queen output, system, tool_status without
+        // nodeId) — render it normally but keep the subagent run going
+        interleaved.push({ idx: items.length + interleaved.length, msg: m });
+        i++;
+      }
+
+      // Emit interleaved messages first (before the bubble)
+      for (const { msg: im } of interleaved) {
+        items.push({ kind: "message", msg: im });
+      }
+
+      // Build the single parallel bubble from all collected subagent msgs
+      if (subagentMsgs.length > 0) {
+        const byNode = new Map<string, ChatMessage[]>();
+        for (const m of subagentMsgs) {
+          const nid = m.nodeId!;
+          if (!byNode.has(nid)) byNode.set(nid, []);
+          byNode.get(nid)!.push(m);
+        }
+        const groups: SubagentGroup[] = [];
+        for (const [nodeId, msgs] of byNode) {
+          groups.push({
+            nodeId,
+            messages: msgs,
+            contextUsage: contextUsage?.[nodeId],
+          });
+        }
+        items.push({ kind: "parallel", groupId: `par-${firstId}`, groups });
+      }
+    }
+    return items;
+  }, [threadMessages, contextUsage]);
 
   // Mark current thread as read
   useEffect(() => {
@@ -299,26 +477,64 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim()) return;
-    onSend(input.trim(), activeThread);
+    if (!input.trim() && pendingImages.length === 0) return;
+    onSend(
+      input.trim(),
+      activeThread,
+      pendingImages.length > 0 ? pendingImages : undefined,
+    );
     setInput("");
+    setPendingImages([]);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const url = ev.target?.result as string;
+        setPendingImages((prev) => [
+          ...prev,
+          { type: "image_url", image_url: { url } },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    });
+    // Reset so the same file can be re-selected
+    e.target.value = "";
   };
 
   return (
     <div className="flex flex-col h-full min-w-0">
       {/* Compact sub-header */}
       <div className="px-5 pt-4 pb-2 flex items-center gap-2">
-        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Conversation</p>
+        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
+          Conversation
+        </p>
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto px-5 py-4 space-y-3">
-        {threadMessages.map((msg) => (
-          <div key={msg.id}>
-            <MessageBubble msg={msg} queenPhase={queenPhase} />
-          </div>
-        ))}
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-auto px-5 py-4 space-y-3"
+      >
+        {renderItems.map((item) =>
+          item.kind === "parallel" ? (
+            <div key={item.groupId}>
+              <ParallelSubagentBubble
+                groupId={item.groupId}
+                groups={item.groups}
+              />
+            </div>
+          ) : (
+            <div key={item.msg.id}>
+              <MessageBubble msg={item.msg} queenPhase={queenPhase} />
+            </div>
+          ),
+        )}
 
         {/* Show typing indicator while waiting for first queen response (disabled + empty chat) */}
         {(isWaiting || (disabled && threadMessages.length === 0)) && (
@@ -335,9 +551,18 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
             </div>
             <div className="border border-primary/20 bg-primary/5 rounded-2xl rounded-tl-md px-4 py-3">
               <div className="flex gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce"
+                  style={{ animationDelay: "0ms" }}
+                />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce"
+                  style={{ animationDelay: "150ms" }}
+                />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce"
+                  style={{ animationDelay: "300ms" }}
+                />
               </div>
             </div>
           </div>
@@ -355,9 +580,18 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
             </div>
             <div className="bg-muted/60 rounded-2xl rounded-tl-md px-4 py-3">
               <div className="flex gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: "300ms" }} />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce"
+                  style={{ animationDelay: "0ms" }}
+                />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce"
+                  style={{ animationDelay: "150ms" }}
+                />
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce"
+                  style={{ animationDelay: "300ms" }}
+                />
               </div>
             </div>
           </div>
@@ -369,46 +603,84 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
       {(() => {
         if (!contextUsage) return null;
         const queenUsage = contextUsage["__queen__"];
-        const workerEntries = Object.entries(contextUsage).filter(([k]) => k !== "__queen__");
-        const workerUsage = workerEntries.length > 0
-          ? workerEntries.reduce((best, [, v]) => (v.usagePct > best.usagePct ? v : best), workerEntries[0][1])
-          : undefined;
+        const workerEntries = Object.entries(contextUsage).filter(
+          ([k]) => k !== "__queen__",
+        );
+        const workerUsage =
+          workerEntries.length > 0
+            ? workerEntries.reduce(
+                (best, [, v]) => (v.usagePct > best.usagePct ? v : best),
+                workerEntries[0][1],
+              )
+            : undefined;
         if (!queenUsage && !workerUsage) return null;
         return (
           <div className="flex items-center gap-3 mx-4 px-3 py-1 rounded-lg bg-muted/30 border border-border/20 group/ctx flex-shrink-0">
             {queenUsage && (
-              <div className="flex items-center gap-2 flex-1 min-w-0" title={`Queen: ${(queenUsage.estimatedTokens / 1000).toFixed(1)}k / ${(queenUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${queenUsage.messageCount} messages`}>
-                <Crown className="w-3 h-3 flex-shrink-0" style={{ color: "hsl(45,95%,58%)" }} />
+              <div
+                className="flex items-center gap-2 flex-1 min-w-0"
+                title={`Queen: ${(queenUsage.estimatedTokens / 1000).toFixed(1)}k / ${(queenUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${queenUsage.messageCount} messages`}
+              >
+                <Crown
+                  className="w-3 h-3 flex-shrink-0"
+                  style={{ color: "hsl(45,95%,58%)" }}
+                />
                 <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden min-w-[60px]">
                   <div
                     className="h-full rounded-full transition-all duration-500 ease-out"
                     style={{
                       width: `${Math.min(queenUsage.usagePct, 100)}%`,
-                      backgroundColor: queenUsage.usagePct >= 90 ? "hsl(0,65%,55%)" : queenUsage.usagePct >= 70 ? "hsl(35,90%,55%)" : "hsl(45,95%,58%)",
+                      backgroundColor:
+                        queenUsage.usagePct >= 90
+                          ? "hsl(0,65%,55%)"
+                          : queenUsage.usagePct >= 70
+                            ? "hsl(35,90%,55%)"
+                            : "hsl(45,95%,58%)",
                     }}
                   />
                 </div>
                 <span className="text-[10px] text-muted-foreground/70 flex-shrink-0 tabular-nums">
-                  <span className="group-hover/ctx:hidden">{queenUsage.usagePct}%</span>
-                  <span className="hidden group-hover/ctx:inline">{(queenUsage.estimatedTokens / 1000).toFixed(1)}k / {(queenUsage.maxTokens / 1000).toFixed(0)}k</span>
+                  <span className="group-hover/ctx:hidden">
+                    {queenUsage.usagePct}%
+                  </span>
+                  <span className="hidden group-hover/ctx:inline">
+                    {(queenUsage.estimatedTokens / 1000).toFixed(1)}k /{" "}
+                    {(queenUsage.maxTokens / 1000).toFixed(0)}k
+                  </span>
                 </span>
               </div>
             )}
             {workerUsage && (
-              <div className="flex items-center gap-2 flex-1 min-w-0" title={`Worker: ${(workerUsage.estimatedTokens / 1000).toFixed(1)}k / ${(workerUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${workerUsage.messageCount} messages`}>
-                <Cpu className="w-3 h-3 flex-shrink-0" style={{ color: "hsl(220,60%,55%)" }} />
+              <div
+                className="flex items-center gap-2 flex-1 min-w-0"
+                title={`Worker: ${(workerUsage.estimatedTokens / 1000).toFixed(1)}k / ${(workerUsage.maxTokens / 1000).toFixed(0)}k tokens \u00b7 ${workerUsage.messageCount} messages`}
+              >
+                <Cpu
+                  className="w-3 h-3 flex-shrink-0"
+                  style={{ color: "hsl(220,60%,55%)" }}
+                />
                 <div className="flex-1 h-1.5 rounded-full bg-muted/50 overflow-hidden min-w-[60px]">
                   <div
                     className="h-full rounded-full transition-all duration-500 ease-out"
                     style={{
                       width: `${Math.min(workerUsage.usagePct, 100)}%`,
-                      backgroundColor: workerUsage.usagePct >= 90 ? "hsl(0,65%,55%)" : workerUsage.usagePct >= 70 ? "hsl(35,90%,55%)" : "hsl(220,60%,55%)",
+                      backgroundColor:
+                        workerUsage.usagePct >= 90
+                          ? "hsl(0,65%,55%)"
+                          : workerUsage.usagePct >= 70
+                            ? "hsl(35,90%,55%)"
+                            : "hsl(220,60%,55%)",
                     }}
                   />
                 </div>
                 <span className="text-[10px] text-muted-foreground/70 flex-shrink-0 tabular-nums">
-                  <span className="group-hover/ctx:hidden">{workerUsage.usagePct}%</span>
-                  <span className="hidden group-hover/ctx:inline">{(workerUsage.estimatedTokens / 1000).toFixed(1)}k / {(workerUsage.maxTokens / 1000).toFixed(0)}k</span>
+                  <span className="group-hover/ctx:hidden">
+                    {workerUsage.usagePct}%
+                  </span>
+                  <span className="hidden group-hover/ctx:inline">
+                    {(workerUsage.estimatedTokens / 1000).toFixed(1)}k /{" "}
+                    {(workerUsage.maxTokens / 1000).toFixed(0)}k
+                  </span>
                 </span>
               </div>
             )}
@@ -417,7 +689,9 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
       })()}
 
       {/* Input area — question widget replaces textarea when a question is pending */}
-      {pendingQuestions && pendingQuestions.length >= 2 && onMultiQuestionSubmit ? (
+      {pendingQuestions &&
+      pendingQuestions.length >= 2 &&
+      onMultiQuestionSubmit ? (
         <MultiQuestionWidget
           questions={pendingQuestions}
           onSubmit={onMultiQuestionSubmit}
@@ -432,7 +706,47 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
         />
       ) : (
         <form onSubmit={handleSubmit} className="p-4">
+          {/* Image preview strip */}
+          {pendingImages.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2 px-1">
+              {pendingImages.map((img, i) => (
+                <div key={i} className="relative group">
+                  <img
+                    src={img.image_url.url}
+                    alt={`preview ${i + 1}`}
+                    className="h-16 w-16 object-cover rounded-lg border border-border"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPendingImages((prev) => prev.filter((_, j) => j !== i))
+                    }
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-3 bg-muted/40 rounded-xl px-4 py-2.5 border border-border focus-within:border-primary/40 transition-colors">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            <button
+              type="button"
+              disabled={disabled || !supportsImages}
+              onClick={() => supportsImages && fileInputRef.current?.click()}
+              className="flex-shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+              title={supportsImages ? "Attach image" : "Image not supported by the current model"}
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
             <textarea
               ref={textareaRef}
               rows={1}
@@ -449,7 +763,9 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
                   handleSubmit(e);
                 }
               }}
-              placeholder={disabled ? "Connecting to agent..." : "Message Queen Bee..."}
+              placeholder={
+                disabled ? "Connecting to agent..." : "Message Queen Bee..."
+              }
               disabled={disabled}
               className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
             />
@@ -464,7 +780,9 @@ export default function ChatPanel({ messages, onSend, isWaiting, isWorkerWaiting
             ) : (
               <button
                 type="submit"
-                disabled={!input.trim() || disabled}
+                disabled={
+                  (!input.trim() && pendingImages.length === 0) || disabled
+                }
                 className="p-2 rounded-lg bg-primary text-primary-foreground disabled:opacity-30 hover:opacity-90 transition-opacity"
               >
                 <Send className="w-4 h-4" />

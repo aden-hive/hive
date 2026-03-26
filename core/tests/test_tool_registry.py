@@ -6,10 +6,12 @@ ToolResult instances. Historically, invalid JSON in ToolResult.content
 could cause a json.JSONDecodeError and crash execution.
 """
 
+import logging
 import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 
+from framework.llm.provider import Tool, ToolUse
 from framework.runner.tool_registry import ToolRegistry
 
 
@@ -206,3 +208,188 @@ def test_register_mcp_server_direct_client_when_manager_disabled(monkeypatch):
     registry.cleanup()
 
     assert created_clients[0].disconnect_calls == 1
+
+
+def test_load_registry_servers_retries_when_registration_returns_zero(monkeypatch):
+    registry = ToolRegistry()
+    attempts = {"count": 0}
+
+    def fake_register(server_config, use_connection_manager=True):
+        attempts["count"] += 1
+        return 0 if attempts["count"] == 1 else 2
+
+    monkeypatch.setattr(registry, "register_mcp_server", fake_register)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    results = registry.load_registry_servers(
+        [{"name": "jira", "transport": "http", "url": "http://localhost:4010"}],
+        log_summary=False,
+    )
+
+    assert attempts["count"] == 2
+    assert results == [
+        {
+            "server": "jira",
+            "status": "loaded",
+            "tools_loaded": 2,
+            "skipped_reason": None,
+        }
+    ]
+
+
+def test_load_registry_servers_marks_failures_as_skipped(monkeypatch):
+    registry = ToolRegistry()
+
+    monkeypatch.setattr(registry, "register_mcp_server", lambda *args, **kwargs: 0)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+
+    results = registry.load_registry_servers(
+        [{"name": "jira", "transport": "http", "url": "http://localhost:4010"}],
+        log_summary=False,
+    )
+
+    assert results == [
+        {
+            "server": "jira",
+            "status": "skipped",
+            "tools_loaded": 0,
+            "skipped_reason": "registered 0 tools",
+        }
+    ]
+
+
+def test_load_registry_servers_emits_structured_log_fields(monkeypatch):
+    registry = ToolRegistry()
+    captured_logs: list[tuple[str, dict | None]] = []
+
+    monkeypatch.setattr(registry, "register_mcp_server", lambda *args, **kwargs: 2)
+    monkeypatch.setattr(
+        "framework.runner.tool_registry.logger.info",
+        lambda message, *args, **kwargs: captured_logs.append((message, kwargs.get("extra"))),
+    )
+
+    registry.load_registry_servers(
+        [{"name": "jira", "transport": "http", "url": "http://localhost:4010"}],
+        log_summary=True,
+    )
+
+    assert captured_logs == [
+        (
+            "MCP registry server resolution",
+            {
+                "event": "mcp_registry_server_resolution",
+                "server": "jira",
+                "status": "loaded",
+                "tools_loaded": 2,
+                "skipped_reason": None,
+            },
+        )
+    ]
+
+
+def test_tool_execution_error_logs_stack_trace_and_context(caplog):
+    """ToolRegistry should log stack traces and context when tool execution fails."""
+    registry = ToolRegistry()
+
+    def failing_executor(inputs: dict) -> None:
+        raise ValueError("Intentional test failure")
+
+    tool = Tool(
+        name="failing_tool",
+        description="A tool that always fails",
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register("failing_tool", tool, failing_executor)
+
+    tool_use = ToolUse(
+        id="test_call_123",
+        name="failing_tool",
+        input={"param": "value"},
+    )
+
+    with caplog.at_level(logging.ERROR):
+        executor = registry.get_executor()
+        result = executor(tool_use)
+
+    assert result.is_error is True
+    assert "Intentional test failure" in result.content
+
+    assert any("failing_tool" in record.message for record in caplog.records)
+    assert any("test_call_123" in record.message for record in caplog.records)
+    assert any(record.exc_info is not None for record in caplog.records)
+
+
+def test_tool_execution_error_logs_inputs(caplog):
+    """ToolRegistry should log tool inputs when execution fails."""
+    registry = ToolRegistry()
+
+    def failing_executor(inputs: dict) -> None:
+        raise RuntimeError("Tool failed")
+
+    tool = Tool(
+        name="input_logging_tool",
+        description="Tests input logging",
+        parameters={"type": "object", "properties": {"foo": {"type": "string"}}},
+    )
+    registry.register("input_logging_tool", tool, failing_executor)
+
+    tool_use = ToolUse(
+        id="call_456",
+        name="input_logging_tool",
+        input={"foo": "bar", "nested": {"key": "value"}},
+    )
+
+    with caplog.at_level(logging.ERROR):
+        executor = registry.get_executor()
+        executor(tool_use)
+
+    log_messages = [record.message for record in caplog.records]
+    full_log = " ".join(log_messages)
+    assert '"foo": "bar"' in full_log or "'foo': 'bar'" in full_log
+
+
+def test_unknown_tool_error_returns_proper_result():
+    """ToolRegistry should return proper error for unknown tools."""
+    registry = ToolRegistry()
+    tool_use = ToolUse(
+        id="unknown_call",
+        name="nonexistent_tool",
+        input={},
+    )
+
+    executor = registry.get_executor()
+    result = executor(tool_use)
+
+    assert result.is_error is True
+    assert "Unknown tool" in result.content
+    assert "nonexistent_tool" in result.content
+
+
+def test_tool_execution_error_truncates_large_inputs(caplog):
+    """ToolRegistry should truncate large inputs in error logs."""
+    registry = ToolRegistry()
+
+    def failing_executor(inputs: dict) -> None:
+        raise RuntimeError("Tool failed")
+
+    tool = Tool(
+        name="large_input_tool",
+        description="Tests input truncation",
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register("large_input_tool", tool, failing_executor)
+
+    large_input = {"data": "x" * 1000}
+    tool_use = ToolUse(
+        id="call_789",
+        name="large_input_tool",
+        input=large_input,
+    )
+
+    with caplog.at_level(logging.ERROR):
+        executor = registry.get_executor()
+        executor(tool_use)
+
+    log_messages = [record.message for record in caplog.records]
+    full_log = " ".join(log_messages)
+    assert "...(truncated)" in full_log

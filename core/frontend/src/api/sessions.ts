@@ -81,6 +81,10 @@ export const sessionsApi = {
   eventsHistory: (sessionId: string) =>
     api.get<{ events: AgentEvent[]; session_id: string }>(`/sessions/${sessionId}/events/history`),
 
+  /** Open the session's data folder in the OS file manager. */
+  revealFolder: (sessionId: string) =>
+    api.post<{ path: string }>(`/sessions/${sessionId}/reveal`),
+
   /** List all queen sessions on disk — live + cold (post-restart). */
   history: () =>
     api.get<{ sessions: Array<{ session_id: string; cold: boolean; live: boolean; has_messages: boolean; created_at: number; agent_name?: string | null; agent_path?: string | null }> }>("/sessions/history"),
