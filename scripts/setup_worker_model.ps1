@@ -573,13 +573,13 @@ switch ($num) {
         $SubscriptionMode        = "minimax_code"
         $SelectedEnvVar          = "MINIMAX_API_KEY"
         $SelectedProviderId      = "minimax"
-        $SelectedModel           = "MiniMax-M2.5"
+        $SelectedModel           = "MiniMax-M2.7"
         $SelectedMaxTokens       = 32768
-        $SelectedMaxContextTokens = 900000  # MiniMax M2.5 — 1M context window
+        $SelectedMaxContextTokens = 900000  # MiniMax M2.7 — 1M context window
         $SelectedApiBase         = "https://api.minimax.io/v1"
         Write-Host ""
         Write-Ok "Using MiniMax coding key"
-        Write-Color -Text "  Model: MiniMax-M2.5 | API: api.minimax.io" -Color DarkGray
+        Write-Color -Text "  Model: MiniMax-M2.7 | API: api.minimax.io" -Color DarkGray
     }
     5 {
         # Kimi Code Subscription

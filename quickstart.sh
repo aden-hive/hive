@@ -396,7 +396,7 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     declare -A DEFAULT_MODELS=(
         ["anthropic"]="claude-haiku-4-5-20251001"
         ["openai"]="gpt-5-mini"
-        ["minimax"]="MiniMax-M2.5"
+        ["minimax"]="MiniMax-M2.7"
         ["gemini"]="gemini-3-flash-preview"
         ["groq"]="moonshotai/kimi-k2-instruct-0905"
         ["cerebras"]="zai-glm-4.7"
@@ -517,7 +517,7 @@ else
 
     # Default models by provider id (parallel arrays)
     MODEL_PROVIDER_IDS=(anthropic openai minimax gemini groq cerebras mistral together_ai deepseek)
-    MODEL_DEFAULTS=("claude-haiku-4-5-20251001" "gpt-5-mini" "MiniMax-M2.5" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
+    MODEL_DEFAULTS=("claude-haiku-4-5-20251001" "gpt-5-mini" "MiniMax-M2.7" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
 
     # Helper: get provider display name for an env var
     get_provider_name() {
@@ -1286,15 +1286,15 @@ case $choice in
         SUBSCRIPTION_MODE="minimax_code"
         SELECTED_ENV_VAR="MINIMAX_API_KEY"
         SELECTED_PROVIDER_ID="minimax"
-        SELECTED_MODEL="MiniMax-M2.5"
+        SELECTED_MODEL="MiniMax-M2.7"
         SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=900000  # MiniMax M2.5 — 1M context window
+        SELECTED_MAX_CONTEXT_TOKENS=900000  # MiniMax M2.7 — 1M context window
         SELECTED_API_BASE="https://api.minimax.io/v1"
         PROVIDER_NAME="MiniMax"
         SIGNUP_URL="https://platform.minimax.io/user-center/basic-information/interface-key"
         echo ""
         echo -e "${GREEN}⬢${NC} Using MiniMax coding key"
-        echo -e "  ${DIM}Model: MiniMax-M2.5 | API: api.minimax.io${NC}"
+        echo -e "  ${DIM}Model: MiniMax-M2.7 | API: api.minimax.io${NC}"
         ;;
     5)
         # Kimi Code Subscription

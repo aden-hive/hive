@@ -259,7 +259,7 @@ def check_minimax(
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
-            json={"model": "MiniMax-M2.5", "messages": []},
+            json={"model": "MiniMax-M2.7", "messages": []},
         )
     if r.status_code in (200, 400, 422, 429):
         return {"valid": True, "message": "MiniMax API key valid"}

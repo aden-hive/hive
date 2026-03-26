@@ -818,7 +818,7 @@ $ProviderMap = [ordered]@{
 $DefaultModels = @{
     anthropic   = "claude-haiku-4-5-20251001"
     openai      = "gpt-5-mini"
-    minimax     = "MiniMax-M2.5"
+    minimax     = "MiniMax-M2.7"
     gemini      = "gemini-3-flash-preview"
     groq        = "moonshotai/kimi-k2-instruct-0905"
     cerebras    = "zai-glm-4.7"
@@ -1257,13 +1257,13 @@ switch ($num) {
         $SubscriptionMode        = "minimax_code"
         $SelectedProviderId      = "minimax"
         $SelectedEnvVar          = "MINIMAX_API_KEY"
-        $SelectedModel           = "MiniMax-M2.5"
+        $SelectedModel           = "MiniMax-M2.7"
         $SelectedMaxTokens       = 32768
         $SelectedMaxContextTokens = 900000
         $SelectedApiBase         = "https://api.minimax.io/v1"
         Write-Host ""
         Write-Ok "Using MiniMax coding key"
-        Write-Color -Text "  Model: MiniMax-M2.5 | API: api.minimax.io" -Color DarkGray
+        Write-Color -Text "  Model: MiniMax-M2.7 | API: api.minimax.io" -Color DarkGray
     }
     5 {
         # Kimi Code Subscription
