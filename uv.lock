@@ -875,7 +875,7 @@ requires-dist = [
     { name = "croniter", specifier = ">=1.4.0" },
     { name = "fastmcp", specifier = ">=2.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "litellm", specifier = ">=1.81.0" },
+    { name = "litellm", specifier = "==1.81.7" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=8.0" },
@@ -3523,6 +3523,9 @@ all = [
 bigquery = [
     { name = "google-cloud-bigquery" },
 ]
+browser = [
+    { name = "pillow" },
+]
 databricks = [
     { name = "databricks-mcp" },
     { name = "databricks-sdk" },
@@ -3572,11 +3575,12 @@ requires-dist = [
     { name = "google-cloud-bigquery", marker = "extra == 'bigquery'", specifier = ">=3.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jsonpath-ng", specifier = ">=1.6.0" },
-    { name = "litellm", specifier = ">=1.81.0" },
+    { name = "litellm", specifier = "==1.81.7" },
     { name = "openpyxl", marker = "extra == 'all'", specifier = ">=3.1.0" },
     { name = "openpyxl", marker = "extra == 'excel'", specifier = ">=3.1.0" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "pillow", marker = "extra == 'all'", specifier = ">=10.0.0" },
+    { name = "pillow", marker = "extra == 'browser'", specifier = ">=10.0.0" },
     { name = "pillow", marker = "extra == 'ocr'", specifier = ">=10.0.0" },
     { name = "playwright", specifier = ">=1.40.0" },
     { name = "playwright-stealth", specifier = ">=1.0.5" },
@@ -3594,7 +3598,7 @@ requires-dist = [
     { name = "restrictedpython", marker = "extra == 'sandbox'", specifier = ">=7.0" },
     { name = "stripe", specifier = ">=14.3.0" },
 ]
-provides-extras = ["dev", "sandbox", "ocr", "excel", "sql", "bigquery", "databricks", "all"]
+provides-extras = ["dev", "sandbox", "browser", "ocr", "excel", "sql", "bigquery", "databricks", "all"]
 
 [package.metadata.requires-dev]
 dev = [

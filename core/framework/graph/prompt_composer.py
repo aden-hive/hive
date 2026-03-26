@@ -26,6 +26,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Injected into every worker node's system prompt so the LLM understands
+# it is one step in a multi-node pipeline and should not overreach.
+EXECUTION_SCOPE_PREAMBLE = (
+    "EXECUTION SCOPE: You are one node in a multi-step workflow graph. "
+    "Focus ONLY on the task described in your instructions below. "
+    "Call set_output() for each of your declared output keys, then stop. "
+    "Do NOT attempt work that belongs to other nodes — the framework "
+    "routes data between nodes automatically."
+)
+
 
 def _with_datetime(prompt: str) -> str:
     """Append current datetime with local timezone to a system prompt."""
@@ -140,14 +150,24 @@ def compose_system_prompt(
     focus_prompt: str | None,
     narrative: str | None = None,
     accounts_prompt: str | None = None,
+    skills_catalog_prompt: str | None = None,
+    protocols_prompt: str | None = None,
+    execution_preamble: str | None = None,
+    node_type_preamble: str | None = None,
 ) -> str:
-    """Compose the three-layer system prompt.
+    """Compose the multi-layer system prompt.
 
     Args:
         identity_prompt: Layer 1 — static agent identity (from GraphSpec).
         focus_prompt: Layer 3 — per-node focus directive (from NodeSpec.system_prompt).
         narrative: Layer 2 — auto-generated from conversation state.
         accounts_prompt: Connected accounts block (sits between identity and narrative).
+        skills_catalog_prompt: Available skills catalog XML (Agent Skills standard).
+        protocols_prompt: Default skill operational protocols section.
+        execution_preamble: EXECUTION_SCOPE_PREAMBLE for worker nodes
+            (prepended before focus so the LLM knows its pipeline scope).
+        node_type_preamble: Node-type-specific preamble, e.g. GCU browser
+            best-practices prompt (prepended before focus).
 
     Returns:
         Composed system prompt with all layers present, plus current datetime.
@@ -162,9 +182,26 @@ def compose_system_prompt(
     if accounts_prompt:
         parts.append(f"\n{accounts_prompt}")
 
+    # Skills catalog (discovered skills available for activation)
+    if skills_catalog_prompt:
+        parts.append(f"\n{skills_catalog_prompt}")
+
+    # Operational protocols (default skill behavioral guidance)
+    if protocols_prompt:
+        parts.append(f"\n{protocols_prompt}")
+
     # Layer 2: Narrative (what's happened so far)
     if narrative:
         parts.append(f"\n--- Context (what has happened so far) ---\n{narrative}")
+
+    # Execution scope preamble (worker nodes — tells the LLM it is one
+    # step in a multi-node pipeline and should not overreach)
+    if execution_preamble:
+        parts.append(f"\n{execution_preamble}")
+
+    # Node-type preamble (e.g. GCU browser best-practices)
+    if node_type_preamble:
+        parts.append(f"\n{node_type_preamble}")
 
     # Layer 3: Focus (current phase directive)
     if focus_prompt:
@@ -255,7 +292,9 @@ def build_transition_marker(
     sections.append(f"\nCompleted: {previous_node.name}")
     sections.append(f"  {previous_node.description}")
 
-    # Outputs in memory
+    # Outputs in memory — use file references for large values so the
+    # next node loads full data from disk instead of seeing truncated
+    # inline previews that look deceptively complete.
     all_memory = memory.read_all()
     if all_memory:
         memory_lines: list[str] = []
@@ -263,7 +302,29 @@ def build_transition_marker(
             if value is None:
                 continue
             val_str = str(value)
-            if len(val_str) > 300:
+            if len(val_str) > 300 and data_dir:
+                # Auto-spill large transition values to data files
+                import json as _json
+
+                data_path = Path(data_dir)
+                data_path.mkdir(parents=True, exist_ok=True)
+                ext = ".json" if isinstance(value, (dict, list)) else ".txt"
+                filename = f"output_{key}{ext}"
+                try:
+                    write_content = (
+                        _json.dumps(value, indent=2, ensure_ascii=False)
+                        if isinstance(value, (dict, list))
+                        else str(value)
+                    )
+                    (data_path / filename).write_text(write_content, encoding="utf-8")
+                    file_size = (data_path / filename).stat().st_size
+                    val_str = (
+                        f"[Saved to '{filename}' ({file_size:,} bytes). "
+                        f"Use load_data(filename='{filename}') to access.]"
+                    )
+                except Exception:
+                    val_str = val_str[:300] + "..."
+            elif len(val_str) > 300:
                 val_str = val_str[:300] + "..."
             memory_lines.append(f"  {key}: {val_str}")
         if memory_lines:
@@ -280,7 +341,7 @@ def build_transition_marker(
                 ]
                 if file_lines:
                     sections.append(
-                        "\nData files (use read_file to access):\n" + "\n".join(file_lines)
+                        "\nData files (use load_data to access):\n" + "\n".join(file_lines)
                     )
 
     # Agent working memory
@@ -294,6 +355,12 @@ def build_transition_marker(
     # Next phase
     sections.append(f"\nNow entering: {next_node.name}")
     sections.append(f"  {next_node.description}")
+    if next_node.output_keys:
+        sections.append(
+            f"\nYour ONLY job in this phase: complete the task above and call "
+            f"set_output() for {next_node.output_keys}. Do NOT do work that "
+            f"belongs to later phases."
+        )
 
     # Reflection prompt (engineered metacognition)
     sections.append(

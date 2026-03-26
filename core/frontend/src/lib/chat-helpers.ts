@@ -62,7 +62,7 @@ export function sseEventToChatMessage(
       const innerSuffix = innerTurn != null && innerTurn > 0 ? `-t${innerTurn}` : "";
 
       const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
-      if (!snapshot) return null;
+      if (!snapshot.trim()) return null;
       return {
         id: `stream-${iterIdKey}${innerSuffix}-${event.node_id}`,
         agent: agentDisplayName || event.node_id || "Agent",
@@ -72,6 +72,8 @@ export function sseEventToChatMessage(
         role: "worker",
         thread,
         createdAt,
+        nodeId: event.node_id || undefined,
+        executionId: event.execution_id || undefined,
       };
     }
 
@@ -100,7 +102,7 @@ export function sseEventToChatMessage(
       const llmInnerSuffix = llmInnerTurn != null && llmInnerTurn > 0 ? `-t${llmInnerTurn}` : "";
 
       const snapshot = (event.data?.snapshot as string) || (event.data?.content as string) || "";
-      if (!snapshot) return null;
+      if (!snapshot.trim()) return null;
       return {
         id: `stream-${idKey}${llmInnerSuffix}-${event.node_id}`,
         agent: event.node_id || "Agent",
@@ -110,6 +112,8 @@ export function sseEventToChatMessage(
         role: "worker",
         thread,
         createdAt,
+        nodeId: event.node_id || undefined,
+        executionId: event.execution_id || undefined,
       };
     }
 

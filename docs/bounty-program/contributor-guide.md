@@ -6,9 +6,7 @@ Earn XP, Discord roles, and eventually real money by contributing to the Aden ag
 
 ### 1. Link your GitHub and Discord
 
-Open a [Link Discord Account](https://github.com/aden-hive/hive/issues/new?template=link-discord.yml) issue — just paste your Discord ID and submit. A GitHub Action will automatically add you to `contributors.yml` and close the issue.
-
-To find your Discord ID: Discord Settings > Advanced > Enable **Developer Mode**, then right-click your name > **Copy User ID**.
+Run `/link-github your-github-username` in Discord. The bot will give you a verification code — create a public gist with that code, then run `/verify`. Done.
 
 Without this link, Lurkr can't push XP to your Discord account.
 
@@ -154,7 +152,7 @@ A: Yes. Most services have free tiers. The bounty issue links to where you get t
 A: Contribute consistently across different bounty types for 4+ weeks. Maintainers will nominate you.
 
 **Q: What if I haven't linked my Discord yet?**
-A: You'll still get credit in GitHub, but no Lurkr XP or Discord roles. Add yourself to `contributors.yml`.
+A: You'll still get credit in GitHub, but no Lurkr XP or Discord roles. Run `/link-github` in Discord.
 
 ## Quick Reference
 

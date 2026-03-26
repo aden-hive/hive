@@ -45,6 +45,8 @@ class ToolResult:
     tool_use_id: str
     content: str
     is_error: bool = False
+    image_content: list[dict[str, Any]] | None = None
+    is_skill_content: bool = False  # AS-10: marks activated skill body, protected from pruning
 
 
 class LLMProvider(ABC):

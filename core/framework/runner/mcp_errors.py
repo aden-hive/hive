@@ -15,7 +15,7 @@ class MCPErrorCode(Enum):
     MCP_HEALTH_FAILED = "MCP_HEALTH_FAILED"
 
 
-class MCPError(Exception):
+class MCPError(ValueError):
     """Base exception for all structured MCP errors."""
 
     def __init__(self, code: MCPErrorCode, what: str, why: str, fix: str):
