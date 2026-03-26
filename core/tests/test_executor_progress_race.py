@@ -12,8 +12,6 @@ import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from framework.graph.executor import GraphExecutor
 from framework.runtime.core import Runtime
 
@@ -91,7 +89,10 @@ class TestWriteProgressBasic:
         executor = _make_executor(tmp_path)
         memory = FakeMemory()
 
-        executor._write_progress("node_b", ["node_a", "node_b"], memory, {"node_a": 1, "node_b": 1})
+        executor._write_progress(
+            "node_b", ["node_a", "node_b"],
+            memory, {"node_a": 1, "node_b": 1},
+        )
 
         data = json.loads(state_path.read_text(encoding="utf-8"))
         assert data["session_id"] == "sess-123"
@@ -109,7 +110,7 @@ class TestWriteProgressBasic:
             node_id = f"node_{i}"
             path = [f"node_{j}" for j in range(i + 1)]
             counts = {f"node_{j}": 1 for j in range(i + 1)}
-            memory = FakeMemory({f"step": i})
+            memory = FakeMemory({"step": i})
             executor._write_progress(node_id, path, memory, counts)
 
         data = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
@@ -129,8 +130,13 @@ class TestWriteProgressBasic:
 
         time.sleep(0.01)
 
-        executor._write_progress("node_b", ["node_a", "node_b"], FakeMemory(), {"node_a": 1, "node_b": 1})
-        data2 = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+        executor._write_progress(
+            "node_b", ["node_a", "node_b"],
+            FakeMemory(), {"node_a": 1, "node_b": 1},
+        )
+        data2 = json.loads(
+            (tmp_path / "state.json").read_text(encoding="utf-8"),
+        )
         ts2 = data2["timestamps"]["updated_at"]
 
         assert ts2 > ts1, "Timestamp should advance on each write"
@@ -192,7 +198,7 @@ class TestWriteProgressAtomicWrite:
         executor = _make_executor(tmp_path)
 
         for i in range(50):
-            memory = FakeMemory({f"iteration": i, "nested": {"a": [1, 2, 3]}})
+            memory = FakeMemory({"iteration": i, "nested": {"a": [1, 2, 3]}})
             executor._write_progress(
                 f"node_{i}",
                 [f"node_{j}" for j in range(i + 1)],
@@ -210,29 +216,30 @@ class TestWriteProgressAtomicWrite:
         memory = FakeMemory({"step": 1})
 
         # Write valid initial state
-        executor._write_progress("node_a", ["node_a"], memory, {"node_a": 1})
-        original_data = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+        executor._write_progress(
+            "node_a", ["node_a"], memory, {"node_a": 1},
+        )
+        original_data = json.loads(
+            (tmp_path / "state.json").read_text(encoding="utf-8"),
+        )
 
-        # Simulate a crash during atomic_write by patching it to raise
-        from framework.utils.io import atomic_write as real_atomic_write
-        call_count = 0
-
-        def crashing_atomic_write(path, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            # On second call, raise after opening tmp file
-            ctx = real_atomic_write(path, *args, **kwargs)
-            if call_count >= 1:
-                raise OSError("disk full")
-            return ctx
-
-        with patch("framework.utils.io.atomic_write", side_effect=crashing_atomic_write):
+        # Simulate a crash during atomic_write by raising OSError
+        target = "framework.utils.io.atomic_write"
+        with patch(target, side_effect=OSError("disk full")):
             # This should fail silently (best-effort)
-            executor._write_progress("node_b", ["node_a", "node_b"], FakeMemory({"step": 2}), {"node_a": 1, "node_b": 1})
+            executor._write_progress(
+                "node_b", ["node_a", "node_b"],
+                FakeMemory({"step": 2}),
+                {"node_a": 1, "node_b": 1},
+            )
 
         # Original state.json must be intact
-        preserved = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
-        assert preserved == original_data, "Previous state.json should survive a failed write"
+        preserved = json.loads(
+            (tmp_path / "state.json").read_text(encoding="utf-8"),
+        )
+        assert preserved == original_data, (
+            "Previous state.json should survive a failed write"
+        )
 
 
 class TestWriteProgressConcurrency:
@@ -264,7 +271,10 @@ class TestWriteProgressConcurrency:
             except Exception as e:
                 errors.append(e)
 
-        threads = [threading.Thread(target=write_from_thread, args=(i,)) for i in range(num_threads)]
+        threads = [
+            threading.Thread(target=write_from_thread, args=(i,))
+            for i in range(num_threads)
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -317,7 +327,12 @@ class TestWriteProgressConcurrency:
             except Exception as e:
                 errors.append(e)
 
-        threads = [threading.Thread(target=write_and_append_id, args=(i,)) for i in range(num_threads)]
+        threads = [
+            threading.Thread(
+                target=write_and_append_id, args=(i,),
+            )
+            for i in range(num_threads)
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -413,7 +428,12 @@ class TestWriteProgressConcurrency:
             except Exception as e:
                 errors.append(e)
 
-        threads = [threading.Thread(target=write_with_slow_memory, args=(i,)) for i in range(num_threads)]
+        threads = [
+            threading.Thread(
+                target=write_with_slow_memory, args=(i,),
+            )
+            for i in range(num_threads)
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -450,8 +470,13 @@ class TestWriteProgressConcurrency:
 
         def writer():
             for i in range(100):
-                memory = FakeMemory({f"step": i})
-                executor._write_progress(f"node_{i}", [f"n{j}" for j in range(i + 1)], memory, {f"node_{i}": 1})
+                memory = FakeMemory({"step": i})
+                executor._write_progress(
+                    f"node_{i}",
+                    [f"n{j}" for j in range(i + 1)],
+                    memory,
+                    {f"node_{i}": 1},
+                )
             stop_event.set()
 
         def reader():
@@ -574,7 +599,11 @@ class TestWriteProgressEdgeCases:
             try:
                 barrier.wait(timeout=5)
                 for i in range(20):
-                    exec_a._write_progress(f"a_{i}", [f"a_{i}"], FakeMemory({"from": "a"}), {f"a_{i}": 1})
+                    exec_a._write_progress(
+                        f"a_{i}", [f"a_{i}"],
+                        FakeMemory({"from": "a"}),
+                        {f"a_{i}": 1},
+                    )
             except Exception as e:
                 errors.append(e)
 
@@ -582,7 +611,11 @@ class TestWriteProgressEdgeCases:
             try:
                 barrier.wait(timeout=5)
                 for i in range(20):
-                    exec_b._write_progress(f"b_{i}", [f"b_{i}"], FakeMemory({"from": "b"}), {f"b_{i}": 1})
+                    exec_b._write_progress(
+                        f"b_{i}", [f"b_{i}"],
+                        FakeMemory({"from": "b"}),
+                        {f"b_{i}": 1},
+                    )
             except Exception as e:
                 errors.append(e)
 
