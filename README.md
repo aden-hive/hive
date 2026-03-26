@@ -105,6 +105,7 @@ cd hive
 
 # Windows (PowerShell)
 .\quickstart.ps1
+```
 
 This sets up:
 
