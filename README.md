@@ -100,9 +100,11 @@ Use Hive when you need:
 git clone https://github.com/aden-hive/hive.git
 cd hive
 
-
-# Run quickstart setup
+# Run quickstart setup (macOS/Linux)
 ./quickstart.sh
+
+# Windows (PowerShell)
+.\quickstart.ps1
 ```
 
 This sets up:
