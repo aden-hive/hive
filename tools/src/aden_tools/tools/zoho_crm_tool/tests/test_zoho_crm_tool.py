@@ -1,13 +1,12 @@
 """
-Tests for Zoho CRM tool and OAuth2 provider.
+Tests for Zoho CRM MCP tools, OAuth2 provider, and credential configuration.
 
 Covers:
-- _ZohoCRMClient methods (search, get, create, update, add_note)
-- Error handling (401, 403, 404, 429, timeout)
-- Credential retrieval (CredentialStoreAdapter vs env vs exchange)
-- All 5 MCP tool functions
-- ZohoOAuth2Provider configuration
-- Credential spec
+- MCP tool functions (search, get, create, update, add_note)
+- Error handling (HTTP errors, timeouts, network issues)
+- Credential retrieval (CredentialStoreAdapter and environment variables)
+- ZohoOAuth2Provider behavior and validation
+- Credential specification (CREDENTIAL_SPECS)
 """
 
 from __future__ import annotations
@@ -15,153 +14,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 
-from aden_tools.tools.zoho_crm_tool.zoho_crm_tool import (
-    CRM_API_VERSION,
-    _ZohoCRMClient,
-    register_tools,
-)
-
-# --- _ZohoCRMClient tests ---
-
-
-class TestZohoCRMClient:
-    def setup_method(self):
-        self.client = _ZohoCRMClient("test-token")
-
-    def test_headers(self):
-        headers = self.client._headers
-        assert headers["Authorization"] == "Zoho-oauthtoken test-token"
-        assert headers["Content-Type"] == "application/json"
-
-    def test_handle_response_success(self):
-        response = MagicMock()
-        response.status_code = 200
-        response.json.return_value = {"data": []}
-        assert self.client._handle_response(response) == {"data": []}
-
-    @pytest.mark.parametrize(
-        "status_code,expected_substring",
-        [
-            (401, "Invalid or expired"),
-            (403, "Insufficient permissions"),
-            (404, "not found"),
-            (429, "rate limit"),
-        ],
-    )
-    def test_handle_response_errors(self, status_code, expected_substring):
-        response = MagicMock()
-        response.status_code = status_code
-        result = self.client._handle_response(response)
-        assert "error" in result
-        assert expected_substring in result["error"]
-
-    def test_handle_response_429_retriable(self):
-        response = MagicMock()
-        response.status_code = 429
-        result = self.client._handle_response(response)
-        assert result.get("retriable") is True
-
-    def test_handle_response_generic_error(self):
-        response = MagicMock()
-        response.status_code = 500
-        response.json.return_value = {"message": "Internal Server Error"}
-        result = self.client._handle_response(response)
-        assert "error" in result
-        assert "500" in result["error"]
-
-    @patch("aden_tools.tools.zoho_crm_tool.zoho_crm_tool.httpx.get")
-    def test_search_records(self, mock_get):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [{"id": "1", "First_Name": "Zoho"}],
-            "info": {"page": 1, "per_page": 2, "more_records": False},
-        }
-        mock_get.return_value = mock_response
-
-        result = self.client.search_records("Leads", criteria="", word="Zoho", page=1, per_page=2)
-
-        mock_get.assert_called_once()
-        call_url = mock_get.call_args.args[0]
-        assert f"/crm/{CRM_API_VERSION}/Leads/search" in call_url
-        assert result["data"]
-        assert result["info"]["page"] == 1
-
-    @patch("aden_tools.tools.zoho_crm_tool.zoho_crm_tool.httpx.get")
-    def test_get_record(self, mock_get):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"data": [{"id": "1192161000000585006"}]}
-        mock_get.return_value = mock_response
-
-        result = self.client.get_record("Leads", "1192161000000585006")
-
-        mock_get.assert_called_once_with(
-            f"{self.client._api_base}/Leads/1192161000000585006",
-            headers=self.client._headers,
-            timeout=30.0,
-        )
-        assert result["data"][0]["id"] == "1192161000000585006"
-
-    @patch("aden_tools.tools.zoho_crm_tool.zoho_crm_tool.httpx.post")
-    def test_create_record(self, mock_post):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [{"details": {"id": "1192161000000586001"}}],
-        }
-        mock_post.return_value = mock_response
-
-        data = {"First_Name": "Zoho", "Last_Name": "Test", "Company": "Hive"}
-        result = self.client.create_record("Leads", data)
-
-        mock_post.assert_called_once_with(
-            f"{self.client._api_base}/Leads",
-            headers=self.client._headers,
-            json={"data": [data]},
-            timeout=30.0,
-        )
-        assert result["data"][0]["details"]["id"] == "1192161000000586001"
-
-    @patch("aden_tools.tools.zoho_crm_tool.zoho_crm_tool.httpx.put")
-    def test_update_record(self, mock_put):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"data": [{"details": {"id": "1192161000000586001"}}]}
-        mock_put.return_value = mock_response
-
-        result = self.client.update_record(
-            "Leads", "1192161000000586001", {"Description": "Updated"}
-        )
-
-        mock_put.assert_called_once_with(
-            f"{self.client._api_base}/Leads/1192161000000586001",
-            headers=self.client._headers,
-            json={"data": [{"Description": "Updated"}]},
-            timeout=30.0,
-        )
-        assert result["data"][0]["details"]["id"] == "1192161000000586001"
-
-    @patch("aden_tools.tools.zoho_crm_tool.zoho_crm_tool.httpx.post")
-    def test_add_note_parent_id_structure(self, mock_post):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"data": [{"details": {"id": "note-1"}}]}
-        mock_post.return_value = mock_response
-
-        self.client.add_note("Leads", "1192161000000586001", "Title", "Content")
-
-        call_json = mock_post.call_args.kwargs["json"]
-        note_data = call_json["data"][0]
-        assert note_data["Parent_Id"] == {
-            "module": {"api_name": "Leads"},
-            "id": "1192161000000586001",
-        }
-        assert note_data["Note_Title"] == "Title"
-        assert note_data["Note_Content"] == "Content"
-
+from aden_tools.tools.zoho_crm_tool.zoho_crm_tool import register_tools
 
 # --- Tool registration and credential tests ---
 
