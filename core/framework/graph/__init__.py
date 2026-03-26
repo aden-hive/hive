@@ -18,6 +18,7 @@ from framework.graph.event_loop_node import (
 )
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Constraint, Goal, GoalStatus, SuccessCriterion
+from framework.graph.graph_validator import GraphDependencyValidator, GraphValidationResult
 from framework.graph.node import NodeContext, NodeProtocol, NodeResult, NodeSpec
 
 __all__ = [
@@ -56,4 +57,7 @@ __all__ = [
     "ActiveNodeClientIO",
     "InertNodeClientIO",
     "ClientIOGateway",
+    # Graph Validation
+    "GraphDependencyValidator",
+    "GraphValidationResult",
 ]
