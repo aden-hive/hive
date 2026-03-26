@@ -575,7 +575,7 @@ class MCPClient:
         except Exception as e:
             raise RuntimeError(
                 f"[Server: {self.config.name}] [Transport: {self.config.transport}] "
-                f"Tool '{tool_name}' failed: {e}"
+                f"Failed to call tool via HTTP: Tool '{tool_name}' failed: {e}"
             ) from e
 
     def _reconnect(self) -> None:

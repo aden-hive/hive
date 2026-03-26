@@ -254,7 +254,7 @@ class MCPRegistry:
         if manifest is None:
             raise MCPInstallError(
                 server=name,
-                why="Server not found in the cached registry index.",
+                why=f"Server '{name}' not found in registry index.",
                 fix="Run: hive mcp update  — then try again.",
             )
 
