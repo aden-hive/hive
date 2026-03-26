@@ -2,14 +2,10 @@
 
 from dataclasses import dataclass, field
 
+from framework.config import RuntimeConfig
 
-@dataclass
-class RuntimeConfig:
-    """Runtime configuration for the agent."""
-
-    model: str | None = None  # Use system default
-    max_concurrent: int = 10
-    verbose: bool = False
+# Default runtime configuration (reads from ~/.hive/configuration.json)
+default_config: RuntimeConfig = RuntimeConfig()
 
 
 @dataclass
@@ -29,9 +25,6 @@ class WorkerModels:
 
 # Default model configuration
 worker_models = WorkerModels()
-
-# Default runtime configuration
-default_config = RuntimeConfig()
 
 
 @dataclass

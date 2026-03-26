@@ -14,14 +14,16 @@ Architecture:
 
 import logging
 from pathlib import Path
+from typing import Any
 
+from framework.config import RuntimeConfig
 from framework.graph import Constraint, Goal, SuccessCriterion
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.executor import ExecutionResult
-from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig
+from framework.runtime.agent_runtime import AgentRuntime
 from framework.runtime.execution_stream import EntryPointSpec
 
-from .config import AgentMetadata, RuntimeConfig, default_config, metadata, worker_models
+from .config import AgentMetadata, default_config, metadata, worker_models
 from .nodes import (
     coordinator_node,
     nodes,
@@ -146,7 +148,7 @@ class DocumentIntelligenceAgentTeam:
         self,
         config: RuntimeConfig | None = None,
         agent_metadata: AgentMetadata | None = None,
-    ):
+    ) -> None:
         self.config = config or default_config
         self.metadata = agent_metadata or metadata
         self.goal = goal
@@ -174,20 +176,19 @@ class DocumentIntelligenceAgentTeam:
     def build_graph(self) -> GraphSpec:
         """Build the agent graph specification."""
         applied_nodes = self._apply_worker_models()
-        kwargs = {
-            "id": "document-intelligence-team",
-            "goal_id": goal.id,
-            "version": self.metadata.version,
-            "entry_node": "intake",
-            "entry_points": {"start": "intake"},
-            "terminal_nodes": [],  # forever-alive
-            "pause_nodes": [],
-            "nodes": applied_nodes,
-            "edges": edges,
-        }
-        if self.config.model is not None:
-            kwargs["default_model"] = self.config.model
-        return GraphSpec(**kwargs)
+        return GraphSpec(
+            id="document-intelligence-team",
+            goal_id=goal.id,
+            version=self.metadata.version,
+            entry_node="intake",
+            entry_points={"start": "intake"},
+            terminal_nodes=[],  # forever-alive
+            pause_nodes=[],
+            nodes=applied_nodes,
+            edges=edges,
+            default_model=self.config.model,
+            max_tokens=self.config.max_tokens,
+        )
 
     def build_runtime(
         self,
@@ -205,9 +206,6 @@ class DocumentIntelligenceAgentTeam:
             llm=llm,
             tools=tools,
             tool_executor=tool_executor,
-            config=AgentRuntimeConfig(
-                max_concurrent_executions=self.config.max_concurrent,
-            ),
         )
         runtime.intro_message = self.metadata.intro_message
 
@@ -225,32 +223,38 @@ class DocumentIntelligenceAgentTeam:
         self._runtime = runtime
         return runtime
 
-    async def start(self):
+    async def start(self) -> None:
         """Start the agent runtime."""
         if self._runtime is None:
             self.build_runtime()
         await self._runtime.start()
 
-    async def stop(self):
+    async def stop(self) -> None:
         """Stop the agent runtime."""
         if self._runtime:
             await self._runtime.stop()
 
-    def info(self) -> dict:
+    def info(self) -> dict[str, Any]:
         """Return agent information as a dict."""
         return {
             "name": self.metadata.name,
             "version": self.metadata.version,
             "description": self.metadata.description,
+            "goal": {
+                "name": goal.name,
+                "description": goal.description,
+            },
             "nodes": [n.id for n in nodes],
+            "edges": [e.id for e in edges],
             "client_facing_nodes": [n.id for n in nodes if n.client_facing],
             "entry_node": "intake",
+            "entry_points": {"start": "intake"},
             "terminal_nodes": [],
             "sub_agents": coordinator_node.sub_agents,
             "pattern": "Queen Bee + Worker Bees (A2A via delegate_to_sub_agent)",
         }
 
-    def validate(self) -> dict:
+    def validate(self) -> dict[str, Any]:
         """Validate the agent graph structure."""
         graph = self.build_graph()
         issues = graph.validate()
@@ -266,9 +270,9 @@ class DocumentIntelligenceAgentTeam:
     async def trigger_and_wait(
         self,
         entry_point: str,
-        input_data: dict,
+        input_data: dict[str, Any],
         timeout: float | None = None,
-        session_state: dict | None = None,
+        session_state: dict[str, Any] | None = None,
     ) -> ExecutionResult | None:
         """Delegate trigger_and_wait to the underlying runtime."""
         if self._runtime is None:
@@ -281,7 +285,7 @@ class DocumentIntelligenceAgentTeam:
         )
 
     async def run(
-        self, context: dict, session_state: dict | None = None
+        self, context: dict[str, Any], session_state: dict[str, Any] | None = None
     ) -> ExecutionResult:
         """Run the agent (convenience method for single execution)."""
         await self.start()

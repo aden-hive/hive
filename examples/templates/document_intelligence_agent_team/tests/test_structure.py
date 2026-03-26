@@ -4,8 +4,6 @@ Validates the A2A architecture: Queen Bee (coordinator) with 3 Worker Bee
 sub-agents connected via delegate_to_sub_agent, NOT edges.
 """
 
-import pytest
-
 
 class TestGoal:
     """Test goal definition."""
@@ -127,14 +125,15 @@ class TestAgentStructure:
     def test_validate_passes(self, agent):
         """Agent validation passes."""
         result = agent.validate()
-        assert result["valid"], f"Validation failed: {result['issues']}"
+        assert result["valid"], f"Validation failed: {result['errors']}"
 
-    def test_info_returns_string(self, agent):
-        """Info method returns descriptive string."""
+    def test_info_returns_dict(self, agent):
+        """Info method returns a dict with expected keys."""
         info = agent.info()
-        assert "Document Intelligence" in info
-        assert "Queen Bee" in info
-        assert "Worker Bee" in info
+        assert isinstance(info, dict)
+        assert "Document Intelligence" in info["name"]
+        assert "Queen Bee" in info["pattern"]
+        assert "Worker Bee" in info["pattern"]
 
 
 class TestConfig:
@@ -143,7 +142,6 @@ class TestConfig:
     def test_default_config_exists(self, agent_module):
         """Default config is available."""
         assert hasattr(agent_module, "default_config")
-        assert agent_module.default_config.model is None  # system default
 
     def test_metadata_exists(self, agent_module):
         """Agent metadata is available."""

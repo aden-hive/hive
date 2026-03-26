@@ -13,7 +13,8 @@ from .agent import (
     goal,
     nodes,
 )
-from .config import AgentMetadata, RuntimeConfig, default_config, metadata, worker_models
+from .config import AgentMetadata, default_config, metadata, worker_models
+from framework.config import RuntimeConfig
 
 __all__ = [
     "DocumentIntelligenceAgentTeam",

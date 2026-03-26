@@ -9,12 +9,14 @@ import asyncio
 import json
 import logging
 import sys
+from typing import Any
+
 import click
 
 from .agent import default_agent, goal, DocumentIntelligenceAgentTeam
 
 
-def setup_logging(verbose=False, debug=False):
+def setup_logging(verbose: bool = False, debug: bool = False) -> None:
     """Configure logging for execution visibility."""
     if debug:
         level, fmt = logging.DEBUG, "%(asctime)s %(name)s: %(message)s"
@@ -28,7 +30,7 @@ def setup_logging(verbose=False, debug=False):
 
 @click.group()
 @click.version_option(version="1.0.0")
-def cli():
+def cli() -> None:
     """Document Intelligence Agent Team - Multi-perspective A2A document analysis."""
     pass
 
@@ -39,19 +41,19 @@ def cli():
 @click.option("--quiet", "-q", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
-def run(document, brief, quiet, verbose, debug):
+def run(document: str, brief: str, quiet: bool, verbose: bool, debug: bool) -> None:
     """Run multi-perspective analysis on a document."""
     if not quiet:
         setup_logging(verbose=verbose, debug=debug)
 
-    context = {
+    context: dict[str, Any] = {
         "document_text": document,
         "analysis_brief": brief,
     }
 
     result = asyncio.run(default_agent.run(context))
 
-    output_data = {
+    output_data: dict[str, Any] = {
         "success": result.success,
         "steps_executed": result.steps_executed,
         "output": result.output,
@@ -66,7 +68,7 @@ def run(document, brief, quiet, verbose, debug):
 @cli.command()
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
-def tui(verbose, debug):
+def tui(verbose: bool, debug: bool) -> None:
     """Launch the TUI dashboard for interactive document analysis."""
     setup_logging(verbose=verbose, debug=debug)
 
@@ -86,7 +88,7 @@ def tui(verbose, debug):
     from framework.runtime.event_bus import EventBus
     from framework.runtime.execution_stream import EntryPointSpec
 
-    async def run_with_tui():
+    async def run_with_tui() -> None:
         agent = DocumentIntelligenceAgentTeam()
 
         agent._event_bus = EventBus()
@@ -101,6 +103,8 @@ def tui(verbose, debug):
 
         llm = LiteLLMProvider(
             model=agent.config.model,
+            api_key=agent.config.api_key,
+            api_base=agent.config.api_base,
         )
 
         tools = list(agent._tool_registry.get_tools().values())
@@ -138,7 +142,7 @@ def tui(verbose, debug):
 
 @cli.command()
 @click.option("--json", "output_json", is_flag=True)
-def info(output_json):
+def info(output_json: bool) -> None:
     """Show agent information."""
     info_data = default_agent.info()
     if output_json:
@@ -147,23 +151,26 @@ def info(output_json):
         click.echo(f"Agent: {info_data['name']}")
         click.echo(f"Version: {info_data['version']}")
         click.echo(f"Description: {info_data['description']}")
+        click.echo(f"\nGoal: {info_data['goal']['name']}")
+        click.echo(f"  {info_data['goal']['description']}")
         click.echo(f"\nNodes: {', '.join(info_data['nodes'])}")
         click.echo(f"Client-facing: {', '.join(info_data['client_facing_nodes'])}")
         click.echo(f"Entry: {info_data['entry_node']}")
         click.echo(f"Terminal: {', '.join(info_data['terminal_nodes'])}")
+        click.echo(f"Edges: {len(info_data['edges'])}")
 
 
 @cli.command()
-def validate():
+def validate() -> None:
     """Validate agent structure."""
     validation = default_agent.validate()
     if validation["valid"]:
-        click.echo("Agent is valid")
+        click.echo("✅ Agent is valid")
         if validation["warnings"]:
             for warning in validation["warnings"]:
-                click.echo(f"  WARNING: {warning}")
+                click.echo(f"  ⚠️  {warning}")
     else:
-        click.echo("Agent has errors:")
+        click.echo("❌ Agent has errors:")
         for error in validation["errors"]:
             click.echo(f"  ERROR: {error}")
     sys.exit(0 if validation["valid"] else 1)
@@ -171,12 +178,12 @@ def validate():
 
 @cli.command()
 @click.option("--verbose", "-v", is_flag=True)
-def shell(verbose):
+def shell(verbose: bool) -> None:
     """Interactive document analysis session (CLI, no TUI)."""
     asyncio.run(_interactive_shell(verbose))
 
 
-async def _interactive_shell(verbose=False):
+async def _interactive_shell(verbose: bool = False) -> None:
     """Async interactive shell."""
     setup_logging(verbose=verbose)
 
@@ -189,7 +196,7 @@ async def _interactive_shell(verbose=False):
 
     try:
         while True:
-            lines = []
+            lines: list[str] = []
             try:
                 while True:
                     line = await asyncio.get_event_loop().run_in_executor(None, input, "")
