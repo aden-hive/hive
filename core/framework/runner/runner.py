@@ -1121,6 +1121,9 @@ class AgentRunner:
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
 
+        # Auto-discover registry-selected MCP servers from mcp_registry.json
+        self._load_registry_mcp_servers(agent_path)
+
     @staticmethod
     def _import_agent_module(agent_path: Path):
         """Import an agent package from its directory path.
@@ -1424,6 +1427,45 @@ class AgentRunner:
         """Load and register MCP servers from a configuration file."""
         self._tool_registry.load_mcp_config(config_path)
 
+    def _load_registry_mcp_servers(self, agent_path: Path) -> None:
+        """Load and register MCP servers selected via ``mcp_registry.json``."""
+        from framework.runner.mcp_registry import MCPRegistry
+
+        try:
+            registry = MCPRegistry()
+            registry.initialize()
+            server_configs = registry.load_agent_selection(agent_path)
+        except Exception as exc:
+            logger.warning(
+                "Failed to load MCP registry servers for '%s': %s",
+                agent_path.name,
+                exc,
+            )
+            return
+
+        if not server_configs:
+            return
+
+        results = self._tool_registry.load_registry_servers(server_configs)
+        loaded = [result for result in results if result["status"] == "loaded"]
+        skipped = [result for result in results if result["status"] != "loaded"]
+
+        logger.info(
+            "Loaded %d/%d MCP registry server(s) for agent '%s'",
+            len(loaded),
+            len(results),
+            agent_path.name,
+        )
+        if skipped:
+            logger.info(
+                "Skipped MCP registry servers for agent '%s': %s",
+                agent_path.name,
+                [
+                    {"server": result["server"], "reason": result["skipped_reason"]}
+                    for result in skipped
+                ],
+            )
+
     def set_approval_callback(self, callback: Callable) -> None:
         """
         Set a callback for human-in-the-loop approval during execution.
@@ -1479,20 +1521,26 @@ class AgentRunner:
                 # Get OAuth token from Claude Code subscription
                 api_key = get_claude_code_token()
                 if not api_key:
-                    print("Warning: Claude Code subscription configured but no token found.")
-                    print("Run 'claude' to authenticate, then try again.")
+                    logger.warning(
+                        "Claude Code subscription configured but no token found. "
+                        "Run 'claude' to authenticate, then try again."
+                    )
             elif use_codex:
                 # Get OAuth token from Codex subscription
                 api_key = get_codex_token()
                 if not api_key:
-                    print("Warning: Codex subscription configured but no token found.")
-                    print("Run 'codex' to authenticate, then try again.")
+                    logger.warning(
+                        "Codex subscription configured but no token found. "
+                        "Run 'codex' to authenticate, then try again."
+                    )
             elif use_kimi_code:
                 # Get API key from Kimi Code CLI config (~/.kimi/config.toml)
                 api_key = get_kimi_code_token()
                 if not api_key:
-                    print("Warning: Kimi Code subscription configured but no key found.")
-                    print("Run 'kimi /login' to authenticate, then try again.")
+                    logger.warning(
+                        "Kimi Code subscription configured but no key found. "
+                        "Run 'kimi /login' to authenticate, then try again."
+                    )
             elif use_antigravity:
                 pass  # AntigravityProvider handles credentials internally
 
@@ -1577,8 +1625,12 @@ class AgentRunner:
                             if api_key_env:
                                 os.environ[api_key_env] = api_key
                         elif api_key_env:
-                            print(f"Warning: {api_key_env} not set. LLM calls will fail.")
-                            print(f"Set it with: export {api_key_env}=your-api-key")
+                            logger.warning(
+                                "%s not set. LLM calls will fail. "
+                                "Set it with: export %s=your-api-key",
+                                api_key_env,
+                                api_key_env,
+                            )
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
