@@ -1,0 +1,542 @@
+"""Tool result handling: truncation, spillover, JSON preview, and execution.
+
+Manages tool result size limits, file spillover for large results, and
+smart JSON previews.  Also includes transient error classification and
+the context-window-exceeded error detector.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+from pathlib import Path
+from typing import Any
+
+from framework.llm.provider import ToolResult, ToolUse
+from framework.llm.stream_events import ToolCallEvent
+
+logger = logging.getLogger(__name__)
+
+# Pattern for detecting context-window-exceeded errors across LLM providers.
+_CONTEXT_TOO_LARGE_RE = re.compile(
+    r"context.{0,20}(length|window|limit|size)|"
+    r"too.{0,10}(long|large|many.{0,10}tokens)|"
+    r"(exceed|exceeds|exceeded).{0,30}(limit|window|context|tokens)|"
+    r"maximum.{0,20}token|prompt.{0,20}too.{0,10}long",
+    re.IGNORECASE,
+)
+
+
+def is_context_too_large_error(exc: BaseException) -> bool:
+    """Detect whether an exception indicates the LLM input was too large."""
+    cls = type(exc).__name__
+    if "ContextWindow" in cls:
+        return True
+    return bool(_CONTEXT_TOO_LARGE_RE.search(str(exc)))
+
+
+def is_transient_error(exc: BaseException) -> bool:
+    """Classify whether an exception is transient (retryable) vs permanent.
+
+    Transient: network errors, rate limits, server errors, timeouts.
+    Permanent: auth errors, bad requests, context window exceeded.
+    """
+    try:
+        from litellm.exceptions import (
+            APIConnectionError,
+            BadGatewayError,
+            InternalServerError,
+            RateLimitError,
+            ServiceUnavailableError,
+        )
+
+        transient_types: tuple[type[BaseException], ...] = (
+            RateLimitError,
+            APIConnectionError,
+            InternalServerError,
+            BadGatewayError,
+            ServiceUnavailableError,
+            TimeoutError,
+            ConnectionError,
+            OSError,
+        )
+    except ImportError:
+        transient_types = (TimeoutError, ConnectionError, OSError)
+
+    if isinstance(exc, transient_types):
+        return True
+
+    # RuntimeError from StreamErrorEvent with "Stream error:" prefix
+    if isinstance(exc, RuntimeError):
+        error_str = str(exc).lower()
+        transient_keywords = [
+            "rate limit",
+            "429",
+            "timeout",
+            "connection",
+            "internal server",
+            "502",
+            "503",
+            "504",
+            "service unavailable",
+            "bad gateway",
+            "overloaded",
+            "failed to parse tool call",
+        ]
+        return any(kw in error_str for kw in transient_keywords)
+
+    return False
+
+
+def extract_json_metadata(parsed: Any, *, _depth: int = 0, _max_depth: int = 3) -> str:
+    """Return a concise structural summary of parsed JSON.
+
+    Reports key names, value types, and — crucially — array lengths so
+    the LLM knows how much data exists beyond the preview.
+
+    Returns an empty string for simple scalars.
+    """
+    if _depth >= _max_depth:
+        if isinstance(parsed, dict):
+            return f"dict with {len(parsed)} keys"
+        if isinstance(parsed, list):
+            return f"list of {len(parsed)} items"
+        return type(parsed).__name__
+
+    if isinstance(parsed, dict):
+        if not parsed:
+            return "empty dict"
+        lines: list[str] = []
+        indent = "  " * (_depth + 1)
+        for key, value in list(parsed.items())[:20]:
+            if isinstance(value, list):
+                line = f'{indent}"{key}": list of {len(value)} items'
+                if value:
+                    first = value[0]
+                    if isinstance(first, dict):
+                        sample_keys = list(first.keys())[:10]
+                        line += f" (each item: dict with keys {sample_keys})"
+                    elif isinstance(first, list):
+                        line += f" (each item: list of {len(first)} elements)"
+                lines.append(line)
+            elif isinstance(value, dict):
+                child = extract_json_metadata(value, _depth=_depth + 1, _max_depth=_max_depth)
+                lines.append(f'{indent}"{key}": {child}')
+            else:
+                lines.append(f'{indent}"{key}": {type(value).__name__}')
+        if len(parsed) > 20:
+            lines.append(f"{indent}... and {len(parsed) - 20} more keys")
+        return "\n".join(lines)
+
+    if isinstance(parsed, list):
+        if not parsed:
+            return "empty list"
+        desc = f"list of {len(parsed)} items"
+        first = parsed[0]
+        if isinstance(first, dict):
+            sample_keys = list(first.keys())[:10]
+            desc += f" (each item: dict with keys {sample_keys})"
+        elif isinstance(first, list):
+            desc += f" (each item: list of {len(first)} elements)"
+        return desc
+
+    return ""
+
+
+def build_json_preview(parsed: Any, *, max_chars: int = 5000) -> str | None:
+    """Build a smart preview of parsed JSON, truncating large arrays.
+
+    Shows first 3 + last 1 items of large arrays with explicit count
+    markers so the LLM cannot mistake the preview for the full dataset.
+
+    Returns ``None`` if no truncation was needed (no large arrays).
+    """
+    _LARGE_ARRAY_THRESHOLD = 10
+
+    def _truncate_arrays(obj: Any) -> tuple[Any, bool]:
+        """Return (truncated_copy, was_truncated)."""
+        if isinstance(obj, list) and len(obj) > _LARGE_ARRAY_THRESHOLD:
+            n = len(obj)
+            head = obj[:3]
+            tail = obj[-1:]
+            marker = f"... ({n - 4} more items omitted, {n} total) ..."
+            return head + [marker] + tail, True
+        if isinstance(obj, dict):
+            changed = False
+            out: dict[str, Any] = {}
+            for k, v in obj.items():
+                new_v, did = _truncate_arrays(v)
+                out[k] = new_v
+                changed = changed or did
+            return (out, True) if changed else (obj, False)
+        return obj, False
+
+    preview_obj, was_truncated = _truncate_arrays(parsed)
+    if not was_truncated:
+        return None  # No large arrays — caller should use raw slicing
+
+    try:
+        result = json.dumps(preview_obj, indent=2, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return None
+
+    if len(result) > max_chars:
+        # Even 3+1 items too big — try just 1 item
+        def _minimal_arrays(obj: Any) -> Any:
+            if isinstance(obj, list) and len(obj) > _LARGE_ARRAY_THRESHOLD:
+                n = len(obj)
+                return obj[:1] + [f"... ({n - 1} more items omitted, {n} total) ..."]
+            if isinstance(obj, dict):
+                return {k: _minimal_arrays(v) for k, v in obj.items()}
+            return obj
+
+        preview_obj = _minimal_arrays(parsed)
+        try:
+            result = json.dumps(preview_obj, indent=2, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return None
+        if len(result) > max_chars:
+            result = result[:max_chars] + "…"
+
+    return result
+
+
+def truncate_tool_result(
+    result: ToolResult,
+    tool_name: str,
+    *,
+    max_tool_result_chars: int,
+    spillover_dir: str | None,
+    next_spill_filename_fn: Any,  # Callable[[str], str]
+) -> ToolResult:
+    """Persist tool result to file and optionally truncate for context.
+
+    When *spillover_dir* is configured, EVERY non-error tool result is
+    saved to a file (short filename like ``web_search_1.txt``).  A
+    ``[Saved to '...']`` annotation is appended so the reference
+    survives pruning and compaction.
+
+    - Small results (≤ limit): full content kept + file annotation
+    - Large results (> limit): preview + file reference
+    - Errors: pass through unchanged
+    - load_data results: truncate with pagination hint (no re-spill)
+    """
+    limit = max_tool_result_chars
+
+    # Errors always pass through unchanged
+    if result.is_error:
+        return result
+
+    # load_data reads FROM spilled files — never re-spill (circular).
+    # Just truncate with a pagination hint if the result is too large.
+    if tool_name == "load_data":
+        if limit <= 0 or len(result.content) <= limit:
+            return result  # Small load_data result — pass through as-is
+        # Large load_data result — truncate with smart preview
+        PREVIEW_CAP = min(5000, max(limit - 500, limit // 2))
+
+        metadata_str = ""
+        smart_preview: str | None = None
+        try:
+            parsed_ld = json.loads(result.content)
+            metadata_str = extract_json_metadata(parsed_ld)
+            smart_preview = build_json_preview(parsed_ld, max_chars=PREVIEW_CAP)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+        if smart_preview is not None:
+            preview_block = smart_preview
+        else:
+            preview_block = result.content[:PREVIEW_CAP] + "…"
+
+        header = (
+            f"[{tool_name} result: {len(result.content):,} chars — "
+            f"too large for context. Use offset_bytes/limit_bytes "
+            f"parameters to read smaller chunks.]"
+        )
+        if metadata_str:
+            header += f"\n\nData structure:\n{metadata_str}"
+        header += (
+            "\n\nWARNING: This is an INCOMPLETE preview. Do NOT draw conclusions or counts from it."
+        )
+
+        truncated = f"{header}\n\nPreview (small sample only):\n{preview_block}"
+        logger.info(
+            "%s result truncated: %d → %d chars (use offset/limit to paginate)",
+            tool_name,
+            len(result.content),
+            len(truncated),
+        )
+        return ToolResult(
+            tool_use_id=result.tool_use_id,
+            content=truncated,
+            is_error=False,
+            image_content=result.image_content,
+            is_skill_content=result.is_skill_content,
+        )
+
+    spill_dir = spillover_dir
+    if spill_dir:
+        spill_path = Path(spill_dir)
+        spill_path.mkdir(parents=True, exist_ok=True)
+        filename = next_spill_filename_fn(tool_name)
+
+        # Pretty-print JSON content so load_data's line-based
+        # pagination works correctly.
+        write_content = result.content
+        parsed_json: Any = None  # track for metadata extraction
+        try:
+            parsed_json = json.loads(result.content)
+            write_content = json.dumps(parsed_json, indent=2, ensure_ascii=False)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass  # Not JSON — write as-is
+
+        (spill_path / filename).write_text(write_content, encoding="utf-8")
+
+        if limit > 0 and len(result.content) > limit:
+            # Large result: build a small, metadata-rich preview so the
+            # LLM cannot mistake it for the complete dataset.
+            PREVIEW_CAP = 5000
+
+            # Extract structural metadata (array lengths, key names)
+            metadata_str = ""
+            smart_preview: str | None = None
+            if parsed_json is not None:
+                metadata_str = extract_json_metadata(parsed_json)
+                smart_preview = build_json_preview(parsed_json, max_chars=PREVIEW_CAP)
+
+            if smart_preview is not None:
+                preview_block = smart_preview
+            else:
+                preview_block = result.content[:PREVIEW_CAP] + "…"
+
+            # Assemble header with structural info + warning
+            header = (
+                f"[Result from {tool_name}: {len(result.content):,} chars — "
+                f"too large for context, saved to '{filename}'.]\n"
+            )
+            if metadata_str:
+                header += f"\nData structure:\n{metadata_str}"
+            header += (
+                f"\n\nWARNING: The preview below is INCOMPLETE. "
+                f"Do NOT draw conclusions or counts from it. "
+                f"Use load_data(filename='{filename}') to read the "
+                f"full data before analysis."
+            )
+
+            content = f"{header}\n\nPreview (small sample only):\n{preview_block}"
+            logger.info(
+                "Tool result spilled to file: %s (%d chars → %s)",
+                tool_name,
+                len(result.content),
+                filename,
+            )
+        else:
+            # Small result: keep full content + annotation
+            content = f"{result.content}\n\n[Saved to '{filename}']"
+            logger.info(
+                "Tool result saved to file: %s (%d chars → %s)",
+                tool_name,
+                len(result.content),
+                filename,
+            )
+
+        return ToolResult(
+            tool_use_id=result.tool_use_id,
+            content=content,
+            is_error=False,
+            image_content=result.image_content,
+            is_skill_content=result.is_skill_content,
+        )
+
+    # No spillover_dir — truncate in-place if needed
+    if limit > 0 and len(result.content) > limit:
+        PREVIEW_CAP = min(5000, max(limit - 500, limit // 2))
+
+        metadata_str = ""
+        smart_preview: str | None = None
+        try:
+            parsed_inline = json.loads(result.content)
+            metadata_str = extract_json_metadata(parsed_inline)
+            smart_preview = build_json_preview(parsed_inline, max_chars=PREVIEW_CAP)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+        if smart_preview is not None:
+            preview_block = smart_preview
+        else:
+            preview_block = result.content[:PREVIEW_CAP] + "…"
+
+        header = (
+            f"[Result from {tool_name}: {len(result.content):,} chars — "
+            f"truncated to fit context budget.]"
+        )
+        if metadata_str:
+            header += f"\n\nData structure:\n{metadata_str}"
+        header += (
+            "\n\nWARNING: This is an INCOMPLETE preview. "
+            "Do NOT draw conclusions or counts from the preview alone."
+        )
+
+        truncated = f"{header}\n\n{preview_block}"
+        logger.info(
+            "Tool result truncated in-place: %s (%d → %d chars)",
+            tool_name,
+            len(result.content),
+            len(truncated),
+        )
+        return ToolResult(
+            tool_use_id=result.tool_use_id,
+            content=truncated,
+            is_error=False,
+            image_content=result.image_content,
+            is_skill_content=result.is_skill_content,
+        )
+
+    return result
+
+
+async def execute_tool(
+    tool_executor: Any,  # Callable[[ToolUse], ToolResult | Awaitable[ToolResult]] | None
+    tc: ToolCallEvent,
+    timeout: float,
+    skill_dirs: list[str] | None = None,
+) -> ToolResult:
+    """Execute a tool call, handling both sync and async executors.
+
+    Applies ``tool_call_timeout_seconds`` to prevent hung MCP servers
+    from blocking the event loop indefinitely.  The initial executor
+    call is offloaded to a thread pool so that sync executors don't
+    freeze the event loop.
+    """
+    if tool_executor is None:
+        return ToolResult(
+            tool_use_id=tc.tool_use_id,
+            content=f"No tool executor configured for '{tc.tool_name}'",
+            is_error=True,
+        )
+
+    skill_dirs = skill_dirs or []
+    skill_read_tools = {"view_file", "load_data", "read_file"}
+    if tc.tool_name in skill_read_tools and skill_dirs:
+        raw_path = tc.tool_input.get("path", "")
+        if raw_path:
+            resolved = Path(raw_path).resolve(strict=False)
+            resolved_roots = [Path(skill_dir).resolve(strict=False) for skill_dir in skill_dirs]
+            if any(resolved.is_relative_to(root) for root in resolved_roots):
+                try:
+                    content = resolved.read_text(encoding="utf-8")
+                except Exception as exc:
+                    return ToolResult(
+                        tool_use_id=tc.tool_use_id,
+                        content=f"Could not read skill resource '{raw_path}': {exc}",
+                        is_error=True,
+                    )
+                return ToolResult(
+                    tool_use_id=tc.tool_use_id,
+                    content=content,
+                    is_skill_content=resolved.name == "SKILL.md",
+                )
+
+    tool_use = ToolUse(id=tc.tool_use_id, name=tc.tool_name, input=tc.tool_input)
+
+    async def _run() -> ToolResult:
+        # Offload the executor call to a thread.  Sync MCP executors
+        # block on future.result() — running in a thread keeps the
+        # event loop free so asyncio.wait_for can fire the timeout.
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, tool_executor, tool_use)
+        # Async executors return a coroutine — await it on the loop
+        if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+            result = await result
+        return result
+
+    try:
+        if timeout > 0:
+            result = await asyncio.wait_for(_run(), timeout=timeout)
+        else:
+            result = await _run()
+    except TimeoutError:
+        logger.warning("Tool '%s' timed out after %.0fs", tc.tool_name, timeout)
+        return ToolResult(
+            tool_use_id=tc.tool_use_id,
+            content=(
+                f"Tool '{tc.tool_name}' timed out after {timeout:.0f}s. "
+                "The operation took too long and was cancelled. "
+                "Try a simpler request or a different approach."
+            ),
+            is_error=True,
+        )
+    return result
+
+
+def record_learning(key: str, value: Any, spillover_dir: str | None) -> None:
+    """Append a set_output value to adapt.md as a learning entry.
+
+    Called at set_output time — the moment knowledge is produced — so that
+    adapt.md accumulates the agent's outputs across the session.  Since
+    adapt.md is injected into the system prompt, these persist through
+    any compaction.
+    """
+    if not spillover_dir:
+        return
+    try:
+        adapt_path = Path(spillover_dir) / "adapt.md"
+        adapt_path.parent.mkdir(parents=True, exist_ok=True)
+        content = adapt_path.read_text(encoding="utf-8") if adapt_path.exists() else ""
+
+        if "## Outputs" not in content:
+            content += "\n\n## Outputs\n"
+
+        # Truncate long values for memory (full value is in shared memory)
+        v_str = str(value)
+        if len(v_str) > 500:
+            v_str = v_str[:500] + "…"
+
+        entry = f"- {key}: {v_str}\n"
+
+        # Replace existing entry for same key (update, not duplicate)
+        lines = content.splitlines(keepends=True)
+        replaced = False
+        for i, line in enumerate(lines):
+            if line.startswith(f"- {key}:"):
+                lines[i] = entry
+                replaced = True
+                break
+        if replaced:
+            content = "".join(lines)
+        else:
+            content += entry
+
+        adapt_path.write_text(content, encoding="utf-8")
+    except Exception as e:
+        logger.warning("Failed to record learning for key=%s: %s", key, e)
+
+
+def next_spill_filename(tool_name: str, counter: int) -> str:
+    """Return a short, monotonic filename for a tool result spill."""
+    # Shorten common tool name prefixes to save tokens
+    short = tool_name.removeprefix("tool_").removeprefix("mcp_")
+    return f"{short}_{counter}.txt"
+
+
+def restore_spill_counter(spillover_dir: str | None) -> int:
+    """Scan spillover_dir for existing spill files and return the max counter.
+
+    Returns the highest spill number found (or 0 if none).
+    """
+    if not spillover_dir:
+        return 0
+    spill_path = Path(spillover_dir)
+    if not spill_path.is_dir():
+        return 0
+    max_n = 0
+    for f in spill_path.iterdir():
+        if not f.is_file():
+            continue
+        m = re.search(r"_(\d+)\.txt$", f.name)
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+    return max_n
