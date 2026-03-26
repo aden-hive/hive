@@ -257,7 +257,7 @@ Common error codes:
 
 ## Implementation Notes
 
-- All tools are **read-only** (GET requests only)
+- Tools encompass both resource query (GET) and update/create (POST/PATCH/DELETE) operations
 - Credentials are retrieved from the `CLOUDFLARE_API_TOKEN` environment variable
 - Requests are validated and sanitized for security
 - Responses are normalized into compact, agent-friendly objects

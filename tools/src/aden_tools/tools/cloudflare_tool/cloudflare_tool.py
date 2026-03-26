@@ -77,7 +77,8 @@ def _make_request(
     token: str,
     params: dict[str, Any] | None = None,
     json_data: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+    full_response: bool = False,
+) -> dict[str, Any] | list[Any]:
     """Make HTTP request to Cloudflare API.
 
     Args:
@@ -136,14 +137,14 @@ def _make_request(
             }
 
         # Parse successful response
-        if response.status_code == 204:
-            return {"success": True}
-
         data = response.json()
         if not data.get("success"):
             errors = data.get("errors", [])
             error_msg = errors[0].get("message") if errors else "Unknown error"
             return {"error": error_msg}
+
+        if full_response:
+            return data
 
         return data.get("result", {})
 
@@ -187,19 +188,15 @@ def register_tools(mcp, credentials=None):
         if name:
             params["name"] = name.strip()
 
-        result = _make_request("GET", "/zones", token, params=params)
+        result = _make_request("GET", "/zones", token, params=params, full_response=True)
 
         if "error" in result:
             return result
 
         # Extract and normalize zone data
-        zones = (
-            result.get("zones", [])
-            if isinstance(result, dict) and "zones" not in result
-            else result
-        )
+        zones = result.get("result", [])
         if not isinstance(zones, list):
-            zones = [result] if isinstance(result, dict) and "id" in result else []
+            zones = [zones] if isinstance(zones, dict) and "id" in zones else []
 
         normalized_zones = [
             {
@@ -212,11 +209,15 @@ def register_tools(mcp, credentials=None):
             for z in zones
         ]
 
+        # Extract pagination from result_info
+        result_info = result.get("result_info", {})
+        total_count = result_info.get("total_count", len(normalized_zones))
+
         return {
             "zones": normalized_zones,
             "page": page,
             "per_page": per_page,
-            "total": len(normalized_zones),
+            "total": total_count,
         }
 
     @mcp.tool("cloudflare_get_zone")
@@ -472,13 +473,17 @@ def register_tools(mcp, credentials=None):
         if type:
             params["type"] = type.strip().upper()
 
-        result = _make_request("GET", f"/zones/{zone_id}/dns_records", token, params=params)
+        result = _make_request(
+            "GET", f"/zones/{zone_id}/dns_records", token, params=params, full_response=True
+        )
 
         if "error" in result:
             return result
 
-        # Extract records (could be dict with pagination info or direct list)
-        records = result if isinstance(result, list) else result.get("records", [])
+        # Extract records
+        records = result.get("result", [])
+        if not isinstance(records, list):
+            records = [records] if isinstance(records, dict) else []
 
         normalized_records = [
             {
@@ -493,12 +498,15 @@ def register_tools(mcp, credentials=None):
             for r in records
         ]
 
+        result_info = result.get("result_info", {})
+        total_count = result_info.get("total_count", len(normalized_records))
+
         return {
             "records": normalized_records,
             "zone_id": zone_id,
             "page": page,
             "per_page": per_page,
-            "total": len(normalized_records),
+            "total": total_count,
         }
 
     @mcp.tool("cloudflare_get_dns_record")
@@ -1283,14 +1291,16 @@ def register_tools(mcp, credentials=None):
         description: str | None = None,
         priority: int = 1,
     ) -> dict[str, Any]:
-        """Create a custom firewall rule (IP/Country/Bot blocking).
+        """Create a custom firewall rule (IP/Country/Bot blocking) using Rulesets API.
 
         Args:
             zone_id: Zone ID
-            action: Action to take ('block', 'challenge', 'js_challenge', 'allow', 'log')
+            action: Action to take ('block', 'challenge', 'js_challenge',
+                   'managed_challenge', 'skip', 'log')
             expression: Filter expression (e.g. 'ip.src eq 1.1.1.1' or 'cf.client.bot')
             description: Human-readable label
-            priority: Execution priority
+            priority: Execution priority (not strictly used in rulesets append,
+                     but kept for compatibility)
 
         Returns:
             created firewall rule details
@@ -1302,16 +1312,28 @@ def register_tools(mcp, credentials=None):
         if validation_error:
             return validation_error
 
-        # Standard Cloudflare Firewall Rules API
-        data = [
-            {
-                "action": action.lower(),
-                "filter": {"expression": expression, "paused": False},
-                "description": description or f"Rule created via MCP at {priority}",
-                "priority": priority,
-            }
-        ]
-        result = _make_request("POST", f"/zones/{zone_id}/firewall/rules", token, json_data=data)
+        # Modern Cloudflare Ruleset phase integration
+        new_rule = {
+            "action": action.lower(),
+            "expression": expression,
+            "description": description or "Rule created via MCP",
+            "enabled": True,
+        }
+
+        # We can POST to append a rule to the phase entrypoint ruleset
+        endpoint = f"/zones/{zone_id}/rulesets/phases/http_request_firewall_custom/entrypoint/rules"
+        result = _make_request("POST", endpoint, token, json_data=new_rule)
+
+        # If the phase entrypoint doesn't exist (404), create it via PUT
+        if isinstance(result, dict) and result.get("status_code") == 404:
+            put_data = {"rules": [new_rule]}
+            result = _make_request(
+                "PUT",
+                f"/zones/{zone_id}/rulesets/phases/http_request_firewall_custom/entrypoint",
+                token,
+                json_data=put_data,
+            )
+
         return {"created_rules": result}
 
     @mcp.tool("cloudflare_delete_firewall_rule")
@@ -1320,7 +1342,7 @@ def register_tools(mcp, credentials=None):
 
         Args:
             zone_id: Zone ID
-            rule_id: Rule ID to delete
+            rule_id: Rule ID to delete (must be a Ruleset rule ID)
 
         Returns:
             status message
@@ -1332,7 +1354,12 @@ def register_tools(mcp, credentials=None):
         if validation_error:
             return validation_error
 
-        result = _make_request("DELETE", f"/zones/{zone_id}/firewall/rules/{rule_id}", token)
+        # Modern Ruleset deletion
+        endpoint = (
+            f"/zones/{zone_id}/rulesets/phases/http_request_firewall_custom/"
+            f"entrypoint/rules/{rule_id}"
+        )
+        result = _make_request("DELETE", endpoint, token)
         return {"deleted": result}
 
     # --- PERFORMANCE & SPEED ---
@@ -1687,7 +1714,7 @@ def register_tools(mcp, credentials=None):
 
     @mcp.tool("cloudflare_list_firewall_rules")
     def cloudflare_list_firewall_rules(zone_id: str) -> dict[str, Any]:
-        """List custom firewall rules for a zone.
+        """List custom firewall rules for a zone (using Modern Rulesets API).
 
         Args:
             zone_id: Zone ID
@@ -1699,11 +1726,15 @@ def register_tools(mcp, credentials=None):
         if isinstance(token, dict):
             return token
 
-        result = _make_request("GET", f"/zones/{zone_id}/firewall/rules", token)
+        result = _make_request(
+            "GET",
+            f"/zones/{zone_id}/rulesets/phases/http_request_firewall_custom/entrypoint",
+            token,
+        )
         if "error" in result:
             return result
 
-        rules = result if isinstance(result, list) else []
+        rules = result.get("rules", []) if isinstance(result, dict) else []
         return {"firewall_rules": rules}
 
     @mcp.tool("cloudflare_list_access_applications")

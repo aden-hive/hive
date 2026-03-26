@@ -1171,3 +1171,83 @@ class TestCloudflareTools:
             result = fn(zone_id="z_test", mode="full")
             if isinstance(result, dict):
                 assert "error" not in result
+
+
+class TestCloudflareEdgeCases:
+    def test_missing_or_invalid_token(self, tools_registry, monkeypatch):
+        # Unset the environment variable
+        monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
+        fn = tools_registry["cloudflare_list_zones"].fn
+        result = fn()
+        assert "error" in result
+        assert "CLOUDFLARE_API_TOKEN is required" in result["error"]
+
+    def test_invalid_zone_id_format(self, tools_registry, monkeypatch):
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
+        fn = tools_registry["cloudflare_get_zone"].fn
+
+        # Test missing/empty zone
+        empty_result = fn(zone_id="")
+        assert "error" in empty_result
+        assert "zone_id must be a non-empty string" in empty_result["error"]
+
+        # Test invalid length/chars
+        invalid_result = fn(zone_id="invalid-length-and-chars-here")
+        assert "error" in invalid_result
+        assert "Invalid zone_id format" in invalid_result["error"]
+
+    def test_invalid_domain_format(self, tools_registry, monkeypatch):
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
+        fn = tools_registry["cloudflare_check_domain_dns_health"].fn
+
+        # Test invalid domain length
+        invalid_result = fn(domain="a" * 260)
+        assert "error" in invalid_result
+        assert "Domain length must be 3-255 characters" in invalid_result["error"]
+
+        # Test invalid characters
+        invalid_chars = fn(domain="ex*mple.com")
+        assert "error" in invalid_chars
+        assert "Invalid domain format" in invalid_chars["error"]
+
+    def test_api_error_responses(self, tools_registry, monkeypatch):
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
+        fn = tools_registry["cloudflare_list_zones"].fn
+
+        # Helper to create mock errors
+        def mock_error_response(status_code, retry_after=None):
+            mock = MagicMock()
+            mock.status_code = status_code
+            mock.text = "Error detail"
+            mock.json.side_effect = Exception("Not JSON")
+            if retry_after:
+                mock.headers = {"Retry-After": retry_after}
+            else:
+                mock.headers = {}
+            return mock
+
+        with patch("aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request") as mock_req:
+            # Test 401 Unauthorized
+            mock_req.return_value = mock_error_response(401)
+            res_401 = fn()
+            assert "error" in res_401
+            assert "Unauthorized" in res_401["error"]
+
+            # Test 403 Forbidden
+            mock_req.return_value = mock_error_response(403)
+            res_403 = fn()
+            assert "error" in res_403
+            assert "Forbidden" in res_403["error"]
+
+            # Test 404 Not Found
+            mock_req.return_value = mock_error_response(404)
+            res_404 = fn()
+            assert "error" in res_404
+            assert "Not found" in res_404["error"]
+
+            # Test 429 Rate Limiting
+            mock_req.return_value = mock_error_response(429, retry_after="60")
+            res_429 = fn()
+            assert "error" in res_429
+            assert "Too many requests - rate limited" in res_429["error"]
+            assert res_429.get("retry_after") == "60"
