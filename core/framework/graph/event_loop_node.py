@@ -139,7 +139,7 @@ async def _describe_images_as_text(image_content: list[dict[str, Any]]) -> str |
             if description:
                 count = len(image_content)
                 label = "image" if count == 1 else f"{count} images"
-                return f"[{label} attached \u2014 description: {description}]"
+                return f"[{label} attached  — description: {description}]"
         except Exception as exc:
             logger.debug("Vision fallback model '%s' failed: %s", model, exc)
             continue
