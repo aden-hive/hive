@@ -28,7 +28,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "playwright>=1.40.0",
     "playwright-stealth>=1.0.5",
-    "litellm>=1.81.0",
+    "litellm==1.81.7",  # pinned: supply chain attack in >=1.82.7 (adenhq/hive#6783)
     "dnspython>=2.4.0",
     "resend>=2.0.0",
     "asana>=3.2.0",
@@ -47,6 +47,9 @@ dev = [
 ]
 sandbox = [
     "RestrictedPython>=7.0",
+]
+browser = [
+    "pillow>=10.0.0",
 ]
 ocr = [
     "pytesseract>=0.3.10",
