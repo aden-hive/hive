@@ -38,7 +38,7 @@ class TestRuntimeBasics:
         assert runtime.current_run is None
 
     @pytest.mark.skip(
-        reason="FileStorage.save_run() is deprecated and now a no-op. "
+        reason="save_run() is deprecated and now a no-op. "
         "New sessions use unified storage at sessions/{session_id}/state.json"
     )
     def test_run_saved_on_end(self, tmp_path: Path):
@@ -346,7 +346,7 @@ class TestNarrativeGeneration:
     """Test automatic narrative generation."""
 
     @pytest.mark.skip(
-        reason="FileStorage.save_run() and get_runs_by_goal() are deprecated. "
+        reason="save_run() and get_runs_by_goal() are deprecated. "
         "New sessions use unified storage at sessions/{session_id}/state.json"
     )
     def test_default_narrative_success(self, tmp_path: Path):
@@ -369,7 +369,7 @@ class TestNarrativeGeneration:
         assert "completed successfully" in run.narrative
 
     @pytest.mark.skip(
-        reason="FileStorage.save_run() and get_runs_by_goal() are deprecated. "
+        reason="save_run() and get_runs_by_goal() are deprecated. "
         "New sessions use unified storage at sessions/{session_id}/state.json"
     )
     def test_default_narrative_failure(self, tmp_path: Path):

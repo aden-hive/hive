@@ -1,7 +1,7 @@
 """
 Concurrent Storage - Thread-safe storage backend with file locking.
 
-Wraps FileStorage with:
+Provides:
 - Async file locking for atomic writes
 - Write batching for performance
 - Read caching for concurrent access
@@ -10,14 +10,14 @@ Wraps FileStorage with:
 import asyncio
 import logging
 import time
+import warnings
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from weakref import WeakValueDictionary
 
-from framework.schemas.run import Run, RunStatus, RunSummary
-from framework.storage.backend import FileStorage
+from framework.schemas.run import Run, RunSummary
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,6 @@ class ConcurrentStorage:
     - Async file locking to prevent concurrent write corruption
     - Write batching to reduce I/O overhead
     - Read caching for frequently accessed data
-    - Compatible API with FileStorage
 
     Example:
         storage = ConcurrentStorage("/path/to/storage")
@@ -75,7 +74,6 @@ class ConcurrentStorage:
             max_locks: Maximum number of active file locks to track strongly
         """
         self.base_path = Path(base_path)
-        self._base_storage = FileStorage(base_path)
 
         # Caching
         self._cache: dict[str, CacheEntry] = {}
@@ -157,6 +155,93 @@ class ConcurrentStorage:
 
         return lock
 
+    # === KEY VALIDATION ===
+
+    @staticmethod
+    def _validate_key(key: str) -> None:
+        """Validate key to prevent path traversal attacks.
+
+        Args:
+            key: The key to validate
+
+        Raises:
+            ValueError: If key contains path traversal or dangerous patterns
+        """
+        if not key or key.strip() == "":
+            raise ValueError("Key cannot be empty")
+
+        if "/" in key or "\\" in key:
+            raise ValueError(f"Invalid key format: path separators not allowed in '{key}'")
+
+        if ".." in key or key.startswith("."):
+            raise ValueError(f"Invalid key format: path traversal detected in '{key}'")
+
+        if key.startswith("/") or (len(key) > 1 and key[1] == ":"):
+            raise ValueError(f"Invalid key format: absolute paths not allowed in '{key}'")
+
+        if "\x00" in key:
+            raise ValueError("Invalid key format: null bytes not allowed")
+
+        dangerous_chars = {"<", ">", "|", "&", "$", "`", "'", '"'}
+        if any(char in key for char in dangerous_chars):
+            raise ValueError(f"Invalid key format: contains dangerous characters in '{key}'")
+
+    # === FILE OPERATIONS (formerly in FileStorage) ===
+
+    def _save_run_sync(self, run: Run) -> None:
+        """Save a run to disk.
+
+        DEPRECATED: This method is a no-op.
+        New sessions use unified storage at sessions/{session_id}/state.json.
+        """
+        warnings.warn(
+            "ConcurrentStorage._save_run_sync() is deprecated. "
+            "New sessions use unified storage at sessions/{session_id}/state.json. "
+            "This write has been skipped.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    def _load_run_sync(self, run_id: str) -> Run | None:
+        """Load a run from storage."""
+        run_path = self.base_path / "runs" / f"{run_id}.json"
+        if not run_path.exists():
+            return None
+        with open(run_path, encoding="utf-8") as f:
+            return Run.model_validate_json(f.read())
+
+    def _load_summary_sync(self, run_id: str) -> RunSummary | None:
+        """Load just the summary (faster than full run)."""
+        summary_path = self.base_path / "summaries" / f"{run_id}.json"
+        if not summary_path.exists():
+            run = self._load_run_sync(run_id)
+            if run:
+                return RunSummary.from_run(run)
+            return None
+        with open(summary_path, encoding="utf-8") as f:
+            return RunSummary.model_validate_json(f.read())
+
+    def _delete_run_sync(self, run_id: str) -> bool:
+        """Delete a run from storage."""
+        run_path = self.base_path / "runs" / f"{run_id}.json"
+        summary_path = self.base_path / "summaries" / f"{run_id}.json"
+
+        if not run_path.exists():
+            return False
+
+        run_path.unlink()
+        if summary_path.exists():
+            summary_path.unlink()
+
+        return True
+
+    def _list_all_runs_sync(self) -> list[str]:
+        """List all run IDs."""
+        runs_dir = self.base_path / "runs"
+        if not runs_dir.exists():
+            return []
+        return [f.stem for f in runs_dir.glob("*.json")]
+
     # === RUN OPERATIONS (Async, Thread-Safe) ===
 
     async def save_run(self, run: Run, immediate: bool = False) -> None:
@@ -180,40 +265,17 @@ class ConcurrentStorage:
             await self._write_queue.put(("run", run))
 
     async def _save_run_locked(self, run: Run) -> None:
-        """Save a run with file locking, including index locks."""
+        """Save a run with file locking."""
         lock_key = f"run:{run.id}"
-
-        # Helper to get lock
-        async def get_lock(k):
-            return await self._get_lock(k)
-
-        # Acquire main lock
-        run_lock = await get_lock(lock_key)
+        run_lock = await self._get_lock(lock_key)
 
         async with run_lock:
-            # 2. Acquire index locks
-            index_lock_keys = [
-                f"index:by_goal:{run.goal_id}",
-                f"index:by_status:{run.status.value}",
-            ]
-            for node_id in run.metrics.nodes_executed:
-                index_lock_keys.append(f"index:by_node:{node_id}")
-
-            # Collect index locks
-            index_locks = [await get_lock(k) for k in index_lock_keys]
-
-            # Recursive acquisition
-            async def with_locks(locks, callback):
-                if not locks:
-                    return await callback()
-                async with locks[0]:
-                    return await with_locks(locks[1:], callback)
 
             async def perform_save():
                 loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, self._base_storage.save_run, run)
+                await loop.run_in_executor(None, self._save_run_sync, run)
 
-            await with_locks(index_locks, perform_save)
+            await perform_save()
 
     async def load_run(self, run_id: str, use_cache: bool = True) -> Run | None:
         """
@@ -240,7 +302,7 @@ class ConcurrentStorage:
         lock_key = f"run:{run_id}"
         async with await self._get_lock(lock_key):
             loop = asyncio.get_event_loop()
-            run = await loop.run_in_executor(None, self._base_storage.load_run, run_id)
+            run = await loop.run_in_executor(None, self._load_run_sync, run_id)
 
         # Update cache
         if run:
@@ -262,7 +324,7 @@ class ConcurrentStorage:
         lock_key = f"summary:{run_id}"
         async with await self._get_lock(lock_key):
             loop = asyncio.get_event_loop()
-            summary = await loop.run_in_executor(None, self._base_storage.load_summary, run_id)
+            summary = await loop.run_in_executor(None, self._load_summary_sync, run_id)
 
         # Update cache
         if summary:
@@ -275,7 +337,7 @@ class ConcurrentStorage:
         lock_key = f"run:{run_id}"
         async with await self._get_lock(lock_key):
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, self._base_storage.delete_run, run_id)
+            result = await loop.run_in_executor(None, self._delete_run_sync, run_id)
 
         # Clear cache
         self._cache.pop(f"run:{run_id}", None)
@@ -283,37 +345,10 @@ class ConcurrentStorage:
 
         return result
 
-    # === QUERY OPERATIONS (Async, with Locking) ===
-
-    async def get_runs_by_goal(self, goal_id: str) -> list[str]:
-        """Get all run IDs for a goal."""
-        async with await self._get_lock(f"index:by_goal:{goal_id}"):
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._base_storage.get_runs_by_goal, goal_id)
-
-    async def get_runs_by_status(self, status: str | RunStatus) -> list[str]:
-        """Get all run IDs with a status."""
-        if isinstance(status, RunStatus):
-            status = status.value
-        async with await self._get_lock(f"index:by_status:{status}"):
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._base_storage.get_runs_by_status, status)
-
-    async def get_runs_by_node(self, node_id: str) -> list[str]:
-        """Get all run IDs that executed a node."""
-        async with await self._get_lock(f"index:by_node:{node_id}"):
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, self._base_storage.get_runs_by_node, node_id)
-
     async def list_all_runs(self) -> list[str]:
         """List all run IDs."""
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._base_storage.list_all_runs)
-
-    async def list_all_goals(self) -> list[str]:
-        """List all goal IDs that have runs."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._base_storage.list_all_goals)
+        return await loop.run_in_executor(None, self._list_all_runs_sync)
 
     # === BATCH OPERATIONS ===
 
@@ -411,10 +446,11 @@ class ConcurrentStorage:
     async def get_stats(self) -> dict:
         """Get storage statistics."""
         loop = asyncio.get_event_loop()
-        base_stats = await loop.run_in_executor(None, self._base_storage.get_stats)
+        all_runs = await loop.run_in_executor(None, self._list_all_runs_sync)
 
         return {
-            **base_stats,
+            "total_runs": len(all_runs),
+            "storage_path": str(self.base_path),
             "cache": self.get_cache_stats(),
             "pending_writes": self._write_queue.qsize(),
             "running": self._running,
@@ -423,10 +459,9 @@ class ConcurrentStorage:
     # === SYNC API (for backward compatibility) ===
 
     def save_run_sync(self, run: Run) -> None:
-        """Synchronous save (uses base storage directly with lock)."""
-        # Use threading lock for sync operations
-        self._base_storage.save_run(run)
+        """Synchronous save (deprecated, no-op)."""
+        self._save_run_sync(run)
 
     def load_run_sync(self, run_id: str) -> Run | None:
-        """Synchronous load (uses base storage directly)."""
-        return self._base_storage.load_run(run_id)
+        """Synchronous load."""
+        return self._load_run_sync(run_id)

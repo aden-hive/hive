@@ -1,5 +1,5 @@
 """
-Tests for path traversal vulnerability fix in FileStorage.
+Tests for path traversal vulnerability fix in ConcurrentStorage.
 
 Verifies that the _validate_key() method properly blocks path traversal attempts.
 """
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from framework.storage.backend import FileStorage
+from framework.storage.concurrent import ConcurrentStorage
 
 
 class TestPathTraversalProtection:
@@ -19,7 +19,7 @@ class TestPathTraversalProtection:
     def storage(self):
         """Create a temporary storage instance for testing."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            yield FileStorage(tmpdir)
+            yield ConcurrentStorage(tmpdir)
 
     # === VALID KEYS (should pass validation) ===
 
@@ -117,59 +117,54 @@ class TestPathTraversalProtection:
 
     # === END-TO-END TESTS ===
 
-    def test_get_runs_by_goal_blocks_traversal(self, storage):
-        """get_runs_by_goal() should block path traversal."""
+    def test_validate_key_blocks_goal_traversal(self, storage):
+        """_validate_key() should block path traversal in goal-like keys."""
         with pytest.raises(ValueError):
-            storage.get_runs_by_goal("../../../.env")
+            storage._validate_key("../../../.env")
 
-    def test_get_runs_by_node_blocks_traversal(self, storage):
-        """get_runs_by_node() should block path traversal."""
+    def test_validate_key_blocks_node_traversal(self, storage):
+        """_validate_key() should block absolute paths."""
         with pytest.raises(ValueError):
-            storage.get_runs_by_node("/etc/passwd")
+            storage._validate_key("/etc/passwd")
 
-    def test_get_runs_by_status_blocks_traversal(self, storage):
-        """get_runs_by_status() should block path traversal."""
+    def test_validate_key_blocks_status_traversal(self, storage):
+        """_validate_key() should block backslash traversal."""
         with pytest.raises(ValueError):
-            storage.get_runs_by_status("..\\..\\windows\\system32")
+            storage._validate_key("..\\..\\windows\\system32")
 
-    def test_valid_queries_still_work(self, storage):
-        """Valid queries should work after fix."""
-        # These should return empty list, not raise errors
-        result = storage.get_runs_by_goal("legitimate_goal")
-        assert result == []
-
-        result = storage.get_runs_by_node("legitimate_node")
-        assert result == []
-
-        result = storage.get_runs_by_status("completed")
-        assert result == []
+    def test_valid_keys_pass_validation(self, storage):
+        """Valid keys should pass validation without errors."""
+        # These should not raise errors
+        storage._validate_key("legitimate_goal")
+        storage._validate_key("legitimate_node")
+        storage._validate_key("completed")
 
     # === REAL-WORLD ATTACK SCENARIOS ===
 
     def test_blocks_env_file_escape(self, storage):
         """Block attempts to access .env files."""
         with pytest.raises(ValueError):
-            storage.get_runs_by_goal("../../../.env")
+            storage._validate_key("../../../.env")
 
     def test_blocks_config_file_escape(self, storage):
         """Block attempts to access config files."""
         with pytest.raises(ValueError):
-            storage.get_runs_by_goal("../../../../etc/aden/database.yaml")
+            storage._validate_key("../../../../etc/aden/database.yaml")
 
     def test_blocks_web_shell_creation(self, storage):
         """Block attempts to create web shells."""
         with pytest.raises(ValueError):
-            storage._add_to_index("by_goal", "../../var/www/html/shell", "malicious_code")
+            storage._validate_key("../../var/www/html/shell")
 
     def test_blocks_cron_injection(self, storage):
         """Block attempts to create cron jobs."""
         with pytest.raises(ValueError):
-            storage._add_to_index("by_node", "../../../etc/cron.d/backdoor", "reverse_shell")
+            storage._validate_key("../../../etc/cron.d/backdoor")
 
     def test_blocks_sudoers_modification(self, storage):
         """Block attempts to modify sudoers file."""
         with pytest.raises(ValueError):
-            storage._add_to_index("by_status", "../../../../etc/sudoers", "ALL=(ALL) NOPASSWD:ALL")
+            storage._validate_key("../../../../etc/sudoers")
 
 
 class TestPathTraversalWithActualFiles:
@@ -186,11 +181,11 @@ class TestPathTraversalWithActualFiles:
             secret_file = tmpdir_path / "secret.txt"
             secret_file.write_text("SENSITIVE_DATA", encoding="utf-8")
 
-            storage = FileStorage(storage_dir)
+            storage = ConcurrentStorage(storage_dir)
 
             # Attempt to read the secret file via path traversal
             with pytest.raises(ValueError):
-                storage.get_runs_by_goal("../secret")
+                storage._validate_key("../secret")
 
             # Verify the secret file was not accessed (still contains original data)
             assert secret_file.read_text(encoding="utf-8") == "SENSITIVE_DATA"
@@ -202,11 +197,11 @@ class TestPathTraversalWithActualFiles:
             storage_dir = tmpdir_path / "storage"
             storage_dir.mkdir()
 
-            storage = FileStorage(storage_dir)
+            storage = ConcurrentStorage(storage_dir)
 
             # Attempt to write outside storage directory
             with pytest.raises(ValueError):
-                storage._add_to_index("by_goal", "../../malicious", "payload")
+                storage._validate_key("../../malicious")
 
             # Verify no file was created outside storage
             malicious_file = tmpdir_path / "malicious.json"

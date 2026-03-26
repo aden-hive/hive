@@ -73,7 +73,7 @@ class DebugTool:
 
         Args:
             test_storage: Storage for test and result data
-            runtime_storage: Optional FileStorage for Runtime data
+            runtime_storage: Optional storage backend for Runtime data
         """
         self.test_storage = test_storage
         self.runtime_storage = runtime_storage
