@@ -22,7 +22,6 @@ from fastmcp import FastMCP
 
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
-
 # ---------------------------------------------------------------------------
 # Verified tools (stable, on main)
 # ---------------------------------------------------------------------------
@@ -46,6 +45,7 @@ from .calendar_tool import register_tools as register_calendar
 from .calendly_tool import register_tools as register_calendly
 from .cloudinary_tool import register_tools as register_cloudinary
 from .confluence_tool import register_tools as register_confluence
+from .currency_exchange_tool import register_tools as register_currency_exchange
 from .csv_tool import register_tools as register_csv
 from .databricks_tool import register_tools as register_databricks
 from .discord_tool import register_tools as register_discord
@@ -225,7 +225,6 @@ def _register_verified(
 
 def _register_unverified(
     mcp: FastMCP,
-    credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """Register unverified (new/community) tools."""
     # --- No credentials ---
@@ -243,6 +242,7 @@ def _register_unverified(
     register_intercom(mcp, credentials=credentials)
     register_apollo(mcp, credentials=credentials)
     register_brevo(mcp, credentials=credentials)
+    register_currency_exchange(mcp)
     register_bigquery(mcp, credentials=credentials)
     register_calcom(mcp, credentials=credentials)
     register_razorpay(mcp, credentials=credentials)
@@ -324,3 +324,4 @@ def register_all_tools(
 
 
 __all__ = ["register_all_tools"]
+
