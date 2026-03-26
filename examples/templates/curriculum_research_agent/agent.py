@@ -261,8 +261,8 @@ class CurriculumResearchAgent:
 
         entry_point_specs = [
             EntryPointSpec(
-                id="default",
-                name="Default",
+                id="start",
+                name="Start",
                 entry_node=self.entry_node,
                 trigger_type="manual",
                 isolation_level="shared",
@@ -318,7 +318,7 @@ class CurriculumResearchAgent:
         await self.start(mock_mode=mock_mode)
         try:
             result = await self.trigger_and_wait(
-                "default", context, session_state=session_state
+                "start", context, session_state=session_state
             )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:

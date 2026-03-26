@@ -1,20 +1,10 @@
 """Runtime configuration for Curriculum Research Agent."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from framework.config import RuntimeConfig
 
 default_config = RuntimeConfig()
-
-
-@dataclass
-class CurriculumConfig:
-    """Domain-specific configuration for curriculum research."""
-
-    max_search_results: int = 10
-    include_domains: list[str] = field(default_factory=list)
-    addie_phase: str = "Analysis"  # Analysis | Design | Both
-    output_format: str = "markdown"  # markdown | json
 
 
 @dataclass
@@ -38,5 +28,4 @@ class AgentMetadata:
     )
 
 
-curriculum_config = CurriculumConfig()
 metadata = AgentMetadata()
