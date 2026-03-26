@@ -92,6 +92,7 @@ from .microsoft_graph_tool import register_tools as register_microsoft_graph
 from .mongodb_tool import register_tools as register_mongodb
 from .n8n_tool import register_tools as register_n8n
 from .news_tool import register_tools as register_news
+from .ninjapear_tool import register_tools as register_ninjapear
 from .notion_tool import register_tools as register_notion
 from .obsidian_tool import register_tools as register_obsidian
 from .pagerduty_tool import register_tools as register_pagerduty
@@ -269,6 +270,7 @@ def _register_unverified(
     register_microsoft_graph(mcp, credentials=credentials)
     register_mongodb(mcp, credentials=credentials)
     register_n8n(mcp, credentials=credentials)
+    register_ninjapear(mcp, credentials=credentials)
     register_obsidian(mcp, credentials=credentials)
     register_pagerduty(mcp, credentials=credentials)
     register_pinecone(mcp, credentials=credentials)
