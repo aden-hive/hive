@@ -46,6 +46,44 @@ worker_models.analyst = "gpt-4o"
 worker_models.strategist = "gemini-2.0-flash"
 ```
 
+### Validation Layer (Inter-Agent Handoff Gate)
+
+Each Worker Bee output passes through a validation gate before entering synthesis:
+
+| Worker Bee | Required fields | On failure |
+|---|---|---|
+| **Researcher** | entities list + confidence score (0–1) | Retry once → `LOW_CONFIDENCE` |
+| **Analyst** | consistency_score + findings | Retry once → `UNVERIFIED` |
+| **Strategist** | recommendations with priority | Retry once → `ADVISORY_ONLY` |
+
+One worker failing validation does **not** halt the pipeline — the Coordinator proceeds
+with remaining agents and annotates the report with `⚠️ PARTIAL_ANALYSIS`.
+This implements the **circuit breaker pattern** for multi-agent reliability.
+
+### Long-Term Memory (Cross-Session Pattern Retention)
+
+The Coordinator uses `append_data`/`load_data` to maintain episodic memory across sessions:
+
+- **Prior consensus ranges** for recurring document types seed new analyses
+- **Outlier detection**: if a model consistently diverges, it is flagged in the log
+- **Cold-start context**: the 3 most recent analyses are loaded before each new run
+
+Memory files (stored in agent storage):
+- `ltm_analyses.json` — structured analysis patterns per session
+- `worker_behavior.jsonl` — per-worker reliability log (one line per session)
+
+### Behavior Monitoring (Worker Reliability Tracking)
+
+Each session logs worker behavior to `worker_behavior.jsonl`:
+
+```json
+{"worker": "researcher", "validation": "PASS", "confidence": 0.87, "was_outlier": false}
+```
+
+This addresses the **compound error probability problem**: tracking per-agent reliability
+over time allows the Coordinator to calibrate synthesis confidence and flag models that
+consistently underperform — before their errors cascade into the final report.
+
 ## Usage
 
 ```bash

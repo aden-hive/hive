@@ -4,12 +4,38 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class ValidationConfig:
+    """Output validation thresholds for Worker Bee handoff gates.
+
+    Controls circuit breaker behavior: when a worker fails validation,
+    the pipeline degrades gracefully rather than halting.
+    """
+
+    max_retries: int = 1  # Retry once before marking as failed
+    min_confidence: float = 0.0  # Flag outputs below this threshold
+    require_confidence_score: bool = True
+    require_structured_output: bool = True
+
+
+@dataclass
+class LTMConfig:
+    """Long-term memory configuration for cross-session pattern retention."""
+
+    enabled: bool = True
+    ltm_file: str = "ltm_analyses.json"
+    behavior_log_file: str = "worker_behavior.jsonl"
+    max_prior_sessions: int = 10  # Cap retrieval to last N sessions
+
+
+@dataclass
 class RuntimeConfig:
     """Runtime configuration for the agent."""
 
     model: str | None = None  # Use system default
     max_concurrent: int = 10
     verbose: bool = False
+    validation: ValidationConfig = field(default_factory=ValidationConfig)
+    ltm: LTMConfig = field(default_factory=LTMConfig)
 
 
 @dataclass
