@@ -119,7 +119,7 @@ This sets up:
 - **LLM provider** - Interactive default model configuration, including Hive LLM and OpenRouter
 - All required Python dependencies with `uv`
 
-- Finally, it will open the Hive interface in your browser
+- If the frontend build succeeds, it will open the Hive dashboard in your browser
 
 > **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
 
