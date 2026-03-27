@@ -109,7 +109,7 @@ def tui(verbose: bool, debug: bool) -> None:
 
         tools = list(agent._tool_registry.get_tools().values())
         tool_executor = agent._tool_registry.get_executor()
-        graph = agent.build_graph()
+        graph = agent._build_graph()
 
         runtime = create_agent_runtime(
             graph=graph,

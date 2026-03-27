@@ -107,24 +107,24 @@ class TestAgentStructure:
 
     def test_forever_alive(self, agent):
         """Agent is forever-alive (no terminal nodes)."""
-        graph = agent.build_graph()
+        graph = agent._build_graph()
         assert graph.terminal_nodes == []
 
     def test_entry_node(self, agent):
         """Entry node is intake."""
-        graph = agent.build_graph()
+        graph = agent._build_graph()
         assert graph.entry_node == "intake"
 
     def test_graph_builds_successfully(self, agent):
         """Graph builds without errors."""
-        graph = agent.build_graph()
+        graph = agent._build_graph()
         assert graph is not None
         assert len(graph.nodes) == 5
         assert len(graph.edges) == 2
 
     def test_validate_passes(self, agent):
         """Agent validation passes."""
-        result = agent.validate()
+        result = agent.validate()  # internally calls _build_graph()
         assert result["valid"], f"Validation failed: {result['errors']}"
 
     def test_info_returns_dict(self, agent):

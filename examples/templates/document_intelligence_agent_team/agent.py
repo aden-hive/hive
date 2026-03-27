@@ -173,7 +173,7 @@ class DocumentIntelligenceAgentTeam:
                 applied_nodes.append(node)
         return applied_nodes
 
-    def build_graph(self) -> GraphSpec:
+    def _build_graph(self) -> GraphSpec:
         """Build the agent graph specification."""
         applied_nodes = self._apply_worker_models()
         return GraphSpec(
@@ -198,7 +198,7 @@ class DocumentIntelligenceAgentTeam:
         tool_executor=None,
     ) -> AgentRuntime:
         """Build and configure the agent runtime."""
-        graph = self.build_graph()
+        graph = self._build_graph()
         runtime = AgentRuntime(
             graph=graph,
             goal=goal,
@@ -256,7 +256,7 @@ class DocumentIntelligenceAgentTeam:
 
     def validate(self) -> dict[str, Any]:
         """Validate the agent graph structure."""
-        graph = self.build_graph()
+        graph = self._build_graph()
         issues = graph.validate()
         return {
             "valid": len(issues["errors"]) == 0,

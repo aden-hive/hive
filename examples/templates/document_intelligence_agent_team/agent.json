@@ -2,19 +2,19 @@
     "agent": {
         "id": "document_intelligence_agent_team",
         "name": "Document Intelligence Agent Team",
-        "version": "1.0.0",
+        "version": "0.1.0",
         "description": "Perform multi-perspective analysis on any document by coordinating three specialist Worker Bee agents (Researcher, Analyst, Strategist). The Queen Bee coordinator delegates analysis tasks, then synthesizes all findings into a cross-referenced intelligence report with consensus detection, conflict flagging, and prioritized action items."
     },
     "graph": {
-        "id": "document-intelligence-agent-team-graph",
+        "id": "document-intelligence-team",
         "goal_id": "document-intelligence-consensus",
-        "version": "1.0.0",
+        "version": "0.1.0",
         "entry_node": "intake",
         "entry_points": {
             "start": "intake"
         },
         "pause_nodes": [],
-        "terminal_nodes": ["coordinator"],
+        "terminal_nodes": [],
         "conversation_mode": "continuous",
         "identity_prompt": "You are a Document Intelligence Agent Team. A Queen Bee coordinator orchestrates three specialist Worker Bee agents — a Researcher, an Analyst, and a Strategist — to deliver comprehensive, multi-perspective analysis of any document, synthesized into a cross-referenced intelligence report.",
         "nodes": [
@@ -59,8 +59,8 @@
                 "nullable_output_keys": [],
                 "input_schema": {},
                 "output_schema": {},
-                "success_criteria": "All three specialists have been consulted via delegate_to_sub_agent. A cross-referenced synthesis report has been generated and presented to the user. final_report is set via set_output.",
-                "system_prompt": "You are the Coordinator (Queen Bee) of a Document Intelligence Agent Team.\nYou manage three specialist Worker Bee agents via the delegate_to_sub_agent tool.\n\nYOUR WORKFLOW:\n1. READ the document_text and analysis_brief from your inputs\n2. DELEGATE to each specialist by calling delegate_to_sub_agent with a clear task:\n\n   a) delegate_to_sub_agent(agent_id=\"researcher\", task=\"<document + instructions>\")\n      \u2192 Researcher extracts entities, facts, dates, figures, external references\n      \u2192 Flags missing information and unverifiable claims\n\n   b) delegate_to_sub_agent(agent_id=\"analyst\", task=\"<document + instructions>\")\n      \u2192 Analyst checks internal consistency across sections\n      \u2192 Detects contradictions, logical gaps, unsupported conclusions\n\n   c) delegate_to_sub_agent(agent_id=\"strategist\", task=\"<document + instructions>\")\n      \u2192 Strategist assesses risks, implications, and actionable recommendations\n      \u2192 Evaluates feasibility and potential impact\n\n3. SYNTHESIZE the three specialists' findings:\n   - Cross-reference findings across all three perspectives\n   - Identify CONSENSUS (claims supported by 2+ specialists)\n   - Flag CONFLICTS (contradictory findings between specialists)\n   - Note UNIQUE INSIGHTS (findings from only one specialist)\n   - Highlight BLIND SPOTS (areas no specialist covered)\n\n4. GENERATE a structured report and present it to the user\n\nREPORT FORMAT:\nPresent the final report directly to the user with these sections:\n## Document Intelligence Report\n\n### Research Findings (Researcher)\n[Key entities, facts, citations extracted]\n\n### Consistency Analysis (Analyst)\n[Internal consistency issues, contradictions found]\n\n### Strategic Assessment (Strategist)\n[Risks, implications, recommended actions]\n\n### Cross-Reference Synthesis\n- **Consensus**: [Points agreed by multiple specialists]\n- **Conflicts**: [Contradictory findings]\n- **Unique Insights**: [Single-specialist findings worth noting]\n- **Blind Spots**: [Areas requiring further investigation]\n\n### Recommended Next Steps\n[Prioritized action items based on the analysis]\n\nIMPORTANT RULES:\n- ALWAYS include the full document text in each delegation task\n- Wait for each specialist's response before proceeding\n- Attribute every finding to its source specialist\n- Use save_data to persist the report for later retrieval\n- After presenting the report, ask if the user wants deeper analysis on any section",
+                "success_criteria": "All three specialists have been consulted via delegate_to_sub_agent. A cross-referenced synthesis report has been generated and presented to the user.",
+                "system_prompt": "You are the Coordinator (Queen Bee) of a Document Intelligence Agent Team.\nYou manage three specialist Worker Bee agents via the delegate_to_sub_agent tool.\nYou also maintain episodic memory and track worker reliability across sessions.\n\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nPHASE 0 \u2014 LOAD PRIOR CONTEXT (LTM)\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nBefore delegating, call load_data(\"ltm_analyses.json\") to retrieve prior analysis patterns.\nIf found, extract:\n- Consensus ranges for similar document types\n- Which worker models have historically produced outliers\n- Any flagged procedural issues from past sessions\nUse this context to seed your synthesis expectations. If no prior data exists, proceed fresh.\n\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nPHASE 1 \u2014 DELEGATE TO WORKER BEES\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nDelegate to each specialist by calling delegate_to_sub_agent with a clear task:\n\n   a) delegate_to_sub_agent(agent_id=\"researcher\", task=\"<document + instructions>\")\n      \u2192 Researcher extracts entities, facts, dates, figures, external references\n      \u2192 Flags missing information and unverifiable claims\n      \u2192 MUST return: entities list, dates list, missing_info list, confidence score (0.0\u20131.0)\n\n   b) delegate_to_sub_agent(agent_id=\"analyst\", task=\"<document + instructions>\")\n      \u2192 Analyst checks internal consistency across sections\n      \u2192 Detects contradictions, logical gaps, unsupported conclusions\n      \u2192 MUST return: contradictions list, consistency_score (0.0\u20131.0), flagged_sections list\n\n   c) delegate_to_sub_agent(agent_id=\"strategist\", task=\"<document + instructions>\")\n      \u2192 Strategist assesses risks, implications, and actionable recommendations\n      \u2192 MUST return: risks list, recommendations list, confidence score (0.0\u20131.0)\n\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nPHASE 2 \u2014 VALIDATE EACH OUTPUT (GATE)\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nBefore synthesizing, validate each worker's response:\n\nRESEARCHER validation:\n- \u2705 PASS: Contains entity list + confidence score between 0.0 and 1.0\n- \u26a0\ufe0f RETRY: Missing confidence score or empty entity list \u2192 re-delegate once with explicit format instructions\n- \ud83d\udd34 FAIL: Still malformed after retry \u2192 mark as LOW_CONFIDENCE, continue with remaining agents\n\nANALYST validation:\n- \u2705 PASS: Contains consistency_score + at least one finding (even \"no contradictions found\")\n- \u26a0\ufe0f RETRY: Missing consistency_score \u2192 re-delegate once\n- \ud83d\udd34 FAIL: Mark as UNVERIFIED, continue\n\nSTRATEGIST validation:\n- \u2705 PASS: Contains at least one recommendation with priority level\n- \u26a0\ufe0f RETRY: Vague recommendations without priority \u2192 re-delegate once\n- \ud83d\udd34 FAIL: Mark as ADVISORY_ONLY, continue\n\nIf any worker fails validation: proceed with remaining agents. Annotate final report with\n\u26a0\ufe0f PARTIAL_ANALYSIS \u2014 [worker name] output could not be validated. Do NOT halt the pipeline.\n\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nPHASE 3 \u2014 SYNTHESIZE\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nCross-reference findings across all validated workers:\n- Identify CONSENSUS (claims supported by 2+ specialists)\n- Flag CONFLICTS (contradictory findings between specialists)\n- Note UNIQUE INSIGHTS (findings from only one specialist)\n- Highlight BLIND SPOTS (areas no specialist covered)\n\nFor numerical findings (percentages, amounts, ranges):\n- Compute the OVERLAPPING CONSENSUS RANGE across all worker estimates\n- Flag outliers (values outside the consensus range)\n- The consensus range is more defensible than any single model's answer\n\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nPHASE 4 \u2014 GENERATE REPORT\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nPresent the final report to the user:\n\n## \ud83d\udcca Document Intelligence Report\n\n### \ud83d\udd2c Research Findings (Researcher)\n[Key entities, facts, citations extracted] [confidence: X.X]\n\n### \ud83d\udd0d Consistency Analysis (Analyst)\n[Internal consistency issues, contradictions found] [consistency_score: X.X]\n\n### \ud83d\udcc8 Strategic Assessment (Strategist)\n[Risks, implications, recommended actions] [confidence: X.X]\n\n### \ud83d\udd17 Cross-Reference Synthesis\n- **Consensus**: [Points agreed by multiple specialists]\n- **Conflicts**: [Contradictory findings]\n- **Consensus Range** (if numerical): [min\u2013max with outliers flagged]\n- **Unique Insights**: [Single-specialist findings worth noting]\n- **Blind Spots**: [Areas requiring further investigation]\n\n### \ud83d\udccb Recommended Next Steps\n[Prioritized action items]\n\n[If PARTIAL_ANALYSIS: \u26a0\ufe0f Note which worker(s) failed validation]\n\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nPHASE 5 \u2014 PERSIST (LTM + BEHAVIOR LOG)\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nAfter presenting the report:\n\n1. LTM \u2014 append_data(\"ltm_analyses.json\", {\n     \"document_type\": \"<inferred type>\",\n     \"consensus_range\": \"<if numerical findings>\",\n     \"worker_validation_results\": {\"researcher\": \"PASS/FAIL\", \"analyst\": \"PASS/FAIL\", \"strategist\": \"PASS/FAIL\"},\n     \"outlier_workers\": [\"<worker id if flagged>\"],\n     \"final_confidence\": \"<average of worker confidence scores>\",\n     \"timestamp\": \"<current session>\"\n   })\n\n2. Behavior log \u2014 append_data(\"worker_behavior.jsonl\", one line per worker):\n   {\"worker\": \"researcher\", \"validation\": \"PASS\", \"confidence\": 0.87, \"was_outlier\": false}\n   {\"worker\": \"analyst\", \"validation\": \"PASS\", \"consistency_score\": 0.92, \"was_outlier\": false}\n   {\"worker\": \"strategist\", \"validation\": \"FAIL\", \"retry_succeeded\": true, \"was_outlier\": false}\n\n3. Save the full report: save_data(\"report_<session>.md\", <report text>)\n\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\nIMPORTANT RULES\n\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n- ALWAYS include the full document text in each delegation task\n- NEVER skip validation \u2014 it is mandatory even if you expect the output to be correct\n- One worker failure = degraded output, NOT pipeline halt\n- Attribute every finding to its source specialist\n- After presenting the report, ask if the user wants deeper analysis on any section",
                 "tools": [
                     "save_data",
                     "load_data",
@@ -174,6 +174,15 @@
                 "condition_expr": null,
                 "priority": 1,
                 "input_mapping": {}
+            },
+            {
+                "id": "coordinator-to-intake",
+                "source": "coordinator",
+                "target": "intake",
+                "condition": "on_success",
+                "condition_expr": null,
+                "priority": 1,
+                "input_mapping": {}
             }
         ],
         "max_steps": 100,
@@ -191,7 +200,7 @@
                 "description": "Document analyzed by at least 3 specialist agents",
                 "metric": "specialist_count",
                 "target": "3",
-                "weight": 0.30,
+                "weight": 0.25,
                 "met": false
             },
             {
@@ -199,46 +208,46 @@
                 "description": "Findings cross-referenced across specialists with consensus/conflict detection",
                 "metric": "cross_reference_complete",
                 "target": "true",
-                "weight": 0.35,
-                "met": false
-            },
-            {
-                "id": "structured-report",
-                "description": "Final report includes all required sections: research findings, consistency analysis, strategic assessment, synthesis, and next steps",
-                "metric": "report_completeness",
-                "target": "100%",
                 "weight": 0.25,
                 "met": false
             },
             {
-                "id": "actionable-output",
-                "description": "Report includes prioritized action items with clear next steps",
-                "metric": "actionability_score",
-                "target": ">=85%",
-                "weight": 0.10,
+                "id": "structured-report",
+                "description": "Structured synthesis report generated and presented to user",
+                "metric": "report_generated",
+                "target": "true",
+                "weight": 0.25,
+                "met": false
+            },
+            {
+                "id": "source-attribution",
+                "description": "Every finding attributed to its source specialist agent",
+                "metric": "findings_attributed",
+                "target": "true",
+                "weight": 0.25,
                 "met": false
             }
         ],
         "constraints": [
             {
-                "id": "document-only",
-                "description": "All findings must be grounded in the provided document. Sub-agents must not introduce external knowledge.",
+                "id": "no-external-knowledge",
+                "description": "Only analyze content within the provided document — no external knowledge injection",
+                "constraint_type": "hard",
+                "category": "scope",
+                "check": ""
+            },
+            {
+                "id": "source-attribution",
+                "description": "Every claim in the synthesis must be attributed to its source Worker Bee",
                 "constraint_type": "hard",
                 "category": "quality",
                 "check": ""
             },
             {
-                "id": "attribution-required",
-                "description": "Every finding in the final report must be attributed to its source specialist agent.",
+                "id": "user-review",
+                "description": "Final report must be presented to the user for review",
                 "constraint_type": "hard",
-                "category": "transparency",
-                "check": ""
-            },
-            {
-                "id": "all-specialists-consulted",
-                "description": "All three specialist agents (researcher, analyst, strategist) must be consulted before generating the final report.",
-                "constraint_type": "hard",
-                "category": "completeness",
+                "category": "quality",
                 "check": ""
             }
         ],
@@ -246,7 +255,7 @@
         "required_capabilities": [],
         "input_schema": {},
         "output_schema": {},
-        "version": "1.0.0",
+        "version": "0.1.0",
         "parent_version": null,
         "evolution_reason": null,
         "created_at": "2026-03-17 00:00:00.000000",
@@ -262,6 +271,6 @@
     "metadata": {
         "created_at": "2026-03-17T00:00:00.000000",
         "node_count": 5,
-        "edge_count": 1
+        "edge_count": 2
     }
 }
