@@ -86,23 +86,31 @@ intake → research → compile-report
 
 ### Basic Usage
 
+Run the agent through the interactive TUI dashboard:
+```bash
+# Launch the dashboard and select "Tech & AI News Reporter"
+hive tui
+
+# Or run directly from the command line
+hive run examples/templates/tech_news_reporter
+```
+
+To run programmatically:
 ```python
 from framework.runner import AgentRunner
 
 # Load the agent
 runner = AgentRunner.load("examples/templates/tech_news_reporter")
 
-# Run with input
-result = await runner.run({"input_key": "value"})
+# The intake node will interactively ask the user for topic preferences
+result = await runner.run({})
 
-# Access results
-print(result.output)
 print(result.status)
 ```
 
 ### Input Schema
 
-The agent's entry node `intake` requires:
+No input keys are required at launch. The `intake` node is client-facing and will interactively prompt the user to choose their preferred tech/AI news topics before the research begins.
 
 
 ### Output Schema
