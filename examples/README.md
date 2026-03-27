@@ -26,7 +26,8 @@ Use templates when you want to:
 
 ```bash
 # 1. Copy the template
-cp -r examples/templates/marketing_agent exports/my_agent
+cp -r examples/templates/job_hunter exports/my_agent  
+### Note: You can replace `job_hunter` with any available template from the `examples/templates` directory. 
 
 # 2. Edit the goal, nodes, and edges in agent.py and nodes/__init__.py
 
