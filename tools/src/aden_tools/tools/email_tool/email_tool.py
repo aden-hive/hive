@@ -12,7 +12,6 @@ import os
 from typing import TYPE_CHECKING, Literal
 
 import httpx
-import resend
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
@@ -35,6 +34,15 @@ def register_tools(
         bcc: list[str] | None = None,
     ) -> dict:
         """Send email using Resend API."""
+        try:
+            import resend
+        except ImportError:
+            return {
+                "error": (
+                    "resend not installed. Install with: "
+                    "pip install resend  or  pip install tools[email]"
+                )
+            }
         resend.api_key = api_key
         try:
             payload: dict = {
