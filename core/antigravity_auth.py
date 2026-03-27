@@ -196,18 +196,26 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
 
 def wait_for_callback(port: int, timeout: int = 300) -> tuple[str | None, str | None, str | None]:
     """Start local server and wait for OAuth callback."""
+    # Reset state from previous runs
+    OAuthCallbackHandler.auth_code = None
+    OAuthCallbackHandler.state = None
+    OAuthCallbackHandler.error = None
+
     server = HTTPServer(("localhost", port), OAuthCallbackHandler)
     server.timeout = 1
 
-    start = time.time()
-    while time.time() - start < timeout:
-        if OAuthCallbackHandler.auth_code:
-            return (
-                OAuthCallbackHandler.auth_code,
-                OAuthCallbackHandler.state,
-                OAuthCallbackHandler.error,
-            )
-        server.handle_request()
+    try:
+        start = time.time()
+        while time.time() - start < timeout:
+            if OAuthCallbackHandler.auth_code:
+                return (
+                    OAuthCallbackHandler.auth_code,
+                    OAuthCallbackHandler.state,
+                    OAuthCallbackHandler.error,
+                )
+            server.handle_request()
+    finally:
+        server.server_close()
 
     return None, None, "timeout"
 
@@ -268,11 +276,23 @@ def load_accounts() -> dict[str, Any]:
 
 
 def save_accounts(data: dict[str, Any]) -> None:
-    """Save accounts to file."""
+    """Save accounts to file with restricted permissions."""
     _ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(_ACCOUNTS_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-    logger.info(f"Saved credentials to {_ACCOUNTS_FILE}")
+    # Restrict the parent directory as well
+    _ACCOUNTS_FILE.parent.chmod(0o700)
+
+    # Atomic write with restricted permissions (chmod 600)
+    tmp_path = _ACCOUNTS_FILE.with_suffix(".tmp")
+    try:
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        tmp_path.replace(_ACCOUNTS_FILE)
+        logger.info(f"Saved credentials to {_ACCOUNTS_FILE}")
+    except Exception as e:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        logger.error(f"Failed to save credentials: {e}")
 
 
 def validate_credentials(access_token: str, project_id: str = _DEFAULT_PROJECT_ID) -> bool:

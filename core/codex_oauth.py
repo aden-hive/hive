@@ -140,7 +140,7 @@ def get_account_id(access_token: str) -> str | None:
 
 
 def save_credentials(token_data: dict, account_id: str) -> None:
-    """Save credentials to ~/.codex/auth.json in the same format the Codex CLI uses."""
+    """Save credentials to ~/.codex/auth.json with restricted permissions."""
     auth_data = {
         "tokens": {
             "access_token": token_data["access_token"],
@@ -154,9 +154,18 @@ def save_credentials(token_data: dict, account_id: str) -> None:
         auth_data["tokens"]["id_token"] = token_data["id_token"]
 
     CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(CODEX_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(auth_data, f, indent=2)
+
+    # Atomic write with restricted permissions (chmod 600)
+    tmp_path = CODEX_AUTH_FILE.with_suffix(".tmp")
+    try:
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(auth_data, f, indent=2)
+        tmp_path.replace(CODEX_AUTH_FILE)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise
 
 
 def open_browser(url: str) -> bool:
