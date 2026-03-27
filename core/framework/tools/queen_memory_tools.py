@@ -49,7 +49,7 @@ def recall_diary(query: str = "", days_back: int = 7) -> str:
     """
     from datetime import date, timedelta
 
-    from framework.agents.queen.queen_memory import read_episodic_memory
+    from framework.agents.queen.queen_memory import format_memory_date, read_episodic_memory
 
     days_back = max(1, min(days_back, 30))
     today = date.today()
@@ -70,7 +70,7 @@ def recall_diary(query: str = "", days_back: int = 7) -> str:
             if not matched:
                 continue
             content = "### ".join(matched)
-        label = d.strftime("%B %-d, %Y")
+        label = format_memory_date(d)
         if d == today:
             label = f"Today — {label}"
         entry = f"## {label}\n\n{content}"
