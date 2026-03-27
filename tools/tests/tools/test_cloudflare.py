@@ -1169,8 +1169,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_set_ssl_mode"].fn
             result = fn(zone_id="z_test", mode="full")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
 
 class TestCloudflareEdgeCases:
