@@ -518,7 +518,9 @@ class LiteLLMProvider(LLMProvider):
         # Translate kimi/ prefix to anthropic/ so litellm uses the Anthropic
         # Messages API handler and routes to that endpoint — no special headers needed.
         _original_model = model
-        if model.lower().startswith("kimi/"):
+        if _is_ollama_model(model):
+            model = _ensure_ollama_chat_prefix(model)
+        elif model.lower().startswith("kimi/"):
             model = "anthropic/" + model[len("kimi/") :]
             # Normalise api_base: litellm's Anthropic handler appends /v1/messages,
             # so the base must be https://api.kimi.com/coding (no /v1 suffix).

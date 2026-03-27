@@ -186,6 +186,8 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
                 "store": False,
                 "allowed_openai_params": ["store"],
             }
+    if worker_llm.get("provider") == "ollama":
+        return {"num_ctx": worker_llm.get("num_ctx", 16384)}
     return {}
 
 

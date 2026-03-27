@@ -912,8 +912,9 @@ config["llm"] = {
     "model": model,
     "max_tokens": int(max_tokens),
     "max_context_tokens": int(max_context_tokens),
-    "api_key_env_var": env_var,
 }
+if env_var:
+    config["llm"]["api_key_env_var"] = env_var
 config["created_at"] = created_at
 
 if use_claude_code_sub == "true":
@@ -1097,10 +1098,11 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
         kimi_code)   [ "$KIMI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         hive_llm)    [ "$HIVE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         antigravity) [ "$ANTIGRAVITY_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
-        *)
-            # API key provider — check if the env var is set; ollama has no credential
+            # API key provider — check if the env var is set; ollama uses local runtime detection
             if [ "$PREV_PROVIDER" = "ollama" ]; then
-                PREV_CRED_VALID=true
+                if [ "$OLLAMA_DETECTED" = true ]; then
+                    PREV_CRED_VALID=true
+                fi
             elif [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
                 PREV_CRED_VALID=true
             fi
