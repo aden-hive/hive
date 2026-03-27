@@ -1024,6 +1024,11 @@ elif [ -f "$HOME/.hive/antigravity-accounts.json" ]; then
     ANTIGRAVITY_CRED_DETECTED=true
 fi
 
+OLLAMA_DETECTED=false
+if ollama list >/dev/null 2>&1; then
+    OLLAMA_DETECTED=true
+fi
+
 # Detect API key providers
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     for env_var in "${!PROVIDER_NAMES[@]}"; do
@@ -1120,6 +1125,7 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
                 groq)      DEFAULT_CHOICE=11 ;;
                 cerebras)  DEFAULT_CHOICE=12 ;;
                 openrouter) DEFAULT_CHOICE=13 ;;
+                ollama)    DEFAULT_CHOICE=14 ;;
                 minimax)   DEFAULT_CHOICE=4 ;;
                 kimi)      DEFAULT_CHOICE=5 ;;
                 hive)      DEFAULT_CHOICE=6 ;;
@@ -1198,7 +1204,14 @@ for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     fi
 done
 
-SKIP_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]}))
+# 14) Local (Ollama) — no API key needed
+if [ "$OLLAMA_DETECTED" = true ]; then
+    echo -e "  ${CYAN}14)${NC} Local (Ollama) - No API key needed  ${GREEN}(ollama detected)${NC}"
+else
+    echo -e "  ${CYAN}14)${NC} Local (Ollama) - No API key needed"
+fi
+
+SKIP_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]} + 1))
 echo -e "  ${CYAN}$SKIP_CHOICE)${NC} Skip for now"
 echo ""
 
@@ -1416,6 +1429,46 @@ case $choice in
         PROVIDER_NAME="OpenRouter"
         SIGNUP_URL="https://openrouter.ai/keys"
         ;;
+    14)
+        # Local (Ollama) — no API key; pick model from ollama list
+        SELECTED_PROVIDER_ID="ollama"
+        SELECTED_ENV_VAR=""
+        SELECTED_MAX_TOKENS=32768
+        SELECTED_MAX_CONTEXT_TOKENS=120000
+        OLLAMA_MODELS=()
+        while IFS= read -r line; do
+            [ -n "$line" ] && OLLAMA_MODELS+=("$line")
+        done < <(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}')
+        if [ ${#OLLAMA_MODELS[@]} -gt 0 ]; then
+            echo ""
+            echo -e "${BOLD}Select an Ollama model:${NC}"
+            echo ""
+            for idx in "${!OLLAMA_MODELS[@]}"; do
+                num=$((idx + 1))
+                echo -e "  ${CYAN}$num)${NC} ${OLLAMA_MODELS[$idx]}"
+            done
+            echo ""
+            while true; do
+                read -r -p "Enter choice (1-${#OLLAMA_MODELS[@]}): " model_choice
+                if [[ "$model_choice" =~ ^[0-9]+$ ]] && [ "$model_choice" -ge 1 ] && [ "$model_choice" -le ${#OLLAMA_MODELS[@]} ]; then
+                    SELECTED_MODEL="${OLLAMA_MODELS[$((model_choice - 1))]}"
+                    break
+                fi
+                echo -e "${RED}Invalid choice. Please enter 1-${#OLLAMA_MODELS[@]}${NC}"
+            done
+            echo ""
+            echo -e "${GREEN}⬢${NC} Using Ollama with model ${DIM}$SELECTED_MODEL${NC}"
+            echo -e "${YELLOW}  ⚠ Note: The framework uses a ~9,500 token system prompt and requires strong tool use.${NC}"
+            echo -e "${YELLOW}    For best results, use models like qwen2.5:72b+ or mistral-large.${NC}"
+            echo ""
+        else
+            SELECTED_MODEL="llama3"
+            echo ""
+            echo -e "${YELLOW}  No Ollama models found.${NC} Using default model: ${DIM}$SELECTED_MODEL${NC}"
+            echo -e "  Run ${CYAN}ollama pull $SELECTED_MODEL${NC} (or another model), then edit ${CYAN}~/.hive/configuration.json${NC} to change the model."
+            echo ""
+        fi
+        ;;
     "$SKIP_CHOICE")
         echo ""
         echo -e "${YELLOW}Skipped.${NC} An LLM API key is required to test and use worker agents."
@@ -1586,6 +1639,10 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+    elif [ "$SELECTED_PROVIDER_ID" = "ollama" ]; then
+        # Pass api_base explicitly — LiteLLM requires this to route ollama/* models
+        # to the local Ollama server instead of trying to reach a remote endpoint.
+        save_configuration "ollama" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "http://localhost:11434" > /dev/null || SAVE_OK=false
     else
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null || SAVE_OK=false
     fi
@@ -1861,6 +1918,9 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
         echo -e "  ${GREEN}⬢${NC} OpenRouter API Key → ${DIM}$SELECTED_MODEL${NC}"
         echo -e "  ${DIM}API: openrouter.ai/api/v1 (OpenAI-compatible)${NC}"
+    elif [ "$SELECTED_PROVIDER_ID" = "ollama" ]; then
+        echo -e "  ${GREEN}⬢${NC} Local (Ollama) → ${DIM}$SELECTED_MODEL${NC}"
+        echo -e "  ${DIM}No API key required (runs locally via http://localhost:11434)${NC}"
     else
         echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
     fi

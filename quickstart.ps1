@@ -1103,6 +1103,7 @@ if ($PrevSubMode -or $PrevProvider) {
                 "groq"      { $DefaultChoice = "10" }
                 "cerebras"  { $DefaultChoice = "11" }
                 "openrouter" { $DefaultChoice = "12" }
+                "ollama"     { $DefaultChoice = "13" }
                 "minimax"   { $DefaultChoice = "4" }
                 "kimi"      { $DefaultChoice = "5" }
             }
@@ -1171,7 +1172,17 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     if ($envVal) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 }
 
-$SkipChoice = 7 + $ProviderMenuEnvVars.Count
+# 13) Local (Ollama) — no API key needed
+Write-Host "  " -NoNewline
+Write-Color -Text "13" -Color Cyan -NoNewline
+if ($OllamaDetected) {
+    Write-Host ") Local (Ollama) - No API key needed  " -NoNewline
+    Write-Color -Text "(ollama detected)" -Color Green
+} else {
+    Write-Host ") Local (Ollama) - No API key needed"
+}
+
+$SkipChoice = 7 + $ProviderMenuEnvVars.Count + 1
 Write-Host "  " -NoNewline
 Write-Color -Text "$SkipChoice" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
