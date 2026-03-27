@@ -22,7 +22,6 @@ from typing import Any
 
 from framework.llm.provider import Tool, ToolResult, ToolUse
 
-
 # ---------------------------------------------------------------------------
 # Tool definitions (auto-discovered by ToolRegistry.discover_from_module)
 # ---------------------------------------------------------------------------
@@ -305,9 +304,9 @@ def post_to_lrs(
     Returns:
         {"statement_id": str, "success": bool, "error": str | None}
     """
-    import urllib.request
-    import urllib.error
     import base64
+    import urllib.error
+    import urllib.request
 
     statement_id = statement.get("id", str(uuid.uuid4()))
 

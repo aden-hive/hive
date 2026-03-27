@@ -12,6 +12,7 @@ Curriculum Research Agent (#5301) and Document Intelligence A2A (#5523)
 to record learning interactions as xAPI statements in real time.
 """
 
+import logging
 from pathlib import Path
 
 from framework.graph import Constraint, Goal, SuccessCriterion
@@ -25,14 +26,12 @@ from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
 from .nodes import (
+    confirmation_node,
     event_capture_node,
+    lrs_dispatch_node,
     statement_builder_node,
     validator_node,
-    lrs_dispatch_node,
-    confirmation_node,
 )
-
-import logging
 
 logger = logging.getLogger(__name__)
 

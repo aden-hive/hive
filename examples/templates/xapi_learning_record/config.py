@@ -1,5 +1,6 @@
 """Configuration for xAPI Learning Record Agent."""
 
+import os
 from dataclasses import dataclass, field
 
 
@@ -51,10 +52,10 @@ class AgentMetadata:
     )
 
 
-# LRS connection settings — replace with your LRS credentials
-LRS_ENDPOINT = "https://cloud.scorm.com/lrs/YOUR_LRS_KEY/statements"
-LRS_USERNAME = "your_username"
-LRS_PASSWORD = "your_password"
+# LRS connection settings — loaded from environment variables
+LRS_ENDPOINT = os.environ.get("LRS_ENDPOINT", "")
+LRS_USERNAME = os.environ.get("LRS_USERNAME", "")
+LRS_PASSWORD = os.environ.get("LRS_PASSWORD", "")
 
 # Platform identifier embedded in xAPI context
 PLATFORM = "Hive"

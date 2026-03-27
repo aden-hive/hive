@@ -9,17 +9,17 @@ __version__ = "0.1.0"
 
 from .agent import (
     XAPILearningRecordAgent,
+    conversation_mode,
     default_agent,
-    goal,
-    nodes,
     edges,
     entry_node,
     entry_points,
+    goal,
+    identity_prompt,
+    loop_config,
+    nodes,
     pause_nodes,
     terminal_nodes,
-    loop_config,
-    conversation_mode,
-    identity_prompt,
 )
 from .config import AgentMetadata, RuntimeConfig, default_config, metadata
 
