@@ -26,9 +26,7 @@ from aden_tools.tools.mattermost_tool.mattermost_tool import (
 
 class TestMattermostClient:
     def setup_method(self):
-        self.client = _MattermostClient(
-            "test-access-token", "https://mattermost.example.com"
-        )
+        self.client = _MattermostClient("test-access-token", "https://mattermost.example.com")
 
     def test_headers(self):
         headers = self.client._headers
@@ -198,8 +196,10 @@ class TestMattermostClient:
 
     @patch("aden_tools.tools.mattermost_tool.mattermost_tool.httpx.request")
     def test_delete_post(self, mock_request):
-        mock_request.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"status": "ok"}))
-        result = self.client.delete_post("p123")
+        mock_request.return_value = MagicMock(
+            status_code=200, json=MagicMock(return_value={"status": "ok"})
+        )
+        self.client.delete_post("p123")
         assert mock_request.call_args[0][0] == "DELETE"
         assert "posts/p123" in mock_request.call_args[0][1]
 
@@ -238,9 +238,7 @@ class TestMattermostClient:
             ),
             MagicMock(
                 status_code=200,
-                json=MagicMock(
-                    return_value=[{"id": "t1", "name": "team"}]
-                ),
+                json=MagicMock(return_value=[{"id": "t1", "name": "team"}]),
             ),
         ]
         result = self.client.list_teams()
@@ -285,9 +283,7 @@ class TestMattermostListTeamsTool:
     def test_list_teams_success(self, mock_request):
         mock_request.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value=[{"id": "t1", "name": "test-team"}]
-            ),
+            json=MagicMock(return_value=[{"id": "t1", "name": "test-team"}]),
         )
         result = self._fn("mattermost_list_teams")()
         assert result["success"] is True
@@ -300,9 +296,7 @@ class TestMattermostListTeamsTool:
         mcp.tool.return_value = lambda fn: fns.append(fn) or fn
         register_tools(mcp, credentials=None)
         with patch.dict("os.environ", {"MATTERMOST_ACCESS_TOKEN": ""}, clear=False):
-            result = next(
-                f for f in fns if f.__name__ == "mattermost_list_teams"
-            )()
+            result = next(f for f in fns if f.__name__ == "mattermost_list_teams")()
         assert "error" in result
         assert "not configured" in result["error"]
 
@@ -395,9 +389,7 @@ class TestMattermostSendMessageTool:
         ) as mock_request:
             mock_request.return_value = MagicMock(
                 status_code=201,
-                json=MagicMock(
-                    return_value={"id": "p1", "channel_id": "c1", "message": content}
-                ),
+                json=MagicMock(return_value={"id": "p1", "channel_id": "c1", "message": content}),
             )
             result = self._fn("mattermost_send_message")("c1", content)
         assert result["success"] is True
@@ -424,9 +416,7 @@ class TestMattermostSendMessageTool:
             ),
             MagicMock(
                 status_code=201,
-                json=MagicMock(
-                    return_value={"id": "p1", "channel_id": "c1", "message": "Hi"}
-                ),
+                json=MagicMock(return_value={"id": "p1", "channel_id": "c1", "message": "Hi"}),
             ),
         ]
         result = self._fn("mattermost_send_message")("c1", "Hi")

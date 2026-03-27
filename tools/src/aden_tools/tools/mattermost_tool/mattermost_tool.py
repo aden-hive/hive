@@ -55,9 +55,7 @@ class _MattermostClient:
             response = httpx.request(method, url, **request_kwargs)
             if response.status_code == 429 and attempt < MAX_RETRIES:
                 try:
-                    wait = min(
-                        float(response.headers.get("Retry-After", 1)), MAX_RETRY_WAIT
-                    )
+                    wait = min(float(response.headers.get("Retry-After", 1)), MAX_RETRY_WAIT)
                 except (ValueError, TypeError):
                     wait = min(2**attempt, MAX_RETRY_WAIT)
                 time.sleep(wait)
@@ -96,13 +94,9 @@ class _MattermostClient:
 
     def list_teams(self) -> dict[str, Any]:
         """List teams the authenticated user belongs to."""
-        return self._request_with_retry(
-            "GET", f"{self._base_url}/users/me/teams"
-        )
+        return self._request_with_retry("GET", f"{self._base_url}/users/me/teams")
 
-    def list_channels(
-        self, team_id: str, per_page: int = 100
-    ) -> dict[str, Any]:
+    def list_channels(self, team_id: str, per_page: int = 100) -> dict[str, Any]:
         """List public channels for a team."""
         return self._request_with_retry(
             "GET",
@@ -112,9 +106,7 @@ class _MattermostClient:
 
     def get_channel(self, channel_id: str) -> dict[str, Any]:
         """Get detailed information about a channel."""
-        return self._request_with_retry(
-            "GET", f"{self._base_url}/channels/{channel_id}"
-        )
+        return self._request_with_retry("GET", f"{self._base_url}/channels/{channel_id}")
 
     def send_message(
         self,
@@ -185,9 +177,7 @@ class _MattermostClient:
 
     def delete_post(self, post_id: str) -> dict[str, Any]:
         """Delete a post."""
-        return self._request_with_retry(
-            "DELETE", f"{self._base_url}/posts/{post_id}"
-        )
+        return self._request_with_retry("DELETE", f"{self._base_url}/posts/{post_id}")
 
 
 def register_tools(
@@ -204,7 +194,8 @@ def register_tools(
             token = credentials.get("mattermost")
             if token is not None and not isinstance(token, str):
                 raise TypeError(
-                    f"Expected string from credentials.get('mattermost'), got {type(token).__name__}"
+                    "Expected string from credentials.get('mattermost'), "
+                    f"got {type(token).__name__}"
                 )
             return token
         return os.getenv("MATTERMOST_ACCESS_TOKEN")
@@ -215,7 +206,8 @@ def register_tools(
             url = credentials.get("mattermost_url")
             if url is not None and not isinstance(url, str):
                 raise TypeError(
-                    f"Expected string from credentials.get('mattermost_url'), got {type(url).__name__}"
+                    "Expected string from credentials.get('mattermost_url'), "
+                    f"got {type(url).__name__}"
                 )
             if url:
                 return url
@@ -267,9 +259,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def mattermost_list_channels(
-        team_id: str, per_page: int = 100, account: str = ""
-    ) -> dict:
+    def mattermost_list_channels(team_id: str, per_page: int = 100, account: str = "") -> dict:
         """
         List public channels for a Mattermost team.
 
