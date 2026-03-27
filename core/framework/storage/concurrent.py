@@ -63,6 +63,7 @@ class ConcurrentStorage:
         batch_interval: float = 0.1,
         max_batch_size: int = 100,
         max_locks: int = 1000,
+        max_cache_entries: int | None = None,
     ):
         """
         Initialize concurrent storage.
@@ -73,13 +74,16 @@ class ConcurrentStorage:
             batch_interval: Interval between batch flushes
             max_batch_size: Maximum items before forcing flush
             max_locks: Maximum number of active file locks to track strongly
+            max_cache_entries: If set, cache is bounded; oldest entries are evicted (LRU).
+                None means unbounded (memory use proportional to distinct runs in TTL window).
         """
         self.base_path = Path(base_path)
         self._base_storage = FileStorage(base_path)
 
-        # Caching
-        self._cache: dict[str, CacheEntry] = {}
+        # Caching (OrderedDict for LRU eviction when max_cache_entries is set)
+        self._cache: OrderedDict[str, CacheEntry] = OrderedDict()
         self._cache_ttl = cache_ttl
+        self._max_cache_entries = max_cache_entries
 
         # Batching
         self._write_queue: asyncio.Queue = asyncio.Queue()
@@ -175,6 +179,7 @@ class ConcurrentStorage:
             await self._save_run_locked(run)
             # Update cache only after successful immediate write
             self._cache[f"run:{run.id}"] = CacheEntry(run, time.time())
+            self._evict_cache_if_needed()
         else:
             # For batched writes, cache will be updated in _flush_batch after successful write
             await self._write_queue.put(("run", run))
@@ -230,10 +235,12 @@ class ConcurrentStorage:
             cache_key = f"run:{run_id}"
             cached = self._cache.get(cache_key)
             if cached and not cached.is_expired(self._cache_ttl):
-                # CRITICAL: Touch LRU even on cache hit
+                # CRITICAL: Touch LRU even on cache hit (lock + cache)
                 lock_key = f"run:{run_id}"
                 if lock_key in self._lru_tracking:
                     self._lru_tracking.move_to_end(lock_key)
+                if cache_key in self._cache:
+                    self._cache.move_to_end(cache_key)
                 return cached.value
 
         # CRITICAL: Acquire lock to trigger LRU update
@@ -245,6 +252,7 @@ class ConcurrentStorage:
         # Update cache
         if run:
             self._cache[f"run:{run_id}"] = CacheEntry(run, time.time())
+            self._evict_cache_if_needed()
 
         return run
 
@@ -256,6 +264,7 @@ class ConcurrentStorage:
         if use_cache and cache_key in self._cache:
             entry = self._cache[cache_key]
             if not entry.is_expired(self._cache_ttl):
+                self._cache.move_to_end(cache_key)
                 return entry.value
 
         # Load from storage
@@ -267,6 +276,7 @@ class ConcurrentStorage:
         # Update cache
         if summary:
             self._cache[cache_key] = CacheEntry(summary, time.time())
+            self._evict_cache_if_needed()
 
         return summary
 
@@ -280,6 +290,9 @@ class ConcurrentStorage:
         # Clear cache
         self._cache.pop(f"run:{run_id}", None)
         self._cache.pop(f"summary:{run_id}", None)
+
+        # Remove run lock from LRU so WeakValueDictionary can release it
+        self._lru_tracking.pop(lock_key, None)
 
         return result
 
@@ -389,6 +402,13 @@ class ConcurrentStorage:
 
     # === CACHE MANAGEMENT ===
 
+    def _evict_cache_if_needed(self) -> None:
+        """Evict oldest cache entries when over max_cache_entries."""
+        if self._max_cache_entries is None:
+            return
+        while len(self._cache) > self._max_cache_entries:
+            self._cache.popitem(last=False)
+
     def clear_cache(self) -> None:
         """Clear all cached values."""
         self._cache.clear()
@@ -400,11 +420,14 @@ class ConcurrentStorage:
     def get_cache_stats(self) -> dict:
         """Get cache statistics."""
         expired = sum(1 for entry in self._cache.values() if entry.is_expired(self._cache_ttl))
-        return {
+        stats: dict[str, Any] = {
             "total_entries": len(self._cache),
             "expired_entries": expired,
             "valid_entries": len(self._cache) - expired,
         }
+        if self._max_cache_entries is not None:
+            stats["max_entries"] = self._max_cache_entries
+        return stats
 
     # === UTILITY ===
 
