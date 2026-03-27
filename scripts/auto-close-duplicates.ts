@@ -224,10 +224,18 @@ async function autoCloseDuplicates(): Promise<void> {
     );
 
     console.log(`[DEBUG] Fetching comments for issue #${issue.number}...`);
-    const comments: GitHubComment[] = await githubRequest(
-      `/repos/${owner}/${repo}/issues/${issue.number}/comments`,
-      token
-    );
+    let commentPage = 1;
+    const comments: GitHubComment[] = [];
+    while (true) {
+      const pageComments: GitHubComment[] = await githubRequest(
+        `/repos/${owner}/${repo}/issues/${issue.number}/comments?per_page=100&page=${commentPage}`,
+        token
+      );
+      if (pageComments.length === 0) break;
+      comments.push(...pageComments);
+      commentPage++;
+      if (commentPage > 20) break; // Safety limit
+    }
     console.log(
       `[DEBUG] Issue #${issue.number} has ${comments.length} comments`
     );
@@ -246,8 +254,7 @@ async function autoCloseDuplicates(): Promise<void> {
     }
     const dupeCommentDate = new Date(lastDupeComment.created_at);
     console.log(
-      `[DEBUG] Issue #${
-        issue.number
+      `[DEBUG] Issue #${issue.number
       } - most recent duplicate comment from: ${dupeCommentDate.toISOString()}`
     );
 
@@ -258,8 +265,7 @@ async function autoCloseDuplicates(): Promise<void> {
       continue;
     }
     console.log(
-      `[DEBUG] Issue #${
-        issue.number
+      `[DEBUG] Issue #${issue.number
       } - duplicate comment is old enough (${Math.floor(
         (Date.now() - dupeCommentDate.getTime()) / (1000 * 60 * 60)
       )} hours)`
@@ -268,10 +274,18 @@ async function autoCloseDuplicates(): Promise<void> {
     console.log(
       `[DEBUG] Issue #${issue.number} - checking reactions on duplicate comment...`
     );
-    const reactions: GitHubReaction[] = await githubRequest(
-      `/repos/${owner}/${repo}/issues/comments/${lastDupeComment.id}/reactions`,
-      token
-    );
+    let reactionPage = 1;
+    const reactions: GitHubReaction[] = [];
+    while (true) {
+      const pageReactions: GitHubReaction[] = await githubRequest(
+        `/repos/${owner}/${repo}/issues/comments/${lastDupeComment.id}/reactions?per_page=100&page=${reactionPage}`,
+        token
+      );
+      if (pageReactions.length === 0) break;
+      reactions.push(...pageReactions);
+      reactionPage++;
+      if (reactionPage > 20) break; // Safety limit
+    }
     console.log(
       `[DEBUG] Issue #${issue.number} - duplicate comment has ${reactions.length} reactions`
     );
@@ -338,4 +352,4 @@ if (import.meta.main) {
   autoCloseDuplicates().catch(console.error);
 }
 
-export {};
+export { };
