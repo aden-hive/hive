@@ -14,6 +14,7 @@ CLOUDFLARE_CREDENTIALS = {
             "https://dash.cloudflare.com/profile/api-tokens"
         ),
         direct_api_key_supported=True,
+        health_check_endpoint="https://api.cloudflare.com/client/v4/user/tokens/verify",
         tools=[
             "cloudflare_list_zones",
             "cloudflare_get_zone",
