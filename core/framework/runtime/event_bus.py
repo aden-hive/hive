@@ -621,6 +621,28 @@ class EventBus:
             )
         )
 
+    async def emit_goal_achieved(
+        self,
+        stream_id: str,
+        execution_id: str,
+        goal_name: str,
+        goal_description: str,
+        output: dict[str, Any] | None = None,
+    ) -> None:
+        """Emit goal achieved event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.GOAL_ACHIEVED,
+                stream_id=stream_id,
+                execution_id=execution_id,
+                data={
+                    "goal_name": goal_name,
+                    "goal_description": goal_description,
+                    "output": output or {},
+                },
+            )
+        )
+
     async def emit_constraint_violation(
         self,
         stream_id: str,
