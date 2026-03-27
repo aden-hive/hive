@@ -54,8 +54,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_zones"].fn
             result = fn()
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_get_zone(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
