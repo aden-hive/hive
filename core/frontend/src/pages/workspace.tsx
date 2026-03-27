@@ -18,6 +18,12 @@ import type { LiveSession, AgentEvent, DiscoverEntry, NodeSpec, DraftGraph as Dr
 import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
 import { topologyToGraphNodes } from "@/lib/graph-converter";
 import { cronToLabel } from "@/lib/graphUtils";
+import {
+  buildStructuredRunQuestions,
+  canShowRunButton,
+  getStructuredRunInputKeys,
+  hasAllStructuredRunInputs,
+} from "@/lib/run-inputs";
 import { ApiError } from "@/api/client";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
@@ -351,7 +357,9 @@ interface AgentBackendState {
   /** Multiple questions from ask_user_multiple */
   pendingQuestions: { id: string; prompt: string; options?: string[] }[] | null;
   /** Whether the pending question came from queen or worker */
-  pendingQuestionSource: "queen" | "worker" | null;
+  pendingQuestionSource: "queen" | "worker" | "run" | null;
+  /** Last structured input payload successfully used to start the worker. */
+  lastRunInputData: Record<string, unknown> | null;
   /** Per-node context window usage (from context_usage_updated events) */
   contextUsage: Record<string, { usagePct: number; messageCount: number; estimatedTokens: number; maxTokens: number }>;
   /** Whether the queen's LLM supports image content — false disables the attach button */
@@ -393,6 +401,7 @@ function defaultAgentState(): AgentBackendState {
     pendingOptions: null,
     pendingQuestions: null,
     pendingQuestionSource: null,
+    lastRunInputData: null,
     contextUsage: {},
     queenSupportsImages: true,
   };
@@ -693,15 +702,71 @@ export default function Workspace() {
     }
   }, [sessionsByAgent, activeSessionByAgent, activeWorker, agentStates]);
 
+  const appendSystemMessage = useCallback((agentType: string, content: string) => {
+    setSessionsByAgent((prev) => {
+      const sessions = prev[agentType] || [];
+      const activeId = activeSessionRef.current[agentType] || sessions[0]?.id;
+      return {
+        ...prev,
+        [agentType]: sessions.map((s) => {
+          if (s.id !== activeId) return s;
+          const errorMsg: ChatMessage = {
+            id: makeId(),
+            agent: "System",
+            agentColor: "",
+            content,
+            timestamp: "",
+            type: "system",
+            thread: agentType,
+            createdAt: Date.now(),
+          };
+          return { ...s, messages: [...s.messages, errorMsg] };
+        }),
+      };
+    });
+  }, []);
+
   const handleRun = useCallback(async () => {
     const state = agentStates[activeWorker];
     if (!state?.sessionId || !state?.ready) return;
+
+    const sessions = sessionsRef.current[activeWorker] || [];
+    const activeId = activeSessionRef.current[activeWorker] || sessions[0]?.id;
+    const activeSession = sessions.find((s) => s.id === activeId) || sessions[0];
+    const requiredRunKeys = getStructuredRunInputKeys(
+      state.nodeSpecs,
+      activeSession?.graphNodes || [],
+    );
+
+    if (
+      requiredRunKeys.length > 0 &&
+      !hasAllStructuredRunInputs(requiredRunKeys, state.lastRunInputData)
+    ) {
+      updateAgentState(activeWorker, {
+        awaitingInput: true,
+        pendingQuestion: null,
+        pendingOptions: null,
+        pendingQuestions: buildStructuredRunQuestions(requiredRunKeys),
+        pendingQuestionSource: "run",
+        workerRunState: "idle",
+      });
+      return;
+    }
+
+    const inputData =
+      requiredRunKeys.length > 0 && state.lastRunInputData
+        ? state.lastRunInputData
+        : {};
+
     // Reset dismissed banner so a repeated 424 re-shows it
     setDismissedBanner(null);
     try {
       updateAgentState(activeWorker, { workerRunState: "deploying" });
-      const result = await executionApi.trigger(state.sessionId, "default", {});
-      updateAgentState(activeWorker, { currentExecutionId: result.execution_id });
+      const result = await executionApi.trigger(state.sessionId, "default", inputData);
+      updateAgentState(activeWorker, {
+        currentExecutionId: result.execution_id,
+        lastRunInputData: inputData,
+      });
     } catch (err) {
       // 424 = credentials required — open the credentials modal
       if (err instanceof ApiError && err.status === 424) {
@@ -714,25 +779,16 @@ export default function Workspace() {
       }
 
       const errMsg = err instanceof Error ? err.message : String(err);
-      setSessionsByAgent((prev) => {
-        const sessions = prev[activeWorker] || [];
-        const activeId = activeSessionRef.current[activeWorker] || sessions[0]?.id;
-        return {
-          ...prev,
-          [activeWorker]: sessions.map((s) => {
-            if (s.id !== activeId) return s;
-            const errorMsg: ChatMessage = {
-              id: makeId(), agent: "System", agentColor: "",
-              content: `Failed to trigger run: ${errMsg}`,
-              timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
-            };
-            return { ...s, messages: [...s.messages, errorMsg] };
-          }),
-        };
-      });
+      appendSystemMessage(activeWorker, `Failed to trigger run: ${errMsg}`);
       updateAgentState(activeWorker, { workerRunState: "idle" });
     }
-  }, [agentStates, activeWorker, updateAgentState]);
+  }, [agentStates, activeWorker, appendSystemMessage, updateAgentState]);
+
+  const canRunLoadedWorker = canShowRunButton(
+    activeAgentState?.sessionId,
+    activeAgentState?.ready,
+    activeAgentState?.queenPhase,
+  );
 
   // --- Fetch discovered agents for NewTabPopover ---
   const [discoverAgents, setDiscoverAgents] = useState<DiscoverEntry[]>([]);
@@ -2826,6 +2882,40 @@ export default function Workspace() {
 
   // --- handleMultiQuestionAnswer: submit answers to ask_user_multiple ---
   const handleMultiQuestionAnswer = useCallback((answers: Record<string, string>) => {
+    const state = agentStates[activeWorker];
+    if (state?.pendingQuestionSource === "run") {
+      if (!state.sessionId || !state.ready) return;
+      updateAgentState(activeWorker, {
+        pendingQuestion: null,
+        pendingOptions: null,
+        pendingQuestions: null,
+        pendingQuestionSource: null,
+        awaitingInput: false,
+        workerRunState: "deploying",
+        lastRunInputData: answers,
+      });
+      executionApi.trigger(state.sessionId, "default", answers).then((result) => {
+        updateAgentState(activeWorker, {
+          currentExecutionId: result.execution_id,
+          lastRunInputData: answers,
+        });
+      }).catch((err: unknown) => {
+        if (err instanceof ApiError && err.status === 424) {
+          const errBody = err.body as Record<string, unknown>;
+          const credPath = (errBody?.agent_path as string) || null;
+          if (credPath) setCredentialAgentPath(credPath);
+          updateAgentState(activeWorker, { workerRunState: "idle", error: "credentials_required" });
+          setCredentialsOpen(true);
+          return;
+        }
+
+        const errMsg = err instanceof Error ? err.message : String(err);
+        appendSystemMessage(activeWorker, `Failed to trigger run: ${errMsg}`);
+        updateAgentState(activeWorker, { workerRunState: "idle" });
+      });
+      return;
+    }
+
     updateAgentState(activeWorker, {
       pendingQuestion: null, pendingOptions: null,
       pendingQuestions: null, pendingQuestionSource: null,
@@ -2835,7 +2925,7 @@ export default function Workspace() {
       ([id, answer]) => `[${id}]: ${answer}`,
     );
     handleSend(lines.join("\n"), activeWorker);
-  }, [activeWorker, handleSend, updateAgentState]);
+  }, [activeWorker, agentStates, appendSystemMessage, handleSend, updateAgentState]);
 
   // --- handleQuestionDismiss: user closed the question widget without answering ---
   // Injects a dismiss signal so the blocked node can continue.
@@ -2853,6 +2943,11 @@ export default function Workspace() {
       pendingQuestionSource: null,
       awaitingInput: false,
     });
+
+    if (source === "run") {
+      updateAgentState(activeWorker, { workerRunState: "idle" });
+      return;
+    }
 
     // Unblock the waiting node with a dismiss signal
     const dismissMsg = `[User dismissed the question: "${question}"]`;
@@ -3145,7 +3240,7 @@ export default function Workspace() {
                     : null
               }
               building={activeAgentState?.queenBuilding}
-              onRun={handleRun}
+              onRun={canRunLoadedWorker ? handleRun : undefined}
               onPause={handlePause}
               runState={activeAgentState?.workerRunState ?? "idle"}
               flowchartMap={activeAgentState?.flowchartMap ?? undefined}
