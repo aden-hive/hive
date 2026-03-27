@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot, Radar, Reply, DollarSign, MapPin, Calendar, UserPlus, Twitter } from "lucide-react";
+import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot, Radar, Reply, DollarSign, MapPin, Calendar, UserPlus, Twitter, Mic } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import type { LucideIcon } from "lucide-react";
 import { agentsApi } from "@/api/agents";
 import type { DiscoverEntry } from "@/api/types";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 
 // --- Icon and color maps (backend can't serve icons) ---
 
@@ -92,6 +93,27 @@ export default function Home() {
     }
   };
 
+  // Voice input integration
+  const handleVoiceResult = (transcript: string) => {
+    setInputValue(transcript);
+    // Automatically submit after setting the value
+    setTimeout(() => {
+      navigate(`/workspace?agent=new-agent&prompt=${encodeURIComponent(transcript.trim())}`);
+    }, 100);
+  };
+
+  const { isListening, isSupported, startListening, stopListening } = useVoiceInput({
+    onResult: handleVoiceResult,
+    onError: (error) => {
+      console.error("Voice input error:", error);
+    },
+  });
+
+  // Debug: log when isListening changes
+  useEffect(() => {
+    console.log("Home page - isListening changed to:", isListening);
+  }, [isListening]);
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <TopBar />
@@ -137,9 +159,23 @@ export default function Home() {
                   }
                 }}
                 placeholder="Describe a task for the hive..."
-                className="w-full bg-transparent px-5 py-4 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none rounded-xl resize-none overflow-y-auto"
+                className="w-full bg-transparent px-5 py-4 pr-20 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none rounded-xl resize-none overflow-y-auto"
               />
-              <div className="absolute right-3 bottom-2.5">
+              <div className="absolute right-3 bottom-2.5 flex items-center gap-1.5">
+                {isSupported && (
+                  <button
+                    type="button"
+                    onClick={isListening ? stopListening : startListening}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                      isListening
+                        ? "bg-primary text-primary-foreground animate-pulse"
+                        : "bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground"
+                    }`}
+                    title={isListening ? "Listening..." : "Voice input"}
+                  >
+                    <Mic className="w-3.5 h-3.5" />
+                  </button>
+                )}
                 <button
                   type="submit"
                   disabled={!inputValue.trim()}
