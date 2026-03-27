@@ -810,8 +810,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_get_network_settings"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_purge_cache_all(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
