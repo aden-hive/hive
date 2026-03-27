@@ -474,8 +474,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_get_security_analytics"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_get_cache_analytics(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
