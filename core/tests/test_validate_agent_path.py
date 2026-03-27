@@ -134,7 +134,11 @@ class TestValidateAgentPathPositive:
         other_cwd.mkdir()
 
         monkeypatch.setattr(app_module, "_REPO_ROOT", repo_root)
-        app_module._ALLOWED_AGENT_ROOTS = (repo_root / "exports", examples_root, tmp_path / ".hive" / "agents")
+        app_module._ALLOWED_AGENT_ROOTS = (
+            repo_root / "exports",
+            examples_root,
+            tmp_path / ".hive" / "agents",
+        )
         monkeypatch.chdir(other_cwd)
 
         result = validate_agent_path("examples/some_agent")

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -139,7 +138,10 @@ async def test_codex_parity_local_only_human_in_loop_run_completes() -> None:
                 "set_output",
                 {
                     "key": "important_changes",
-                    "value": "- Remote days increased from 2 to 4\n- Security training increased from annual to twice yearly",
+                    "value": (
+                        "- Remote days increased from 2 to 4\n"
+                        "- Security training increased from annual to twice yearly"
+                    ),
                 },
                 tool_use_id="set_1",
             ),
@@ -396,7 +398,12 @@ def _make_session(agent_id="test_agent") -> Session:
         worker_path=Path("/tmp/test_agent"),
         runner=runner,
         worker_runtime=_MockRuntime(),
-        worker_info=SimpleNamespace(name="test_agent", description="A test agent", goal_name="test_goal", node_count=2),
+        worker_info=SimpleNamespace(
+            name="test_agent",
+            description="A test agent",
+            goal_name="test_goal",
+            node_count=2,
+        ),
         worker_validation_report={"valid": True, "steps": {}},
         worker_validation_failures=[],
     )

@@ -1103,7 +1103,9 @@ def _build_worker_input_data(runtime: Any, task: str) -> dict[str, Any]:
         _RERUN_WITH_DEFAULTS_RE.search(task or "")
     )
     recent_defaults = (
-        _load_recent_worker_input_defaults(runtime, allowed_keys) if should_merge_recent_defaults else {}
+        _load_recent_worker_input_defaults(runtime, allowed_keys)
+        if should_merge_recent_defaults
+        else {}
     )
 
     for key in allowed_keys:
@@ -2992,7 +2994,8 @@ def register_queen_lifecycle_tools(
         if red_flags:
             if isinstance(health_signals, list) and health_signals:
                 parts.append(
-                    f"{red_flags} issue signal(s) detected ({', '.join(health_signals)}) — use focus='issues' for details"
+                    f"{red_flags} issue signal(s) detected "
+                    f"({', '.join(health_signals)}) — use focus='issues' for details"
                 )
             else:
                 parts.append(f"{red_flags} issue type(s) detected — use focus='issues' for details")
@@ -3208,15 +3211,24 @@ def register_queen_lifecycle_tools(
                 lines.append("Health signals:")
                 for signal in issue_signals:
                     desc = _HEALTH_SIGNAL_DESCRIPTIONS.get(signal, signal.replace("_", " "))
-                    if signal in {"stalled", "slow_progress"} and health_snapshot.get("stall_minutes") is not None:
+                    if (
+                        signal in {"stalled", "slow_progress"}
+                        and health_snapshot.get("stall_minutes") is not None
+                    ):
                         desc += f" ({health_snapshot['stall_minutes']} min since last step)"
-                    elif signal in {"long_non_accept_streak", "judge_pressure"} and health_snapshot.get(
-                        "steps_since_last_accept"
-                    ) is not None:
+                    elif (
+                        signal in {"long_non_accept_streak", "judge_pressure"}
+                        and health_snapshot.get("steps_since_last_accept") is not None
+                    ):
                         desc += (
-                            f" ({health_snapshot['steps_since_last_accept']} non-ACCEPT step(s) since last ACCEPT)"
+                            " ("
+                            f"{health_snapshot['steps_since_last_accept']} non-ACCEPT step(s)"
+                            " since last ACCEPT)"
                         )
-                    elif signal == "recent_non_accept_churn" and health_snapshot.get("recent_verdicts"):
+                    elif (
+                        signal == "recent_non_accept_churn"
+                        and health_snapshot.get("recent_verdicts")
+                    ):
                         verdicts = ", ".join(health_snapshot["recent_verdicts"][-4:])
                         desc += f" ({verdicts})"
                     lines.append(f"  {signal}: {desc}")
@@ -4057,7 +4069,9 @@ def register_queen_lifecycle_tools(
 
         worker_path = getattr(session, "worker_path", None)
         worker_name = Path(worker_path).name if worker_path else ""
-        validation_report = await _run_package_validation(str(worker_path) if worker_path else worker_name)
+        validation_report = await _run_package_validation(
+            str(worker_path) if worker_path else worker_name
+        )
         if _validation_blocks_stage_or_run(validation_report):
             failures = _validation_failures(validation_report)
             return json.dumps(
@@ -4122,13 +4136,16 @@ def register_queen_lifecycle_tools(
 
         worker_path = getattr(session, "worker_path", None)
         worker_name = Path(worker_path).name if worker_path else ""
-        validation_report = await _run_package_validation(str(worker_path) if worker_path else worker_name)
+        validation_report = await _run_package_validation(
+            str(worker_path) if worker_path else worker_name
+        )
         if _validation_blocks_stage_or_run(validation_report):
             failures = _validation_failures(validation_report)
             return json.dumps(
                 {
                     "error": (
-                        f"Cannot rerun agent '{worker_name or 'current worker'}' because validation "
+                        f"Cannot rerun agent '{worker_name or 'current worker'}' "
+                        "because validation "
                         "is failing. Fix the package and reload it before running."
                     ),
                     "validation_failures": failures,
@@ -4146,9 +4163,8 @@ def register_queen_lifecycle_tools(
             if missing:
                 return json.dumps(
                     {
-                        "error": (
-                            "No complete previous worker input is available for a same-defaults rerun."
-                        ),
+                        "error": "No complete previous worker input is available for a "
+                        "same-defaults rerun.",
                         "missing_inputs": missing,
                     }
                 )

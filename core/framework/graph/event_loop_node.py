@@ -1274,6 +1274,10 @@ class EventLoopNode(NodeProtocol):
                 and not ctx.node_spec.client_facing
                 and not user_input_requested
                 and not queen_input_requested
+                and (
+                    self._can_auto_complete_outputs(ctx)
+                    or _received_queen_guidance
+                )
                 and not reported_to_parent
                 and not _saw_transient_stream_retry
                 and not any(
@@ -3186,6 +3190,7 @@ class EventLoopNode(NodeProtocol):
                 outputs_set_this_turn
                 and accumulator is not None
                 and allow_tool_turn_auto_complete
+                and self._can_auto_complete_outputs(ctx)
                 and self._outputs_ready_for_auto_complete(ctx, accumulator)
             ):
                 return (
@@ -3557,8 +3562,10 @@ class EventLoopNode(NodeProtocol):
                 is_error=True,
             )
 
-        candidate = normalized_value if normalized_value is not None else self._normalize_set_output_value(
-            value
+        candidate = (
+            normalized_value
+            if normalized_value is not None
+            else self._normalize_set_output_value(value)
         )
         if current_value is not None and current_value == candidate:
             remaining = [k for k in (missing_keys or []) if k != key]
@@ -3793,6 +3800,19 @@ class EventLoopNode(NodeProtocol):
         all_nullable = nullable_keys >= set(output_keys)
         none_set = not any(accumulator.get(k) is not None for k in output_keys)
         return not (all_nullable and none_set)
+
+    def _can_auto_complete_outputs(self, ctx: NodeContext) -> bool:
+        """Only simple nodes should bypass the normal judge path.
+
+        Nodes with custom judges or success criteria still need the normal
+        evaluation path so they can enforce retry/accept semantics.
+        """
+        return (
+            self._judge is None
+            and not ctx.node_spec.sub_agents
+            and not ctx.node_spec.success_criteria
+            and not self._mark_complete_flag
+        )
 
     @staticmethod
     def _ngram_similarity(s1: str, s2: str, n: int = 2) -> float:

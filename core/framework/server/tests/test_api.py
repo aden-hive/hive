@@ -674,7 +674,6 @@ class TestExecution:
         ]
         session.event_bus.emit_client_output_delta = AsyncMock()
         app = _make_app_with_session(session)
-        mgr = app["manager"]
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(

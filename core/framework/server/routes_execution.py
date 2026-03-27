@@ -45,7 +45,11 @@ def _queen_is_waiting_on_terminal_followup(session: Any) -> bool:
     if bus is None or not hasattr(bus, "get_history"):
         return False
 
-    events = bus.get_history(event_type=EventType.CLIENT_INPUT_REQUESTED, stream_id="queen", limit=5)
+    events = bus.get_history(
+        event_type=EventType.CLIENT_INPUT_REQUESTED,
+        stream_id="queen",
+        limit=5,
+    )
     for event in events:
         data = getattr(event, "data", None) or {}
         options = [str(opt) for opt in (data.get("options") or []) if opt]
@@ -95,7 +99,9 @@ async def _worker_validation_error(session) -> web.Response | None:
         session.worker_validation_failures = _validation_failures(report)
 
     if _validation_blocks_stage_or_run(report):
-        failures = getattr(session, "worker_validation_failures", None) or _validation_failures(report)
+        failures = getattr(session, "worker_validation_failures", None) or _validation_failures(
+            report
+        )
         worker_name = getattr(getattr(session, "worker_path", None), "name", "") or "current worker"
         return web.json_response(
             {

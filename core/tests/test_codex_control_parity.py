@@ -57,8 +57,21 @@ def tool_call_scenario(
     events: list[Any] = []
     if preamble_text:
         events.append(TextDeltaEvent(content=preamble_text, snapshot=preamble_text))
-    events.append(ToolCallEvent(tool_use_id=tool_use_id, tool_name=tool_name, tool_input=tool_input))
-    events.append(FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"))
+    events.append(
+        ToolCallEvent(
+            tool_use_id=tool_use_id,
+            tool_name=tool_name,
+            tool_input=tool_input,
+        )
+    )
+    events.append(
+        FinishEvent(
+            stop_reason="tool_calls",
+            input_tokens=10,
+            output_tokens=5,
+            model="mock",
+        )
+    )
     return events
 
 
@@ -90,7 +103,10 @@ def build_ctx(spec: NodeSpec, llm: LLMProvider, *, stream_id: str) -> NodeContex
             "control",
             tool_call_scenario(
                 "ask_user",
-                {"question": "What kind of agent should I design for you?", "options": ["Summarizer"]},
+                {
+                    "question": "What kind of agent should I design for you?",
+                    "options": ["Summarizer"],
+                },
                 tool_use_id="ask_1",
             ),
         ),

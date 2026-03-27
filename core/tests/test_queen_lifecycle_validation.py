@@ -52,7 +52,10 @@ def _register_fake_validator(registry: ToolRegistry, report: dict) -> None:
 
 
 def test_parse_validation_report_handles_saved_footer() -> None:
-    raw = '{\n  "valid": false,\n  "steps": {"tool_validation": {"passed": false}}\n}\n\n[Saved to \'validate.txt\']'
+    raw = (
+        '{\n  "valid": false,\n  "steps": {"tool_validation": {"passed": false}}\n}\n\n'
+        "[Saved to 'validate.txt']"
+    )
 
     parsed = qlt._parse_validation_report(raw)
 
@@ -245,7 +248,13 @@ def test_build_worker_input_data_maps_bullet_task_fields_to_entry_inputs(
         graph=SimpleNamespace(
             entry_node="process",
             get_node=lambda node_id: SimpleNamespace(
-                input_keys=["docs_dir", "review_dir", "word_threshold", "style_rules", "target_ratio"]
+                input_keys=[
+                    "docs_dir",
+                    "review_dir",
+                    "word_threshold",
+                    "style_rules",
+                    "target_ratio",
+                ]
             )
             if node_id == "process"
             else None,
@@ -481,7 +490,10 @@ async def test_load_built_agent_blocks_invalid_package(monkeypatch, tmp_path: Pa
                     "steps": {
                         "behavior_validation": {
                             "passed": False,
-                            "output": "Node 'scan-markdown' has a blank or placeholder system_prompt",
+                            "output": (
+                                "Node 'scan-markdown' has a blank or placeholder"
+                                " system_prompt"
+                            ),
                         }
                     },
                 }
@@ -728,7 +740,9 @@ async def test_start_worker_starts_fresh_worker_session(monkeypatch, tmp_path: P
         phase_state=QueenPhaseState(phase="staging"),
     )
 
-    result_raw = await registry._tools["start_worker"].executor({"task": "run with docs_path: docs/"})
+    result_raw = await registry._tools["start_worker"].executor(
+        {"task": "run with docs_path: docs/"}
+    )
     result = json.loads(result_raw)
 
     assert result["status"] == "started"

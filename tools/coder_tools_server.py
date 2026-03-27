@@ -387,7 +387,8 @@ def _behavior_validation_errors(agent_module) -> list[str]:
                 if isinstance(tool_name, str) and f"{tool_name}(" in prompt:
                     errors.append(
                         f"Node '{node_id}' system_prompt uses callable-style tool syntax for "
-                        f"'{tool_name}'. Describe tool usage in prose instead of Python-style calls."
+                        f"'{tool_name}'. Describe tool usage in prose instead of "
+                        "Python-style calls."
                     )
             for alias, actual in _TOOL_ALIAS_HINTS.items():
                 if alias in prompt and actual in tools and alias not in tools:
@@ -454,8 +455,12 @@ def _behavior_validation_errors(agent_module) -> list[str]:
                 "message",
             }
             intake_like = any(hint in text for hint in _ENTRY_INTAKE_HINTS)
-            direct_work_like = any(_contains_hint_word(text, hint) for hint in _ENTRY_DIRECT_WORK_HINTS)
-            pass_through_inputs = bool(lowered_input_keys) and lowered_input_keys <= lowered_output_keys
+            direct_work_like = any(
+                _contains_hint_word(text, hint) for hint in _ENTRY_DIRECT_WORK_HINTS
+            )
+            pass_through_inputs = bool(lowered_input_keys) and (
+                lowered_input_keys <= lowered_output_keys
+            )
             runtime_normalization_only = any(
                 hint in text
                 for hint in (
@@ -1636,7 +1641,6 @@ def _run_agent_tests_impl(
     if not agent_path.is_dir():
         # Fall back to framework agents for bare framework package names.
         agent_path = Path(PROJECT_ROOT) / "core" / "framework" / "agents" / agent_name
-        display_ref = f"core/framework/agents/{agent_name}"
     tests_dir = agent_path / "tests"
 
     if not agent_path.is_dir():
@@ -2132,7 +2136,10 @@ def _validate_agent_package_impl(agent_name: str) -> dict[str, object]:
                 "summary": test_result.get("summary", "unknown"),
             }
             if not all_passed:
-                warning_summary = f"Test suite not fully passing: {test_result.get('summary', 'unknown')}"
+                warning_summary = (
+                    "Test suite not fully passing: "
+                    f"{test_result.get('summary', 'unknown')}"
+                )
                 steps["tests"]["warning"] = warning_summary
                 steps["tests"]["warnings"] = [warning_summary]
                 if test_result.get("failures"):
@@ -2489,7 +2496,10 @@ pause_nodes = []
 terminal_nodes = []
 
 conversation_mode = "continuous"
-identity_prompt = "You are {human_name}, a focused Hive worker that follows the goal, constraints, and node instructions precisely."
+identity_prompt = (
+    "You are {human_name}, a focused Hive worker that follows the goal, "
+    "constraints, and node instructions precisely."
+)
 loop_config = {{
     "max_iterations": 100,
     "max_tool_calls_per_turn": 30,

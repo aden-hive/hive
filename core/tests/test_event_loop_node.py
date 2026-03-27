@@ -435,7 +435,10 @@ class TestSetOutput:
             scenarios=[
                 tool_call_scenario(
                     "ask_user",
-                    {"question": "Continue scanning or generate report?", "options": ["Continue", "Report"]},
+                    {
+                        "question": "Continue scanning or generate report?",
+                        "options": ["Continue", "Report"],
+                    },
                     tool_use_id="ask_1",
                 ),
                 [
@@ -452,7 +455,7 @@ class TestSetOutput:
                     ToolCallEvent(
                         tool_use_id="set_all",
                         tool_name="set_output",
-                        tool_input={"key": "all_findings", "value": "{\"ok\": true}"},
+                        tool_input={"key": "all_findings", "value": '{"ok": true}'},
                     ),
                     FinishEvent(
                         stop_reason="tool_calls",
@@ -553,7 +556,12 @@ class TestStallDetection:
         assert "no-progress loop detected" in (result.error or "").lower()
 
     @pytest.mark.asyncio
-    async def test_no_progress_counter_resets_after_output_progress(self, runtime, node_spec, memory):
+    async def test_no_progress_counter_resets_after_output_progress(
+        self,
+        runtime,
+        node_spec,
+        memory,
+    ):
         """A real output-setting turn should reset the no-progress churn counter."""
         llm = MockStreamingLLM(
             scenarios=[
@@ -1153,14 +1161,14 @@ class TestEscalate:
                     ToolCallEvent(
                         tool_use_id="set_headers",
                         tool_name="set_output",
-                        tool_input={"key": "original_headers", "value": "[\"name\",\"email\"]"},
+                        tool_input={"key": "original_headers", "value": '["name","email"]'},
                     ),
                     ToolCallEvent(
                         tool_use_id="set_rows",
                         tool_name="set_output",
                         tool_input={
                             "key": "parsed_rows",
-                            "value": "[{\"name\":\"Alice\",\"email\":\"alice@example.com\"}]",
+                            "value": '[{"name":"Alice","email":"alice@example.com"}]',
                         },
                     ),
                     ToolCallEvent(

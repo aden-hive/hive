@@ -63,7 +63,9 @@ async def _worker_validation_error(session) -> web.Response | None:
         session.worker_validation_failures = _validation_failures(report)
 
     if _validation_blocks_stage_or_run(report):
-        failures = getattr(session, "worker_validation_failures", None) or _validation_failures(report)
+        failures = getattr(session, "worker_validation_failures", None) or _validation_failures(
+            report
+        )
         worker_name = getattr(getattr(session, "worker_path", None), "name", "") or "current worker"
         return web.json_response(
             {

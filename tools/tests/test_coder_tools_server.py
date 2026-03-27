@@ -250,7 +250,10 @@ def test_behavior_validation_errors_rejects_placeholder_prompts_and_empty_work_n
     assert "Autonomous node 'done' has no tools or sub_agents" not in errors
 
 
-def test_validate_agent_package_accepts_absolute_path_and_skips_missing_tests(tmp_path, monkeypatch):
+def test_validate_agent_package_accepts_absolute_path_and_skips_missing_tests(
+    tmp_path,
+    monkeypatch,
+):
     mod = _load_coder_tools_server()
     mod.PROJECT_ROOT = str(tmp_path)
 
@@ -459,7 +462,12 @@ def test_behavior_validation_errors_allows_gcu_nodes_without_explicit_tools():
                     target=">=5",
                 )
             ],
-            constraints=[SimpleNamespace(id="c-1", description="Use browser tools only inside the GCU.")],
+            constraints=[
+                SimpleNamespace(
+                    id="c-1",
+                    description="Use browser tools only inside the GCU.",
+                )
+            ],
         ),
         terminal_nodes=["done"],
         nodes=[
@@ -475,7 +483,7 @@ def test_behavior_validation_errors_allows_gcu_nodes_without_explicit_tools():
                 description="Browser worker that searches Google Maps.",
                 system_prompt=(
                     "Search Google Maps for the query, collect relevant businesses, "
-                    "and call set_output(\"business_list\", ...)."
+                    'and call set_output("business_list", ...).'
                 ),
                 success_criteria="Business list extracted.",
             ),
@@ -598,7 +606,12 @@ def test_behavior_validation_errors_rejects_callable_style_tool_prompt_usage():
                     target="1.0",
                 )
             ],
-            constraints=[SimpleNamespace(id="c-1", description="Do not overwrite without approval.")],
+            constraints=[
+                SimpleNamespace(
+                    id="c-1",
+                    description="Do not overwrite without approval.",
+                )
+            ],
         ),
         terminal_nodes=["done"],
         nodes=[
@@ -800,7 +813,10 @@ def test_behavior_validation_errors_rejects_entry_intake_parser_with_scan_exclus
                 sub_agents=[],
                 input_keys=["target_dir", "word_threshold", "review_dir_mode"],
                 output_keys=["target_dir", "word_threshold", "review_root", "scan_exclusions"],
-                description="Validate provided directory configuration and emit normalized runtime settings.",
+                description=(
+                    "Validate provided directory configuration and emit "
+                    "normalized runtime settings."
+                ),
                 system_prompt=(
                     "Validate target_dir, normalize word_threshold, set scan_exclusions, "
                     "and resolve review_root before real work begins."
@@ -850,7 +866,12 @@ def test_behavior_validation_errors_rejects_output_dirs_that_must_preexist():
                     target=">=0.99",
                 )
             ],
-            constraints=[SimpleNamespace(id="c-1", description="Do not overwrite originals early.")],
+            constraints=[
+                SimpleNamespace(
+                    id="c-1",
+                    description="Do not overwrite originals early.",
+                )
+            ],
         ),
         entry_node="start",
         terminal_nodes=["done"],
@@ -1039,7 +1060,10 @@ def test_behavior_validation_errors_allows_session_data_tools_for_delivery_paylo
             intro_message="Ready to deliver review artifacts.",
         ),
         goal=SimpleNamespace(
-            description="Expose a manifest artifact and clickable link after local review generation.",
+            description=(
+                "Expose a manifest artifact and clickable link after local "
+                "review generation."
+            ),
             success_criteria=[
                 SimpleNamespace(
                     id="sc-1",
@@ -1048,7 +1072,12 @@ def test_behavior_validation_errors_allows_session_data_tools_for_delivery_paylo
                     target=">=1 link",
                 )
             ],
-            constraints=[SimpleNamespace(id="c-1", description="Do not write workspace files here.")],
+            constraints=[
+                SimpleNamespace(
+                    id="c-1",
+                    description="Do not write workspace files here.",
+                )
+            ],
         ),
         entry_node="publish-links",
         terminal_nodes=["done"],
@@ -1093,7 +1122,10 @@ Tasks:
    - manifest_path
    - artifact_links
 """,
-                success_criteria="Clickable session artifact links are returned and final result is complete.",
+                success_criteria=(
+                    "Clickable session artifact links are returned and final "
+                    "result is complete."
+                ),
             ),
             SimpleNamespace(
                 id="done",
