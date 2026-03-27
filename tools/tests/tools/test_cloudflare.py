@@ -201,8 +201,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_get_dnssec_status"].fn
             result = fn(zone_id="z_test")
-           assert isinstance(result, dict)
-           assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_update_zone_setting(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -516,8 +516,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_get_performance_analytics"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_get_http_analytics_report(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -537,8 +537,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_get_http_analytics_report"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_firewall_events(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -579,8 +579,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_get_security_settings"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_page_rules(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -600,8 +600,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_page_rules"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_waf_rulesets(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -621,8 +621,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_waf_rulesets"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_get_bot_management_settings(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -642,8 +642,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_get_bot_management_settings"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_managed_transforms(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -663,8 +663,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_managed_transforms"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_get_ddos_protection_settings(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -684,8 +684,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_get_ddos_protection_settings"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_create_firewall_rule(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -705,8 +705,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_create_firewall_rule"].fn
             result = fn(zone_id="z_test", action="block", expression="ip.src eq 1.2.3.4")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_delete_firewall_rule(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -726,8 +726,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_delete_firewall_rule"].fn
             result = fn(zone_id="z_test", rule_id="rule1")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_get_speed_settings(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -852,8 +852,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_purge_cache_files"].fn
             result = fn(zone_id="z_test", urls=["https://example.com/a"])
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_advanced_services(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -873,8 +873,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_advanced_services"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_accounts(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -894,8 +894,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_accounts"].fn
             result = fn()
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_get_account_details(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -915,8 +915,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_get_account_details"].fn
             result = fn(account_id="acct1")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_account_members(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -936,8 +936,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_account_members"].fn
             result = fn(account_id="acct1")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_invite_account_member(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -957,8 +957,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_invite_account_member"].fn
             result = fn(account_id="acct1", email="a@b.com", roles=["admin"])
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_delete_account_member(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -978,8 +978,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_delete_account_member"].fn
             result = fn(account_id="acct1", member_id="m1")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_custom_hostnames(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -999,8 +999,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_custom_hostnames"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_audit_logs(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -1020,8 +1020,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_audit_logs"].fn
             result = fn(account_id="acct1")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_firewall_rules(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -1041,8 +1041,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_firewall_rules"].fn
             result = fn(zone_id="z_test")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_access_applications(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -1062,8 +1062,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_access_applications"].fn
             result = fn(account_id="acct1")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_r2_buckets(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -1083,8 +1083,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_r2_buckets"].fn
             result = fn(account_id="acct1")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_list_pages_projects(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -1104,8 +1104,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_list_pages_projects"].fn
             result = fn(account_id="acct1")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_create_access_policy(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -1127,8 +1127,8 @@ class TestCloudflareTools:
             result = fn(
                 account_id="acct1", application_id="app1", name="p1", decision="allow", include=[]
             )
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_create_worker_route(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -1148,8 +1148,8 @@ class TestCloudflareTools:
         ):
             fn = tools_registry["cloudflare_create_worker_route"].fn
             result = fn(zone_id="z_test", pattern="api.example.com/*", script_name="s1")
-            if isinstance(result, dict):
-                assert "error" not in result
+            assert isinstance(result, dict)
+            assert "error" not in result
 
     def test_cloudflare_set_ssl_mode(self, tools_registry, monkeypatch):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
@@ -1174,6 +1174,31 @@ class TestCloudflareTools:
 
 
 class TestCloudflareEdgeCases:
+    def test_credentials_dict_preferred_over_env_var(self, mcp, monkeypatch):
+        # Set environment variable
+        monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "env-key")
+
+        # Register with credentials dict that has a different key
+        # We must call register_tools directly instead of using the tools_registry fixture
+        # which doesn't pass a credentials dictionary.
+        register_tools(mcp, credentials={"cloudflare": "dict-key"})
+        tools = mcp._tool_manager._tools
+        fn = tools["cloudflare_list_zones"].fn
+
+        with patch("aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request") as mock_req:
+            mock_req.return_value = _mock_success_response()
+            result = fn()
+
+            # Assert success
+            assert isinstance(result, dict)
+            assert "error" not in result
+
+            # Verify the dict-key was used, not the env-key
+            mock_req.assert_called_once()
+            args, kwargs = mock_req.call_args
+            headers = kwargs.get("headers", {})
+            assert headers.get("Authorization") == "Bearer dict-key"
+
     def test_missing_or_invalid_token(self, tools_registry, monkeypatch):
         # Unset the environment variable
         monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
