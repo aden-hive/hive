@@ -121,7 +121,7 @@ This sets up:
 
 - Finally, it will open the Hive interface in your browser
 
-> **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
+> **Tip:** To reopen the dashboard later, run `hive open` from the repo root directory. If `hive` is not found, run `source $HOME/.local/bin/env` first.
 
 ### Build Your First Agent
 
