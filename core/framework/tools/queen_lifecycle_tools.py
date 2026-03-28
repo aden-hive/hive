@@ -967,26 +967,60 @@ def _should_backfill_from_recent_input(key: str, value: Any) -> bool:
     return False
 
 
-def _load_recent_worker_input_defaults(runtime: Any, input_keys: list[str]) -> dict[str, Any]:
+def _load_recent_worker_input_defaults(
+    runtime: Any,
+    input_keys: list[str],
+    session_id: str | None = None,
+) -> dict[str, Any]:
     """Load the best recent worker input payload from unified session state.
 
-    We score candidates by how many entry input keys they populate so that a
-    fully specified previous run beats a newer but partially malformed rerun.
+    When a current session is known, only that session is considered so reruns
+    cannot inherit structured defaults from an unrelated historical session.
+    Otherwise we fall back to the latest available session as a best-effort
+    compatibility path for legacy callers.
     """
     store = getattr(runtime, "_session_store", None)
     sessions_dir = Path(getattr(store, "sessions_dir", "")) if store is not None else None
     if sessions_dir is None or not sessions_dir.exists():
         return {}
 
+    candidate_state_paths: list[Path]
+    if session_id:
+        state_path = sessions_dir / session_id / "state.json"
+        candidate_state_paths = [state_path] if state_path.exists() else []
+    else:
+        candidate_state_paths = []
+
+    if not candidate_state_paths:
+        candidate_state_paths = sorted(
+            sessions_dir.glob("session_*/state.json"),
+            key=lambda path: path.stat().st_mtime if path.exists() else 0,
+            reverse=True,
+        )
+
     work_keys = [key for key in input_keys if key not in {"user_request", "task", "feedback"}]
     if not work_keys:
-        return {}
+        best_payload: dict[str, Any] = {}
+        best_updated_at = ""
+        for state_path in candidate_state_paths:
+            try:
+                raw_state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            input_data = raw_state.get("input_data") or {}
+            if not isinstance(input_data, dict) or not input_data:
+                continue
+            updated_at = str((raw_state.get("timestamps") or {}).get("updated_at") or "")
+            if updated_at >= best_updated_at:
+                best_payload = dict(input_data)
+                best_updated_at = updated_at
+        return best_payload
 
     best_payload: dict[str, Any] = {}
     best_score = -1
     best_updated_at = ""
 
-    for state_path in sessions_dir.glob("session_*/state.json"):
+    for state_path in candidate_state_paths:
         try:
             raw_state = json.loads(state_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -1078,7 +1112,11 @@ def _get_default_entry_input_keys(runtime: Any) -> list[str]:
     return list(getattr(node, "input_keys", []) or []) if node is not None else []
 
 
-def _build_worker_input_data(runtime: Any, task: str) -> dict[str, Any]:
+def _build_worker_input_data(
+    runtime: Any,
+    task: str,
+    session_id: str | None = None,
+) -> dict[str, Any]:
     """Shape queen task text into the loaded worker's expected entry inputs."""
     structured = _parse_structured_task_payload(task)
     allowed_keys = _get_default_entry_input_keys(runtime)
@@ -1103,7 +1141,7 @@ def _build_worker_input_data(runtime: Any, task: str) -> dict[str, Any]:
         _RERUN_WITH_DEFAULTS_RE.search(task or "")
     )
     recent_defaults = (
-        _load_recent_worker_input_defaults(runtime, allowed_keys)
+        _load_recent_worker_input_defaults(runtime, allowed_keys, session_id=session_id)
         if should_merge_recent_defaults
         else {}
     )
@@ -1224,7 +1262,7 @@ def register_queen_lifecycle_tools(
 
             exec_id = await runtime.trigger(
                 entry_point_id="default",
-                input_data=_build_worker_input_data(runtime, task),
+                input_data=_build_worker_input_data(runtime, task, session_id=session_id),
                 # Worker runs should start from the explicit input payload for
                 # this run, not inherit another execution's shared session.
                 session_state=None,
@@ -3845,14 +3883,6 @@ def register_queen_lifecycle_tools(
             available immediately. The user will see the agent's graph and
             can interact with it without opening a new tab.
             """
-            runtime = _get_runtime()
-            if runtime is not None:
-                try:
-                    await session_manager.unload_worker(manager_session_id)
-                except Exception as e:
-                    logger.error("Failed to unload existing worker: %s", e, exc_info=True)
-                    return json.dumps({"error": f"Failed to unload existing worker: {e}"})
-
             try:
                 resolved_path = validate_agent_path(agent_path)
             except ValueError as e:
@@ -3917,6 +3947,14 @@ def register_queen_lifecycle_tools(
                         )
                     }
                 )
+
+            runtime = _get_runtime()
+            if runtime is not None:
+                try:
+                    await session_manager.unload_worker(manager_session_id)
+                except Exception as e:
+                    logger.error("Failed to unload existing worker: %s", e, exc_info=True)
+                    return json.dumps({"error": f"Failed to unload existing worker: {e}"})
 
             try:
                 updated_session = await session_manager.load_worker(
@@ -4091,7 +4129,7 @@ def register_queen_lifecycle_tools(
 
             exec_id = await runtime.trigger(
                 entry_point_id="default",
-                input_data=_build_worker_input_data(runtime, task),
+                input_data=_build_worker_input_data(runtime, task, session_id=session_id),
                 # Fresh manual worker runs avoid stale state leaking from a
                 # previous execution into Codex's next tool/planning turn.
                 session_state=None,
@@ -4154,7 +4192,11 @@ def register_queen_lifecycle_tools(
         allowed_keys = _get_default_entry_input_keys(runtime)
         input_data = {
             key: _normalize_worker_input_value(key, value)
-            for key, value in _load_recent_worker_input_defaults(runtime, allowed_keys).items()
+            for key, value in _load_recent_worker_input_defaults(
+                runtime,
+                allowed_keys,
+                session_id=session_id,
+            ).items()
         }
         work_keys = [key for key in allowed_keys if key not in {"user_request", "task", "feedback"}]
         if work_keys:

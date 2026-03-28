@@ -1476,7 +1476,7 @@ class GraphExecutor:
                         )
                         continuous_conversation.update_system_prompt(
                             new_system,
-                            output_keys=next_spec.output_keys or None,
+                            output_keys=list(next_spec.output_keys or []),
                         )
 
                         # Stamp the next phase before inserting the transition

@@ -8,6 +8,7 @@ import {
   canShowRunButton,
   getStructuredRunInputKeys,
   hasAllStructuredRunInputs,
+  trimStructuredRunInputs,
 } from "./run-inputs";
 
 function makeNodeSpec(overrides: Partial<NodeSpec>): NodeSpec {
@@ -107,12 +108,28 @@ describe("buildStructuredRunQuestions", () => {
 
 describe("canShowRunButton", () => {
   it("only exposes Run when a worker session is ready and staged/running", () => {
-    expect(canShowRunButton("sess-1", true, "staging")).toBe(true);
-    expect(canShowRunButton("sess-1", true, "running")).toBe(true);
+    expect(canShowRunButton("sess-1", true, "staging", true)).toBe(true);
+    expect(canShowRunButton("sess-1", true, "running", true)).toBe(true);
 
-    expect(canShowRunButton("sess-1", true, "planning")).toBe(false);
-    expect(canShowRunButton("sess-1", true, "building")).toBe(false);
-    expect(canShowRunButton("sess-1", false, "staging")).toBe(false);
-    expect(canShowRunButton(null, true, "staging")).toBe(false);
+    expect(canShowRunButton("sess-1", true, "planning", true)).toBe(false);
+    expect(canShowRunButton("sess-1", true, "building", true)).toBe(false);
+    expect(canShowRunButton("sess-1", false, "staging", true)).toBe(false);
+    expect(canShowRunButton("sess-1", true, "staging", false)).toBe(false);
+    expect(canShowRunButton(null, true, "staging", true)).toBe(false);
+  });
+});
+
+describe("trimStructuredRunInputs", () => {
+  it("drops stale keys that are no longer part of the current schema", () => {
+    expect(
+      trimStructuredRunInputs(["target_dir", "word_threshold"], {
+        target_dir: "/tmp/project",
+        word_threshold: 800,
+        stale_key: "old",
+      }),
+    ).toEqual({
+      target_dir: "/tmp/project",
+      word_threshold: 800,
+    });
   });
 });

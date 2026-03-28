@@ -928,6 +928,19 @@ class TestStop:
             )
             assert resp.status == 400
 
+    @pytest.mark.asyncio
+    async def test_stop_ignores_worker_validation_failure(self):
+        session = _make_session()
+        session.worker_validation_failures = ["behavior_validation: broken"]
+        session.worker_runtime._mock_streams["default"]._execution_tasks["exec_abc"] = MagicMock()
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/stop",
+                json={"execution_id": "exec_abc"},
+            )
+            assert resp.status == 200
+
 
 class TestReplay:
     @pytest.mark.asyncio

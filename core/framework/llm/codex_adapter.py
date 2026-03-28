@@ -148,7 +148,7 @@ class CodexResponsesAdapter:
         cleaned["api_base"] = normalize_codex_api_base(
             cleaned.get("api_base") or self._provider.api_base
         )
-        cleaned.setdefault("store", False)
+        cleaned["store"] = False
         cleaned["allowed_openai_params"] = merge_codex_allowed_openai_params(
             cleaned.get("allowed_openai_params")
         )

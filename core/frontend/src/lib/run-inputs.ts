@@ -38,10 +38,19 @@ export function buildStructuredRunQuestions(keys: string[]) {
   }));
 }
 
+export function trimStructuredRunInputs(
+  keys: string[],
+  inputData: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!inputData) return {};
+  return Object.fromEntries(keys.flatMap((key) => (key in inputData ? [[key, inputData[key]]] : [])));
+}
+
 export function canShowRunButton(
   sessionId: string | null | undefined,
   ready: boolean | null | undefined,
   queenPhase: QueenPhase | null | undefined,
+  topologyReady: boolean,
 ): boolean {
-  return Boolean(sessionId && ready && queenPhase && RUNNABLE_PHASES.has(queenPhase));
+  return Boolean(sessionId && ready && topologyReady && queenPhase && RUNNABLE_PHASES.has(queenPhase));
 }

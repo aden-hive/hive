@@ -23,6 +23,7 @@ import {
   canShowRunButton,
   getStructuredRunInputKeys,
   hasAllStructuredRunInputs,
+  trimStructuredRunInputs,
 } from "@/lib/run-inputs";
 import { ApiError } from "@/api/client";
 
@@ -754,8 +755,8 @@ export default function Workspace() {
     }
 
     const inputData =
-      requiredRunKeys.length > 0 && state.lastRunInputData
-        ? state.lastRunInputData
+      requiredRunKeys.length > 0
+        ? trimStructuredRunInputs(requiredRunKeys, state.lastRunInputData)
         : {};
 
     // Reset dismissed banner so a repeated 424 re-shows it
@@ -788,6 +789,13 @@ export default function Workspace() {
     activeAgentState?.sessionId,
     activeAgentState?.ready,
     activeAgentState?.queenPhase,
+    Boolean(
+      activeAgentState?.nodeSpecs?.length ||
+        sessionsByAgent[activeWorker]?.some(
+          (session) =>
+            session.id === activeAgentState?.sessionId && session.graphNodes.length > 0,
+        ),
+    ),
   );
 
   // --- Fetch discovered agents for NewTabPopover ---
@@ -2892,26 +2900,41 @@ export default function Workspace() {
         pendingQuestionSource: null,
         awaitingInput: false,
         workerRunState: "deploying",
-        lastRunInputData: answers,
       });
-      executionApi.trigger(state.sessionId, "default", answers).then((result) => {
+      const requiredRunKeys = getStructuredRunInputKeys(
+        state.nodeSpecs,
+        sessionsRef.current[activeWorker]?.find((s) => s.id === state.sessionId)?.graphNodes || [],
+      );
+      const trimmedAnswers = trimStructuredRunInputs(requiredRunKeys, answers);
+      executionApi.trigger(state.sessionId, "default", trimmedAnswers).then((result) => {
         updateAgentState(activeWorker, {
           currentExecutionId: result.execution_id,
-          lastRunInputData: answers,
+          lastRunInputData: trimmedAnswers,
         });
       }).catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 424) {
           const errBody = err.body as Record<string, unknown>;
           const credPath = (errBody?.agent_path as string) || null;
           if (credPath) setCredentialAgentPath(credPath);
-          updateAgentState(activeWorker, { workerRunState: "idle", error: "credentials_required" });
+          updateAgentState(activeWorker, {
+            workerRunState: "idle",
+            error: "credentials_required",
+            lastRunInputData: trimmedAnswers,
+          });
           setCredentialsOpen(true);
           return;
         }
 
         const errMsg = err instanceof Error ? err.message : String(err);
         appendSystemMessage(activeWorker, `Failed to trigger run: ${errMsg}`);
-        updateAgentState(activeWorker, { workerRunState: "idle" });
+        updateAgentState(activeWorker, {
+          workerRunState: "idle",
+          awaitingInput: true,
+          pendingQuestion: null,
+          pendingOptions: null,
+          pendingQuestions: buildStructuredRunQuestions(requiredRunKeys),
+          pendingQuestionSource: "run",
+        });
       });
       return;
     }

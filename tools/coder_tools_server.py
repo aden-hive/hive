@@ -345,8 +345,11 @@ def _behavior_validation_errors(agent_module) -> list[str]:
     metadata = getattr(agent_module, "metadata", None)
     goal = getattr(agent_module, "goal", None)
 
-    if _is_placeholder_text(identity_prompt):
-        errors.append("identity_prompt is blank or still contains TODO placeholders")
+    identity_prompt_text = identity_prompt.strip()
+    if not identity_prompt_text:
+        errors.append("identity_prompt is blank")
+    elif any(marker in identity_prompt_text for marker in _PLACEHOLDER_MARKERS):
+        errors.append("identity_prompt still contains TODO placeholders")
 
     if metadata is not None:
         if _is_placeholder_text(getattr(metadata, "description", "") or ""):
@@ -508,6 +511,7 @@ def _classify_behavior_validation_errors(errors: list[str]) -> tuple[list[str], 
     warnings so they can be surfaced without preventing staging/runs.
     """
     blocking_markers = (
+        "identity_prompt still contains TODO placeholders",
         "blank or placeholder system_prompt",
         "uses session data tools",
         "Autonomous node ",
@@ -2123,14 +2127,14 @@ def _validate_agent_package_impl(agent_name: str) -> dict[str, object]:
             }
         elif "error" in test_result:
             steps["tests"] = {
-                "passed": True,
+                "passed": False,
                 "warning": test_result["error"],
                 "warnings": [test_result["error"]],
             }
         else:
             all_passed = test_result.get("failed", 0) == 0 and test_result.get("errors", 0) == 0
             steps["tests"] = {
-                "passed": True,
+                "passed": all_passed,
                 "summary": test_result.get("summary", "unknown"),
             }
             if not all_passed:
@@ -2300,10 +2304,10 @@ default_config = RuntimeConfig()
 
 @dataclass
 class AgentMetadata:
-    name: str = "{human_name}"
+    name: str = {human_name!r}
     version: str = "1.0.0"
-    description: str = "{_draft_desc or "TODO: Add agent description."}"
-    intro_message: str = "{_default_intro_message(human_name, _draft_desc)}"
+    description: str = {(_draft_desc or "TODO: Add agent description.")!r}
+    intro_message: str = {_default_intro_message(human_name, _draft_desc)!r}
 
 
 metadata = AgentMetadata()

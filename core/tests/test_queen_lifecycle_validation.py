@@ -518,6 +518,56 @@ async def test_load_built_agent_blocks_invalid_package(monkeypatch, tmp_path: Pa
     assert "behavior_validation" in result["validation_failures"][0]
     assert captured["agent_name"] == str(agent_dir)
     fake_manager.load_worker.assert_not_called()
+    fake_manager.unload_worker.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_load_built_agent_keeps_current_worker_when_replacement_fails_validation(
+    monkeypatch, tmp_path: Path
+) -> None:
+    registry = ToolRegistry()
+    _register_fake_validator(
+        registry,
+        {
+            "valid": False,
+            "steps": {
+                "behavior_validation": {
+                    "passed": False,
+                    "output": "Node 'scan' has a blank or placeholder system_prompt",
+                }
+            },
+        },
+    )
+    session = SimpleNamespace(
+        worker_runtime=SimpleNamespace(),
+        event_bus=None,
+        worker_path=Path("exports/existing_agent"),
+        runner=None,
+    )
+    fake_manager = SimpleNamespace(
+        get_session=lambda _sid: None,
+        unload_worker=AsyncMock(),
+        load_worker=AsyncMock(),
+    )
+    phase_state = QueenPhaseState(phase="building")
+    register_queen_lifecycle_tools(
+        registry,
+        session=session,
+        session_manager=fake_manager,
+        manager_session_id="sess-1",
+        phase_state=phase_state,
+    )
+
+    agent_dir = tmp_path / "broken_agent"
+    agent_dir.mkdir()
+    monkeypatch.setattr(qlt, "validate_agent_path", lambda _path: agent_dir)
+
+    result_raw = await registry._tools["load_built_agent"].executor({"agent_path": str(agent_dir)})
+    result = json.loads(result_raw)
+
+    assert "Cannot load agent" in result["error"]
+    fake_manager.unload_worker.assert_not_called()
+    fake_manager.load_worker.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -706,6 +756,142 @@ async def test_rerun_worker_with_last_input_reuses_complete_recent_defaults(
         "word_threshold": 800,
     }
     assert trigger_kwargs["session_state"] is None
+
+
+@pytest.mark.asyncio
+async def test_rerun_worker_with_last_input_preserves_legacy_task_payload(
+    monkeypatch, tmp_path: Path
+) -> None:
+    registry = ToolRegistry()
+    _register_fake_validator(registry, {"valid": True, "steps": {}})
+
+    monkeypatch.setattr(qlt, "validate_credentials", lambda *args, **kwargs: None)
+    monkeypatch.chdir(tmp_path)
+
+    sessions_dir = tmp_path / "agent_store" / "sessions"
+    sessions_dir.mkdir(parents=True)
+    session_dir = sessions_dir / "session_20260324_204400_task"
+    session_dir.mkdir()
+    (session_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "timestamps": {"updated_at": "2026-03-24T20:44:00"},
+                "input_data": {"task": "re-run the markdown review"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime = SimpleNamespace(
+        _session_store=SimpleNamespace(sessions_dir=sessions_dir),
+        resume_timers=MagicMock(),
+        trigger=AsyncMock(return_value="exec-rerun"),
+        graph=SimpleNamespace(
+            nodes=[],
+            entry_node="process",
+            get_node=lambda node_id: (
+                SimpleNamespace(input_keys=["task"]) if node_id == "process" else None
+            ),
+        ),
+        get_entry_points=lambda: [SimpleNamespace(id="default", entry_node="process")],
+    )
+    session = SimpleNamespace(
+        worker_runtime=runtime,
+        event_bus=None,
+        worker_path=Path("exports/legacy_worker"),
+        runner=None,
+    )
+    phase_state = QueenPhaseState(phase="staging")
+    register_queen_lifecycle_tools(
+        registry,
+        session=session,
+        session_id="sess-rerun",
+        phase_state=phase_state,
+    )
+
+    result_raw = await registry._tools["rerun_worker_with_last_input"].executor({})
+    result = json.loads(result_raw)
+
+    assert result["status"] == "started"
+    trigger_kwargs = runtime.trigger.await_args.kwargs
+    assert trigger_kwargs["input_data"] == {"task": "re-run the markdown review"}
+
+
+@pytest.mark.asyncio
+async def test_rerun_worker_with_last_input_uses_current_session_defaults_only(
+    monkeypatch, tmp_path: Path
+) -> None:
+    registry = ToolRegistry()
+    _register_fake_validator(registry, {"valid": True, "steps": {}})
+
+    monkeypatch.setattr(qlt, "validate_credentials", lambda *args, **kwargs: None)
+    monkeypatch.chdir(tmp_path)
+
+    sessions_dir = tmp_path / "agent_store" / "sessions"
+    current_session_dir = sessions_dir / "sess-rerun-current"
+    current_session_dir.mkdir(parents=True)
+    (current_session_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "timestamps": {"updated_at": "2026-03-24T20:44:00"},
+                "input_data": {"target_dir": str((tmp_path / "current").resolve())},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    other_session_dir = sessions_dir / "session_20260325_204400_other"
+    other_session_dir.mkdir(parents=True)
+    (other_session_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "timestamps": {"updated_at": "2026-03-25T20:44:00"},
+                "input_data": {
+                    "target_dir": str((tmp_path / "other").resolve()),
+                    "review_dir": str((tmp_path / "other_reviews").resolve()),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime = SimpleNamespace(
+        _session_store=SimpleNamespace(sessions_dir=sessions_dir),
+        resume_timers=MagicMock(),
+        trigger=AsyncMock(return_value="exec-rerun"),
+        graph=SimpleNamespace(
+            nodes=[],
+            entry_node="process",
+            get_node=lambda node_id: (
+                SimpleNamespace(input_keys=["target_dir", "review_dir"])
+                if node_id == "process"
+                else None
+            ),
+        ),
+        get_entry_points=lambda: [SimpleNamespace(id="default", entry_node="process")],
+    )
+    session = SimpleNamespace(
+        worker_runtime=runtime,
+        event_bus=None,
+        worker_path=Path("exports/docs_reviewer"),
+        runner=None,
+    )
+    phase_state = QueenPhaseState(phase="staging")
+    register_queen_lifecycle_tools(
+        registry,
+        session=session,
+        session_id="sess-rerun-current",
+        phase_state=phase_state,
+    )
+
+    result_raw = await registry._tools["rerun_worker_with_last_input"].executor({})
+    result = json.loads(result_raw)
+
+    assert (
+        result["error"]
+        == "No complete previous worker input is available for a same-defaults rerun."
+    )
+    assert result["missing_inputs"] == ["review_dir"]
 
 
 @pytest.mark.asyncio

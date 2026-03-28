@@ -104,3 +104,26 @@ async def test_worker_health_summary_flags_stall_and_non_accept_churn(tmp_path: 
     assert "recent_non_accept_churn" in data["issue_signals"]
     assert data["steps_since_last_accept"] == 4
     assert data["stall_minutes"] is not None
+
+
+@pytest.mark.asyncio
+async def test_worker_health_summary_errors_when_default_session_has_no_state(
+    tmp_path: Path,
+) -> None:
+    registry = ToolRegistry()
+    event_bus = EventBus()
+    storage_path = tmp_path / "agent_store"
+    (storage_path / "sessions" / "session-stale").mkdir(parents=True, exist_ok=True)
+
+    register_worker_monitoring_tools(
+        registry,
+        event_bus,
+        storage_path,
+        default_session_id="session-stale",
+    )
+
+    raw = await registry._tools["get_worker_health_summary"].executor({})
+    data = json.loads(raw)
+
+    assert "error" in data
+    assert "session-stale" in data["error"]

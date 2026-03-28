@@ -128,6 +128,8 @@ def read_worker_health_snapshot(
     session_dir = storage_path / "sessions" / str(session_id)
     tool_logs_path = session_dir / "logs" / "tool_logs.jsonl"
     state_path = session_dir / "state.json"
+    if not session_dir.exists() or not state_path.exists():
+        return {"error": f"No persisted worker state found for session '{session_id}'"}
 
     session_status = "unknown"
     if state_path.exists():

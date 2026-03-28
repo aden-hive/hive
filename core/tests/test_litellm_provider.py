@@ -252,6 +252,34 @@ class TestToolConversion:
             "options": ["Yes", "No"],
         }
 
+    def test_parse_tool_call_arguments_keeps_null_inside_strings(self):
+        """Literal normalization should not mutate quoted text values."""
+        provider = LiteLLMProvider(model="openai/gpt-5.3-codex", api_key="test-key")
+
+        parsed = provider._parse_tool_call_arguments(
+            "{'hypothesis': 'null hypothesis', 'approved': false}",
+            "summarize",
+        )
+
+        assert parsed == {
+            "hypothesis": "null hypothesis",
+            "approved": False,
+        }
+
+    def test_parse_tool_call_arguments_strips_json_code_fences(self):
+        """Fence stripping should remove the language tag before JSON parsing."""
+        provider = LiteLLMProvider(model="openai/gpt-5.3-codex", api_key="test-key")
+
+        parsed = provider._parse_tool_call_arguments(
+            '```json\n{"question":"Continue?","options":["Yes","No"]}\n```',
+            "ask_user",
+        )
+
+        assert parsed == {
+            "question": "Continue?",
+            "options": ["Yes", "No"],
+        }
+
 
 class TestAnthropicProviderBackwardCompatibility:
     """Test AnthropicProvider backward compatibility with LiteLLM backend."""

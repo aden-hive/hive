@@ -98,3 +98,16 @@ def test_validation_blocks_stage_or_run_ignores_non_blocking_warnings() -> None:
     }
 
     assert sm._validation_blocks_stage_or_run(report) is False
+
+
+def test_run_validation_report_sync_handles_subprocess_launcher_errors(monkeypatch) -> None:
+    def _boom(*args, **kwargs):
+        raise FileNotFoundError("uv not found")
+
+    monkeypatch.setattr(sm.subprocess, "run", _boom)
+
+    report = sm._run_validation_report_sync("/tmp/demo_agent")
+
+    assert report["valid"] is False
+    assert report["steps"]["validator_subprocess"]["passed"] is False
+    assert "uv not found" in report["steps"]["validator_subprocess"]["error"]

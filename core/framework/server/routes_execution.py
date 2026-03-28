@@ -192,10 +192,6 @@ async def handle_inject(request: web.Request) -> web.Response:
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
 
-    validation_err = await _worker_validation_error(session)
-    if validation_err is not None:
-        return validation_err
-
     body = await request.json()
     node_id = body.get("node_id")
     content = body.get("content", "")
@@ -510,10 +506,6 @@ async def handle_stop(request: web.Request) -> web.Response:
 
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
-
-    validation_err = await _worker_validation_error(session)
-    if validation_err is not None:
-        return validation_err
 
     body = await request.json()
     execution_id = body.get("execution_id")

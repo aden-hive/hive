@@ -238,7 +238,7 @@ def test_behavior_validation_errors_rejects_placeholder_prompts_and_empty_work_n
 
     errors = mod._behavior_validation_errors(agent_module)
 
-    assert "identity_prompt is blank or still contains TODO placeholders" in errors
+    assert "identity_prompt still contains TODO placeholders" in errors
     assert "metadata.description is blank or still contains TODO placeholders" in errors
     assert "metadata.intro_message is blank or still contains TODO placeholders" in errors
     assert "goal.description is blank or still contains TODO placeholders" in errors
@@ -324,6 +324,17 @@ def test_validate_agent_package_accepts_absolute_path_and_skips_missing_tests(
     assert report["steps"]["tests"]["skipped"] is True
     assert str(agent_dir) in report["steps"]["tests"]["summary"]
     assert tool_calls["agent_path"] == str(agent_dir)
+
+
+def test_behavior_validation_identity_prompt_placeholder_blocks_stage() -> None:
+    mod = _load_coder_tools_server()
+
+    blocking, warnings = mod._classify_behavior_validation_errors(
+        ["identity_prompt still contains TODO placeholders"]
+    )
+
+    assert blocking == ["identity_prompt still contains TODO placeholders"]
+    assert warnings == []
 
 
 def test_behavior_validation_errors_accepts_complete_worker_nodes():
@@ -1155,7 +1166,60 @@ def test_generated_agent_template_avoids_intro_and_success_metric_todos():
     mod = _load_coder_tools_server()
     source = Path(mod.__file__).read_text(encoding="utf-8")
 
-    assert 'intro_message: str = "{_default_intro_message(human_name, _draft_desc)}"' in source
+    assert "intro_message: str = {_default_intro_message(human_name, _draft_desc)!r}" in source
     assert 'metric="{_default_success_metric(i + 1)}"' in source
     assert 'target="{_default_success_target()}"' in source
     assert 'identity_prompt = "TODO: Add identity prompt."' not in source
+
+
+def test_validation_reports_failed_tests_as_failed(monkeypatch) -> None:
+    mod = _load_coder_tools_server()
+    mod.PROJECT_ROOT = "/tmp/demo_project"
+
+    monkeypatch.setattr(
+        mod,
+        "_resolve_agent_package_target",
+        lambda _name: (Path("/tmp/demo_agent"), "demo_agent", "demo_agent"),
+    )
+    monkeypatch.setattr(
+        mod,
+        "_validate_agent_tools_impl",
+        lambda _path: {"valid": True, "message": "ok"},
+    )
+    monkeypatch.setattr(mod, "_behavior_validation_errors", lambda _module: [])
+    monkeypatch.setattr(
+        mod,
+        "_run_agent_tests_impl",
+        lambda _path: {"failed": 1, "errors": 0, "summary": "1 failed", "failures": ["boom"]},
+    )
+
+    class _Proc:
+        def __init__(self, stdout: str):
+            self.returncode = 0
+            self.stdout = stdout
+            self.stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        command_text = " ".join(str(part) for part in cmd)
+        if "missing = [a for a in ('goal', 'nodes', 'edges')" in command_text:
+            return _Proc('{"valid": true}')
+        if "from demo_agent import default_agent" in command_text:
+            return _Proc("True")
+        if "graph_ids = {n.id for n in agent.nodes}" in command_text:
+            return _Proc('{"valid": true, "errors": []}')
+        if "AgentRunner.load" in command_text:
+            return _Proc("AgentRunner.load (graph-only): OK")
+        raise AssertionError(f"Unexpected subprocess command: {cmd}")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "demo_agent",
+        types.SimpleNamespace(goal=object(), nodes=[], edges=[]),
+    )
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
+
+    report = mod._validate_agent_package_impl("demo_agent")
+
+    assert report["valid"] is False
+    assert report["steps"]["tests"]["passed"] is False
+    assert report["steps"]["tests"]["failures"] == ["boom"]

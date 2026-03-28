@@ -116,14 +116,21 @@ def _run_validation_report_sync(agent_ref: str | Path) -> dict[str, Any]:
         print(json.dumps(module._validate_agent_package_impl(agent_ref), default=str))
         """
     )
-    proc = subprocess.run(
-        ["uv", "run", "python", "-c", script, str(CODER_TOOLS_SERVER), agent_ref_str],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        cwd=REPO_ROOT,
-        stdin=subprocess.DEVNULL,
-    )
+    try:
+        proc = subprocess.run(
+            ["uv", "run", "python", "-c", script, str(CODER_TOOLS_SERVER), agent_ref_str],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=REPO_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {
+            "valid": False,
+            "summary": f"validate_agent_package failed for '{agent_ref_str}'",
+            "steps": {"validator_subprocess": {"passed": False, "error": str(exc)[:2000]}},
+        }
     if proc.returncode != 0:
         detail = proc.stderr.strip() or proc.stdout.strip() or "validation subprocess failed"
         return {

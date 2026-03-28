@@ -1249,19 +1249,67 @@ class LiteLLMProvider(LLMProvider):
     @staticmethod
     def _normalize_pythonish_tool_arguments(raw_arguments: str) -> str:
         """Convert common JSON-like literals into a form ast.literal_eval can parse."""
-        return re.sub(
-            r"\b(true|false|null)\b",
-            lambda match: {
-                "true": "True",
-                "false": "False",
-                "null": "None",
-            }[match.group(1)],
-            raw_arguments,
-        )
+        replacements = {
+            "true": "True",
+            "false": "False",
+            "null": "None",
+        }
+        out: list[str] = []
+        token: list[str] = []
+        in_string = False
+        string_quote = ""
+        escaped = False
+
+        def flush_token() -> None:
+            if not token:
+                return
+            word = "".join(token)
+            out.append(replacements.get(word, word))
+            token.clear()
+
+        for char in raw_arguments:
+            if in_string:
+                out.append(char)
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == string_quote:
+                    in_string = False
+                continue
+
+            if char in {'"', "'"}:
+                flush_token()
+                in_string = True
+                string_quote = char
+                out.append(char)
+                continue
+
+            if char.isalpha():
+                token.append(char)
+                continue
+
+            flush_token()
+            out.append(char)
+
+        flush_token()
+        return "".join(out)
+
+    @staticmethod
+    def _strip_tool_argument_fence(raw_arguments: str) -> str:
+        """Remove surrounding fenced-code markers from streamed tool arguments."""
+        stripped = raw_arguments.strip()
+        if not stripped.startswith("```") or not stripped.endswith("```"):
+            return stripped
+
+        lines = stripped.splitlines()
+        if len(lines) >= 2:
+            return "\n".join(lines[1:-1]).strip()
+        return stripped.strip("`").strip()
 
     def _parse_pythonish_tool_arguments(self, raw_arguments: str) -> dict[str, Any] | None:
         """Parse single-quoted / trailing-comma argument payloads safely."""
-        stripped = raw_arguments.strip().strip("`")
+        stripped = self._strip_tool_argument_fence(raw_arguments)
         if not stripped or stripped[0] != "{":
             return None
         candidate = self._close_truncated_json_fragment(stripped)
@@ -1274,9 +1322,7 @@ class LiteLLMProvider(LLMProvider):
 
     def _parse_tool_call_arguments(self, raw_arguments: str, tool_name: str) -> dict[str, Any]:
         """Parse streamed tool arguments, repairing truncation when possible."""
-        stripped = raw_arguments.strip()
-        if stripped.startswith("```") and stripped.endswith("```"):
-            stripped = stripped.strip("`").strip()
+        stripped = self._strip_tool_argument_fence(raw_arguments)
         try:
             parsed = json.loads(stripped) if stripped else {}
         except json.JSONDecodeError:
