@@ -175,8 +175,9 @@ def _ensure_ollama_chat_prefix(model: str) -> str:
     See: https://docs.litellm.ai/docs/providers/ollama#example-usage---tool-calling
     """
     if model.startswith("ollama/"):
-        return "ollama_chat/" + model[len("ollama/"):]
+        return "ollama_chat/" + model[len("ollama/") :]
     return model
+
 
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
@@ -744,6 +745,8 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
             if _is_ollama_model(self.model):
+                # Ollama requires explicit tool_choice=auto for function calling
+                # so future readers don't have to guess.
                 kwargs.setdefault("tool_choice", "auto")
 
         # Add response_format for structured output
@@ -943,6 +946,8 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
             if _is_ollama_model(self.model):
+                # Ollama requires explicit tool_choice=auto for function calling
+                # so future readers don't have to guess.
                 kwargs.setdefault("tool_choice", "auto")
         if response_format:
             kwargs["response_format"] = response_format
@@ -1646,6 +1651,8 @@ class LiteLLMProvider(LLMProvider):
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
             if _is_ollama_model(self.model):
+                # Ollama requires explicit tool_choice=auto for function calling
+                # so future readers don't have to guess.
                 kwargs.setdefault("tool_choice", "auto")
         if response_format:
             kwargs["response_format"] = response_format

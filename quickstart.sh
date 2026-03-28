@@ -1435,8 +1435,8 @@ case $choice in
         # Local (Ollama) — no API key; pick model from ollama list
         SELECTED_PROVIDER_ID="ollama"
         SELECTED_ENV_VAR=""
-        SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=120000
+        SELECTED_MAX_TOKENS=8192
+        SELECTED_MAX_CONTEXT_TOKENS=16384
         OLLAMA_MODELS=()
         while IFS= read -r line; do
             [ -n "$line" ] && OLLAMA_MODELS+=("$line")
@@ -1464,11 +1464,12 @@ case $choice in
             echo -e "${YELLOW}    For best results, use models like qwen2.5:72b+ or mistral-large.${NC}"
             echo ""
         else
-            SELECTED_MODEL="llama3"
             echo ""
-            echo -e "${YELLOW}  No Ollama models found.${NC} Using default model: ${DIM}$SELECTED_MODEL${NC}"
-            echo -e "  Run ${CYAN}ollama pull $SELECTED_MODEL${NC} (or another model), then edit ${CYAN}~/.hive/configuration.json${NC} to change the model."
+            echo -e "${RED}No Ollama models found.${NC}"
+            echo -e "  Please open another terminal, run ${CYAN}ollama pull llama3${NC} (or another model),"
+            echo -e "  and then run this quickstart again."
             echo ""
+            exit 1
         fi
         ;;
     "$SKIP_CHOICE")
