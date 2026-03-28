@@ -71,7 +71,7 @@ class TestExampleTemplatesDiscovery:
         groups = discover_agents()
         examples = groups.get("Examples", [])
         
-        agents_by_path = {str(entry.path): entry for entry in examples}
+        # agents_by_path = {str(entry.path): entry for entry in examples}
         
         # Find by exact path match
         examples_dir = Path("examples/templates")
@@ -82,11 +82,10 @@ class TestExampleTemplatesDiscovery:
         
         entry = matching[0]
         expected_tools = {"gmail_list_messages", "gmail_get_message", "gmail_batch_get_messages", 
-                         "gmail_send_message", "gmail_create_draft"}
-        assert entry.tool_count >= len(expected_tools), (
-            f"email_reply_agent tool_count={entry.tool_count}, expected >= {len(expected_tools)}. "
-            f"Expected tools: {expected_tools}"
-        )
+                         "gmail_reply_email"}
+        actual_tools = set(entry.tools)
+        missing = expected_tools - actual_tools
+        assert not missing, f"Missing expected tools: {missing}"
 
     def test_meeting_scheduler_expected_tools(self):
         """Test that meeting_scheduler declares expected calendar/sheets tools."""
