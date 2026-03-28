@@ -126,7 +126,16 @@ class RSSTwitterAgent:
     ) -> ExecutionResult:
         feed_url = str(input_data.get("feed_url") or "https://news.ycombinator.com/rss")
         raw_max_articles = input_data.get("max_articles")
-        max_articles = 3 if raw_max_articles in (None, "") else int(raw_max_articles)
+        try:
+            max_articles = (
+                3 if raw_max_articles in (None, "") else int(raw_max_articles)
+            )
+        except (TypeError, ValueError):
+            return ExecutionResult(
+                success=False,
+                error="max_articles must be an integer.",
+                steps_executed=0,
+            )
         twitter_credential_ref = input_data.get("twitter_credential_ref")
         workflow_coro = run_workflow(
             feed_url=feed_url,

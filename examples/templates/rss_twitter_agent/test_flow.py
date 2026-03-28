@@ -192,6 +192,15 @@ def test_agent_preserves_explicit_zero_max_articles(monkeypatch) -> None:
     assert captured["max_articles"] == 0
 
 
+def test_agent_rejects_non_numeric_max_articles() -> None:
+    result = asyncio.run(
+        agent_module.default_agent.trigger_and_wait("start", {"max_articles": "abc"})
+    )
+
+    assert result.success is False
+    assert result.error == "max_articles must be an integer."
+
+
 def test_post_threads_impl_reports_partial_failure(monkeypatch) -> None:
     async def fake_post_thread(
         thread: dict, credential_ref: str | None = None
