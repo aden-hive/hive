@@ -83,6 +83,7 @@ from .http_headers_scanner import register_tools as register_http_headers_scanne
 from .hubspot_tool import register_tools as register_hubspot
 from .huggingface_tool import register_tools as register_huggingface
 from .intercom_tool import register_tools as register_intercom
+from .hackernews_tool import register_tools as register_hackernews
 from .jira_tool import register_tools as register_jira
 from .kafka_tool import register_tools as register_kafka
 from .langfuse_tool import register_tools as register_langfuse
@@ -231,6 +232,7 @@ def _register_unverified(
     """Register unverified (new/community) tools."""
     # --- No credentials ---
     register_duckduckgo(mcp)
+    register_hackernews(mcp)
     register_yahoo_finance(mcp)
     register_youtube_transcript(mcp)
 
