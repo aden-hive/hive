@@ -1,0 +1,553 @@
+{
+  "original_draft": {
+    "agent_name": "procurement_approval_agent",
+    "goal": "Automate purchase request approval with adaptive QuickBooks sync routing.",
+    "description": "",
+    "success_criteria": [
+      "Approved requests remain within budget",
+      "Manual threshold requests get manager review",
+      "Approved requests produce PO artifacts"
+    ],
+    "constraints": [
+      "Requests must pass budget validation",
+      "Requests must pass vendor validation"
+    ],
+    "nodes": [
+      {
+        "id": "setup-wizard",
+        "name": "Setup Wizard",
+        "description": "First-run onboarding for QuickBooks integration preference",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [],
+        "output_keys": [
+          "setup_completed",
+          "preferred_sync_method"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "pre-execution-check",
+        "name": "Execution Confirmation",
+        "description": "Confirm whether to process this request now",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "item",
+          "cost",
+          "department",
+          "requester"
+        ],
+        "output_keys": [
+          "process_request"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "decision",
+        "flowchart_shape": "diamond",
+        "flowchart_color": "#d89d26"
+      },
+      {
+        "id": "request-cancelled",
+        "name": "Request Cancelled",
+        "description": "Terminal node when user chooses not to process request",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "item",
+          "requester"
+        ],
+        "output_keys": [
+          "request_cancelled"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      },
+      {
+        "id": "intake",
+        "name": "Request Intake",
+        "description": "Validate and parse purchase request",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "item",
+          "cost",
+          "justification",
+          "requester",
+          "department",
+          "vendor"
+        ],
+        "output_keys": [
+          "validated_request"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "budget-check",
+        "name": "Budget Validation",
+        "description": "Check if request fits within department budget",
+        "node_type": "event_loop",
+        "tools": [
+          "load_data"
+        ],
+        "input_keys": [
+          "validated_request"
+        ],
+        "output_keys": [
+          "budget_status",
+          "remaining_budget"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "decision",
+        "flowchart_shape": "diamond",
+        "flowchart_color": "#d89d26"
+      },
+      {
+        "id": "vendor-check",
+        "name": "Vendor Validation",
+        "description": "Check whether vendor is on approved list",
+        "node_type": "event_loop",
+        "tools": [
+          "load_data"
+        ],
+        "input_keys": [
+          "validated_request"
+        ],
+        "output_keys": [
+          "vendor_approved"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "database",
+        "flowchart_shape": "cylinder",
+        "flowchart_color": "#508878"
+      },
+      {
+        "id": "manager-approval",
+        "name": "Manager Approval",
+        "description": "Get manager approval for purchase request",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "validated_request",
+          "budget_status",
+          "remaining_budget"
+        ],
+        "output_keys": [
+          "approval_decision",
+          "approver_name"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "decision",
+        "flowchart_shape": "diamond",
+        "flowchart_color": "#d89d26"
+      },
+      {
+        "id": "po-generator",
+        "name": "PO Generator",
+        "description": "Generate purchase order documents",
+        "node_type": "event_loop",
+        "tools": [
+          "save_data"
+        ],
+        "input_keys": [
+          "validated_request"
+        ],
+        "output_keys": [
+          "po_number",
+          "po_data",
+          "po_files_created"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "database",
+        "flowchart_shape": "cylinder",
+        "flowchart_color": "#508878"
+      },
+      {
+        "id": "integration-setup-check",
+        "name": "Integration Setup Check",
+        "description": "Ask whether API credentials are available for this request",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "po_number"
+        ],
+        "output_keys": [
+          "declared_qb_api_available",
+          "declared_sync_preference"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "integration-check",
+        "name": "Integration Capability Check",
+        "description": "Detect whether QuickBooks API credentials are available",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "po_number",
+          "po_data"
+        ],
+        "output_keys": [
+          "has_qb_api",
+          "sync_method"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "pre-sync-confirmation",
+        "name": "Pre-Sync Confirmation",
+        "description": "Final yes/no confirmation before sync/export",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "sync_method",
+          "po_number"
+        ],
+        "output_keys": [
+          "sync_confirmed"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "decision",
+        "flowchart_shape": "diamond",
+        "flowchart_color": "#d89d26"
+      },
+      {
+        "id": "sync-cancelled",
+        "name": "Sync Cancelled",
+        "description": "Terminal node when user declines final sync/export",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "po_number",
+          "sync_method"
+        ],
+        "output_keys": [
+          "sync_cancelled"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      },
+      {
+        "id": "quickbooks-sync",
+        "name": "QuickBooks Sync",
+        "description": "Sync generated PO to QuickBooks API",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "po_number",
+          "po_data"
+        ],
+        "output_keys": [
+          "qb_po_id",
+          "sync_status"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "csv-export",
+        "name": "QuickBooks CSV Export",
+        "description": "Generate CSV + instructions when API sync is unavailable",
+        "node_type": "event_loop",
+        "tools": [
+          "save_data"
+        ],
+        "input_keys": [
+          "po_number",
+          "po_data"
+        ],
+        "output_keys": [
+          "csv_file_path",
+          "import_instructions"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "database",
+        "flowchart_shape": "cylinder",
+        "flowchart_color": "#508878"
+      },
+      {
+        "id": "notifications",
+        "name": "Generate Notifications",
+        "description": "Create notification files for stakeholders",
+        "node_type": "event_loop",
+        "tools": [
+          "save_data"
+        ],
+        "input_keys": [
+          "validated_request",
+          "po_number",
+          "po_files_created",
+          "sync_method"
+        ],
+        "output_keys": [
+          "notifications_created"
+        ],
+        "success_criteria": "",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "setup-wizard",
+        "target": "pre-execution-check",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "pre-execution-check",
+        "target": "intake",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-2",
+        "source": "pre-execution-check",
+        "target": "request-cancelled",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-3",
+        "source": "intake",
+        "target": "budget-check",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-4",
+        "source": "budget-check",
+        "target": "manager-approval",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-5",
+        "source": "budget-check",
+        "target": "vendor-check",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-6",
+        "source": "manager-approval",
+        "target": "vendor-check",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-7",
+        "source": "manager-approval",
+        "target": "intake",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-8",
+        "source": "vendor-check",
+        "target": "po-generator",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-9",
+        "source": "po-generator",
+        "target": "integration-setup-check",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-10",
+        "source": "integration-setup-check",
+        "target": "integration-check",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-11",
+        "source": "integration-check",
+        "target": "pre-sync-confirmation",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-12",
+        "source": "pre-sync-confirmation",
+        "target": "quickbooks-sync",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-13",
+        "source": "pre-sync-confirmation",
+        "target": "csv-export",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-14",
+        "source": "pre-sync-confirmation",
+        "target": "sync-cancelled",
+        "condition": "conditional",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-15",
+        "source": "quickbooks-sync",
+        "target": "notifications",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-16",
+        "source": "csv-export",
+        "target": "notifications",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "pre-execution-check",
+    "terminal_nodes": [
+      "notifications",
+      "request-cancelled",
+      "sync-cancelled"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "setup-wizard": [
+      "setup-wizard"
+    ],
+    "pre-execution-check": [
+      "pre-execution-check"
+    ],
+    "request-cancelled": [
+      "request-cancelled"
+    ],
+    "intake": [
+      "intake"
+    ],
+    "budget-check": [
+      "budget-check"
+    ],
+    "vendor-check": [
+      "vendor-check"
+    ],
+    "manager-approval": [
+      "manager-approval"
+    ],
+    "po-generator": [
+      "po-generator"
+    ],
+    "integration-setup-check": [
+      "integration-setup-check"
+    ],
+    "integration-check": [
+      "integration-check"
+    ],
+    "pre-sync-confirmation": [
+      "pre-sync-confirmation"
+    ],
+    "sync-cancelled": [
+      "sync-cancelled"
+    ],
+    "quickbooks-sync": [
+      "quickbooks-sync"
+    ],
+    "csv-export": [
+      "csv-export"
+    ],
+    "notifications": [
+      "notifications"
+    ]
+  }
+}
