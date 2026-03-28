@@ -8,10 +8,112 @@ from typing import Any
 from aiohttp import web
 
 from framework.credentials.validation import validate_agent_credentials
+from framework.runtime.event_bus import AgentEvent, EventType
 from framework.server.app import resolve_session, safe_path_segment, sessions_dir
 from framework.server.routes_sessions import _credential_error_response
+from framework.server.session_manager import (
+    _run_validation_report_sync,
+    _validation_blocks_stage_or_run,
+    _validation_failures,
+)
 
 logger = logging.getLogger(__name__)
+
+_TERMINAL_STOP_MARKERS = (
+    "done for now",
+    "stop here",
+    "stop for now",
+    "end session",
+    "finish and close session",
+    "finish and close",
+)
+
+
+def _normalize_choice_text(text: str) -> str:
+    lowered = str(text or "").strip().lower()
+    return " ".join(lowered.replace("_", " ").split())
+
+
+def _looks_like_terminal_stop_reply(text: str) -> bool:
+    normalized = _normalize_choice_text(text)
+    return any(marker in normalized for marker in _TERMINAL_STOP_MARKERS)
+
+
+def _queen_is_waiting_on_terminal_followup(session: Any) -> bool:
+    """Return True when the latest queen question offered a terminal stop option."""
+    bus = getattr(session, "event_bus", None)
+    if bus is None or not hasattr(bus, "get_history"):
+        return False
+
+    events = bus.get_history(
+        event_type=EventType.CLIENT_INPUT_REQUESTED,
+        stream_id="queen",
+        limit=5,
+    )
+    for event in events:
+        data = getattr(event, "data", None) or {}
+        options = [str(opt) for opt in (data.get("options") or []) if opt]
+        for question in data.get("questions") or []:
+            options.extend(str(opt) for opt in (question.get("options") or []) if opt)
+        if options:
+            return any(_looks_like_terminal_stop_reply(opt) for opt in options)
+    return False
+
+
+async def _acknowledge_terminal_queen_choice(session: Any, message: str) -> None:
+    """Emit a final acknowledgment when the user chooses to stop."""
+    ack = "Okay, stopping here. I’ll wait for your next message."
+    bus = getattr(session, "event_bus", None)
+    if bus is None:
+        return
+
+    if hasattr(bus, "publish"):
+        await bus.publish(
+            AgentEvent(
+                type=EventType.CLIENT_INPUT_RECEIVED,
+                stream_id="queen",
+                node_id="queen",
+                execution_id=session.id,
+                data={"content": message},
+            )
+        )
+    if hasattr(bus, "emit_client_output_delta"):
+        await bus.emit_client_output_delta(
+            "queen",
+            "queen",
+            ack,
+            ack,
+            execution_id=session.id,
+        )
+
+
+async def _worker_validation_error(session) -> web.Response | None:
+    """Return a 409 response when the loaded worker is invalid."""
+    report = getattr(session, "worker_validation_report", None)
+    if report is None and getattr(session, "worker_path", None):
+        loop = asyncio.get_running_loop()
+        report = await loop.run_in_executor(
+            None, lambda: _run_validation_report_sync(str(session.worker_path))
+        )
+        session.worker_validation_report = report
+        session.worker_validation_failures = _validation_failures(report)
+
+    if _validation_blocks_stage_or_run(report):
+        failures = getattr(session, "worker_validation_failures", None) or _validation_failures(
+            report
+        )
+        worker_name = getattr(getattr(session, "worker_path", None), "name", "") or "current worker"
+        return web.json_response(
+            {
+                "error": (
+                    f"Worker '{worker_name}' failed validation and cannot be executed. "
+                    "Fix the package and reload it before running or resuming."
+                ),
+                "validation_failures": failures,
+            },
+            status=409,
+        )
+    return None
 
 
 async def handle_trigger(request: web.Request) -> web.Response:
@@ -25,6 +127,10 @@ async def handle_trigger(request: web.Request) -> web.Response:
 
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
+
+    validation_err = await _worker_validation_error(session)
+    if validation_err is not None:
+        return validation_err
 
     # Validate credentials before running — deferred from load time to avoid
     # showing the modal before the user clicks Run.  Runs in executor because
@@ -53,11 +159,7 @@ async def handle_trigger(request: web.Request) -> web.Response:
     body = await request.json()
     entry_point_id = body.get("entry_point_id", "default")
     input_data = body.get("input_data", {})
-    session_state = body.get("session_state") or {}
-
-    # Scope the worker execution to the live session ID
-    if "resume_session_id" not in session_state:
-        session_state["resume_session_id"] = session.id
+    session_state = body.get("session_state") or None
 
     execution_id = await session.worker_runtime.trigger(
         entry_point_id,
@@ -108,10 +210,7 @@ async def handle_chat(request: web.Request) -> web.Response:
     The input box is permanently connected to the queen agent.
     Worker input is handled separately via /worker-input.
 
-    Body: {"message": "hello", "images": [{"type": "image_url", "image_url": {"url": "data:..."}}]}
-
-    The optional ``images`` field accepts a list of OpenAI-format image_url
-    content blocks.  The frontend encodes images as base64 data URIs.
+    Body: {"message": "hello"}
     """
     session, err = resolve_session(request)
     if err:
@@ -119,29 +218,34 @@ async def handle_chat(request: web.Request) -> web.Response:
 
     body = await request.json()
     message = body.get("message", "")
-    image_content = body.get("images") or None  # list[dict] | None
 
-    if not message and not image_content:
+    if not message:
         return web.json_response({"error": "message is required"}, status=400)
+
+    manager: Any = request.app["manager"]
+
+    if _looks_like_terminal_stop_reply(message) and _queen_is_waiting_on_terminal_followup(session):
+        await _acknowledge_terminal_queen_choice(session, message)
+        await manager.suspend_queen(session)
+        return web.json_response(
+            {
+                "status": "queen",
+                "delivered": True,
+            }
+        )
 
     queen_executor = session.queen_executor
     if queen_executor is not None:
         node = queen_executor.node_registry.get("queen")
         if node is not None and hasattr(node, "inject_event"):
-            await node.inject_event(message, is_client_input=True, image_content=image_content)
-            # Publish to EventBus so the session event log captures user messages
-            from framework.runtime.event_bus import AgentEvent, EventType
-
+            await node.inject_event(message, is_client_input=True)
             await session.event_bus.publish(
                 AgentEvent(
                     type=EventType.CLIENT_INPUT_RECEIVED,
                     stream_id="queen",
                     node_id="queen",
                     execution_id=session.id,
-                    data={
-                        "content": message,
-                        "image_count": len(image_content) if image_content else 0,
-                    },
+                    data={"content": message},
                 )
             )
             return web.json_response(
@@ -152,7 +256,6 @@ async def handle_chat(request: web.Request) -> web.Response:
             )
 
     # Queen is dead — try to revive her
-    manager: Any = request.app["manager"]
     try:
         await manager.revive_queen(session, initial_prompt=message)
         return web.json_response(
@@ -273,6 +376,10 @@ async def handle_resume(request: web.Request) -> web.Response:
 
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
+
+    validation_err = await _worker_validation_error(session)
+    if validation_err is not None:
+        return validation_err
 
     body = await request.json()
     worker_session_id = body.get("session_id")
@@ -419,9 +526,14 @@ async def handle_stop(request: web.Request) -> web.Response:
                     if hasattr(node, "cancel_current_turn"):
                         node.cancel_current_turn()
 
-            cancelled = await stream.cancel_execution(
-                execution_id, reason="Execution stopped by user"
-            )
+            try:
+                cancelled = await stream.cancel_execution(
+                    execution_id, reason="Execution stopped by user"
+                )
+            except TypeError:
+                # Backward compatibility for older stream/test doubles that
+                # still expose cancel_execution(execution_id) only.
+                cancelled = await stream.cancel_execution(execution_id)
             if cancelled:
                 # Cancel queen's in-progress LLM turn
                 if session.queen_executor:

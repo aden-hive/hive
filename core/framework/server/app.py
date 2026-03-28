@@ -48,7 +48,20 @@ def validate_agent_path(agent_path: str | Path) -> Path:
     Raises:
         ValueError: If the path is outside all allowed roots.
     """
-    resolved = Path(agent_path).expanduser().resolve()
+    raw_path = str(agent_path).strip()
+    if not raw_path:
+        raise ValueError(
+            "agent_path must be inside an allowed directory "
+            "(exports/, examples/, or ~/.hive/agents/)"
+        )
+
+    candidate = Path(agent_path).expanduser()
+    if not candidate.is_absolute():
+        # Resolve relative paths from the repository root so server-side
+        # validation is independent of the process working directory.
+        candidate = _REPO_ROOT / candidate
+
+    resolved = candidate.resolve()
     for root in _get_allowed_agent_roots():
         if resolved.is_relative_to(root) and resolved != root:
             return resolved
@@ -281,6 +294,8 @@ def _setup_static_serving(app: web.Application) -> None:
     async def handle_spa(request: web.Request) -> web.FileResponse:
         """Serve static files with SPA fallback to index.html."""
         rel_path = request.match_info.get("path", "")
+        if rel_path == "api" or rel_path.startswith("api/"):
+            raise web.HTTPNotFound()
         file_path = (dist_dir / rel_path).resolve()
 
         if file_path.is_file() and file_path.is_relative_to(dist_dir):

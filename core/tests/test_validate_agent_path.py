@@ -123,6 +123,28 @@ class TestValidateAgentPathPositive:
         result = validate_agent_path(str(agent_dir))
         assert isinstance(result, Path)
 
+    def test_repo_relative_path_resolves_from_repo_root_not_cwd(self, tmp_path, monkeypatch):
+        import framework.server.app as app_module
+
+        repo_root = tmp_path / "repo"
+        examples_root = repo_root / "examples"
+        agent_dir = examples_root / "some_agent"
+        agent_dir.mkdir(parents=True)
+        other_cwd = tmp_path / "elsewhere"
+        other_cwd.mkdir()
+
+        monkeypatch.setattr(app_module, "_REPO_ROOT", repo_root)
+        app_module._ALLOWED_AGENT_ROOTS = (
+            repo_root / "exports",
+            examples_root,
+            tmp_path / ".hive" / "agents",
+        )
+        monkeypatch.chdir(other_cwd)
+
+        result = validate_agent_path("examples/some_agent")
+
+        assert result == agent_dir.resolve()
+
 
 # ---------------------------------------------------------------------------
 # validate_agent_path: negative cases (should raise ValueError)

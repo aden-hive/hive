@@ -1474,7 +1474,22 @@ class GraphExecutor:
                             narrative=narrative,
                             accounts_prompt=_node_accounts,
                         )
-                        continuous_conversation.update_system_prompt(new_system)
+                        continuous_conversation.update_system_prompt(
+                            new_system,
+                            output_keys=list(next_spec.output_keys or []),
+                        )
+
+                        # Stamp the next phase before inserting the transition
+                        # marker so the marker itself is preserved with the
+                        # phase it introduces during compaction/restore.
+                        continuous_conversation.set_current_phase(next_spec.id)
+
+                        transition_tool_names = set(cumulative_tool_names)
+                        transition_tool_names.update(next_spec.tools or [])
+                        if next_spec.output_keys:
+                            transition_tool_names.add("set_output")
+                        if next_spec.client_facing:
+                            transition_tool_names.update({"ask_user", "ask_user_multiple"})
 
                         # Insert transition marker into conversation
                         data_dir = str(self._storage_path / "data") if self._storage_path else None
@@ -1482,7 +1497,7 @@ class GraphExecutor:
                             previous_node=node_spec,
                             next_node=next_spec,
                             memory=memory,
-                            cumulative_tool_names=sorted(cumulative_tool_names),
+                            cumulative_tool_names=sorted(transition_tool_names),
                             data_dir=data_dir,
                             adapt_content=_adapt_text,
                         )
@@ -1490,9 +1505,6 @@ class GraphExecutor:
                             marker,
                             is_transition_marker=True,
                         )
-
-                        # Set current phase for phase-aware compaction
-                        continuous_conversation.set_current_phase(next_spec.id)
 
                         # Phase-boundary compaction (same flow as EventLoopNode._compact)
                         if continuous_conversation.usage_ratio() > 0.5:

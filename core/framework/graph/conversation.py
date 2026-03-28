@@ -351,13 +351,15 @@ class NodeConversation:
     def system_prompt(self) -> str:
         return self._system_prompt
 
-    def update_system_prompt(self, new_prompt: str) -> None:
+    def update_system_prompt(self, new_prompt: str, output_keys: list[str] | None = None) -> None:
         """Update the system prompt.
 
         Used in continuous conversation mode at phase transitions to swap
         Layer 3 (focus) while preserving the conversation history.
         """
         self._system_prompt = new_prompt
+        if output_keys is not None:
+            self._output_keys = output_keys
         self._meta_persisted = False  # re-persist with new prompt
 
     def set_current_phase(self, phase_id: str) -> None:
@@ -771,7 +773,7 @@ class NodeConversation:
             delete_before = recent_messages[0].seq if recent_messages else self._next_seq
             await self._store.delete_parts_before(delete_before)
             await self._store.write_part(summary_msg.seq, summary_msg.to_storage_dict())
-            await self._store.write_cursor({"next_seq": self._next_seq})
+            await self._write_cursor_update({"next_seq": self._next_seq})
 
         self._messages = [summary_msg] + recent_messages
         self._last_api_input_tokens = None  # reset; next LLM call will recalibrate
@@ -975,7 +977,7 @@ class NodeConversation:
             # Write kept structural messages (they may have been modified)
             for msg in kept_structural:
                 await self._store.write_part(msg.seq, msg.to_storage_dict())
-            await self._store.write_cursor({"next_seq": self._next_seq})
+            await self._write_cursor_update({"next_seq": self._next_seq})
 
         # Reassemble: reference + kept structural (in original order) + recent
         self._messages = [ref_msg] + kept_structural + recent_messages
@@ -1012,7 +1014,7 @@ class NodeConversation:
         """Remove all messages, keep system prompt, preserve ``_next_seq``."""
         if self._store:
             await self._store.delete_parts_before(self._next_seq)
-            await self._store.write_cursor({"next_seq": self._next_seq})
+            await self._write_cursor_update({"next_seq": self._next_seq})
         self._messages.clear()
         self._last_api_input_tokens = None
 
@@ -1047,6 +1049,14 @@ class NodeConversation:
 
     # --- Persistence internals ---------------------------------------------
 
+    async def _write_cursor_update(self, data: dict[str, Any]) -> None:
+        """Merge cursor updates instead of clobbering existing crash-recovery state."""
+        if self._store is None:
+            return
+        cursor = await self._store.read_cursor() or {}
+        cursor.update(data)
+        await self._store.write_cursor(cursor)
+
     async def _persist(self, message: Message) -> None:
         """Write-through a single message.  No-op when store is None."""
         if self._store is None:
@@ -1054,7 +1064,7 @@ class NodeConversation:
         if not self._meta_persisted:
             await self._persist_meta()
         await self._store.write_part(message.seq, message.to_storage_dict())
-        await self._store.write_cursor({"next_seq": self._next_seq})
+        await self._write_cursor_update({"next_seq": self._next_seq})
 
     async def _persist_meta(self) -> None:
         """Lazily write conversation metadata to the store (called once)."""

@@ -224,6 +224,12 @@ class TestUpdateSystemPrompt:
         conv.update_system_prompt("updated")
         assert conv.system_prompt == "updated"
 
+    def test_update_replaces_output_keys(self):
+        conv = NodeConversation(system_prompt="original", output_keys=["brief"])
+        conv.update_system_prompt("updated", output_keys=["articles_data"])
+        assert conv.system_prompt == "updated"
+        assert conv._output_keys == ["articles_data"]
+
 
 # ===========================================================================
 # Conversation threading through executor
@@ -371,6 +377,61 @@ class TestContinuousConversation:
                 m.get("content", "") for m in node_b_messages if isinstance(m.get("content"), str)
             )
             assert "PHASE TRANSITION" in all_content
+
+    @pytest.mark.asyncio
+    async def test_transition_marker_uses_next_node_tools_not_stale_previous_tools(self):
+        runtime = _make_runtime()
+        web_scrape = _make_tool("web_scrape")
+        file_tool = _make_tool("read_file")
+
+        llm = MockStreamingLLM(
+            scenarios=[
+                _text_then_set_output("Intake done.", "brief", "enterprise ai"),
+                _text_finish(""),
+                _text_then_set_output("Research done.", "articles_data", '{"articles": []}'),
+                _text_finish(""),
+            ]
+        )
+
+        node_a = NodeSpec(
+            id="a",
+            name="Intake",
+            description="Collect user preference",
+            node_type="event_loop",
+            client_facing=True,
+            output_keys=["brief"],
+        )
+        node_b = NodeSpec(
+            id="b",
+            name="Research",
+            description="Scrape recent articles",
+            node_type="event_loop",
+            input_keys=["brief"],
+            output_keys=["articles_data"],
+            tools=["web_scrape"],
+        )
+
+        graph = GraphSpec(
+            id="g1",
+            goal_id="g1",
+            entry_node="a",
+            nodes=[node_a, node_b],
+            edges=[EdgeSpec(id="e1", source="a", target="b", condition=EdgeCondition.ON_SUCCESS)],
+            terminal_nodes=["b"],
+            conversation_mode="continuous",
+        )
+
+        executor = GraphExecutor(runtime=runtime, llm=llm, tools=[file_tool, web_scrape])
+        result = await executor.execute(graph=graph, goal=_make_goal())
+        assert result.success
+
+        node_b_messages = llm.stream_calls[2]["messages"]
+        all_content = " ".join(
+            m.get("content", "") for m in node_b_messages if isinstance(m.get("content"), str)
+        )
+        assert "Available tools:" in all_content
+        assert "web_scrape" in all_content
+        assert "set_output" in all_content
 
 
 # ===========================================================================

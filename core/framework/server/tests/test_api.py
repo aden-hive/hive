@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+from framework.runtime.event_bus import AgentEvent, EventType
 from framework.runtime.triggers import TriggerDefinition
 from framework.server.app import create_app
 from framework.server.session_manager import Session
@@ -190,6 +191,8 @@ def _make_session(
         runner=runner,
         worker_runtime=rt,
         worker_info=MockAgentInfo(),
+        worker_validation_report={"valid": True, "steps": {}},
+        worker_validation_failures=[],
     )
 
 
@@ -556,6 +559,7 @@ class TestExecution:
     @pytest.mark.asyncio
     async def test_trigger(self):
         session = _make_session()
+        session.worker_runtime.trigger = AsyncMock(return_value="exec_test_123")
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -565,6 +569,11 @@ class TestExecution:
             assert resp.status == 200
             data = await resp.json()
             assert data["execution_id"] == "exec_test_123"
+            session.worker_runtime.trigger.assert_awaited_once_with(
+                "default",
+                {"msg": "hi"},
+                session_state=None,
+            )
 
     @pytest.mark.asyncio
     async def test_trigger_not_found(self):
@@ -575,6 +584,25 @@ class TestExecution:
                 json={"entry_point_id": "default"},
             )
             assert resp.status == 404
+
+    @pytest.mark.asyncio
+    async def test_trigger_blocks_invalid_loaded_worker(self):
+        session = _make_session()
+        session.worker_validation_report = {
+            "valid": False,
+            "steps": {"behavior_validation": {"passed": False}},
+        }
+        session.worker_validation_failures = ["behavior_validation: placeholder prompt"]
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/trigger",
+                json={"entry_point_id": "default", "input_data": {"msg": "hi"}},
+            )
+            assert resp.status == 409
+            data = await resp.json()
+            assert "failed validation" in data["error"]
+            assert data["validation_failures"] == ["behavior_validation: placeholder prompt"]
 
     @pytest.mark.asyncio
     async def test_inject(self):
@@ -616,14 +644,91 @@ class TestExecution:
             assert data["delivered"] is True
 
     @pytest.mark.asyncio
-    async def test_chat_injects_when_node_waiting(self):
-        """When a node is awaiting input, /chat should inject instead of trigger."""
+    async def test_chat_still_goes_to_queen_when_node_waiting(self):
+        """The main chat channel stays wired to Queen even if a worker is waiting."""
         session = _make_session()
         session.worker_runtime.find_awaiting_node = lambda: ("chat_node", "primary")
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
                 "/api/sessions/test_agent/chat",
+                json={"message": "user reply"},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["status"] == "queen"
+            assert data["delivered"] is True
+
+    @pytest.mark.asyncio
+    async def test_chat_done_for_now_parks_queen_without_new_followup(self):
+        """Terminal stop choices should acknowledge once and park the queen."""
+        session = _make_session()
+        session.event_bus.get_history.return_value = [
+            AgentEvent(
+                type=EventType.CLIENT_INPUT_REQUESTED,
+                stream_id="queen",
+                node_id="queen",
+                execution_id=session.id,
+                data={"options": ["Run again with same input", "Done for now"]},
+            )
+        ]
+        session.event_bus.emit_client_output_delta = AsyncMock()
+        app = _make_app_with_session(session)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/chat",
+                json={"message": "No, stop here"},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["status"] == "queen"
+            assert data["delivered"] is True
+
+        queen_node = session.queen_executor
+        assert queen_node is None
+        session.event_bus.emit_client_output_delta.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_chat_non_terminal_choice_still_goes_to_queen(self):
+        """Non-terminal follow-up choices should still be injected into the queen."""
+        session = _make_session()
+        session.event_bus.get_history.return_value = [
+            AgentEvent(
+                type=EventType.CLIENT_INPUT_REQUESTED,
+                stream_id="queen",
+                node_id="queen",
+                execution_id=session.id,
+                data={"options": ["Run again with same input", "Done for now"]},
+            )
+        ]
+        session.event_bus.emit_client_output_delta = AsyncMock()
+        app = _make_app_with_session(session)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/chat",
+                json={"message": "Run again with same input"},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["status"] == "queen"
+            assert data["delivered"] is True
+            queen_node = session.queen_executor.node_registry["queen"]
+            queen_node.inject_event.assert_awaited_once_with(
+                "Run again with same input",
+                is_client_input=True,
+            )
+            session.event_bus.emit_client_output_delta.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_worker_input_injects_when_node_waiting(self):
+        session = _make_session()
+        session.worker_runtime.find_awaiting_node = lambda: ("chat_node", "primary")
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/worker-input",
                 json={"message": "user reply"},
             )
             assert resp.status == 200
@@ -715,8 +820,6 @@ class TestResume:
             assert resp.status == 200
             data = await resp.json()
             assert data["execution_id"] == "exec_test_123"
-            assert data["resumed_from"] == session_id
-            assert data["checkpoint_id"] is None
 
     @pytest.mark.asyncio
     async def test_resume_with_checkpoint(self, sample_session, tmp_agent_dir):
@@ -761,6 +864,31 @@ class TestResume:
             )
             assert resp.status == 404
 
+    @pytest.mark.asyncio
+    async def test_resume_blocks_invalid_loaded_worker(self, sample_session, tmp_agent_dir):
+        session_id, session_dir, state = sample_session
+        tmp_path, agent_name, base = tmp_agent_dir
+
+        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        session.worker_validation_report = {
+            "valid": False,
+            "steps": {"tool_validation": {"passed": False}},
+        }
+        session.worker_validation_failures = ["tool_validation: missing tool execute_command_tool"]
+        app = _make_app_with_session(session)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/resume",
+                json={"session_id": session_id},
+            )
+            assert resp.status == 409
+            data = await resp.json()
+            assert "failed validation" in data["error"]
+            assert data["validation_failures"] == [
+                "tool_validation: missing tool execute_command_tool"
+            ]
+
 
 class TestStop:
     @pytest.mark.asyncio
@@ -799,6 +927,19 @@ class TestStop:
                 json={},
             )
             assert resp.status == 400
+
+    @pytest.mark.asyncio
+    async def test_stop_ignores_worker_validation_failure(self):
+        session = _make_session()
+        session.worker_validation_failures = ["behavior_validation: broken"]
+        session.worker_runtime._mock_streams["default"]._execution_tasks["exec_abc"] = MagicMock()
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/stop",
+                json={"execution_id": "exec_abc"},
+            )
+            assert resp.status == 200
 
 
 class TestReplay:

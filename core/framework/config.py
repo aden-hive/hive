@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from framework.graph.edge import DEFAULT_MAX_TOKENS
+from framework.llm.codex_backend import CODEX_API_BASE, build_codex_litellm_kwargs
 
 # ---------------------------------------------------------------------------
 # Low-level config file access
@@ -125,7 +126,6 @@ def get_worker_api_key() -> str | None:
                 return token
         except ImportError:
             pass
-
     api_key_env_var = worker_llm.get("api_key_env_var")
     if api_key_env_var:
         return os.environ.get(api_key_env_var)
@@ -141,7 +141,7 @@ def get_worker_api_base() -> str | None:
         return get_api_base()
 
     if worker_llm.get("use_codex_subscription"):
-        return "https://chatgpt.com/backend-api/codex"
+        return CODEX_API_BASE
     if worker_llm.get("use_kimi_code_subscription"):
         return "https://api.kimi.com/coding"
     if worker_llm.get("use_antigravity_subscription"):
@@ -169,23 +169,14 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
     if worker_llm.get("use_codex_subscription"):
         api_key = get_worker_api_key()
         if api_key:
-            headers: dict[str, str] = {
-                "Authorization": f"Bearer {api_key}",
-                "User-Agent": "CodexBar",
-            }
+            account_id = None
             try:
                 from framework.runner.runner import get_codex_account_id
 
                 account_id = get_codex_account_id()
-                if account_id:
-                    headers["ChatGPT-Account-Id"] = account_id
             except ImportError:
                 pass
-            return {
-                "extra_headers": headers,
-                "store": False,
-                "allowed_openai_params": ["store"],
-            }
+            return build_codex_litellm_kwargs(api_key, account_id=account_id)
     return {}
 
 
@@ -274,7 +265,6 @@ def get_api_key() -> str | None:
                 return token
         except ImportError:
             pass
-
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
@@ -380,7 +370,7 @@ def get_api_base() -> str | None:
     llm = get_hive_config().get("llm", {})
     if llm.get("use_codex_subscription"):
         # Codex subscription routes through the ChatGPT backend, not api.openai.com.
-        return "https://chatgpt.com/backend-api/codex"
+        return CODEX_API_BASE
     if llm.get("use_kimi_code_subscription"):
         # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
         return "https://api.kimi.com/coding"
@@ -415,23 +405,14 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
     if llm.get("use_codex_subscription"):
         api_key = get_api_key()
         if api_key:
-            headers: dict[str, str] = {
-                "Authorization": f"Bearer {api_key}",
-                "User-Agent": "CodexBar",
-            }
+            account_id = None
             try:
                 from framework.runner.runner import get_codex_account_id
 
                 account_id = get_codex_account_id()
-                if account_id:
-                    headers["ChatGPT-Account-Id"] = account_id
             except ImportError:
                 pass
-            return {
-                "extra_headers": headers,
-                "store": False,
-                "allowed_openai_params": ["store"],
-            }
+            return build_codex_litellm_kwargs(api_key, account_id=account_id)
     return {}
 
 

@@ -7,6 +7,7 @@ that yields pre-programmed StreamEvents to control the loop deterministically.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -348,6 +349,143 @@ class TestSetOutput:
         assert result.output["result"] == "ok"
         assert "bad_key" not in result.output
 
+    def test_set_output_rejects_identical_duplicate_value(self):
+        """Identical repeated set_output calls should be treated as an error, not progress."""
+        node = EventLoopNode()
+
+        result = node._handle_set_output(
+            {"key": "result", "value": "42"},
+            ["result"],
+            missing_keys=["result", "summary"],
+            current_value=42,
+            normalized_value=42,
+        )
+
+        assert result.is_error is True
+        assert "already set to the same value" in result.content
+        assert "summary" in result.content
+
+    @pytest.mark.asyncio
+    async def test_set_output_auto_completes_non_client_facing_node(
+        self,
+        runtime,
+        node_spec,
+        memory,
+    ):
+        """A worker node should finish immediately once required outputs are set."""
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("set_output", {"key": "result", "value": "done"}),
+            ]
+        )
+
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(config=LoopConfig(max_iterations=5))
+        result = await node.execute(ctx)
+
+        assert result.success is True
+        assert result.output["result"] == "done"
+        assert len(llm.stream_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_set_output_auto_completes_client_facing_node(
+        self,
+        runtime,
+        memory,
+    ):
+        """Client-facing nodes should also finish once required outputs are set."""
+        spec = NodeSpec(
+            id="review",
+            name="Review",
+            description="client-facing review node",
+            node_type="event_loop",
+            output_keys=["decision"],
+            client_facing=True,
+        )
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("set_output", {"key": "decision", "value": "approve"}),
+            ]
+        )
+
+        ctx = build_ctx(runtime, spec, memory, llm)
+        node = EventLoopNode(config=LoopConfig(max_iterations=5))
+        result = await node.execute(ctx)
+
+        assert result.success is True
+        assert result.output["decision"] == "approve"
+        assert len(llm.stream_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_client_facing_completes_immediately_after_user_reply_sets_all_outputs(
+        self,
+        runtime,
+        memory,
+    ):
+        """Client-facing nodes should finish once a post-user-reply turn sets all outputs."""
+        spec = NodeSpec(
+            id="findings-review",
+            name="Findings Review",
+            description="review findings",
+            node_type="event_loop",
+            output_keys=["continue_scanning", "feedback", "all_findings"],
+            client_facing=True,
+        )
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "ask_user",
+                    {
+                        "question": "Continue scanning or generate report?",
+                        "options": ["Continue", "Report"],
+                    },
+                    tool_use_id="ask_1",
+                ),
+                [
+                    ToolCallEvent(
+                        tool_use_id="set_continue",
+                        tool_name="set_output",
+                        tool_input={"key": "continue_scanning", "value": "false"},
+                    ),
+                    ToolCallEvent(
+                        tool_use_id="set_feedback",
+                        tool_name="set_output",
+                        tool_input={"key": "feedback", "value": "generate final report"},
+                    ),
+                    ToolCallEvent(
+                        tool_use_id="set_all",
+                        tool_name="set_output",
+                        tool_input={"key": "all_findings", "value": '{"ok": true}'},
+                    ),
+                    FinishEvent(
+                        stop_reason="tool_calls",
+                        input_tokens=10,
+                        output_tokens=5,
+                        model="mock",
+                    ),
+                ],
+            ]
+        )
+
+        node = EventLoopNode(config=LoopConfig(max_iterations=10))
+        ctx = build_ctx(runtime, spec, memory, llm)
+
+        async def user_responds():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Generate the report")
+
+        task = asyncio.create_task(user_responds())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output == {
+            "continue_scanning": False,
+            "feedback": "generate final report",
+            "all_findings": {"ok": True},
+        }
+        assert len(llm.stream_calls) == 2
+
     @pytest.mark.asyncio
     async def test_missing_keys_triggers_retry(self, runtime, node_spec, memory):
         """Judge accepts but output keys are missing -> retry with hint."""
@@ -398,6 +536,47 @@ class TestStallDetection:
 
         assert result.success is False
         assert "stalled" in result.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_no_progress_churn_detection(self, runtime, node_spec, memory):
+        """Different text with missing outputs should still fail if nothing progresses."""
+        llm = MockStreamingLLM(
+            scenarios=[
+                text_scenario("Reviewing the logs and thinking through the issue."),
+                text_scenario("I am narrowing down the likely cause."),
+                text_scenario("I have more context and am still analyzing."),
+            ]
+        )
+
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(config=LoopConfig(max_iterations=10, stall_detection_threshold=3))
+        result = await node.execute(ctx)
+
+        assert result.success is False
+        assert "no-progress loop detected" in (result.error or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_no_progress_counter_resets_after_output_progress(
+        self,
+        runtime,
+        node_spec,
+        memory,
+    ):
+        """A real output-setting turn should reset the no-progress churn counter."""
+        llm = MockStreamingLLM(
+            scenarios=[
+                text_scenario("Parsing the problem statement."),
+                text_scenario("Extracting the key facts now."),
+                tool_call_scenario("set_output", {"key": "result", "value": "triaged"}),
+            ]
+        )
+
+        ctx = build_ctx(runtime, node_spec, memory, llm)
+        node = EventLoopNode(config=LoopConfig(max_iterations=10, stall_detection_threshold=3))
+        result = await node.execute(ctx)
+
+        assert result.success is True
+        assert result.output["result"] == "triaged"
 
 
 # ===========================================================================
@@ -646,6 +825,57 @@ class TestClientFacingBlocking:
 
         assert len(received) >= 1
         assert received[0].type == EventType.CLIENT_INPUT_REQUESTED
+
+    @pytest.mark.asyncio
+    async def test_queen_long_ask_user_prompt_surfaces_result_before_widget(
+        self, runtime, memory, client_spec
+    ):
+        """Long queen prompts should stream visible result text before options."""
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "ask_user",
+                    {
+                        "question": (
+                            "Root cause: checkout requests are failing because the DB pool is "
+                            "exhausted and cart reads are timing out.\n\n"
+                            "What would you like to do next?"
+                        ),
+                        "options": ["Rerun", "Stop"],
+                    },
+                    tool_use_id="ask_1",
+                ),
+            ]
+        )
+        bus = EventBus()
+        received = []
+
+        async def capture(e):
+            received.append(e)
+
+        bus.subscribe(
+            event_types=[EventType.CLIENT_OUTPUT_DELTA, EventType.CLIENT_INPUT_REQUESTED],
+            handler=capture,
+        )
+
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+        ctx = build_ctx(runtime, client_spec, memory, llm, stream_id="queen")
+
+        async def shutdown():
+            await asyncio.sleep(0.05)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(shutdown())
+        await node.execute(ctx)
+        await task
+
+        output_events = [e for e in received if e.type == EventType.CLIENT_OUTPUT_DELTA]
+        input_events = [e for e in received if e.type == EventType.CLIENT_INPUT_REQUESTED]
+
+        assert output_events
+        assert input_events
+        assert "Root cause: checkout requests are failing" in output_events[0].data["snapshot"]
+        assert input_events[0].data["prompt"] == "What would you like to do next?"
 
     @pytest.mark.asyncio
     @pytest.mark.skip(reason="Hangs in non-interactive shells (client-facing blocks on stdin)")
@@ -905,8 +1135,78 @@ class TestEscalate:
 
         assert result.success is True
         assert result.output["result"] == "resolved after queen guidance"
-        assert judge.evaluate.await_count >= 1
+        assert judge.evaluate.await_count == 0
         assert len(client_input_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_escalate_then_complete_outputs_autocompletes_without_extra_turn(
+        self, runtime, memory
+    ):
+        """Worker nodes should still auto-complete after queen guidance once outputs are set."""
+        spec = NodeSpec(
+            id="csv-intake",
+            name="CSV Intake",
+            description="parse csv",
+            node_type="event_loop",
+            output_keys=["original_headers", "parsed_rows", "raw_csv_text"],
+        )
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "escalate",
+                    {"reason": "need csv", "context": "input malformed"},
+                    tool_use_id="esc_1",
+                ),
+                [
+                    ToolCallEvent(
+                        tool_use_id="set_headers",
+                        tool_name="set_output",
+                        tool_input={"key": "original_headers", "value": '["name","email"]'},
+                    ),
+                    ToolCallEvent(
+                        tool_use_id="set_rows",
+                        tool_name="set_output",
+                        tool_input={
+                            "key": "parsed_rows",
+                            "value": '[{"name":"Alice","email":"alice@example.com"}]',
+                        },
+                    ),
+                    ToolCallEvent(
+                        tool_use_id="set_raw",
+                        tool_name="set_output",
+                        tool_input={
+                            "key": "raw_csv_text",
+                            "value": "name,email\\nAlice,alice@example.com",
+                        },
+                    ),
+                    FinishEvent(
+                        stop_reason="tool_calls",
+                        input_tokens=10,
+                        output_tokens=5,
+                        model="mock",
+                    ),
+                ],
+            ]
+        )
+
+        ctx = build_ctx(runtime, spec, memory, llm, stream_id="worker")
+        node = EventLoopNode(config=LoopConfig(max_iterations=5))
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Use the sample CSV and continue.")
+
+        task = asyncio.create_task(queen_reply())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output == {
+            "original_headers": ["name", "email"],
+            "parsed_rows": [{"name": "Alice", "email": "alice@example.com"}],
+            "raw_csv_text": "name,email\\nAlice,alice@example.com",
+        }
+        assert len(llm.stream_calls) == 2
 
 
 # ===========================================================================
@@ -1382,6 +1682,39 @@ class TestPauseResume:
         assert llm._call_index == 0
 
 
+class TestToolExecutionContext:
+    @pytest.mark.asyncio
+    async def test_execute_tool_preserves_contextvars_in_threadpool(self):
+        marker = contextvars.ContextVar("marker", default="missing")
+
+        def tool_exec(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content=marker.get(),
+                is_error=False,
+            )
+
+        node = EventLoopNode(
+            tool_executor=tool_exec,
+            config=LoopConfig(tool_call_timeout_seconds=5),
+        )
+
+        token = marker.set("present")
+        try:
+            result = await node._execute_tool(
+                ToolCallEvent(
+                    tool_use_id="tool-1",
+                    tool_name="echo_marker",
+                    tool_input={},
+                )
+            )
+        finally:
+            marker.reset(token)
+
+        assert result.is_error is False
+        assert result.content == "present"
+
+
 # ===========================================================================
 # Stream errors
 # ===========================================================================
@@ -1783,6 +2116,17 @@ class TestFingerprintToolCalls:
         )
 
 
+class TestFingerprintSetOutputCalls:
+    """Unit tests for _fingerprint_set_output_calls()."""
+
+    def test_basic_fingerprint(self):
+        results = [
+            {"tool_name": "set_output", "tool_input": {"key": "result", "value": {"a": 1}}},
+        ]
+        fps = EventLoopNode._fingerprint_set_output_calls(results)
+        assert fps == [("result", '{"a": 1}')]
+
+
 class TestIsToolDoomLoop:
     """Unit tests for _is_tool_doom_loop()."""
 
@@ -1818,6 +2162,25 @@ class TestIsToolDoomLoop:
     def test_empty_fingerprints_no_doom(self):
         node = EventLoopNode(config=LoopConfig(tool_doom_loop_threshold=3))
         is_doom, _ = node._is_tool_doom_loop([[], [], []])
+        assert is_doom is False
+
+
+class TestIsOutputDoomLoop:
+    """Unit tests for _is_output_doom_loop()."""
+
+    def test_at_threshold_identical(self):
+        node = EventLoopNode(config=LoopConfig(tool_doom_loop_threshold=3))
+        fp = [("result", '"done"')]
+        is_doom, desc = node._is_output_doom_loop([fp, fp, fp])
+        assert is_doom is True
+        assert "set_output" in desc
+
+    def test_different_values_no_doom(self):
+        node = EventLoopNode(config=LoopConfig(tool_doom_loop_threshold=3))
+        fp1 = [("result", '"a"')]
+        fp2 = [("result", '"b"')]
+        fp3 = [("result", '"c"')]
+        is_doom, _ = node._is_output_doom_loop([fp1, fp2, fp3])
         assert is_doom is False
 
 
@@ -1862,6 +2225,95 @@ class ToolRepeatLLM(LLMProvider):
             )
         else:
             # Unique text per call to avoid stall detection
+            text = f"{self.final_text} (call {idx})"
+            yield TextDeltaEvent(content=text, snapshot=text)
+            yield FinishEvent(
+                stop_reason="stop",
+                input_tokens=10,
+                output_tokens=5,
+                model="mock",
+            )
+
+    def complete(self, messages, system="", **kwargs) -> LLMResponse:
+        return LLMResponse(
+            content="ok",
+            model="mock",
+            stop_reason="stop",
+        )
+
+
+class SetOutputRepeatLLM(LLMProvider):
+    """LLM that repeats the same set_output-only turn across iterations."""
+
+    def __init__(self, key: str, value: str, tool_turns: int, final_text: str = "done"):
+        self.key = key
+        self.value = value
+        self.tool_turns = tool_turns
+        self.final_text = final_text
+        self._call_index = 0
+
+    async def stream(self, messages, system="", tools=None, max_tokens=4096):
+        idx = self._call_index
+        self._call_index += 1
+        outer_iter = idx // 2
+        is_tool_call = (idx % 2 == 0) and outer_iter < self.tool_turns
+        if is_tool_call:
+            yield ToolCallEvent(
+                tool_use_id=f"set_{outer_iter}",
+                tool_name="set_output",
+                tool_input={"key": self.key, "value": self.value},
+            )
+            yield FinishEvent(
+                stop_reason="tool_calls",
+                input_tokens=10,
+                output_tokens=5,
+                model="mock",
+            )
+        else:
+            text = f"{self.final_text} (call {idx})"
+            yield TextDeltaEvent(content=text, snapshot=text)
+            yield FinishEvent(
+                stop_reason="stop",
+                input_tokens=10,
+                output_tokens=5,
+                model="mock",
+            )
+
+    def complete(self, messages, system="", **kwargs) -> LLMResponse:
+        return LLMResponse(
+            content="ok",
+            model="mock",
+            stop_reason="stop",
+        )
+
+
+class VaryingSetOutputRepeatLLM(LLMProvider):
+    """LLM that repeats set_output turns with different values across iterations."""
+
+    def __init__(self, key: str, values: list[str], final_text: str = "done"):
+        self.key = key
+        self.values = values
+        self.final_text = final_text
+        self._call_index = 0
+
+    async def stream(self, messages, system="", tools=None, max_tokens=4096):
+        idx = self._call_index
+        self._call_index += 1
+        outer_iter = idx // 2
+        is_tool_call = (idx % 2 == 0) and outer_iter < len(self.values)
+        if is_tool_call:
+            yield ToolCallEvent(
+                tool_use_id=f"set_{outer_iter}",
+                tool_name="set_output",
+                tool_input={"key": self.key, "value": self.values[outer_iter]},
+            )
+            yield FinishEvent(
+                stop_reason="tool_calls",
+                input_tokens=10,
+                output_tokens=5,
+                model="mock",
+            )
+        else:
             text = f"{self.final_text} (call {idx})"
             yield TextDeltaEvent(content=text, snapshot=text)
             yield FinishEvent(
@@ -2263,7 +2715,97 @@ class TestToolDoomLoopIntegration:
         assert result.success is True
         # Doom loop MUST fire for repeatedly-failing tool calls
         assert len(doom_events) >= 1
-        assert "failing_tool" in doom_events[0].data["description"]
+
+    @pytest.mark.asyncio
+    async def test_repeated_identical_set_output_turns_fail_fast(
+        self,
+        runtime,
+        node_spec,
+        memory,
+    ):
+        """Repeated identical set_output-only turns should fail instead of spinning forever."""
+        node_spec.output_keys = ["result", "review_manifest"]
+        judge = AsyncMock(spec=JudgeProtocol)
+        judge.evaluate = AsyncMock(return_value=JudgeVerdict(action="RETRY"))
+
+        llm = SetOutputRepeatLLM("result", "same summary", tool_turns=4)
+        bus = EventBus()
+        doom_events: list = []
+        bus.subscribe(
+            event_types=[EventType.NODE_TOOL_DOOM_LOOP],
+            handler=lambda e: doom_events.append(e),
+        )
+
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[])
+        node = EventLoopNode(
+            judge=judge,
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=10,
+                tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,
+            ),
+        )
+        result = await node.execute(ctx)
+
+        assert result.success is False
+        assert "Output doom loop detected" in (result.error or "")
+        assert doom_events
+        assert "set_output" in doom_events[0].data["description"]
+        assert "result" in doom_events[0].data["description"]
+
+    @pytest.mark.asyncio
+    async def test_meta_reset_set_output_turns_fail_fast(
+        self,
+        runtime,
+        node_spec,
+        memory,
+    ):
+        """Fresh-payload reset chatter should trip the output doom loop guard."""
+        node_spec.output_keys = ["rules", "candidates", "scan_stats"]
+        judge = AsyncMock(spec=JudgeProtocol)
+        judge.evaluate = AsyncMock(return_value=JudgeVerdict(action="RETRY"))
+
+        llm = VaryingSetOutputRepeatLLM(
+            "rules",
+            [
+                (
+                    "New event acknowledged. Awaiting fresh request payload "
+                    "(phase transition details + structured inputs) to proceed."
+                ),
+                (
+                    "Context reset complete. Awaiting fresh phase transition payload "
+                    "and structured inputs to proceed."
+                ),
+                (
+                    "Ready for fresh request payload with phase transition "
+                    "instructions and structured inputs."
+                ),
+            ],
+        )
+        bus = EventBus()
+        doom_events: list = []
+        bus.subscribe(
+            event_types=[EventType.NODE_TOOL_DOOM_LOOP],
+            handler=lambda e: doom_events.append(e),
+        )
+
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[])
+        node = EventLoopNode(
+            judge=judge,
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=10,
+                tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,
+            ),
+        )
+        result = await node.execute(ctx)
+
+        assert result.success is False
+        assert "fresh payload" in (result.error or "").lower()
+        assert doom_events
+        assert "fresh payload" in doom_events[0].data["description"].lower()
 
 
 # ===========================================================================

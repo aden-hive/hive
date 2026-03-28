@@ -28,6 +28,8 @@ except ImportError:
     RateLimitError = Exception  # type: ignore[assignment, misc]
 
 from framework.config import HIVE_LLM_ENDPOINT as HIVE_API_BASE
+from framework.llm.codex_adapter import CodexResponsesAdapter
+from framework.llm.codex_backend import normalize_codex_api_base
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 from framework.llm.stream_events import StreamEvent
 
@@ -512,7 +514,9 @@ class LiteLLMProvider(LLMProvider):
                 api_base = api_base.rstrip("/")[:-3]
         self.model = model
         self.api_key = api_key
-        self.api_base = api_base or self._default_api_base_for_model(_original_model)
+        self.api_base = normalize_codex_api_base(
+            api_base or self._default_api_base_for_model(_original_model)
+        )
         self.extra_kwargs = kwargs
         # Detect Claude Code OAuth subscription by checking the api_key prefix.
         self._claude_code_oauth = bool(api_key and api_key.startswith("sk-ant-oat"))
@@ -520,13 +524,11 @@ class LiteLLMProvider(LLMProvider):
             # Anthropic requires a specific User-Agent for OAuth requests.
             eh = self.extra_kwargs.setdefault("extra_headers", {})
             eh.setdefault("user-agent", CLAUDE_CODE_USER_AGENT)
-        # The Codex ChatGPT backend (chatgpt.com/backend-api/codex) rejects
-        # several standard OpenAI params: max_output_tokens, stream_options.
-        self._codex_backend = bool(
-            self.api_base and "chatgpt.com/backend-api/codex" in self.api_base
-        )
         # Antigravity routes through a local OpenAI-compatible proxy — no patches needed.
         self._antigravity = bool(self.api_base and "localhost:8069" in self.api_base)
+        self._codex_adapter = CodexResponsesAdapter(self)
+        # Backward-compatible alias for existing tests/callers.
+        self._codex_backend = self._codex_adapter.enabled
 
         if litellm is None:
             raise ImportError(
@@ -552,6 +554,132 @@ class LiteLLMProvider(LLMProvider):
         if model_lower.startswith("hive/"):
             return HIVE_API_BASE
         return None
+
+    @staticmethod
+    def _normalize_codex_api_base(api_base: str | None) -> str | None:
+        """Normalize ChatGPT Codex backend URLs to the stable base endpoint."""
+        return normalize_codex_api_base(api_base)
+
+    def _chunk_codex_system_prompt(self, system: str) -> list[str]:
+        """Break large system prompts into smaller Codex-friendly chunks."""
+        return self._codex_adapter.chunk_system_prompt(system)
+
+    def _build_request_messages(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        *,
+        json_mode: bool,
+    ) -> list[dict[str, Any]]:
+        """Build request messages, including Codex-specific prompt chunking."""
+        full_messages: list[dict[str, Any]] = []
+        if self._claude_code_oauth:
+            billing = _claude_code_billing_header(messages)
+            full_messages.append({"role": "system", "content": billing})
+
+        system_messages: list[dict[str, Any]] = []
+        if system:
+            if self._codex_backend:
+                system_messages.extend(
+                    self._codex_adapter.build_system_messages(system, json_mode=json_mode)
+                )
+            else:
+                sys_msg: dict[str, Any] = {"role": "system", "content": system}
+                if _model_supports_cache_control(self.model):
+                    sys_msg["cache_control"] = {"type": "ephemeral"}
+                system_messages.append(sys_msg)
+        elif self._codex_backend:
+            system_messages.extend(
+                self._codex_adapter.build_system_messages("", json_mode=json_mode)
+            )
+
+        if json_mode and not self._codex_backend:
+            json_instruction = "Please respond with a valid JSON object."
+            if system_messages:
+                system_messages[0] = {
+                    **system_messages[0],
+                    "content": f"{system_messages[0]['content']}\n\n{json_instruction}",
+                }
+            else:
+                system_messages.append({"role": "system", "content": json_instruction})
+
+        full_messages.extend(system_messages)
+        full_messages.extend(messages)
+
+        return [
+            m
+            for m in full_messages
+            if not (
+                m.get("role") == "assistant" and not m.get("content") and not m.get("tool_calls")
+            )
+        ]
+
+    def _derive_codex_tool_choice(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[Tool] | None,
+    ) -> str | dict[str, Any] | None:
+        """Force tool use for Codex when critical framework tools are available."""
+        if not self._codex_backend:
+            return None
+        return self._codex_adapter.derive_tool_choice(messages, tools)
+
+    def _sanitize_request_kwargs(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        stream: bool,
+    ) -> dict[str, Any]:
+        """Normalize provider kwargs, with extra hardening for Codex."""
+        cleaned = dict(kwargs)
+        if cleaned.get("metadata") is None:
+            cleaned.pop("metadata", None)
+
+        if self._codex_backend:
+            cleaned = self._codex_adapter.harden_request_kwargs(cleaned)
+
+        if stream:
+            cleaned["stream"] = True
+        return cleaned
+
+    def _build_completion_kwargs(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        *,
+        tools: list[Tool] | None,
+        max_tokens: int,
+        response_format: dict[str, Any] | None,
+        json_mode: bool,
+        stream: bool,
+    ) -> dict[str, Any]:
+        """Build request kwargs for completion/stream calls."""
+        full_messages = self._build_request_messages(messages, system, json_mode=json_mode)
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": full_messages,
+            **self.extra_kwargs,
+        }
+        if not stream:
+            kwargs["max_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
+            if not self._is_anthropic_model():
+                kwargs["stream_options"] = {"include_usage": True}
+
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.api_base:
+            kwargs["api_base"] = self.api_base
+        if tools:
+            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+            tool_choice = self._derive_codex_tool_choice(full_messages, tools)
+            if tool_choice is not None:
+                kwargs["tool_choice"] = tool_choice
+        if response_format:
+            kwargs["response_format"] = response_format
+
+        return self._sanitize_request_kwargs(kwargs, stream=stream)
 
     def _completion_with_rate_limit_retry(
         self, max_retries: int | None = None, **kwargs: Any
@@ -691,42 +819,15 @@ class LiteLLMProvider(LLMProvider):
                 )
             )
 
-        # Prepare messages with system prompt
-        full_messages = []
-        if system:
-            full_messages.append({"role": "system", "content": system})
-        full_messages.extend(messages)
-
-        # Add JSON mode via prompt engineering (works across all providers)
-        if json_mode:
-            json_instruction = "\n\nPlease respond with a valid JSON object."
-            # Append to system message if present, otherwise add as system message
-            if full_messages and full_messages[0]["role"] == "system":
-                full_messages[0]["content"] += json_instruction
-            else:
-                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
-
-        # Build kwargs
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "messages": full_messages,
-            "max_tokens": max_tokens,
-            **self.extra_kwargs,
-        }
-
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
-        if self.api_base:
-            kwargs["api_base"] = self.api_base
-
-        # Add tools if provided
-        if tools:
-            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
-
-        # Add response_format for structured output
-        # LiteLLM passes this through to the underlying provider
-        if response_format:
-            kwargs["response_format"] = response_format
+        kwargs = self._build_completion_kwargs(
+            messages,
+            system,
+            tools=tools,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            json_mode=json_mode,
+            stream=False,
+        )
 
         # Make the call
         response = self._completion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
@@ -887,40 +988,15 @@ class LiteLLMProvider(LLMProvider):
                 json_mode=json_mode,
             )
             return await self._collect_stream_to_response(stream_iter)
-
-        full_messages: list[dict[str, Any]] = []
-        if self._claude_code_oauth:
-            billing = _claude_code_billing_header(messages)
-            full_messages.append({"role": "system", "content": billing})
-        if system:
-            sys_msg: dict[str, Any] = {"role": "system", "content": system}
-            if _model_supports_cache_control(self.model):
-                sys_msg["cache_control"] = {"type": "ephemeral"}
-            full_messages.append(sys_msg)
-        full_messages.extend(messages)
-
-        if json_mode:
-            json_instruction = "\n\nPlease respond with a valid JSON object."
-            if full_messages and full_messages[0]["role"] == "system":
-                full_messages[0]["content"] += json_instruction
-            else:
-                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
-
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "messages": full_messages,
-            "max_tokens": max_tokens,
-            **self.extra_kwargs,
-        }
-
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
-        if self.api_base:
-            kwargs["api_base"] = self.api_base
-        if tools:
-            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
-        if response_format:
-            kwargs["response_format"] = response_format
+        kwargs = self._build_completion_kwargs(
+            messages,
+            system,
+            tools=tools,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            json_mode=json_mode,
+            stream=False,
+        )
 
         response = await self._acompletion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
 
@@ -1170,17 +1246,92 @@ class LiteLLMProvider(LLMProvider):
                 return parsed
         return None
 
+    @staticmethod
+    def _normalize_pythonish_tool_arguments(raw_arguments: str) -> str:
+        """Convert common JSON-like literals into a form ast.literal_eval can parse."""
+        replacements = {
+            "true": "True",
+            "false": "False",
+            "null": "None",
+        }
+        out: list[str] = []
+        token: list[str] = []
+        in_string = False
+        string_quote = ""
+        escaped = False
+
+        def flush_token() -> None:
+            if not token:
+                return
+            word = "".join(token)
+            out.append(replacements.get(word, word))
+            token.clear()
+
+        for char in raw_arguments:
+            if in_string:
+                out.append(char)
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == string_quote:
+                    in_string = False
+                continue
+
+            if char in {'"', "'"}:
+                flush_token()
+                in_string = True
+                string_quote = char
+                out.append(char)
+                continue
+
+            if char.isalpha():
+                token.append(char)
+                continue
+
+            flush_token()
+            out.append(char)
+
+        flush_token()
+        return "".join(out)
+
+    @staticmethod
+    def _strip_tool_argument_fence(raw_arguments: str) -> str:
+        """Remove surrounding fenced-code markers from streamed tool arguments."""
+        stripped = raw_arguments.strip()
+        if not stripped.startswith("```") or not stripped.endswith("```"):
+            return stripped
+
+        lines = stripped.splitlines()
+        if len(lines) >= 2:
+            return "\n".join(lines[1:-1]).strip()
+        return stripped.strip("`").strip()
+
+    def _parse_pythonish_tool_arguments(self, raw_arguments: str) -> dict[str, Any] | None:
+        """Parse single-quoted / trailing-comma argument payloads safely."""
+        stripped = self._strip_tool_argument_fence(raw_arguments)
+        if not stripped or stripped[0] != "{":
+            return None
+        candidate = self._close_truncated_json_fragment(stripped)
+        candidate = self._normalize_pythonish_tool_arguments(candidate)
+        try:
+            parsed = ast.literal_eval(candidate)
+        except (SyntaxError, ValueError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
     def _parse_tool_call_arguments(self, raw_arguments: str, tool_name: str) -> dict[str, Any]:
         """Parse streamed tool arguments, repairing truncation when possible."""
+        stripped = self._strip_tool_argument_fence(raw_arguments)
         try:
-            parsed = json.loads(raw_arguments) if raw_arguments else {}
+            parsed = json.loads(stripped) if stripped else {}
         except json.JSONDecodeError:
             parsed = None
 
         if isinstance(parsed, dict):
             return parsed
 
-        repaired = self._repair_truncated_tool_arguments(raw_arguments)
+        repaired = self._repair_truncated_tool_arguments(stripped)
         if repaired is not None:
             logger.warning(
                 "[tool-args] Recovered truncated arguments for %s on %s",
@@ -1188,6 +1339,15 @@ class LiteLLMProvider(LLMProvider):
                 self.model,
             )
             return repaired
+
+        pythonish = self._parse_pythonish_tool_arguments(stripped)
+        if pythonish is not None:
+            logger.warning(
+                "[tool-args] Recovered malformed arguments for %s on %s",
+                tool_name,
+                self.model,
+            )
+            return pythonish
 
         raise ValueError(
             f"Failed to parse tool call arguments for '{tool_name}' (likely truncated JSON)."
@@ -1516,6 +1676,139 @@ class LiteLLMProvider(LLMProvider):
             model=response.model,
         )
 
+    def _build_stream_events_from_nonstream_response(
+        self,
+        response: Any,
+    ) -> list[StreamEvent]:
+        """Convert a non-stream completion response into stream events."""
+        from framework.llm.stream_events import (
+            FinishEvent,
+            TextDeltaEvent,
+            TextEndEvent,
+            ToolCallEvent,
+        )
+
+        choices = getattr(response, "choices", None) or []
+        if not choices:
+            output_text = getattr(response, "output_text", "") or ""
+            if not output_text:
+                return []
+            from framework.llm.stream_events import FinishEvent, TextDeltaEvent, TextEndEvent
+
+            usage = getattr(response, "usage", None)
+            return [
+                TextDeltaEvent(content=output_text, snapshot=output_text),
+                TextEndEvent(full_text=output_text),
+                FinishEvent(
+                    stop_reason="stop",
+                    input_tokens=getattr(usage, "prompt_tokens", 0) or 0 if usage else 0,
+                    output_tokens=getattr(usage, "completion_tokens", 0) or 0 if usage else 0,
+                    model=getattr(response, "model", None) or self.model,
+                ),
+            ]
+
+        choice = choices[0]
+        message = getattr(choice, "message", None)
+        content = self._extract_message_text(message)
+        tool_calls = getattr(message, "tool_calls", None) or []
+
+        events: list[StreamEvent] = []
+        for tc in tool_calls:
+            parsed_args = self._coerce_tool_input(
+                tc.function.arguments if tc.function else {},
+                tc.function.name if tc.function else "",
+            )
+            events.append(
+                ToolCallEvent(
+                    tool_use_id=getattr(tc, "id", ""),
+                    tool_name=tc.function.name if tc.function else "",
+                    tool_input=parsed_args,
+                )
+            )
+
+        if content:
+            events.append(TextDeltaEvent(content=content, snapshot=content))
+            events.append(TextEndEvent(full_text=content))
+
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "prompt_tokens", 0) or 0 if usage else 0
+        output_tokens = getattr(usage, "completion_tokens", 0) or 0 if usage else 0
+        cached_tokens = 0
+        if usage:
+            details = getattr(usage, "prompt_tokens_details", None)
+            cached_tokens = (
+                getattr(details, "cached_tokens", 0) or 0
+                if details is not None
+                else getattr(usage, "cache_read_input_tokens", 0) or 0
+            )
+
+        events.append(
+            FinishEvent(
+                stop_reason=getattr(choice, "finish_reason", None)
+                or ("tool_calls" if tool_calls else "stop"),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cached_tokens=cached_tokens,
+                model=getattr(response, "model", None) or self.model,
+            )
+        )
+        return events
+
+    @staticmethod
+    def _extract_message_text(message: Any) -> str:
+        """Extract text from a provider message object across response shapes."""
+        if message is None:
+            return ""
+        content = getattr(message, "content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, str):
+                    parts.append(block)
+                elif isinstance(block, dict):
+                    text = block.get("text") or block.get("content") or ""
+                    if isinstance(text, str):
+                        parts.append(text)
+                else:
+                    text = getattr(block, "text", "") or getattr(block, "content", "")
+                    if isinstance(text, str):
+                        parts.append(text)
+            return "".join(parts)
+        return str(content or "")
+
+    def _coerce_tool_input(self, raw_arguments: Any, tool_name: str) -> dict[str, Any]:
+        """Normalize raw tool-call arguments from either string or object forms."""
+        if isinstance(raw_arguments, dict):
+            return raw_arguments
+        if raw_arguments in (None, ""):
+            return {}
+        return self._parse_tool_call_arguments(str(raw_arguments), tool_name)
+
+    async def _recover_empty_codex_stream(
+        self,
+        kwargs: dict[str, Any],
+        last_role: str | None,
+    ) -> list[StreamEvent] | None:
+        """Try a non-stream completion when Codex returns an empty stream."""
+        if not self._codex_backend:
+            return None
+        return await self._codex_adapter.recover_empty_stream(
+            kwargs,
+            last_role=last_role,
+            acompletion=litellm.acompletion,  # type: ignore[union-attr]
+        )
+
+    def _merge_tool_call_chunk(
+        self,
+        tool_calls_acc: dict[int, dict[str, str]],
+        tc: Any,
+        last_tool_idx: int,
+    ) -> int:
+        """Merge a streamed tool-call chunk, compensating for broken Codex indexes."""
+        return self._codex_adapter.merge_tool_call_chunk(tool_calls_acc, tc, last_tool_idx)
+
     async def stream(
         self,
         messages: list[dict[str, Any]],
@@ -1567,65 +1860,16 @@ class LiteLLMProvider(LLMProvider):
                 yield event
             return
 
-        full_messages: list[dict[str, Any]] = []
-        if self._claude_code_oauth:
-            billing = _claude_code_billing_header(messages)
-            full_messages.append({"role": "system", "content": billing})
-        if system:
-            sys_msg: dict[str, Any] = {"role": "system", "content": system}
-            if _model_supports_cache_control(self.model):
-                sys_msg["cache_control"] = {"type": "ephemeral"}
-            full_messages.append(sys_msg)
-        full_messages.extend(messages)
-
-        # Codex Responses API requires an `instructions` field (system prompt).
-        # Inject a minimal one when callers don't provide a system message.
-        if self._codex_backend and not any(m["role"] == "system" for m in full_messages):
-            full_messages.insert(0, {"role": "system", "content": "You are a helpful assistant."})
-
-        # Add JSON mode via prompt engineering (works across all providers)
-        if json_mode:
-            json_instruction = "\n\nPlease respond with a valid JSON object."
-            if full_messages and full_messages[0]["role"] == "system":
-                full_messages[0]["content"] += json_instruction
-            else:
-                full_messages.insert(0, {"role": "system", "content": json_instruction.strip()})
-
-        # Remove ghost empty assistant messages (content="" and no tool_calls).
-        # These arise when a model returns an empty stream after a tool result
-        # (an "expected" no-op turn). Keeping them in history confuses some
-        # models (notably Codex/gpt-5.3) and causes cascading empty streams.
-        full_messages = [
-            m
-            for m in full_messages
-            if not (
-                m.get("role") == "assistant" and not m.get("content") and not m.get("tool_calls")
-            )
-        ]
-
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "messages": full_messages,
-            "max_tokens": max_tokens,
-            "stream": True,
-            **self.extra_kwargs,
-        }
-        # stream_options is OpenAI-specific; Anthropic rejects it with 400.
-        # Only include it for providers that support it.
-        if not self._is_anthropic_model():
-            kwargs["stream_options"] = {"include_usage": True}
-        if self.api_key:
-            kwargs["api_key"] = self.api_key
-        if self.api_base:
-            kwargs["api_base"] = self.api_base
-        if tools:
-            kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
-        if response_format:
-            kwargs["response_format"] = response_format
-        # The Codex ChatGPT backend (Responses API) rejects several params.
-        if self._codex_backend:
-            kwargs.pop("max_tokens", None)
-            kwargs.pop("stream_options", None)
+        kwargs = self._build_completion_kwargs(
+            messages,
+            system,
+            tools=tools,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            json_mode=json_mode,
+            stream=True,
+        )
+        full_messages = kwargs["messages"]
 
         for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
             # Post-stream events (ToolCall, TextEnd, Finish) are buffered
@@ -1683,43 +1927,17 @@ class LiteLLMProvider(LLMProvider):
                     # argument deltas that arrive with id=None.
                     if delta and delta.tool_calls:
                         for tc in delta.tool_calls:
-                            idx = tc.index if hasattr(tc, "index") and tc.index is not None else 0
-
-                            if tc.id:
-                                # New tool call announced (or done event re-sent).
-                                # Check if this id already has a slot.
-                                existing_idx = next(
-                                    (k for k, v in tool_calls_acc.items() if v["id"] == tc.id),
-                                    None,
-                                )
-                                if existing_idx is not None:
-                                    idx = existing_idx
-                                elif idx in tool_calls_acc and tool_calls_acc[idx]["id"] not in (
-                                    "",
-                                    tc.id,
-                                ):
-                                    # Slot taken by a different call — assign new index
-                                    idx = max(tool_calls_acc.keys()) + 1
-                                _last_tool_idx = idx
-                            else:
-                                # Argument delta with no id — route to last opened slot
-                                idx = _last_tool_idx
-
-                            if idx not in tool_calls_acc:
-                                tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
-                            if tc.id:
-                                tool_calls_acc[idx]["id"] = tc.id
-                            if tc.function:
-                                if tc.function.name:
-                                    tool_calls_acc[idx]["name"] = tc.function.name
-                                if tc.function.arguments:
-                                    tool_calls_acc[idx]["arguments"] += tc.function.arguments
+                            _last_tool_idx = self._merge_tool_call_chunk(
+                                tool_calls_acc,
+                                tc,
+                                _last_tool_idx,
+                            )
 
                     # --- Finish ---
                     if choice.finish_reason:
                         stream_finish_reason = choice.finish_reason
                         for _idx, tc_data in sorted(tool_calls_acc.items()):
-                            parsed_args = self._parse_tool_call_arguments(
+                            parsed_args = self._coerce_tool_input(
                                 tc_data.get("arguments", ""),
                                 tc_data.get("name", ""),
                             )
@@ -1852,6 +2070,11 @@ class LiteLLMProvider(LLMProvider):
                         (m["role"] for m in reversed(full_messages) if m.get("role") != "system"),
                         None,
                     )
+                    recovered_events = await self._recover_empty_codex_stream(kwargs, last_role)
+                    if recovered_events:
+                        for event in recovered_events:
+                            yield event
+                        return
                     if attempt < EMPTY_STREAM_MAX_RETRIES:
                         token_count, token_method = _estimate_tokens(
                             self.model,

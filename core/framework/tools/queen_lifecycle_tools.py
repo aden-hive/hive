@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -53,6 +54,7 @@ from framework.tools.flowchart_utils import (
     save_flowchart_file,
     synthesize_draft_from_runtime,
 )
+from framework.tools.worker_monitoring_tools import read_worker_health_snapshot
 
 if TYPE_CHECKING:
     from framework.runner.tool_registry import ToolRegistry
@@ -60,6 +62,16 @@ if TYPE_CHECKING:
     from framework.runtime.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
+
+_NON_ACCEPT_JUDGE_ACTIONS = frozenset({"RETRY", "CONTINUE", "ESCALATE"})
+_HEALTH_SIGNAL_DESCRIPTIONS: dict[str, str] = {
+    "failed_session": "worker session is marked failed",
+    "stalled": "worker appears stalled with no meaningful progress for 5+ minutes",
+    "slow_progress": "worker progress has slowed for 2+ minutes without completing",
+    "long_non_accept_streak": "worker has a sustained non-ACCEPT judge streak",
+    "judge_pressure": "worker is under repeated non-ACCEPT judge pressure",
+    "recent_non_accept_churn": "recent judge verdicts are all non-ACCEPT, indicating churn",
+}
 
 
 @dataclass
@@ -118,8 +130,6 @@ class QueenPhaseState:
 
     # Default skill operational protocols — appended to every phase prompt
     protocols_prompt: str = ""
-    # Community skills catalog (XML) — appended after protocols
-    skills_catalog_prompt: str = ""
 
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
@@ -146,8 +156,6 @@ class QueenPhaseState:
 
         memory = format_for_injection()
         parts = [base]
-        if self.skills_catalog_prompt:
-            parts.append(self.skills_catalog_prompt)
         if self.protocols_prompt:
             parts.append(self.protocols_prompt)
         if memory:
@@ -750,6 +758,438 @@ def _update_meta_json(session_manager, manager_session_id, updates: dict) -> Non
         pass
 
 
+def _parse_validation_report(raw: Any) -> dict | None:
+    """Best-effort parse of validate_agent_package output."""
+    if isinstance(raw, dict):
+        return raw
+    if hasattr(raw, "content"):
+        raw = raw.content
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    candidates = [text]
+    if "\n\n[Saved to" in text:
+        candidates.append(text.split("\n\n[Saved to", 1)[0].strip())
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidates.append(text[start : end + 1])
+    try:
+        for candidate in candidates:
+            try:
+                return json.loads(candidate)
+            except (TypeError, json.JSONDecodeError):
+                continue
+    except TypeError:
+        pass
+    return None
+
+
+def _validation_failures(report: dict | None) -> list[str]:
+    """Flatten failed validation steps into readable messages."""
+    if not report:
+        return []
+    failures: list[str] = []
+    for step_name, step in (report.get("steps") or {}).items():
+        if step.get("passed"):
+            continue
+        detail = step.get("output") or step.get("error") or "failed"
+        failures.append(f"{step_name}: {detail}")
+    return failures
+
+
+def _validation_blocks_stage_or_run(report: dict | None) -> bool:
+    """Return True when validation results should block staging or execution."""
+    if not report:
+        return False
+    return any(
+        isinstance(step, dict) and not step.get("passed", False)
+        for step in (report.get("steps") or {}).values()
+    )
+
+
+def _invalid_validation_report(reason: str) -> dict:
+    """Build a structured validation failure when validator output is unusable."""
+    return {
+        "valid": False,
+        "summary": reason,
+        "steps": {
+            "validator_subprocess": {
+                "passed": False,
+                "error": reason,
+            }
+        },
+    }
+
+
+_STRUCTURED_TASK_PAIR_RE = re.compile(
+    r"\[?(?P<key>[A-Za-z_][A-Za-z0-9_]*)\]?\s*(?::|=)\s*(?P<value>.*?)(?=(?:\s+\[?[A-Za-z_][A-Za-z0-9_]*\]?\s*(?::|=))|$)"
+)
+_STRUCTURED_TASK_LINE_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?\[?(?P<key>[A-Za-z_][A-Za-z0-9_]*)\]?\s*(?::|=)\s*(?P<value>.*?)\s*$"
+)
+_NUMERIC_WITH_SUFFIX_RE = re.compile(r"^(?P<number>-?\d+(?:\.\d+)?)\s*\([^)]*\)\s*$")
+_LEADING_NUMERIC_RE = re.compile(r"^\s*(?P<number>-?\d+(?:\.\d+)?)\b")
+_RERUN_WITH_DEFAULTS_RE = re.compile(
+    r"\b(?:run\s+again|rerun|continue)\b.*\b(?:same\s+(?:default|defaults|settings|inputs)|"
+    r"defaults?)\b",
+    re.IGNORECASE,
+)
+_PATH_INPUT_KEY_HINTS = (
+    "_dir",
+    "_path",
+    "_folder",
+    "_root",
+)
+_NUMERIC_INPUT_KEY_HINTS = (
+    "_threshold",
+    "_count",
+    "_limit",
+    "_max",
+    "_min",
+    "_ratio",
+    "_size",
+)
+
+
+def _coerce_task_value(raw: str) -> Any:
+    """Best-effort coerce simple structured task values from text."""
+    text = raw.strip().rstrip(",")
+    if not text:
+        return ""
+    numeric_match = _NUMERIC_WITH_SUFFIX_RE.match(text)
+    if numeric_match:
+        text = numeric_match.group("number")
+    try:
+        return json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return text
+
+
+def _parse_structured_task_payload(task: str) -> dict[str, Any]:
+    """Extract ``key: value`` pairs or JSON objects from a task string."""
+    text = (task or "").strip()
+    if not text:
+        return {}
+
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except (TypeError, json.JSONDecodeError):
+        pass
+
+    payload: dict[str, Any] = {}
+    current_key: str | None = None
+    for raw_line in text.splitlines():
+        if not raw_line.strip():
+            current_key = None
+            continue
+        inline_matches = list(_STRUCTURED_TASK_PAIR_RE.finditer(raw_line.strip()))
+        if len(inline_matches) > 1:
+            for match in inline_matches:
+                payload[match.group("key")] = _coerce_task_value(match.group("value"))
+            current_key = inline_matches[-1].group("key")
+            continue
+        line_match = _STRUCTURED_TASK_LINE_RE.match(raw_line)
+        if line_match:
+            key = line_match.group("key")
+            value_text = line_match.group("value")
+            payload[key] = _coerce_task_value(value_text)
+            current_key = key
+            continue
+        if current_key and (raw_line.startswith("  ") or raw_line.startswith("\t")):
+            existing = payload.get(current_key, "")
+            continuation = raw_line.strip()
+            if isinstance(existing, str):
+                payload[current_key] = f"{existing}\n{continuation}".strip()
+            continue
+        current_key = None
+
+    if payload:
+        return payload
+
+    matches = list(_STRUCTURED_TASK_PAIR_RE.finditer(text))
+    for match in matches:
+        key = match.group("key")
+        value_text = match.group("value")
+        if not value_text.strip():
+            continue
+        payload[key] = _coerce_task_value(value_text)
+    return payload
+
+
+def _looks_like_path_input_key(key: str) -> bool:
+    lowered = key.lower()
+    return lowered.endswith(_PATH_INPUT_KEY_HINTS) or lowered in {
+        "path",
+        "dir",
+        "folder",
+        "root",
+    }
+
+
+def _looks_like_numeric_input_key(key: str) -> bool:
+    lowered = key.lower()
+    return lowered.endswith(_NUMERIC_INPUT_KEY_HINTS) or lowered in {
+        "threshold",
+        "count",
+        "limit",
+        "max",
+        "min",
+        "ratio",
+        "size",
+    }
+
+
+def _normalize_worker_input_value(key: str, value: Any) -> Any:
+    """Normalize structured worker inputs before handing them to the runtime."""
+    if not isinstance(value, str):
+        return value
+
+    text = value.strip()
+    if not text:
+        return ""
+
+    if _looks_like_numeric_input_key(key):
+        numeric_match = _LEADING_NUMERIC_RE.match(text)
+        if numeric_match:
+            number = numeric_match.group("number")
+            return float(number) if "." in number else int(number)
+
+    if _looks_like_path_input_key(key):
+        candidate = Path(text).expanduser()
+        if not candidate.is_absolute():
+            candidate = (Path.cwd() / candidate).resolve()
+        return str(candidate)
+
+    return text
+
+
+def _should_backfill_from_recent_input(key: str, value: Any) -> bool:
+    """Return True when a recent session input should replace the current value."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return True
+        if _looks_like_numeric_input_key(key):
+            return _LEADING_NUMERIC_RE.fullmatch(text) is None
+    return False
+
+
+def _load_recent_worker_input_defaults(
+    runtime: Any,
+    input_keys: list[str],
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Load the best recent worker input payload from unified session state.
+
+    When a current session is known, only that session is considered so reruns
+    cannot inherit structured defaults from an unrelated historical session.
+    Otherwise we fall back to the latest available session as a best-effort
+    compatibility path for legacy callers.
+    """
+    store = getattr(runtime, "_session_store", None)
+    sessions_dir = Path(getattr(store, "sessions_dir", "")) if store is not None else None
+    if sessions_dir is None or not sessions_dir.exists():
+        return {}
+    allowed_key_set = set(input_keys)
+
+    candidate_state_paths: list[Path]
+    if session_id:
+        state_path = sessions_dir / session_id / "state.json"
+        candidate_state_paths = [state_path] if state_path.exists() else []
+    else:
+        candidate_state_paths = []
+
+    if not candidate_state_paths:
+        candidate_state_paths = sorted(
+            sessions_dir.glob("session_*/state.json"),
+            key=lambda path: path.stat().st_mtime if path.exists() else 0,
+            reverse=True,
+        )
+
+    work_keys = [key for key in input_keys if key not in {"user_request", "task", "feedback"}]
+    if not work_keys:
+        best_payload: dict[str, Any] = {}
+        best_updated_at = ""
+        for state_path in candidate_state_paths:
+            try:
+                raw_state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            input_data = raw_state.get("input_data") or {}
+            if not isinstance(input_data, dict) or not input_data:
+                continue
+            input_data = {key: value for key, value in input_data.items() if key in allowed_key_set}
+            if not input_data:
+                continue
+            updated_at = str((raw_state.get("timestamps") or {}).get("updated_at") or "")
+            if updated_at >= best_updated_at:
+                best_payload = dict(input_data)
+                best_updated_at = updated_at
+        return best_payload
+
+    best_payload: dict[str, Any] = {}
+    best_score = -1
+    best_updated_at = ""
+
+    for state_path in candidate_state_paths:
+        try:
+            raw_state = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        input_data = raw_state.get("input_data") or {}
+        if not isinstance(input_data, dict):
+            continue
+
+        merged_input = {key: value for key, value in input_data.items() if key in allowed_key_set}
+        result_output = (raw_state.get("result") or {}).get("output") or {}
+        if isinstance(result_output, dict):
+            for key in work_keys:
+                if merged_input.get(key) in (None, "") and result_output.get(key) not in (None, ""):
+                    merged_input[key] = result_output[key]
+
+        score = sum(1 for key in work_keys if merged_input.get(key) not in (None, ""))
+        if score <= 0:
+            continue
+
+        updated_at = str((raw_state.get("timestamps") or {}).get("updated_at") or "")
+        if score > best_score or (score == best_score and updated_at > best_updated_at):
+            best_payload = merged_input
+            best_score = score
+            best_updated_at = updated_at
+
+    return best_payload
+
+
+async def _preflight_worker_run(session: Any, runtime: Any, timeout_seconds: int) -> None:
+    """Validate credentials and refresh MCP servers before a worker run."""
+    loop = asyncio.get_running_loop()
+
+    async def _preflight():
+        cred_error: CredentialError | None = None
+        try:
+            await loop.run_in_executor(
+                None,
+                lambda: validate_credentials(
+                    runtime.graph.nodes,
+                    interactive=False,
+                    skip=False,
+                ),
+            )
+        except CredentialError as e:
+            cred_error = e
+
+        runner = getattr(session, "runner", None)
+        if runner:
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
+                )
+            except Exception as e:
+                logger.warning("MCP resync failed: %s", e)
+
+        if cred_error is not None:
+            raise cred_error
+
+    try:
+        await asyncio.wait_for(_preflight(), timeout=timeout_seconds)
+    except TimeoutError:
+        logger.warning(
+            "worker run preflight timed out after %ds — proceeding",
+            timeout_seconds,
+        )
+
+
+def _get_default_entry_input_keys(runtime: Any) -> list[str]:
+    """Return the loaded worker's default entry node input keys, if available."""
+    try:
+        entry_points = runtime.get_entry_points()
+    except Exception:
+        return []
+    if not entry_points:
+        return []
+
+    graph = getattr(runtime, "graph", None)
+    if graph is None or not hasattr(graph, "get_node"):
+        return []
+
+    entry_spec = entry_points[0]
+    entry_node_id = getattr(entry_spec, "entry_node", None) or getattr(graph, "entry_node", None)
+    if not entry_node_id:
+        return []
+
+    node = graph.get_node(entry_node_id)
+    return list(getattr(node, "input_keys", []) or []) if node is not None else []
+
+
+def _build_worker_input_data(
+    runtime: Any,
+    task: str,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Shape queen task text into the loaded worker's expected entry inputs."""
+    structured = _parse_structured_task_payload(task)
+    allowed_keys = _get_default_entry_input_keys(runtime)
+
+    # Backwards compatibility for older workers that still expect a single
+    # free-form task string, while allowing newer workers to receive
+    # structured fields directly.
+    if not allowed_keys:
+        payload = {"user_request": task, "task": task}
+        payload.update(structured)
+        return payload
+
+    shaped: dict[str, Any] = {}
+    if "user_request" in allowed_keys:
+        shaped["user_request"] = task
+    if "task" in allowed_keys:
+        shaped["task"] = task
+
+    work_keys = [key for key in allowed_keys if key not in {"user_request", "task", "feedback"}]
+    structured_work_keys = {key for key in work_keys if key in structured}
+    should_merge_recent_defaults = bool(structured_work_keys) or bool(
+        _RERUN_WITH_DEFAULTS_RE.search(task or "")
+    )
+    recent_defaults = (
+        _load_recent_worker_input_defaults(runtime, allowed_keys, session_id=session_id)
+        if should_merge_recent_defaults
+        else {}
+    )
+
+    for key in allowed_keys:
+        if key in {"user_request", "task", "feedback"}:
+            continue
+        if key in structured:
+            shaped[key] = _normalize_worker_input_value(key, structured[key])
+            if (
+                key in recent_defaults
+                and _should_backfill_from_recent_input(key, shaped[key])
+                and recent_defaults.get(key) not in (None, "")
+            ):
+                shaped[key] = _normalize_worker_input_value(key, recent_defaults[key])
+        elif recent_defaults.get(key) not in (None, ""):
+            shaped[key] = _normalize_worker_input_value(key, recent_defaults[key])
+
+    work_keys = [key for key in allowed_keys if key != "feedback"]
+    if not any(key in shaped for key in work_keys):
+        if len(work_keys) == 1:
+            shaped[work_keys[0]] = task
+        elif "user_request" in allowed_keys and "user_request" not in shaped:
+            shaped["user_request"] = task
+        elif "task" in allowed_keys and "task" not in shaped:
+            shaped["task"] = task
+
+    return shaped
+
+
 def register_queen_lifecycle_tools(
     registry: ToolRegistry,
     session: Any = None,
@@ -803,6 +1243,23 @@ def register_queen_lifecycle_tools(
         """Get current worker runtime from session (late-binding)."""
         return getattr(session, "worker_runtime", None)
 
+    async def _run_package_validation(agent_ref: str) -> dict | None:
+        """Run validate_agent_package if available in the registry."""
+        validator = registry._tools.get("validate_agent_package")
+        if validator is None or not agent_ref:
+            return None
+        # The validator accepts either a built-agent package name or a
+        # fully resolved allowed agent path.
+        result = validator.executor({"agent_name": agent_ref})
+        if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+            result = await result
+        parsed = _parse_validation_report(result)
+        if parsed is None:
+            return _invalid_validation_report(
+                "validate_agent_package returned an invalid or undecodable report"
+            )
+        return parsed
+
     # --- start_worker ---------------------------------------------------------
 
     # How long to wait for credential validation + MCP resync before
@@ -821,66 +1278,17 @@ def register_queen_lifecycle_tools(
             return json.dumps({"error": "No worker loaded in this session."})
 
         try:
-            # Pre-flight: validate credentials and resync MCP servers.
-            # Both are blocking I/O (HTTP health-checks, subprocess spawns)
-            # so they run in a thread-pool executor.  We cap the total
-            # preflight time so the queen never hangs waiting.
-            loop = asyncio.get_running_loop()
-
-            async def _preflight():
-                cred_error: CredentialError | None = None
-                try:
-                    await loop.run_in_executor(
-                        None,
-                        lambda: validate_credentials(
-                            runtime.graph.nodes,
-                            interactive=False,
-                            skip=False,
-                        ),
-                    )
-                except CredentialError as e:
-                    cred_error = e
-
-                runner = getattr(session, "runner", None)
-                if runner:
-                    try:
-                        await loop.run_in_executor(
-                            None,
-                            lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
-                        )
-                    except Exception as e:
-                        logger.warning("MCP resync failed: %s", e)
-
-                # Re-raise CredentialError after MCP resync so both steps
-                # get a chance to run before we bail.
-                if cred_error is not None:
-                    raise cred_error
-
-            try:
-                await asyncio.wait_for(_preflight(), timeout=_START_PREFLIGHT_TIMEOUT)
-            except TimeoutError:
-                logger.warning(
-                    "start_worker preflight timed out after %ds — proceeding with trigger",
-                    _START_PREFLIGHT_TIMEOUT,
-                )
-            except CredentialError:
-                raise  # handled below
+            await _preflight_worker_run(session, runtime, _START_PREFLIGHT_TIMEOUT)
 
             # Resume timers in case they were paused by a previous stop_worker
             runtime.resume_timers()
 
-            # Get session state from any prior execution for memory continuity
-            session_state = runtime._get_primary_session_state("default") or {}
-
-            # Use the shared session ID so queen, judge, and worker all
-            # scope their conversations to the same session.
-            if session_id:
-                session_state["resume_session_id"] = session_id
-
             exec_id = await runtime.trigger(
                 entry_point_id="default",
-                input_data={"user_request": task},
-                session_state=session_state,
+                input_data=_build_worker_input_data(runtime, task, session_id=session_id),
+                # Worker runs should start from the explicit input payload for
+                # this run, not inherit another execution's shared session.
+                session_state=None,
             )
             return json.dumps(
                 {
@@ -2547,19 +2955,76 @@ def register_queen_lifecycle_tools(
 
         return preamble
 
-    def _detect_red_flags(bus: EventBus) -> int:
+    def _get_worker_health_snapshot() -> dict[str, Any] | None:
+        worker_path = getattr(session, "worker_path", None)
+        if not worker_path:
+            return None
+        try:
+            snapshot = read_worker_health_snapshot(
+                Path(worker_path),
+                session_id=session_id,
+                default_session_id=session_id,
+            )
+        except Exception:
+            logger.exception("Failed to read worker health snapshot for queen status")
+            return None
+        if snapshot.get("error"):
+            return None
+        return snapshot
+
+    def _detect_red_flags(bus: EventBus, health_snapshot: dict[str, Any] | None = None) -> int:
         """Count issue categories with cheap limit=1 queries."""
+        if health_snapshot:
+            issue_signals = health_snapshot.get("issue_signals", [])
+            if isinstance(issue_signals, list) and issue_signals:
+                return len(issue_signals)
+
         count = 0
         for evt_type in (
+            EventType.NODE_RETRY,
             EventType.NODE_STALLED,
             EventType.NODE_TOOL_DOOM_LOOP,
             EventType.CONSTRAINT_VIOLATION,
         ):
             if bus.get_history(event_type=evt_type, limit=1):
                 count += 1
+        if _get_recent_judge_pressure(bus)[0]:
+            count += 1
         return count
 
-    def _format_summary(preamble: dict[str, Any], red_flags: int) -> str:
+    def _get_recent_judge_pressure(bus: EventBus, streak_threshold: int = 4) -> tuple[bool, str]:
+        """Detect sustained judge churn even when no hard stall event exists yet."""
+        verdict_events = bus.get_history(event_type=EventType.JUDGE_VERDICT, limit=8)
+        if len(verdict_events) < streak_threshold:
+            return False, ""
+
+        streak: list[str] = []
+        for evt in verdict_events:
+            action = str(evt.data.get("action", "")).upper()
+            if action == "ACCEPT":
+                break
+            if action in _NON_ACCEPT_JUDGE_ACTIONS:
+                streak.append(action)
+                continue
+            break
+
+        if len(streak) < streak_threshold:
+            return False, ""
+
+        compressed: list[str] = []
+        for action in streak:
+            if not compressed or compressed[-1] != action:
+                compressed.append(action)
+        return (
+            True,
+            f"{len(streak)} consecutive non-ACCEPT judge verdict(s): {' -> '.join(compressed)}",
+        )
+
+    def _format_summary(
+        preamble: dict[str, Any],
+        red_flags: int,
+        health_snapshot: dict[str, Any] | None = None,
+    ) -> str:
         """Generate a 1-2 sentence prose summary from the preamble."""
         status = preamble["status"]
 
@@ -2586,10 +3051,17 @@ def register_queen_lifecycle_tools(
                 node_part += f", iteration {iteration}"
             parts.append(node_part)
 
+        health_signals = health_snapshot.get("issue_signals", []) if health_snapshot else []
         if red_flags:
-            parts.append(f"{red_flags} issue type(s) detected — use focus='issues' for details")
+            if isinstance(health_signals, list) and health_signals:
+                parts.append(
+                    f"{red_flags} issue signal(s) detected "
+                    f"({', '.join(health_signals)}) — use focus='issues' for details"
+                )
+            else:
+                parts.append(f"{red_flags} issue type(s) detected — use focus='issues' for details")
         else:
-            parts.append("No issues detected")
+            parts.append("No issue signals detected")
 
         # Latest subagent progress (if any delegation is in flight)
         bus = _get_event_bus()
@@ -2737,7 +3209,7 @@ def register_queen_lifecycle_tools(
 
         return "\n".join(lines)
 
-    def _format_issues(bus: EventBus) -> str:
+    def _format_issues(bus: EventBus, health_snapshot: dict[str, Any] | None = None) -> str:
         """Format retries, stalls, doom loops, and constraint violations."""
         lines = []
         total = 0
@@ -2787,8 +3259,42 @@ def register_queen_lifecycle_tools(
                 ago = _format_time_ago(evt.timestamp)
                 lines.append(f"  {cid} ({ago}): {desc}")
 
+        has_judge_pressure, judge_pressure_desc = _get_recent_judge_pressure(bus)
+        if has_judge_pressure:
+            total += 1
+            lines.append("Judge pressure detected:")
+            lines.append(f"  {judge_pressure_desc}")
+
+        if health_snapshot:
+            issue_signals = health_snapshot.get("issue_signals", [])
+            if isinstance(issue_signals, list) and issue_signals:
+                total += len(issue_signals)
+                lines.append("Health signals:")
+                for signal in issue_signals:
+                    desc = _HEALTH_SIGNAL_DESCRIPTIONS.get(signal, signal.replace("_", " "))
+                    if (
+                        signal in {"stalled", "slow_progress"}
+                        and health_snapshot.get("stall_minutes") is not None
+                    ):
+                        desc += f" ({health_snapshot['stall_minutes']} min since last step)"
+                    elif (
+                        signal in {"long_non_accept_streak", "judge_pressure"}
+                        and health_snapshot.get("steps_since_last_accept") is not None
+                    ):
+                        desc += (
+                            " ("
+                            f"{health_snapshot['steps_since_last_accept']} non-ACCEPT step(s)"
+                            " since last ACCEPT)"
+                        )
+                    elif signal == "recent_non_accept_churn" and health_snapshot.get(
+                        "recent_verdicts"
+                    ):
+                        verdicts = ", ".join(health_snapshot["recent_verdicts"][-4:])
+                        desc += f" ({verdicts})"
+                    lines.append(f"  {signal}: {desc}")
+
         if total == 0:
-            return "No issues detected. No retries, stalls, or constraint violations."
+            return "No issues detected. No runtime issue signals were found."
 
         header = f"{total} issue(s) detected."
         return header + "\n\n" + "\n".join(lines)
@@ -3086,8 +3592,9 @@ def register_queen_lifecycle_tools(
         try:
             if focus is None:
                 # Default: brief prose summary
-                red_flags = _detect_red_flags(bus) if bus else 0
-                return _format_summary(preamble, red_flags)
+                health_snapshot = _get_worker_health_snapshot()
+                red_flags = _detect_red_flags(bus, health_snapshot) if bus else 0
+                return _format_summary(preamble, red_flags, health_snapshot)
 
             if bus is None:
                 return (
@@ -3102,7 +3609,7 @@ def register_queen_lifecycle_tools(
             elif focus == "tools":
                 return _format_tools(bus, last_n)
             elif focus == "issues":
-                return _format_issues(bus)
+                return _format_issues(bus, _get_worker_health_snapshot())
             elif focus == "progress":
                 return await _format_progress(runtime, bus)
             elif focus == "full":
@@ -3399,20 +3906,25 @@ def register_queen_lifecycle_tools(
             available immediately. The user will see the agent's graph and
             can interact with it without opening a new tab.
             """
-            runtime = _get_runtime()
-            if runtime is not None:
-                try:
-                    await session_manager.unload_worker(manager_session_id)
-                except Exception as e:
-                    logger.error("Failed to unload existing worker: %s", e, exc_info=True)
-                    return json.dumps({"error": f"Failed to unload existing worker: {e}"})
-
             try:
                 resolved_path = validate_agent_path(agent_path)
             except ValueError as e:
                 return json.dumps({"error": str(e)})
             if not resolved_path.exists():
                 return json.dumps({"error": f"Agent path does not exist: {agent_path}"})
+
+            validation_report = await _run_package_validation(str(resolved_path))
+            if _validation_blocks_stage_or_run(validation_report):
+                failures = _validation_failures(validation_report)
+                return json.dumps(
+                    {
+                        "error": (
+                            f"Cannot load agent '{resolved_path.name}' because validation failed. "
+                            "Fix the package and re-run validate_agent_package() before loading."
+                        ),
+                        "validation_failures": failures,
+                    }
+                )
 
             # Pre-check: verify the module exports goal/nodes/edges before
             # attempting the full load.  This gives the queen an actionable
@@ -3458,6 +3970,14 @@ def register_queen_lifecycle_tools(
                         )
                     }
                 )
+
+            runtime = _get_runtime()
+            if runtime is not None:
+                try:
+                    await session_manager.unload_worker(manager_session_id)
+                except Exception as e:
+                    logger.error("Failed to unload existing worker: %s", e, exc_info=True)
+                    return json.dumps({"error": f"Failed to unload existing worker: {e}"})
 
             try:
                 updated_session = await session_manager.load_worker(
@@ -3607,60 +4127,35 @@ def register_queen_lifecycle_tools(
         if runtime is None:
             return json.dumps({"error": "No worker loaded in this session."})
 
+        worker_path = getattr(session, "worker_path", None)
+        worker_name = Path(worker_path).name if worker_path else ""
+        validation_report = await _run_package_validation(
+            str(worker_path) if worker_path else worker_name
+        )
+        if _validation_blocks_stage_or_run(validation_report):
+            failures = _validation_failures(validation_report)
+            return json.dumps(
+                {
+                    "error": (
+                        f"Cannot run agent '{worker_name or 'current worker'}' because validation "
+                        "is failing. Fix the package and reload it before running."
+                    ),
+                    "validation_failures": failures,
+                }
+            )
+
         try:
-            # Pre-flight: validate credentials and resync MCP servers.
-            loop = asyncio.get_running_loop()
-
-            async def _preflight():
-                cred_error: CredentialError | None = None
-                try:
-                    await loop.run_in_executor(
-                        None,
-                        lambda: validate_credentials(
-                            runtime.graph.nodes,
-                            interactive=False,
-                            skip=False,
-                        ),
-                    )
-                except CredentialError as e:
-                    cred_error = e
-
-                runner = getattr(session, "runner", None)
-                if runner:
-                    try:
-                        await loop.run_in_executor(
-                            None,
-                            lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
-                        )
-                    except Exception as e:
-                        logger.warning("MCP resync failed: %s", e)
-
-                if cred_error is not None:
-                    raise cred_error
-
-            try:
-                await asyncio.wait_for(_preflight(), timeout=_START_PREFLIGHT_TIMEOUT)
-            except TimeoutError:
-                logger.warning(
-                    "run_agent_with_input preflight timed out after %ds — proceeding",
-                    _START_PREFLIGHT_TIMEOUT,
-                )
-            except CredentialError:
-                raise  # handled below
+            await _preflight_worker_run(session, runtime, _START_PREFLIGHT_TIMEOUT)
 
             # Resume timers in case they were paused by a previous stop
             runtime.resume_timers()
 
-            # Get session state from any prior execution for memory continuity
-            session_state = runtime._get_primary_session_state("default") or {}
-
-            if session_id:
-                session_state["resume_session_id"] = session_id
-
             exec_id = await runtime.trigger(
                 entry_point_id="default",
-                input_data={"user_request": task},
-                session_state=session_state,
+                input_data=_build_worker_input_data(runtime, task, session_id=session_id),
+                # Fresh manual worker runs avoid stale state leaking from a
+                # previous execution into Codex's next tool/planning turn.
+                session_state=None,
             )
 
             # Switch to running phase
@@ -3693,6 +4188,91 @@ def register_queen_lifecycle_tools(
         except Exception as e:
             return json.dumps({"error": f"Failed to start worker: {e}"})
 
+    async def rerun_worker_with_last_input() -> str:
+        """Rerun the loaded worker using the last complete structured input payload."""
+        runtime = _get_runtime()
+        if runtime is None:
+            return json.dumps({"error": "No worker loaded in this session."})
+
+        worker_path = getattr(session, "worker_path", None)
+        worker_name = Path(worker_path).name if worker_path else ""
+        validation_report = await _run_package_validation(
+            str(worker_path) if worker_path else worker_name
+        )
+        if _validation_blocks_stage_or_run(validation_report):
+            failures = _validation_failures(validation_report)
+            return json.dumps(
+                {
+                    "error": (
+                        f"Cannot rerun agent '{worker_name or 'current worker'}' "
+                        "because validation "
+                        "is failing. Fix the package and reload it before running."
+                    ),
+                    "validation_failures": failures,
+                }
+            )
+
+        allowed_keys = _get_default_entry_input_keys(runtime)
+        input_data = {
+            key: _normalize_worker_input_value(key, value)
+            for key, value in _load_recent_worker_input_defaults(
+                runtime,
+                allowed_keys,
+                session_id=session_id,
+            ).items()
+        }
+        work_keys = [key for key in allowed_keys if key not in {"user_request", "task", "feedback"}]
+        if work_keys:
+            missing = [key for key in work_keys if input_data.get(key) in (None, "")]
+            if missing:
+                return json.dumps(
+                    {
+                        "error": "No complete previous worker input is available for a "
+                        "same-defaults rerun.",
+                        "missing_inputs": missing,
+                    }
+                )
+
+        try:
+            await _preflight_worker_run(session, runtime, _START_PREFLIGHT_TIMEOUT)
+
+            runtime.resume_timers()
+
+            exec_id = await runtime.trigger(
+                entry_point_id="default",
+                input_data=input_data,
+                session_state=None,
+            )
+
+            if phase_state is not None:
+                await phase_state.switch_to_running()
+                _update_meta_json(session_manager, manager_session_id, {"phase": "running"})
+
+            return json.dumps(
+                {
+                    "status": "started",
+                    "phase": "running",
+                    "execution_id": exec_id,
+                    "input_data": input_data,
+                }
+            )
+        except CredentialError as e:
+            error_payload = credential_errors_to_json(e)
+            error_payload["agent_path"] = str(getattr(session, "worker_path", "") or "")
+
+            bus = getattr(session, "event_bus", None)
+            if bus is not None:
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.CREDENTIALS_REQUIRED,
+                        stream_id="queen",
+                        data=error_payload,
+                    )
+                )
+            return json.dumps(error_payload)
+        except Exception as e:
+            return json.dumps({"error": f"Failed to rerun worker: {e}"})
+
     _run_input_tool = Tool(
         name="run_agent_with_input",
         description=(
@@ -3713,6 +4293,21 @@ def register_queen_lifecycle_tools(
     )
     registry.register(
         "run_agent_with_input", _run_input_tool, lambda inputs: run_agent_with_input(**inputs)
+    )
+    tools_registered += 1
+
+    _rerun_tool = Tool(
+        name="rerun_worker_with_last_input",
+        description=(
+            "Rerun the loaded worker using the most recent complete structured input payload. "
+            "Use this when the user asks to run again with the same defaults or same input."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "rerun_worker_with_last_input",
+        _rerun_tool,
+        lambda _inputs: rerun_worker_with_last_input(),
     )
     tools_registered += 1
 

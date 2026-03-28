@@ -535,8 +535,8 @@ class EventBus:
             async with self._semaphore:
                 try:
                     await handler(event)
-                except Exception:
-                    logger.exception(f"Handler error for {event.type}")
+                except Exception as e:
+                    logger.error(f"Handler error for {event.type}: {e}")
 
         # Run all handlers concurrently
         await asyncio.gather(*[run_handler(h) for h in handlers], return_exceptions=True)
@@ -901,6 +901,9 @@ class EventBus:
         execution_id: str | None = None,
         options: list[str] | None = None,
         questions: list[dict] | None = None,
+        auto_blocked: bool = False,
+        assistant_text_present: bool = False,
+        assistant_text_requires_input: bool = False,
     ) -> None:
         """Emit client input requested event (client_facing=True nodes).
 
@@ -917,6 +920,12 @@ class EventBus:
             data["options"] = options
         if questions:
             data["questions"] = questions
+        if auto_blocked:
+            data["auto_blocked"] = True
+        if assistant_text_present:
+            data["assistant_text_present"] = True
+        if assistant_text_requires_input:
+            data["assistant_text_requires_input"] = True
         await self.publish(
             AgentEvent(
                 type=EventType.CLIENT_INPUT_REQUESTED,

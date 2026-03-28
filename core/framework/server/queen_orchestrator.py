@@ -7,6 +7,7 @@ and queen orchestration concerns separate.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -15,6 +16,185 @@ if TYPE_CHECKING:
     from framework.server.session_manager import Session
 
 logger = logging.getLogger(__name__)
+
+_PRIMARY_RESULT_KEYS = (
+    "result",
+    "answer",
+    "final_answer",
+    "final_result",
+    "final_output",
+    "response",
+    "summary",
+    "report",
+)
+_NON_PRIMARY_KEY_TOKENS = (
+    "task",
+    "request",
+    "prompt",
+    "input",
+    "brief",
+    "context",
+    "plan",
+    "step",
+    "given",
+    "target",
+    "relationship",
+    "symbolic",
+    "metadata",
+    "artifact",
+    "file",
+    "path",
+    "url",
+    "link",
+)
+_ARTIFACT_SUFFIXES = {
+    ".csv",
+    ".doc",
+    ".docx",
+    ".gif",
+    ".html",
+    ".jpeg",
+    ".jpg",
+    ".json",
+    ".md",
+    ".pdf",
+    ".png",
+    ".ppt",
+    ".pptx",
+    ".svg",
+    ".txt",
+    ".xlsx",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+_PRIMARY_RESULT_CHAR_LIMIT = 8000
+
+
+def _stringify_worker_output_value(value: Any) -> str:
+    """Convert worker output values to user-presentable text."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        except TypeError:
+            return str(value)
+    return str(value)
+
+
+def _looks_like_artifact_reference(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if stripped.startswith("[Saved to "):
+        return True
+    if "\n" in stripped:
+        return False
+    if stripped.startswith(("/", "./", "../")):
+        return True
+    return Path(stripped).suffix.lower() in _ARTIFACT_SUFFIXES
+
+
+def _is_non_primary_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(token in lowered for token in _NON_PRIMARY_KEY_TOKENS)
+
+
+def _select_primary_worker_result(output: dict[str, Any]) -> tuple[str, str] | None:
+    """Pick the best worker output to relay verbatim, if one exists."""
+    if not output:
+        return None
+
+    normalized: dict[str, str] = {}
+    for key, value in output.items():
+        text = _stringify_worker_output_value(value).strip()
+        if text:
+            normalized[key] = text
+
+    for key in _PRIMARY_RESULT_KEYS:
+        text = normalized.get(key, "")
+        if text and not _looks_like_artifact_reference(text):
+            return key, text
+
+    candidates: list[tuple[str, str]] = []
+    for key, text in normalized.items():
+        if _is_non_primary_key(key) or _looks_like_artifact_reference(text):
+            continue
+        candidates.append((key, text))
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    for key, text in candidates:
+        lowered = key.lower()
+        if any(token in lowered for token in ("result", "answer", "summary", "report", "response")):
+            return key, text
+    return None
+
+
+def _format_worker_output_summary(output: dict[str, Any]) -> str:
+    """Build a concise summary of worker output keys for queen handoff."""
+    if not output:
+        return "  (no output keys set)"
+
+    lines: list[str] = []
+    for key, value in output.items():
+        preview = _stringify_worker_output_value(value).strip() or "(empty)"
+        if len(preview) > 200:
+            preview = preview[:200] + "..."
+        lines.append(f"  {key}: {preview}")
+    return "\n".join(lines)
+
+
+def _build_worker_terminal_notification(output: dict[str, Any]) -> str:
+    """Format a worker-completed notification for the queen."""
+    summary = _format_worker_output_summary(output)
+    primary = _select_primary_worker_result(output)
+    if primary is None:
+        return (
+            "[WORKER_TERMINAL] Worker finished successfully.\n"
+            f"Output summary:\n{summary}\n"
+            "Report this to the user. Ask if they want to continue with another run."
+        )
+
+    key, text = primary
+    if len(text) > _PRIMARY_RESULT_CHAR_LIMIT:
+        text = text[:_PRIMARY_RESULT_CHAR_LIMIT].rstrip() + "\n...[truncated]"
+    return (
+        "[WORKER_TERMINAL] Worker finished successfully.\n"
+        f"Output summary:\n{summary}\n"
+        f"Primary result key: {key}\n"
+        "[PRIMARY_RESULT_BEGIN]\n"
+        f"{text}\n"
+        "[PRIMARY_RESULT_END]\n"
+        "Show the PRIMARY_RESULT to the user exactly as written between "
+        "[PRIMARY_RESULT_BEGIN] and [PRIMARY_RESULT_END] before any commentary. "
+        "Do not paraphrase, compress, or reformat it. After that, briefly mention "
+        "any important artifacts or other output keys if useful, then ask if they "
+        "want to continue with another run."
+    )
+
+
+def _client_input_counts_as_planning_ask(event: Any) -> bool:
+    """Return True when a queen input-request should satisfy planning ask rounds.
+
+    Explicit ask_user / ask_user_multiple calls always count. We also count
+    queen auto-blocks that followed assistant text which clearly invited a
+    reply, which covers Codex-style plain-text planning questions that failed
+    to call ask_user. Empty/status-only auto-blocks do not count.
+    """
+    data = getattr(event, "data", None) or {}
+    if data.get("prompt") or data.get("questions") or data.get("options"):
+        return True
+    if not data.get("auto_blocked"):
+        return False
+    requires_input = data.get("assistant_text_requires_input")
+    if requires_input is None:
+        requires_input = bool(data.get("assistant_text_present") and data.get("prompt"))
+    return bool(requires_input)
 
 
 async def create_queen(
@@ -62,7 +242,6 @@ async def create_queen(
     from framework.agents.queen.nodes.thinking_hook import select_expert_persona
     from framework.graph.event_loop_node import HookContext, HookResult
     from framework.graph.executor import GraphExecutor
-    from framework.runner.mcp_registry import MCPRegistry
     from framework.runner.tool_registry import ToolRegistry
     from framework.runtime.core import Runtime
     from framework.runtime.event_bus import AgentEvent, EventType
@@ -87,16 +266,6 @@ async def create_queen(
         except Exception:
             logger.warning("Queen: MCP config failed to load", exc_info=True)
 
-    try:
-        registry = MCPRegistry()
-        registry.initialize()
-        registry_configs = registry.load_agent_selection(queen_pkg_dir)
-        if registry_configs:
-            results = queen_registry.load_registry_servers(registry_configs)
-            logger.info("Queen: loaded MCP registry servers: %s", results)
-    except Exception:
-        logger.warning("Queen: MCP registry config failed to load", exc_info=True)
-
     # ---- Phase state --------------------------------------------------
     initial_phase = "staging" if worker_identity else "planning"
     phase_state = QueenPhaseState(phase=initial_phase, event_bus=session.event_bus)
@@ -108,14 +277,7 @@ async def create_queen(
     async def _track_planning_asks(event: AgentEvent) -> None:
         if phase_state.phase != "planning":
             return
-        # Only count explicit ask_user / ask_user_multiple calls, not
-        # auto-block (text-only turns emit CLIENT_INPUT_REQUESTED with
-        # an empty prompt and no options/questions).
-        data = event.data or {}
-        has_prompt = bool(data.get("prompt"))
-        has_questions = bool(data.get("questions"))
-        has_options = bool(data.get("options"))
-        if has_prompt or has_questions or has_options:
+        if _client_input_counts_as_planning_ask(event):
             phase_state.planning_ask_rounds += 1
 
     session.event_bus.subscribe(
@@ -233,15 +395,11 @@ async def create_queen(
 
     # ---- Default skill protocols -------------------------------------
     try:
-        from framework.skills.manager import SkillsManager, SkillsManagerConfig
+        from framework.skills.manager import SkillsManager
 
-        # Pass project_root so user-scope skills (~/.hive/skills/, ~/.agents/skills/)
-        # are discovered. Queen has no agent-specific project root, so we use its
-        # own directory — the value just needs to be non-None to enable user-scope scanning.
-        _queen_skills_mgr = SkillsManager(SkillsManagerConfig(project_root=Path(__file__).parent))
+        _queen_skills_mgr = SkillsManager()
         _queen_skills_mgr.load()
         phase_state.protocols_prompt = _queen_skills_mgr.protocols_prompt
-        phase_state.skills_catalog_prompt = _queen_skills_mgr.skills_catalog_prompt
     except Exception:
         logger.debug("Queen skill loading failed (non-fatal)", exc_info=True)
 
@@ -326,20 +484,10 @@ async def create_queen(
                         # Mark worker as configured after first successful run
                         session.worker_configured = True
                         output = event.data.get("output", {})
-                        output_summary = ""
-                        if output:
-                            for key, value in output.items():
-                                val_str = str(value)
-                                if len(val_str) > 200:
-                                    val_str = val_str[:200] + "..."
-                                output_summary += f"\n  {key}: {val_str}"
-                        _out = output_summary or " (no output keys set)"
-                        notification = (
-                            "[WORKER_TERMINAL] Worker finished successfully.\n"
-                            f"Output:{_out}\n"
-                            "Report this to the user. "
-                            "Ask if they want to continue with another run."
-                        )
+                        # Keep the worker's primary result intact during the
+                        # queen handoff so the user sees the actual answer,
+                        # not just a paraphrased digest of it.
+                        notification = _build_worker_terminal_notification(output)
                     else:  # EXECUTION_FAILED
                         error = event.data.get("error", "Unknown error")
                         notification = (

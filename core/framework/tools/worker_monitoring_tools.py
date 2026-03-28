@@ -36,6 +36,172 @@ logger = logging.getLogger(__name__)
 
 # How many tool_log steps to include in the health summary
 _DEFAULT_LAST_N_STEPS = 40
+_NON_ACCEPT_VERDICTS = frozenset({"RETRY", "CONTINUE", "ESCALATE"})
+
+
+def classify_worker_health(
+    *,
+    session_status: str,
+    recent_verdicts: list[str],
+    steps_since_last_accept: int,
+    stall_minutes: float | None,
+) -> tuple[str, list[str]]:
+    """Classify worker health from persisted run evidence.
+
+    Keeping this logic at module scope lets Queen-facing status views reuse the
+    exact same health signals as the monitoring tool instead of drifting into a
+    separate, weaker interpretation of worker state.
+    """
+    issue_signals: list[str] = []
+
+    if session_status == "failed":
+        issue_signals.append("failed_session")
+
+    if stall_minutes is not None:
+        if stall_minutes >= 5:
+            issue_signals.append("stalled")
+        elif stall_minutes >= 2:
+            issue_signals.append("slow_progress")
+
+    if steps_since_last_accept >= 6:
+        issue_signals.append("long_non_accept_streak")
+    elif steps_since_last_accept >= 4:
+        issue_signals.append("judge_pressure")
+
+    if len(recent_verdicts) >= 4 and all(v in _NON_ACCEPT_VERDICTS for v in recent_verdicts[-4:]):
+        issue_signals.append("recent_non_accept_churn")
+
+    issue_signals = list(dict.fromkeys(issue_signals))
+
+    if any(sig in issue_signals for sig in ("failed_session", "stalled", "long_non_accept_streak")):
+        return "critical", issue_signals
+    if issue_signals:
+        return "warning", issue_signals
+    return "healthy", issue_signals
+
+
+def read_worker_health_snapshot(
+    storage_path: Path,
+    *,
+    session_id: str | None = None,
+    last_n_steps: int = _DEFAULT_LAST_N_STEPS,
+    default_session_id: str | None = None,
+    worker_agent_id: str | None = None,
+    worker_graph_id: str | None = None,
+) -> dict[str, object]:
+    """Read persisted worker logs and return the structured health snapshot.
+
+    This is the shared source of truth for worker-health reporting. The
+    monitoring tool returns it as JSON, while Queen's user-facing summaries can
+    consume the same dict directly to avoid underreporting issue signals.
+    """
+    storage_path = Path(storage_path)
+    resolved_worker_agent_id = worker_agent_id or storage_path.name
+    resolved_worker_graph_id = worker_graph_id or storage_path.name
+
+    # Auto-discover the most recent session if not specified.
+    if not session_id or session_id == "auto":
+        sessions_dir = storage_path / "sessions"
+        if not sessions_dir.exists():
+            return {"error": "No sessions found — worker has not started yet"}
+
+        if default_session_id and (sessions_dir / default_session_id).is_dir():
+            session_id = default_session_id
+        else:
+            candidates = [
+                d for d in sessions_dir.iterdir() if d.is_dir() and (d / "state.json").exists()
+            ]
+            if not candidates:
+                return {"error": "No sessions found — worker has not started yet"}
+
+            def _sort_key(d: Path):
+                try:
+                    state = json.loads((d / "state.json").read_text(encoding="utf-8"))
+                    priority = 0 if state.get("status", "") in ("in_progress", "running") else 1
+                    return (priority, -d.stat().st_mtime)
+                except Exception:
+                    return (2, 0)
+
+            candidates.sort(key=_sort_key)
+            session_id = candidates[0].name
+
+    session_dir = storage_path / "sessions" / str(session_id)
+    tool_logs_path = session_dir / "logs" / "tool_logs.jsonl"
+    state_path = session_dir / "state.json"
+    if not session_dir.exists() or not state_path.exists():
+        return {"error": f"No persisted worker state found for session '{session_id}'"}
+
+    session_status = "unknown"
+    if state_path.exists():
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            session_status = state.get("status", "unknown")
+        except Exception:
+            pass
+
+    steps: list[dict] = []
+    if tool_logs_path.exists():
+        try:
+            with open(tool_logs_path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            steps.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+        except OSError as e:
+            return {"error": f"Could not read tool logs: {e}"}
+
+    total_steps = len(steps)
+    recent = steps[-last_n_steps:] if len(steps) > last_n_steps else steps
+    recent_verdicts = [s.get("verdict", "") for s in recent if s.get("verdict")]
+
+    steps_since_last_accept = 0
+    for verdict in reversed(recent_verdicts):
+        if verdict == "ACCEPT":
+            break
+        steps_since_last_accept += 1
+
+    last_step_time_iso: str | None = None
+    stall_minutes: float | None = None
+    if steps and tool_logs_path.exists():
+        try:
+            mtime = tool_logs_path.stat().st_mtime
+            last_step_time_iso = datetime.fromtimestamp(mtime, UTC).isoformat()
+            elapsed = (datetime.now(UTC).timestamp() - mtime) / 60
+            stall_minutes = round(elapsed, 1) if elapsed >= 1.0 else None
+        except OSError:
+            pass
+
+    evidence_snippet = ""
+    for step in reversed(recent):
+        text = step.get("llm_text", "")
+        if text:
+            evidence_snippet = text[:500]
+            break
+
+    health_status, issue_signals = classify_worker_health(
+        session_status=session_status,
+        recent_verdicts=recent_verdicts,
+        steps_since_last_accept=steps_since_last_accept,
+        stall_minutes=stall_minutes,
+    )
+
+    return {
+        "worker_agent_id": resolved_worker_agent_id,
+        "worker_graph_id": resolved_worker_graph_id,
+        "session_id": session_id,
+        "session_status": session_status,
+        "health_status": health_status,
+        "issue_signals": issue_signals,
+        "total_steps": total_steps,
+        "recent_verdicts": recent_verdicts,
+        "steps_since_last_accept": steps_since_last_accept,
+        "last_step_time_iso": last_step_time_iso,
+        "stall_minutes": stall_minutes,
+        "evidence_snippet": evidence_snippet,
+    }
 
 
 def register_worker_monitoring_tools(
@@ -91,6 +257,8 @@ def register_worker_monitoring_tools(
         Returns a JSON object with:
         - session_id: the session inspected (useful when auto-discovered)
         - session_status: "running"|"completed"|"failed"|"in_progress"|"unknown"
+        - health_status: "healthy"|"warning"|"critical"
+        - issue_signals: list of detected warning/attention categories
         - total_steps: total number of log steps recorded so far
         - recent_verdicts: list of last N verdict strings (ACCEPT/RETRY/CONTINUE/ESCALATE)
         - steps_since_last_accept: consecutive non-ACCEPT steps from the end
@@ -98,120 +266,22 @@ def register_worker_monitoring_tools(
         - stall_minutes: wall-clock minutes since last step (null if < 1 min)
         - evidence_snippet: last LLM text from the most recent step (truncated)
         """
-        # Auto-discover the most recent session if not specified
-        if not session_id or session_id == "auto":
-            sessions_dir = storage_path / "sessions"
-            if not sessions_dir.exists():
-                return json.dumps({"error": "No sessions found — worker has not started yet"})
-
-            # Prefer the queen's own session ID (set at registration time) over
-            # mtime-based discovery, which can pick a stale orphaned session after
-            # a cold-restore when a newer-but-empty session directory exists.
-            if default_session_id and (sessions_dir / default_session_id).is_dir():
-                session_id = default_session_id
-            else:
-                candidates = [
-                    d for d in sessions_dir.iterdir() if d.is_dir() and (d / "state.json").exists()
-                ]
-                if not candidates:
-                    return json.dumps({"error": "No sessions found — worker has not started yet"})
-
-                def _sort_key(d: Path):
-                    try:
-                        state = json.loads((d / "state.json").read_text(encoding="utf-8"))
-                        # in_progress/running sorts before completed/failed
-                        priority = 0 if state.get("status", "") in ("in_progress", "running") else 1
-                        return (priority, -d.stat().st_mtime)
-                    except Exception:
-                        return (2, 0)
-
-                candidates.sort(key=_sort_key)
-                session_id = candidates[0].name
-
-        # Resolve log paths
-        session_dir = storage_path / "sessions" / session_id
-        tool_logs_path = session_dir / "logs" / "tool_logs.jsonl"
-        state_path = session_dir / "state.json"
-
-        # Read session status
-        session_status = "unknown"
-        if state_path.exists():
-            try:
-                state = json.loads(state_path.read_text(encoding="utf-8"))
-                session_status = state.get("status", "unknown")
-            except Exception:
-                pass
-
-        # Read tool logs
-        steps: list[dict] = []
-        if tool_logs_path.exists():
-            try:
-                with open(tool_logs_path, encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            try:
-                                steps.append(json.loads(line))
-                            except json.JSONDecodeError:
-                                continue
-            except OSError as e:
-                return json.dumps({"error": f"Could not read tool logs: {e}"})
-
-        total_steps = len(steps)
-        recent = steps[-last_n_steps:] if len(steps) > last_n_steps else steps
-
-        # Extract verdict sequence
-        recent_verdicts = [s.get("verdict", "") for s in recent if s.get("verdict")]
-
-        # Count consecutive non-ACCEPT from the end
-        steps_since_last_accept = 0
-        for v in reversed(recent_verdicts):
-            if v == "ACCEPT":
-                break
-            steps_since_last_accept += 1
-
-        # Timing: use tool_logs file mtime as proxy for last step time
-        last_step_time_iso: str | None = None
-        stall_minutes: float | None = None
-        if steps and tool_logs_path.exists():
-            try:
-                mtime = tool_logs_path.stat().st_mtime
-                last_step_time_iso = datetime.fromtimestamp(mtime, UTC).isoformat()
-                elapsed = (datetime.now(UTC).timestamp() - mtime) / 60
-                stall_minutes = round(elapsed, 1) if elapsed >= 1.0 else None
-            except OSError:
-                pass
-
-        # Evidence snippet: last LLM text
-        evidence_snippet = ""
-        for step in reversed(recent):
-            text = step.get("llm_text", "")
-            if text:
-                evidence_snippet = text[:500]
-                break
-
-        return json.dumps(
-            {
-                "worker_agent_id": _worker_agent_id,
-                "worker_graph_id": _worker_graph_id,
-                "session_id": session_id,
-                "session_status": session_status,
-                "total_steps": total_steps,
-                "recent_verdicts": recent_verdicts,
-                "steps_since_last_accept": steps_since_last_accept,
-                "last_step_time_iso": last_step_time_iso,
-                "stall_minutes": stall_minutes,
-                "evidence_snippet": evidence_snippet,
-            },
-            ensure_ascii=False,
+        snapshot = read_worker_health_snapshot(
+            storage_path,
+            session_id=session_id,
+            last_n_steps=last_n_steps,
+            default_session_id=default_session_id,
+            worker_agent_id=_worker_agent_id,
+            worker_graph_id=_worker_graph_id,
         )
+        return json.dumps(snapshot, ensure_ascii=False)
 
     _health_summary_tool = Tool(
         name="get_worker_health_summary",
         description=(
             "Read the worker agent's execution logs and return a compact health snapshot. "
             "Returns worker_agent_id and worker_graph_id (use these for ticket identity fields), "
-            "recent verdicts, step count, time since last step, and "
+            "health_status, issue_signals, recent verdicts, step count, time since last step, and "
             "a snippet of the most recent LLM output. "
             "session_id is optional — omit it to auto-discover the most recent active session."
         ),

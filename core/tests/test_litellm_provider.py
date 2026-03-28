@@ -238,6 +238,48 @@ class TestToolConversion:
         with pytest.raises(ValueError, match="Failed to parse tool call arguments"):
             provider._parse_tool_call_arguments('{"question": foo', "ask_user")
 
+    def test_parse_tool_call_arguments_recovers_pythonish_payloads(self):
+        """Single-quoted and trailing-comma argument payloads should be recovered."""
+        provider = LiteLLMProvider(model="openai/gpt-5.3-codex", api_key="test-key")
+
+        parsed = provider._parse_tool_call_arguments(
+            "{'question': 'Continue?', 'options': ['Yes', 'No'],}",
+            "ask_user",
+        )
+
+        assert parsed == {
+            "question": "Continue?",
+            "options": ["Yes", "No"],
+        }
+
+    def test_parse_tool_call_arguments_keeps_null_inside_strings(self):
+        """Literal normalization should not mutate quoted text values."""
+        provider = LiteLLMProvider(model="openai/gpt-5.3-codex", api_key="test-key")
+
+        parsed = provider._parse_tool_call_arguments(
+            "{'hypothesis': 'null hypothesis', 'approved': false}",
+            "summarize",
+        )
+
+        assert parsed == {
+            "hypothesis": "null hypothesis",
+            "approved": False,
+        }
+
+    def test_parse_tool_call_arguments_strips_json_code_fences(self):
+        """Fence stripping should remove the language tag before JSON parsing."""
+        provider = LiteLLMProvider(model="openai/gpt-5.3-codex", api_key="test-key")
+
+        parsed = provider._parse_tool_call_arguments(
+            '```json\n{"question":"Continue?","options":["Yes","No"]}\n```',
+            "ask_user",
+        )
+
+        assert parsed == {
+            "question": "Continue?",
+            "options": ["Yes", "No"],
+        }
+
 
 class TestAnthropicProviderBackwardCompatibility:
     """Test AnthropicProvider backward compatibility with LiteLLM backend."""
@@ -726,6 +768,221 @@ class TestMiniMaxStreamFallback:
         assert LiteLLMProvider(model="minimax-text-01", api_key="x")._is_minimax_model()
         assert LiteLLMProvider(model="minimax/minimax-text-01", api_key="x")._is_minimax_model()
         assert not LiteLLMProvider(model="gpt-4o-mini", api_key="x")._is_minimax_model()
+
+
+class TestCodexEmptyStreamRecovery:
+    """Codex empty streams should fall back before surfacing ghost-stream retries."""
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_stream_recovers_empty_codex_stream_via_nonstream_completion(
+        self,
+        mock_acompletion,
+    ):
+        """An empty Codex stream should be salvaged with a non-stream completion."""
+        from framework.llm.stream_events import FinishEvent, TextDeltaEvent
+
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.3-codex",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex",
+        )
+
+        class EmptyStreamResponse:
+            chunks: list = []
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        recovered = MagicMock()
+        recovered.choices = [MagicMock()]
+        recovered.choices[0].message.content = "Recovered via fallback"
+        recovered.choices[0].message.tool_calls = []
+        recovered.choices[0].finish_reason = "stop"
+        recovered.model = provider.model
+        recovered.usage.prompt_tokens = 12
+        recovered.usage.completion_tokens = 4
+
+        async def side_effect(*args, **kwargs):
+            if kwargs.get("stream"):
+                return EmptyStreamResponse()
+            return recovered
+
+        mock_acompletion.side_effect = side_effect
+
+        events = []
+        async for event in provider.stream(messages=[{"role": "user", "content": "hi"}]):
+            events.append(event)
+
+        text_events = [event for event in events if isinstance(event, TextDeltaEvent)]
+        assert len(text_events) == 1
+        assert text_events[0].snapshot == "Recovered via fallback"
+
+        finish_events = [event for event in events if isinstance(event, FinishEvent)]
+        assert len(finish_events) == 1
+        assert finish_events[0].stop_reason == "stop"
+        assert finish_events[0].input_tokens == 12
+        assert finish_events[0].output_tokens == 4
+
+        assert mock_acompletion.call_count == 2
+        assert mock_acompletion.call_args_list[0].kwargs["stream"] is True
+        assert "stream" not in mock_acompletion.call_args_list[1].kwargs
+
+    @pytest.mark.asyncio
+    @patch("litellm.acompletion")
+    async def test_stream_recovers_empty_codex_stream_with_tool_calls(
+        self,
+        mock_acompletion,
+    ):
+        """Non-stream fallback should preserve tool calls, not just text."""
+        from framework.llm.stream_events import FinishEvent, ToolCallEvent
+
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.3-codex",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex/responses",
+        )
+
+        class EmptyStreamResponse:
+            chunks: list = []
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        tc = MagicMock()
+        tc.id = "tool_1"
+        tc.function.name = "ask_user"
+        tc.function.arguments = '{"question":"Continue?","options":["Yes","No"]}'
+
+        recovered = MagicMock()
+        recovered.choices = [MagicMock()]
+        recovered.choices[0].message.content = ""
+        recovered.choices[0].message.tool_calls = [tc]
+        recovered.choices[0].finish_reason = "tool_calls"
+        recovered.model = provider.model
+        recovered.usage.prompt_tokens = 14
+        recovered.usage.completion_tokens = 5
+
+        async def side_effect(*args, **kwargs):
+            if kwargs.get("stream"):
+                return EmptyStreamResponse()
+            return recovered
+
+        mock_acompletion.side_effect = side_effect
+
+        events = []
+        async for event in provider.stream(
+            messages=[{"role": "user", "content": "Should we continue?"}],
+            tools=[
+                Tool(
+                    name="ask_user",
+                    description="Ask the user",
+                    parameters={"properties": {"question": {"type": "string"}}},
+                )
+            ],
+        ):
+            events.append(event)
+
+        tool_events = [event for event in events if isinstance(event, ToolCallEvent)]
+        assert len(tool_events) == 1
+        assert tool_events[0].tool_name == "ask_user"
+        assert tool_events[0].tool_input == {
+            "question": "Continue?",
+            "options": ["Yes", "No"],
+        }
+
+        finish_events = [event for event in events if isinstance(event, FinishEvent)]
+        assert len(finish_events) == 1
+        assert finish_events[0].stop_reason == "tool_calls"
+
+
+class TestCodexRequestHardening:
+    def test_codex_build_completion_kwargs_splits_prompt_and_forces_tool_choice(self):
+        """Codex requests should chunk large system prompts and require tools when needed."""
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.3-codex",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex/responses",
+        )
+        kwargs = provider._build_completion_kwargs(
+            messages=[{"role": "user", "content": "hi"}],
+            system="# Identity\n" + ("rule\n" * 2000),
+            tools=[
+                Tool(
+                    name="ask_user",
+                    description="Ask the user",
+                    parameters={"properties": {"question": {"type": "string"}}},
+                )
+            ],
+            max_tokens=256,
+            response_format=None,
+            json_mode=False,
+            stream=True,
+        )
+
+        system_messages = [m for m in kwargs["messages"] if m["role"] == "system"]
+        assert len(system_messages) >= 2
+        assert system_messages[0]["content"].startswith("# Codex Execution Contract")
+        assert kwargs["tool_choice"] == "required"
+        assert kwargs["store"] is False
+        assert "max_tokens" not in kwargs
+        assert "stream_options" not in kwargs
+        assert kwargs["api_base"] == "https://chatgpt.com/backend-api/codex"
+        assert "store" in kwargs["allowed_openai_params"]
+
+    def test_codex_merge_tool_call_chunk_handles_parallel_calls_with_broken_indexes(self):
+        """Codex chunk merging should survive index=0 for multiple parallel tool calls."""
+        from types import SimpleNamespace
+
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.3-codex",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex",
+        )
+        acc: dict[int, dict[str, str]] = {}
+        last_idx = 0
+
+        chunks = [
+            SimpleNamespace(
+                id="tool_1",
+                index=0,
+                function=SimpleNamespace(name="web_search", arguments='{"query":"alpha'),
+            ),
+            SimpleNamespace(
+                id="tool_2",
+                index=0,
+                function=SimpleNamespace(name="read_file", arguments='{"path":"beta'),
+            ),
+            SimpleNamespace(
+                id=None,
+                index=0,
+                function=SimpleNamespace(name=None, arguments='"}'),
+            ),
+            SimpleNamespace(
+                id=None,
+                index=0,
+                function=SimpleNamespace(name=None, arguments='"}'),
+            ),
+        ]
+
+        for chunk in chunks:
+            last_idx = provider._merge_tool_call_chunk(acc, chunk, last_idx)
+
+        assert len(acc) == 2
+        parsed = [
+            provider._parse_tool_call_arguments(slot["arguments"], slot["name"])
+            for _, slot in sorted(acc.items())
+        ]
+        assert parsed == [
+            {"query": "alpha"},
+            {"path": "beta"},
+        ]
 
 
 class TestOpenRouterToolCompatFallback:

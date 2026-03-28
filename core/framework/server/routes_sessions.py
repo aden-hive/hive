@@ -28,8 +28,6 @@ import contextlib
 import json
 import logging
 import shutil
-import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -42,9 +40,44 @@ from framework.server.app import (
     sessions_dir,
     validate_agent_path,
 )
-from framework.server.session_manager import SessionManager
+from framework.server.session_manager import (
+    SessionManager,
+    WorkerValidationError,
+    _run_validation_report_sync,
+    _validation_blocks_stage_or_run,
+    _validation_failures,
+)
 
 logger = logging.getLogger(__name__)
+
+
+async def _worker_validation_error(session) -> web.Response | None:
+    """Return a 409 response when the loaded worker is invalid."""
+    report = getattr(session, "worker_validation_report", None)
+    if report is None and getattr(session, "worker_path", None):
+        loop = asyncio.get_running_loop()
+        report = await loop.run_in_executor(
+            None, lambda: _run_validation_report_sync(str(session.worker_path))
+        )
+        session.worker_validation_report = report
+        session.worker_validation_failures = _validation_failures(report)
+
+    if _validation_blocks_stage_or_run(report):
+        failures = getattr(session, "worker_validation_failures", None) or _validation_failures(
+            report
+        )
+        worker_name = getattr(getattr(session, "worker_path", None), "name", "") or "current worker"
+        return web.json_response(
+            {
+                "error": (
+                    f"Worker '{worker_name}' failed validation and cannot be executed. "
+                    "Fix the package and reload it before running or restoring."
+                ),
+                "validation_failures": failures,
+            },
+            status=409,
+        )
+    return None
 
 
 def _get_manager(request: web.Request) -> SessionManager:
@@ -53,11 +86,8 @@ def _get_manager(request: web.Request) -> SessionManager:
 
 def _session_to_live_dict(session) -> dict:
     """Serialize a live Session to the session-primary JSON shape."""
-    from framework.llm.capabilities import supports_image_tool_results
-
     info = session.worker_info
     phase_state = getattr(session, "phase_state", None)
-    queen_model: str = getattr(getattr(session, "runner", None), "model", "") or ""
     return {
         "session_id": session.id,
         "worker_id": session.worker_id,
@@ -73,7 +103,6 @@ def _session_to_live_dict(session) -> dict:
         "queen_phase": phase_state.phase
         if phase_state
         else ("staging" if session.worker_runtime else "planning"),
-        "queen_supports_images": supports_image_tool_results(queen_model) if queen_model else True,
     }
 
 
@@ -311,6 +340,11 @@ async def handle_load_worker(request: web.Request) -> web.Response:
             model=model,
         )
     except ValueError as e:
+        if isinstance(e, WorkerValidationError):
+            return web.json_response(
+                {"error": str(e), "validation_failures": e.failures},
+                status=409,
+            )
         return web.json_response({"error": str(e)}, status=409)
     except FileNotFoundError:
         return web.json_response({"error": f"Agent not found: {agent_path}"}, status=404)
@@ -729,6 +763,10 @@ async def handle_restore_checkpoint(request: web.Request) -> web.Response:
     if not session.worker_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
 
+    validation_err = await _worker_validation_error(session)
+    if validation_err is not None:
+        return validation_err
+
     ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
     ws_id = safe_path_segment(ws_id)
     checkpoint_id = safe_path_segment(request.match_info["checkpoint_id"])
@@ -984,29 +1022,6 @@ async def handle_discover(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
-async def handle_reveal_session_folder(request: web.Request) -> web.Response:
-    """POST /api/sessions/{session_id}/reveal — open session data folder in the OS file manager."""
-    manager: SessionManager = request.app["manager"]
-    session_id = request.match_info["session_id"]
-
-    session = manager.get_session(session_id)
-    storage_session_id = (session.queen_resume_from or session.id) if session else session_id
-    folder = Path.home() / ".hive" / "queen" / "session" / storage_session_id
-    folder.mkdir(parents=True, exist_ok=True)
-
-    try:
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", str(folder)])
-        elif sys.platform == "win32":
-            subprocess.Popen(["explorer", str(folder)])
-        else:
-            subprocess.Popen(["xdg-open", str(folder)])
-    except Exception as exc:
-        return web.json_response({"error": str(exc)}, status=500)
-
-    return web.json_response({"path": str(folder)})
-
-
 # ------------------------------------------------------------------
 # Route registration
 # ------------------------------------------------------------------
@@ -1031,7 +1046,6 @@ def register_routes(app: web.Application) -> None:
     app.router.add_delete("/api/sessions/{session_id}/worker", handle_unload_worker)
 
     # Session info
-    app.router.add_post("/api/sessions/{session_id}/reveal", handle_reveal_session_folder)
     app.router.add_get("/api/sessions/{session_id}/stats", handle_session_stats)
     app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
     app.router.add_patch(

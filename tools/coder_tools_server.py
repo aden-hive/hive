@@ -68,6 +68,15 @@ mcp = FastMCP("coder-tools")
 
 PROJECT_ROOT: str = ""
 SNAPSHOT_DIR: str = ""
+_PLACEHOLDER_MARKERS = (
+    "TODO",
+    "TODO:",
+    "TODO ",
+    "Add system prompt for this node",
+    "Add identity prompt",
+    "Define success criteria",
+    "Describe what this node does",
+)
 
 
 # ── Path resolution ───────────────────────────────────────────────────────
@@ -136,6 +145,388 @@ def _resolve_path(path: str) -> str:
     if common != PROJECT_ROOT:
         raise ValueError(f"Access denied: '{path}' is outside the project root.")
     return resolved
+
+
+def _is_placeholder_text(value: str | None) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return True
+    return any(marker in text for marker in _PLACEHOLDER_MARKERS)
+
+
+_ENTRY_INTAKE_HINTS = (
+    "parse the incoming task",
+    "parse the task text",
+    "structured runtime task",
+    "accept structured runtime task",
+    "read runtime task input",
+    "validate runtime",
+    "validate runtime path",
+    "validate runtime paths",
+    "intake & validate",
+    "configuration values",
+    "intake config",
+    "infer values conservatively",
+)
+_ENTRY_DIRECT_WORK_HINTS = (
+    "scan",
+    "scanning",
+    "discover",
+    "discovery",
+    "search",
+    "fetch",
+    "analyze",
+    "analyse",
+    "transform",
+    "sanitize",
+    "summarize",
+    "summarise",
+    "generate",
+    "write",
+    "apply",
+    "candidate",
+)
+_TOOL_ALIAS_HINTS = {
+    "run_command": "execute_command_tool",
+}
+_OUTPUT_DIRECTORY_INPUT_HINTS = {
+    "review_dir",
+    "output_dir",
+    "destination_dir",
+    "dest_dir",
+    "target_dir",
+    "review_path",
+    "output_path",
+    "destination_path",
+    "dest_path",
+    "target_path",
+}
+_SESSION_DATA_TOOLS = frozenset(
+    {
+        "save_data",
+        "load_data",
+        "list_data_files",
+        "append_data",
+        "edit_data",
+        "serve_file_to_user",
+    }
+)
+_WORKSPACE_PATH_HINTS = frozenset(
+    {
+        "review_dir",
+        "review_root",
+        "output_dir",
+        "output_root",
+        "output_path",
+        "target_dir",
+        "target_root",
+        "target_path",
+        "workspace",
+        "project folder",
+        "project folders",
+    }
+)
+_SESSION_DATA_TOOL_PATH_OP_RE = re.compile(
+    r"(save_data|load_data|list_data_files|append_data|edit_data|serve_file_to_user)"
+    r"[^.\n]{0,200}\b(?:to|into|in|inside|under|within|from|at|on)\s+(?:the\s+)?"
+    r"(review_dir|review_root|output_dir|output_root|output_path|target_dir|target_root|"
+    r"target_path|workspace|project folder|project folders)\b|"
+    r"\b(?:to|into|in|inside|under|within|from|at|on)\s+(?:the\s+)?"
+    r"(review_dir|review_root|output_dir|output_root|output_path|target_dir|target_root|"
+    r"target_path|workspace|project folder|project folders)\b[^.\n]{0,200}"
+    r"(save_data|load_data|list_data_files|append_data|edit_data|serve_file_to_user)",
+    re.IGNORECASE,
+)
+
+
+def _contains_hint_word(text: str, hint: str) -> bool:
+    """Return True when *hint* appears as a word/phrase, not just a substring."""
+    if " " in hint:
+        return hint in text
+    return re.search(rf"\b{re.escape(hint)}\b", text) is not None
+
+
+def _default_intro_message(human_name: str, description: str) -> str:
+    """Return a non-placeholder intro line for generated agents."""
+    desc = (description or "").strip().rstrip(".")
+    if desc:
+        return f"{desc}."
+    return f"Ready to run {human_name}."
+
+
+def _default_success_metric(index: int) -> str:
+    """Return a generic but non-placeholder success metric name."""
+    return f"criterion_{index}_satisfied"
+
+
+def _looks_like_agent_path(agent_ref: str) -> bool:
+    """Return True when *agent_ref* should be treated as a filesystem path."""
+    candidate = Path(agent_ref).expanduser()
+    return candidate.is_absolute() or len(candidate.parts) > 1 or agent_ref.startswith((".", "~"))
+
+
+def _resolve_agent_package_target(agent_ref: str) -> tuple[Path, str, str]:
+    """Resolve a validator target to (agent_dir, package_name, display_ref).
+
+    Bare names still target exports/<name> for build-time validation.
+    Paths are resolved relative to the repository root and must pass the
+    server allowlist so existing example agents can be staged safely.
+    """
+    ref = (agent_ref or "").strip()
+    if not ref:
+        raise ValueError("Agent reference is required")
+
+    if not PROJECT_ROOT:
+        raise ValueError("PROJECT_ROOT is not configured")
+
+    if _looks_like_agent_path(ref):
+        resolved = Path(_resolve_path(ref))
+        try:
+            from framework.server.app import validate_agent_path
+        except ImportError as exc:
+            raise ValueError("Cannot validate agent path: framework package not available") from exc
+
+        resolved = validate_agent_path(str(resolved))
+        return resolved, resolved.name, str(resolved)
+
+    resolved = (Path(PROJECT_ROOT) / "exports" / ref).resolve()
+    return resolved, ref, f"exports/{ref}"
+
+
+def _default_success_target() -> str:
+    """Return a generic non-placeholder success target."""
+    return "true"
+
+
+def _node_can_progress_without_declared_tools(node) -> bool:
+    """Return True when a node can legitimately work without MCP/local tools.
+
+    Runtime supports two common cases that should not be blocked by static
+    validation:
+    - ``gcu`` nodes, whose browser tools are injected by the framework.
+    - pure LLM work nodes that consume inputs and explicitly write outputs via
+      ``set_output`` without needing external tools.
+    """
+    if getattr(node, "node_type", "") == "gcu":
+        return True
+
+    output_keys = list(getattr(node, "output_keys", []) or [])
+    if not output_keys:
+        return False
+
+    prompt = (getattr(node, "system_prompt", "") or "").lower()
+    text = " ".join(
+        filter(
+            None,
+            [
+                getattr(node, "name", "") or "",
+                getattr(node, "description", "") or "",
+                getattr(node, "system_prompt", "") or "",
+            ],
+        )
+    ).lower()
+    mentions_set_output = (
+        "set_output(" in prompt
+        or "call set_output" in prompt
+        or "use set_output" in prompt
+        or "set_output " in prompt
+    )
+    looks_like_real_work = any(_contains_hint_word(text, hint) for hint in _ENTRY_DIRECT_WORK_HINTS)
+    return mentions_set_output and looks_like_real_work
+
+
+def _behavior_validation_errors(agent_module) -> list[str]:
+    """Return behavior-level validation errors for a generated agent package."""
+    errors: list[str] = []
+    nodes = list(getattr(agent_module, "nodes", []) or [])
+    terminal_ids = set(getattr(agent_module, "terminal_nodes", []) or [])
+    entry_node_id = getattr(agent_module, "entry_node", None) or ""
+    identity_prompt = getattr(agent_module, "identity_prompt", "") or ""
+    metadata = getattr(agent_module, "metadata", None)
+    goal = getattr(agent_module, "goal", None)
+
+    identity_prompt_text = identity_prompt.strip()
+    if not identity_prompt_text:
+        errors.append("identity_prompt is blank")
+    elif any(marker in identity_prompt_text for marker in _PLACEHOLDER_MARKERS):
+        errors.append("identity_prompt still contains TODO placeholders")
+
+    if metadata is not None:
+        if _is_placeholder_text(getattr(metadata, "description", "") or ""):
+            errors.append("metadata.description is blank or still contains TODO placeholders")
+        if _is_placeholder_text(getattr(metadata, "intro_message", "") or ""):
+            errors.append("metadata.intro_message is blank or still contains TODO placeholders")
+
+    if goal is not None:
+        if _is_placeholder_text(getattr(goal, "description", "") or ""):
+            errors.append("goal.description is blank or still contains TODO placeholders")
+        for criterion in list(getattr(goal, "success_criteria", []) or []):
+            cid = getattr(criterion, "id", "<unknown>")
+            for attr in ("description", "metric", "target"):
+                if _is_placeholder_text(getattr(criterion, attr, "") or ""):
+                    errors.append(f"Success criterion '{cid}' has blank or placeholder {attr}")
+        for constraint in list(getattr(goal, "constraints", []) or []):
+            cid = getattr(constraint, "id", "<unknown>")
+            if _is_placeholder_text(getattr(constraint, "description", "") or ""):
+                errors.append(f"Constraint '{cid}' has blank or placeholder description")
+
+    for node in nodes:
+        node_id = getattr(node, "id", "<unknown>")
+        node_desc = getattr(node, "description", "") or ""
+        if _is_placeholder_text(node_desc):
+            errors.append(f"Node '{node_id}' has a blank or placeholder description")
+
+        prompt = getattr(node, "system_prompt", "") or ""
+        prompt_lower = prompt.lower()
+        if _is_placeholder_text(prompt):
+            errors.append(f"Node '{node_id}' has a blank or placeholder system_prompt")
+        else:
+            tools = list(getattr(node, "tools", []) or [])
+            for tool_name in tools:
+                if isinstance(tool_name, str) and f"{tool_name}(" in prompt:
+                    errors.append(
+                        f"Node '{node_id}' system_prompt uses callable-style tool syntax for "
+                        f"'{tool_name}'. Describe tool usage in prose instead of "
+                        "Python-style calls."
+                    )
+            for alias, actual in _TOOL_ALIAS_HINTS.items():
+                if alias in prompt and actual in tools and alias not in tools:
+                    errors.append(
+                        f"Node '{node_id}' system_prompt references unsupported tool alias "
+                        f"'{alias}'. Use the actual registered tool name '{actual}'."
+                    )
+            data_tools_used = [tool for tool in tools if tool in _SESSION_DATA_TOOLS]
+            if data_tools_used:
+                workspace_path_hints = []
+                if _SESSION_DATA_TOOL_PATH_OP_RE.search(prompt):
+                    workspace_path_hints = [
+                        hint
+                        for hint in _WORKSPACE_PATH_HINTS
+                        if _contains_hint_word(prompt_lower, hint)
+                    ]
+                if workspace_path_hints:
+                    joined_tools = ", ".join(sorted(data_tools_used))
+                    joined_hints = ", ".join(sorted(workspace_path_hints))
+                    errors.append(
+                        f"Node '{node_id}' uses session data tools ({joined_tools}) as if they "
+                        f"can operate on workspace paths ({joined_hints}). Data tools use the "
+                        "framework-managed session data directory; use execute_command_tool for "
+                        "workspace/review/output directories."
+                    )
+
+        success_criteria = getattr(node, "success_criteria", "") or ""
+        if _is_placeholder_text(success_criteria):
+            errors.append(f"Node '{node_id}' has blank or placeholder success_criteria")
+
+        tools = list(getattr(node, "tools", []) or [])
+        sub_agents = list(getattr(node, "sub_agents", []) or [])
+        client_facing = bool(getattr(node, "client_facing", False))
+        if (
+            node_id not in terminal_ids
+            and not client_facing
+            and not tools
+            and not sub_agents
+            and not _node_can_progress_without_declared_tools(node)
+        ):
+            errors.append(f"Autonomous node '{node_id}' has no tools or sub_agents")
+
+        if node_id == entry_node_id:
+            input_keys = list(getattr(node, "input_keys", []) or [])
+            output_keys = list(getattr(node, "output_keys", []) or [])
+            text = " ".join(
+                filter(
+                    None,
+                    [
+                        getattr(node, "name", "") or "",
+                        node_desc,
+                        prompt,
+                    ],
+                )
+            ).lower()
+            lowered_input_keys = {str(key).lower() for key in input_keys}
+            lowered_output_keys = {str(key).lower() for key in output_keys}
+            generic_task_only = len(input_keys) == 1 and input_keys[0] in {
+                "task",
+                "user_request",
+                "raw",
+                "input",
+                "request",
+                "message",
+            }
+            intake_like = any(hint in text for hint in _ENTRY_INTAKE_HINTS)
+            direct_work_like = any(
+                _contains_hint_word(text, hint) for hint in _ENTRY_DIRECT_WORK_HINTS
+            )
+            pass_through_inputs = bool(lowered_input_keys) and (
+                lowered_input_keys <= lowered_output_keys
+            )
+            runtime_normalization_only = any(
+                hint in text
+                for hint in (
+                    "validate",
+                    "validation",
+                    "normalize",
+                    "normalise",
+                    "config",
+                    "configuration",
+                    "runtime",
+                    "path",
+                    "paths",
+                )
+            )
+            if (
+                intake_like
+                and not direct_work_like
+                and (generic_task_only or pass_through_inputs or runtime_normalization_only)
+            ):
+                errors.append(
+                    f"Entry node '{node_id}' appears to be an intake/config parser. "
+                    "The queen handles intake. Make the first real work node consume "
+                    "structured input_keys directly instead of reparsing a generic task string."
+                )
+            for input_key in input_keys:
+                lowered_key = str(input_key).lower()
+                if lowered_key not in _OUTPUT_DIRECTORY_INPUT_HINTS:
+                    continue
+                if (
+                    lowered_key in text
+                    and "exist" in text
+                    and ("directory" in text or "directories" in text)
+                ):
+                    errors.append(
+                        f"Entry node '{node_id}' requires output path '{input_key}' to pre-exist. "
+                        "Output/review directories should be created if missing instead of "
+                        "blocking the run during intake validation."
+                    )
+                    break
+
+    return errors
+
+
+def _classify_behavior_validation_errors(errors: list[str]) -> tuple[list[str], list[str]]:
+    """Split behavior validation findings into blocking errors and warnings.
+
+    Hard failures are reserved for issues that are likely to break runtime
+    execution or violate framework contracts. Quality/style issues remain
+    warnings so they can be surfaced without preventing staging/runs.
+    """
+    blocking_markers = (
+        "identity_prompt still contains TODO placeholders",
+        "blank or placeholder system_prompt",
+        "uses session data tools",
+        "Autonomous node ",
+        "appears to be an intake/config parser",
+        "requires output path",
+    )
+
+    blocking: list[str] = []
+    warnings: list[str] = []
+    for error in errors:
+        if any(marker in error for marker in blocking_markers):
+            blocking.append(error)
+        else:
+            warnings.append(error)
+    return blocking, warnings
 
 
 # ── Git snapshot system (ported from opencode's shadow git) ───────────────
@@ -752,9 +1143,14 @@ def list_agent_tools(
 
 
 def _validate_agent_tools_impl(agent_path: str) -> dict:
-    """Validate that all tools declared in an agent's nodes exist in its MCP servers.
+    """Validate that all tools declared in an agent's nodes exist at runtime.
 
-    Returns a dict with validation result: pass/fail, missing tools per node, available tools.
+    Mirrors runtime tool discovery:
+    1. MCP tools from ``mcp_servers.json`` (when present)
+    2. Agent-local ``tools.py`` custom tools (when present)
+
+    Returns a dict with validation result: pass/fail, missing tools per node,
+    available tools, and discovery warnings.
     """
     try:
         resolved = _resolve_path(agent_path)
@@ -781,11 +1177,8 @@ def _validate_agent_tools_impl(agent_path: str) -> dict:
 
     agent_dir = resolved  # Keep path; 'resolved' is reused for MCP config in loop
 
-    # --- Discover available tools from agent's MCP servers ---
+    # --- Discover available tools from MCP + local tools.py ---
     mcp_config_path = os.path.join(agent_dir, "mcp_servers.json")
-    if not os.path.isfile(mcp_config_path):
-        return {"error": f"No mcp_servers.json found in {agent_path}"}
-
     try:
         from pathlib import Path
 
@@ -796,36 +1189,45 @@ def _validate_agent_tools_impl(agent_path: str) -> dict:
 
     available_tools: set[str] = set()
     discovery_errors = []
-    config_dir = Path(mcp_config_path).parent
-
-    try:
-        with open(mcp_config_path, encoding="utf-8") as f:
-            servers_config = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        return {"error": f"Failed to read mcp_servers.json: {e}"}
-
-    for server_name, server_conf in servers_config.items():
-        resolved = ToolRegistry.resolve_mcp_stdio_config(
-            {"name": server_name, **server_conf}, config_dir
-        )
+    if os.path.isfile(mcp_config_path):
+        config_dir = Path(mcp_config_path).parent
         try:
-            config = MCPServerConfig(
-                name=server_name,
-                transport=resolved.get("transport", "stdio"),
-                command=resolved.get("command"),
-                args=resolved.get("args", []),
-                env=resolved.get("env", {}),
-                cwd=resolved.get("cwd"),
-                url=resolved.get("url"),
-                headers=resolved.get("headers", {}),
+            with open(mcp_config_path, encoding="utf-8") as f:
+                servers_config = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            return {"error": f"Failed to read mcp_servers.json: {e}"}
+
+        for server_name, server_conf in servers_config.items():
+            resolved = ToolRegistry.resolve_mcp_stdio_config(
+                {"name": server_name, **server_conf}, config_dir
             )
-            client = MCPClient(config)
-            client.connect()
-            for tool in client.list_tools():
-                available_tools.add(tool.name)
-            client.disconnect()
+            try:
+                config = MCPServerConfig(
+                    name=server_name,
+                    transport=resolved.get("transport", "stdio"),
+                    command=resolved.get("command"),
+                    args=resolved.get("args", []),
+                    env=resolved.get("env", {}),
+                    cwd=resolved.get("cwd"),
+                    url=resolved.get("url"),
+                    headers=resolved.get("headers", {}),
+                )
+                client = MCPClient(config)
+                client.connect()
+                for tool in client.list_tools():
+                    available_tools.add(tool.name)
+                client.disconnect()
+            except Exception as e:
+                discovery_errors.append({"server": server_name, "error": str(e)})
+
+    local_tools_path = Path(agent_dir) / "tools.py"
+    if local_tools_path.is_file():
+        try:
+            registry = ToolRegistry()
+            registry.discover_from_module(local_tools_path)
+            available_tools.update(registry.get_tools().keys())
         except Exception as e:
-            discovery_errors.append({"server": server_name, "error": str(e)})
+            discovery_errors.append({"server": "tools.py", "error": str(e)})
 
     # --- Load agent nodes and extract declared tools ---
     agent_py = os.path.join(agent_dir, "agent.py")
@@ -1227,7 +1629,7 @@ def get_agent_checkpoint(
 
 
 def _run_agent_tests_impl(
-    agent_name: str,
+    agent_ref: str,
     test_types: str = "all",
     fail_fast: bool = False,
 ) -> dict:
@@ -1235,22 +1637,35 @@ def _run_agent_tests_impl(
 
     Returns a dict with summary counts, per-test results, and failure details.
     """
-    agent_path = Path(PROJECT_ROOT) / "exports" / agent_name
+    try:
+        agent_path, agent_name, display_ref = _resolve_agent_package_target(agent_ref)
+    except ValueError as e:
+        return {"error": str(e)}
+
     if not agent_path.is_dir():
-        # Fall back to framework agents
+        # Fall back to framework agents for bare framework package names.
         agent_path = Path(PROJECT_ROOT) / "core" / "framework" / "agents" / agent_name
     tests_dir = agent_path / "tests"
 
     if not agent_path.is_dir():
         return {
-            "error": f"Agent not found: {agent_name}",
+            "error": f"Agent not found: {agent_ref}",
             "hint": "Use list_agents() to see available agents.",
         }
 
     if not tests_dir.exists():
         return {
-            "error": f"No tests directory: exports/{agent_name}/tests/",
-            "hint": "Create test files in the tests/ directory first.",
+            "agent_name": agent_name,
+            "agent_path": str(agent_path),
+            "summary": f"No tests directory: {tests_dir}",
+            "passed": 0,
+            "failed": 0,
+            "skipped": 1,
+            "errors": 0,
+            "total": 0,
+            "test_results": [],
+            "failures": [],
+            "skipped_all": True,
         }
 
     # Parse test types
@@ -1297,7 +1712,10 @@ def _run_agent_tests_impl(
     core_path = os.path.join(PROJECT_ROOT, "core")
     exports_path = os.path.join(PROJECT_ROOT, "exports")
     fw_agents_path = os.path.join(PROJECT_ROOT, "core", "framework", "agents")
+    package_parent = str(agent_path.parent)
     path_parts = [core_path, exports_path, fw_agents_path, PROJECT_ROOT]
+    if package_parent not in path_parts:
+        path_parts.insert(1, package_parent)
     if pythonpath:
         path_parts.append(pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(path_parts)
@@ -1387,6 +1805,7 @@ def _run_agent_tests_impl(
 
     return {
         "agent_name": agent_name,
+        "agent_path": str(agent_path),
         "summary": summary_text,
         "passed": passed,
         "failed": failed,
@@ -1425,28 +1844,50 @@ def run_agent_tests(
 # ── Meta-agent: Unified agent validation ───────────────────────────────────
 
 
-@mcp.tool()
-def validate_agent_package(agent_name: str) -> str:
+def _validate_agent_package_impl(agent_name: str) -> dict[str, object]:
     """Run structural validation checks on a built agent package in one call.
 
-    Executes 5 steps and reports all results (does not stop on first failure):
+    Executes multiple checks and reports all results (does not stop on first failure):
       1. Class validation — checks graph structure and entry_points contract
       2. Node completeness — every NodeSpec in nodes/ must be in the nodes list,
          and GCU nodes must be referenced in a parent's sub_agents
       3. Graph validation — loads the agent graph without credential checks
-      4. Tool validation — checks declared tools exist in MCP servers
-      5. Tests — runs the agent's pytest suite
+      4. Behavior validation — rejects placeholder prompts and empty autonomous nodes
+      5. Tool validation — checks declared tools exist in MCP servers
+      6. Tests — runs the agent's pytest suite
 
     Note: Credential validation is intentionally skipped here (building phase).
     Credentials are validated at run time by run_agent_with_input() preflight.
 
     Args:
-        agent_name: Agent package name (e.g. 'my_agent'). Must exist in exports/.
+        agent_name: Agent package name (e.g. 'my_agent') or an allowed
+            agent path such as examples/templates/my_agent.
 
     Returns:
-        JSON with per-step results and overall pass/fail summary
+        Dict with per-step results and overall pass/fail summary
     """
-    agent_path = f"exports/{agent_name}"
+    global PROJECT_ROOT, SNAPSHOT_DIR
+
+    if not PROJECT_ROOT:
+        PROJECT_ROOT = _find_project_root()
+    if not SNAPSHOT_DIR and PROJECT_ROOT:
+        SNAPSHOT_DIR = os.path.join(
+            os.path.expanduser("~"),
+            ".hive",
+            "snapshots",
+            os.path.basename(PROJECT_ROOT),
+        )
+
+    try:
+        agent_dir, package_name, display_ref = _resolve_agent_package_target(agent_name)
+    except ValueError as e:
+        return {
+            "valid": False,
+            "agent_name": agent_name,
+            "steps": {"target_resolution": {"passed": False, "error": str(e)}},
+            "summary": "FAIL: 1 of 1 steps failed (target_resolution)",
+        }
+
     steps: dict[str, dict] = {}
 
     # Set up env for subprocess calls
@@ -1454,8 +1895,11 @@ def validate_agent_package(agent_name: str) -> str:
     core_path = os.path.join(PROJECT_ROOT, "core")
     exports_path = os.path.join(PROJECT_ROOT, "exports")
     fw_agents_path = os.path.join(PROJECT_ROOT, "core", "framework", "agents")
+    package_parent = str(agent_dir.parent)
     pythonpath = env.get("PYTHONPATH", "")
     path_parts = [core_path, exports_path, fw_agents_path, PROJECT_ROOT]
+    if package_parent not in path_parts:
+        path_parts.insert(1, package_parent)
     if pythonpath:
         path_parts.append(pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(path_parts)
@@ -1464,22 +1908,22 @@ def validate_agent_package(agent_name: str) -> str:
     try:
         _contract_script = textwrap.dedent("""\
             import importlib, json
-            mod = importlib.import_module('{agent_name}')
+            mod = importlib.import_module('{package_name}')
             missing = [a for a in ('goal', 'nodes', 'edges') if getattr(mod, a, None) is None]
             if missing:
                 print(json.dumps({{
                     'valid': False,
                     'error': (
-                        "Module '{agent_name}' is missing module-level attributes: "
+                        "Module '{package_name}' is missing module-level attributes: "
                         + ", ".join(missing) + ". "
-                        "Fix: in {agent_name}/__init__.py, add "
+                        "Fix: in {package_name}/__init__.py, add "
                         "'from .agent import " + ", ".join(missing) + "' "
-                        "so that 'import {agent_name}' exposes them at package level."
+                        "so that 'import {package_name}' exposes them at package level."
                     )
                 }}))
             else:
                 print(json.dumps({{'valid': True}}))
-        """).format(agent_name=agent_name)
+        """).format(package_name=package_name)
         proc = subprocess.run(
             ["uv", "run", "python", "-c", _contract_script],
             capture_output=True,
@@ -1499,8 +1943,8 @@ def validate_agent_package(agent_name: str) -> str:
             steps["module_contract"] = {
                 "passed": False,
                 "error": (
-                    f"Failed to import '{agent_name}': {proc.stderr.strip()[:1000]}. "
-                    f"Fix: ensure {agent_name}/__init__.py exists and can be imported "
+                    f"Failed to import '{package_name}': {proc.stderr.strip()[:1000]}. "
+                    f"Fix: ensure {package_name}/__init__.py exists and can be imported "
                     f"without errors (check syntax, missing dependencies, relative imports)."
                 ),
             }
@@ -1515,7 +1959,7 @@ def validate_agent_package(agent_name: str) -> str:
                 "run",
                 "python",
                 "-c",
-                f"from {agent_name} import default_agent; print(default_agent.validate())",
+                f"from {package_name} import default_agent; print(default_agent.validate())",
             ],
             capture_output=True,
             text=True,
@@ -1562,7 +2006,7 @@ def validate_agent_package(agent_name: str) -> str:
                     )
             print(json.dumps({{'valid': len(errors) == 0, 'errors': errors}}))
         """)
-        check_script = _check_template.format(agent_name=agent_name)
+        check_script = _check_template.format(agent_name=package_name)
         proc = subprocess.run(
             ["uv", "run", "python", "-c", check_script],
             capture_output=True,
@@ -1603,7 +2047,7 @@ def validate_agent_package(agent_name: str) -> str:
                 "python",
                 "-c",
                 f"from framework.runner.runner import AgentRunner; "
-                f'r = AgentRunner.load("exports/{agent_name}", '
+                f"r = AgentRunner.load({str(display_ref)!r}, "
                 f"skip_credential_validation=True); "
                 f'print("AgentRunner.load (graph-only): OK")',
             ],
@@ -1624,9 +2068,42 @@ def validate_agent_package(agent_name: str) -> str:
     except Exception as e:
         steps["graph_validation"] = {"passed": False, "error": str(e)}
 
+    # Step B2: Behavior validation — reject placeholder prompts and empty work nodes
+    try:
+        import importlib
+
+        if package_parent not in sys.path:
+            sys.path.insert(0, package_parent)
+
+        stale = [
+            name
+            for name in sys.modules
+            if name == package_name or name.startswith(f"{package_name}.")
+        ]
+        for name in stale:
+            del sys.modules[name]
+
+        agent_mod = importlib.import_module(package_name)
+        behavior_errors = _behavior_validation_errors(agent_mod)
+        behavior_blockers, behavior_warnings = _classify_behavior_validation_errors(behavior_errors)
+        steps["behavior_validation"] = {
+            "passed": len(behavior_blockers) == 0,
+            "output": (
+                "No placeholder prompts or empty autonomous nodes detected"
+                if not behavior_errors
+                else "; ".join(behavior_blockers or behavior_warnings)
+            ),
+        }
+        if behavior_blockers:
+            steps["behavior_validation"]["errors"] = behavior_blockers
+        if behavior_warnings:
+            steps["behavior_validation"]["warnings"] = behavior_warnings
+    except Exception as e:
+        steps["behavior_validation"] = {"passed": False, "error": str(e)}
+
     # Step C: Tool validation (direct call)
     try:
-        tool_result = _validate_agent_tools_impl(agent_path)
+        tool_result = _validate_agent_tools_impl(str(agent_dir))
         if "error" in tool_result:
             steps["tool_validation"] = {"passed": False, "error": tool_result["error"]}
         else:
@@ -1641,17 +2118,33 @@ def validate_agent_package(agent_name: str) -> str:
 
     # Step D: Tests (direct call)
     try:
-        test_result = _run_agent_tests_impl(agent_name)
-        if "error" in test_result:
-            steps["tests"] = {"passed": False, "error": test_result["error"]}
+        test_result = _run_agent_tests_impl(str(agent_dir))
+        if test_result.get("skipped_all"):
+            steps["tests"] = {
+                "passed": True,
+                "skipped": True,
+                "summary": test_result.get("summary", "No tests directory found; skipped"),
+            }
+        elif "error" in test_result:
+            steps["tests"] = {
+                "passed": False,
+                "warning": test_result["error"],
+                "warnings": [test_result["error"]],
+            }
         else:
             all_passed = test_result.get("failed", 0) == 0 and test_result.get("errors", 0) == 0
             steps["tests"] = {
                 "passed": all_passed,
                 "summary": test_result.get("summary", "unknown"),
             }
-            if not all_passed and test_result.get("failures"):
-                steps["tests"]["failures"] = test_result["failures"]
+            if not all_passed:
+                warning_summary = (
+                    f"Test suite not fully passing: {test_result.get('summary', 'unknown')}"
+                )
+                steps["tests"]["warning"] = warning_summary
+                steps["tests"]["warnings"] = [warning_summary]
+                if test_result.get("failures"):
+                    steps["tests"]["failures"] = test_result["failures"]
     except Exception as e:
         steps["tests"] = {"passed": False, "error": str(e)}
 
@@ -1665,13 +2158,20 @@ def validate_agent_package(agent_name: str) -> str:
     else:
         summary = f"FAIL: {len(failed_steps)} of {total} steps failed ({', '.join(failed_steps)})"
 
+    return {
+        "valid": valid,
+        "agent_name": package_name,
+        "agent_path": str(agent_dir),
+        "steps": steps,
+        "summary": summary,
+    }
+
+
+@mcp.tool()
+def validate_agent_package(agent_name: str) -> str:
+    """Run structural validation checks on a built agent package in one call."""
     return json.dumps(
-        {
-            "valid": valid,
-            "agent_name": agent_name,
-            "steps": steps,
-            "summary": summary,
-        },
+        _validate_agent_package_impl(agent_name),
         indent=2,
         default=str,
     )
@@ -1804,10 +2304,10 @@ default_config = RuntimeConfig()
 
 @dataclass
 class AgentMetadata:
-    name: str = "{human_name}"
+    name: str = {human_name!r}
     version: str = "1.0.0"
-    description: str = "{_draft_desc or "TODO: Add agent description."}"
-    intro_message: str = "TODO: Add intro message."
+    description: str = {(_draft_desc or "TODO: Add agent description.")!r}
+    intro_message: str = {_default_intro_message(human_name, _draft_desc)!r}
 
 
 metadata = AgentMetadata()
@@ -1913,8 +2413,8 @@ __all__ = {node_var_names!r}
         SuccessCriterion(
             id="sc-{i + 1}",
             description="{sc}",
-            metric="TODO",
-            target="TODO",
+            metric="{_default_success_metric(i + 1)}",
+            target="{_default_success_target()}",
             weight=1.0,
         ),"""
             for i, sc in enumerate(_draft_sc)
@@ -1924,8 +2424,8 @@ __all__ = {node_var_names!r}
         SuccessCriterion(
             id="sc-1",
             description="TODO: Define success criterion.",
-            metric="TODO",
-            target="TODO",
+            metric="criterion_1_satisfied",
+            target="true",
             weight=1.0,
         ),"""
 
@@ -1997,7 +2497,10 @@ pause_nodes = []
 terminal_nodes = []
 
 conversation_mode = "continuous"
-identity_prompt = "TODO: Add identity prompt."
+identity_prompt = (
+    "You are {human_name}, a focused Hive worker that follows the goal, "
+    "constraints, and node instructions precisely."
+)
 loop_config = {{
     "max_iterations": 100,
     "max_tool_calls_per_turn": 30,
@@ -2063,7 +2566,7 @@ class {class_name}:
                     name="Default",
                     entry_node=self.entry_node,
                     trigger_type="manual",
-                    isolation_level="shared",
+                    isolation_level="isolated",
                 ),
             ],
             llm=llm,
@@ -2347,11 +2850,13 @@ def runner_loaded():
             "files": all_file_paths,
             "next_steps": [
                 (
-                    "IMPORTANT: All generated files are structurally complete "
-                    "with correct imports, class definition, validate() method, "
-                    "and __init__.py exports. Use edit_file to customize TODO "
-                    "placeholders — do NOT use write_file to rewrite entire files, "
-                    "as this will break imports and structure."
+                    "IMPORTANT: The generated scaffold has correct imports, class "
+                    "definition, validate() method, and __init__.py exports, but "
+                    "it is NOT ready to load or run yet. Replace every TODO / "
+                    "placeholder prompt and make validation pass before staging. "
+                    "Use edit_file to customize placeholders — do NOT use "
+                    "write_file to rewrite entire files, as this will break "
+                    "imports and structure."
                 ),
                 (
                     f"Use edit_file to customize system prompts, tools, "

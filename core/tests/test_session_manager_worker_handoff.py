@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from framework.runtime.event_bus import EventBus
+import framework.agents.worker_memory as worker_memory
+from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.server.session_manager import Session, SessionManager
 
 
@@ -123,3 +126,52 @@ async def test_stop_session_unsubscribes_worker_handoff() -> None:
         reason="after stop",
     )
     assert queen_node.inject_event.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_digest_final_completion_does_not_overwrite_terminal_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bus = EventBus()
+    manager = SessionManager()
+    session = _make_session(bus, session_id="session_digest_final")
+    session.worker_path = Path("/tmp/log_triage_agent")
+
+    queen_node = SimpleNamespace(inject_event=AsyncMock())
+    session.queen_executor = _make_executor(queen_node)
+
+    consolidate = AsyncMock()
+    monkeypatch.setattr(worker_memory, "consolidate_worker_run", consolidate)
+
+    manager._subscribe_worker_digest(session)
+
+    bus.get_history = lambda event_type=None, limit=None: [
+        AgentEvent(
+            type=EventType.EXECUTION_STARTED,
+            stream_id="default",
+            execution_id="exec_digest",
+            run_id="run_digest",
+        )
+    ]
+
+    await bus.publish(
+        AgentEvent(
+            type=EventType.EXECUTION_STARTED,
+            stream_id="default",
+            execution_id="exec_digest",
+            run_id="run_digest",
+        )
+    )
+    await bus.publish(
+        AgentEvent(
+            type=EventType.EXECUTION_COMPLETED,
+            stream_id="default",
+            execution_id="exec_digest",
+            run_id="run_digest",
+            data={"output": {"result": "final answer"}},
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    consolidate.assert_awaited_once()
+    assert queen_node.inject_event.await_count == 0

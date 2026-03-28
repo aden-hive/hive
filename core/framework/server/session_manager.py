@@ -12,6 +12,8 @@ Architecture:
 import asyncio
 import json
 import logging
+import subprocess
+import textwrap
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -22,6 +24,134 @@ from typing import Any
 from framework.runtime.triggers import TriggerDefinition
 
 logger = logging.getLogger(__name__)
+REPO_ROOT = Path(__file__).resolve().parents[3]
+CODER_TOOLS_SERVER = REPO_ROOT / "tools" / "coder_tools_server.py"
+
+
+def _parse_validation_report(raw: str | dict[str, Any] | None) -> dict[str, Any]:
+    """Best-effort parse of validate_agent_package output."""
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str):
+        return {}
+
+    cleaned = raw.strip()
+    if "\n\n[Saved to " in cleaned:
+        cleaned = cleaned.split("\n\n[Saved to ", 1)[0].strip()
+    if not cleaned:
+        return {}
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(cleaned[start : end + 1])
+            except json.JSONDecodeError:
+                return {}
+        return {}
+
+
+def _validation_failures(report: dict[str, Any] | None) -> list[str]:
+    """Extract readable failure summaries from a validation report."""
+    if not isinstance(report, dict):
+        return []
+
+    steps = report.get("steps") or {}
+    failures: list[str] = []
+    for step_name, step in steps.items():
+        if not isinstance(step, dict) or step.get("passed", False):
+            continue
+        if step.get("errors"):
+            errors = step["errors"]
+            if isinstance(errors, list):
+                failures.extend(f"{step_name}: {err}" for err in errors)
+                continue
+        if step.get("missing_tools"):
+            missing = step["missing_tools"]
+            if isinstance(missing, list):
+                failures.extend(f"{step_name}: missing tool {tool}" for tool in missing)
+                continue
+        detail = step.get("error") or step.get("output") or "validation failed"
+        failures.append(f"{step_name}: {detail}")
+    if not failures and report.get("summary"):
+        failures.append(str(report["summary"]))
+    return failures
+
+
+def _validation_blocks_stage_or_run(report: dict[str, Any] | None) -> bool:
+    """Return True when a validation report contains any failed step."""
+    if not isinstance(report, dict):
+        return False
+    steps = report.get("steps")
+    if not isinstance(steps, dict):
+        return bool(report.get("valid") is False)
+    return any(isinstance(step, dict) and not step.get("passed", False) for step in steps.values())
+
+
+def _run_validation_report_sync(agent_ref: str | Path) -> dict[str, Any]:
+    """Run validate_agent_package in an isolated subprocess.
+
+    Accepts either a built-agent package name (for exports/) or a full
+    allowed agent path such as examples/templates/<agent>.
+    """
+    if not agent_ref:
+        return {}
+    agent_ref_str = str(agent_ref)
+
+    script = textwrap.dedent(
+        """
+        import importlib.util
+        import sys
+
+        server_path = sys.argv[1]
+        agent_ref = sys.argv[2]
+        spec = importlib.util.spec_from_file_location("coder_tools_server", server_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        import json
+        print(json.dumps(module._validate_agent_package_impl(agent_ref), default=str))
+        """
+    )
+    try:
+        proc = subprocess.run(
+            ["uv", "run", "python", "-c", script, str(CODER_TOOLS_SERVER), agent_ref_str],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=REPO_ROOT,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {
+            "valid": False,
+            "summary": f"validate_agent_package failed for '{agent_ref_str}'",
+            "steps": {"validator_subprocess": {"passed": False, "error": str(exc)[:2000]}},
+        }
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or "validation subprocess failed"
+        return {
+            "valid": False,
+            "summary": f"validate_agent_package failed for '{agent_ref_str}'",
+            "steps": {"validator_subprocess": {"passed": False, "error": detail[:2000]}},
+        }
+    return _parse_validation_report(proc.stdout)
+
+
+class WorkerValidationError(ValueError):
+    """Raised when a worker package fails validation before load/run."""
+
+    def __init__(self, agent_name: str, report: dict[str, Any]):
+        self.agent_name = agent_name
+        self.report = report
+        self.failures = _validation_failures(report)
+        super().__init__(
+            f"Worker '{agent_name}' failed validation: "
+            + ("; ".join(self.failures) if self.failures else "validation failed")
+        )
 
 
 @dataclass
@@ -41,6 +171,8 @@ class Session:
     runner: Any | None = None  # AgentRunner
     worker_runtime: Any | None = None  # AgentRuntime
     worker_info: Any | None = None  # AgentInfo
+    worker_validation_report: dict[str, Any] | None = None
+    worker_validation_failures: list[str] = field(default_factory=list)
     # Queen phase state (building/staging/running)
     phase_state: Any = None  # QueenPhaseState
     # Worker handoff subscription
@@ -83,6 +215,47 @@ class SessionManager:
         self._credential_store = credential_store
         self._lock = asyncio.Lock()
 
+    async def suspend_queen(self, session: Session) -> None:
+        """Park the queen until the user sends a fresh message.
+
+        This is lighter than stopping the full session: it tears down the
+        queen executor and its subscriptions, but preserves the live session,
+        loaded worker, and persisted history. The next `/chat` call will
+        revive the queen via the normal code path.
+        """
+        if session.worker_handoff_sub is not None:
+            try:
+                session.event_bus.unsubscribe(session.worker_handoff_sub)
+            except Exception:
+                pass
+            session.worker_handoff_sub = None
+
+        if session.memory_consolidation_sub is not None:
+            try:
+                session.event_bus.unsubscribe(session.memory_consolidation_sub)
+            except Exception:
+                pass
+            session.memory_consolidation_sub = None
+
+        executor = session.queen_executor
+        if executor is not None:
+            node = executor.node_registry.get("queen")
+            if node is not None and hasattr(node, "signal_shutdown"):
+                node.signal_shutdown()
+
+        if session.queen_task is not None:
+            task = session.queen_task
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.debug("Queen task exited with error during suspend", exc_info=True)
+            session.queen_task = None
+
+        session.queen_executor = None
+
     # ------------------------------------------------------------------
     # Session lifecycle
     # ------------------------------------------------------------------
@@ -96,7 +269,8 @@ class SessionManager:
 
         Internal helper — use create_session() or create_session_with_worker().
         """
-        from framework.config import RuntimeConfig, get_hive_config
+        from framework.config import RuntimeConfig
+        from framework.llm.litellm import LiteLLMProvider
         from framework.runtime.event_bus import EventBus
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -110,20 +284,12 @@ class SessionManager:
         rc = RuntimeConfig(model=model or self._model or RuntimeConfig().model)
 
         # Session owns these — shared with queen and worker
-        llm_config = get_hive_config().get("llm", {})
-        if llm_config.get("use_antigravity_subscription"):
-            from framework.llm.antigravity import AntigravityProvider
-
-            llm = AntigravityProvider(model=rc.model)
-        else:
-            from framework.llm.litellm import LiteLLMProvider
-
-            llm = LiteLLMProvider(
-                model=rc.model,
-                api_key=rc.api_key,
-                api_base=rc.api_base,
-                **rc.extra_kwargs,
-            )
+        llm = LiteLLMProvider(
+            model=rc.model,
+            api_key=rc.api_key,
+            api_base=rc.api_base,
+            **rc.extra_kwargs,
+        )
         event_bus = EventBus()
 
         session = Session(
@@ -294,6 +460,11 @@ class SessionManager:
         try:
             # Blocking I/O — load in executor
             loop = asyncio.get_running_loop()
+            validation_report = await loop.run_in_executor(
+                None, lambda: _run_validation_report_sync(str(agent_path))
+            )
+            if _validation_blocks_stage_or_run(validation_report):
+                raise WorkerValidationError(agent_path.name, validation_report)
 
             # Prioritize: explicit model arg > worker-specific model > session default
             from framework.config import (
@@ -320,25 +491,17 @@ class SessionManager:
             # with the correct worker credentials so _setup() doesn't fall back
             # to the queen's llm config (which may be a different provider).
             if worker_model and not model:
-                from framework.config import get_hive_config
+                from framework.llm.litellm import LiteLLMProvider
 
-                worker_llm_cfg = get_hive_config().get("worker_llm", {})
-                if worker_llm_cfg.get("use_antigravity_subscription"):
-                    from framework.llm.antigravity import AntigravityProvider
-
-                    runner._llm = AntigravityProvider(model=resolved_model)
-                else:
-                    from framework.llm.litellm import LiteLLMProvider
-
-                    worker_api_key = get_worker_api_key()
-                    worker_api_base = get_worker_api_base()
-                    worker_extra = get_worker_llm_extra_kwargs()
-                    runner._llm = LiteLLMProvider(
-                        model=resolved_model,
-                        api_key=worker_api_key,
-                        api_base=worker_api_base,
-                        **worker_extra,
-                    )
+                worker_api_key = get_worker_api_key()
+                worker_api_base = get_worker_api_base()
+                worker_extra = get_worker_llm_extra_kwargs()
+                runner._llm = LiteLLMProvider(
+                    model=resolved_model,
+                    api_key=worker_api_key,
+                    api_base=worker_api_base,
+                    **worker_extra,
+                )
 
             # Setup with session's event bus
             if runner._agent_runtime is None:
@@ -383,6 +546,8 @@ class SessionManager:
             session.runner = runner
             session.worker_runtime = runtime
             session.worker_info = info
+            session.worker_validation_report = validation_report
+            session.worker_validation_failures = _validation_failures(validation_report)
 
             # Subscribe to execution completion for per-run digest generation
             self._subscribe_worker_digest(session)
@@ -637,6 +802,8 @@ class SessionManager:
         session.runner = None
         session.worker_runtime = None
         session.worker_info = None
+        session.worker_validation_report = None
+        session.worker_validation_failures = []
 
         # Notify queen
         await self._notify_queen_worker_unloaded(session)
@@ -820,12 +987,25 @@ class SessionManager:
                 return
             await node.inject_event(f"[WORKER_DIGEST]\n{content}")
 
-        async def _consolidate_and_notify(run_id: str, outcome_event: Any) -> None:
-            """Write the digest then push it to the queen."""
+        async def _consolidate_and_notify(
+            run_id: str,
+            outcome_event: Any,
+            *,
+            inject_to_queen: bool,
+        ) -> None:
+            """Write the digest and optionally push it into the queen.
+
+            Final worker completion/failure already emits a richer
+            [WORKER_TERMINAL] handoff with the real primary result. Injecting the
+            final digest as a second queen event causes Codex to replace that
+            result with a bland generic follow-up prompt. Keep writing digests to
+            disk for memory/history, but only inject mid-run snapshots.
+            """
             from framework.agents.worker_memory import consolidate_worker_run
 
             await consolidate_worker_run(_agent_name, run_id, outcome_event, _bus, _llm)
-            await _inject_digest_to_queen(run_id)
+            if inject_to_queen:
+                await _inject_digest_to_queen(run_id)
 
         async def _on_worker_event(event: Any) -> None:
             if event.stream_id == "queen":
@@ -851,7 +1031,7 @@ class SessionManager:
                 run_id = getattr(event, "run_id", None) or _resolve_run_id(exec_id)
                 if run_id:
                     asyncio.create_task(
-                        _consolidate_and_notify(run_id, event),
+                        _consolidate_and_notify(run_id, event, inject_to_queen=False),
                         name=f"worker-digest-final-{run_id}",
                     )
 
@@ -872,7 +1052,7 @@ class SessionManager:
                 if run_id:
                     _last_digest[exec_id] = now
                     asyncio.create_task(
-                        _consolidate_and_notify(run_id, None),
+                        _consolidate_and_notify(run_id, None, inject_to_queen=True),
                         name=f"worker-digest-{run_id}",
                     )
 
@@ -1047,17 +1227,10 @@ class SessionManager:
         _consolidation_session_dir = queen_dir
 
         async def _on_compaction(_event) -> None:
-            # Only consolidate on queen compactions — worker and subagent
-            # compactions are frequent and don't warrant a memory update.
-            if getattr(_event, "stream_id", None) != "queen":
-                return
             from framework.agents.queen.queen_memory import consolidate_queen_memory
 
-            asyncio.create_task(
-                consolidate_queen_memory(
-                    session.id, _consolidation_session_dir, _consolidation_llm
-                ),
-                name=f"queen-memory-consolidation-{session.id}",
+            await consolidate_queen_memory(
+                session.id, _consolidation_session_dir, _consolidation_llm
             )
 
         from framework.runtime.event_bus import EventType as _ET

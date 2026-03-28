@@ -22,6 +22,7 @@ from framework.graph.edge import (
 )
 from framework.graph.executor import ExecutionResult
 from framework.graph.node import NodeSpec
+from framework.llm.codex_backend import CODEX_API_BASE, build_codex_litellm_kwargs
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.preload_validation import run_preload_validation
 from framework.runner.tool_registry import ToolRegistry
@@ -327,17 +328,68 @@ def _read_codex_auth_file() -> dict | None:
         return None
 
 
+def _get_jwt_claims(token: str) -> dict | None:
+    """Decode JWT claims without verification for local expiry/account inspection."""
+    import base64
+
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        payload = parts[1]
+        padding = 4 - len(payload) % 4
+        if padding != 4:
+            payload += "=" * padding
+        decoded = base64.urlsafe_b64decode(payload)
+        claims = json.loads(decoded)
+        return claims if isinstance(claims, dict) else None
+    except Exception:
+        return None
+
+
+def _get_codex_token_expiry(auth_data: dict) -> float | None:
+    """Return the best-known expiry timestamp for a Codex access token."""
+    from datetime import datetime
+
+    tokens = auth_data.get("tokens", {})
+    access_token = tokens.get("access_token")
+    explicit = (
+        auth_data.get("expires_at")
+        or auth_data.get("expiresAt")
+        or tokens.get("expires_at")
+        or tokens.get("expiresAt")
+    )
+    if isinstance(explicit, (int, float)):
+        return float(explicit)
+    if isinstance(explicit, str):
+        try:
+            return datetime.fromisoformat(explicit.replace("Z", "+00:00")).timestamp()
+        except (ValueError, TypeError):
+            pass
+
+    if isinstance(access_token, str):
+        claims = _get_jwt_claims(access_token) or {}
+        exp = claims.get("exp")
+        if isinstance(exp, (int, float)):
+            return float(exp)
+    return None
+
+
 def _is_codex_token_expired(auth_data: dict) -> bool:
     """Check whether the Codex token is expired or close to expiry.
 
     The Codex auth.json has no explicit ``expiresAt`` field, so we infer
     expiry as ``last_refresh + _CODEX_TOKEN_LIFETIME_SECS``.  Falls back
-    to the file mtime when ``last_refresh`` is absent.
+    to JWT ``exp`` or file age heuristics when no explicit timestamp exists.
     """
     import time
     from datetime import datetime
 
     now = time.time()
+    explicit_expiry = _get_codex_token_expiry(auth_data)
+    if explicit_expiry is not None:
+        return now >= (explicit_expiry - _TOKEN_REFRESH_BUFFER_SECS)
+
     last_refresh = auth_data.get("last_refresh")
 
     if last_refresh is None:
@@ -431,6 +483,8 @@ def get_codex_token() -> str | None:
     Returns:
         The access token if available, None otherwise.
     """
+    import time
+
     # Try Keychain first, then file
     auth_data = _read_codex_keychain() or _read_codex_auth_file()
     if not auth_data:
@@ -441,15 +495,20 @@ def get_codex_token() -> str | None:
     if not access_token:
         return None
 
+    explicit_expiry = _get_codex_token_expiry(auth_data)
+    is_expired = _is_codex_token_expired(auth_data)
+
     # Check if token is still valid
-    if not _is_codex_token_expired(auth_data):
+    if not is_expired:
         return access_token
 
     # Token is expired or near expiry — attempt refresh
     refresh_token = tokens.get("refresh_token")
     if not refresh_token:
         logger.warning("Codex token expired and no refresh token available")
-        return access_token  # Return expired token; it may still work briefly
+        if explicit_expiry is not None and time.time() >= explicit_expiry:
+            return None
+        return access_token
 
     logger.info("Codex token expired or near expiry, refreshing...")
     token_data = _refresh_codex_token(refresh_token)
@@ -460,6 +519,8 @@ def get_codex_token() -> str | None:
 
     # Refresh failed — return the existing token and warn
     logger.warning("Codex token refresh failed. Run 'codex' to re-authenticate.")
+    if explicit_expiry is not None and time.time() >= explicit_expiry:
+        return None
     return access_token
 
 
@@ -471,26 +532,12 @@ def _get_account_id_from_jwt(access_token: str) -> str | None:
     This is used as a fallback when the auth.json doesn't store the
     account_id explicitly.
     """
-    import base64
-
-    try:
-        parts = access_token.split(".")
-        if len(parts) != 3:
-            return None
-        payload = parts[1]
-        # Add base64 padding
-        padding = 4 - len(payload) % 4
-        if padding != 4:
-            payload += "=" * padding
-        decoded = base64.urlsafe_b64decode(payload)
-        claims = json.loads(decoded)
-        auth = claims.get("https://api.openai.com/auth")
-        if isinstance(auth, dict):
-            account_id = auth.get("chatgpt_account_id")
-            if isinstance(account_id, str) and account_id:
-                return account_id
-    except Exception:
-        pass
+    claims = _get_jwt_claims(access_token) or {}
+    auth = claims.get("https://api.openai.com/auth")
+    if isinstance(auth, dict):
+        account_id = auth.get("chatgpt_account_id")
+        if isinstance(account_id, str) and account_id:
+            return account_id
     return None
 
 
@@ -1558,20 +1605,20 @@ class AgentRunner:
                 # OpenAI Codex subscription routes through the ChatGPT backend
                 # (chatgpt.com/backend-api/codex/responses), NOT the standard
                 # OpenAI API.  The consumer OAuth token lacks platform API scopes.
-                extra_headers: dict[str, str] = {
-                    "Authorization": f"Bearer {api_key}",
-                    "User-Agent": "CodexBar",
-                }
                 account_id = get_codex_account_id()
-                if account_id:
-                    extra_headers["ChatGPT-Account-Id"] = account_id
                 self._llm = LiteLLMProvider(
                     model=self.model,
                     api_key=api_key,
-                    api_base="https://chatgpt.com/backend-api/codex",
-                    extra_headers=extra_headers,
-                    store=False,
-                    allowed_openai_params=["store"],
+                    api_base=CODEX_API_BASE,
+                    **build_codex_litellm_kwargs(api_key, account_id=account_id),
+                )
+            elif api_key and use_kimi_code:
+                # Kimi Code subscription uses the Kimi coding API (OpenAI-compatible).
+                # The api_base is set automatically by LiteLLMProvider for kimi/ models.
+                self._llm = LiteLLMProvider(
+                    model=self.model,
+                    api_key=api_key,
+                    api_base=api_base,
                 )
             elif api_key and use_kimi_code:
                 # Kimi Code subscription uses the Kimi coding API (OpenAI-compatible).
