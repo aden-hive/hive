@@ -186,6 +186,8 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
                 "store": False,
                 "allowed_openai_params": ["store"],
             }
+    if worker_llm.get("provider") == "ollama":
+        return {"num_ctx": worker_llm.get("num_ctx", 16384)}
     return {}
 
 
@@ -432,6 +434,11 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
                 "store": False,
                 "allowed_openai_params": ["store"],
             }
+    if llm.get("provider") == "ollama":
+        # Pass num_ctx to Ollama so it doesn't silently truncate the ~9.5k Queen prompt.
+        # Ollama's default num_ctx is only 2048. We set it to 16384 here so LiteLLM
+        # passes it through as a provider-specific option.
+        return {"num_ctx": llm.get("num_ctx", 16384)}
     return {}
 
 
