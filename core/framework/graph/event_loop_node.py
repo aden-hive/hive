@@ -162,7 +162,13 @@ class _EscalationReceiver:
         self._response: str | None = None
         self._awaiting_input = True  # So inject_worker_message() can prefer us
 
-    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+    async def inject_event(
+        self,
+        content: str,
+        *,
+        is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Called by ExecutionStream.inject_input() when the user responds."""
         self._response = content
         self._event.set()
@@ -498,7 +504,9 @@ class EventLoopNode(NodeProtocol):
         self._config = config or LoopConfig()
         self._tool_executor = tool_executor
         self._conversation_store = conversation_store
-        self._injection_queue: asyncio.Queue[tuple[str, bool]] = asyncio.Queue()
+        self._injection_queue: asyncio.Queue[tuple[str, bool, list[dict[str, Any]] | None]] = (
+            asyncio.Queue()
+        )
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
         # Client-facing input blocking state
         self._input_ready = asyncio.Event()
@@ -2191,7 +2199,13 @@ class EventLoopNode(NodeProtocol):
             conversation=conversation if _is_continuous else None,
         )
 
-    async def inject_event(self, content: str, *, is_client_input: bool = False) -> None:
+    async def inject_event(
+        self,
+        content: str,
+        *,
+        is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Inject an external event or user input into the running loop.
 
         The content becomes a user message prepended to the next iteration.
@@ -2207,8 +2221,10 @@ class EventLoopNode(NodeProtocol):
                 human user (e.g. /chat endpoint), False for external events
                 (e.g. worker question forwarded by the frontend).  Controls
                 message formatting in _drain_injection_queue, not wake behavior.
+            image_content: Optional multimodal payload blocks that should be
+                attached to the injected user message.
         """
-        await self._injection_queue.put((content, is_client_input))
+        await self._injection_queue.put((content, is_client_input, image_content))
         self._input_ready.set()
 
     async def inject_trigger(self, trigger: TriggerEvent) -> None:
@@ -5206,7 +5222,7 @@ class EventLoopNode(NodeProtocol):
         count = 0
         while not self._injection_queue.empty():
             try:
-                content, is_client_input = self._injection_queue.get_nowait()
+                content, is_client_input, image_content = self._injection_queue.get_nowait()
                 logger.info(
                     "[drain] injected message (client_input=%s): %s",
                     is_client_input,
@@ -5214,9 +5230,16 @@ class EventLoopNode(NodeProtocol):
                 )
                 # Real user input is stored as-is; external events get a prefix
                 if is_client_input:
-                    await conversation.add_user_message(content, is_client_input=True)
+                    await conversation.add_user_message(
+                        content,
+                        is_client_input=True,
+                        image_content=image_content,
+                    )
                 else:
-                    await conversation.add_user_message(f"[External event]: {content}")
+                    await conversation.add_user_message(
+                        f"[External event]: {content}",
+                        image_content=image_content,
+                    )
                 count += 1
             except asyncio.QueueEmpty:
                 break

@@ -433,6 +433,7 @@ class ExecutionStream:
         content: str,
         *,
         is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Inject user input into a running client-facing EventLoopNode.
 
@@ -444,7 +445,11 @@ class ExecutionStream:
         for executor in self._active_executors.values():
             node = executor.node_registry.get(node_id)
             if node is not None and hasattr(node, "inject_event"):
-                await node.inject_event(content, is_client_input=is_client_input)
+                await node.inject_event(
+                    content,
+                    is_client_input=is_client_input,
+                    image_content=image_content,
+                )
                 return True
         return False
 

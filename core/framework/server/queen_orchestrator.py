@@ -484,6 +484,9 @@ async def create_queen(
                         # Mark worker as configured after first successful run
                         session.worker_configured = True
                         output = event.data.get("output", {})
+                        # Keep the worker's primary result intact during the
+                        # queen handoff so the user sees the actual answer,
+                        # not just a paraphrased digest of it.
                         notification = _build_worker_terminal_notification(output)
                     else:  # EXECUTION_FAILED
                         error = event.data.get("error", "Unknown error")
