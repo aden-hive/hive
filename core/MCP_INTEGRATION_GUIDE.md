@@ -171,7 +171,7 @@ runner.register_mcp_server(
     args=["-m", "aden_tools.mcp_server", "--stdio"],
     cwd="../tools",
     env={
-        "BRAVE_SEARCH_API_KEY": os.environ["BRAVE_SEARCH_API_KEY"]
+        "BRAVE_SEARCH_API_KEY": os.getenv("BRAVE_SEARCH_API_KEY")
     }
 )
 ```
