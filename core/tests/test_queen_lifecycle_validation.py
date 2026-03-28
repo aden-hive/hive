@@ -81,6 +81,13 @@ def test_validation_blocks_stage_or_run_ignores_non_blocking_warnings() -> None:
     assert qlt._validation_blocks_stage_or_run(report) is False
 
 
+def test_invalid_validation_report_blocks_stage_or_run() -> None:
+    report = qlt._invalid_validation_report("validator returned garbage")
+
+    assert report["valid"] is False
+    assert qlt._validation_blocks_stage_or_run(report) is True
+
+
 @pytest.mark.asyncio
 async def test_get_worker_status_summary_flags_retry_and_judge_pressure() -> None:
     registry = ToolRegistry()
@@ -697,6 +704,7 @@ async def test_rerun_worker_with_last_input_reuses_complete_recent_defaults(
             "target_dir": "docs",
             "review_dir": "docs_reviews",
             "word_threshold": 800,
+            "feedback": "stale",
         },
     }
     malformed_recent_state = {
@@ -892,6 +900,52 @@ async def test_rerun_worker_with_last_input_uses_current_session_defaults_only(
         == "No complete previous worker input is available for a same-defaults rerun."
     )
     assert result["missing_inputs"] == ["review_dir"]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_with_input_blocks_when_validator_output_is_undecodable(
+    monkeypatch, tmp_path: Path
+) -> None:
+    registry = ToolRegistry()
+    registry.register(
+        "validate_agent_package",
+        Tool(
+            name="validate_agent_package",
+            description="fake validator",
+            parameters={"type": "object", "properties": {"agent_name": {"type": "string"}}},
+        ),
+        lambda _inputs: "not-json",
+    )
+
+    monkeypatch.setattr(qlt, "validate_credentials", lambda *args, **kwargs: None)
+    monkeypatch.chdir(tmp_path)
+
+    runtime = SimpleNamespace(
+        resume_timers=MagicMock(),
+        trigger=AsyncMock(return_value="exec-2"),
+        graph=SimpleNamespace(nodes=[]),
+    )
+    session = SimpleNamespace(
+        worker_runtime=runtime,
+        event_bus=None,
+        worker_path=Path("exports/docs_sanitizer_agent"),
+        runner=None,
+    )
+    register_queen_lifecycle_tools(
+        registry,
+        session=session,
+        session_id="sess-invalid-validator",
+        phase_state=QueenPhaseState(phase="staging"),
+    )
+
+    result_raw = await registry._tools["run_agent_with_input"].executor({"task": "run it"})
+    result = json.loads(result_raw)
+
+    assert "validation is failing" in result["error"]
+    assert result["validation_failures"] == [
+        "validator_subprocess: validate_agent_package returned an invalid or undecodable report"
+    ]
+    runtime.trigger.assert_not_awaited()
 
 
 @pytest.mark.asyncio

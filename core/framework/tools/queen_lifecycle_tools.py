@@ -810,6 +810,20 @@ def _validation_blocks_stage_or_run(report: dict | None) -> bool:
     )
 
 
+def _invalid_validation_report(reason: str) -> dict:
+    """Build a structured validation failure when validator output is unusable."""
+    return {
+        "valid": False,
+        "summary": reason,
+        "steps": {
+            "validator_subprocess": {
+                "passed": False,
+                "error": reason,
+            }
+        },
+    }
+
+
 _STRUCTURED_TASK_PAIR_RE = re.compile(
     r"\[?(?P<key>[A-Za-z_][A-Za-z0-9_]*)\]?\s*(?::|=)\s*(?P<value>.*?)(?=(?:\s+\[?[A-Za-z_][A-Za-z0-9_]*\]?\s*(?::|=))|$)"
 )
@@ -983,6 +997,7 @@ def _load_recent_worker_input_defaults(
     sessions_dir = Path(getattr(store, "sessions_dir", "")) if store is not None else None
     if sessions_dir is None or not sessions_dir.exists():
         return {}
+    allowed_key_set = set(input_keys)
 
     candidate_state_paths: list[Path]
     if session_id:
@@ -1010,6 +1025,9 @@ def _load_recent_worker_input_defaults(
             input_data = raw_state.get("input_data") or {}
             if not isinstance(input_data, dict) or not input_data:
                 continue
+            input_data = {key: value for key, value in input_data.items() if key in allowed_key_set}
+            if not input_data:
+                continue
             updated_at = str((raw_state.get("timestamps") or {}).get("updated_at") or "")
             if updated_at >= best_updated_at:
                 best_payload = dict(input_data)
@@ -1030,7 +1048,7 @@ def _load_recent_worker_input_defaults(
         if not isinstance(input_data, dict):
             continue
 
-        merged_input = dict(input_data)
+        merged_input = {key: value for key, value in input_data.items() if key in allowed_key_set}
         result_output = (raw_state.get("result") or {}).get("output") or {}
         if isinstance(result_output, dict):
             for key in work_keys:
@@ -1235,7 +1253,12 @@ def register_queen_lifecycle_tools(
         result = validator.executor({"agent_name": agent_ref})
         if asyncio.iscoroutine(result) or asyncio.isfuture(result):
             result = await result
-        return _parse_validation_report(result)
+        parsed = _parse_validation_report(result)
+        if parsed is None:
+            return _invalid_validation_report(
+                "validate_agent_package returned an invalid or undecodable report"
+            )
+        return parsed
 
     # --- start_worker ---------------------------------------------------------
 
