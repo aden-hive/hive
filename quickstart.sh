@@ -1062,9 +1062,12 @@ try:
     with open(cfg_path, encoding="utf-8-sig") as f:
         c = json.load(f)
     llm = c.get("llm", {})
-    print(f"PREV_PROVIDER={llm.get(\"provider\", \"\")}")
-    print(f"PREV_MODEL={llm.get(\"model\", \"\")}")
-    print(f"PREV_ENV_VAR={llm.get(\"api_key_env_var\", \"\")}")
+    prov = llm.get("provider", "")
+    mod = llm.get("model", "")
+    env = llm.get("api_key_env_var", "")
+    print(f"PREV_PROVIDER='{prov}'")
+    print(f"PREV_MODEL='{mod}'")
+    print(f"PREV_ENV_VAR='{env}'")
     sub = ""
     if llm.get("use_claude_code_subscription"):
         sub = "claude_code"
@@ -1098,6 +1101,7 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
         kimi_code)   [ "$KIMI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         hive_llm)    [ "$HIVE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         antigravity) [ "$ANTIGRAVITY_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        *)
             # API key provider — check if the env var is set; ollama uses local runtime detection
             if [ "$PREV_PROVIDER" = "ollama" ]; then
                 if [ "$OLLAMA_DETECTED" = true ]; then
@@ -1433,6 +1437,14 @@ case $choice in
         ;;
     14)
         # Local (Ollama) — no API key; pick model from ollama list
+        if [ "$OLLAMA_DETECTED" != true ]; then
+            echo ""
+            echo -e "${YELLOW}Ollama depends on a local Ollama server, but 'ollama list' failed.${NC}"
+            echo -e "  Please install Ollama (https://ollama.com) and start the server,"
+            echo -e "  then run this quickstart again."
+            echo ""
+            exit 1
+        fi
         SELECTED_PROVIDER_ID="ollama"
         SELECTED_ENV_VAR=""
         SELECTED_MAX_TOKENS=8192
@@ -1454,6 +1466,7 @@ case $choice in
                 read -r -p "Enter choice (1-${#OLLAMA_MODELS[@]}): " model_choice
                 if [[ "$model_choice" =~ ^[0-9]+$ ]] && [ "$model_choice" -ge 1 ] && [ "$model_choice" -le ${#OLLAMA_MODELS[@]} ]; then
                     SELECTED_MODEL="${OLLAMA_MODELS[$((model_choice - 1))]}"
+                    SELECTED_API_BASE="http://localhost:11434"
                     break
                 fi
                 echo -e "${RED}Invalid choice. Please enter 1-${#OLLAMA_MODELS[@]}${NC}"

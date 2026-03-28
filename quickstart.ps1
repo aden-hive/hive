@@ -1401,7 +1401,6 @@ switch ($num) {
                 break
             }
         }
-        }
     }
     13 {
         # Local (Ollama)
