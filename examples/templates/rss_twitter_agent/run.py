@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from typing import Any
 
 from .fetch import (
@@ -43,9 +42,6 @@ async def run_workflow(
     twitter_credential_ref: str | None = None,
 ) -> dict[str, Any]:
     """Run the original sequential RSS -> summarize -> approve -> post flow."""
-    if twitter_credential_ref:
-        os.environ["TWITTER_CREDENTIAL_REF"] = twitter_credential_ref
-
     print("=" * 60)
     print("RSS-to-Twitter Agent")
     print("=" * 60 + "\n")
@@ -94,7 +90,9 @@ async def run_workflow(
 
         approved_threads.append(thread)
         print("  Posting...\n")
-        result_json = await post_to_twitter(json.dumps([thread]))
+        result_json = await post_to_twitter(
+            json.dumps([thread]), twitter_credential_ref=twitter_credential_ref
+        )
         result = json.loads(result_json)
         results.append(result)
         if isinstance(result, dict) and result.get("success"):
@@ -118,8 +116,23 @@ async def run_workflow(
     print(f"Done! Posted {total_posted}/{reviewed} reviewed threads.")
     print("=" * 60)
 
+    workflow_success = all(
+        isinstance(result, dict) and result.get("success") for result in results
+    )
+    workflow_error = None
+    if not workflow_success and results:
+        errors = [
+            result.get("error") or result.get("message", "Unknown posting error")
+            for result in results
+            if isinstance(result, dict) and not result.get("success")
+        ]
+        workflow_error = (
+            "; ".join(error for error in errors if error) or "Posting failed"
+        )
+
     return {
-        "success": True,
+        "success": workflow_success if results else True,
+        "error": workflow_error,
         "feed_url": feed_url,
         "articles_json": articles_json,
         "processed_json": summaries_json,

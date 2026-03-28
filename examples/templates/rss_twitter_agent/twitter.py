@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -13,20 +12,43 @@ from .credentials import resolve_twitter_session_dir
 TwitterConfig = Any
 
 
-def _session_dir() -> Path:
-    configured = resolve_twitter_session_dir(os.environ.get("TWITTER_CREDENTIAL_REF"))
+def _session_dir(credential_ref: str | None = None) -> Path:
+    configured = resolve_twitter_session_dir(credential_ref)
     return Path(configured).expanduser()
 
 
-def _session_marker() -> Path:
-    return _session_dir() / ".logged_in"
+def _session_marker(credential_ref: str | None = None) -> Path:
+    return _session_dir(credential_ref) / ".logged_in"
 
 
-def _is_logged_in() -> bool:
-    return _session_marker().exists()
+def _is_logged_in(credential_ref: str | None = None) -> bool:
+    return _session_marker(credential_ref).exists()
 
 
-async def _post_thread_with_playwright(thread: dict) -> dict:
+async def _capture_posted_tweet_url(page: Any, tweet_text: str) -> str | None:
+    """Best-effort permalink lookup for the freshly posted tweet/reply."""
+    if "status/" in page.url:
+        return page.url
+
+    snippet = tweet_text.strip().replace("\n", " ")[:80]
+    if not snippet:
+        return None
+
+    try:
+        article = page.locator("article").filter(has_text=snippet).first
+        status_link = article.locator("a[href*='/status/']").first
+        href = await status_link.get_attribute("href", timeout=5000)
+    except Exception:
+        return None
+
+    if not href:
+        return None
+    return href if href.startswith("http") else f"https://x.com{href}"
+
+
+async def _post_thread_with_playwright(
+    thread: dict, credential_ref: str | None = None
+) -> dict:
     from playwright.async_api import TimeoutError as PlaywrightTimeout
     from playwright.async_api import async_playwright
 
@@ -36,10 +58,10 @@ async def _post_thread_with_playwright(thread: dict) -> dict:
     if not tweets:
         return {"title": title, "posted": 0, "error": "No tweets in thread"}
 
-    session_dir = _session_dir()
-    session_marker = _session_marker()
+    session_dir = _session_dir(credential_ref)
+    session_marker = _session_marker(credential_ref)
     session_dir.mkdir(parents=True, exist_ok=True)
-    first_run = not _is_logged_in()
+    first_run = not _is_logged_in(credential_ref)
 
     print(f"\n{'=' * 60}")
     print(f"Thread: {title[:55]}{'...' if len(title) > 55 else ''}")
@@ -87,7 +109,7 @@ async def _post_thread_with_playwright(thread: dict) -> dict:
             print("Session saved — future runs will be fully automatic.\n")
 
         posted = 0
-        first_tweet_url = None
+        current_tweet_url = None
 
         for i, tweet_text in enumerate(tweets):
             if isinstance(tweet_text, dict):
@@ -132,13 +154,25 @@ async def _post_thread_with_playwright(thread: dict) -> dict:
                     await post_btn.click()
                     await asyncio.sleep(2.5)
 
-                    first_tweet_url = page.url
+                    current_tweet_url = await _capture_posted_tweet_url(
+                        page, tweet_text
+                    )
+                    if not current_tweet_url:
+                        await context.close()
+                        return {
+                            "title": title,
+                            "posted": posted,
+                            "total": len(tweets),
+                            "error": "Tweet posted but could not resolve its permalink for threading.",
+                        }
                     posted += 1
                     print("  Posted tweet 1")
 
                 else:
-                    if first_tweet_url and "status" in first_tweet_url:
-                        await page.goto(first_tweet_url, wait_until="domcontentloaded")
+                    if current_tweet_url and "status" in current_tweet_url:
+                        await page.goto(
+                            current_tweet_url, wait_until="domcontentloaded"
+                        )
                         await asyncio.sleep(1.5)
 
                         reply_btn = page.locator("[data-testid='reply']").first
@@ -146,10 +180,13 @@ async def _post_thread_with_playwright(thread: dict) -> dict:
                         await reply_btn.click()
                         await asyncio.sleep(1.0)
                     else:
-                        await page.goto(
-                            "https://x.com/compose/tweet", wait_until="domcontentloaded"
-                        )
-                        await asyncio.sleep(1.5)
+                        await context.close()
+                        return {
+                            "title": title,
+                            "posted": posted,
+                            "total": len(tweets),
+                            "error": "Cannot continue thread because the previous tweet URL was not available.",
+                        }
 
                     textarea = page.locator(
                         "div[data-testid='tweetTextarea_0'], div[role='textbox']"
@@ -167,6 +204,17 @@ async def _post_thread_with_playwright(thread: dict) -> dict:
                     await post_btn.click()
                     await asyncio.sleep(2.5)
 
+                    current_tweet_url = await _capture_posted_tweet_url(
+                        page, tweet_text
+                    )
+                    if not current_tweet_url:
+                        await context.close()
+                        return {
+                            "title": title,
+                            "posted": posted,
+                            "total": len(tweets),
+                            "error": "Reply posted but could not resolve its permalink for the next step.",
+                        }
                     posted += 1
                     print(f"  Posted tweet {i + 1}")
 
@@ -181,7 +229,7 @@ async def _post_thread_with_playwright(thread: dict) -> dict:
         "title": title,
         "posted": posted,
         "total": len(tweets),
-        "url": first_tweet_url,
+        "url": current_tweet_url,
     }
 
 
@@ -190,9 +238,6 @@ async def post_threads_impl(
     config: TwitterConfig,
     credential_ref: str | None = None,
 ) -> str | dict[str, Any]:
-    if credential_ref:
-        os.environ["TWITTER_CREDENTIAL_REF"] = credential_ref
-
     try:
         threads = json.loads(threads_json)
     except (json.JSONDecodeError, TypeError) as e:
@@ -210,14 +255,27 @@ async def post_threads_impl(
     for thread in threads:
         if not isinstance(thread, dict):
             continue
-        result = await _post_thread_with_playwright(thread)
+        result = await _post_thread_with_playwright(
+            thread, credential_ref=credential_ref
+        )
         results.append(result)
         total_posted += result.get("posted", 0)
 
+    success = bool(results) and all(
+        result.get("posted", 0) >= result.get("total", 0) and not result.get("error")
+        for result in results
+    )
+    message = f"Posted {total_posted} tweets across {len(results)} threads"
+    if not success:
+        message = (
+            f"Posted {total_posted} tweets across {len(results)} threads, "
+            "but one or more threads failed."
+        )
+
     return {
-        "success": True,
+        "success": success,
         "threads": results,
-        "message": f"Posted {total_posted} tweets across {len(results)} threads",
+        "message": message,
     }
 
 

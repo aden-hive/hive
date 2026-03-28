@@ -32,6 +32,24 @@ def _extract_session_dir(payload: Any) -> str | None:
             except json.JSONDecodeError:
                 return None
         return raw
+    keys = getattr(payload, "keys", None)
+    if isinstance(keys, dict):
+        for key in (
+            "session_dir",
+            "user_data_dir",
+            "twitter_session_dir",
+            "playwright_user_data_dir",
+            "path",
+            "value",
+        ):
+            getter = getattr(payload, "get_key", None)
+            if callable(getter):
+                resolved = getter(key)
+                if isinstance(resolved, str) and resolved.strip():
+                    return resolved.strip()
+        default_getter = getattr(payload, "get_default_key", None)
+        if callable(default_getter):
+            return _extract_session_dir(default_getter())
     return None
 
 
@@ -42,14 +60,16 @@ def resolve_twitter_session_dir(credential_ref: str | None = None) -> str:
         return str(Path(env_dir).expanduser())
 
     ref = credential_ref or os.environ.get("TWITTER_CREDENTIAL_REF")
-    if ref and "/" in ref:
+    if ref:
         try:
             from framework.credentials.store import CredentialStore
 
-            store = CredentialStore.with_encrypted_storage(
-                Path.home() / ".hive" / "credentials"
-            )
-            value = store.get(ref)
+            store = CredentialStore.with_encrypted_storage()
+            if "/" in ref:
+                provider, alias = ref.split("/", 1)
+                value = store.get_credential_by_alias(provider, alias)
+            else:
+                value = store.get(ref)
             resolved = _extract_session_dir(value)
             if resolved:
                 return str(Path(resolved).expanduser())

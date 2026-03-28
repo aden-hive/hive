@@ -123,7 +123,8 @@ class RSSTwitterAgent:
         self, entry_point: str, input_data: dict, timeout: float | None = None
     ) -> ExecutionResult:
         feed_url = str(input_data.get("feed_url") or "https://news.ycombinator.com/rss")
-        max_articles = int(input_data.get("max_articles") or 3)
+        raw_max_articles = input_data.get("max_articles")
+        max_articles = 3 if raw_max_articles in (None, "") else int(raw_max_articles)
         twitter_credential_ref = input_data.get("twitter_credential_ref")
         workflow = await run_workflow(
             feed_url=feed_url,
@@ -134,14 +135,15 @@ class RSSTwitterAgent:
         )
 
         return ExecutionResult(
-            success=True,
+            success=bool(workflow.get("success", True)),
             output={
-                "articles_json": workflow["articles_json"],
-                "processed_json": workflow["processed_json"],
-                "threads_json": workflow["threads_json"],
-                "approved_json": workflow["approved_json"],
-                "results_json": workflow["results_json"],
+                "articles_json": workflow.get("articles_json", "[]"),
+                "processed_json": workflow.get("processed_json", "[]"),
+                "threads_json": workflow.get("threads_json", "[]"),
+                "approved_json": workflow.get("approved_json", "[]"),
+                "results_json": workflow.get("results_json", "[]"),
             },
+            error=workflow.get("error"),
             steps_executed=5,
         )
 

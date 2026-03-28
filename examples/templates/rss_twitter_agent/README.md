@@ -14,7 +14,6 @@ Updated for Hive v0.6+ project layout and credential namespace support.
 From repo root:
 
 ```bash
-cd /Users/vasu/Desktop/hive
 uv run python -m examples.templates.rss_twitter_agent run \
   --feed-url "https://news.ycombinator.com/rss" \
   --max-articles 3

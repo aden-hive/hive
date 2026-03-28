@@ -8,6 +8,8 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
+from .config import get_ollama_model, get_ollama_url
+
 
 def fetch_rss(
     feed_url: str = "https://news.ycombinator.com/rss", max_articles: int = 3
@@ -47,11 +49,11 @@ def fetch_rss(
 
 def _call_ollama(prompt: str, max_tokens: int = 800) -> str:
     """Call Ollama API directly via HTTP."""
-    model = os.environ.get("OLLAMA_MODEL", "llama3.2")
+    model = get_ollama_model()
     try:
         with httpx.Client() as client:
             resp = client.post(
-                "http://localhost:11434/api/generate",
+                f"{get_ollama_url()}/api/generate",
                 json={
                     "model": model,
                     "prompt": prompt,
@@ -127,6 +129,7 @@ def _generate_thread_for_article(summary: dict) -> dict | None:
     points = summary.get("points", [])
     why = summary.get("why_it_matters", "")
     hashtags = " ".join(summary.get("hashtags", ["#Tech"])[:3])
+    title_literal = json.dumps(title[:60])
 
     prompt = f"""You are a viral tech Twitter personality. Write an engaging 4-tweet thread about this article.
 
@@ -145,7 +148,7 @@ Rules:
 - Sound like a real person, not a press release.
 
 Return ONLY a JSON object with this exact structure (no other text):
-{{"title": "{title[:60]}", "tweets": ["tweet1", "tweet2", "tweet3", "tweet4"]}}"""
+{{"title": {title_literal}, "tweets": ["tweet1", "tweet2", "tweet3", "tweet4"]}}"""
 
     text = _call_ollama(prompt, 700)
 
@@ -236,7 +239,9 @@ def approve_threads(threads_json: str) -> str:
     return json.dumps(approved)
 
 
-async def post_to_twitter(approved_json: str) -> str:
+async def post_to_twitter(
+    approved_json: str, twitter_credential_ref: str | None = None
+) -> str:
     """Post approved threads via Playwright automation."""
     threads = json.loads(approved_json) if approved_json else []
     if not threads:
@@ -248,7 +253,7 @@ async def post_to_twitter(approved_json: str) -> str:
 
     from .twitter import post_threads_impl
 
-    credential_ref = os.environ.get("TWITTER_CREDENTIAL_REF")
+    credential_ref = twitter_credential_ref or os.environ.get("TWITTER_CREDENTIAL_REF")
     result = await post_threads_impl(approved_json, None, credential_ref=credential_ref)
     return (
         json.dumps(result)
