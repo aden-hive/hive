@@ -66,8 +66,10 @@ def register_tools(mcp: FastMCP) -> None:
 
         except httpx.TimeoutException:
             return {"error": "Request to HackerNews API timed out."}
-        except Exception as e:
-            return {"error": f"Failed to fetch HackerNews stories: {str(e)}"}
+        except httpx.HTTPStatusError as e:
+            return {"error": f"HackerNews API returned HTTP {e.response.status_code}"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error fetching HackerNews stories: {e}"}
 
     @mcp.tool()
     def get_hn_story_details(story_id: int, include_comments: bool = True, comment_limit: int = 10) -> dict:
@@ -128,5 +130,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         except httpx.TimeoutException:
             return {"error": "Request to HackerNews API timed out."}
-        except Exception as e:
-            return {"error": f"Failed to fetch detailed story info: {str(e)}"}
+        except httpx.HTTPStatusError as e:
+            return {"error": f"HackerNews API returned HTTP {e.response.status_code}"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error fetching story details: {e}"}

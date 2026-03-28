@@ -231,5 +231,3 @@ def register_tools(
             return {"error": "Search request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {str(e)}"}
-        except Exception as e:
-            return {"error": f"Search failed: {str(e)}"}

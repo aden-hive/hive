@@ -69,7 +69,7 @@ def register_tools(
         if response.status_code == 422:
             try:
                 detail = response.json().get("results", {}).get("message", response.text)
-            except Exception:
+            except ValueError:
                 detail = response.text
             return {"error": f"Invalid NewsData parameters: {detail}"}
         return {"error": f"NewsData request failed: HTTP {response.status_code}"}
@@ -83,7 +83,7 @@ def register_tools(
         if response.status_code == 422:
             try:
                 detail = response.json().get("message", response.text)
-            except Exception:
+            except ValueError:
                 detail = response.text
             return {"error": f"Invalid Finlight parameters: {detail}"}
         return {"error": f"Finlight request failed: HTTP {response.status_code}"}
@@ -518,8 +518,6 @@ def register_tools(
             return {"error": "News sentiment request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
-        except Exception as e:
-            return {"error": f"News sentiment failed: {e}"}
 
     @mcp.tool()
     def news_latest(

@@ -77,3 +77,6 @@ core/tests/*dumps/*
 screenshots/*
 
 .gemini/*
+
+# Progress Tracking Updates
+progress/

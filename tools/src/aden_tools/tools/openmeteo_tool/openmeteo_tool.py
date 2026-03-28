@@ -47,8 +47,10 @@ def register_tools(mcp: FastMCP) -> None:
             return data.get("current_weather", {"error": "No current weather data returned"})
         except httpx.HTTPStatusError as e:
             return {"error": f"API request failed: {e.response.status_code}"}
-        except Exception as e:
-            return {"error": str(e)}
+        except httpx.TimeoutException:
+            return {"error": "Weather API request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
 
     @mcp.tool()
     def weather_get_forecast(latitude: float, longitude: float, days: int = 7) -> dict:
@@ -95,5 +97,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
         except httpx.HTTPStatusError as e:
             return {"error": f"API request failed: {e.response.status_code}"}
-        except Exception as e:
-            return {"error": str(e)}
+        except httpx.TimeoutException:
+            return {"error": "Weather API request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}

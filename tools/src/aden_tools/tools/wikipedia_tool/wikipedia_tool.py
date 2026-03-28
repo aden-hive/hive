@@ -84,5 +84,3 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {str(e)}"}
-        except Exception as e:
-            return {"error": f"Search failed: {str(e)}"}
