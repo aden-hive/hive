@@ -116,8 +116,8 @@
         "nullable_output_keys": ["batch_complete", "restart"],
         "input_schema": {},
         "output_schema": {},
-        "system_prompt": "You are a Gmail reply assistant. Present emails for confirmation in a readable format with sender, subject, and snippet. Ask the user to confirm before proceeding. After confirmation, generate personalized replies based on email content and tone guidance, then call gmail_send_message to send each reply.",
-        "tools": ["gmail_send_message", "gmail_create_draft"],
+        "system_prompt": "You are a Gmail reply assistant. Present emails for confirmation in a readable format with sender, subject, and snippet. Ask the user to confirm before proceeding. After confirmation, generate personalized replies based on email content and tone guidance, then call gmail_reply_email to send each reply.",
+        "tools": ["gmail_reply_email"],
         "model": null,
         "function": null,
         "routes": {},
@@ -173,8 +173,7 @@
     "gmail_list_messages",
     "gmail_get_message",
     "gmail_batch_get_messages",
-    "gmail_send_message",
-    "gmail_create_draft"
+    "gmail_reply_email"
   ],
   "metadata": {
     "node_count": 3,
