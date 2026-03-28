@@ -32,7 +32,7 @@ class _FakeRegistry:
 
     def load_agent_selection(self, agent_path: Path):
         self.loaded_paths.append(agent_path)
-        return list(self._returned_configs)
+        return list(self._returned_configs), None
 
 
 def test_agent_runner_loads_registry_selected_servers(tmp_path, monkeypatch):
@@ -61,7 +61,7 @@ def test_agent_runner_loads_registry_selected_servers(tmp_path, monkeypatch):
     monkeypatch.setattr(AgentRunner, "_resolve_default_model", staticmethod(lambda: "test-model"))
     monkeypatch.setattr(
         "framework.runner.tool_registry.ToolRegistry.register_mcp_server",
-        lambda self, server_config, use_connection_manager=True: (
+        lambda self, server_config, use_connection_manager=True, **kwargs: (
             registered.append(server_config) or 1
         ),
     )
@@ -95,7 +95,7 @@ def test_agent_runner_skips_registry_when_no_servers_selected(tmp_path, monkeypa
     monkeypatch.setattr(AgentRunner, "_resolve_default_model", staticmethod(lambda: "test-model"))
     monkeypatch.setattr(
         "framework.runner.tool_registry.ToolRegistry.register_mcp_server",
-        lambda self, server_config, use_connection_manager=True: (
+        lambda self, server_config, use_connection_manager=True, **kwargs: (
             registered.append(server_config) or 1
         ),
     )
@@ -135,7 +135,7 @@ def test_agent_runner_logs_actual_registry_load_results(tmp_path, monkeypatch):
     monkeypatch.setattr(AgentRunner, "_resolve_default_model", staticmethod(lambda: "test-model"))
     monkeypatch.setattr(
         "framework.runner.tool_registry.ToolRegistry.load_registry_servers",
-        lambda self, server_configs: [
+        lambda self, server_configs, **kwargs: [
             {"server": "jira", "status": "loaded", "tools_loaded": 2, "skipped_reason": None},
             {
                 "server": "slack",
@@ -223,7 +223,7 @@ def test_integration_real_registry_to_agent_runner(tmp_path, monkeypatch):
     registered: list[dict] = []
     monkeypatch.setattr(
         "framework.runner.tool_registry.ToolRegistry.register_mcp_server",
-        lambda self, server_config, use_connection_manager=True: (
+        lambda self, server_config, use_connection_manager=True, **kwargs: (
             registered.append(server_config) or 1
         ),
     )

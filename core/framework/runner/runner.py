@@ -1429,12 +1429,18 @@ class AgentRunner:
 
     def _load_registry_mcp_servers(self, agent_path: Path) -> None:
         """Load and register MCP servers selected via ``mcp_registry.json``."""
+        registry_json = agent_path / "mcp_registry.json"
+        if registry_json.is_file():
+            self._tool_registry.set_mcp_registry_agent_path(agent_path)
+        else:
+            self._tool_registry.set_mcp_registry_agent_path(None)
+
         from framework.runner.mcp_registry import MCPRegistry
 
         try:
             registry = MCPRegistry()
             registry.initialize()
-            server_configs = registry.load_agent_selection(agent_path)
+            server_configs, selection_max_tools = registry.load_agent_selection(agent_path)
         except Exception as exc:
             logger.warning(
                 "Failed to load MCP registry servers for '%s': %s",
@@ -1446,7 +1452,12 @@ class AgentRunner:
         if not server_configs:
             return
 
-        results = self._tool_registry.load_registry_servers(server_configs)
+        results = self._tool_registry.load_registry_servers(
+            server_configs,
+            preserve_existing_tools=True,
+            log_collisions=True,
+            max_tools=selection_max_tools,
+        )
         loaded = [result for result in results if result["status"] == "loaded"]
         skipped = [result for result in results if result["status"] != "loaded"]
 

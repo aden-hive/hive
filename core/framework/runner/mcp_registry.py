@@ -401,14 +401,16 @@ class MCPRegistry:
 
     # ── load_agent_selection ────────────────────────────────────────
 
-    def load_agent_selection(self, agent_path: Path) -> list[dict[str, Any]]:
+    def load_agent_selection(self, agent_path: Path) -> tuple[list[dict[str, Any]], int | None]:
         """Load mcp_registry.json from an agent directory and resolve servers.
 
-        Returns list of plain dicts compatible with ToolRegistry.register_mcp_server().
+        Returns:
+            (server_config_dicts, max_tools) for :meth:`ToolRegistry.load_registry_servers`.
+            ``max_tools`` is ``None`` when omitted or invalid in JSON.
         """
         registry_json_path = agent_path / "mcp_registry.json"
         if not registry_json_path.exists():
-            return []
+            return [], None
 
         selection = json.loads(registry_json_path.read_text(encoding="utf-8"))
 
@@ -437,15 +439,16 @@ class MCPRegistry:
                 continue
             validated[field] = value
 
+        max_tools = validated.get("max_tools")
         configs = self.resolve_for_agent(
             include=validated.get("include"),
             tags=validated.get("tags"),
             exclude=validated.get("exclude"),
             profile=validated.get("profile"),
-            max_tools=validated.get("max_tools"),
+            max_tools=max_tools,
             versions=validated.get("versions"),
         )
-        return [self._server_config_to_dict(c) for c in configs]
+        return [self._server_config_to_dict(c) for c in configs], max_tools
 
     # ── resolve_for_agent ───────────────────────────────────────────
 
@@ -552,12 +555,14 @@ class MCPRegistry:
                     )
                     continue
 
-            # Check tool count cap before adding (FR-56)
+            # Check tool count cap before adding (FR-56), using manifest tool list when present.
+            # When ``tools`` is empty (e.g. ``add_local``), counts are unknown here—callers should
+            # pass the same ``max_tools`` to ToolRegistry.load_registry_servers to cap registration.
             manifest_tools = manifest.get("tools", [])
             server_tool_count = len(manifest_tools)
             if max_tools is not None and server_tool_count == 0:
                 logger.debug(
-                    "Server '%s' has no declared tools in manifest, skipping max_tools check",
+                    "Server '%s' has no tools list in manifest; max_tools enforced at registration",
                     name,
                 )
             elif max_tools is not None and total_tools + server_tool_count > max_tools:
