@@ -33,7 +33,7 @@ jobs:
       - name: Run tests
         run: |
           cd core
-          uv run pytest tests/ -v
+          uv run pytest tests/ -v -n auto
 
       - name: Generate changelog
         id: changelog

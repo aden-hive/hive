@@ -63,7 +63,7 @@ jobs:
         working-directory: core
         run: |
           uv sync
-          uv run pytest tests/ -v
+          uv run pytest tests/ -v -n auto
 
   test-tools:
     name: Test Tools (${{ matrix.os }})
@@ -88,7 +88,7 @@ jobs:
         working-directory: tools
         run: |
           uv sync --extra dev
-          uv run pytest tests/ -v
+          uv run pytest tests/ -v -n auto
 
   validate:
     name: Validate Agent Exports
