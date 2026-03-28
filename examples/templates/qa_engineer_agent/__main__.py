@@ -8,21 +8,21 @@ from .agent import default_agent
 logging.basicConfig(level=logging.INFO)
 
 async def main():
-    print("=== Démarrage du QA Engineer Agent ===")
+    print("=== Running QA Engineer Agent ===")
     
-    # Message de test simulant la requête d'un utilisateur
+    # Test message simulating a user request
     test_context = {
         "user_request": "Please run the automated tests in the 'test_project/' directory using 'pytest' and tell me if there are any bugs."
     }
     
-    # Exécuter l'agent
+    # Run the agent
     result = await default_agent.run(test_context)
     
-    print("\n=== Résultat de l'exécution ===")
+    print("\n=== Results of execution ===")
     if result.success:
-        print("Succès !")
+        print("Success!")
     else:
-        print(f"Erreur : {result.error}")
+        print(f"Error: {result.error}")
 
 if __name__ == "__main__":
     asyncio.run(main())
