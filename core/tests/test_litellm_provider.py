@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from framework.config import get_llm_extra_kwargs
 from framework.llm.anthropic import AnthropicProvider
 from framework.llm.litellm import (
     OPENROUTER_TOOL_COMPAT_MODEL_CACHE,
@@ -1160,8 +1161,6 @@ class TestGetLlmExtraKwargsOllama:
             "llm": {"provider": "ollama", "model": "ollama/llama3"},
         }
         with patch("framework.config.get_hive_config", return_value=config):
-            from framework.config import get_llm_extra_kwargs
-
             result = get_llm_extra_kwargs()
         assert result == {"num_ctx": 16384}
 
@@ -1171,8 +1170,6 @@ class TestGetLlmExtraKwargsOllama:
             "llm": {"provider": "ollama", "model": "ollama/llama3", "num_ctx": 32768},
         }
         with patch("framework.config.get_hive_config", return_value=config):
-            from framework.config import get_llm_extra_kwargs
-
             result = get_llm_extra_kwargs()
         assert result == {"num_ctx": 32768}
 
@@ -1182,15 +1179,11 @@ class TestGetLlmExtraKwargsOllama:
             "llm": {"provider": "anthropic", "model": "claude-3-haiku"},
         }
         with patch("framework.config.get_hive_config", return_value=config):
-            from framework.config import get_llm_extra_kwargs
-
             result = get_llm_extra_kwargs()
         assert result == {}
 
     def test_empty_config_returns_empty(self):
         """Missing config should return empty dict."""
         with patch("framework.config.get_hive_config", return_value={}):
-            from framework.config import get_llm_extra_kwargs
-
             result = get_llm_extra_kwargs()
         assert result == {}
