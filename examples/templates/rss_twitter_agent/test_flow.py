@@ -8,6 +8,8 @@ import json
 
 from .fetch import approve_threads
 from . import agent as agent_module
+from . import credentials as credentials_module
+from . import fetch as fetch_module
 from . import run as run_module
 from . import twitter as twitter_module
 
@@ -216,3 +218,41 @@ def test_post_threads_impl_reports_partial_failure(monkeypatch) -> None:
     assert isinstance(result, dict)
     assert result["success"] is False
     assert "failed" in result["message"]
+
+
+def test_trigger_and_wait_honors_timeout(monkeypatch) -> None:
+    async def slow_workflow(**kwargs) -> dict[str, object]:
+        await asyncio.sleep(0.05)
+        return {"success": True}
+
+    monkeypatch.setattr(agent_module, "run_workflow", slow_workflow)
+
+    result = asyncio.run(
+        agent_module.default_agent.trigger_and_wait("start", {}, timeout=0.001)
+    )
+
+    assert result.success is False
+    assert "timed out" in (result.error or "")
+
+
+def test_extract_session_dir_recurses_into_json_value() -> None:
+    payload = {"value": '{"session_dir": "/tmp/twitter-profile"}'}
+
+    assert credentials_module._extract_session_dir(payload) == "/tmp/twitter-profile"
+
+
+def test_fetch_rss_rejects_localhost_target() -> None:
+    assert fetch_module.fetch_rss("http://127.0.0.1/rss") == "[]"
+
+
+def test_summarize_articles_falls_back_when_model_shape_is_invalid(monkeypatch) -> None:
+    articles = [{"title": "A", "link": "https://example.com/a", "summary": "Sum"}]
+    monkeypatch.setattr(
+        fetch_module, "_call_ollama", lambda prompt, max_tokens=800: '["oops"]'
+    )
+
+    result = json.loads(fetch_module.summarize_articles(json.dumps(articles)))
+
+    assert isinstance(result, list)
+    assert isinstance(result[0], dict)
+    assert result[0]["title"] == "A"

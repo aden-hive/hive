@@ -2,13 +2,99 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
+import socket
 import xml.etree.ElementTree as ET
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
 from .config import get_ollama_model, get_ollama_url
+
+
+def _is_public_ip(host: str) -> bool:
+    """Reject loopback/private/link-local targets to avoid local network fetches."""
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return not (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    )
+
+
+def _validate_public_feed_url(feed_url: str) -> str:
+    """Allow only http(s) URLs that resolve to public destinations."""
+    parsed = urlparse(feed_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Feed URL must use http(s) and include a hostname.")
+
+    try:
+        addrinfo = socket.getaddrinfo(
+            parsed.hostname, parsed.port or None, proto=socket.IPPROTO_TCP
+        )
+    except OSError as exc:
+        raise ValueError(f"Could not resolve feed host '{parsed.hostname}'.") from exc
+
+    if not addrinfo:
+        raise ValueError(f"Could not resolve feed host '{parsed.hostname}'.")
+
+    for family, *_rest, sockaddr in addrinfo:
+        host = sockaddr[0] if family in (socket.AF_INET, socket.AF_INET6) else None
+        if not host or not _is_public_ip(host):
+            raise ValueError("Feed URL must resolve to a public network destination.")
+
+    return feed_url
+
+
+def _fetch_public_feed(feed_url: str, max_redirects: int = 5) -> str:
+    """Fetch RSS while validating every redirect target against SSRF-prone destinations."""
+    current_url = _validate_public_feed_url(feed_url)
+    with httpx.Client(follow_redirects=False) as client:
+        for _ in range(max_redirects + 1):
+            resp = client.get(current_url, timeout=10.0)
+            if resp.status_code in {301, 302, 303, 307, 308}:
+                location = resp.headers.get("location")
+                if not location:
+                    break
+                current_url = _validate_public_feed_url(
+                    urljoin(str(resp.url), location)
+                )
+                continue
+            resp.raise_for_status()
+            return resp.text
+    raise ValueError("Too many redirects while fetching feed URL.")
+
+
+def _valid_summary_item(item: object) -> bool:
+    return (
+        isinstance(item, dict)
+        and isinstance(item.get("title"), str)
+        and isinstance(item.get("url"), str)
+        and isinstance(item.get("hook"), str)
+        and isinstance(item.get("why_it_matters"), str)
+        and isinstance(item.get("points"), list)
+        and all(isinstance(point, str) for point in item["points"])
+        and isinstance(item.get("hashtags"), list)
+        and all(isinstance(tag, str) for tag in item["hashtags"])
+    )
+
+
+def _valid_thread_payload(item: object) -> bool:
+    return (
+        isinstance(item, dict)
+        and isinstance(item.get("title"), str)
+        and isinstance(item.get("tweets"), list)
+        and len(item["tweets"]) >= 3
+        and all(isinstance(tweet, str) and tweet.strip() for tweet in item["tweets"])
+    )
 
 
 def fetch_rss(
@@ -16,10 +102,7 @@ def fetch_rss(
 ) -> str:
     """Fetch RSS feed and return parsed articles as JSON string."""
     try:
-        with httpx.Client() as client:
-            resp = client.get(feed_url, timeout=10.0, follow_redirects=True)
-            resp.raise_for_status()
-            xml_content = resp.text
+        xml_content = _fetch_public_feed(feed_url)
     except Exception:
         return json.dumps([])
 
@@ -101,7 +184,11 @@ Return ONLY the JSON array, no other text:"""
     if start >= 0 and end > start:
         try:
             parsed = json.loads(text[start:end])
-            if isinstance(parsed, list) and parsed:
+            if (
+                isinstance(parsed, list)
+                and parsed
+                and all(_valid_summary_item(item) for item in parsed)
+            ):
                 return json.dumps(parsed)
         except json.JSONDecodeError:
             pass
@@ -157,7 +244,7 @@ Return ONLY a JSON object with this exact structure (no other text):
     if start >= 0 and end > start:
         try:
             obj = json.loads(text[start:end])
-            if isinstance(obj, dict) and "tweets" in obj and len(obj["tweets"]) >= 3:
+            if _valid_thread_payload(obj):
                 return obj
         except json.JSONDecodeError:
             pass

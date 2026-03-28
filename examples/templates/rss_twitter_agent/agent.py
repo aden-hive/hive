@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from framework.graph import Constraint, EdgeCondition, EdgeSpec, Goal, SuccessCriterion
 from framework.graph.executor import ExecutionResult
 
@@ -126,13 +128,25 @@ class RSSTwitterAgent:
         raw_max_articles = input_data.get("max_articles")
         max_articles = 3 if raw_max_articles in (None, "") else int(raw_max_articles)
         twitter_credential_ref = input_data.get("twitter_credential_ref")
-        workflow = await run_workflow(
+        workflow_coro = run_workflow(
             feed_url=feed_url,
             max_articles=max_articles,
             twitter_credential_ref=(
                 str(twitter_credential_ref) if twitter_credential_ref else None
             ),
         )
+        try:
+            workflow = (
+                await asyncio.wait_for(workflow_coro, timeout=timeout)
+                if timeout is not None
+                else await workflow_coro
+            )
+        except asyncio.TimeoutError:
+            return ExecutionResult(
+                success=False,
+                error=f"RSS-to-Twitter workflow timed out after {timeout} seconds.",
+                steps_executed=0,
+            )
 
         return ExecutionResult(
             success=bool(workflow.get("success", True)),

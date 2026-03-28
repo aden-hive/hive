@@ -19,8 +19,9 @@ def _extract_session_dir(payload: Any) -> str | None:
             "value",
         ):
             value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
+            resolved = _extract_session_dir(value)
+            if resolved:
+                return resolved
     elif isinstance(payload, str):
         raw = payload.strip()
         if not raw:
@@ -44,9 +45,9 @@ def _extract_session_dir(payload: Any) -> str | None:
         ):
             getter = getattr(payload, "get_key", None)
             if callable(getter):
-                resolved = getter(key)
-                if isinstance(resolved, str) and resolved.strip():
-                    return resolved.strip()
+                resolved = _extract_session_dir(getter(key))
+                if resolved:
+                    return resolved
         default_getter = getattr(payload, "get_default_key", None)
         if callable(default_getter):
             return _extract_session_dir(default_getter())

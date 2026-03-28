@@ -220,8 +220,20 @@ async def _post_thread_with_playwright(
 
             except PlaywrightTimeout as e:
                 print(f"  Timeout on tweet {i + 1}: {e}")
+                return {
+                    "title": title,
+                    "posted": posted,
+                    "total": len(tweets),
+                    "error": f"Timeout while posting tweet {i + 1}: {e}",
+                }
             except Exception as e:
                 print(f"  Error on tweet {i + 1}: {e}")
+                return {
+                    "title": title,
+                    "posted": posted,
+                    "total": len(tweets),
+                    "error": f"Error while posting tweet {i + 1}: {e}",
+                }
 
         await context.close()
 
