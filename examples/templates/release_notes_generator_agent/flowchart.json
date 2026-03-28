@@ -1,7 +1,7 @@
 {
   "original_draft": {
     "agent_name": "release_notes_generator_agent",
-    "goal": "Generate structured release notes from commits or pull request titles.",
+    "goal": "Generate structured release notes from GitHub repository commits.",
     "description": "",
     "success_criteria": [],
     "constraints": [],
@@ -13,10 +13,14 @@
         "node_type": "event_loop",
         "tools": [],
         "input_keys": [
-          "version"
+          "version",
+          "repo",
+          "since"
         ],
         "output_keys": [
-          "version"
+          "version",
+          "repo",
+          "since"
         ],
         "success_criteria": "Version has been confirmed for release notes generation.",
         "sub_agents": [],
@@ -27,10 +31,15 @@
       {
         "id": "collect_changes",
         "name": "Collect Changes",
-        "description": "Collect commit messages or PR titles",
+        "description": "Fetch recent commits from GitHub",
         "node_type": "event_loop",
-        "tools": [],
-        "input_keys": [],
+        "tools": [
+          "github_list_commits"
+        ],
+        "input_keys": [
+          "repo",
+          "since"
+        ],
         "output_keys": [
           "changes"
         ],

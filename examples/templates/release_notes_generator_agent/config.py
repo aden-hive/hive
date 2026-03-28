@@ -1,36 +1,52 @@
-"""Configuration for Release Notes Generator Agent."""
+"""Runtime configuration for Release Notes Generator Agent."""
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
+def _load_preferred_model() -> str:
+    """Load preferred model from ~/.hive/configuration.json."""
+    config_path = Path.home() / ".hive" / "configuration.json"
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+            llm = config.get("llm", {})
+            if llm.get("provider") and llm.get("model"):
+                return f"{llm['provider']}/{llm['model']}"
+        except Exception:
+            pass
+    return "anthropic/claude-sonnet-4-20250514"
+
+
+@dataclass
 class RuntimeConfig:
     """Runtime configuration for the agent."""
 
-    def __init__(
-        self,
-        model: str = "anthropic/claude-sonnet-4-20250514",
-        api_key: str | None = None,
-        api_base: str | None = None,
-        max_tokens: int = 2000,
-    ):
-        self.model = model
-        self.api_key = api_key
-        self.api_base = api_base
-        self.max_tokens = max_tokens
+    model: str = field(default_factory=_load_preferred_model)
+    temperature: float = 0.7
+    max_tokens: int = 40000
+    api_key: str | None = None
+    api_base: str | None = None
 
 
+default_config = RuntimeConfig()
+
+
+@dataclass
 class AgentMetadata:
     """Metadata for the agent."""
 
-    def __init__(
-        self,
-        name: str = "Release Notes Generator Agent",
-        version: str = "1.0.0",
-        description: str = "Generate structured release notes from commits or pull request titles.",
-    ):
-        self.name = name
-        self.version = version
-        self.description = description
+    name: str = "Release Notes Generator Agent"
+    version: str = "1.0.0"
+    description: str = (
+        "Generate structured release notes from GitHub repository commits."
+    )
+    intro_message: str = (
+        "Provide a repository (owner/repo) and optional version to generate release notes. "
+        "Requires GitHub credentials to be configured."
+    )
 
 
-# Default instances
-default_config = RuntimeConfig()
 metadata = AgentMetadata()
