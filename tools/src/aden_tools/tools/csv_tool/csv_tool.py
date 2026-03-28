@@ -1,5 +1,7 @@
 """CSV Tool - Read and manipulate CSV files."""
 
+from __future__ import annotations
+
 import csv
 import os
 
