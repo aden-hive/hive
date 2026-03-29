@@ -953,7 +953,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
         print(f"Error: '{agent_path}' is not a directory", file=sys.stderr)
         print(f"  Tip: Provide the path to an agent folder, not a file", file=sys.stderr)
         return 1
-    if not (agent_path_obj / "agent.py").exists() and not (agent_path_obj / "agent.json").exists():
+    if not (agent_path_obj / "agent.py").is_file() and not (agent_path_obj / "agent.json").is_file():
         print(f"Error: No agent found at '{agent_path}'", file=sys.stderr)
         print(f"  Expected agent.py or agent.json inside the directory", file=sys.stderr)
         print(f"  Tip: Run 'hive list' to see available agents in '{args.agents_dir}'", file=sys.stderr)

@@ -137,11 +137,11 @@ class TestHiveShellCommand:
     """Tests for ``hive shell`` error handling with invalid agent paths."""
 
     @pytest.fixture(autouse=True)
-    def _require_hive(self):
+    def _require_hive(self) -> None:
         if shutil.which("hive") is None:
             pytest.skip("'hive' entry point not installed (run: pip install -e core/)")
 
-    def test_shell_nonexistent_path(self):
+    def test_shell_nonexistent_path(self) -> None:
         """hive shell with a non-existent path should exit non-zero with a clear message."""
         result = subprocess.run(
             ["hive", "shell", "nonexistent_agent_xyz_abc"],
@@ -153,7 +153,7 @@ class TestHiveShellCommand:
         assert "Agent path not found" in result.stderr
         assert "nonexistent_agent_xyz_abc" in result.stderr
 
-    def test_shell_nonexistent_path_shows_tip(self):
+    def test_shell_nonexistent_path_shows_tip(self) -> None:
         """hive shell with a non-existent path should suggest running hive list."""
         result = subprocess.run(
             ["hive", "shell", "nonexistent_agent_xyz_abc"],
@@ -161,9 +161,10 @@ class TestHiveShellCommand:
             text=True,
             encoding="utf-8",
         )
+        assert result.returncode != 0
         assert "hive list" in result.stderr
 
-    def test_shell_file_path_not_directory(self, tmp_path):
+    def test_shell_file_path_not_directory(self, tmp_path: Path) -> None:
         """hive shell with a file (not a directory) should exit non-zero with a clear message."""
         fake_file = tmp_path / "not_a_dir.txt"
         fake_file.write_text("not an agent")
@@ -177,7 +178,7 @@ class TestHiveShellCommand:
         assert result.returncode != 0
         assert "is not a directory" in result.stderr
 
-    def test_shell_empty_directory(self, tmp_path):
+    def test_shell_empty_directory(self, tmp_path: Path) -> None:
         """hive shell with a directory that has no agent.py or agent.json should exit non-zero."""
         empty_dir = tmp_path / "empty_agent"
         empty_dir.mkdir()
