@@ -118,6 +118,8 @@ class QueenPhaseState:
 
     # Default skill operational protocols — appended to every phase prompt
     protocols_prompt: str = ""
+    # Community skills catalog (XML) — appended after protocols
+    skills_catalog_prompt: str = ""
 
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
@@ -144,6 +146,8 @@ class QueenPhaseState:
 
         memory = format_for_injection()
         parts = [base]
+        if self.skills_catalog_prompt:
+            parts.append(self.skills_catalog_prompt)
         if self.protocols_prompt:
             parts.append(self.protocols_prompt)
         if memory:
@@ -727,6 +731,25 @@ def _dissolve_planning_nodes(
     return converted, flowchart_map
 
 
+def _update_meta_json(session_manager, manager_session_id, updates: dict) -> None:
+    """Merge updates into the queen session's meta.json."""
+    if session_manager is None or not manager_session_id:
+        return
+    srv_session = session_manager.get_session(manager_session_id)
+    if not srv_session:
+        return
+    storage_sid = getattr(srv_session, "queen_resume_from", None) or srv_session.id
+    meta_path = Path.home() / ".hive" / "queen" / "session" / storage_sid / "meta.json"
+    try:
+        existing = {}
+        if meta_path.exists():
+            existing = json.loads(meta_path.read_text(encoding="utf-8"))
+        existing.update(updates)
+        meta_path.write_text(json.dumps(existing), encoding="utf-8")
+    except OSError:
+        pass
+
+
 def register_queen_lifecycle_tools(
     registry: ToolRegistry,
     session: Any = None,
@@ -975,6 +998,7 @@ def register_queen_lifecycle_tools(
         # Switch to building phase
         if phase_state is not None:
             await phase_state.switch_to_building()
+            _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
 
         result = json.loads(stop_result)
         result["phase"] = "building"
@@ -1559,11 +1583,21 @@ def register_queen_lifecycle_tools(
                 # Find edges where this leaf node is the source
                 out_edges = [e for e in validated_edges if e["source"] == leaf_id]
                 in_edges = [e for e in validated_edges if e["target"] == leaf_id]
-                if not out_edges:
-                    continue  # already a proper leaf
 
                 # Identify the parent (predecessor that connects IN)
                 parent_ids = [e["source"] for e in in_edges]
+
+                if not out_edges:
+                    # Already a proper leaf — still ensure sub_agents is set
+                    for pid in parent_ids:
+                        parent = node_by_id_v.get(pid)
+                        if parent is None:
+                            continue
+                        existing = parent.get("sub_agents") or []
+                        if leaf_id not in existing:
+                            existing.append(leaf_id)
+                        parent["sub_agents"] = existing
+                    continue
 
                 # Strip all outgoing edges from the leaf node that
                 # don't go back to a parent (report edges are OK)
@@ -1978,6 +2012,17 @@ def register_queen_lifecycle_tools(
                                 "type": "string",
                                 "description": "What success looks like for this node",
                             },
+                            "sub_agents": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": (
+                                    "IDs of GCU/browser sub-agent nodes managed by this node. "
+                                    "At build time, sub-agent nodes are dissolved into this list. "
+                                    "Set this on the PARENT node — e.g. the orchestrator that "
+                                    "delegates to GCU leaves. Visual delegation edges are "
+                                    "synthesized automatically."
+                                ),
+                            },
                             "decision_clause": {
                                 "type": "string",
                                 "description": (
@@ -2095,8 +2140,22 @@ def register_queen_lifecycle_tools(
         phase_state.draft_graph = converted
         phase_state.flowchart_map = fmap
 
-        # Note: flowchart file is persisted later, in initialize_and_build_agent
-        # (after the agent folder is scaffolded) or in load_built_agent.
+        # Create agent folder early so flowchart and agent_path are available
+        # throughout the entire BUILDING phase.
+        _agent_name = phase_state.draft_graph.get("agent_name", "").strip()
+        if _agent_name:
+            _agent_folder = Path("exports") / _agent_name
+            _agent_folder.mkdir(parents=True, exist_ok=True)
+            _save_flowchart_file(_agent_folder, original_copy, fmap)
+            phase_state.agent_path = str(_agent_folder)
+            _update_meta_json(
+                session_manager,
+                manager_session_id,
+                {
+                    "agent_path": str(_agent_folder),
+                    "agent_name": _agent_name.replace("_", " ").title(),
+                },
+            )
 
         dissolved_count = len(original_nodes) - len(converted.get("nodes", []))
         decision_count = sum(1 for n in original_nodes if n.get("flowchart_type") == "decision")
@@ -2228,6 +2287,7 @@ def register_queen_lifecycle_tools(
                     if fallback_path:
                         phase_state.agent_path = str(fallback_path)
                     await phase_state.switch_to_building(source="tool")
+                    _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
                     if phase_state.inject_notification:
                         await phase_state.inject_notification(
                             "[PHASE CHANGE] Switched to BUILDING phase. "
@@ -2270,8 +2330,13 @@ def register_queen_lifecycle_tools(
                 if parsed.get("success", True):
                     if phase_state is not None:
                         # Set agent_path so the frontend can query credentials
-                        phase_state.agent_path = str(Path("exports") / agent_name)
+                        phase_state.agent_path = phase_state.agent_path or str(
+                            Path("exports") / agent_name
+                        )
                         await phase_state.switch_to_building(source="tool")
+                        _update_meta_json(
+                            session_manager, manager_session_id, {"phase": "building"}
+                        )
                         # Reset draft state after successful scaffolding
                         phase_state.build_confirmed = False
                         # Persist flowchart now that the agent folder exists
@@ -2319,6 +2384,7 @@ def register_queen_lifecycle_tools(
         # Switch to staging phase
         if phase_state is not None:
             await phase_state.switch_to_staging()
+            _update_meta_json(session_manager, manager_session_id, {"phase": "staging"})
 
         result = json.loads(stop_result)
         result["phase"] = "staging"
@@ -2346,6 +2412,30 @@ def register_queen_lifecycle_tools(
     def _get_event_bus():
         """Get the session's event bus for querying history."""
         return getattr(session, "event_bus", None)
+
+    def _get_worker_name() -> str | None:
+        """Return the worker agent directory name, used for diary lookups."""
+        p = getattr(session, "worker_path", None)
+        return p.name if p else None
+
+    def _format_diary(max_runs: int) -> str:
+        """Read recent run digests from disk — no EventBus required."""
+        agent_name = _get_worker_name()
+        if not agent_name:
+            return "No worker loaded — diary unavailable."
+        from framework.agents.worker_memory import read_recent_digests
+
+        entries = read_recent_digests(agent_name, max_runs)
+        if not entries:
+            return (
+                f"No run digests for '{agent_name}' yet. "
+                "Digests are written at the end of each completed run."
+            )
+        lines = [f"Worker '{agent_name}' — {len(entries)} recent run digest(s):", ""]
+        for _run_id, content in entries:
+            lines.append(content)
+            lines.append("")
+        return "\n".join(lines).rstrip()
 
     # Tiered cooldowns: summary is free, detail has short cooldown, full keeps 30s
     _COOLDOWN_FULL = 30.0
@@ -2949,16 +3039,17 @@ def register_queen_lifecycle_tools(
         import time as _time
 
         # --- Tiered cooldown ---
+        # diary is free (file reads only), summary is free, detail has 10s, full has 30s
         now = _time.monotonic()
         if focus == "full":
             cooldown = _COOLDOWN_FULL
             tier = "full"
-        elif focus is not None:
+        elif focus == "diary" or focus is None:
+            cooldown = 0.0
+            tier = focus or "summary"
+        else:
             cooldown = _COOLDOWN_DETAIL
             tier = "detail"
-        else:
-            cooldown = 0.0
-            tier = "summary"
 
         elapsed_since = now - _status_last_called.get(tier, 0.0)
         if elapsed_since < cooldown:
@@ -2973,6 +3064,10 @@ def register_queen_lifecycle_tools(
                 }
             )
         _status_last_called[tier] = now
+
+        # --- Diary: pure file reads, no runtime required ---
+        if focus == "diary":
+            return _format_diary(last_n)
 
         # --- Runtime check ---
         runtime = _get_runtime()
@@ -3023,7 +3118,7 @@ def register_queen_lifecycle_tools(
             else:
                 return (
                     f"Unknown focus '{focus}'. "
-                    "Valid options: activity, memory, tools, issues, progress, full."
+                    "Valid options: diary, activity, memory, tools, issues, progress, full."
                 )
         except Exception as exc:
             logger.exception("get_worker_status error")
@@ -3034,6 +3129,8 @@ def register_queen_lifecycle_tools(
         description=(
             "Check on the worker. Returns a brief prose summary by default. "
             "Use 'focus' to drill into specifics:\n"
+            "- diary: persistent run digests from past executions — read this first "
+            "before digging into live runtime logs\n"
             "- activity: current node, transitions, latest LLM output\n"
             "- memory: worker's accumulated knowledge and state\n"
             "- tools: running and recent tool calls\n"
@@ -3046,8 +3143,11 @@ def register_queen_lifecycle_tools(
             "properties": {
                 "focus": {
                     "type": "string",
-                    "enum": ["activity", "memory", "tools", "issues", "progress", "full"],
-                    "description": ("Aspect to inspect. Omit for a brief summary."),
+                    "enum": ["diary", "activity", "memory", "tools", "issues", "progress", "full"],
+                    "description": (
+                        "Aspect to inspect. Omit for a brief summary. "
+                        "Use 'diary' to read persistent run history before checking live logs."
+                    ),
                 },
                 "last_n": {
                     "type": "integer",
@@ -3446,6 +3546,7 @@ def register_queen_lifecycle_tools(
                 if phase_state is not None:
                     phase_state.agent_path = str(resolved_path)
                     await phase_state.switch_to_staging()
+                    _update_meta_json(session_manager, manager_session_id, {"phase": "staging"})
 
                 worker_name = info.name if info else updated_session.worker_id
                 return json.dumps(
@@ -3565,6 +3666,7 @@ def register_queen_lifecycle_tools(
             # Switch to running phase
             if phase_state is not None:
                 await phase_state.switch_to_running()
+                _update_meta_json(session_manager, manager_session_id, {"phase": "running"})
 
             return json.dumps(
                 {
@@ -3702,6 +3804,8 @@ def register_queen_lifecycle_tools(
             _save_trigger_to_agent(session, trigger_id, tdef)
             bus = getattr(session, "event_bus", None)
             if bus:
+                _runner = getattr(session, "runner", None)
+                _graph_entry = _runner.graph.entry_node if _runner else None
                 await bus.publish(
                     AgentEvent(
                         type=EventType.TRIGGER_ACTIVATED,
@@ -3710,6 +3814,8 @@ def register_queen_lifecycle_tools(
                             "trigger_id": trigger_id,
                             "trigger_type": t_type,
                             "trigger_config": t_config,
+                            "name": tdef.description or trigger_id,
+                            **({"entry_node": _graph_entry} if _graph_entry else {}),
                         },
                     )
                 )
@@ -3762,6 +3868,8 @@ def register_queen_lifecycle_tools(
         # Emit event
         bus = getattr(session, "event_bus", None)
         if bus:
+            _runner = getattr(session, "runner", None)
+            _graph_entry = _runner.graph.entry_node if _runner else None
             await bus.publish(
                 AgentEvent(
                     type=EventType.TRIGGER_ACTIVATED,
@@ -3770,6 +3878,8 @@ def register_queen_lifecycle_tools(
                         "trigger_id": trigger_id,
                         "trigger_type": t_type,
                         "trigger_config": t_config,
+                        "name": tdef.description or trigger_id,
+                        **({"entry_node": _graph_entry} if _graph_entry else {}),
                     },
                 )
             )
@@ -3868,7 +3978,10 @@ def register_queen_lifecycle_tools(
                 AgentEvent(
                     type=EventType.TRIGGER_DEACTIVATED,
                     stream_id="queen",
-                    data={"trigger_id": trigger_id},
+                    data={
+                        "trigger_id": trigger_id,
+                        "name": tdef.description or trigger_id if tdef else trigger_id,
+                    },
                 )
             )
 

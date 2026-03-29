@@ -702,6 +702,15 @@ stop_worker() to return to STAGING phase.
 _queen_behavior_always = """
 # Behavior
 
+## Images attached by the user
+
+Users can attach images directly to their chat messages. When you see an \
+image in the conversation, analyze it using your native vision capability — \
+do NOT say you cannot see images or that you lack access to files. The image \
+is embedded in the message; no tool call is needed to view it. Describe what \
+you see, answer questions about it, and use the visual content to inform your \
+response just as you would text.
+
 ## CRITICAL RULE — ask_user / ask_user_multiple
 
 Every response that ends with a question, a prompt, or expects user \
@@ -1144,6 +1153,8 @@ Batch your response — do not call run_agent_with_input() once per trigger.
 config since last run), skip it and inform the user.
 - Never disable a trigger without telling the user. Use remove_trigger() only \
 when explicitly asked or when the trigger is clearly obsolete.
+- When the user asks to remove or disable a trigger, you MUST call remove_trigger(trigger_id). \
+Never just say "it's removed" without actually calling the tool.
 """
 
 # -- Backward-compatible composed versions (used by queen_node.system_prompt default) --

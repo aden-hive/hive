@@ -30,6 +30,8 @@ from typing import Any
 # ContextVar is thread-safe and async-safe - perfect for concurrent agent execution
 trace_context: ContextVar[dict[str, Any] | None] = ContextVar("trace_context", default=None)
 
+_STANDARD_LOG_RECORD_FIELDS = set(logging.makeLogRecord({}).__dict__)
+
 # ANSI escape code pattern (matches \033[...m or \x1b[...m)
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*m|\033\[[0-9;]*m")
 
@@ -91,6 +93,14 @@ class StructuredFormatter(logging.Formatter):
         model = getattr(record, "model", None)
         if model is not None:
             log_entry["model"] = model
+
+        # Preserve arbitrary structured fields passed via ``extra=...``.
+        for key, value in record.__dict__.items():
+            if key in _STANDARD_LOG_RECORD_FIELDS or key.startswith("_"):
+                continue
+            if key in log_entry:
+                continue
+            log_entry[key] = value
 
         # Add exception info if present (strip ANSI codes from exception text too)
         if record.exc_info:
@@ -208,7 +218,12 @@ def configure_logging(
 
     # Suppress noisy LiteLLM INFO logs (model/provider line + Provider List URL
     # printed on every single completion call).  Warnings and errors still show.
-    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    # Honour LITELLM_LOG env var so users can opt-in to debug output.
+    _litellm_level = os.getenv("LITELLM_LOG", "").upper()
+    if _litellm_level and hasattr(logging, _litellm_level):
+        logging.getLogger("LiteLLM").setLevel(getattr(logging, _litellm_level))
+    else:
+        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
     # When in JSON mode, configure known third-party loggers to use JSON formatter
     # This ensures libraries like LiteLLM, httpcore also output clean JSON

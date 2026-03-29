@@ -27,7 +27,14 @@ export default function MyAgents() {
     agentsApi
       .discover()
       .then((result) => {
-        setAgents(result["Your Agents"] || []);
+        const entries = result["Your Agents"] || [];
+        entries.sort((a, b) => {
+          if (!a.last_active && !b.last_active) return 0;
+          if (!a.last_active) return 1;
+          if (!b.last_active) return -1;
+          return b.last_active.localeCompare(a.last_active);
+        });
+        setAgents(entries);
       })
       .catch((err) => {
         setError(err.message || "Failed to load agents");

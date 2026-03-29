@@ -19,6 +19,7 @@ Testing commands:
 import argparse
 import sys
 from pathlib import Path
+from framework.trace.cli import register_trace_commands
 
 
 
@@ -88,9 +89,18 @@ def main():
     from framework.testing.cli import register_testing_commands
     register_testing_commands(subparsers)
 
-    # NEW: Register model management commands
+    # Register model management commands
     from framework.model_cli import register_model_commands
     register_model_commands(subparsers)
+
+    # Register skill commands (skill list, skill trust, ...)
+    from framework.skills.cli import register_skill_commands
+    register_skill_commands(subparsers)
+
+    # Register debugger commands (debugger)
+    from framework.debugger.cli import register_debugger_commands
+    register_debugger_commands(subparsers)
+    register_trace_commands(subparsers)
 
     args = parser.parse_args()
 

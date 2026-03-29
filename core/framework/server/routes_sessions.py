@@ -11,7 +11,6 @@ Session-primary routes:
 - GET    /api/sessions/{session_id}/entry-points     — list entry points
 - PATCH  /api/sessions/{session_id}/triggers/{id}   — update trigger task
 - GET    /api/sessions/{session_id}/graphs           — list graph IDs
-- GET    /api/sessions/{session_id}/queen-messages   — queen conversation history
 - GET    /api/sessions/{session_id}/events/history  — persisted eventbus log (for replay)
 
 Worker session browsing (persisted execution runs on disk):
@@ -24,9 +23,13 @@ Worker session browsing (persisted execution runs on disk):
 
 """
 
+import asyncio
+import contextlib
 import json
 import logging
 import shutil
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -50,8 +53,11 @@ def _get_manager(request: web.Request) -> SessionManager:
 
 def _session_to_live_dict(session) -> dict:
     """Serialize a live Session to the session-primary JSON shape."""
+    from framework.llm.capabilities import supports_image_tool_results
+
     info = session.worker_info
     phase_state = getattr(session, "phase_state", None)
+    queen_model: str = getattr(getattr(session, "runner", None), "model", "") or ""
     return {
         "session_id": session.id,
         "worker_id": session.worker_id,
@@ -67,6 +73,7 @@ def _session_to_live_dict(session) -> dict:
         "queen_phase": phase_state.phase
         if phase_state
         else ("staging" if session.worker_runtime else "planning"),
+        "queen_supports_images": supports_image_tool_results(queen_model) if queen_model else True,
     }
 
 
@@ -408,7 +415,7 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
 
 
 async def handle_update_trigger_task(request: web.Request) -> web.Response:
-    """PATCH /api/sessions/{session_id}/triggers/{trigger_id} — update trigger task."""
+    """PATCH /api/sessions/{session_id}/triggers/{trigger_id} — update trigger fields."""
     session, err = resolve_session(request)
     if err:
         return err
@@ -427,19 +434,100 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"error": "Invalid JSON body"}, status=400)
 
-    task = body.get("task")
-    if task is None:
-        return web.json_response({"error": "Missing 'task' field"}, status=400)
-    if not isinstance(task, str):
-        return web.json_response({"error": "'task' must be a string"}, status=400)
+    updates: dict[str, object] = {}
 
-    tdef.task = task
+    if "task" in body:
+        task = body.get("task")
+        if not isinstance(task, str):
+            return web.json_response({"error": "'task' must be a string"}, status=400)
+        tdef.task = task
+        updates["task"] = tdef.task
+
+    trigger_config_update = body.get("trigger_config")
+    if trigger_config_update is not None:
+        if not isinstance(trigger_config_update, dict):
+            return web.json_response(
+                {"error": "'trigger_config' must be an object"},
+                status=400,
+            )
+        merged_trigger_config = dict(tdef.trigger_config)
+        merged_trigger_config.update(trigger_config_update)
+
+        if tdef.trigger_type == "timer":
+            cron_expr = merged_trigger_config.get("cron")
+            interval = merged_trigger_config.get("interval_minutes")
+            if cron_expr is not None and not isinstance(cron_expr, str):
+                return web.json_response(
+                    {"error": "'trigger_config.cron' must be a string"},
+                    status=400,
+                )
+            if cron_expr:
+                try:
+                    from croniter import croniter
+
+                    if not croniter.is_valid(cron_expr):
+                        return web.json_response(
+                            {"error": f"Invalid cron expression: {cron_expr}"},
+                            status=400,
+                        )
+                except ImportError:
+                    return web.json_response(
+                        {
+                            "error": (
+                                "croniter package not installed — cannot validate cron expression."
+                            )
+                        },
+                        status=500,
+                    )
+                merged_trigger_config.pop("interval_minutes", None)
+            elif interval is None:
+                return web.json_response(
+                    {
+                        "error": (
+                            "Timer trigger needs 'cron' or 'interval_minutes' in trigger_config."
+                        )
+                    },
+                    status=400,
+                )
+            elif not isinstance(interval, (int, float)) or interval <= 0:
+                return web.json_response(
+                    {"error": "'trigger_config.interval_minutes' must be > 0"},
+                    status=400,
+                )
+        tdef.trigger_config = merged_trigger_config
+        updates["trigger_config"] = tdef.trigger_config
+
+    if not updates:
+        return web.json_response(
+            {"error": "Provide at least one of 'task' or 'trigger_config'"},
+            status=400,
+        )
 
     # Persist to session state and agent definition
     from framework.tools.queen_lifecycle_tools import (
         _persist_active_triggers,
         _save_trigger_to_agent,
+        _start_trigger_timer,
+        _start_trigger_webhook,
     )
+
+    if "trigger_config" in updates and trigger_id in getattr(session, "active_trigger_ids", set()):
+        task = session.active_timer_tasks.pop(trigger_id, None)
+        if task and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        getattr(session, "trigger_next_fire", {}).pop(trigger_id, None)
+
+        webhook_subs = getattr(session, "active_webhook_subs", {})
+        if sub_id := webhook_subs.pop(trigger_id, None):
+            with contextlib.suppress(Exception):
+                session.event_bus.unsubscribe(sub_id)
+
+        if tdef.trigger_type == "timer":
+            await _start_trigger_timer(session, trigger_id, tdef)
+        elif tdef.trigger_type == "webhook":
+            await _start_trigger_webhook(session, trigger_id, tdef)
 
     if trigger_id in getattr(session, "active_trigger_ids", set()):
         session_id = request.match_info["session_id"]
@@ -447,10 +535,35 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
 
     _save_trigger_to_agent(session, trigger_id, tdef)
 
+    # Emit SSE event so the frontend updates the graph and detail panel
+    bus = getattr(session, "event_bus", None)
+    if bus:
+        from framework.runtime.event_bus import AgentEvent, EventType
+
+        await bus.publish(
+            AgentEvent(
+                type=EventType.TRIGGER_UPDATED,
+                stream_id="queen",
+                data={
+                    "trigger_id": trigger_id,
+                    "task": tdef.task,
+                    "trigger_config": tdef.trigger_config,
+                    "trigger_type": tdef.trigger_type,
+                    "name": tdef.description or trigger_id,
+                    "entry_node": getattr(
+                        getattr(getattr(session, "runner", None), "graph", None),
+                        "entry_node",
+                        None,
+                    ),
+                },
+            )
+        )
+
     return web.json_response(
         {
             "trigger_id": trigger_id,
             "task": tdef.task,
+            "trigger_config": tdef.trigger_config,
         }
     )
 
@@ -754,60 +867,6 @@ async def handle_messages(request: web.Request) -> web.Response:
     return web.json_response({"messages": all_messages})
 
 
-async def handle_queen_messages(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/queen-messages — get queen conversation.
-
-    Reads directly from disk so it works for both live sessions and cold
-    (post-server-restart) sessions — no live session required.
-    """
-    session_id = request.match_info["session_id"]
-
-    queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
-    convs_dir = queen_dir / "conversations"
-    if not convs_dir.exists():
-        return web.json_response({"messages": [], "session_id": session_id})
-
-    all_messages: list[dict] = []
-
-    def _read_parts(parts_dir: Path, node_id: str) -> None:
-        if not parts_dir.exists():
-            return
-        for part_file in sorted(parts_dir.iterdir()):
-            if part_file.suffix != ".json":
-                continue
-            try:
-                part = json.loads(part_file.read_text(encoding="utf-8"))
-                part["_node_id"] = node_id
-                # Use file mtime as created_at so frontend can order
-                # queen and worker messages chronologically.
-                part.setdefault("created_at", part_file.stat().st_mtime)
-                all_messages.append(part)
-            except (json.JSONDecodeError, OSError):
-                continue
-
-    # Flat layout: conversations/parts/*.json
-    _read_parts(convs_dir / "parts", "queen")
-
-    # Node-based layout: conversations/<node_id>/parts/*.json
-    for node_dir in convs_dir.iterdir():
-        if not node_dir.is_dir() or node_dir.name == "parts":
-            continue
-        _read_parts(node_dir / "parts", node_dir.name)
-
-    all_messages.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
-
-    # Filter to client-facing messages only
-    all_messages = [
-        m
-        for m in all_messages
-        if not m.get("is_transition_marker")
-        and m["role"] != "tool"
-        and not (m["role"] == "assistant" and m.get("tool_calls"))
-    ]
-
-    return web.json_response({"messages": all_messages, "session_id": session_id})
-
-
 async def handle_session_events_history(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/events/history — persisted eventbus log.
 
@@ -925,6 +984,29 @@ async def handle_discover(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def handle_reveal_session_folder(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/reveal — open session data folder in the OS file manager."""
+    manager: SessionManager = request.app["manager"]
+    session_id = request.match_info["session_id"]
+
+    session = manager.get_session(session_id)
+    storage_session_id = (session.queen_resume_from or session.id) if session else session_id
+    folder = Path.home() / ".hive" / "queen" / "session" / storage_session_id
+    folder.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(folder)])
+        elif sys.platform == "win32":
+            subprocess.Popen(["explorer", str(folder)])
+        else:
+            subprocess.Popen(["xdg-open", str(folder)])
+    except Exception as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+
+    return web.json_response({"path": str(folder)})
+
+
 # ------------------------------------------------------------------
 # Route registration
 # ------------------------------------------------------------------
@@ -949,13 +1031,14 @@ def register_routes(app: web.Application) -> None:
     app.router.add_delete("/api/sessions/{session_id}/worker", handle_unload_worker)
 
     # Session info
+    app.router.add_post("/api/sessions/{session_id}/reveal", handle_reveal_session_folder)
     app.router.add_get("/api/sessions/{session_id}/stats", handle_session_stats)
     app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
     app.router.add_patch(
         "/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task
     )
     app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
-    app.router.add_get("/api/sessions/{session_id}/queen-messages", handle_queen_messages)
+
     app.router.add_get("/api/sessions/{session_id}/events/history", handle_session_events_history)
 
     # Worker session browsing (session-primary)

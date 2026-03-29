@@ -154,6 +154,7 @@ class GraphExecutor:
         iteration_metadata_provider: Callable | None = None,
         skills_catalog_prompt: str = "",
         protocols_prompt: str = "",
+        skill_dirs: list[str] | None = None,
     ):
         """
         Initialize the executor.
@@ -181,6 +182,7 @@ class GraphExecutor:
                 system prompt (for phase switching)
             skills_catalog_prompt: Available skills catalog for system prompt
             protocols_prompt: Default skill operational protocols for system prompt
+            skill_dirs: Skill base directories for Tier 3 resource access
         """
         self.runtime = runtime
         self.llm = llm
@@ -204,6 +206,7 @@ class GraphExecutor:
         self.iteration_metadata_provider = iteration_metadata_provider
         self.skills_catalog_prompt = skills_catalog_prompt
         self.protocols_prompt = protocols_prompt
+        self.skill_dirs: list[str] = skill_dirs or []
 
         if protocols_prompt:
             self.logger.info(
@@ -1420,6 +1423,7 @@ class GraphExecutor:
                     next_spec = graph.get_node(current_node_id)
                     if next_spec and next_spec.node_type == "event_loop":
                         from framework.graph.prompt_composer import (
+                            EXECUTION_SCOPE_PREAMBLE,
                             build_accounts_prompt,
                             build_narrative,
                             build_transition_marker,
@@ -1459,9 +1463,14 @@ class GraphExecutor:
                             )
 
                         # Compose new system prompt (Layer 1 + 2 + 3 + accounts)
+                        # Prepend scope preamble to focus so the LLM stays
+                        # within this node's responsibility.
+                        _focus = next_spec.system_prompt
+                        if next_spec.output_keys and _focus:
+                            _focus = f"{EXECUTION_SCOPE_PREAMBLE}\n\n{_focus}"
                         new_system = compose_system_prompt(
                             identity_prompt=getattr(graph, "identity_prompt", None),
-                            focus_prompt=next_spec.system_prompt,
+                            focus_prompt=_focus,
                             narrative=narrative,
                             accounts_prompt=_node_accounts,
                         )
@@ -1839,6 +1848,9 @@ class GraphExecutor:
 
             existing_underscore = [k for k in memory._data if k.startswith("_")]
             extra_keys = set(_skill_keys) | set(existing_underscore)
+            # Only inject into read_keys when it was already non-empty — an empty
+            # read_keys means "allow all reads" and injecting skill keys would
+            # inadvertently restrict reads to skill keys only.
             for k in extra_keys:
                 if read_keys and k not in read_keys:
                     read_keys.append(k)
@@ -1893,6 +1905,7 @@ class GraphExecutor:
             iteration_metadata_provider=self.iteration_metadata_provider,
             skills_catalog_prompt=self.skills_catalog_prompt,
             protocols_prompt=self.protocols_prompt,
+            skill_dirs=self.skill_dirs,
         )
 
     VALID_NODE_TYPES = {
