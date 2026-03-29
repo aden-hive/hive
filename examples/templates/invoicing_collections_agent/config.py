@@ -30,30 +30,32 @@ COLLECTION_CONFIG: dict = {
         {
             "label": "current",
             "min_days": 0,
-            "max_days": 30,
+            "max_days": 2,
             "action": "none",
             "description": "Not yet overdue — no action required.",
         },
         {
-            "label": "30_day",
-            "min_days": 31,
-            "max_days": 60,
-            "action": "first_reminder",
-            "description": "First overdue notice.",
+            "label": "3_day",
+            "min_days": 3,
+            "max_days": 14,
+            "action": "gentle_reminder",
+            "description": "Gentle reminder with direct payment link.",
         },
         {
-            "label": "60_day",
-            "min_days": 61,
-            "max_days": 90,
-            "action": "second_reminder",
-            "description": "Second overdue notice with firmer tone.",
+            "label": "15_day",
+            "min_days": 15,
+            "max_days": 29,
+            "action": "firm_reminder_cc_ae",
+            "description": "Firmer tone, CC the assigned Account Executive.",
         },
         {
-            "label": "90_plus",
-            "min_days": 91,
+            "label": "30_plus",
+            "min_days": 30,
             "max_days": None,
-            "action": "escalate",
-            "description": "Severely overdue — escalate for human review.",
+            "action": "restrict_and_notify_cfo",
+            "description": (
+                "Restrict client software access via API and notify the CFO."
+            ),
         },
     ],
     # Invoices above this amount always require HITL escalation regardless
@@ -62,14 +64,20 @@ COLLECTION_CONFIG: dict = {
     # How many days between follow-up reminders within the same bucket.
     "reminder_cadence_days": 7,
     "from_email": "collections@example.com",
+    "payment_link_base": "https://pay.example.com/invoice/",
+    "cfo_email": "cfo@example.com",
     "email_templates": {
-        "first_reminder": {
+        "gentle_reminder": {
             "subject": "Friendly Reminder: Invoice {invoice_id} is Past Due",
             "tone": "polite",
         },
-        "second_reminder": {
-            "subject": "Second Notice: Invoice {invoice_id} Requires Attention",
+        "firm_reminder_cc_ae": {
+            "subject": "Second Notice: Invoice {invoice_id} Requires Immediate Attention",
             "tone": "firm",
+        },
+        "restrict_and_notify_cfo": {
+            "subject": "Final Notice: Invoice {invoice_id} — Access Restricted",
+            "tone": "final",
         },
     },
 }

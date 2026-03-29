@@ -55,9 +55,9 @@ classify_overdue_node = NodeSpec(
     id="classify-overdue",
     name="Classify Overdue",
     description=(
-        "Bucket each unpaid invoice into aging categories (current / 30-day / "
-        "60-day / 90+) using the collection config thresholds. Flag invoices "
-        "for reminder or escalation."
+        "Bucket each unpaid invoice into aging categories (current / 3-day / "
+        "15-day / 30+) using the collection config thresholds. Flag invoices "
+        "for reminder, escalation, or access restriction."
     ),
     node_type="event_loop",
     client_facing=False,
@@ -81,11 +81,11 @@ Rules:
   based on its days_overdue value.
 - If an invoice's amount >= escalation_threshold_usd, it MUST be flagged for
   escalation regardless of its bucket.
-- Invoices in the "current" bucket (0-30 days) must NEVER receive reminders.
-- Invoices flagged for "first_reminder" or "second_reminder" go into
+- Invoices in the "current" bucket (0-2 days) must NEVER receive reminders.
+- Invoices flagged for "gentle_reminder" or "firm_reminder_cc_ae" go into
   reminder_accounts.
-- Invoices flagged for "escalate" (90+ days or high-value) go into
-  escalation_accounts.
+- Invoices flagged for "restrict_and_notify_cfo" (30+ days or high-value) go
+  into escalation_accounts.
 
 Return raw JSON (no markdown):
 {{
@@ -96,8 +96,9 @@ Return raw JSON (no markdown):
       "customer_email": "...",
       "amount": 0.0,
       "days_overdue": 0,
-      "bucket": "current|30_day|60_day|90_plus",
-      "action": "none|first_reminder|second_reminder|escalate"
+      "bucket": "current|3_day|15_day|30_plus",
+      "action": "none|gentle_reminder|firm_reminder_cc_ae|restrict_and_notify_cfo",
+      "account_executive_email": "..."
     }}
   ],
   "reminder_accounts": [
@@ -107,7 +108,8 @@ Return raw JSON (no markdown):
       "customer_email": "...",
       "amount": 0.0,
       "days_overdue": 0,
-      "action": "first_reminder|second_reminder"
+      "action": "gentle_reminder|firm_reminder_cc_ae",
+      "account_executive_email": "..."
     }}
   ],
   "escalation_accounts": [
@@ -117,10 +119,10 @@ Return raw JSON (no markdown):
       "customer_email": "...",
       "amount": 0.0,
       "days_overdue": 0,
-      "reason": "90+ days overdue|High-value invoice (>$10k)"
+      "reason": "30+ days overdue|High-value invoice (>$10k)"
     }}
   ],
-  "classification_summary": "Classified N invoices: X current, Y at 30-day, ..."
+  "classification_summary": "Classified N invoices: X current, Y at 3-day, ..."
 }}
 """,
     tools=[],
@@ -131,8 +133,8 @@ send_reminders_node = NodeSpec(
     id="send-reminders",
     name="Send Reminders",
     description=(
-        "Send first or second reminder emails to accounts in the reminder "
-        "list. Handle missing email credentials gracefully."
+        "Send tiered reminder emails: gentle reminders with payment links at "
+        "3 days, firm reminders CC'ing the Account Executive at 15 days."
     ),
     node_type="event_loop",
     client_facing=False,
@@ -140,22 +142,34 @@ send_reminders_node = NodeSpec(
     input_keys=["reminder_accounts", "collection_config"],
     output_keys=["reminders_sent", "reminder_errors", "reminder_summary"],
     system_prompt="""\
-You are an accounts-receivable assistant sending overdue invoice reminders.
+You are a polite but persistent accounts-receivable clerk sending overdue
+invoice reminders.
 
 Accounts to remind: {reminder_accounts}
 Collection config: {collection_config}
 
 For each account in reminder_accounts:
 1. Look up the email template from collection_config.email_templates based on
-   the account's action (first_reminder or second_reminder).
+   the account's action.
 2. Use the send_email tool to send the reminder:
+
+   **For gentle_reminder (3-14 days overdue):**
    - to: the customer_email
-   - subject: use the template subject, replacing {{invoice_id}} with the
-     actual invoice ID
-   - html: compose a professional email body. For first_reminder use a polite
-     tone; for second_reminder use a firm but respectful tone. Include the
-     invoice ID, amount, and days overdue.
+   - subject: use the template subject, replacing {{invoice_id}}
+   - html: compose a polite, friendly email. Include the invoice ID, amount,
+     days overdue, and a DIRECT PAYMENT LINK using
+     collection_config.payment_link_base + invoice_id.
    - from_email: use collection_config.from_email
+
+   **For firm_reminder_cc_ae (15-29 days overdue):**
+   - to: the customer_email
+   - cc: the account's account_executive_email (if available)
+   - subject: use the template subject, replacing {{invoice_id}}
+   - html: compose a firm but respectful email. Escalate the tone. Include
+     the invoice ID, amount, days overdue, and the payment link. Mention that
+     the Account Executive has been CC'd.
+   - from_email: use collection_config.from_email
+
 3. If send_email fails (e.g. missing credentials), log the error but continue
    with the next account — do NOT stop the whole process.
 
@@ -165,7 +179,7 @@ Return raw JSON (no markdown):
     {{
       "invoice_id": "...",
       "customer_email": "...",
-      "action": "first_reminder|second_reminder",
+      "action": "gentle_reminder|firm_reminder_cc_ae",
       "status": "sent|failed",
       "error": null
     }}
@@ -216,16 +230,18 @@ Escalation accounts: {escalation_accounts}
 Collection config: {collection_config}
 
 Verify ALL of the following:
-1. No invoice in the "current" bucket (0-30 days) received a reminder.
-2. Every invoice with days_overdue 31-60 is bucketed as "30_day" with action
-   "first_reminder".
-3. Every invoice with days_overdue 61-90 is bucketed as "60_day" with action
-   "second_reminder".
-4. Every invoice with days_overdue 91+ is bucketed as "90_plus" with action
-   "escalate".
+1. No invoice in the "current" bucket (0-2 days) received a reminder.
+2. Every invoice with days_overdue 3-14 is bucketed as "3_day" with action
+   "gentle_reminder".
+3. Every invoice with days_overdue 15-29 is bucketed as "15_day" with action
+   "firm_reminder_cc_ae".
+4. Every invoice with days_overdue 30+ is bucketed as "30_plus" with action
+   "restrict_and_notify_cfo".
 5. Every invoice with amount >= escalation_threshold_usd appears in
    escalation_accounts regardless of its bucket.
 6. Reminders were only sent to accounts in reminder_accounts.
+7. Gentle reminders include a payment link.
+8. Firm reminders CC the Account Executive.
 
 If ANY rule is violated:
 - Set judgment_passed to false and needs_reclassification to true.
@@ -261,14 +277,19 @@ escalate_review_node = NodeSpec(
     system_prompt="""\
 The following invoices require human review before further collection action.
 They have been flagged for escalation due to high value (>$10,000) or being
-severely overdue (90+ days).
+30+ days past due.
 
 Escalation accounts: {escalation_accounts}
 Classification details: {classified_invoices}
 Judgment details: {judgment_details}
 
+**Pending actions for approved accounts:**
+- Client software access will be restricted via API
+- The CFO ({collection_config.cfo_email}) will be notified
+- A final notice email will be sent to the client
+
 Please review each account and decide:
-- "approved" — proceed with escalated collection actions
+- "approved" — proceed with access restriction, CFO notification, and final notice
 - "rejected" — do not escalate; no further action
 - "deferred" — revisit later
 
@@ -313,9 +334,9 @@ Use csv_write to save the report to "ar_aging_report.csv".
 
 Also compute per-bucket totals:
   - current: count and total $
-  - 30_day: count and total $
-  - 60_day: count and total $
-  - 90_plus: count and total $
+  - 3_day: count and total $
+  - 15_day: count and total $
+  - 30_plus: count and total $
   - grand total of all unpaid
 
 Return raw JSON (no markdown):
@@ -324,9 +345,9 @@ Return raw JSON (no markdown):
   "report_summary": "Generated AR aging report with N invoices.",
   "ar_aging_totals": {{
     "current": {{"count": 0, "total": 0.0}},
-    "30_day": {{"count": 0, "total": 0.0}},
-    "60_day": {{"count": 0, "total": 0.0}},
-    "90_plus": {{"count": 0, "total": 0.0}},
+    "3_day": {{"count": 0, "total": 0.0}},
+    "15_day": {{"count": 0, "total": 0.0}},
+    "30_plus": {{"count": 0, "total": 0.0}},
     "grand_total": 0.0
   }}
 }}

@@ -64,7 +64,25 @@ goal = Goal(
     constraints=[
         Constraint(
             id="c-no-current-reminders",
-            description="Never send reminders to invoices in the current bucket (0-30 days)",
+            description="Never send reminders to invoices in the current bucket (0-2 days)",
+            constraint_type="hard",
+            category="functional",
+        ),
+        Constraint(
+            id="c-payment-link",
+            description="All gentle reminders (3-day) must include a direct payment link",
+            constraint_type="hard",
+            category="functional",
+        ),
+        Constraint(
+            id="c-cc-account-executive",
+            description="Firm reminders (15-day) must CC the assigned Account Executive",
+            constraint_type="hard",
+            category="functional",
+        ),
+        Constraint(
+            id="c-restrict-access",
+            description="At 30+ days, restrict client software access via API and notify CFO",
             constraint_type="hard",
             category="functional",
         ),
