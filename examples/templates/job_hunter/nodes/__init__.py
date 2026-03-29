@@ -9,9 +9,9 @@ intake_node = NodeSpec(
     name="Intake",
     description="Analyze resume and identify 3-5 strongest role types",
     node_type="event_loop",
-    client_facing=False,
+    client_facing=True,
     max_node_visits=1,
-    input_keys=["resume_text"],
+    input_keys=[],
     output_keys=["resume_text", "role_analysis"],
     success_criteria=(
         "The user's resume has been analyzed and 3-5 target roles identified "
