@@ -108,6 +108,7 @@ def _request(
 
 
 def _auth_error() -> dict[str, Any]:
+    """Return standardized missing-API-key error payload."""
     return {
         "error": "FRESHDESK_API_KEY environment variable not set",
         "help": "Get your API key from Freshdesk profile settings and set "
@@ -116,6 +117,7 @@ def _auth_error() -> dict[str, Any]:
 
 
 def _domain_error() -> dict[str, Any]:
+    """Return standardized missing-domain error payload."""
     return {
         "error": "FRESHDESK_DOMAIN is required",
         "help": "Set FRESHDESK_DOMAIN (e.g. acme.freshdesk.com) or configure freshdesk_domain.",
@@ -140,6 +142,7 @@ def _extract_ticket(ticket: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extract_contact(contact: dict[str, Any]) -> dict[str, Any]:
+    """Normalize Freshdesk contact into a compact dict."""
     return {
         "id": contact.get("id"),
         "name": contact.get("name"),
@@ -154,6 +157,7 @@ def _extract_contact(contact: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extract_agent(agent: dict[str, Any]) -> dict[str, Any]:
+    """Normalize Freshdesk agent into a compact dict."""
     return {
         "id": agent.get("id"),
         "contact_id": agent.get("contact_id"),
@@ -165,6 +169,7 @@ def _extract_agent(agent: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extract_group(group: dict[str, Any]) -> dict[str, Any]:
+    """Normalize Freshdesk group into a compact dict."""
     return {
         "id": group.get("id"),
         "name": group.get("name"),
@@ -176,6 +181,7 @@ def _extract_group(group: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extract_company(company: dict[str, Any]) -> dict[str, Any]:
+    """Normalize Freshdesk company into a compact dict."""
     return {
         "id": company.get("id"),
         "name": company.get("name"),

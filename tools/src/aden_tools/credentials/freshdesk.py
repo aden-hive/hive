@@ -7,6 +7,7 @@ Requires FRESHDESK_API_KEY and FRESHDESK_DOMAIN (or credential store equivalents
 
 from .base import CredentialSpec
 
+# Shared tool coverage for both Freshdesk credentials.
 _FRESHDESK_TOOLS = [
     "freshdesk_list_tickets",
     "freshdesk_filter_tickets",
@@ -27,7 +28,9 @@ _FRESHDESK_TOOLS = [
     "freshdesk_get_company",
 ]
 
+# Credential specs for Freshdesk API key and domain.
 FRESHDESK_CREDENTIALS = {
+    # API key used as Basic auth username (`api_key:X`).
     "freshdesk": CredentialSpec(
         env_var="FRESHDESK_API_KEY",
         tools=_FRESHDESK_TOOLS,
@@ -46,6 +49,7 @@ FRESHDESK_CREDENTIALS = {
         credential_id="freshdesk",
         credential_key="api_key",
     ),
+    # Freshdesk tenant hostname used to build API base URLs.
     "freshdesk_domain": CredentialSpec(
         env_var="FRESHDESK_DOMAIN",
         tools=_FRESHDESK_TOOLS,
