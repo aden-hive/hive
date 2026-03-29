@@ -13,6 +13,36 @@ from typing import Any
 
 from pydantic import BaseModel, Field, SecretStr
 
+PROVIDER_TO_CREDENTIAL_ID = {
+    "anthropic": "anthropic",
+    "openai": "openai",
+    "gemini": "gemini",
+    "google": "gemini",
+    "groq": "groq",
+    "cerebras": "cerebras",
+    "mistral": "mistral",
+    "cohere": "cohere",
+    "together": "together",
+    "together_ai": "together",
+    "replicate": "replicate",
+    "deepseek": "deepseek",
+    "minimax": "minimax",
+    "azure": "azure",
+}
+
+def get_credential_id_for_provider(provider: str) -> str | None:
+    """
+    Get the credential store ID for a provider.
+    
+    Args:
+        provider: Provider name (e.g., "gemini", "anthropic", "openai")
+        
+    Returns:
+        Credential ID for use with CredentialStore, or None if not found
+    """
+    if not provider:
+        return None
+    return PROVIDER_TO_CREDENTIAL_ID.get(provider.lower())
 
 def _utc_now() -> datetime:
     """Get current UTC time as timezone-aware datetime."""
