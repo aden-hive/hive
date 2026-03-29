@@ -943,6 +943,22 @@ def cmd_shell(args: argparse.Namespace) -> int:
         if not agent_path:
             return 1
 
+    # Validate the agent path before attempting to load it
+    agent_path_obj = Path(agent_path)
+    if not agent_path_obj.exists():
+        print(f"Error: Agent path not found: '{agent_path}'", file=sys.stderr)
+        print(f"  Tip: Run 'hive list' to see available agents in '{args.agents_dir}'", file=sys.stderr)
+        return 1
+    if not agent_path_obj.is_dir():
+        print(f"Error: '{agent_path}' is not a directory", file=sys.stderr)
+        print(f"  Tip: Provide the path to an agent folder, not a file", file=sys.stderr)
+        return 1
+    if not (agent_path_obj / "agent.py").exists() and not (agent_path_obj / "agent.json").exists():
+        print(f"Error: No agent found at '{agent_path}'", file=sys.stderr)
+        print(f"  Expected agent.py or agent.json inside the directory", file=sys.stderr)
+        print(f"  Tip: Run 'hive list' to see available agents in '{args.agents_dir}'", file=sys.stderr)
+        return 1
+
     try:
         runner = AgentRunner.load(agent_path)
     except CredentialError as e:
