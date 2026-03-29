@@ -194,6 +194,7 @@ class ConcurrentStorage:
         Uses an atomic write (temp-file + rename) so a mid-write crash
         never leaves a partially written file on disk.
         """
+        self._validate_key(run.id)
         runs_dir = self.base_path / "runs"
         runs_dir.mkdir(parents=True, exist_ok=True)
         run_path = runs_dir / f"{run.id}.json"
@@ -210,6 +211,7 @@ class ConcurrentStorage:
 
     def _load_summary_sync(self, run_id: str) -> RunSummary | None:
         """Load just the summary (faster than full run)."""
+        self._validate_key(run_id)
         summary_path = self.base_path / "summaries" / f"{run_id}.json"
         if not summary_path.exists():
             run = self._load_run_sync(run_id)
@@ -313,7 +315,12 @@ class ConcurrentStorage:
         return run
 
     async def load_summary(self, run_id: str, use_cache: bool = True) -> RunSummary | None:
-        """Load just the summary (faster than full run)."""
+        """Load just the summary (faster than full run).
+
+        Raises:
+            ValueError: If run_id contains path traversal characters.
+        """
+        self._validate_key(run_id)
         cache_key = f"summary:{run_id}"
 
         # Check cache
@@ -467,7 +474,14 @@ class ConcurrentStorage:
 
     def save_run_sync(self, run: Run) -> None:
         """Synchronous save — persists a run to disk immediately."""
+        self._validate_key(run.id)
+        # Invalidate summary cache since the run data is changing
+        self._cache.pop(f"summary:{run.id}", None)
+
         self._save_run_sync(run)
+
+        # Refresh run cache
+        self._cache[f"run:{run.id}"] = CacheEntry(run, time.time())
 
     def load_run_sync(self, run_id: str) -> Run | None:
         """Synchronous load.

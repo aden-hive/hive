@@ -132,10 +132,24 @@ class TestPathTraversalProtection:
         with pytest.raises(ValueError):
             await storage.delete_run("../etc/passwd")
 
+    @pytest.mark.asyncio
+    async def test_load_summary_blocks_traversal(self, storage):
+        """load_summary() must reject path traversal in the run_id."""
+        with pytest.raises(ValueError):
+            await storage.load_summary("../../../.env")
+
     def test_load_run_sync_blocks_traversal(self, storage):
         """load_run_sync() must reject path traversal in the run_id."""
         with pytest.raises(ValueError):
             storage.load_run_sync("../../../.env")
+
+    def test_save_run_sync_blocks_traversal(self, storage):
+        """save_run_sync() must reject path traversal in the run_id."""
+        from framework.schemas.run import Run
+
+        run = Run(id="../../../.env", goal_id="test", goal_description="", input_data={})
+        with pytest.raises(ValueError):
+            storage.save_run_sync(run)
 
     def test_load_run_sync_valid_id_returns_none(self, storage):
         """load_run_sync with a legitimate nonexistent ID returns None."""
@@ -153,6 +167,14 @@ class TestPathTraversalProtection:
         """Block attempts to access config files via load_run_sync."""
         with pytest.raises(ValueError):
             storage.load_run_sync("../../../../etc/aden/database.yaml")
+
+    def test_blocks_arbitrary_write_via_save_sync(self, storage):
+        """Block attempts to write arbitrary files via save_run_sync."""
+        from framework.schemas.run import Run
+
+        run = Run(id="../../var/www/html/shell", goal_id="test", goal_description="", input_data={})
+        with pytest.raises(ValueError):
+            storage.save_run_sync(run)
 
 
 class TestPathTraversalWithActualFiles:
