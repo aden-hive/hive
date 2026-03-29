@@ -64,12 +64,29 @@ def _request(
     headers.setdefault("Content-Type", "application/json")
     headers.setdefault("Accept", "application/json")
     try:
-        resp = getattr(httpx, method)(
-            url,
-            headers=headers,
-            timeout=30.0,
-            **kwargs,
-        )
+        if method == "get":
+            resp = httpx.get(
+                url,
+                headers=headers,
+                timeout=30.0,
+                **kwargs,
+            )
+        elif method == "post":
+            resp = httpx.post(
+                url,
+                headers=headers,
+                timeout=30.0,
+                **kwargs,
+            )
+        elif method == "put":
+            resp = httpx.put(
+                url,
+                headers=headers,
+                timeout=30.0,
+                **kwargs,
+            )
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}")
         if resp.status_code == 401:
             return {"error": "Unauthorized. Check your Freshdesk API key."}
         if resp.status_code == 403:
