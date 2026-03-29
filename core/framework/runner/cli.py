@@ -402,6 +402,11 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
     elif args.input_file:
         try:
+            from pathlib import 
+            if not Path(args.input_file).is_file():
+                print(f"Error: input file is a directory, not a file: {args.input_file}", file=sys.stderr)
+                return 1
+
             with open(args.input_file, encoding="utf-8") as f:
                 context = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
