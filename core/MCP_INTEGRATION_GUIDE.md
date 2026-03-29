@@ -122,8 +122,8 @@ runner.register_mcp_server(
 
 **Configuration:**
 
-- `url`: Base URL for HTTP requests over the socket (e.g., `"http://localhost"`)
-- `socket_path`: Absolute path to the Unix socket file (e.g., `"/tmp/mcp_server.sock"`)
+- `url`: Base URL for HTTP requests over the socket (required, e.g., `"http://localhost"`)
+- `socket_path`: Absolute path to the Unix socket file (required, e.g., `"/tmp/mcp_server.sock"`)
 - `headers`: HTTP headers to include (optional)
 
 ### SSE Transport
@@ -143,7 +143,7 @@ runner.register_mcp_server(
 
 **Configuration:**
 
-- `url`: SSE endpoint URL (e.g., `"http://localhost:8000/sse"`)
+- `url`: SSE endpoint URL (required, e.g., `"http://localhost:8000/sse"`)
 - `headers`: HTTP headers for the SSE connection (optional)
 
 ## Using MCP Tools in Agents
