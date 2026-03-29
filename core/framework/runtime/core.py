@@ -16,7 +16,7 @@ from typing import Any
 from framework.observability import set_trace_context
 from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
-from framework.storage.backend import FileStorage
+from framework.storage.concurrent import ConcurrentStorage
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class Runtime:
             logger.warning(f"Storage path does not exist, creating: {path}")
             path.mkdir(parents=True, exist_ok=True)
 
-        self.storage = FileStorage(storage_path)
+        self.storage = ConcurrentStorage(storage_path)
         self._current_run: Run | None = None
         self._current_node: str = "unknown"
 
@@ -132,8 +132,8 @@ class Runtime:
         self._current_run.output_data = output_data or {}
         self._current_run.complete(status, narrative)
 
-        # Save to storage
-        self.storage.save_run(self._current_run)
+        # Save to storage (sync — Runtime methods are not async)
+        self.storage.save_run_sync(self._current_run)
         self._current_run = None
 
     def set_node(self, node_id: str) -> None:
