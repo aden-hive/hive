@@ -24,11 +24,18 @@
       "Bash(done)",
       "Bash(xargs cat:*)",
       "mcp__agent-builder__list_mcp_tools",
-      "mcp__agent-builder__add_mcp_server"
+      "mcp__agent-builder__add_mcp_server",
+      "Bash(grep -E \"\\\\.\\(py|json|sh|md\\)$\")",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(uv run:*)",
+      "Bash(git pull:*)",
+      "Bash(git reset:*)",
+      "Bash(git rm:*)",
+      "Bash(git restore:*)"
     ]
-  },
-  "enabledMcpjsonServers": [
-    "agent-builder",
-    "tools"
-  ]
+  }
 }
