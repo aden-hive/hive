@@ -1035,6 +1035,12 @@ $ProviderMenuUrls     = @(
     "https://openrouter.ai/keys"
 )
 
+$OllamaDetected = $false
+try {
+    $null = & ollama list 2>$null
+    if ($LASTEXITCODE -eq 0) { $OllamaDetected = $true }
+} catch { }
+
 # ── Read previous configuration (if any) ──────────────────────
 $PrevProvider = ""
 $PrevModel = ""
@@ -1071,7 +1077,9 @@ if ($PrevSubMode -or $PrevProvider) {
         "kimi_code"   { if ($KimiCredDetected)   { $prevCredValid = $true } }
         "hive_llm"    { if ($HiveCredDetected)   { $prevCredValid = $true } }
         default {
-            if ($PrevEnvVar) {
+            if ($PrevProvider -eq "ollama") {
+                $prevCredValid = $true
+            } elseif ($PrevEnvVar) {
                 $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "Process")
                 if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "User") }
                 if ($envVal) { $prevCredValid = $true }
@@ -1095,6 +1103,7 @@ if ($PrevSubMode -or $PrevProvider) {
                 "groq"      { $DefaultChoice = "10" }
                 "cerebras"  { $DefaultChoice = "11" }
                 "openrouter" { $DefaultChoice = "12" }
+                "ollama"     { $DefaultChoice = "13" }
                 "minimax"   { $DefaultChoice = "4" }
                 "kimi"      { $DefaultChoice = "5" }
             }
@@ -1163,7 +1172,17 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     if ($envVal) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 }
 
-$SkipChoice = 7 + $ProviderMenuEnvVars.Count
+# 13) Local (Ollama) — no API key needed
+Write-Host "  " -NoNewline
+Write-Color -Text "13" -Color Cyan -NoNewline
+if ($OllamaDetected) {
+    Write-Host ") Local (Ollama) - No API key needed  " -NoNewline
+    Write-Color -Text "(ollama detected)" -Color Green
+} else {
+    Write-Host ") Local (Ollama) - No API key needed"
+}
+
+$SkipChoice = 7 + $ProviderMenuEnvVars.Count + 1
 Write-Host "  " -NoNewline
 Write-Color -Text "$SkipChoice" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
@@ -1381,6 +1400,75 @@ switch ($num) {
                 # User pressed Enter with existing key — keep it
                 break
             }
+        }
+    }
+    13 {
+        # Local (Ollama)
+        if (-not $OllamaDetected) {
+            Write-Host ""
+            Write-Warn "Ollama depends on a local Ollama server, but 'ollama list' failed."
+            Write-Host "  Please install Ollama (https://ollama.com) and start the server,"
+            Write-Host "  then run this quickstart again."
+            Write-Host ""
+            exit 1
+        }
+        $SelectedProviderId = "ollama"
+        Write-Host ""
+        Write-Ok "Using Local (Ollama)"
+        Write-Host ""
+
+        # Fetch available models
+        $ollamaModels = @()
+        try {
+            $listOutput = & ollama list 2>$null
+            if ($listOutput.Count -gt 1) {
+                for ($i = 1; $i -lt $listOutput.Count; $i++) {
+                    $line = $listOutput[$i].Trim()
+                    if ($line) {
+                        $mName = ($line -split '\s+')[0]
+                        if ($mName) { $ollamaModels += $mName }
+                    }
+                }
+            }
+        } catch { }
+
+        if ($ollamaModels.Count -eq 0) {
+            Write-Warn "No Ollama models found."
+            Write-Host "  Please open another terminal, run 'ollama run <model>' (e.g. 'ollama run llama3'),"
+            Write-Host "  and then run this quickstart again."
+            Write-Host ""
+            exit 1
+        }
+
+        # Show model picker
+        Write-Host "  Select an Ollama model:"
+        Write-Host ""
+        $defaultIdx = "1"
+        for ($i = 0; $i -lt $ollamaModels.Count; $i++) {
+            Write-Color -Text "  $($i + 1)" -Color Cyan -NoNewline
+            Write-Host ") $($ollamaModels[$i])"
+            if ($PrevProvider -eq "ollama" -and $PrevModel -eq $ollamaModels[$i]) {
+                $defaultIdx = [string]($i + 1)
+            }
+        }
+        Write-Host ""
+        
+        while ($true) {
+            $raw = Read-Host "Enter choice (1-$($ollamaModels.Count)) [$defaultIdx]"
+            if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $defaultIdx }
+            if ($raw -match '^\d+$') {
+                $num = [int]$raw
+                if ($num -ge 1 -and $num -le $ollamaModels.Count) {
+                    $SelectedModel = $ollamaModels[$num - 1]
+                    Write-Host ""
+                    Write-Ok "Model: $SelectedModel"
+                    $SelectedMaxTokens = 8192
+                    $SelectedMaxContextTokens = 16384
+                    $SelectedApiBase = "http://localhost:11434"
+                    break
+                }
+            }
+            Write-Color -Text "Invalid choice. Please enter 1-$($ollamaModels.Count)" -Color Red
         }
     }
     { $_ -eq $SkipChoice } {
@@ -1701,8 +1789,13 @@ if ($SelectedProviderId) {
     } elseif ($SelectedProviderId -eq "openrouter") {
         $config.llm["api_base"] = "https://openrouter.ai/api/v1"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
-    } else {
+    } elseif ($SelectedProviderId -eq "ollama") {
+        $config.llm["api_base"] = "http://localhost:11434"
+        $config.llm.Remove("api_key_env_var")
+    } elseif ($SelectedEnvVar) {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
+    } else {
+        $config.llm.Remove("api_key_env_var")
     }
 
     $config | ConvertTo-Json -Depth 4 | Set-Content -Path $HiveConfigFile -Encoding UTF8
