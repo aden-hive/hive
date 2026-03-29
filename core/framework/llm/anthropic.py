@@ -1,24 +1,23 @@
 """Anthropic Claude LLM provider - backward compatible wrapper around LiteLLM."""
 
 import os
-from collections.abc import Callable
 from typing import Any
 
 from framework.llm.litellm import LiteLLMProvider
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool
 
 
-def _get_api_key_from_credential_manager() -> str | None:
-    """Get API key from CredentialManager or environment.
+def _get_api_key_from_credential_store() -> str | None:
+    """Get API key from CredentialStoreAdapter or environment.
 
     Priority:
-    1. CredentialManager (supports .env hot-reload)
+    1. CredentialStoreAdapter (supports encrypted storage + env vars)
     2. os.environ fallback
     """
     try:
-        from aden_tools.credentials import CredentialManager
+        from aden_tools.credentials import CredentialStoreAdapter
 
-        creds = CredentialManager()
+        creds = CredentialStoreAdapter.default()
         if creds.is_available("anthropic"):
             return creds.get("anthropic")
     except ImportError:
@@ -44,12 +43,12 @@ class AnthropicProvider(LLMProvider):
         Initialize the Anthropic provider.
 
         Args:
-            api_key: Anthropic API key. If not provided, uses CredentialManager
+            api_key: Anthropic API key. If not provided, uses CredentialStoreAdapter
                      or ANTHROPIC_API_KEY env var.
             model: Model to use (default: claude-haiku-4-5-20251001)
         """
         # Delegate to LiteLLMProvider internally.
-        self.api_key = api_key or _get_api_key_from_credential_manager()
+        self.api_key = api_key or _get_api_key_from_credential_store()
         if not self.api_key:
             raise ValueError(
                 "Anthropic API key required. Set ANTHROPIC_API_KEY env var or pass api_key."
@@ -70,6 +69,7 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
         """Generate a completion from Claude (via LiteLLM)."""
         return self._provider.complete(
@@ -79,21 +79,26 @@ class AnthropicProvider(LLMProvider):
             max_tokens=max_tokens,
             response_format=response_format,
             json_mode=json_mode,
+            max_retries=max_retries,
         )
 
-    def complete_with_tools(
+    async def acomplete(
         self,
         messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
-        """Run a tool-use loop until Claude produces a final response (via LiteLLM)."""
-        return self._provider.complete_with_tools(
+        """Async completion via LiteLLM."""
+        return await self._provider.acomplete(
             messages=messages,
             system=system,
             tools=tools,
-            tool_executor=tool_executor,
-            max_iterations=max_iterations,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            json_mode=json_mode,
+            max_retries=max_retries,
         )

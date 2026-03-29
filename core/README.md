@@ -14,69 +14,14 @@ Framework provides a runtime framework that captures **decisions**, not just act
 ## Installation
 
 ```bash
-pip install -e .
+uv pip install -e .
 ```
 
-## MCP Server Setup
+## Agent Building
 
-The framework includes an MCP (Model Context Protocol) server for building agents. To set up the MCP server:
+Agent scaffolding is handled by the `coder-tools` MCP server (in `tools/coder_tools_server.py`), which provides the `initialize_and_build_agent` tool and related utilities. The package generation logic lives directly in `tools/coder_tools_server.py`.
 
-### Automated Setup
-
-**Using bash (Linux/macOS):**
-```bash
-./setup_mcp.sh
-```
-
-**Using Python (cross-platform):**
-```bash
-python setup_mcp.py
-```
-
-The setup script will:
-1. Install the framework package
-2. Install MCP dependencies (mcp, fastmcp)
-3. Create/verify `.mcp.json` configuration
-4. Test the MCP server module
-
-### Manual Setup
-
-If you prefer manual setup:
-
-```bash
-# Install framework
-pip install -e .
-
-# Install MCP dependencies
-pip install mcp fastmcp
-
-# Test the server
-python -m framework.mcp.agent_builder_server
-```
-
-### Using with MCP Clients
-
-To use the agent builder with Claude Desktop or other MCP clients, add this to your MCP client configuration:
-
-```json
-{
-  "mcpServers": {
-    "agent-builder": {
-      "command": "python",
-      "args": ["-m", "framework.mcp.agent_builder_server"],
-      "cwd": "/path/to/goal-agent"
-    }
-  }
-}
-```
-
-The MCP server provides tools for:
-- Creating agent building sessions
-- Defining goals with success criteria
-- Adding nodes (llm_generate, llm_tool_use, router, function)
-- Connecting nodes with edges
-- Validating and exporting agent graphs
-- Testing nodes and full agent graphs
+See the [Getting Started Guide](../docs/getting-started.md) for building agents.
 
 ## Quick Start
 
@@ -85,14 +30,14 @@ The MCP server provides tools for:
 Run an LLM-powered calculator:
 
 ```bash
-# Single calculation
-python -m framework calculate "2 + 3 * 4"
+# Run an exported agent
+uv run python -m framework run exports/calculator --input '{"expression": "2 + 3 * 4"}'
 
-# Interactive mode
-python -m framework interactive
+# Interactive shell session
+uv run python -m framework shell exports/calculator
 
-# Analyze runs with Builder
-python -m framework analyze calculator
+# Show agent info
+uv run python -m framework info exports/calculator
 ```
 
 ### Using the Runtime
@@ -136,16 +81,16 @@ Tests are generated using MCP tools (`generate_constraint_tests`, `generate_succ
 
 ```bash
 # Run tests against an agent
-python -m framework test-run <agent_path> --goal <goal_id> --parallel 4
+uv run python -m framework test-run <agent_path> --goal <goal_id> --parallel 4
 
 # Debug failed tests
-python -m framework test-debug <agent_path> <test_name>
+uv run python -m framework test-debug <agent_path> <test_name>
 
-# List tests for a goal
-python -m framework test-list <goal_id>
+# List tests for an agent
+uv run python -m framework test-list <agent_path>
 ```
 
-For detailed testing workflows, see the [testing-agent skill](.claude/skills/testing-agent/SKILL.md).
+For detailed testing workflows, see [developer-guide.md](../docs/developer-guide.md).
 
 ### Analyzing Agent Behavior with Builder
 

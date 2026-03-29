@@ -15,9 +15,11 @@ Usage:
     python mcp_server.py --stdio
 
 Environment Variables:
-    MCP_PORT              - Server port (default: 4001)
-    ANTHROPIC_API_KEY     - Required at startup for testing/LLM nodes
-    BRAVE_SEARCH_API_KEY  - Required for web_search tool (validated at agent load time)
+    MCP_PORT                  - Server port (default: 4001)
+    INCLUDE_UNVERIFIED_TOOLS  - Set to "true", "1", or "yes" to also load
+                                unverified/community tool integrations (default: off)
+    ANTHROPIC_API_KEY         - Required at startup for testing/LLM nodes
+    BRAVE_SEARCH_API_KEY      - Required for web_search tool (validated at agent load time)
 
 Note:
     Two-tier credential validation:
@@ -65,11 +67,10 @@ from fastmcp import FastMCP  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import PlainTextResponse  # noqa: E402
 
-from aden_tools.credentials import CredentialError, CredentialManager  # noqa: E402
+from aden_tools.credentials import CredentialError, CredentialStoreAdapter  # noqa: E402
 from aden_tools.tools import register_all_tools  # noqa: E402
 
-# Create credential manager
-credentials = CredentialManager()
+credentials = CredentialStoreAdapter.default()
 
 # Tier 1: Validate startup-required credentials (if any)
 try:
@@ -81,8 +82,9 @@ except CredentialError as e:
 
 mcp = FastMCP("tools")
 
-# Register all tools with the MCP server, passing credential manager
-tools = register_all_tools(mcp, credentials=credentials)
+# Register all tools with the MCP server, passing credential store
+include_unverified = os.getenv("INCLUDE_UNVERIFIED_TOOLS", "").lower() in ("true", "1", "yes")
+tools = register_all_tools(mcp, credentials=credentials, include_unverified=include_unverified)
 # Only print to stdout in HTTP mode (STDIO mode requires clean stdout for JSON-RPC)
 if "--stdio" not in sys.argv:
     logger.info(f"Registered {len(tools)} tools: {tools}")

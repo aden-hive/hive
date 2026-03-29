@@ -22,7 +22,6 @@ The framework includes a Goal-Based Testing system (Goal → Agent → Eval):
 See `framework.testing` for details.
 """
 
-from framework.builder.query import BuilderQuery
 from framework.llm import AnthropicProvider, LLMProvider
 from framework.runner import AgentOrchestrator, AgentRunner
 from framework.runtime.core import Runtime
@@ -51,8 +50,6 @@ __all__ = [
     "Problem",
     # Runtime
     "Runtime",
-    # Builder
-    "BuilderQuery",
     # LLM
     "LLMProvider",
     "AnthropicProvider",

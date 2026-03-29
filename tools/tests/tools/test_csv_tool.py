@@ -1,5 +1,6 @@
 """Tests for csv_tool - Read and manipulate CSV files."""
 
+import importlib.util
 from pathlib import Path
 from unittest.mock import patch
 
@@ -7,6 +8,8 @@ import pytest
 from fastmcp import FastMCP
 
 from aden_tools.tools.csv_tool.csv_tool import register_tools
+
+duckdb_available = importlib.util.find_spec("duckdb") is not None
 
 # Test IDs for sandbox
 TEST_WORKSPACE_ID = "test-workspace"
@@ -46,7 +49,10 @@ def session_dir(tmp_path: Path) -> Path:
 def basic_csv(session_dir: Path) -> Path:
     """Create a basic CSV file for testing."""
     csv_file = session_dir / "basic.csv"
-    csv_file.write_text("name,age,city\nAlice,30,NYC\nBob,25,LA\nCharlie,35,Chicago\n")
+    csv_file.write_text(
+        "name,age,city\nAlice,30,NYC\nBob,25,LA\nCharlie,35,Chicago\n",
+        encoding="utf-8",
+    )
     return csv_file
 
 
@@ -57,7 +63,7 @@ def large_csv(session_dir: Path) -> Path:
     lines = ["id,value"]
     for i in range(100):
         lines.append(f"{i},{i * 10}")
-    csv_file.write_text("\n".join(lines) + "\n")
+    csv_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return csv_file
 
 
@@ -65,7 +71,7 @@ def large_csv(session_dir: Path) -> Path:
 def empty_csv(session_dir: Path) -> Path:
     """Create an empty CSV file (no content)."""
     csv_file = session_dir / "empty.csv"
-    csv_file.write_text("")
+    csv_file.write_text("", encoding="utf-8")
     return csv_file
 
 
@@ -73,7 +79,7 @@ def empty_csv(session_dir: Path) -> Path:
 def headers_only_csv(session_dir: Path) -> Path:
     """Create a CSV file with only headers."""
     csv_file = session_dir / "headers_only.csv"
-    csv_file.write_text("name,age,city\n")
+    csv_file.write_text("name,age,city\n", encoding="utf-8")
     return csv_file
 
 
@@ -154,6 +160,49 @@ class TestCsvRead:
         # First row should be id=50
         assert result["rows"][0] == {"id": "50", "value": "500"}
 
+    def test_negative_limit(self, csv_tool_fn, basic_csv, tmp_path):
+        """Return error for negative limit."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tool_fn(
+                path="basic.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                limit=-1,
+            )
+
+        assert "error" in result
+        assert "non-negative" in result["error"].lower()
+
+    def test_negative_offset(self, csv_tool_fn, basic_csv, tmp_path):
+        """Return error for negative offset."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tool_fn(
+                path="basic.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                offset=-1,
+            )
+
+        assert "error" in result
+        assert "non-negative" in result["error"].lower()
+
+    def test_negative_limit_and_offset(self, csv_tool_fn, basic_csv, tmp_path):
+        """Return error for both negative limit and offset."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tool_fn(
+                path="basic.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                limit=-5,
+                offset=-10,
+            )
+
+        assert "error" in result
+        assert "non-negative" in result["error"].lower()
+
     def test_file_not_found(self, csv_tool_fn, session_dir, tmp_path):
         """Return error for non-existent file."""
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
@@ -171,7 +220,7 @@ class TestCsvRead:
         """Return error for non-CSV file extension."""
         # Create a text file
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name,age\nAlice,30\n")
+        txt_file.write_text("name,age\nAlice,30\n", encoding="utf-8")
 
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = csv_tool_fn(
@@ -271,7 +320,8 @@ class TestCsvRead:
         """Read CSV with quoted fields containing commas."""
         csv_file = session_dir / "quoted.csv"
         csv_file.write_text(
-            'name,address,note\n"Smith, John","123 Main St, Apt 4","Hello, world"\n'
+            'name,address,note\n"Smith, John","123 Main St, Apt 4","Hello, world"\n',
+            encoding="utf-8",
         )
 
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
@@ -339,7 +389,7 @@ class TestCsvWrite:
         assert result["rows_written"] == 2
 
         # Verify file content
-        content = (session_dir / "output.csv").read_text()
+        content = (session_dir / "output.csv").read_text(encoding="utf-8")
         assert "name,age,city" in content
         assert "Alice,30,NYC" in content
         assert "Bob,25,LA" in content
@@ -403,7 +453,7 @@ class TestCsvWrite:
 
         assert result["success"] is True
 
-        content = (session_dir / "output.csv").read_text()
+        content = (session_dir / "output.csv").read_text(encoding="utf-8")
         assert "extra" not in content
         assert "ignored" not in content
 
@@ -422,7 +472,7 @@ class TestCsvWrite:
         assert result["success"] is True
         assert result["rows_written"] == 0
 
-        content = (session_dir / "output.csv").read_text()
+        content = (session_dir / "output.csv").read_text(encoding="utf-8")
         assert "name,age" in content
 
     def test_write_unicode_content(self, csv_tools, session_dir, tmp_path):
@@ -442,6 +492,33 @@ class TestCsvWrite:
         content = (session_dir / "unicode.csv").read_text(encoding="utf-8")
         assert "太郎" in content
         assert "東京" in content
+
+    def test_write_no_parent_directory(self, csv_tools, session_dir, tmp_path):
+        """Write CSV to root without parent directory (fixes #1843)."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_write"](
+                path="data.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                columns=["id", "value"],
+                rows=[
+                    {"id": "1", "value": "test1"},
+                    {"id": "2", "value": "test2"},
+                ],
+            )
+
+        assert result["success"] is True
+        assert result["rows_written"] == 2
+
+        # Verify file was created at session root
+        csv_file = session_dir / "data.csv"
+        assert csv_file.exists()
+
+        content = csv_file.read_text(encoding="utf-8")
+        assert "id,value" in content
+        assert "1,test1" in content
+        assert "2,test2" in content
 
 
 class TestCsvAppend:
@@ -506,7 +583,7 @@ class TestCsvAppend:
 
         assert result["success"] is True
 
-        content = (session_dir / "basic.csv").read_text()
+        content = (session_dir / "basic.csv").read_text(encoding="utf-8")
         assert "extra" not in content
         assert "ignored" not in content
         assert "David" in content
@@ -514,7 +591,7 @@ class TestCsvAppend:
     def test_append_non_csv_extension_error(self, csv_tools, session_dir, tmp_path):
         """Return error for non-CSV file extension."""
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name\nAlice\n")
+        txt_file.write_text("name\nAlice\n", encoding="utf-8")
 
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = csv_tools["csv_append"](
@@ -606,7 +683,7 @@ class TestCsvInfo:
     def test_get_info_non_csv_extension_error(self, csv_tools, session_dir, tmp_path):
         """Return error for non-CSV file extension."""
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name\nAlice\n")
+        txt_file.write_text("name\nAlice\n", encoding="utf-8")
 
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = csv_tools["csv_info"](
@@ -620,6 +697,7 @@ class TestCsvInfo:
         assert ".csv" in result["error"].lower()
 
 
+@pytest.mark.skipif(not duckdb_available, reason="duckdb not installed")
 class TestCsvSql:
     """Tests for csv_sql function (requires duckdb)."""
 
@@ -633,7 +711,8 @@ class TestCsvSql:
             "2,MacBook,Electronics,1999,30\n"
             "3,Coffee Mug,Kitchen,15,200\n"
             "4,Headphones,Electronics,299,75\n"
-            "5,Water Bottle,Kitchen,25,150\n"
+            "5,Water Bottle,Kitchen,25,150\n",
+            encoding="utf-8",
         )
         return csv_file
 

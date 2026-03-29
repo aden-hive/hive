@@ -79,7 +79,7 @@ async def example_3_config_file():
     # Copy example config (in practice, you'd place this in your agent folder)
     import shutil
 
-    shutil.copy("examples/mcp_servers.json", test_agent_path / "mcp_servers.json")
+    shutil.copy(Path(__file__).parent / "mcp_servers.json", test_agent_path / "mcp_servers.json")
 
     # Load agent - MCP servers will be auto-discovered
     runner = AgentRunner.load(test_agent_path)
@@ -93,81 +93,6 @@ async def example_3_config_file():
 
     # Clean up the test config
     (test_agent_path / "mcp_servers.json").unlink()
-
-
-async def example_4_custom_agent_with_mcp_tools():
-    """Example 4: Build custom agent that uses MCP tools"""
-    print("\n=== Example 4: Custom Agent with MCP Tools ===\n")
-
-    from framework.builder.workflow import WorkflowBuilder
-
-    # Create a workflow builder
-    builder = WorkflowBuilder()
-
-    # Define goal
-    builder.set_goal(
-        goal_id="web-researcher",
-        name="Web Research Agent",
-        description="Search the web and summarize findings",
-    )
-
-    # Add success criteria
-    builder.add_success_criterion(
-        "search-results", "Successfully retrieve at least 3 web search results"
-    )
-    builder.add_success_criterion("summary", "Provide a clear, concise summary of the findings")
-
-    # Add nodes that will use MCP tools
-    builder.add_node(
-        node_id="web-searcher",
-        name="Web Search",
-        description="Search the web for information",
-        node_type="llm_tool_use",
-        system_prompt="Search for {query} and return the top results. Use the web_search tool.",
-        tools=["web_search"],  # This tool comes from tools MCP server
-        input_keys=["query"],
-        output_keys=["search_results"],
-    )
-
-    builder.add_node(
-        node_id="summarizer",
-        name="Summarize Results",
-        description="Summarize the search results",
-        node_type="llm_generate",
-        system_prompt="Summarize the following search results in 2-3 sentences: {search_results}",
-        input_keys=["search_results"],
-        output_keys=["summary"],
-    )
-
-    # Connect nodes
-    builder.add_edge("web-searcher", "summarizer")
-
-    # Set entry point
-    builder.set_entry("web-searcher")
-    builder.set_terminal("summarizer")
-
-    # Export the agent
-    export_path = Path("exports/web-research-agent")
-    export_path.mkdir(parents=True, exist_ok=True)
-    builder.export(export_path)
-
-    # Load and register MCP server
-    runner = AgentRunner.load(export_path)
-    runner.register_mcp_server(
-        name="tools",
-        transport="stdio",
-        command="python",
-        args=["-m", "aden_tools.mcp_server", "--stdio"],
-        cwd="../tools",
-    )
-
-    # Run the agent
-    result = await runner.run({"query": "latest AI breakthroughs 2026"})
-
-    print(f"\nAgent completed with result:\n{result}")
-
-    # Cleanup
-    runner.cleanup()
 
 
 async def main():

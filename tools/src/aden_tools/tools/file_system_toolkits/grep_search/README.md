@@ -36,12 +36,13 @@ grep_search(
 | `agent_id` | str | Yes | - | The ID of the agent |
 | `session_id` | str | Yes | - | The ID of the current session |
 | `recursive` | bool | No | False | Whether to search recursively in subdirectories |
+| `hashline` | bool | No | False | If True, include an `anchor` field (`N:hhhh`) in each match for use with `hashline_edit` |
 
 ## Returns
 
 Returns a dictionary with the following structure:
 
-**Success:**
+**Success (default mode):**
 ```python
 {
     "success": True,
@@ -61,6 +62,25 @@ Returns a dictionary with the following structure:
         }
     ],
     "total_matches": 2
+}
+```
+
+**Success (hashline mode):**
+```python
+{
+    "success": True,
+    "pattern": "def \\w+\\(",
+    "path": "src",
+    "recursive": True,
+    "matches": [
+        {
+            "file": "src/main.py",
+            "line_number": 10,
+            "line_content": "def process_data(args):",
+            "anchor": "10:a3f2"
+        }
+    ],
+    "total_matches": 1
 }
 ```
 

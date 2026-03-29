@@ -43,9 +43,10 @@ jobs:
             console.log(`  Found issue references: ${issueNumbers.length > 0 ? issueNumbers.join(', ') : 'none'}`);
 
             if (issueNumbers.length === 0) {
-              const message = `## PR Closed - Requirements Not Met
+              const message = `## PR Requirements Warning
 
-            This PR has been automatically closed because it doesn't meet the requirements.
+            This PR does not meet the contribution requirements.
+            If the issue is not fixed within ~24 hours, it may be automatically closed.
 
             **Missing:** No linked issue found.
 
@@ -58,16 +59,24 @@ jobs:
             - Add the \`micro-fix\` label or include \`micro-fix\` in your PR title for trivial fixes
             - Add the \`documentation\` label or include \`doc\`/\`docs\` in your PR title for documentation changes
 
+            **Micro-fix requirements** (must meet ALL):
+            | Qualifies | Disqualifies |
+            |-----------|--------------|
+            | < 20 lines changed | Any functional bug fix |
+            | Typos & Documentation & Linting | Refactoring for "clean code" |
+            | No logic/API/DB changes | New features (even tiny ones) |
+
             **Why is this required?** See #472 for details.`;
 
-              const comments = await github.rest.issues.listComments({
+              const comments = await github.paginate(github.rest.issues.listComments, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
+                per_page: 100,
               });
 
-              const botComment = comments.data.find(
-                (c) => c.user.type === 'Bot' && c.body.includes('PR Closed - Requirements Not Met')
+              const botComment = comments.find(
+                (c) => c.user.type === 'Bot' && c.body.includes('PR Requirements Warning')
               );
 
               if (!botComment) {
@@ -79,11 +88,11 @@ jobs:
                 });
               }
 
-              await github.rest.pulls.update({
+              await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: prNumber,
-                state: 'closed',
+                issue_number: prNumber,
+                labels: ['pr-requirements-warning'],
               });
 
               core.setFailed('PR must reference an issue');
@@ -125,9 +134,10 @@ jobs:
                 `#${i.number} (assignees: ${i.assignees.length > 0 ? i.assignees.join(', ') : 'none'})`
               ).join(', ');
 
-              const message = `## PR Closed - Requirements Not Met
+              const message = `## PR Requirements Warning
 
-            This PR has been automatically closed because it doesn't meet the requirements.
+            This PR does not meet the contribution requirements.
+            If the issue is not fixed within ~24 hours, it may be automatically closed.
 
             **PR Author:** @${prAuthor}
             **Found issues:** ${issueList}
@@ -141,16 +151,24 @@ jobs:
             - Add the \`micro-fix\` label or include \`micro-fix\` in your PR title for trivial fixes
             - Add the \`documentation\` label or include \`doc\`/\`docs\` in your PR title for documentation changes
 
+            **Micro-fix requirements** (must meet ALL):
+            | Qualifies | Disqualifies |
+            |-----------|--------------|
+            | < 20 lines changed | Any functional bug fix |
+            | Typos & Documentation & Linting | Refactoring for "clean code" |
+            | No logic/API/DB changes | New features (even tiny ones) |
+
             **Why is this required?** See #472 for details.`;
 
-              const comments = await github.rest.issues.listComments({
+              const comments = await github.paginate(github.rest.issues.listComments, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: prNumber,
+                per_page: 100,
               });
 
-              const botComment = comments.data.find(
-                (c) => c.user.type === 'Bot' && c.body.includes('PR Closed - Requirements Not Met')
+              const botComment = comments.find(
+                (c) => c.user.type === 'Bot' && c.body.includes('PR Requirements Warning')
               );
 
               if (!botComment) {
@@ -162,14 +180,24 @@ jobs:
                 });
               }
 
-              await github.rest.pulls.update({
+              await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: prNumber,
-                state: 'closed',
+                issue_number: prNumber,
+                labels: ['pr-requirements-warning'],
               });
 
               core.setFailed('PR author must be assigned to the linked issue');
             } else {
               console.log(`PR requirements met! Issue #${issueWithAuthorAssigned} has ${prAuthor} as assignee.`);
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  name: "pr-requirements-warning"
+                });
+              }catch (error){
+                //ignore if label doesn't exist
+              }
             }

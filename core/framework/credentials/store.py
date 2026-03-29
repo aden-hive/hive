@@ -45,7 +45,7 @@ class CredentialStore:
     Usage:
         # Basic usage
         store = CredentialStore(
-            storage=EncryptedFileStorage("/path/to/creds"),
+            storage=EncryptedFileStorage("~/.hive/credentials"),
             providers=[OAuth2Provider(), StaticProvider()]
         )
 
@@ -362,6 +362,59 @@ class CredentialStore:
         """
         return self._storage.list_all()
 
+    def list_accounts(self, provider_name: str) -> list[dict[str, Any]]:
+        """List all accounts for a provider type with their identities.
+
+        Args:
+            provider_name: Provider type name (e.g. "google", "slack").
+
+        Returns:
+            List of dicts with credential_id, provider, alias, identity, label.
+        """
+        if hasattr(self._storage, "load_all_for_provider"):
+            creds = self._storage.load_all_for_provider(provider_name)
+        else:
+            cred = self.get_credential(provider_name)
+            creds = [cred] if cred else []
+        return [
+            {
+                "credential_id": c.id,
+                "provider": provider_name,
+                "alias": c.alias,
+                "identity": c.identity.to_dict(),
+            }
+            for c in creds
+        ]
+
+    def get_credential_by_alias(self, provider_name: str, alias: str) -> CredentialObject | None:
+        """Find a credential by provider name and alias.
+
+        Args:
+            provider_name: Provider type name (e.g. "google").
+            alias: User-set alias from the Aden platform.
+
+        Returns:
+            CredentialObject if found, None otherwise.
+        """
+        # LLMs sometimes pass "provider/alias" as the alias (e.g. "google/wrok"
+        # instead of just "wrok").  Strip the provider prefix when present.
+        if alias.startswith(f"{provider_name}/"):
+            alias = alias[len(provider_name) + 1 :]
+
+        if hasattr(self._storage, "load_by_alias"):
+            return self._storage.load_by_alias(provider_name, alias)
+
+        # Scan fallback for storage backends without alias index
+        if hasattr(self._storage, "load_all_for_provider"):
+            for cred in self._storage.load_all_for_provider(provider_name):
+                if cred.alias == alias:
+                    return cred
+        return None
+
+    def get_credential_by_identity(self, provider_name: str, label: str) -> CredentialObject | None:
+        """Alias for get_credential_by_alias (backward compat)."""
+        return self.get_credential_by_alias(provider_name, label)
+
     def is_available(self, credential_id: str) -> bool:
         """
         Check if a credential is available.
@@ -373,6 +426,10 @@ class CredentialStore:
             True if credential exists and is accessible
         """
         return self.get_credential(credential_id, refresh_if_needed=False) is not None
+
+    def exists(self, credential_id: str) -> bool:
+        """Check if a credential exists in storage without triggering provider fetches."""
+        return self._storage.exists(credential_id)
 
     # --- Validation ---
 
@@ -566,7 +623,7 @@ class CredentialStore:
     @classmethod
     def with_encrypted_storage(
         cls,
-        base_path: str,
+        base_path: str | None = None,
         providers: list[CredentialProvider] | None = None,
         **kwargs: Any,
     ) -> CredentialStore:
@@ -574,7 +631,7 @@ class CredentialStore:
         Create a credential store with encrypted file storage.
 
         Args:
-            base_path: Directory for credential files
+            base_path: Directory for credential files. Defaults to ~/.hive/credentials.
             providers: List of credential providers
             **kwargs: Additional arguments passed to CredentialStore
 
@@ -612,3 +669,97 @@ class CredentialStore:
             providers=providers,
             **kwargs,
         )
+
+    @classmethod
+    def with_aden_sync(
+        cls,
+        base_url: str = "https://api.adenhq.com",
+        cache_ttl_seconds: int = 300,
+        local_path: str | None = None,
+        auto_sync: bool = True,
+        **kwargs: Any,
+    ) -> CredentialStore:
+        """
+        Create a credential store with Aden server sync.
+
+        Automatically syncs OAuth2 tokens from the Aden authentication server.
+        Falls back to local-only storage if ADEN_API_KEY is not set or Aden
+        is unreachable.
+
+        Args:
+            base_url: Aden server URL (default: https://api.adenhq.com)
+            cache_ttl_seconds: How long to cache credentials locally (default: 5 min)
+            local_path: Path for local credential storage (default: ~/.hive/credentials)
+            auto_sync: Whether to sync all credentials on startup (default: True)
+            **kwargs: Additional arguments passed to CredentialStore
+
+        Returns:
+            CredentialStore configured with Aden sync
+
+        Example:
+            # Simple usage - just set ADEN_API_KEY env var
+            store = CredentialStore.with_aden_sync()
+
+            # Get HubSpot token (auto-refreshed via Aden)
+            token = store.get_key("hubspot", "access_token")
+        """
+        import os
+        from pathlib import Path
+
+        from .storage import EncryptedFileStorage
+
+        # Determine local storage path
+        if local_path is None:
+            local_path = str(Path.home() / ".hive" / "credentials")
+
+        local_storage = EncryptedFileStorage(base_path=local_path)
+
+        # Check if Aden is configured
+        api_key = os.environ.get("ADEN_API_KEY")
+        if not api_key:
+            logger.info("ADEN_API_KEY not set, using local-only credential storage")
+            return cls(storage=local_storage, **kwargs)
+
+        # Try to setup Aden sync
+        try:
+            from .aden import (
+                AdenCachedStorage,
+                AdenClientConfig,
+                AdenCredentialClient,
+                AdenSyncProvider,
+            )
+
+            # Create Aden client
+            client = AdenCredentialClient(AdenClientConfig(base_url=base_url))
+
+            # Create sync provider
+            provider = AdenSyncProvider(client=client)
+
+            # Use cached storage for offline resilience
+            cached_storage = AdenCachedStorage(
+                local_storage=local_storage,
+                aden_provider=provider,
+                cache_ttl_seconds=cache_ttl_seconds,
+            )
+
+            store = cls(
+                storage=cached_storage,
+                providers=[provider],
+                auto_refresh=True,
+                **kwargs,
+            )
+
+            # Initial sync
+            if auto_sync:
+                synced = provider.sync_all(store)
+                logger.info(f"Synced {synced} credentials from Aden server")
+
+            return store
+
+        except ImportError:
+            logger.warning("Aden components not available, using local storage")
+            return cls(storage=local_storage, **kwargs)
+
+        except Exception as e:
+            logger.warning(f"Failed to setup Aden sync: {e}. Using local storage.")
+            return cls(storage=local_storage, **kwargs)

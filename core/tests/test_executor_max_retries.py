@@ -79,7 +79,7 @@ async def test_executor_respects_custom_max_retries_high(runtime):
         name="Flaky Node",
         description="A node that fails multiple times before succeeding",
         max_retries=10,  # Should allow 10 retries
-        node_type="function",
+        node_type="event_loop",
         output_keys=["result"],
     )
 
@@ -123,7 +123,7 @@ async def test_executor_respects_custom_max_retries_low(runtime):
         name="Fragile Node",
         description="A node with low retry tolerance",
         max_retries=2,  # max_retries=N means N total attempts allowed
-        node_type="function",
+        node_type="event_loop",
         output_keys=["result"],
     )
 
@@ -166,7 +166,7 @@ async def test_executor_respects_default_max_retries(runtime):
         name="Default Node",
         description="A node using default retry settings",
         # max_retries not specified, should default to 3
-        node_type="function",
+        node_type="event_loop",
         output_keys=["result"],
     )
 
@@ -211,7 +211,7 @@ async def test_executor_max_retries_two_succeeds_on_second(runtime):
         name="Two Retry Node",
         description="A node with two attempts allowed",
         max_retries=2,  # max_retries=N means N total attempts allowed
-        node_type="function",
+        node_type="event_loop",
         output_keys=["result"],
     )
 
@@ -253,7 +253,7 @@ async def test_executor_different_nodes_different_max_retries(runtime):
         name="Node 1",
         description="First node in multi-node test",
         max_retries=2,
-        node_type="function",
+        node_type="event_loop",
         output_keys=["result1"],
     )
 
@@ -262,7 +262,7 @@ async def test_executor_different_nodes_different_max_retries(runtime):
         name="Node 2",
         description="Second node in multi-node test",
         max_retries=5,
-        node_type="function",
+        node_type="event_loop",
         input_keys=["result1"],
         output_keys=["result2"],
     )

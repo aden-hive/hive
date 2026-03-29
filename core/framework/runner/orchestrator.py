@@ -71,9 +71,15 @@ class AgentOrchestrator:
 
         # Auto-create LLM - LiteLLM auto-detects provider and API key from model name
         if self._llm is None:
+            from framework.config import get_api_base, get_api_key, get_llm_extra_kwargs
             from framework.llm.litellm import LiteLLMProvider
 
-            self._llm = LiteLLMProvider(model=self._model)
+            self._llm = LiteLLMProvider(
+                model=self._model,
+                api_key=get_api_key(),
+                api_base=get_api_base(),
+                **get_llm_extra_kwargs(),
+            )
 
     def register(
         self,
@@ -456,7 +462,7 @@ Respond with JSON only:
 }}"""
 
         try:
-            response = self._llm.complete(
+            response = await self._llm.acomplete(
                 messages=[{"role": "user", "content": prompt}],
                 system="You are a request router. Respond with JSON only.",
                 max_tokens=256,

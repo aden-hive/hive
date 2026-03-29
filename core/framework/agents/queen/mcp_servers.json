@@ -1,0 +1,9 @@
+{
+  "coder-tools": {
+    "transport": "stdio",
+    "command": "uv",
+    "args": ["run", "python", "coder_tools_server.py", "--stdio"],
+    "cwd": "../../../../tools",
+    "description": "Unsandboxed file system tools for code generation and validation"
+  }
+}

@@ -2,10 +2,16 @@
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import AsyncIterator
 from typing import Any
 
-from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
+from framework.llm.provider import LLMProvider, LLMResponse, Tool
+from framework.llm.stream_events import (
+    FinishEvent,
+    StreamEvent,
+    TextDeltaEvent,
+    TextEndEvent,
+)
 
 
 class MockLLMProvider(LLMProvider):
@@ -114,6 +120,7 @@ class MockLLMProvider(LLMProvider):
         max_tokens: int = 1024,
         response_format: dict[str, Any] | None = None,
         json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
         """
         Generate a mock completion without calling a real LLM.
@@ -139,39 +146,48 @@ class MockLLMProvider(LLMProvider):
             stop_reason="mock_complete",
         )
 
-    def complete_with_tools(
+    async def acomplete(
         self,
         messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[[ToolUse], ToolResult],
-        max_iterations: int = 10,
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 1024,
+        response_format: dict[str, Any] | None = None,
+        json_mode: bool = False,
+        max_retries: int | None = None,
     ) -> LLMResponse:
-        """
-        Generate a mock completion without tool use.
-
-        In mock mode, we skip tool execution and return a final response immediately.
-
-        Args:
-            messages: Initial conversation (ignored in mock mode)
-            system: System prompt (used to extract expected output keys)
-            tools: Available tools (ignored in mock mode)
-            tool_executor: Tool executor function (ignored in mock mode)
-            max_iterations: Max iterations (ignored in mock mode)
-
-        Returns:
-            LLMResponse with mock content
-        """
-        # In mock mode, we don't execute tools - just return a final response
-        # Try to generate JSON if the system prompt suggests structured output
-        json_mode = "json" in system.lower() or "output_keys" in system.lower()
-
-        content = self._generate_mock_response(system=system, json_mode=json_mode)
-
-        return LLMResponse(
-            content=content,
-            model=self.model,
-            input_tokens=0,
-            output_tokens=0,
-            stop_reason="mock_complete",
+        """Async mock completion (no I/O, returns immediately)."""
+        return self.complete(
+            messages=messages,
+            system=system,
+            tools=tools,
+            max_tokens=max_tokens,
+            response_format=response_format,
+            json_mode=json_mode,
+            max_retries=max_retries,
         )
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[StreamEvent]:
+        """Stream a mock completion as word-level TextDeltaEvents.
+
+        Splits the mock response into words and yields each as a separate
+        TextDeltaEvent with an accumulating snapshot, exercising the full
+        streaming pipeline without any API calls.
+        """
+        content = self._generate_mock_response(system=system, json_mode=False)
+        words = content.split(" ")
+        accumulated = ""
+
+        for i, word in enumerate(words):
+            chunk = word if i == 0 else " " + word
+            accumulated += chunk
+            yield TextDeltaEvent(content=chunk, snapshot=accumulated)
+
+        yield TextEndEvent(full_text=accumulated)
+        yield FinishEvent(stop_reason="mock_complete", model=self.model)

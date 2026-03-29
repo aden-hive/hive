@@ -34,11 +34,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Input context from JSON file",
     )
     run_parser.add_argument(
-        "--mock",
-        action="store_true",
-        help="Run in mock mode (no real LLM calls)",
-    )
-    run_parser.add_argument(
         "--output",
         "-o",
         type=str,
@@ -55,6 +50,26 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         "-v",
         action="store_true",
         help="Show detailed execution logs (steps, LLM calls, etc.)",
+    )
+
+    run_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model to use (any LiteLLM-compatible name)",
+    )
+    run_parser.add_argument(
+        "--resume-session",
+        type=str,
+        default=None,
+        help="Resume from a specific session ID",
+    )
+    run_parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Resume from a specific checkpoint (requires --resume-session)",
     )
     run_parser.set_defaults(func=cmd_run)
 
@@ -174,20 +189,208 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     shell_parser.set_defaults(func=cmd_shell)
 
+    # tui command (interactive agent dashboard)
+    # setup-credentials command
+    setup_creds_parser = subparsers.add_parser(
+        "setup-credentials",
+        help="Interactive credential setup",
+        description="Guide through setting up required credentials for an agent.",
+    )
+    setup_creds_parser.add_argument(
+        "agent_path",
+        type=str,
+        nargs="?",
+        help="Path to agent folder (optional - runs general setup if not specified)",
+    )
+    setup_creds_parser.set_defaults(func=cmd_setup_credentials)
+
+    # serve command (HTTP API server)
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Start HTTP API server",
+        description="Start an HTTP server exposing REST + SSE APIs for agent control.",
+    )
+    serve_parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host to bind (default: 127.0.0.1)",
+    )
+    serve_parser.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=8787,
+        help="Port to listen on (default: 8787)",
+    )
+    serve_parser.add_argument(
+        "--agent",
+        "-a",
+        type=str,
+        action="append",
+        default=[],
+        help="Agent path to preload (repeatable)",
+    )
+    serve_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model for preloaded agents",
+    )
+    serve_parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open dashboard in browser after server starts",
+    )
+    serve_parser.add_argument("--verbose", "-v", action="store_true", help="Enable INFO log level")
+    serve_parser.add_argument("--debug", action="store_true", help="Enable DEBUG log level")
+    serve_parser.set_defaults(func=cmd_serve)
+
+    # open command (serve + auto-open browser)
+    open_parser = subparsers.add_parser(
+        "open",
+        help="Start HTTP server and open dashboard in browser",
+        description="Shortcut for 'hive serve --open'. "
+        "Starts the HTTP server and opens the dashboard.",
+    )
+    open_parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host to bind (default: 127.0.0.1)",
+    )
+    open_parser.add_argument(
+        "--port",
+        "-p",
+        type=int,
+        default=8787,
+        help="Port to listen on (default: 8787)",
+    )
+    open_parser.add_argument(
+        "--agent",
+        "-a",
+        type=str,
+        action="append",
+        default=[],
+        help="Agent path to preload (repeatable)",
+    )
+    open_parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="LLM model for preloaded agents",
+    )
+    open_parser.add_argument("--verbose", "-v", action="store_true", help="Enable INFO log level")
+    open_parser.add_argument("--debug", action="store_true", help="Enable DEBUG log level")
+    open_parser.set_defaults(func=cmd_open)
+
+
+def _load_resume_state(
+    agent_path: str, session_id: str, checkpoint_id: str | None = None
+) -> dict | None:
+    """Load session or checkpoint state for headless resume.
+
+    Args:
+        agent_path: Path to the agent folder (e.g., exports/my_agent)
+        session_id: Session ID to resume from
+        checkpoint_id: Optional checkpoint ID within the session
+
+    Returns:
+        session_state dict for executor, or None if not found
+    """
+    agent_name = Path(agent_path).name
+    agent_work_dir = Path.home() / ".hive" / "agents" / agent_name
+    session_dir = agent_work_dir / "sessions" / session_id
+
+    if not session_dir.exists():
+        return None
+
+    if checkpoint_id:
+        # Checkpoint-based resume: load checkpoint and extract state
+        cp_path = session_dir / "checkpoints" / f"{checkpoint_id}.json"
+        if not cp_path.exists():
+            return None
+        try:
+            cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        return {
+            "resume_session_id": session_id,
+            "memory": cp_data.get("shared_memory", {}),
+            "paused_at": cp_data.get("next_node") or cp_data.get("current_node"),
+            "execution_path": cp_data.get("execution_path", []),
+            "node_visit_counts": {},
+        }
+    else:
+        # Session state resume: load state.json
+        state_path = session_dir / "state.json"
+        if not state_path.exists():
+            return None
+        try:
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        progress = state_data.get("progress", {})
+        paused_at = progress.get("paused_at") or progress.get("resume_from")
+        return {
+            "resume_session_id": session_id,
+            "memory": state_data.get("memory", {}),
+            "paused_at": paused_at,
+            "execution_path": progress.get("path", []),
+            "node_visit_counts": progress.get("node_visit_counts", {}),
+        }
+
+
+def _prompt_before_start(agent_path: str, runner, model: str | None = None):
+    """Prompt user to start agent or update credentials.
+
+    Returns:
+        Updated runner if user proceeds, None if user aborts.
+    """
+    from framework.credentials.setup import CredentialSetupSession
+    from framework.runner import AgentRunner
+
+    while True:
+        print()
+        try:
+            choice = input("Press Enter to start agent, or 'u' to update credentials: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+
+        if choice == "":
+            return runner
+        elif choice.lower() == "u":
+            session = CredentialSetupSession.from_agent_path(agent_path)
+            result = session.run_interactive()
+            if result.success:
+                # Reload runner with updated credentials
+                try:
+                    runner = AgentRunner.load(agent_path, model=model)
+                except Exception as e:
+                    print(f"Error reloading agent: {e}")
+                    return None
+            # Loop back to prompt again
+        elif choice.lower() == "q":
+            return None
+
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
-    import logging
 
+    from framework.credentials.models import CredentialError
+    from framework.observability import configure_logging
     from framework.runner import AgentRunner
 
     # Set logging level (quiet by default for cleaner output)
     if args.quiet:
-        logging.basicConfig(level=logging.ERROR, format="%(message)s")
+        configure_logging(level="ERROR")
     elif getattr(args, "verbose", False):
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        configure_logging(level="INFO")
     else:
-        logging.basicConfig(level=logging.WARNING, format="%(message)s")
+        configure_logging(level="WARNING")
 
     # Load input context
     context = {}
@@ -199,22 +402,69 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
     elif args.input_file:
         try:
-            with open(args.input_file) as f:
+            with open(args.input_file, encoding="utf-8") as f:
                 context = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Error reading input file: {e}", file=sys.stderr)
             return 1
+    # Validate --output path before execution begins (fail fast, before agent loads)
+    if args.output:
+        import os
 
-    # Load and run agent
+        output_parent = Path(args.output).parent
+        if not output_parent.exists():
+            print(
+                f"Error: output directory does not exist: {output_parent}/",
+                file=sys.stderr,
+            )
+            return 1
+        if not os.access(output_parent, os.W_OK):
+            print(
+                f"Error: output directory is not writable: {output_parent}/",
+                file=sys.stderr,
+            )
+            return 1
+
+    # Standard execution
+    # AgentRunner handles credential setup interactively when stdin is a TTY.
     try:
         runner = AgentRunner.load(
             args.agent_path,
-            mock_mode=args.mock,
-            model=getattr(args, "model", "claude-haiku-4-5-20251001"),
+            model=args.model,
         )
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
+
+    # Prompt before starting (allows credential updates)
+    if sys.stdin.isatty() and not args.quiet:
+        runner = _prompt_before_start(args.agent_path, runner, args.model)
+        if runner is None:
+            return 1
+
+    # Load session/checkpoint state for resume (headless mode)
+    session_state = None
+    resume_session = getattr(args, "resume_session", None)
+    checkpoint = getattr(args, "checkpoint", None)
+    if resume_session:
+        session_state = _load_resume_state(args.agent_path, resume_session, checkpoint)
+        if session_state is None:
+            print(
+                f"Error: Could not load session state for {resume_session}",
+                file=sys.stderr,
+            )
+            return 1
+        if not args.quiet:
+            resume_node = session_state.get("paused_at", "unknown")
+            if checkpoint:
+                print(f"Resuming from checkpoint: {checkpoint}")
+            else:
+                print(f"Resuming session: {resume_session}")
+            print(f"Resume point: {resume_node}")
+            print()
 
     # Auto-inject user_id if the agent expects it but it's not provided
     entry_input_keys = runner.graph.nodes[0].input_keys if runner.graph.nodes else []
@@ -235,8 +485,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("=" * 60)
         print()
 
-    # Run the agent
-    result = asyncio.run(runner.run(context))
+    result = asyncio.run(runner.run(context, session_state=session_state))
 
     # Format output
     output = {
@@ -251,7 +500,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # Output results
     if args.output:
-        with open(args.output, "w") as f:
+        with open(args.output, "w", encoding="utf-8") as f:
             json.dump(output, f, indent=2, default=str)
         if not args.quiet:
             print(f"Results written to {args.output}")
@@ -316,10 +565,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_info(args: argparse.Namespace) -> int:
     """Show agent information."""
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     try:
         runner = AgentRunner.load(args.agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -379,10 +632,14 @@ def cmd_info(args: argparse.Namespace) -> int:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate an exported agent."""
+    from framework.credentials.models import CredentialError
     from framework.runner import AgentRunner
 
     try:
         runner = AgentRunner.load(args.agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -417,12 +674,13 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     directory = Path(args.directory)
     if not directory.exists():
-        print(f"Directory not found: {directory}", file=sys.stderr)
-        return 1
+        # FIX: Handle missing directory gracefully on fresh install
+        print(f"No agents found in {directory}")
+        return 0
 
     agents = []
     for path in directory.iterdir():
-        if path.is_dir() and (path / "agent.json").exists():
+        if _is_valid_agent_dir(path):
             try:
                 runner = AgentRunner.load(path)
                 info = runner.info()
@@ -458,7 +716,7 @@ def cmd_list(args: argparse.Namespace) -> int:
             print(f"  {agent['name']}")
             print(f"    Path: {agent['path']}")
             print(f"    Description: {agent['description']}")
-            print(f"    Steps: {agent['steps']}, Tools: {agent['tools']}")
+            print(f"    Nodes: {agent['nodes']}, Tools: {agent['tools']}")
             print()
 
     return 0
@@ -488,15 +746,26 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     if args.agents:
         # Use specific agents
         for agent_name in args.agents:
+            # Guard against full paths: if the name contains path separators
+            # (e.g. "exports/my_agent"), it will be doubled with agents_dir
+            agent_name_path = Path(agent_name)
+            if len(agent_name_path.parts) > 1:
+                print(
+                    f"Error: --agents expects agent names, not paths. "
+                    f"Use: --agents {agent_name_path.name} "
+                    f"instead of --agents {agent_name}",
+                    file=sys.stderr,
+                )
+                return 1
             agent_path = agents_dir / agent_name
-            if not (agent_path / "agent.json").exists():
+            if not _is_valid_agent_dir(agent_path):
                 print(f"Agent not found: {agent_path}", file=sys.stderr)
                 return 1
             agent_paths.append((agent_name, agent_path))
     else:
         # Discover all agents
         for path in agents_dir.iterdir():
-            if path.is_dir() and (path / "agent.json").exists():
+            if _is_valid_agent_dir(path):
                 agent_paths.append((path.name, path))
 
     if not agent_paths:
@@ -636,75 +905,29 @@ def _interactive_approval(request):
 def _format_natural_language_to_json(
     user_input: str, input_keys: list[str], agent_description: str, session_context: dict = None
 ) -> dict:
-    """Use Haiku to convert natural language input to JSON based on agent's input schema."""
-    import os
+    """Convert natural language input to JSON based on agent's input schema.
 
-    import anthropic
+    Maps user input to the primary input field. For follow-up inputs,
+    appends to the existing value.
+    """
+    main_field = input_keys[0] if input_keys else "objective"
 
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-
-    # Build prompt for Haiku
-    session_info = ""
     if session_context:
-        # Extract the main field (usually 'objective') that we'll append to
-        main_field = input_keys[0] if input_keys else "objective"
         existing_value = session_context.get(main_field, "")
+        if existing_value:
+            return {main_field: f"{existing_value}\n\n{user_input}"}
 
-        session_info = (
-            f'\n\nExisting {main_field}: "{existing_value}"\n\n'
-            f"The user is providing ADDITIONAL information. Append this new "
-            f"information to the existing {main_field} to create an enriched, "
-            "more detailed version."
-        )
-
-    prompt = f"""You are formatting user input for an agent that requires specific input fields.
-
-Agent: {agent_description}
-
-Required input fields: {", ".join(input_keys)}{session_info}
-
-User input: {user_input}
-
-{"If this is a follow-up, APPEND new info to the existing field value." if session_context else ""}
-
-Output ONLY valid JSON, no explanation:"""
-
-    try:
-        message = client.messages.create(
-            model="claude-3-5-haiku-20241022",  # Fast and cheap
-            max_tokens=500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        json_str = message.content[0].text.strip()
-        # Remove markdown code blocks if present
-        if json_str.startswith("```"):
-            json_str = json_str.split("```")[1]
-            if json_str.startswith("json"):
-                json_str = json_str[4:]
-        json_str = json_str.strip()
-
-        return json.loads(json_str)
-    except Exception:
-        # Fallback: try to infer the main field
-        if len(input_keys) == 1:
-            return {input_keys[0]: user_input}
-        else:
-            # Put it in the first field as fallback
-            return {input_keys[0]: user_input}
+    return {main_field: user_input}
 
 
 def cmd_shell(args: argparse.Namespace) -> int:
     """Start an interactive agent session."""
-    import logging
 
+    from framework.credentials.models import CredentialError
+    from framework.observability import configure_logging
     from framework.runner import AgentRunner
 
-    # Configure logging to show runtime visibility
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(message)s",  # Simple format for clean output
-    )
+    configure_logging(level="INFO")
 
     agents_dir = Path(args.agents_dir)
 
@@ -722,6 +945,9 @@ def cmd_shell(args: argparse.Namespace) -> int:
 
     try:
         runner = AgentRunner.load(agent_path)
+    except CredentialError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -927,45 +1153,260 @@ def cmd_shell(args: argparse.Namespace) -> int:
     return 0
 
 
+def _get_framework_agents_dir() -> Path:
+    """Resolve the framework agents directory relative to this file."""
+    return Path(__file__).resolve().parent.parent / "agents"
+
+
+def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
+    """Extract name and description from a Python-based agent's config.py.
+
+    Uses AST parsing to safely extract values without executing code.
+    Returns (name, description) tuple, with fallbacks if parsing fails.
+    """
+    import ast
+
+    config_path = agent_path / "config.py"
+    fallback_name = agent_path.name.replace("_", " ").title()
+    fallback_desc = "(Python-based agent)"
+
+    if not config_path.exists():
+        return fallback_name, fallback_desc
+
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        # Find AgentMetadata class definition
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "AgentMetadata":
+                name = fallback_name
+                desc = fallback_desc
+
+                # Extract default values from class body
+                for item in node.body:
+                    if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                        field_name = item.target.id
+                        if item.value:
+                            # Handle simple string constants
+                            if isinstance(item.value, ast.Constant):
+                                if field_name == "name":
+                                    name = item.value.value
+                                elif field_name == "description":
+                                    desc = item.value.value
+                            # Handle parenthesized multi-line strings (concatenated)
+                            elif isinstance(item.value, ast.JoinedStr):
+                                # f-strings - skip, use fallback
+                                pass
+                            elif isinstance(item.value, ast.BinOp):
+                                # String concatenation with + - try to evaluate
+                                try:
+                                    result = _eval_string_binop(item.value)
+                                    if result and field_name == "name":
+                                        name = result
+                                    elif result and field_name == "description":
+                                        desc = result
+                                except Exception:
+                                    pass
+
+                return name, desc
+
+        return fallback_name, fallback_desc
+    except Exception:
+        return fallback_name, fallback_desc
+
+
+def _eval_string_binop(node) -> str | None:
+    """Recursively evaluate a BinOp of string constants."""
+    import ast
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _eval_string_binop(node.left)
+        right = _eval_string_binop(node.right)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+
+def _is_valid_agent_dir(path: Path) -> bool:
+    """Check if a directory contains a valid agent (agent.json or agent.py)."""
+    if not path.is_dir():
+        return False
+    return (path / "agent.json").exists() or (path / "agent.py").exists()
+
+
+def _has_agents(directory: Path) -> bool:
+    """Check if a directory contains any valid agents (folders with agent.json or agent.py)."""
+    if not directory.exists():
+        return False
+    return any(_is_valid_agent_dir(p) for p in directory.iterdir())
+
+
+def _getch() -> str:
+    """Read a single character from stdin without waiting for Enter."""
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            ch = msvcrt.getch()
+            return ch.decode("utf-8", errors="ignore")
+        else:
+            import termios
+            import tty
+
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                ch = sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            return ch
+    except Exception:
+        return ""
+
+
+def _read_key() -> str:
+    """Read a key, handling arrow key escape sequences."""
+    ch = _getch()
+    if ch == "\x1b":  # Escape sequence start
+        ch2 = _getch()
+        if ch2 == "[":
+            ch3 = _getch()
+            if ch3 == "C":  # Right arrow
+                return "RIGHT"
+            elif ch3 == "D":  # Left arrow
+                return "LEFT"
+    return ch
+
+
 def _select_agent(agents_dir: Path) -> str | None:
-    """Let user select an agent from available agents."""
+    """Let user select an agent from available agents with pagination."""
+    AGENTS_PER_PAGE = 10
+
     if not agents_dir.exists():
         print(f"Directory not found: {agents_dir}", file=sys.stderr)
-        return None
+        # fixes issue #696, creates an exports folder if it does not exist
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Created directory: {agents_dir}", file=sys.stderr)
+        # return None
 
     agents = []
     for path in agents_dir.iterdir():
-        if path.is_dir() and (path / "agent.json").exists():
+        if _is_valid_agent_dir(path):
             agents.append(path)
+    agents.sort(key=lambda p: p.name)
 
     if not agents:
         print(f"No agents found in {agents_dir}", file=sys.stderr)
         return None
 
-    print(f"\nAvailable agents in {agents_dir}:\n")
-    for i, agent_path in enumerate(agents, 1):
+    # Pagination setup
+    page = 0
+    total_pages = (len(agents) + AGENTS_PER_PAGE - 1) // AGENTS_PER_PAGE
+
+    while True:
+        start_idx = page * AGENTS_PER_PAGE
+        end_idx = min(start_idx + AGENTS_PER_PAGE, len(agents))
+        page_agents = agents[start_idx:end_idx]
+
+        # Show page header with indicator
+        if total_pages > 1:
+            print(f"\nAvailable agents in {agents_dir} (Page {page + 1}/{total_pages}):\n")
+        else:
+            print(f"\nAvailable agents in {agents_dir}:\n")
+
+        # Display agents for current page (with global numbering)
+        for i, agent_path in enumerate(page_agents, start_idx + 1):
+            try:
+                name, desc = _extract_python_agent_metadata(agent_path)
+                desc = desc[:50] + "..." if len(desc) > 50 else desc
+                print(f"  {i}. {name}")
+                print(f"     {desc}")
+            except Exception as e:
+                print(f"  {i}. {agent_path.name} (error: {e})")
+
+        # Build navigation options
+        nav_options = []
+        if total_pages > 1:
+            nav_options.append("←/→ or p/n=navigate")
+        nav_options.append("q=quit")
+
+        print()
+        if total_pages > 1:
+            print(f"  [{', '.join(nav_options)}]")
+            print()
+
+        # Show prompt
+        print("Select agent (number), use arrows to navigate, or q to quit: ", end="", flush=True)
+
         try:
-            from framework.runner import AgentRunner
+            key = _read_key()
 
-            runner = AgentRunner.load(agent_path)
-            info = runner.info()
-            desc = info.description[:50] + "..." if len(info.description) > 50 else info.description
-            print(f"  {i}. {info.name}")
-            print(f"     {desc}")
-            runner.cleanup()
-        except Exception as e:
-            print(f"  {i}. {agent_path.name} (error: {e})")
+            if key == "RIGHT" and page < total_pages - 1:
+                page += 1
+                print()  # Newline before redrawing
+            elif key == "LEFT" and page > 0:
+                page -= 1
+                print()
+            elif key == "q":
+                print()
+                return None
+            elif key in ("n", ">") and page < total_pages - 1:
+                page += 1
+                print()
+            elif key in ("p", "<") and page > 0:
+                page -= 1
+                print()
+            elif key.isdigit():
+                # Build number with support for backspace
+                buffer = key
+                print(key, end="", flush=True)
 
-    print()
-    try:
-        choice = input("Select agent (number): ").strip()
-        idx = int(choice) - 1
-        if 0 <= idx < len(agents):
-            return str(agents[idx])
-        print("Invalid selection")
-        return None
-    except (ValueError, EOFError, KeyboardInterrupt):
-        return None
+                while True:
+                    ch = _getch()
+                    if ch in ("\r", "\n"):
+                        # Enter pressed - submit
+                        print()
+                        break
+                    elif ch in ("\x7f", "\x08"):
+                        # Backspace (DEL or BS)
+                        if buffer:
+                            buffer = buffer[:-1]
+                            # Erase character: move back, print space, move back
+                            print("\b \b", end="", flush=True)
+                    elif ch.isdigit():
+                        buffer += ch
+                        print(ch, end="", flush=True)
+                    elif ch == "\x1b":
+                        # Escape - cancel input
+                        print()
+                        buffer = ""
+                        break
+                    elif ch == "\x03":
+                        # Ctrl+C
+                        print()
+                        return None
+                    # Ignore other characters
+
+                if buffer:
+                    try:
+                        idx = int(buffer) - 1
+                        if 0 <= idx < len(agents):
+                            return str(agents[idx])
+                        print("Invalid selection")
+                    except ValueError:
+                        print("Invalid input")
+            elif key == "\r" or key == "\n":
+                print()  # Just pressed enter, redraw
+            else:
+                print()
+                print("Invalid input")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
 
 
 def _interactive_multi(agents_dir: Path) -> int:
@@ -981,7 +1422,7 @@ def _interactive_multi(agents_dir: Path) -> int:
 
     # Register all agents
     for path in agents_dir.iterdir():
-        if path.is_dir() and (path / "agent.json").exists():
+        if _is_valid_agent_dir(path):
             try:
                 orchestrator.register(path.name, path)
                 agent_count += 1
@@ -1067,3 +1508,226 @@ def _interactive_multi(agents_dir: Path) -> int:
 
     orchestrator.cleanup()
     return 0
+
+
+def cmd_setup_credentials(args: argparse.Namespace) -> int:
+    """Interactive credential setup for an agent."""
+    from framework.credentials.setup import CredentialSetupSession
+
+    agent_path = getattr(args, "agent_path", None)
+
+    if agent_path:
+        # Setup credentials for a specific agent
+        session = CredentialSetupSession.from_agent_path(agent_path)
+    else:
+        # No agent specified - show usage
+        print("Usage: hive setup-credentials <agent_path>")
+        print()
+        print("Examples:")
+        print("  hive setup-credentials exports/my-agent")
+        print("  hive setup-credentials examples/templates/deep_research_agent")
+        return 1
+
+    result = session.run_interactive()
+    return 0 if result.success else 1
+
+
+def _open_browser(url: str) -> None:
+    """Open URL in the default browser (best-effort, non-blocking)."""
+    import subprocess
+
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(
+                ["open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                encoding="utf-8",
+            )
+        elif sys.platform == "win32":
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        elif sys.platform == "linux":
+            subprocess.Popen(
+                ["xdg-open", url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                encoding="utf-8",
+            )
+    except Exception:
+        pass  # Best-effort — don't crash if browser can't open
+
+
+def _format_subprocess_output(output: str | bytes | None, limit: int = 2000) -> str:
+    """Return subprocess output as trimmed text safe for console logging."""
+    if not output:
+        return ""
+
+    if isinstance(output, bytes):
+        text = output.decode(errors="replace")
+    else:
+        text = output
+
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
+def _build_frontend() -> bool:
+    """Build the frontend if source is newer than dist. Returns True if dist exists."""
+    import subprocess
+
+    # Find the frontend directory relative to this file or cwd
+    candidates = [
+        Path("core/frontend"),
+        Path(__file__).resolve().parent.parent.parent / "frontend",
+    ]
+    frontend_dir: Path | None = None
+    for c in candidates:
+        if (c / "package.json").is_file():
+            frontend_dir = c.resolve()
+            break
+
+    if frontend_dir is None:
+        return False
+
+    dist_dir = frontend_dir / "dist"
+    src_dir = frontend_dir / "src"
+
+    # Skip build if dist is up-to-date (newest src file older than dist index.html)
+    index_html = dist_dir / "index.html"
+    if index_html.exists() and src_dir.is_dir():
+        dist_mtime = index_html.stat().st_mtime
+        needs_build = False
+        for f in src_dir.rglob("*"):
+            if f.is_file() and f.stat().st_mtime > dist_mtime:
+                needs_build = True
+                break
+        if not needs_build:
+            return True
+
+    # Need to build
+    print("Building frontend...")
+    npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
+    try:
+        # Incremental tsc caches can drift across branch changes and block builds.
+        for cache_file in frontend_dir.glob("tsconfig*.tsbuildinfo"):
+            cache_file.unlink(missing_ok=True)
+
+        # Ensure deps are installed
+        subprocess.run(
+            [npm_cmd, "install", "--no-fund", "--no-audit"],
+            encoding="utf-8",
+            errors="replace",
+            cwd=frontend_dir,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [npm_cmd, "run", "build"],
+            encoding="utf-8",
+            errors="replace",
+            cwd=frontend_dir,
+            check=True,
+            capture_output=True,
+        )
+        print("Frontend built.")
+        return True
+    except FileNotFoundError:
+        print("Node.js not found — skipping frontend build.")
+        return dist_dir.is_dir()
+    except subprocess.CalledProcessError as exc:
+        stdout = _format_subprocess_output(exc.stdout)
+        stderr = _format_subprocess_output(exc.stderr)
+        cmd = " ".join(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else str(exc.cmd)
+        details = "\n".join(part for part in [stdout, stderr] if part).strip()
+        if details:
+            print(f"Frontend build failed while running {cmd}:\n{details}")
+        else:
+            print(f"Frontend build failed while running {cmd} (exit {exc.returncode}).")
+        return dist_dir.is_dir()
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Start the HTTP API server."""
+
+    from aiohttp import web
+
+    _build_frontend()
+
+    from framework.observability import configure_logging
+    from framework.server.app import create_app
+
+    if getattr(args, "debug", False):
+        configure_logging(level="DEBUG")
+    else:
+        configure_logging(level="INFO")
+
+    model = getattr(args, "model", None)
+    app = create_app(model=model)
+
+    async def run_server():
+        manager = app["manager"]
+
+        # Preload agents specified via --agent
+        for agent_path in args.agent:
+            try:
+                session = await manager.create_session_with_worker(agent_path, model=model)
+                info = session.worker_info
+                name = info.name if info else session.worker_id
+                print(f"Loaded agent: {session.worker_id} ({name})")
+            except Exception as e:
+                print(f"Error loading {agent_path}: {e}")
+
+        # Start server using AppRunner/TCPSite (same pattern as webhook_server.py)
+        runner = web.AppRunner(app, access_log=None)
+        await runner.setup()
+        site = web.TCPSite(runner, args.host, args.port)
+        await site.start()
+
+        # Check if frontend is being served
+        dist_candidates = [
+            Path("frontend/dist"),
+            Path("core/frontend/dist"),
+        ]
+        has_frontend = any((c / "index.html").exists() for c in dist_candidates if c.is_dir())
+        dashboard_url = f"http://{args.host}:{args.port}"
+
+        print()
+        print(f"Hive API server running on {dashboard_url}")
+        if has_frontend:
+            print(f"Dashboard: {dashboard_url}")
+        print(f"Health: {dashboard_url}/api/health")
+        print(f"Agents loaded: {sum(1 for s in manager.list_sessions() if s.worker_runtime)}")
+        print()
+        print("Press Ctrl+C to stop")
+
+        # Auto-open browser if --open flag is set and frontend exists
+        if getattr(args, "open", False) and has_frontend:
+            _open_browser(dashboard_url)
+
+        # Run forever until interrupted
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await manager.shutdown_all()
+            await runner.cleanup()
+
+    try:
+        asyncio.run(run_server())
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+
+    return 0
+
+
+def cmd_open(args: argparse.Namespace) -> int:
+    """Start the HTTP API server and open the dashboard in the browser."""
+    args.open = True
+    return cmd_serve(args)

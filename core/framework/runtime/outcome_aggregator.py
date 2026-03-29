@@ -313,7 +313,6 @@ class OutcomeAggregator:
     async def _evaluate_criterion(self, criterion: Any) -> CriterionStatus:
         """
         Evaluate a single success criterion.
-
         This is a heuristic evaluation based on decision outcomes.
         More sophisticated evaluation can be added per criterion type.
         """
@@ -324,6 +323,11 @@ class OutcomeAggregator:
             progress=0.0,
             evidence=[],
         )
+
+        # Guard: only apply this heuristic to success-rate criteria
+        criterion_type = getattr(criterion, "type", "success_rate")
+        if criterion_type != "success_rate":
+            return status
 
         # Get relevant decisions (those mentioning this criterion or related intents)
         relevant_decisions = [
@@ -341,13 +345,17 @@ class OutcomeAggregator:
         outcomes = [d.outcome for d in relevant_decisions if d.outcome is not None]
         if outcomes:
             success_count = sum(1 for o in outcomes if o.success)
+
+            # Progress is computed as raw success rate of decision outcomes.
             status.progress = success_count / len(outcomes)
 
             # Add evidence
             for d in relevant_decisions[:5]:  # Limit evidence
                 if d.outcome:
                     evidence = (
-                        f"{d.decision.intent}: {'success' if d.outcome.success else 'failed'}"
+                        f"decision_id={d.decision.id}, "
+                        f"intent={d.decision.intent}, "
+                        f"result={'success' if d.outcome.success else 'failed'}"
                     )
                     status.evidence.append(evidence)
 

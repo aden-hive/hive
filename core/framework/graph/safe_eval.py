@@ -75,16 +75,6 @@ class SafeEvalVisitor(ast.NodeVisitor):
     def visit_Constant(self, node: ast.Constant) -> Any:
         return node.value
 
-    # --- Number/String/Bytes/NameConstant (Python < 3.8 compat if needed) ---
-    def visit_Num(self, node: ast.Num) -> Any:
-        return node.n
-
-    def visit_Str(self, node: ast.Str) -> Any:
-        return node.s
-
-    def visit_NameConstant(self, node: ast.NameConstant) -> Any:
-        return node.value
-
     # --- Data Structures ---
     def visit_List(self, node: ast.List) -> list:
         return [self.visit(elt) for elt in node.elts]
@@ -125,11 +115,23 @@ class SafeEvalVisitor(ast.NodeVisitor):
         return True
 
     def visit_BoolOp(self, node: ast.BoolOp) -> Any:
-        values = [self.visit(v) for v in node.values]
+        # Short-circuit evaluation to match Python semantics.
+        # Previously all operands were eagerly evaluated, which broke
+        # guard patterns like: ``x is not None and x.get("key")``
         if isinstance(node.op, ast.And):
-            return all(values)
+            result = True
+            for v in node.values:
+                result = self.visit(v)
+                if not result:
+                    return result
+            return result
         elif isinstance(node.op, ast.Or):
-            return any(values)
+            result = False
+            for v in node.values:
+                result = self.visit(v)
+                if result:
+                    return result
+            return result
         raise ValueError(f"Boolean operator {type(node.op).__name__} is not allowed")
 
     def visit_IfExp(self, node: ast.IfExp) -> Any:
@@ -155,7 +157,7 @@ class SafeEvalVisitor(ast.NodeVisitor):
 
     def visit_Attribute(self, node: ast.Attribute) -> Any:
         # value.attr
-        # STIRCT CHECK: No access to private attributes (starting with _)
+        # STRICT CHECK: No access to private attributes (starting with _)
         if node.attr.startswith("_"):
             raise ValueError(f"Access to private attribute '{node.attr}' is not allowed")
 
@@ -225,10 +227,6 @@ class SafeEvalVisitor(ast.NodeVisitor):
         keywords = {kw.arg: self.visit(kw.value) for kw in node.keywords}
 
         return func(*args, **keywords)
-
-    def visit_Index(self, node: ast.Index) -> Any:
-        # Python < 3.9
-        return self.visit(node.value)
 
 
 def safe_eval(expr: str, context: dict[str, Any] | None = None) -> Any:
