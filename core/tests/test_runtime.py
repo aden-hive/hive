@@ -37,20 +37,21 @@ class TestRuntimeBasics:
         runtime.end_run(success=True)
         assert runtime.current_run is None
 
-    @pytest.mark.skip(
-        reason="save_run() is deprecated and now a no-op. "
-        "New sessions use unified storage at sessions/{session_id}/state.json"
-    )
     def test_run_saved_on_end(self, tmp_path: Path):
-        """Run is saved to storage when ended."""
+        """Run is persisted to disk when ended.
+
+        ConcurrentStorage.save_run_sync() writes to runs/{run_id}.json
+        via an atomic temp-file+rename.  This is the primary guardrail
+        ensuring end_run() does not silently discard completed runs.
+        """
         runtime = Runtime(tmp_path)
 
         run_id = runtime.start_run("test_goal", "Test")
         runtime.end_run(success=True)
 
-        # Check file exists
+        # ConcurrentStorage writes to {base_path}/runs/{run_id}.json
         run_file = tmp_path / "runs" / f"{run_id}.json"
-        assert run_file.exists()
+        assert run_file.exists(), f"Expected persisted run at {run_file}"
 
 
 class TestDecisionRecording:

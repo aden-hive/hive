@@ -10,7 +10,6 @@ Provides:
 import asyncio
 import logging
 import time
-import warnings
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +17,7 @@ from typing import Any
 from weakref import WeakValueDictionary
 
 from framework.schemas.run import Run, RunSummary
+from framework.utils.io import atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -189,18 +189,16 @@ class ConcurrentStorage:
     # === FILE OPERATIONS (formerly in FileStorage) ===
 
     def _save_run_sync(self, run: Run) -> None:
-        """Save a run to disk.
+        """Persist a run to disk as ``runs/{run_id}.json``.
 
-        DEPRECATED: This method is a no-op.
-        New sessions use unified storage at sessions/{session_id}/state.json.
+        Uses an atomic write (temp-file + rename) so a mid-write crash
+        never leaves a partially written file on disk.
         """
-        warnings.warn(
-            "ConcurrentStorage._save_run_sync() is deprecated. "
-            "New sessions use unified storage at sessions/{session_id}/state.json. "
-            "This write has been skipped.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        runs_dir = self.base_path / "runs"
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        run_path = runs_dir / f"{run.id}.json"
+        with atomic_write(run_path) as f:
+            f.write(run.model_dump_json(indent=2))
 
     def _load_run_sync(self, run_id: str) -> Run | None:
         """Load a run from storage."""
@@ -287,7 +285,11 @@ class ConcurrentStorage:
 
         Returns:
             Run object or None if not found
+
+        Raises:
+            ValueError: If run_id contains path traversal characters.
         """
+        self._validate_key(run_id)
         if use_cache:
             cache_key = f"run:{run_id}"
             cached = self._cache.get(cache_key)
@@ -333,7 +335,12 @@ class ConcurrentStorage:
         return summary
 
     async def delete_run(self, run_id: str) -> bool:
-        """Delete a run from storage."""
+        """Delete a run from storage.
+
+        Raises:
+            ValueError: If run_id contains path traversal characters.
+        """
+        self._validate_key(run_id)
         lock_key = f"run:{run_id}"
         async with await self._get_lock(lock_key):
             loop = asyncio.get_event_loop()
@@ -459,9 +466,14 @@ class ConcurrentStorage:
     # === SYNC API (for backward compatibility) ===
 
     def save_run_sync(self, run: Run) -> None:
-        """Synchronous save (deprecated, no-op)."""
+        """Synchronous save — persists a run to disk immediately."""
         self._save_run_sync(run)
 
     def load_run_sync(self, run_id: str) -> Run | None:
-        """Synchronous load."""
+        """Synchronous load.
+
+        Raises:
+            ValueError: If run_id contains path traversal characters.
+        """
+        self._validate_key(run_id)
         return self._load_run_sync(run_id)

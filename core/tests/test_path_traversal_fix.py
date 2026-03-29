@@ -1,7 +1,8 @@
 """
-Tests for path traversal vulnerability fix in ConcurrentStorage.
+Tests for path traversal vulnerability protection in ConcurrentStorage.
 
-Verifies that the _validate_key() method properly blocks path traversal attempts.
+Verifies that the _validate_key() method properly blocks path traversal
+attempts and that the public storage API enforces these checks end-to-end.
 """
 
 import tempfile
@@ -13,11 +14,11 @@ from framework.storage.concurrent import ConcurrentStorage
 
 
 class TestPathTraversalProtection:
-    """Tests for path traversal vulnerability protection."""
+    """Tests for path traversal vulnerability protection in ConcurrentStorage."""
 
     @pytest.fixture
     def storage(self):
-        """Create a temporary storage instance for testing."""
+        """Create a temporary ConcurrentStorage instance for testing."""
         with tempfile.TemporaryDirectory() as tmpdir:
             yield ConcurrentStorage(tmpdir)
 
@@ -25,7 +26,6 @@ class TestPathTraversalProtection:
 
     def test_valid_alphanumeric_key(self, storage):
         """Alphanumeric keys should be allowed."""
-        # Should not raise
         storage._validate_key("goal_123")
         storage._validate_key("run_abc_def")
         storage._validate_key("status_completed")
@@ -40,7 +40,6 @@ class TestPathTraversalProtection:
 
     def test_blocks_parent_directory_traversal(self, storage):
         """Block .. path traversal attempts."""
-        # These all have path separators which are blocked first
         with pytest.raises(ValueError):
             storage._validate_key("../../../etc/passwd")
 
@@ -55,13 +54,12 @@ class TestPathTraversalProtection:
         with pytest.raises(ValueError, match="path traversal detected"):
             storage._validate_key(".env")
 
-        # This also has path separator which is caught first
+        # Also has a path separator which is caught first
         with pytest.raises(ValueError):
             storage._validate_key(".ssh/id_rsa")
 
     def test_blocks_absolute_paths_unix(self, storage):
         """Block absolute paths (Unix)."""
-        # These have path separators which are blocked first
         with pytest.raises(ValueError):
             storage._validate_key("/etc/passwd")
 
@@ -70,7 +68,6 @@ class TestPathTraversalProtection:
 
     def test_blocks_absolute_paths_windows(self, storage):
         """Block absolute paths (Windows)."""
-        # These have path separators which are blocked first
         with pytest.raises(ValueError):
             storage._validate_key("C:\\Windows\\System32")
 
@@ -115,63 +112,54 @@ class TestPathTraversalProtection:
         with pytest.raises(ValueError, match="empty"):
             storage._validate_key("   ")
 
-    # === END-TO-END TESTS ===
+    # === END-TO-END TESTS (public API enforces validation) ===
 
-    def test_validate_key_blocks_goal_traversal(self, storage):
-        """_validate_key() should block path traversal in goal-like keys."""
+    @pytest.mark.asyncio
+    async def test_load_run_blocks_traversal(self, storage):
+        """load_run() must reject path traversal in the run_id."""
         with pytest.raises(ValueError):
-            storage._validate_key("../../../.env")
+            await storage.load_run("../../../.env")
 
-    def test_validate_key_blocks_node_traversal(self, storage):
-        """_validate_key() should block absolute paths."""
+    @pytest.mark.asyncio
+    async def test_load_run_valid_id_returns_none(self, storage):
+        """A valid but nonexistent run_id returns None, not an error."""
+        result = await storage.load_run("legitimate_run_id", use_cache=False)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_delete_run_blocks_traversal(self, storage):
+        """delete_run() must reject path traversal in the run_id."""
         with pytest.raises(ValueError):
-            storage._validate_key("/etc/passwd")
+            await storage.delete_run("../etc/passwd")
 
-    def test_validate_key_blocks_status_traversal(self, storage):
-        """_validate_key() should block backslash traversal."""
+    def test_load_run_sync_blocks_traversal(self, storage):
+        """load_run_sync() must reject path traversal in the run_id."""
         with pytest.raises(ValueError):
-            storage._validate_key("..\\..\\windows\\system32")
+            storage.load_run_sync("../../../.env")
 
-    def test_valid_keys_pass_validation(self, storage):
-        """Valid keys should pass validation without errors."""
-        # These should not raise errors
-        storage._validate_key("legitimate_goal")
-        storage._validate_key("legitimate_node")
-        storage._validate_key("completed")
+    def test_load_run_sync_valid_id_returns_none(self, storage):
+        """load_run_sync with a legitimate nonexistent ID returns None."""
+        result = storage.load_run_sync("legitimate_run_id")
+        assert result is None
 
-    # === REAL-WORLD ATTACK SCENARIOS ===
+    # === REAL-WORLD ATTACK SCENARIOS (end-to-end) ===
 
-    def test_blocks_env_file_escape(self, storage):
-        """Block attempts to access .env files."""
+    def test_blocks_env_file_escape_via_load_sync(self, storage):
+        """Block attempts to read .env files via load_run_sync."""
         with pytest.raises(ValueError):
-            storage._validate_key("../../../.env")
+            storage.load_run_sync("../../../.env")
 
-    def test_blocks_config_file_escape(self, storage):
-        """Block attempts to access config files."""
+    def test_blocks_config_file_escape_via_load_sync(self, storage):
+        """Block attempts to access config files via load_run_sync."""
         with pytest.raises(ValueError):
-            storage._validate_key("../../../../etc/aden/database.yaml")
-
-    def test_blocks_web_shell_creation(self, storage):
-        """Block attempts to create web shells."""
-        with pytest.raises(ValueError):
-            storage._validate_key("../../var/www/html/shell")
-
-    def test_blocks_cron_injection(self, storage):
-        """Block attempts to create cron jobs."""
-        with pytest.raises(ValueError):
-            storage._validate_key("../../../etc/cron.d/backdoor")
-
-    def test_blocks_sudoers_modification(self, storage):
-        """Block attempts to modify sudoers file."""
-        with pytest.raises(ValueError):
-            storage._validate_key("../../../../etc/sudoers")
+            storage.load_run_sync("../../../../etc/aden/database.yaml")
 
 
 class TestPathTraversalWithActualFiles:
     """Test path traversal protection with actual file operations."""
 
     def test_cannot_escape_storage_directory(self):
-        """Verify that even with path traversal, we can't escape storage dir."""
+        """Verify that path traversal is caught before any filesystem access."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
             storage_dir = tmpdir_path / "storage"
@@ -183,29 +171,36 @@ class TestPathTraversalWithActualFiles:
 
             storage = ConcurrentStorage(storage_dir)
 
-            # Attempt to read the secret file via path traversal
+            # Attempt to read the secret file via path traversal — must raise
             with pytest.raises(ValueError):
-                storage._validate_key("../secret")
+                storage.load_run_sync("../secret")
 
-            # Verify the secret file was not accessed (still contains original data)
+            # Verify the secret file was not accessed
             assert secret_file.read_text(encoding="utf-8") == "SENSITIVE_DATA"
 
-    def test_cannot_write_outside_storage(self):
-        """Verify that we can't write files outside storage directory."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            storage_dir = tmpdir_path / "storage"
-            storage_dir.mkdir()
+    def test_save_and_load_roundtrip(self, tmp_path):
+        """Verify save_run_sync/load_run_sync roundtrip works correctly."""
+        from framework.schemas.run import Run, RunStatus
 
-            storage = ConcurrentStorage(storage_dir)
+        storage = ConcurrentStorage(tmp_path)
+        run = Run(
+            id="run_test_123",
+            goal_id="goal_abc",
+            goal_description="Integration test",
+            input_data={},
+        )
+        run.complete(RunStatus.COMPLETED, "done")
 
-            # Attempt to write outside storage directory
-            with pytest.raises(ValueError):
-                storage._validate_key("../../malicious")
+        storage.save_run_sync(run)
 
-            # Verify no file was created outside storage
-            malicious_file = tmpdir_path / "malicious.json"
-            assert not malicious_file.exists()
+        loaded = storage.load_run_sync("run_test_123")
+        assert loaded is not None
+        assert loaded.id == "run_test_123"
+        assert loaded.status == RunStatus.COMPLETED
+
+        # Verify the file is at the expected path
+        run_file = tmp_path / "runs" / "run_test_123.json"
+        assert run_file.exists()
 
 
 if __name__ == "__main__":
