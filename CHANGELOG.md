@@ -155,6 +155,8 @@ hive code
 Ctrl+E  # or /coder in chat
 ```
 
+### Security
+- Fixed SSRF vulnerability in web_scrape_tool by enforcing blocklist for internal network addresses and preventing DNS rebinding at the transport layer (#309)
 The Coder ships with:
 
 - **Reference documentation** -- anti-patterns, construction guide, and design patterns baked into its system prompt
