@@ -29,12 +29,9 @@ def _get_api_key(credentials: CredentialStoreAdapter | None) -> str | None:
 def _get_domain(credentials: CredentialStoreAdapter | None) -> str | None:
     """Return Freshdesk domain from credential store or env (e.g. acme.freshdesk.com)."""
     if credentials is not None:
-        try:
-            value = credentials.get("freshdesk_domain")
-            if value:
-                return value.strip()
-        except KeyError:
-            pass
+        value = credentials.get("freshdesk_domain")
+        if value:
+            return value.strip()
     value = os.getenv("FRESHDESK_DOMAIN")
     return value.strip() if value else None
 
