@@ -20,6 +20,14 @@ from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
 
+
+#office _tools
+from .office_tool.excel import register_tools as register_excel_generate
+
+from .office_tool.word import register_tools as register_word_generate
+
+
+
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
 
@@ -34,6 +42,12 @@ from .account_info_tool import register_tools as register_account_info
 from .airtable_tool import register_tools as register_airtable
 from .apify_tool import register_tools as register_apify
 from .apollo_tool import register_tools as register_apollo
+try:
+    from .arxiv_tool import register_tools as register_arxiv
+except ImportError:
+    register_arxiv=None
+
+
 from .arxiv_tool import register_tools as register_arxiv
 from .asana_tool import register_tools as register_asana
 from .attio_tool import register_tools as register_attio
@@ -134,6 +148,7 @@ from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 from .wikipedia_tool import register_tools as register_wikipedia
+from .office_tool.powerpoint import register_tools as register_powerpoint
 from .yahoo_finance_tool import register_tools as register_yahoo_finance
 from .youtube_tool import register_tools as register_youtube
 from .youtube_transcript_tool import register_tools as register_youtube_transcript
@@ -155,6 +170,13 @@ def _register_verified(
     register_runtime_logs(mcp)
     register_wikipedia(mcp)
     register_arxiv(mcp)
+
+    #office tools
+    register_excel(mcp)
+    register_excel_generate(mcp)
+    register_word_generate(mcp, credentials=credentials)
+    register_powerpoint(mcp)
+
 
     # Tools that need credentials (pass credentials if provided)
     # web_search supports multiple providers (Google, Brave) with auto-detection
@@ -195,7 +217,10 @@ def _register_verified(
     register_execute_command(mcp)
     register_data_tools(mcp)
     register_csv(mcp)
-    register_excel(mcp)
+
+
+
+
 
     # --- Security scanning (no credentials) ---
     register_ssl_tls_scanner(mcp)
