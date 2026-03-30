@@ -463,6 +463,7 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
         available["minimax"] = {
             "name": "Minimax",
             "api_key": minimax_key,
+            "api_base": "https://api.minimax.io/v1",
             "status": "needs_check",
             "models": ["MiniMax-Text-01", "abab6.5-chat"],
             "default_model": "MiniMax-Text-01",
