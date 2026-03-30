@@ -1,7 +1,8 @@
 """Interactive LLM provider selector with fallback options."""
 
+from __future__ import annotations
+
 import asyncio
-import json
 import logging
 import os
 import sys
@@ -20,6 +21,25 @@ from framework.config import (
 logger = logging.getLogger(__name__)
 
 
+def _format_model_name(provider_id: str, model: str) -> str:
+    """Format model name according to provider conventions."""
+    if provider_id == "gemini":
+        return model
+    return f"{provider_id}/{model}"
+
+
+def _classify_completion_error(e: Exception) -> str:
+    """Classify a completion error into a user-friendly message."""
+    error_str = str(e).lower()
+    if "credit" in error_str or "balance" in error_str:
+        return "No credits available"
+    if "invalid" in error_str or "auth" in error_str or "key" in error_str:
+        return "Invalid API key"
+    if "rate" in error_str or "limit" in error_str:
+        return "Rate limited"
+    return str(e)[:100]
+
+
 async def test_provider(provider_id: str, config: dict) -> tuple[bool, str | None, str | None]:
     """Test if a provider actually works (has credits, valid key).
 
@@ -28,16 +48,11 @@ async def test_provider(provider_id: str, config: dict) -> tuple[bool, str | Non
     """
     try:
         model = config["default_model"]
-
-        # Format model correctly
-        if provider_id == "gemini":
-            model_name = model
-        else:
-            model_name = f"{provider_id}/{model}"
+        model_name = _format_model_name(provider_id, model)
 
         # Get API key and api_base
         api_key = config.get("api_key") or get_api_key(provider_id)
-        api_base = config.get("api_base")  # Get api_base from config
+        api_base = config.get("api_base")
 
         if not api_key:
             return False, "No API key found", None
@@ -59,28 +74,23 @@ async def test_provider(provider_id: str, config: dict) -> tuple[bool, str | Non
         return False, "No response", api_base
 
     except Exception as e:
-        error_str = str(e).lower()
-        if "credit" in error_str or "balance" in error_str:
-            return False, "No credits available", None
-        if "invalid" in error_str or "auth" in error_str or "key" in error_str:
-            return False, "Invalid API key", None
-        if "rate" in error_str or "limit" in error_str:
-            return False, "Rate limited", None
-        return False, str(e)[:100], None
+        error_message = _classify_completion_error(e)
+        return False, error_message, None
 
 
-async def test_provider_with_model(provider_id: str, model: str, api_key: str, api_base: str | None = None) -> tuple[bool, str | None]:
+async def test_provider_with_model(
+    provider_id: str,
+    model: str,
+    api_key: str,
+    api_base: str | None = None,
+) -> tuple[bool, str | None]:
     """Test a specific model for a provider.
 
     Returns:
         Tuple of (works, error_message)
     """
     try:
-        # Format model correctly
-        if provider_id == "gemini":
-            model_name = model
-        else:
-            model_name = f"{provider_id}/{model}"
+        model_name = _format_model_name(provider_id, model)
 
         # Make a minimal test call with api_base if available
         completion_kwargs = {
@@ -99,14 +109,8 @@ async def test_provider_with_model(provider_id: str, model: str, api_key: str, a
         return False, "No response"
 
     except Exception as e:
-        error_str = str(e).lower()
-        if "credit" in error_str or "balance" in error_str:
-            return False, "No credits available"
-        if "invalid" in error_str or "auth" in error_str or "key" in error_str:
-            return False, "Invalid API key"
-        if "rate" in error_str or "limit" in error_str:
-            return False, "Rate limited"
-        return False, str(e)[:100]
+        error_message = _classify_completion_error(e)
+        return False, error_message
 
 
 async def get_working_providers() -> dict[str, dict]:
@@ -133,7 +137,12 @@ async def get_working_providers() -> dict[str, dict]:
     return working
 
 
-async def get_working_models(provider_id: str, api_key: str, models: list[str], api_base: str | None = None) -> list[str]:
+async def get_working_models(
+    provider_id: str,
+    api_key: str,
+    models: list[str],
+    api_base: str | None = None,
+) -> list[str]:
     """Test which models actually work for a provider."""
     working = []
     print(f"\n  Testing models for {provider_id}...")
@@ -215,6 +224,10 @@ async def interactive_fallback(original_provider: str, error: Exception) -> dict
             api_key = selected_config.get("api_key") or get_api_key(selected_id)
             api_base = selected_config.get("api_base")
 
+            if not api_key:
+                print(f"\n❌ No API key available for {selected_config['name']}.")
+                return None
+
             # Test which models actually work
             working_models = await get_working_models(
                 selected_id,
@@ -246,8 +259,8 @@ async def interactive_fallback(original_provider: str, error: Exception) -> dict
                 except ValueError:
                     pass
 
-            # Save selection
-            save_provider_selection(selected_id, selected_model)
+            # Save selection with API key
+            save_provider_selection(selected_id, selected_model, api_key)
 
             result = {
                 "provider": selected_id,
@@ -306,6 +319,10 @@ async def quick_provider_check() -> dict | None:
         api_key = provider.get("api_key") or get_api_key(provider_id)
         api_base = provider.get("api_base")
 
+        if not api_key:
+            print(f"\n❌ No API key available for {provider['name']}.")
+            return None
+
         # Test which models work
         working_models = await get_working_models(
             provider_id,
@@ -319,7 +336,7 @@ async def quick_provider_check() -> dict | None:
             print(f"\n✅ Auto-selected {provider['name']} (free tier)")
             print(f"   Model: {default_model}")
 
-            save_provider_selection(provider_id, default_model)
+            save_provider_selection(provider_id, default_model, api_key)
 
             result = {
                 "provider": provider_id,
@@ -393,6 +410,12 @@ async def interactive_provider_selection() -> dict | None:
                     print("❌ No API key provided.")
                     return None
 
+                # Save the API key to config
+                save_provider_selection(selected_id, selected_config["default_model"], api_key)
+            else:
+                # Save selection without updating API key
+                save_provider_selection(selected_id, selected_config["default_model"])
+
             # Test which models work
             working_models = await get_working_models(
                 selected_id,
@@ -425,8 +448,8 @@ async def interactive_provider_selection() -> dict | None:
                 except ValueError:
                     pass
 
-            # Save selection
-            save_provider_selection(selected_id, selected_model)
+            # Update saved model
+            save_provider_selection(selected_id, selected_model, api_key)
 
             result = {
                 "provider": selected_id,
