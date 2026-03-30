@@ -1,3 +1,5 @@
+// core/frontend/src/components/AgentGraphEnhanced.tsx
+
 import { memo, useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { Play, Pause, Loader2, CheckCircle2, ZoomIn, ZoomOut, Move, Download, Search, X, Maximize2, Minimize2 } from "lucide-react";
 import { exportAsPNG, exportAsSVG } from "@/lib/graph-export";
