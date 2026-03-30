@@ -91,7 +91,7 @@ export const GraphControls = memo(function GraphControls({
   };
 
   return (
-    <div className="px-5 pt-4 pb-2 flex items-center justify-between">
+    <div className="relative px-5 pt-4 pb-2 flex items-center justify-between">
       {/* Left side - title and version */}
       <div className="flex items-center gap-2">
         <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
