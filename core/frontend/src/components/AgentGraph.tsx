@@ -1,5 +1,3 @@
-// core/frontend/src/components/AgentGraphEnhanced.tsx
-
 import { memo, useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { Play, Pause, Loader2, CheckCircle2, ZoomIn, ZoomOut, Move, Download, Search, X, Maximize2, Minimize2 } from "lucide-react";
 import { exportAsPNG, exportAsSVG } from "@/lib/graph-export";
@@ -60,6 +58,7 @@ const RunButton = memo(function RunButton({ runState, disabled, onRun, onPause, 
       disabled={runState === "deploying" || disabled}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      aria-label={runState === "running" ? "Pause execution" : "Run agent"}
       className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all duration-200 ${
         showPause
           ? "bg-amber-500/15 text-amber-400 border border-amber-500/40 hover:bg-amber-500/25 active:scale-95 cursor-pointer"
@@ -121,32 +120,70 @@ function GraphControls({
         {building && <span className="text-[10px] text-primary/60 animate-pulse">Building...</span>}
       </div>
       <div className="flex items-center gap-1">
-        {onSearchToggle && (
-          <button onClick={onSearchToggle} className={`p-1.5 rounded-md transition-colors ${searchActive ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`}>
-            <Search className="w-3.5 h-3.5" />
-          </button>
-        )}
-        <button onClick={onZoomOut} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50">
+        <button
+          onClick={onSearchToggle}
+          className={`p-1.5 rounded-md transition-colors ${searchActive ? "bg-primary/20 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`}
+          aria-label={searchActive ? "Close search" : "Open search"}
+        >
+          <Search className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={onZoomOut}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          aria-label="Zoom out"
+        >
           <ZoomOut className="w-3.5 h-3.5" />
         </button>
-        <span className="text-[10px] text-muted-foreground min-w-[40px] text-center">{Math.round(scale * 100)}%</span>
-        <button onClick={onZoomIn} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50">
+        <span className="text-[10px] text-muted-foreground min-w-[40px] text-center" aria-label={`Zoom level ${Math.round(scale * 100)} percent`}>
+          {Math.round(scale * 100)}%
+        </span>
+        <button
+          onClick={onZoomIn}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          aria-label="Zoom in"
+        >
           <ZoomIn className="w-3.5 h-3.5" />
         </button>
-        <button onClick={onResetView} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50">
+        <button
+          onClick={onResetView}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          aria-label="Reset view"
+        >
           <Move className="w-3.5 h-3.5" />
         </button>
-        <button onClick={onToggleFullscreen} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50">
+        <button
+          onClick={onToggleFullscreen}
+          className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+          aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+        >
           {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
         </button>
         <div className="relative" ref={exportMenuRef}>
-          <button onClick={() => setShowExportMenu(!showExportMenu)} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50">
+          <button
+            onClick={() => setShowExportMenu(!showExportMenu)}
+            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            aria-label="Export options"
+            aria-haspopup="menu"
+            aria-expanded={showExportMenu}
+          >
             <Download className="w-3.5 h-3.5" />
           </button>
           {showExportMenu && (
-            <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-md shadow-lg z-10 py-1 min-w-[120px]">
-              <button onClick={() => onExport("png")} className="block w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50">Export as PNG</button>
-              <button onClick={() => onExport("svg")} className="block w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50">Export as SVG</button>
+            <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-md shadow-lg z-10 py-1 min-w-[120px]" role="menu">
+              <button
+                onClick={() => onExport("png")}
+                className="block w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50"
+                role="menuitem"
+              >
+                Export as PNG
+              </button>
+              <button
+                onClick={() => onExport("svg")}
+                className="block w-full text-left px-3 py-1.5 text-xs hover:bg-muted/50"
+                role="menuitem"
+              >
+                Export as SVG
+              </button>
             </div>
           )}
         </div>
@@ -156,16 +193,44 @@ function GraphControls({
         <div className="absolute top-12 left-5 right-5 z-20 animate-in fade-in slide-in-from-top-2 duration-200">
           <div className="bg-card border border-primary/30 rounded-lg shadow-lg">
             <div className="flex items-center gap-2 px-3 py-2">
-              <Search className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <input ref={searchInputRef} type="text" value={searchTerm} onChange={(e) => onSearchChange(e.target.value)} placeholder="Search nodes by name or ID..." className="flex-1 bg-transparent text-sm outline-none" />
+              <Search className="w-4 h-4 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchTerm}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="Search nodes by name or ID..."
+                aria-label="Search nodes by name or ID"
+                className="flex-1 bg-transparent text-sm outline-none"
+              />
               {searchResultCount > 0 && (
                 <div className="flex items-center gap-1">
-                  <span className="text-xs text-muted-foreground">{currentResultIndex + 1}/{searchResultCount}</span>
-                  <button onClick={onPrevResult} className="p-1 rounded hover:bg-muted/50">←</button>
-                  <button onClick={onNextResult} className="p-1 rounded hover:bg-muted/50">→</button>
+                  <span className="text-xs text-muted-foreground" aria-label={`Result ${currentResultIndex + 1} of ${searchResultCount}`}>
+                    {currentResultIndex + 1}/{searchResultCount}
+                  </span>
+                  <button
+                    onClick={onPrevResult}
+                    className="p-1 rounded hover:bg-muted/50"
+                    aria-label="Previous result"
+                  >
+                    ←
+                  </button>
+                  <button
+                    onClick={onNextResult}
+                    className="p-1 rounded hover:bg-muted/50"
+                    aria-label="Next result"
+                  >
+                    →
+                  </button>
                 </div>
               )}
-              <button onClick={onClearSearch} className="p-1 rounded hover:bg-muted/50"><X className="w-4 h-4" /></button>
+              <button
+                onClick={onClearSearch}
+                className="p-1 rounded hover:bg-muted/50"
+                aria-label="Clear search"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>
@@ -204,6 +269,11 @@ function truncateLabel(label: string, availablePx: number, fontSize: number): st
   return label.slice(0, Math.max(maxChars - 1, 1)) + "…";
 }
 
+// Helper to get scoped node element
+function getNodeElement(containerRef: React.RefObject<HTMLDivElement>, nodeId: string): Element | null {
+  return containerRef.current?.querySelector(`[data-node-id="${nodeId}"]`) || null;
+}
+
 // ============ Main Component ============
 export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, onPause, version, runState: externalRunState, building, queenPhase }: AgentGraphProps) {
   const [localRunState, setLocalRunState] = useState<RunState>("idle");
@@ -212,6 +282,7 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
   const svgContainerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const graphContainerRef = useRef<HTMLDivElement>(null);
+  const runTimersRef = useRef<number[]>([]);
   
   const [viewState, setViewState] = useState<ViewState>({ scale: 1, offsetX: 0, offsetY: 0 });
   const [isPanning, setIsPanning] = useState(false);
@@ -252,10 +323,27 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     if (runState !== "idle") return;
     if (onRun) onRun();
     else {
+      // Clear any existing timers
+      runTimersRef.current.forEach(clearTimeout);
+      runTimersRef.current = [];
+      
       setLocalRunState("deploying");
-      setTimeout(() => setLocalRunState("running"), 1800);
-      setTimeout(() => setLocalRunState("idle"), 5000);
+      runTimersRef.current.push(
+        window.setTimeout(() => setLocalRunState("running"), 1800),
+        window.setTimeout(() => setLocalRunState("idle"), 5000)
+      );
     }
+  };
+
+  const handlePause = () => {
+    if (onPause) {
+      onPause();
+      return;
+    }
+    // Local pause: clear timers and reset state
+    runTimersRef.current.forEach(clearTimeout);
+    runTimersRef.current = [];
+    setLocalRunState("idle");
   };
 
   const handleZoomIn = () => setViewState(prev => ({ ...prev, scale: Math.min(prev.scale * 1.2, 3) }));
@@ -280,6 +368,28 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     }
   };
 
+  // Helper to center on a node
+  const centerOnNode = useCallback((nodeId: string) => {
+    if (!svgContainerRef.current) return;
+    
+    const nodeElement = getNodeElement(graphContainerRef, nodeId);
+    if (!nodeElement) return;
+    
+    const nodeRect = nodeElement.getBoundingClientRect();
+    const containerRect = svgContainerRef.current.getBoundingClientRect();
+    
+    // Calculate node center relative to container
+    const nodeCenterX = nodeRect.left + nodeRect.width / 2;
+    const nodeCenterY = nodeRect.top + nodeRect.height / 2;
+    const containerCenterX = containerRect.left + containerRect.width / 2;
+    const containerCenterY = containerRect.top + containerRect.height / 2;
+    
+    const targetX = viewState.offsetX + (containerCenterX - nodeCenterX);
+    const targetY = viewState.offsetY + (containerCenterY - nodeCenterY);
+    
+    setViewState(prev => ({ ...prev, offsetX: targetX, offsetY: targetY }));
+  }, [viewState]);
+
   // Search handlers - using node IDs instead of indexes
   const handleSearch = useCallback((term: string) => {
     setSearchTerm(term);
@@ -300,53 +410,26 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     setHighlightedNodeId(results.length > 0 ? results[0] : null);
     
     // Center on first result
-    if (results.length > 0 && svgContainerRef.current) {
-      const nodeElement = document.getElementById(`node-${results[0]}`);
-      if (nodeElement) {
-        const nodeRect = nodeElement.getBoundingClientRect();
-        const containerRect = svgContainerRef.current.getBoundingClientRect();
-        const targetX = (containerRect.width / 2) - (nodeRect.left + nodeRect.width / 2) + viewState.offsetX;
-        const targetY = (containerRect.height / 2) - (nodeRect.top + nodeRect.height / 2) + viewState.offsetY;
-        setViewState(prev => ({ ...prev, offsetX: targetX, offsetY: targetY }));
-      }
+    if (results.length > 0) {
+      centerOnNode(results[0]);
     }
-  }, [nodes, viewState]);
+  }, [nodes, centerOnNode]);
 
   const handleNextResult = useCallback(() => {
     if (searchResults.length === 0) return;
     const nextIndex = (currentSearchIndex + 1) % searchResults.length;
     setCurrentSearchIndex(nextIndex);
     setHighlightedNodeId(searchResults[nextIndex]);
-    
-    // Center on the node by updating pan offsets
-    const nodeId = searchResults[nextIndex];
-    const nodeElement = document.getElementById(`node-${nodeId}`);
-    if (nodeElement && svgContainerRef.current) {
-      const nodeRect = nodeElement.getBoundingClientRect();
-      const containerRect = svgContainerRef.current.getBoundingClientRect();
-      const targetX = (containerRect.width / 2) - (nodeRect.left + nodeRect.width / 2) + viewState.offsetX;
-      const targetY = (containerRect.height / 2) - (nodeRect.top + nodeRect.height / 2) + viewState.offsetY;
-      setViewState(prev => ({ ...prev, offsetX: targetX, offsetY: targetY }));
-    }
-  }, [searchResults, currentSearchIndex, viewState]);
+    centerOnNode(searchResults[nextIndex]);
+  }, [searchResults, currentSearchIndex, centerOnNode]);
 
   const handlePrevResult = useCallback(() => {
     if (searchResults.length === 0) return;
     const prevIndex = (currentSearchIndex - 1 + searchResults.length) % searchResults.length;
     setCurrentSearchIndex(prevIndex);
     setHighlightedNodeId(searchResults[prevIndex]);
-    
-    // Center on the node by updating pan offsets
-    const nodeId = searchResults[prevIndex];
-    const nodeElement = document.getElementById(`node-${nodeId}`);
-    if (nodeElement && svgContainerRef.current) {
-      const nodeRect = nodeElement.getBoundingClientRect();
-      const containerRect = svgContainerRef.current.getBoundingClientRect();
-      const targetX = (containerRect.width / 2) - (nodeRect.left + nodeRect.width / 2) + viewState.offsetX;
-      const targetY = (containerRect.height / 2) - (nodeRect.top + nodeRect.height / 2) + viewState.offsetY;
-      setViewState(prev => ({ ...prev, offsetX: targetX, offsetY: targetY }));
-    }
-  }, [searchResults, currentSearchIndex, viewState]);
+    centerOnNode(searchResults[prevIndex]);
+  }, [searchResults, currentSearchIndex, centerOnNode]);
 
   const clearSearch = useCallback(() => { 
     setSearchTerm(""); 
@@ -379,14 +462,12 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     const originalOffsetY = viewState.offsetY;
     
     try {
-      // Reset view for export
       setViewState({ scale: 1, offsetX: 0, offsetY: 0 });
       await new Promise(resolve => setTimeout(resolve, 100));
       await exportAsPNG(svgRef.current, `${title || "graph"}_${Date.now()}`);
     } catch (error) {
       console.error("Export failed:", error);
     } finally {
-      // Always restore view state
       setViewState({ scale: originalScale, offsetX: originalOffsetX, offsetY: originalOffsetY });
     }
   }, [title, viewState]);
@@ -400,7 +481,7 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     }
   }, [title]);
 
-  // Layout computation
+  // Layout computation (same as before, omitted for brevity)
   const idxMap = useMemo(() => Object.fromEntries(nodes.map((n, i) => [n.id, i])), [nodes]);
   const backEdges = useMemo(() => {
     const edges: { fromIdx: number; toIdx: number }[] = [];
@@ -556,8 +637,25 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
       countdownLabel = h > 0 ? `next in ${h}h ${String(m).padStart(2, "0")}m` : `next in ${m}m ${String(s).padStart(2, "0")}s`;
     }
     const isHighlighted = highlightedNodeId === node.id;
+    const isClickable = !!onNodeClick;
+    
     return (
-      <g key={node.id} id={`node-${node.id}`} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
+      <g
+        key={node.id}
+        data-node-id={node.id}
+        onClick={() => onNodeClick?.(node)}
+        onKeyDown={(e) => {
+          if (!isClickable) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onNodeClick(node);
+          }
+        }}
+        tabIndex={isClickable ? 0 : undefined}
+        role={isClickable ? "button" : undefined}
+        aria-label={isClickable ? `Open node ${node.label}` : undefined}
+        style={{ cursor: isClickable ? "pointer" : "default" }}
+      >
         {isHighlighted && <rect x={pos.x - 4} y={pos.y - 4} width={layout.nodeW + 8} height={NODE_H + 8} rx={NODE_H / 2 + 4} fill="none" stroke="hsl(210,100%,60%)" strokeWidth={2} strokeDasharray="4 2" />}
         <rect x={pos.x} y={pos.y} width={layout.nodeW} height={NODE_H} rx={NODE_H / 2} fill={triggerColors.bg} stroke={triggerColors.border} strokeWidth={1} strokeDasharray="4 2" />
         <text x={pos.x + 18} y={pos.y + NODE_H / 2} fill={triggerColors.icon} fontSize={13} textAnchor="middle" dominantBaseline="middle">{icon}</text>
@@ -577,8 +675,25 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     const labelAvailW = layout.nodeW - 38;
     const displayLabel = truncateLabel(node.label, labelAvailW, fontSize);
     const isHighlighted = highlightedNodeId === node.id;
+    const isClickable = !!onNodeClick;
+    
     return (
-      <g key={node.id} id={`node-${node.id}`} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
+      <g
+        key={node.id}
+        data-node-id={node.id}
+        onClick={() => onNodeClick?.(node)}
+        onKeyDown={(e) => {
+          if (!isClickable) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onNodeClick(node);
+          }
+        }}
+        tabIndex={isClickable ? 0 : undefined}
+        role={isClickable ? "button" : undefined}
+        aria-label={isClickable ? `Open node ${node.label}` : undefined}
+        style={{ cursor: isClickable ? "pointer" : "default" }}
+      >
         {isHighlighted && <rect x={pos.x - 4} y={pos.y - 4} width={layout.nodeW + 8} height={NODE_H + 8} rx={16} fill="none" stroke="hsl(210,100%,60%)" strokeWidth={2} strokeDasharray="4 2" />}
         {isActive && (
           <>
@@ -611,7 +726,7 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
             <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Pipeline</p>
             {version && <span className="text-[10px] font-mono font-medium text-muted-foreground/60 border border-border/30 rounded px-1 py-0.5 leading-none">{version}</span>}
           </div>
-          <RunButton runState={runState} disabled={nodes.length === 0 || isQueenBusy} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
+          <RunButton runState={runState} disabled={nodes.length === 0 || isQueenBusy} onRun={handleRun} onPause={handlePause} btnRef={runBtnRef} />
         </div>
         <div className="flex-1 flex items-center justify-center px-5">
           {building ? (
@@ -627,7 +742,6 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
   const maxLayer = nodes.length > 0 ? Math.max(...layout.layers) : 0;
   const svgHeight = TOP_Y * 2 + (maxLayer + 1) * NODE_H + maxLayer * GAP_Y + 10;
   
-  // Calculate SVG width including back edge offsets
   const maxBackEdgeOffset = backEdges.length > 0 
     ? BACK_EDGE_BASE_OFFSET + (backEdges.length - 1) * BACK_EDGE_INCREMENT + 30
     : 0;
@@ -661,7 +775,7 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
         building={building}
         isFullscreen={isFullscreen}
         onToggleFullscreen={toggleFullscreen}
-        runButton={<RunButton runState={runState} disabled={nodes.length === 0 || isQueenBusy} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />}
+        runButton={<RunButton runState={runState} disabled={nodes.length === 0 || isQueenBusy} onRun={handleRun} onPause={handlePause} btnRef={runBtnRef} />}
       />
       <div ref={svgContainerRef} className="flex-1 overflow-hidden relative" onMouseDown={handlePanStart} onMouseMove={handlePanMove} onMouseUp={handlePanEnd} onMouseLeave={handlePanEnd} onWheel={handleWheel} style={{ cursor: isPanning ? "grabbing" : "grab" }}>
         <div style={transformStyle}>
