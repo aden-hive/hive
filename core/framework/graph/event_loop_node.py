@@ -665,7 +665,11 @@ class EventLoopNode(NodeProtocol):
                 try:
                     _iter_meta = ctx.iteration_metadata_provider()
                 except Exception:
-                    logger.debug("iteration_metadata_provider failed", exc_info=True)
+                    logger.warning(
+                        "iteration_metadata_provider failed for node %s",
+                        node_id,
+                        exc_info=True,
+                    )
             await self._publish_iteration(
                 stream_id,
                 node_id,

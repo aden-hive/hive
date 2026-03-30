@@ -22,8 +22,11 @@ def _is_gcu_enabled() -> bool:
         from framework.config import get_gcu_enabled
 
         return get_gcu_enabled()
+    except (ImportError, ModuleNotFoundError):
+        logger.debug("GCU module not available", exc_info=True)
+        return False
     except Exception:
-        logger.debug("Could not determine GCU enabled state", exc_info=True)
+        logger.warning("Unexpected error checking GCU enabled state", exc_info=True)
         return False
 
 
