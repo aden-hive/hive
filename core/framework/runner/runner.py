@@ -759,6 +759,10 @@ class AgentRunner:
             self._storage_path = default_storage
             self._temp_dir = None
 
+        # Store agent context for subprocess environment (not in global os.environ)
+        self._agent_name = agent_path.name
+        self._storage_path_str = str(self._storage_path)
+
         # Load HIVE_CREDENTIAL_KEY from shell config if not in env.
         # Must happen before MCP subprocesses are spawned so they inherit it.
         _ensure_credential_key_env()
@@ -785,15 +789,36 @@ class AgentRunner:
         if tools_path.exists():
             self._tool_registry.discover_from_module(tools_path)
 
-        # Set environment variables for MCP subprocesses
-        # These are inherited by MCP servers (e.g., GCU browser tools)
-        os.environ["HIVE_AGENT_NAME"] = agent_path.name
-        os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)
+        # NOTE: Global environment variables removed to prevent race conditions
+        # between multiple AgentRunner instances. Use _get_subprocess_env() instead
+        # when launching subprocesses (e.g., MCP servers).
+        # os.environ["HIVE_AGENT_NAME"] = agent_path.name  # REMOVED
+        # os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)  # REMOVED
 
         # Auto-discover MCP servers from mcp_servers.json
         mcp_config_path = agent_path / "mcp_servers.json"
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
+
+    def _get_subprocess_env(self, extra_env: dict | None = None) -> dict:
+        """
+        Build environment dictionary for subprocesses with per-instance context.
+
+        This replaces the previous global os.environ assignments to prevent
+        race conditions when multiple AgentRunner instances run in the same process.
+
+        Args:
+            extra_env: Optional additional environment variables to merge
+
+        Returns:
+            Dictionary suitable for passing as env to subprocess.Popen
+        """
+        env = os.environ.copy()
+        env["HIVE_AGENT_NAME"] = self._agent_name
+        env["HIVE_STORAGE_PATH"] = self._storage_path_str
+        if extra_env:
+            env.update(extra_env)
+        return env
 
     @staticmethod
     def _import_agent_module(agent_path: Path):
@@ -1334,6 +1359,16 @@ class AgentRunner:
             cred_id = "anthropic"
         elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
             cred_id = "minimax"
+        elif model_lower.startswith("openai/") or model_lower.startswith("gpt-"):
+            cred_id = "openai"
+        elif model_lower.startswith("gemini/") or model_lower.startswith("google/"):
+            cred_id = "gemini"
+        elif model_lower.startswith("groq/"):
+            cred_id = "groq"
+        elif model_lower.startswith("cerebras/"):
+            cred_id = "cerebras"
+        elif model_lower.startswith("mistral/"):
+            cred_id = "mistral"
         # Add more mappings as providers are added to LLM_CREDENTIALS
 
         if cred_id is None:
