@@ -1,10 +1,13 @@
 """CLI commands for viewing agent execution traces."""
 
+from __future__ import annotations
+
 import json
-import sys
+import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _get_agent_dir(agent_name: str) -> Path:
@@ -20,17 +23,18 @@ def _parse_timestamp(ts_str: str) -> str:
         # Try ISO format with Z
         dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
         return dt.strftime("%Y-%m-%d %H:%M:%S")
-    except:
+    except (ValueError, TypeError):
         try:
             # Try ISO format without timezone
             dt = datetime.fromisoformat(ts_str)
             return dt.strftime("%Y-%m-%d %H:%M:%S")
-        except:
+        except (ValueError, TypeError):
             try:
                 # Try timestamp as float
                 dt = datetime.fromtimestamp(float(ts_str))
                 return dt.strftime("%Y-%m-%d %H:%M:%S")
-            except:
+            except (ValueError, TypeError) as e:
+                logger.debug(f"Failed to parse timestamp '{ts_str}': {e}")
                 return ts_str[:19] if len(ts_str) > 19 else ts_str
 
 
@@ -52,7 +56,7 @@ def _list_sessions(agent_name: str) -> list[dict]:
             continue
 
         try:
-            with open(state_file) as f:
+            with open(state_file, encoding="utf-8") as f:
                 state = json.load(f)
 
             session_id = session_dir.name
@@ -72,8 +76,8 @@ def _list_sessions(agent_name: str) -> list[dict]:
                 "state_file": state_file,
                 "state": state,
             })
-        except Exception as e:
-            print(f"Warning: Could not read {state_file}: {e}")
+        except (json.JSONDecodeError, OSError) as e:
+            logger.debug(f"Could not read {state_file}: {e}")
 
     return sessions
 
@@ -89,10 +93,11 @@ def _get_conversation_messages(agent_dir: Path, session_id: str) -> list:
     if parts_dir.exists():
         for part_file in sorted(parts_dir.glob("*.json")):
             try:
-                with open(part_file) as f:
+                with open(part_file, encoding="utf-8") as f:
                     data = json.load(f)
                     messages.append(data)
-            except:
+            except (json.JSONDecodeError, OSError) as e:
+                logger.debug(f"Could not read {part_file}: {e}")
                 continue
 
     return messages
@@ -176,7 +181,15 @@ def _display_session_summary(sessions: list) -> None:
         session_id = sess["id"]
         short_id = session_id[:20] if len(session_id) > 20 else session_id
         timestamp = _parse_timestamp(sess["timestamp"])
-        status_icon = "✅" if sess["status"] == "completed" else "⏸️" if sess["status"] == "paused" else "❌"
+
+        # Multi-line conditional to avoid long line
+        if sess["status"] == "completed":
+            status_icon = "✅"
+        elif sess["status"] == "paused":
+            status_icon = "⏸️"
+        else:
+            status_icon = "❌"
+
         steps = sess["steps"]
         print(f"  {short_id:20} | {timestamp:19} | {status_icon} | {steps:3} steps")
 
@@ -246,7 +259,7 @@ def cmd_trace_export(args) -> int:
         return 1
 
     try:
-        with open(state_file) as f:
+        with open(state_file, encoding="utf-8") as f:
             session_data = json.load(f)
 
         # Add conversation messages
@@ -254,14 +267,14 @@ def cmd_trace_export(args) -> int:
         session_data["conversation"] = messages
 
         if output_file:
-            with open(output_file, "w") as f:
+            with open(output_file, "w", encoding="utf-8") as f:
                 json.dump(session_data, f, indent=2, default=str)
             print(f"✅ Exported to {output_file}")
         else:
             print(json.dumps(session_data, indent=2, default=str))
 
         return 0
-    except Exception as e:
+    except (json.JSONDecodeError, OSError) as e:
         print(f"Error exporting session: {e}")
         return 1
 
