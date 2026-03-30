@@ -197,22 +197,27 @@ class AnthropicProvider(LLMProvider):
     def get_model_info(self) -> dict[str, Any]:
         """Get accurate information about the current model."""
         # Delegate to the wrapped provider for accurate metadata
-        wrapped_info = self._provider.get_model_info() if hasattr(self._provider, "get_model_info") else {}
+        has_get_model_info = hasattr(self._provider, "get_model_info")
+        if has_get_model_info:
+            wrapped_info = self._provider.get_model_info()
+        else:
+            wrapped_info = {}
 
         # Get model info from registry for the specific model
         model_info = get_model_info("anthropic", self.model) if self.model else None
 
-        # Merge sources, preferring registry info for accuracy
+        # Merge sources, giving registry info precedence
         if model_info:
-            return {
+            base_info = {
                 "provider": "anthropic",
                 "model": self.model,
                 "max_tokens": model_info.get("max_tokens", 200000),
                 "supports_tools": model_info.get("supports_tools", True),
                 "supports_streaming": model_info.get("supports_streaming", True),
                 "supports_json_mode": model_info.get("supports_json_mode", True),
-                **wrapped_info,
             }
+            # Merge wrapped_info, but registry values take precedence
+            return {**wrapped_info, **base_info}
 
         # Fallback to wrapped provider info
         return {
