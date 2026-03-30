@@ -13,6 +13,7 @@ Exit codes:
 
 import base64
 import hashlib
+import logging
 import http.server
 import json
 import os
