@@ -74,6 +74,7 @@ async def test_provider(provider_id: str, config: dict) -> tuple[bool, str | Non
         return False, "No response", api_base
 
     except Exception as e:
+        logger.debug("Provider test failed for %s: %s", provider_id, e, exc_info=True)
         error_message = _classify_completion_error(e)
         return False, error_message, None
 
@@ -109,6 +110,7 @@ async def test_provider_with_model(
         return False, "No response"
 
     except Exception as e:
+        logger.debug("Model test failed for %s/%s: %s", provider_id, model, e, exc_info=True)
         error_message = _classify_completion_error(e)
         return False, error_message
 
@@ -400,7 +402,6 @@ async def interactive_provider_selection() -> dict | None:
 
             # Get API key if not already set
             api_key = selected_config.get("api_key") or get_api_key(selected_id)
-            api_base = selected_config.get("api_base")
 
             if not api_key:
                 print(f"\nEnter your {selected_config['name']} API key:")
@@ -410,11 +411,14 @@ async def interactive_provider_selection() -> dict | None:
                     print("❌ No API key provided.")
                     return None
 
-                # Save the API key to config
-                save_provider_selection(selected_id, selected_config["default_model"], api_key)
-            else:
-                # Save selection without updating API key
-                save_provider_selection(selected_id, selected_config["default_model"])
+            # Test the provider to get api_base and verify it works
+            works, error, api_base = await test_provider(
+                selected_id,
+                {**selected_config, "api_key": api_key}
+            )
+            if not works:
+                print(f"\n❌ Provider test failed: {error}")
+                return None
 
             # Test which models work
             working_models = await get_working_models(
@@ -448,7 +452,7 @@ async def interactive_provider_selection() -> dict | None:
                 except ValueError:
                     pass
 
-            # Update saved model
+            # Save selection with API key
             save_provider_selection(selected_id, selected_model, api_key)
 
             result = {
