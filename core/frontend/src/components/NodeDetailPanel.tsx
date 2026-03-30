@@ -178,10 +178,18 @@ function SystemPromptTab({ systemPrompt }: { systemPrompt?: string }) {
   const prompt = systemPrompt || "";
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(prompt);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const handleCopy = async () => {
+    try {
+      if (!navigator.clipboard) {
+        console.error("Clipboard API not supported");
+        return
+      }
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.error("Failed to copy prompt", e);
+    }
   };
 
   if (!prompt) {
@@ -440,11 +448,10 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium border-b-2 transition-colors -mb-px ${
-              activeTab === tab.id
+            className={`flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium border-b-2 transition-colors -mb-px ${activeTab === tab.id
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
+              }`}
           >
             <tab.Icon className="w-3 h-3" />
             {tab.label}
@@ -490,7 +497,7 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
                           <div className={`mt-0.5 w-3.5 h-3.5 rounded-full flex-shrink-0 flex items-center justify-center border ${passed ? "border-transparent bg-[hsl(43,70%,45%)]" : "border-border/40 bg-muted/30"}`}>
                             {passed && (
                               <svg viewBox="0 0 8 8" className="w-2 h-2" fill="none">
-                                <path d="M1.5 4l2 2 3-3" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                <path d="M1.5 4l2 2 3-3" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
                               </svg>
                             )}
                           </div>
@@ -523,8 +530,8 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Tools & Integrations</p>
             {realTools && realTools.length > 0
               ? realTools.map((t, i) => (
-                  <ToolRow key={i} tool={{ name: t.name, description: t.description || "No description available", icon: "\ud83d\udd27" }} />
-                ))
+                <ToolRow key={i} tool={{ name: t.name, description: t.description || "No description available", icon: "\ud83d\udd27" }} />
+              ))
               : (
                 <div className="flex items-center justify-center py-6">
                   <p className="text-[11px] text-muted-foreground/50 italic">No tools available</p>
