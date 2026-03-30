@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-from argparse import Namespace
+from argparse import Namespace, _SubParsersAction
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -283,7 +284,7 @@ def cmd_trace_export(args: Namespace) -> int:
         return 1
 
 
-def register_trace_commands(subparsers: Any) -> None:
+def register_trace_commands(subparsers: _SubParsersAction) -> None:
     """Register trace commands with the CLI parser."""
     trace_parser = subparsers.add_parser(
         "trace",
