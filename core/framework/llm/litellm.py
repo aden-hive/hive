@@ -1925,6 +1925,16 @@ class LiteLLMProvider(LLMProvider):
 
             except RateLimitError as e:
                 if attempt < RATE_LIMIT_MAX_RETRIES:
+                    if accumulated_text:
+                        # Text chunks were already yielded to the caller and
+                        # published to the event bus — they cannot be recalled.
+                        # Retrying would re-stream from token 1, duplicating
+                        # content the client has already received.  Yield a
+                        # recoverable error instead; EventLoopNode will commit
+                        # the partial text and skip the outer retry (because
+                        # accumulated_text is non-empty at line 1706).
+                        yield StreamErrorEvent(error=str(e), recoverable=True)
+                        return
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(
                         f"[stream-retry] {self.model} rate limited (429): {e!s}. "
@@ -1948,6 +1958,12 @@ class LiteLLMProvider(LLMProvider):
                         yield event
                     return
                 if _is_stream_transient_error(e) and attempt < RATE_LIMIT_MAX_RETRIES:
+                    if accumulated_text:
+                        # Same guard as RateLimitError: text already published
+                        # to the event bus cannot be recalled.  Stop retrying
+                        # to prevent client-visible duplication.
+                        yield StreamErrorEvent(error=str(e), recoverable=True)
+                        return
                     wait = _compute_retry_delay(attempt, exception=e)
                     logger.warning(
                         f"[stream-retry] {self.model} transient error "
