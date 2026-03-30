@@ -50,12 +50,84 @@ def get_hive_config() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Helper for provider-specific base URL resolution
+# ---------------------------------------------------------------------------
+
+def resolve_api_base_from_config(llm_config: dict) -> str | None:
+    """Resolve api_base from an LLM configuration dict.
+
+    Handles subscription modes, explicit api_base, and provider defaults.
+    """
+    if llm_config.get("use_codex_subscription"):
+        return "https://chatgpt.com/backend-api/codex"
+    if llm_config.get("use_kimi_code_subscription"):
+        return "https://api.kimi.com/coding"
+    if llm_config.get("api_base"):
+        return llm_config["api_base"]
+
+    provider = str(llm_config.get("provider", "")).lower()
+    if provider == "openrouter":
+        return OPENROUTER_API_BASE
+    if provider == "minimax":
+        return "https://api.minimax.io/v1"
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Helper for provider-specific extra kwargs
+# ---------------------------------------------------------------------------
+
+def resolve_extra_kwargs_from_config(llm_config: dict) -> dict[str, Any]:
+    """Resolve extra kwargs (headers, store, etc.) from an LLM configuration dict."""
+    extra_kwargs = {}
+
+    # Claude Code OAuth subscription
+    if llm_config.get("use_claude_code_subscription"):
+        api_key = get_api_key()
+        if api_key:
+            extra_kwargs["extra_headers"] = {"authorization": f"Bearer {api_key}"}
+            logger.debug("Added Claude Code OAuth headers")
+
+    # Codex subscription
+    if llm_config.get("use_codex_subscription"):
+        api_key = get_api_key()
+        if api_key:
+            headers: dict[str, str] = {
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "CodexBar",
+            }
+            try:
+                from framework.runner.runner import get_codex_account_id
+
+                account_id = get_codex_account_id()
+                if account_id:
+                    headers["ChatGPT-Account-Id"] = account_id
+                    logger.debug(f"Added ChatGPT-Account-Id: {account_id}")
+            except ImportError:
+                pass
+            extra_kwargs["extra_headers"] = headers
+            extra_kwargs["store"] = False
+            extra_kwargs["allowed_openai_params"] = ["store"]
+            logger.debug("Added Codex subscription headers")
+
+    # Ollama local models need num_ctx parameter
+    provider = str(llm_config.get("provider", "")).lower()
+    model = str(llm_config.get("model", "")).lower()
+    if provider == "ollama" or model.startswith("ollama/"):
+        max_context = llm_config.get("max_context_tokens", DEFAULT_MAX_CONTEXT_TOKENS)
+        extra_kwargs["num_ctx"] = max_context
+        logger.debug(f"Set Ollama num_ctx={max_context}")
+
+    return extra_kwargs
+
+
+# ---------------------------------------------------------------------------
 # Derived helpers
 # ---------------------------------------------------------------------------
 
-
 def get_preferred_model() -> str:
-    """Return the user's preferred LLM model string (e.g. 'anthropic/claude-sonnet-4-20250514')."""
+    """Return the user's preferred LLM model string, or detect from environment."""
     llm = get_hive_config().get("llm", {})
     if llm.get("provider") and llm.get("model"):
         provider = str(llm["provider"])
@@ -65,7 +137,30 @@ def get_preferred_model() -> str:
             model = model[len("openrouter/") :]
         if model:
             return f"{provider}/{model}"
-    return "anthropic/claude-sonnet-4-20250514"
+
+    # No configured provider/model - try to detect from environment
+    detected_provider = get_provider_from_env()
+    if detected_provider:
+        # Return a sensible default for the detected provider
+        defaults = {
+            "gemini": "gemini-3-flash-preview",
+            "anthropic": "claude-3-haiku-20240307",
+            "openai": "gpt-3.5-turbo",
+            "openrouter": "openrouter/anthropic/claude-3.5-sonnet",
+            "groq": "mixtral-8x7b-32768",
+            "cerebras": "llama3.1-8b",
+            "deepseek": "deepseek-chat",
+            "mistral": "mistral-small-latest",
+            "minimax": "MiniMax-Text-01",
+        }
+        default_model = defaults.get(detected_provider, "gpt-3.5-turbo")
+        if detected_provider == "gemini":
+            return default_model
+        return f"{detected_provider}/{default_model}"
+
+    # Ultimate fallback - but this will be overridden by get_api_key detection
+    logger.warning("No LLM provider configured. Run ./quickstart.sh to configure.")
+    return "gpt-3.5-turbo"
 
 
 def get_preferred_worker_model() -> str | None:
@@ -92,8 +187,11 @@ def get_worker_api_key() -> str | None:
     if not worker_llm:
         return get_api_key()
 
-    # Worker-specific subscription / env var
-    if worker_llm.get("use_claude_code_subscription"):
+    # Get worker provider for provider-specific resolution
+    worker_provider = str(worker_llm.get("provider", "")).strip().lower()
+
+    # Worker-specific subscription / env var (only if provider matches)
+    if worker_provider in ("claude", "anthropic") and worker_llm.get("use_claude_code_subscription"):
         try:
             from framework.runner.runner import get_claude_code_token
 
@@ -103,7 +201,7 @@ def get_worker_api_key() -> str | None:
         except ImportError:
             pass
 
-    if worker_llm.get("use_codex_subscription"):
+    if worker_provider == "codex" and worker_llm.get("use_codex_subscription"):
         try:
             from framework.runner.runner import get_codex_token
 
@@ -113,7 +211,7 @@ def get_worker_api_key() -> str | None:
         except ImportError:
             pass
 
-    if worker_llm.get("use_kimi_code_subscription"):
+    if worker_provider == "kimi" and worker_llm.get("use_kimi_code_subscription"):
         try:
             from framework.runner.runner import get_kimi_code_token
 
@@ -123,12 +221,15 @@ def get_worker_api_key() -> str | None:
         except ImportError:
             pass
 
+    # Environment variable from worker config
     api_key_env_var = worker_llm.get("api_key_env_var")
     if api_key_env_var:
-        return os.environ.get(api_key_env_var)
+        api_key = os.environ.get(api_key_env_var)
+        if api_key:
+            return api_key
 
-    # Fall back to default key
-    return get_api_key()
+    # Fall back to default key with worker provider
+    return get_api_key(worker_provider if worker_provider else None)
 
 
 def get_worker_api_base() -> str | None:
@@ -137,15 +238,13 @@ def get_worker_api_base() -> str | None:
     if not worker_llm:
         return get_api_base()
 
-    if worker_llm.get("use_codex_subscription"):
-        return "https://chatgpt.com/backend-api/codex"
-    if worker_llm.get("use_kimi_code_subscription"):
-        return "https://api.kimi.com/coding"
-    if worker_llm.get("api_base"):
-        return worker_llm["api_base"]
-    if str(worker_llm.get("provider", "")).lower() == "openrouter":
-        return OPENROUTER_API_BASE
-    return None
+    # Use shared resolution helper
+    worker_base = resolve_api_base_from_config(worker_llm)
+    if worker_base:
+        return worker_base
+
+    # Fall back to default base
+    return get_api_base()
 
 
 def get_worker_llm_extra_kwargs() -> dict[str, Any]:
@@ -154,33 +253,14 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
     if not worker_llm:
         return get_llm_extra_kwargs()
 
-    if worker_llm.get("use_claude_code_subscription"):
-        api_key = get_worker_api_key()
-        if api_key:
-            return {
-                "extra_headers": {"authorization": f"Bearer {api_key}"},
-            }
-    if worker_llm.get("use_codex_subscription"):
-        api_key = get_worker_api_key()
-        if api_key:
-            headers: dict[str, str] = {
-                "Authorization": f"Bearer {api_key}",
-                "User-Agent": "CodexBar",
-            }
-            try:
-                from framework.runner.runner import get_codex_account_id
+    # Start with default extra kwargs
+    extra_kwargs = get_llm_extra_kwargs()
 
-                account_id = get_codex_account_id()
-                if account_id:
-                    headers["ChatGPT-Account-Id"] = account_id
-            except ImportError:
-                pass
-            return {
-                "extra_headers": headers,
-                "store": False,
-                "allowed_openai_params": ["store"],
-            }
-    return {}
+    # Merge worker-specific extra kwargs
+    worker_kwargs = resolve_extra_kwargs_from_config(worker_llm)
+    extra_kwargs.update(worker_kwargs)
+
+    return extra_kwargs
 
 
 def get_worker_max_tokens() -> int:
@@ -217,82 +297,89 @@ def get_api_key(provider: str | None = None) -> str | None:
     """Return the API key, supporting env var, Claude Code subscription, Codex, and ZAI Code.
 
     Priority:
-    1. Claude Code subscription (``use_claude_code_subscription: true``)
-       reads the OAuth token from ``~/.claude/.credentials.json``.
-    2. Codex subscription (``use_codex_subscription: true``)
-       reads the OAuth token from macOS Keychain or ``~/.codex/auth.json``.
-    3. Environment variable named in ``api_key_env_var``.
-    4. Provider-specific env var based on configured or detected provider.
+    1. Explicit provider argument (if provided, uses that provider's env var)
+    2. Claude Code subscription (``use_claude_code_subscription: true``)
+    3. Codex subscription (``use_codex_subscription: true``)
+    4. Kimi Code subscription (``use_kimi_code_subscription: true``)
+    5. Environment variable named in ``api_key_env_var``
+    6. Provider-specific env var based on configured or detected provider
     """
     llm = get_hive_config().get("llm", {})
     explicit_provider = (provider or "").lower()
     configured_provider = str(llm.get("provider", "")).lower()
     effective_provider = explicit_provider or configured_provider
 
-    # Claude Code subscription: read OAuth token directly
-    if not explicit_provider and llm.get("use_claude_code_subscription"):
-        try:
-            from framework.runner.runner import get_claude_code_token
+    # If explicit provider is given, skip subscription and env_var branches
+    if not explicit_provider:
+        # Claude Code subscription: read OAuth token directly
+        if llm.get("use_claude_code_subscription"):
+            try:
+                from framework.runner.runner import get_claude_code_token
 
-            token = get_claude_code_token()
-            if token:
-                return token
-        except ImportError:
-            pass
+                token = get_claude_code_token()
+                if token:
+                    return token
+            except ImportError:
+                pass
 
-    # Codex subscription: read OAuth token from Keychain / auth.json
-    if not explicit_provider and llm.get("use_codex_subscription"):
-        try:
-            from framework.runner.runner import get_codex_token
+        # Codex subscription: read OAuth token from Keychain / auth.json
+        if llm.get("use_codex_subscription"):
+            try:
+                from framework.runner.runner import get_codex_token
 
-            token = get_codex_token()
-            if token:
-                return token
-        except ImportError:
-            pass
+                token = get_codex_token()
+                if token:
+                    return token
+            except ImportError:
+                pass
 
-    # Kimi Code subscription: read API key from ~/.kimi/config.toml
-    if not explicit_provider and llm.get("use_kimi_code_subscription"):
-        try:
-            from framework.runner.runner import get_kimi_code_token
+        # Kimi Code subscription: read API key from ~/.kimi/config.toml
+        if llm.get("use_kimi_code_subscription"):
+            try:
+                from framework.runner.runner import get_kimi_code_token
 
-            token = get_kimi_code_token()
-            if token:
-                return token
-        except ImportError:
-            pass
+                token = get_kimi_code_token()
+                if token:
+                    return token
+            except ImportError:
+                pass
 
-    # Standard env-var path (covers ZAI Code and all API-key providers)
-    api_key_env_var = llm.get("api_key_env_var")
-    if not explicit_provider and api_key_env_var:
-        return os.environ.get(api_key_env_var)
+        # Standard env-var path (covers ZAI Code and all API-key providers)
+        api_key_env_var = llm.get("api_key_env_var")
+        if api_key_env_var:
+            return os.environ.get(api_key_env_var)
 
     env_var_map = {
         "gemini": "GEMINI_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
-        "openrouter": "OPENROUTER_API_KEY",  # Add OpenRouter
+        "openrouter": "OPENROUTER_API_KEY",
         "groq": "GROQ_API_KEY",
         "cerebras": "CEREBRAS_API_KEY",
         "deepseek": "DEEPSEEK_API_KEY",
         "mistral": "MISTRAL_API_KEY",
         "minimax": "MINIMAX_API_KEY",
+        "ollama": None,  # Local models don't need API keys
+        "kimi": "KIMI_API_KEY",
+        "codex": "CODEX_API_KEY",
     }
 
     if effective_provider in env_var_map:
         env_var = env_var_map[effective_provider]
-        api_key = os.environ.get(env_var)
-        if api_key:
-            logger.debug(f"Using {env_var} from environment")
-            return api_key
+        if env_var:
+            api_key = os.environ.get(env_var)
+            if api_key:
+                logger.debug(f"Using {env_var} from environment")
+                return api_key
 
     # If no provider was requested or configured, try to detect from environment
     if not effective_provider:
         for provider_name, env_var in env_var_map.items():
-            api_key = os.environ.get(env_var)
-            if api_key:
-                logger.debug(f"Detected {provider_name} from {env_var}")
-                return api_key
+            if env_var:
+                api_key = os.environ.get(env_var)
+                if api_key:
+                    logger.debug(f"Detected {provider_name} from {env_var}")
+                    return api_key
 
     logger.debug(f"No API key found for provider: {effective_provider or 'unknown'}")
     return None
@@ -314,61 +401,13 @@ def get_gcu_viewport_scale() -> float:
 def get_api_base() -> str | None:
     """Return the api_base URL for OpenAI-compatible endpoints, if configured."""
     llm = get_hive_config().get("llm", {})
-    if llm.get("use_codex_subscription"):
-        # Codex subscription routes through the ChatGPT backend, not api.openai.com.
-        return "https://chatgpt.com/backend-api/codex"
-    if llm.get("use_kimi_code_subscription"):
-        # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
-        return "https://api.kimi.com/coding"
-    if llm.get("api_base"):
-        return llm["api_base"]
-    if str(llm.get("provider", "")).lower() == "openrouter":
-        return OPENROUTER_API_BASE
-    # Minimax needs a specific base URL
-    if str(llm.get("provider", "")).lower() == "minimax":
-        return "https://api.minimax.io/v1"
-    return None
+    return resolve_api_base_from_config(llm)
 
 
 def get_llm_extra_kwargs() -> dict[str, Any]:
-    """Return extra kwargs for LiteLLMProvider (e.g. OAuth headers).
-
-    When ``use_claude_code_subscription`` is enabled, returns
-    ``extra_headers`` with the OAuth Bearer token so that litellm's
-    built-in Anthropic OAuth handler adds the required beta headers.
-
-    When ``use_codex_subscription`` is enabled, returns
-    ``extra_headers`` with the Bearer token, ``ChatGPT-Account-Id``,
-    and ``store=False`` (required by the ChatGPT backend).
-    """
+    """Return extra kwargs for LiteLLMProvider (e.g. OAuth headers)."""
     llm = get_hive_config().get("llm", {})
-    if llm.get("use_claude_code_subscription"):
-        api_key = get_api_key()
-        if api_key:
-            return {
-                "extra_headers": {"authorization": f"Bearer {api_key}"},
-            }
-    if llm.get("use_codex_subscription"):
-        api_key = get_api_key()
-        if api_key:
-            headers: dict[str, str] = {
-                "Authorization": f"Bearer {api_key}",
-                "User-Agent": "CodexBar",
-            }
-            try:
-                from framework.runner.runner import get_codex_account_id
-
-                account_id = get_codex_account_id()
-                if account_id:
-                    headers["ChatGPT-Account-Id"] = account_id
-            except ImportError:
-                pass
-            return {
-                "extra_headers": headers,
-                "store": False,
-                "allowed_openai_params": ["store"],
-            }
-    return {}
+    return resolve_extra_kwargs_from_config(llm)
 
 
 def get_available_providers() -> dict[str, dict[str, Any]]:
@@ -557,6 +596,27 @@ def save_provider_selection(provider: str, model: str, api_key: str | None = Non
 
     llm["provider"] = provider
     llm["model"] = model
+
+    # If API key is provided, also set the environment variable for future use
+    if api_key and provider in {
+        "gemini", "anthropic", "openai", "openrouter", "groq",
+        "cerebras", "deepseek", "mistral", "minimax"
+    }:
+        env_var_map = {
+            "gemini": "GEMINI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+            "groq": "GROQ_API_KEY",
+            "cerebras": "CEREBRAS_API_KEY",
+            "deepseek": "DEEPSEEK_API_KEY",
+            "mistral": "MISTRAL_API_KEY",
+            "minimax": "MINIMAX_API_KEY",
+        }
+        env_var = env_var_map.get(provider)
+        if env_var:
+            os.environ[env_var] = api_key
+            logger.debug(f"Set {env_var} in environment")
 
     try:
         with open(HIVE_CONFIG_FILE, "w") as f:
