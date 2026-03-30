@@ -5,6 +5,8 @@ Please use LiteLLMProvider via get_llm_provider() instead, which respects
 your configuration and supports all providers.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -14,41 +16,26 @@ from typing import Any
 
 from framework.llm.litellm import LiteLLMProvider
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
+from framework.llm.provider_models import get_model_info
+from framework.config import get_hive_config
 
 logger = logging.getLogger(__name__)
 
-# Show deprecation warning when module is imported
-warnings.warn(
-    "AnthropicProvider is deprecated and will be removed in a future version. "
-    "Use framework.llm.get_llm_provider() instead which respects your configuration.",
-    DeprecationWarning,
-    stacklevel=2,
-)
 
-logger.warning(
-    "AnthropicProvider is deprecated. Please update your code to use "
-    "get_llm_provider() from framework.llm which automatically selects "
-    "the correct provider based on your configuration."
-)
+def _get_llm_config() -> dict[str, Any]:
+    """Get current LLM configuration from shared config loader."""
+    config = get_hive_config()
+    llm_config = config.get("llm", {})
 
+    # Fallback to environment for missing keys
+    if not llm_config.get("provider"):
+        llm_config["provider"] = os.environ.get("MODEL_PROVIDER", "").lower()
+    if not llm_config.get("model"):
+        llm_config["model"] = os.environ.get("LITELLM_MODEL", "")
+    if not llm_config.get("api_key"):
+        llm_config["api_key"] = os.environ.get("ANTHROPIC_API_KEY", "")
 
-def _get_llm_config():
-    """Get current LLM configuration from ~/.hive/config.json."""
-    config_path = Path.home() / ".hive" / "configuration.json"
-    if config_path.exists():
-        try:
-            with open(config_path, encoding="utf-8") as f:
-                config = json.load(f)
-                return config.get("llm", {})
-        except Exception as e:
-            logger.debug(f"Failed to read config: {e}")
-
-    # Fallback to environment
-    return {
-        "provider": os.environ.get("MODEL_PROVIDER", "").lower(),
-        "model": os.environ.get("LITELLM_MODEL", ""),
-        "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
-    }
+    return llm_config
 
 
 def _get_api_key_from_credential_store() -> str | None:
@@ -67,7 +54,7 @@ def _get_api_key_from_credential_store() -> str | None:
 class AnthropicProvider(LLMProvider):
     """
     Anthropic Claude LLM provider - DEPRECATED.
-    
+
     This class is maintained for backward compatibility but will be removed.
     Please migrate to using get_llm_provider() from framework.llm instead.
     """
@@ -76,23 +63,34 @@ class AnthropicProvider(LLMProvider):
         self,
         api_key: str | None = None,
         model: str | None = None,
-    ):
+    ) -> None:
         """Initialize Anthropic provider with configuration check.
-        
+
         Args:
             api_key: Anthropic API key (optional, will check env/config if not provided)
             model: Model name (optional, will use config if not provided)
-            
+
         Raises:
             ValueError: If Anthropic is not the configured provider or API key missing
         """
+        # Emit deprecation warning only when class is instantiated
+        warnings.warn(
+            "AnthropicProvider is deprecated and will be removed in a future version. "
+            "Use framework.llm.get_llm_provider() instead which respects your configuration.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        logger.warning(
+            "AnthropicProvider is deprecated. Please update your code to use "
+            "get_llm_provider() from framework.llm which automatically selects "
+            "the correct provider based on your configuration."
+        )
+
         # Check if user actually wants Anthropic
         config = _get_llm_config()
         selected_provider = config.get("provider", "").lower()
-        
-        # CRITICAL FIX: Only block when the provider is explicitly set to something else
-        # AND the caller didn't provide explicit api_key/model (allowing explicit usage)
-        # This allows code that intentionally wants to use Anthropic to do so
+
+        # Only block when provider is set to something else AND no explicit params
         if (
             selected_provider
             and selected_provider not in ["anthropic", "claude"]
@@ -107,27 +105,25 @@ class AnthropicProvider(LLMProvider):
                 f"2. Select your desired provider (Gemini, Groq, etc.)\n"
                 f"3. If the error persists, please report this issue."
             )
-        
+
         # For Anthropic users, get the API key
         self.api_key = api_key or _get_api_key_from_credential_store()
-        # CRITICAL FIX: Also check for "claude" alias
         if not self.api_key and selected_provider in {"anthropic", "claude"}:
             raise ValueError(
                 "Anthropic API key required but not found. "
                 "Please set ANTHROPIC_API_KEY environment variable or configure it in quickstart."
             )
-        
+
         # Use model from config, or passed model, or fallback
-        # CRITICAL FIX: Restore original default model for backward compatibility
         self.model = (
             model
             or config.get("model")
             or os.environ.get("LITELLM_MODEL")
             or "claude-haiku-4-5-20251001"  # Original default - maintain compatibility
         )
-        
+
         logger.info(f"Initializing AnthropicProvider with model: {self.model}")
-        
+
         self._provider = LiteLLMProvider(
             model=self.model,
             api_key=self.api_key,
@@ -199,14 +195,33 @@ class AnthropicProvider(LLMProvider):
         return self._provider.count_tokens(text)
 
     def get_model_info(self) -> dict[str, Any]:
-        """Get information about the current model."""
+        """Get accurate information about the current model."""
+        # Delegate to the wrapped provider for accurate metadata
+        wrapped_info = self._provider.get_model_info() if hasattr(self._provider, "get_model_info") else {}
+
+        # Get model info from registry for the specific model
+        model_info = get_model_info("anthropic", self.model) if self.model else None
+
+        # Merge sources, preferring registry info for accuracy
+        if model_info:
+            return {
+                "provider": "anthropic",
+                "model": self.model,
+                "max_tokens": model_info.get("max_tokens", 200000),
+                "supports_tools": model_info.get("supports_tools", True),
+                "supports_streaming": model_info.get("supports_streaming", True),
+                "supports_json_mode": model_info.get("supports_json_mode", True),
+                **wrapped_info,
+            }
+
+        # Fallback to wrapped provider info
         return {
             "provider": "anthropic",
             "model": self.model,
-            "max_tokens": 200000,  # Claude's context window
-            "supports_tools": True,
-            "supports_streaming": True,
-            "supports_json_mode": True,
+            "max_tokens": wrapped_info.get("max_tokens", 200000),
+            "supports_tools": wrapped_info.get("supports_tools", True),
+            "supports_streaming": wrapped_info.get("supports_streaming", True),
+            "supports_json_mode": wrapped_info.get("supports_json_mode", True),
         }
 
     def validate_api_key(self) -> bool:
