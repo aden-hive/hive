@@ -10,64 +10,57 @@
  * @returns Promise that resolves when export is complete
  */
 export async function exportAsPNG(svgElement: SVGElement, filename: string): Promise<void> {
-  return new Promise(async (resolve, reject) => {
-    try {
-      // Ensure filename has .png extension
-      const finalFilename = filename.endsWith('.png') ? filename : `${filename}.png`;
-      
-      // Dynamically import html2canvas to avoid bundling it if not needed
-      const html2canvas = (await import("html2canvas")).default;
-      
-      // Create a wrapper div to contain the SVG (html2canvas works better with HTMLElement)
-      const wrapper = document.createElement('div');
-      const clonedSvg = svgElement.cloneNode(true) as SVGElement;
-      
-      // Preserve the viewBox and dimensions
-      const viewBox = svgElement.getAttribute('viewBox');
-      const width = svgElement.getAttribute('width');
-      const height = svgElement.getAttribute('height');
-      if (viewBox) clonedSvg.setAttribute('viewBox', viewBox);
-      if (width) clonedSvg.setAttribute('width', width);
-      if (height) clonedSvg.setAttribute('height', height);
-      
-      // Apply current transform if present
-      const transform = (svgElement as SVGSVGElement).style?.transform;
-      if (transform) {
-        clonedSvg.style.transform = transform;
-      }
-      
-      wrapper.appendChild(clonedSvg);
-      wrapper.style.position = 'absolute';
-      wrapper.style.top = '-9999px';
-      wrapper.style.left = '-9999px';
-      wrapper.style.width = width || 'auto';
-      wrapper.style.height = height || 'auto';
-      document.body.appendChild(wrapper);
-      
-      // Create canvas from the wrapper
-      const canvas = await html2canvas(wrapper, {
-        scale: 2, // Higher resolution
-        backgroundColor: null, // Transparent background
-        logging: false,
-        useCORS: true,
-        allowTaint: false,
-      });
-      
-      // Clean up wrapper
-      document.body.removeChild(wrapper);
-      
-      // Create download link
-      const link = document.createElement("a");
-      link.download = finalFilename;
-      link.href = canvas.toDataURL("image/png");
-      link.click();
-      
-      resolve();
-    } catch (error) {
-      console.error("Failed to export as PNG:", error);
-      reject(new Error(`Failed to export graph as PNG: ${error}`));
-    }
-  });
+  // Ensure filename has .png extension
+  const finalFilename = filename.endsWith('.png') ? filename : `${filename}.png`;
+  
+  // Dynamically import html2canvas to avoid bundling it if not needed
+  const html2canvas = (await import("html2canvas")).default;
+  
+  // Create a wrapper div to contain the SVG (html2canvas works better with HTMLElement)
+  const wrapper = document.createElement('div');
+  const clonedSvg = svgElement.cloneNode(true) as SVGElement;
+  
+  // Preserve the viewBox and dimensions
+  const viewBox = svgElement.getAttribute('viewBox');
+  const width = svgElement.getAttribute('width');
+  const height = svgElement.getAttribute('height');
+  if (viewBox) clonedSvg.setAttribute('viewBox', viewBox);
+  if (width) clonedSvg.setAttribute('width', width);
+  if (height) clonedSvg.setAttribute('height', height);
+  
+  // Apply current transform if present
+  const transform = (svgElement as SVGSVGElement).style?.transform;
+  if (transform) {
+    clonedSvg.style.transform = transform;
+  }
+  
+  wrapper.appendChild(clonedSvg);
+  wrapper.style.position = 'absolute';
+  wrapper.style.top = '-9999px';
+  wrapper.style.left = '-9999px';
+  wrapper.style.width = width || 'auto';
+  wrapper.style.height = height || 'auto';
+  document.body.appendChild(wrapper);
+  
+  try {
+    // Create canvas from the wrapper
+    const canvas = await html2canvas(wrapper, {
+      scale: 2, // Higher resolution
+      backgroundColor: null, // Transparent background
+      logging: false,
+      useCORS: true,
+      allowTaint: false,
+    });
+    
+    // Create download link
+    const link = document.createElement("a");
+    link.download = finalFilename;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  } finally {
+    // Always clean up wrapper, even if html2canvas throws
+    document.body.removeChild(wrapper);
+  }
 }
 
 /**
@@ -76,57 +69,60 @@ export async function exportAsPNG(svgElement: SVGElement, filename: string): Pro
  * @param filename - Name of the output file (with or without extension)
  */
 export function exportAsSVG(svgElement: SVGElement, filename: string): void {
-  try {
-    // Ensure filename has .svg extension
-    const finalFilename = filename.endsWith('.svg') ? filename : `${filename}.svg`;
-    
-    // Clone the SVG to avoid modifying the original
-    const clonedSvg = svgElement.cloneNode(true) as SVGSVGElement;
-    
-    // Preserve the current transform if present
-    const transform = (svgElement as SVGSVGElement).style?.transform;
-    if (transform) {
-      clonedSvg.style.transform = transform;
-    }
-    
-    // Ensure the SVG has proper namespace
-    clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    clonedSvg.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
-    
-    // Preserve viewBox and dimensions
-    const viewBox = svgElement.getAttribute('viewBox');
-    const width = svgElement.getAttribute('width');
-    const height = svgElement.getAttribute('height');
-    if (viewBox) clonedSvg.setAttribute('viewBox', viewBox);
-    if (width) clonedSvg.setAttribute('width', width);
-    if (height) clonedSvg.setAttribute('height', height);
-    
-    // Add a style element to preserve colors
+  // Ensure filename has .svg extension
+  const finalFilename = filename.endsWith('.svg') ? filename : `${filename}.svg`;
+  
+  // Clone the SVG to avoid modifying the original
+  const clonedSvg = svgElement.cloneNode(true) as SVGSVGElement;
+  
+  // Preserve the current transform if present
+  const transform = (svgElement as SVGSVGElement).style?.transform;
+  if (transform) {
+    clonedSvg.style.transform = transform;
+  }
+  
+  // Preserve viewBox and dimensions
+  const viewBox = svgElement.getAttribute('viewBox');
+  const width = svgElement.getAttribute('width');
+  const height = svgElement.getAttribute('height');
+  if (viewBox) clonedSvg.setAttribute('viewBox', viewBox);
+  if (width) clonedSvg.setAttribute('width', width);
+  if (height) clonedSvg.setAttribute('height', height);
+  
+  // Ensure the SVG has proper namespaces
+  clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  clonedSvg.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+  
+  // Extract existing styles from the SVG or compute from elements
+  // Instead of hardcoding class names, we preserve whatever styles are already present
+  // and add minimal base styles to ensure text rendering
+  const existingStyle = clonedSvg.querySelector('style');
+  if (!existingStyle) {
     const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+    // Use generic selectors that match typical SVG text elements
+    // This preserves text rendering without hardcoding specific class names
     style.textContent = `
-      text { font-family: 'Inter', system-ui, sans-serif; }
-      .node-label { font-weight: 500; }
-      .trigger-label { fill: hsl(210,30%,65%); }
+      text {
+        font-family: 'Inter', system-ui, sans-serif;
+        dominant-baseline: middle;
+      }
     `;
     clonedSvg.insertBefore(style, clonedSvg.firstChild);
-    
-    // Serialize to string
-    const serializer = new XMLSerializer();
-    let source = serializer.serializeToString(clonedSvg);
-    
-    // Add XML declaration
-    source = '<?xml version="1.0" standalone="no"?>\r\n' + source;
-    
-    // Create data URL and download
-    const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(source);
-    const link = document.createElement("a");
-    link.download = finalFilename;
-    link.href = url;
-    link.click();
-  } catch (error) {
-    console.error("Failed to export as SVG:", error);
-    throw new Error(`Failed to export graph as SVG: ${error}`);
   }
+  
+  // Serialize to string
+  const serializer = new XMLSerializer();
+  let source = serializer.serializeToString(clonedSvg);
+  
+  // Add XML declaration
+  source = '<?xml version="1.0" standalone="no"?>\r\n' + source;
+  
+  // Create data URL and download
+  const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(source);
+  const link = document.createElement("a");
+  link.download = finalFilename;
+  link.href = url;
+  link.click();
 }
 
 /**
@@ -141,7 +137,6 @@ export async function exportGraph(
   filename: string = "graph"
 ): Promise<void> {
   // Only add timestamp if the filename doesn't already have one
-  // (callers might already include timestamp)
   const hasTimestamp = /_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}/.test(filename);
   const finalFilename = hasTimestamp ? filename : `${filename}_${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}`;
   
@@ -169,10 +164,21 @@ export async function getGraphDataURL(
     // Create wrapper div for html2canvas compatibility
     const wrapper = document.createElement('div');
     const clonedSvg = svgElement.cloneNode(true) as SVGElement;
+    
+    // Preserve viewBox and dimensions (consistent with exportAsPNG)
+    const viewBox = svgElement.getAttribute('viewBox');
+    const width = svgElement.getAttribute('width');
+    const height = svgElement.getAttribute('height');
+    if (viewBox) clonedSvg.setAttribute('viewBox', viewBox);
+    if (width) clonedSvg.setAttribute('width', width);
+    if (height) clonedSvg.setAttribute('height', height);
+    
     wrapper.appendChild(clonedSvg);
     wrapper.style.position = 'absolute';
     wrapper.style.top = '-9999px';
     wrapper.style.left = '-9999px';
+    wrapper.style.width = width || 'auto';
+    wrapper.style.height = height || 'auto';
     document.body.appendChild(wrapper);
     
     try {
@@ -180,6 +186,7 @@ export async function getGraphDataURL(
         scale: 2,
         backgroundColor: null,
         logging: false,
+        useCORS: true,
       });
       return canvas.toDataURL("image/png");
     } finally {
@@ -188,6 +195,16 @@ export async function getGraphDataURL(
   } else {
     // SVG format
     const clonedSvg = svgElement.cloneNode(true) as SVGElement;
+    
+    // Preserve viewBox and dimensions
+    const viewBox = svgElement.getAttribute('viewBox');
+    const width = svgElement.getAttribute('width');
+    const height = svgElement.getAttribute('height');
+    if (viewBox) clonedSvg.setAttribute('viewBox', viewBox);
+    if (width) clonedSvg.setAttribute('width', width);
+    if (height) clonedSvg.setAttribute('height', height);
+    
+    // Set namespaces
     clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
     clonedSvg.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
     
@@ -213,7 +230,18 @@ export async function getGraphBlob(
     return await response.blob();
   } else {
     const clonedSvg = svgElement.cloneNode(true) as SVGElement;
+    
+    // Preserve viewBox and dimensions
+    const viewBox = svgElement.getAttribute('viewBox');
+    const width = svgElement.getAttribute('width');
+    const height = svgElement.getAttribute('height');
+    if (viewBox) clonedSvg.setAttribute('viewBox', viewBox);
+    if (width) clonedSvg.setAttribute('width', width);
+    if (height) clonedSvg.setAttribute('height', height);
+    
+    // Set namespaces
     clonedSvg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clonedSvg.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
     
     const serializer = new XMLSerializer();
     const source = serializer.serializeToString(clonedSvg);
