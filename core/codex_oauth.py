@@ -162,8 +162,6 @@ def open_browser(url: str) -> bool:
     system = platform.system()
     try:
         if system == "Windows":
-            # Use os.startfile on Windows — no subprocess left behind
-            import os
             os.startfile(url)
             return True
         
@@ -173,19 +171,21 @@ def open_browser(url: str) -> bool:
         else:
             proc = subprocess.Popen(["xdg-open", url], stdout=devnull, stderr=devnull)
         
-        # Wait briefly to ensure the process starts, then detach
+        # Wait briefly to see if the command fails immediately
         try:
-            proc.wait(timeout=2)
+            exit_code = proc.wait(timeout=2)
+            # If it exited with non-zero, the browser command failed
+            if exit_code != 0:
+                print(f"\033[0;33mBrowser command exited with code {exit_code}\033[0m", file=sys.stderr)
+                return False
+            return True
         except subprocess.TimeoutExpired:
-            pass  # Process started; it will exit on its own
-        
-        return True
+            # Still running = success
+            return True
     except Exception as e:
-        # Log the error for debugging (optional)
-        import logging
         logging.getLogger(__name__).debug(f"Failed to open browser: {e}")
         return False
-
+        
 class OAuthCallbackHandler(http.server.BaseHTTPRequestHandler):
     """HTTP handler that captures the OAuth callback."""
 
