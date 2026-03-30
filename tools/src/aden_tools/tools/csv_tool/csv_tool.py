@@ -2,6 +2,7 @@
 
 import csv
 import os
+import re
 
 from fastmcp import FastMCP
 
@@ -335,21 +336,15 @@ def register_tools(mcp: FastMCP) -> None:
             if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
                 return {"error": "Only SELECT queries are allowed for security reasons"}
 
-            # Disallowed keywords for security
-            disallowed = [
-                "INSERT",
-                "UPDATE",
-                "DELETE",
-                "DROP",
-                "CREATE",
-                "ALTER",
-                "TRUNCATE",
-                "EXEC",
-                "EXECUTE",
-            ]
-            for keyword in disallowed:
-                if keyword in query_upper:
-                    return {"error": f"'{keyword}' is not allowed in queries"}
+            # Disallowed keywords for security (word-boundary match to avoid
+            # false positives on column names like created_at, updated_at, etc.)
+            _WRITE_PATTERN = re.compile(
+                r"\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|EXEC|EXECUTE)\b",
+                re.IGNORECASE,
+            )
+            match = _WRITE_PATTERN.search(query)
+            if match:
+                return {"error": f"'{match.group().upper()}' is not allowed in queries"}
 
             # Block obvious multi-statement / injection attempts
             q_lower = query.lower()
