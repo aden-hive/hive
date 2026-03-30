@@ -732,6 +732,100 @@ class TestCsvSql:
         assert "id" in result["columns"]
         assert "name" in result["columns"]
 
+    def test_path_with_single_quote(self, csv_tools, session_dir, tmp_path):
+        """Regression: CSV paths containing single quotes should work (parameter binding)."""
+        csv_file = session_dir / "O'Reilly.csv"
+        csv_file.write_text("name,age\nAlice,21\nBob,22\n", encoding="utf-8")
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_sql"](
+                path="O'Reilly.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT * FROM data",
+            )
+
+        assert "error" not in result, result
+        assert result["success"] is True
+        assert result["row_count"] == 2
+        names = [row["name"] for row in result["rows"]]
+        assert "Alice" in names
+        assert "Bob" in names
+
+    # --- NEW: security regression tests required by Issue #1256 ---
+
+    def test_reject_non_select(self, csv_tools, products_csv, tmp_path):
+        """Reject any non-SELECT / non-WITH query."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_sql"](
+                path=products_csv.name,
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="DROP TABLE data",
+            )
+        assert "error" in result
+
+    def test_reject_multi_statement(self, csv_tools, products_csv, tmp_path):
+        """Reject multi-statement queries with semicolons."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_sql"](
+                path=products_csv.name,
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT * FROM data; DROP TABLE data",
+            )
+        assert "error" in result
+
+    def test_reject_sql_comment_dash(self, csv_tools, products_csv, tmp_path):
+        """Reject queries with SQL line comments."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_sql"](
+                path=products_csv.name,
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT * FROM data -- WHERE id = 1",
+            )
+        assert "error" in result
+
+    def test_with_cte_allowed(self, csv_tools, products_csv, tmp_path):
+        """Allow valid WITH (CTE) queries."""
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_sql"](
+                path=products_csv.name,
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query=(
+                    "WITH electronics AS (SELECT * FROM data"
+                    " WHERE category = 'Electronics')"
+                    " SELECT * FROM electronics"
+                ),
+            )
+        assert result["success"] is True
+
+    def test_keyword_in_column_name_allowed(self, csv_tools, session_dir, tmp_path):
+        """Column names like created_at should not trigger keyword blocking."""
+        csv_file = session_dir / "timestamps.csv"
+        csv_file.write_text(
+            "created_at,updated_at,value\n2024-01-01,2024-01-02,100\n",
+            encoding="utf-8",
+        )
+
+        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+            result = csv_tools["csv_sql"](
+                path="timestamps.csv",
+                workspace_id=TEST_WORKSPACE_ID,
+                agent_id=TEST_AGENT_ID,
+                session_id=TEST_SESSION_ID,
+                query="SELECT created_at, updated_at FROM data",
+            )
+        assert "error" not in result, result
+        assert result["success"] is True
+
     def test_where_clause(self, csv_tools, products_csv, tmp_path):
         """Filter with WHERE clause."""
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
