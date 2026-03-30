@@ -1,7 +1,6 @@
-// core/frontend/src/components/AgentGraphEnhanced.tsx
-
 import { memo, useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { Play, Pause, Loader2, CheckCircle2, ZoomIn, ZoomOut, Move, Download, Search, X, Maximize2, Minimize2 } from "lucide-react";
+import { exportAsPNG, exportAsSVG } from "@/lib/graph-export";
 
 export type NodeStatus = "running" | "complete" | "pending" | "error" | "looping";
 export type NodeType = "execution" | "trigger";
@@ -203,79 +202,6 @@ function truncateLabel(label: string, availablePx: number, fontSize: number): st
   return label.slice(0, Math.max(maxChars - 1, 1)) + "…";
 }
 
-// Real export functions (replace with actual implementation)
-async function exportAsPNG(svgElement: SVGSVGElement, filename: string): Promise<void> {
-  try {
-    // Clone the SVG to avoid modifying the original
-    const clone = svgElement.cloneNode(true) as SVGSVGElement;
-    
-    // Get the current transform and apply it to the clone
-    const transform = svgElement.style.transform;
-    if (transform) {
-      clone.style.transform = transform;
-    }
-    
-    // Use html2canvas or similar library here
-    // For now, we'll use a simple approach
-    const serializer = new XMLSerializer();
-    const svgString = serializer.serializeToString(clone);
-    const blob = new Blob([svgString], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob);
-    
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = svgElement.clientWidth;
-      canvas.height = svgElement.clientHeight;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        canvas.toBlob((blob) => {
-          if (blob) {
-            const pngUrl = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = pngUrl;
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(pngUrl);
-          }
-        });
-      }
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
-  } catch (error) {
-    console.error("Export PNG failed:", error);
-    throw error;
-  }
-}
-
-function exportAsSVG(svgElement: SVGSVGElement, filename: string): void {
-  try {
-    // Clone the SVG to avoid modifying the original
-    const clone = svgElement.cloneNode(true) as SVGSVGElement;
-    
-    // Apply current transform to the clone
-    const transform = svgElement.style.transform;
-    if (transform) {
-      clone.style.transform = transform;
-    }
-    
-    const serializer = new XMLSerializer();
-    const svgString = serializer.serializeToString(clone);
-    const blob = new Blob([svgString], { type: "image/svg+xml" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (error) {
-    console.error("Export SVG failed:", error);
-    throw error;
-  }
-}
-
 // ============ Main Component ============
 export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, onPause, version, runState: externalRunState, building, queenPhase }: AgentGraphProps) {
   const [localRunState, setLocalRunState] = useState<RunState>("idle");
@@ -352,7 +278,7 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     }
   };
 
-  // Search handlers - now using node IDs instead of indexes
+  // Search handlers - using node IDs instead of indexes
   const handleSearch = useCallback((term: string) => {
     setSearchTerm(term);
     if (!term.trim()) { 
@@ -370,7 +296,19 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     setSearchResults(results);
     setCurrentSearchIndex(0);
     setHighlightedNodeId(results.length > 0 ? results[0] : null);
-  }, [nodes]);
+    
+    // Center on first result
+    if (results.length > 0 && svgContainerRef.current) {
+      const nodeElement = document.getElementById(`node-${results[0]}`);
+      if (nodeElement) {
+        const nodeRect = nodeElement.getBoundingClientRect();
+        const containerRect = svgContainerRef.current.getBoundingClientRect();
+        const targetX = (containerRect.width / 2) - (nodeRect.left + nodeRect.width / 2) + viewState.offsetX;
+        const targetY = (containerRect.height / 2) - (nodeRect.top + nodeRect.height / 2) + viewState.offsetY;
+        setViewState(prev => ({ ...prev, offsetX: targetX, offsetY: targetY }));
+      }
+    }
+  }, [nodes, viewState]);
 
   const handleNextResult = useCallback(() => {
     if (searchResults.length === 0) return;
@@ -378,12 +316,17 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     setCurrentSearchIndex(nextIndex);
     setHighlightedNodeId(searchResults[nextIndex]);
     
-    // Scroll to highlighted node if needed
-    const highlightedElement = document.getElementById(`node-${searchResults[nextIndex]}`);
-    if (highlightedElement) {
-      highlightedElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Center on the node by updating pan offsets
+    const nodeId = searchResults[nextIndex];
+    const nodeElement = document.getElementById(`node-${nodeId}`);
+    if (nodeElement && svgContainerRef.current) {
+      const nodeRect = nodeElement.getBoundingClientRect();
+      const containerRect = svgContainerRef.current.getBoundingClientRect();
+      const targetX = (containerRect.width / 2) - (nodeRect.left + nodeRect.width / 2) + viewState.offsetX;
+      const targetY = (containerRect.height / 2) - (nodeRect.top + nodeRect.height / 2) + viewState.offsetY;
+      setViewState(prev => ({ ...prev, offsetX: targetX, offsetY: targetY }));
     }
-  }, [searchResults, currentSearchIndex]);
+  }, [searchResults, currentSearchIndex, viewState]);
 
   const handlePrevResult = useCallback(() => {
     if (searchResults.length === 0) return;
@@ -391,11 +334,17 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     setCurrentSearchIndex(prevIndex);
     setHighlightedNodeId(searchResults[prevIndex]);
     
-    const highlightedElement = document.getElementById(`node-${searchResults[prevIndex]}`);
-    if (highlightedElement) {
-      highlightedElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Center on the node by updating pan offsets
+    const nodeId = searchResults[prevIndex];
+    const nodeElement = document.getElementById(`node-${nodeId}`);
+    if (nodeElement && svgContainerRef.current) {
+      const nodeRect = nodeElement.getBoundingClientRect();
+      const containerRect = svgContainerRef.current.getBoundingClientRect();
+      const targetX = (containerRect.width / 2) - (nodeRect.left + nodeRect.width / 2) + viewState.offsetX;
+      const targetY = (containerRect.height / 2) - (nodeRect.top + nodeRect.height / 2) + viewState.offsetY;
+      setViewState(prev => ({ ...prev, offsetX: targetX, offsetY: targetY }));
     }
-  }, [searchResults, currentSearchIndex]);
+  }, [searchResults, currentSearchIndex, viewState]);
 
   const clearSearch = useCallback(() => { 
     setSearchTerm(""); 
@@ -689,7 +638,7 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
   const isQueenBusy = queenPhase === "building" || queenPhase === "planning";
 
   return (
-    <div className="flex flex-col h-full" ref={graphContainerRef}>
+    <div className="flex flex-col h-full relative" ref={graphContainerRef}>
       <GraphControls
         scale={viewState.scale}
         onZoomIn={handleZoomIn}
