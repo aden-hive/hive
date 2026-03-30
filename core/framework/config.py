@@ -5,15 +5,21 @@ and every agent template share one implementation instead of copy-pasting
 helper functions.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
-from framework.llm.provider_models import get_model_display_name, get_model_info
+from typing import Any
+
 from framework.graph.edge import DEFAULT_MAX_TOKENS
-from framework.llm.provider_models import get_model_capabilities
+from framework.llm.provider_models import (
+    get_model_capabilities,
+    get_model_display_name,
+    get_model_info,
+)
 
 # ---------------------------------------------------------------------------
 # Low-level config file access
@@ -219,9 +225,12 @@ def get_api_key(provider: str | None = None) -> str | None:
     4. Provider-specific env var based on configured or detected provider.
     """
     llm = get_hive_config().get("llm", {})
+    explicit_provider = (provider or "").lower()
+    configured_provider = str(llm.get("provider", "")).lower()
+    effective_provider = explicit_provider or configured_provider
 
     # Claude Code subscription: read OAuth token directly
-    if llm.get("use_claude_code_subscription"):
+    if not explicit_provider and llm.get("use_claude_code_subscription"):
         try:
             from framework.runner.runner import get_claude_code_token
 
@@ -232,7 +241,7 @@ def get_api_key(provider: str | None = None) -> str | None:
             pass
 
     # Codex subscription: read OAuth token from Keychain / auth.json
-    if llm.get("use_codex_subscription"):
+    if not explicit_provider and llm.get("use_codex_subscription"):
         try:
             from framework.runner.runner import get_codex_token
 
@@ -243,7 +252,7 @@ def get_api_key(provider: str | None = None) -> str | None:
             pass
 
     # Kimi Code subscription: read API key from ~/.kimi/config.toml
-    if llm.get("use_kimi_code_subscription"):
+    if not explicit_provider and llm.get("use_kimi_code_subscription"):
         try:
             from framework.runner.runner import get_kimi_code_token
 
@@ -255,39 +264,37 @@ def get_api_key(provider: str | None = None) -> str | None:
 
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
-    if api_key_env_var:
+    if not explicit_provider and api_key_env_var:
         return os.environ.get(api_key_env_var)
 
-    # Fall back to provider-specific env vars based on configured provider
-    configured_provider = llm.get("provider", "").lower()
-    
     env_var_map = {
         "gemini": "GEMINI_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",  # Add OpenRouter
         "groq": "GROQ_API_KEY",
         "cerebras": "CEREBRAS_API_KEY",
         "deepseek": "DEEPSEEK_API_KEY",
         "mistral": "MISTRAL_API_KEY",
         "minimax": "MINIMAX_API_KEY",
     }
-    
-    if configured_provider and configured_provider in env_var_map:
-        env_var = env_var_map[configured_provider]
+
+    if effective_provider in env_var_map:
+        env_var = env_var_map[effective_provider]
         api_key = os.environ.get(env_var)
         if api_key:
             logger.debug(f"Using {env_var} from environment")
             return api_key
-    
-    # If no configured provider, try to detect from environment
-    if not configured_provider:
+
+    # If no provider was requested or configured, try to detect from environment
+    if not effective_provider:
         for provider_name, env_var in env_var_map.items():
             api_key = os.environ.get(env_var)
             if api_key:
                 logger.debug(f"Detected {provider_name} from {env_var}")
                 return api_key
-    
-    logger.debug(f"No API key found for provider: {configured_provider or 'unknown'}")
+
+    logger.debug(f"No API key found for provider: {effective_provider or 'unknown'}")
     return None
 
 
@@ -367,7 +374,7 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
 def get_available_providers() -> dict[str, dict[str, Any]]:
     """Get all available LLM providers based on environment variables."""
     available = {}
-    
+
     # Gemini
     gemini_key = os.environ.get("GEMINI_API_KEY")
     if gemini_key:
@@ -379,7 +386,7 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
             "default_model": "gemini-3-flash-preview",
             "free_tier": True
         }
-    
+
     # Anthropic
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
     if anthropic_key:
@@ -396,7 +403,7 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
             "default_model": "claude-3-haiku-20240307",
             "free_tier": False
         }
-    
+
     # OpenAI
     openai_key = os.environ.get("OPENAI_API_KEY")
     if openai_key:
@@ -408,7 +415,20 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
             "default_model": "gpt-3.5-turbo",
             "free_tier": False
         }
-    
+
+    # OpenRouter
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+    if openrouter_key:
+        available["openrouter"] = {
+            "name": "OpenRouter",
+            "api_key": openrouter_key,
+            "api_base": OPENROUTER_API_BASE,
+            "status": "needs_check",
+            "models": ["openrouter/anthropic/claude-3.5-sonnet", "openrouter/openai/gpt-4o"],
+            "default_model": "openrouter/anthropic/claude-3.5-sonnet",
+            "free_tier": False
+        }
+
     # Groq
     groq_key = os.environ.get("GROQ_API_KEY")
     if groq_key:
@@ -420,7 +440,7 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
             "default_model": "mixtral-8x7b-32768",
             "free_tier": True
         }
-    
+
     # Cerebras
     cerebras_key = os.environ.get("CEREBRAS_API_KEY")
     if cerebras_key:
@@ -432,7 +452,7 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
             "default_model": "llama3.1-8b",
             "free_tier": True
         }
-    
+
     # DeepSeek
     deepseek_key = os.environ.get("DEEPSEEK_API_KEY")
     if deepseek_key:
@@ -444,7 +464,7 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
             "default_model": "deepseek-chat",
             "free_tier": False
         }
-    
+
     # Mistral
     mistral_key = os.environ.get("MISTRAL_API_KEY")
     if mistral_key:
@@ -456,7 +476,7 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
             "default_model": "mistral-small-latest",
             "free_tier": False
         }
-    
+
     # Minimax
     minimax_key = os.environ.get("MINIMAX_API_KEY")
     if minimax_key:
@@ -469,7 +489,7 @@ def get_available_providers() -> dict[str, dict[str, Any]]:
             "default_model": "MiniMax-Text-01",
             "free_tier": False
         }
-    
+
     return available
 
 
@@ -502,6 +522,8 @@ def get_provider_from_env() -> str | None:
         return "anthropic"
     if os.environ.get("OPENAI_API_KEY"):
         return "openai"
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return "openrouter"
     if os.environ.get("GROQ_API_KEY"):
         return "groq"
     if os.environ.get("CEREBRAS_API_KEY"):
@@ -519,12 +541,23 @@ def save_provider_selection(provider: str, model: str, api_key: str | None = Non
     """Save provider selection to configuration file."""
     # Ensure directory exists before writing
     HIVE_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    
+
     config = get_hive_config()
-    if "llm" not in config:
-        config["llm"] = {}
-    config["llm"]["provider"] = provider
-    config["llm"]["model"] = model
+    llm = config.setdefault("llm", {})
+
+    # Clear stale auth/backend overrides when saving a new provider
+    for key in (
+        "use_claude_code_subscription",
+        "use_codex_subscription",
+        "use_kimi_code_subscription",
+        "api_key_env_var",
+        "api_base",
+    ):
+        llm.pop(key, None)
+
+    llm["provider"] = provider
+    llm["model"] = model
+
     try:
         with open(HIVE_CONFIG_FILE, "w") as f:
             json.dump(config, f, indent=2)
@@ -554,21 +587,21 @@ def get_model_display_name_from_config() -> str:
     config = get_hive_config().get("llm", {})
     provider = config.get("provider", "")
     model_api_name = config.get("model", "")
-    
+
     if provider and model_api_name:
         return get_model_display_name(provider, model_api_name)
     return model_api_name or "Unknown"
 
 
-def get_model_capabilities_from_config() -> Dict[str, bool]:
+def get_model_capabilities_from_config() -> dict[str, bool]:
     """Get model capabilities from config."""
     config = get_hive_config().get("llm", {})
     provider = config.get("provider", "")
     model = config.get("model", "")
-    
+
     if provider and model:
         return get_model_capabilities(provider, model)
-    
+
     # Default capabilities
     return {
         "streaming": True,
@@ -582,12 +615,12 @@ def get_model_max_tokens() -> int:
     config = get_hive_config().get("llm", {})
     provider = config.get("provider", "")
     model = config.get("model", "")
-    
+
     if provider and model:
         model_info = get_model_info(provider, model)
         if model_info:
             return model_info["max_tokens"]
-    
+
     # Fall back to configured max_tokens or default
     return config.get("max_tokens", DEFAULT_MAX_TOKENS)
 
@@ -597,15 +630,15 @@ def format_model_info_for_display() -> str:
     provider = get_provider_from_config()
     model_api = get_model_api_name_from_config()
     model_display = get_model_display_name_from_config()
-    
+
     if not provider or not model_api:
         return "No model configured"
-    
+
     model_info = get_model_info(provider, model_api)
     if model_info:
         tier_icon = "🆓" if model_info["tier"] == "free" else "💰"
         return f"{provider.title()}: {model_display} {tier_icon}"
-    
+
     return f"{provider.title()}: {model_api}"
 
 
@@ -614,7 +647,7 @@ def save_config(config: dict) -> bool:
     try:
         # Ensure directory exists
         HIVE_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(HIVE_CONFIG_FILE, "w") as f:
             json.dump(config, f, indent=2)
         logger.info(f"Configuration saved to {HIVE_CONFIG_FILE}")
@@ -633,6 +666,7 @@ def debug_llm_config() -> dict[str, Any]:
         "GEMINI_API_KEY": "✓" if os.environ.get("GEMINI_API_KEY") else "✗",
         "ANTHROPIC_API_KEY": "✓" if os.environ.get("ANTHROPIC_API_KEY") else "✗",
         "OPENAI_API_KEY": "✓" if os.environ.get("OPENAI_API_KEY") else "✗",
+        "OPENROUTER_API_KEY": "✓" if os.environ.get("OPENROUTER_API_KEY") else "✗",
         "GROQ_API_KEY": "✓" if os.environ.get("GROQ_API_KEY") else "✗",
         "CEREBRAS_API_KEY": "✓" if os.environ.get("CEREBRAS_API_KEY") else "✗",
         "DEEPSEEK_API_KEY": "✓" if os.environ.get("DEEPSEEK_API_KEY") else "✗",
@@ -683,7 +717,10 @@ def validate_llm_config() -> tuple[bool, list[str]]:
     elif provider == "minimax":
         if not os.environ.get("MINIMAX_API_KEY") and not get_api_key():
             issues.append("Minimax requires MINIMAX_API_KEY environment variable")
-    
+    elif provider == "openrouter":
+        if not os.environ.get("OPENROUTER_API_KEY") and not get_api_key():
+            issues.append("OpenRouter requires OPENROUTER_API_KEY environment variable")
+
     is_valid = len(issues) == 0
     if is_valid:
         logger.info("LLM configuration is valid")
@@ -710,7 +747,7 @@ class RuntimeConfig:
     api_key: str | None = field(default_factory=get_api_key)
     api_base: str | None = field(default_factory=get_api_base)
     extra_kwargs: dict[str, Any] = field(default_factory=get_llm_extra_kwargs)
-    
+
     def __post_init__(self):
         logger.debug(f"RuntimeConfig initialized with model: {self.model}")
         if self.api_base:
