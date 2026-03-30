@@ -4,6 +4,8 @@ Validates the graph structure, node dependencies, and ensures
 that every node's input_keys are satisfied by reachable predecessors.
 """
 
+from __future__ import annotations
+
 import logging
 from collections import deque
 from dataclasses import dataclass, field
@@ -73,7 +75,11 @@ class GraphDependencyValidator:
         """Build index of all outputs produced by each node."""
         output_index = {}
         for node in self.graph.nodes:
-            output_index[node.id] = set(node.output_keys)
+            outputs = set(node.output_keys)
+            # Include nullable_output_keys if present
+            if hasattr(node, "nullable_output_keys") and node.nullable_output_keys:
+                outputs.update(node.nullable_output_keys)
+            output_index[node.id] = outputs
         return output_index
 
     def _get_reachable_predecessors(self, node_id: str) -> set[str]:
@@ -122,20 +128,55 @@ class GraphDependencyValidator:
 
     def _validate_nodes_exist(self, result: GraphValidationResult) -> None:
         """Validate that all referenced nodes exist."""
+        # Collect all entry nodes from graph
+        entry_nodes = set()
+        if self.graph.entry_node:
+            entry_nodes.add(self.graph.entry_node)
+
+        # Add entry_points if they exist
+        if hasattr(self.graph, "entry_points") and self.graph.entry_points:
+            entry_nodes.update(self.graph.entry_points.keys())
+
+        # Add async_entry_points if they exist
+        if hasattr(self.graph, "async_entry_points") and self.graph.async_entry_points:
+            for aep in self.graph.async_entry_points:
+                if hasattr(aep, "entry_node") and aep.entry_node:
+                    entry_nodes.add(aep.entry_node)
+
+        # Check edges reference existing nodes
         for edge in self.graph.edges:
             if edge.source not in self.node_map:
                 result.add_error(f"Edge references unknown source node: '{edge.source}'")
             if edge.target not in self.node_map:
                 result.add_error(f"Edge references unknown target node: '{edge.target}'")
 
+        # Check entry nodes exist
+        for entry in entry_nodes:
+            if entry not in self.node_map:
+                result.add_error(f"Entry node '{entry}' not found in graph")
+
     def _validate_entry_node(self, result: GraphValidationResult) -> None:
         """Validate that entry node exists."""
-        if not self.graph.entry_node:
+        # Collect all entry nodes
+        entry_nodes = set()
+        if self.graph.entry_node:
+            entry_nodes.add(self.graph.entry_node)
+
+        if hasattr(self.graph, "entry_points") and self.graph.entry_points:
+            entry_nodes.update(self.graph.entry_points.keys())
+
+        if hasattr(self.graph, "async_entry_points") and self.graph.async_entry_points:
+            for aep in self.graph.async_entry_points:
+                if hasattr(aep, "entry_node") and aep.entry_node:
+                    entry_nodes.add(aep.entry_node)
+
+        if not entry_nodes:
             result.add_error("Graph has no entry node defined")
             return
 
-        if self.graph.entry_node not in self.node_map:
-            result.add_error(f"Entry node '{self.graph.entry_node}' not found in graph")
+        for entry in entry_nodes:
+            if entry not in self.node_map:
+                result.add_error(f"Entry node '{entry}' not found in graph")
 
     def _validate_terminal_nodes(self, result: GraphValidationResult) -> None:
         """Validate that terminal nodes exist."""
@@ -151,9 +192,22 @@ class GraphDependencyValidator:
         - It is provided by at least one reachable predecessor's outputs
         - OR it is provided externally (entry node inputs are exempt)
         """
+        # Collect all entry nodes that are exempt from input validation
+        entry_nodes = set()
+        if self.graph.entry_node:
+            entry_nodes.add(self.graph.entry_node)
+
+        if hasattr(self.graph, "entry_points") and self.graph.entry_points:
+            entry_nodes.update(self.graph.entry_points.keys())
+
+        if hasattr(self.graph, "async_entry_points") and self.graph.async_entry_points:
+            for aep in self.graph.async_entry_points:
+                if hasattr(aep, "entry_node") and aep.entry_node:
+                    entry_nodes.add(aep.entry_node)
+
         for node in self.graph.nodes:
-            # Skip validation for entry node inputs (provided externally)
-            if node.id == self.graph.entry_node:
+            # Skip validation for entry nodes (inputs provided externally)
+            if node.id in entry_nodes:
                 continue
 
             if not node.input_keys:
@@ -203,19 +257,18 @@ class GraphDependencyValidator:
         visited = set()
         rec_stack = set()
         cycles = []
-        parent_map = {}
 
-        def dfs(node_id: str, parent: str | None = None) -> bool:
+        def dfs(node_id: str, parent_map: dict[str, str]) -> list[str] | None:
             visited.add(node_id)
             rec_stack.add(node_id)
-            if parent:
-                parent_map[node_id] = parent
 
             for edge in self.edge_map.get(node_id, []):
                 neighbor = edge.target
                 if neighbor not in visited:
-                    if dfs(neighbor, node_id):
-                        return True
+                    parent_map[neighbor] = node_id
+                    result = dfs(neighbor, parent_map)
+                    if result:
+                        return result
                 elif neighbor in rec_stack:
                     # Cycle detected, reconstruct the cycle
                     cycle = [neighbor]
@@ -226,14 +279,16 @@ class GraphDependencyValidator:
                         if not curr:
                             break
                     cycle.insert(0, neighbor)
-                    cycles.append(cycle)
-                    return True
+                    return cycle
             rec_stack.remove(node_id)
-            return False
+            return None
 
         for node_id in self.node_map.keys():
             if node_id not in visited:
-                dfs(node_id)
+                parent_map: dict[str, str] = {}
+                cycle = dfs(node_id, parent_map)
+                if cycle:
+                    cycles.append(cycle)
 
         return cycles
 
