@@ -9,13 +9,14 @@ from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from framework.config import get_hive_config, get_max_context_tokens, get_preferred_model
+from framework.config import get_hive_config, get_preferred_model
 from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
 )
 from framework.graph import Goal
 from framework.graph.edge import (
     DEFAULT_MAX_TOKENS,
+    AsyncEntryPointSpec,
     EdgeCondition,
     EdgeSpec,
     GraphSpec,
@@ -28,7 +29,6 @@ from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.runtime_log_store import RuntimeLogStore
-from framework.tools.flowchart_utils import generate_fallback_flowchart
 
 if TYPE_CHECKING:
     from framework.runner.protocol import AgentMessage, CapabilityResponse
@@ -517,354 +517,6 @@ def get_codex_account_id() -> str | None:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Kimi Code subscription token helpers
-# ---------------------------------------------------------------------------
-
-
-def get_kimi_code_token() -> str | None:
-    """Get the API key from a Kimi Code CLI installation.
-
-    Reads the API key from ``~/.kimi/config.toml``, which is created when
-    the user runs ``kimi /login`` in the Kimi Code CLI.
-
-    Returns:
-        The API key if available, None otherwise.
-    """
-    import tomllib
-
-    config_path = Path.home() / ".kimi" / "config.toml"
-    if not config_path.exists():
-        return None
-
-    try:
-        with open(config_path, "rb") as f:
-            config = tomllib.load(f)
-        providers = config.get("providers", {})
-        # kimi-cli stores credentials under providers.kimi-for-coding
-        for provider_cfg in providers.values():
-            if isinstance(provider_cfg, dict):
-                key = provider_cfg.get("api_key")
-                if key:
-                    return key
-    except Exception:
-        pass
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Antigravity subscription token helpers
-# ---------------------------------------------------------------------------
-
-# Antigravity IDE (native macOS/Linux app) stores OAuth tokens in its
-# VSCode-style SQLite state database under the key
-# "antigravityUnifiedStateSync.oauthToken" as a base64-encoded protobuf blob.
-ANTIGRAVITY_IDE_STATE_DB = (
-    Path.home()
-    / "Library"
-    / "Application Support"
-    / "Antigravity"
-    / "User"
-    / "globalStorage"
-    / "state.vscdb"
-)
-# Linux fallback for the IDE state DB
-ANTIGRAVITY_IDE_STATE_DB_LINUX = (
-    Path.home() / ".config" / "Antigravity" / "User" / "globalStorage" / "state.vscdb"
-)
-# Antigravity credentials stored by native OAuth implementation
-ANTIGRAVITY_AUTH_FILE = Path.home() / ".hive" / "antigravity-accounts.json"
-
-ANTIGRAVITY_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
-_ANTIGRAVITY_TOKEN_LIFETIME_SECS = 3600  # Google access tokens expire in 1 hour
-_ANTIGRAVITY_IDE_STATE_DB_KEY = "antigravityUnifiedStateSync.oauthToken"
-
-
-def _read_antigravity_ide_credentials() -> dict | None:
-    """Read credentials from the Antigravity IDE's SQLite state database.
-
-    The Antigravity desktop IDE (VSCode-based) stores its OAuth token as a
-    base64-encoded protobuf blob in a SQLite database.  The access token is
-    a standard Google OAuth ``ya29.*`` bearer token.
-
-    Returns:
-        Dict with ``accessToken`` and optionally ``refreshToken`` keys,
-        plus ``_source: "ide"`` to skip file-based save on refresh.
-        Returns None if the database is absent or the key is not found.
-    """
-    import re
-    import sqlite3
-
-    for db_path in (ANTIGRAVITY_IDE_STATE_DB, ANTIGRAVITY_IDE_STATE_DB_LINUX):
-        if not db_path.exists():
-            continue
-        try:
-            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            try:
-                row = con.execute(
-                    "SELECT value FROM ItemTable WHERE key = ?",
-                    (_ANTIGRAVITY_IDE_STATE_DB_KEY,),
-                ).fetchone()
-            finally:
-                con.close()
-
-            if not row:
-                continue
-
-            import base64
-
-            blob = base64.b64decode(row[0])
-
-            # The protobuf blob contains the access token (ya29.*) and
-            # refresh token (1//*) as length-prefixed UTF-8 strings.
-            # Decode the inner base64 layer and extract with regex.
-            inner_b64_candidates = re.findall(rb"[A-Za-z0-9+/=_\-]{40,}", blob)
-            access_token: str | None = None
-            refresh_token: str | None = None
-            for candidate in inner_b64_candidates:
-                try:
-                    padded = candidate + b"=" * (-len(candidate) % 4)
-                    inner = base64.urlsafe_b64decode(padded)
-                except Exception:
-                    continue
-                if not access_token:
-                    m = re.search(rb"ya29\.[A-Za-z0-9_\-\.]+", inner)
-                    if m:
-                        access_token = m.group(0).decode("ascii")
-                if not refresh_token:
-                    m = re.search(rb"1//[A-Za-z0-9_\-\.]+", inner)
-                    if m:
-                        refresh_token = m.group(0).decode("ascii")
-                if access_token and refresh_token:
-                    break
-
-            if access_token:
-                return {
-                    "accounts": [
-                        {
-                            "accessToken": access_token,
-                            "refreshToken": refresh_token or "",
-                        }
-                    ],
-                    "_source": "ide",
-                    "_db_path": str(db_path),
-                }
-        except Exception as exc:
-            logger.debug("Failed to read Antigravity IDE state DB: %s", exc)
-            continue
-
-    return None
-
-
-def _read_antigravity_credentials() -> dict | None:
-    """Read Antigravity auth data from all supported credential sources.
-
-    Checks in order:
-    1. Antigravity IDE SQLite state database (native macOS/Linux app)
-    2. Native OAuth credentials file (~/.hive/antigravity-accounts.json)
-
-    Returns:
-        Auth data dict with an ``accounts`` list on success, None otherwise.
-    """
-    # 1. Native Antigravity IDE (primary on macOS)
-    ide_creds = _read_antigravity_ide_credentials()
-    if ide_creds:
-        return ide_creds
-
-    # 2. Native OAuth credentials file
-    if ANTIGRAVITY_AUTH_FILE.exists():
-        try:
-            with open(ANTIGRAVITY_AUTH_FILE, encoding="utf-8") as f:
-                data = json.load(f)
-            accounts = data.get("accounts", [])
-            if accounts and isinstance(accounts[0], dict):
-                return data
-        except (json.JSONDecodeError, OSError):
-            pass
-    return None
-
-
-def _is_antigravity_token_expired(auth_data: dict) -> bool:
-    """Check whether the Antigravity access token is expired or near expiry.
-
-    For IDE-sourced credentials: uses the state DB's mtime as last_refresh
-    since the IDE keeps the DB fresh while it's running.
-    For JSON-sourced credentials: uses the ``last_refresh`` field or file mtime.
-    """
-    import time
-    from datetime import datetime
-
-    now = time.time()
-
-    if auth_data.get("_source") == "ide":
-        # The IDE refreshes tokens automatically while running.
-        # Use the DB file's mtime as a proxy for when the token was last updated.
-        try:
-            db_path = Path(auth_data.get("_db_path", str(ANTIGRAVITY_IDE_STATE_DB)))
-            last_refresh: float = db_path.stat().st_mtime
-        except OSError:
-            return True
-        expires_at = last_refresh + _ANTIGRAVITY_TOKEN_LIFETIME_SECS
-        return now >= (expires_at - _TOKEN_REFRESH_BUFFER_SECS)
-
-    last_refresh_val: float | str | None = auth_data.get("last_refresh")
-    if last_refresh_val is None:
-        try:
-            last_refresh_val = ANTIGRAVITY_AUTH_FILE.stat().st_mtime
-        except OSError:
-            return True
-    elif isinstance(last_refresh_val, str):
-        try:
-            last_refresh_val = datetime.fromisoformat(
-                last_refresh_val.replace("Z", "+00:00")
-            ).timestamp()
-        except (ValueError, TypeError):
-            return True
-
-    expires_at = float(last_refresh_val) + _ANTIGRAVITY_TOKEN_LIFETIME_SECS
-    return now >= (expires_at - _TOKEN_REFRESH_BUFFER_SECS)
-
-
-def _refresh_antigravity_token(refresh_token: str) -> dict | None:
-    """Refresh the Antigravity access token via Google OAuth.
-
-    POSTs form-encoded ``grant_type=refresh_token`` to the Google token
-    endpoint using Antigravity's public OAuth client ID.
-
-    Returns:
-        Parsed response dict (containing ``access_token``) on success,
-        None on any error.
-    """
-    import urllib.error
-    import urllib.parse
-    import urllib.request
-
-    from framework.config import get_antigravity_client_id, get_antigravity_client_secret
-
-    client_id = get_antigravity_client_id()
-    client_secret = get_antigravity_client_secret()
-    params: dict = {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id": client_id,
-    }
-    if client_secret:
-        params["client_secret"] = client_secret
-
-    data = urllib.parse.urlencode(params).encode("utf-8")
-
-    req = urllib.request.Request(
-        ANTIGRAVITY_OAUTH_TOKEN_URL,
-        data=data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
-            return json.loads(resp.read())
-    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
-        logger.debug("Antigravity token refresh failed: %s", exc)
-        return None
-
-
-def _save_refreshed_antigravity_credentials(auth_data: dict, token_data: dict) -> None:
-    """Write refreshed tokens back to the Antigravity JSON credentials file.
-
-    Skipped for IDE-sourced credentials (the IDE manages its own DB).
-    Updates ``accounts[0].accessToken`` (and ``refreshToken`` if present),
-    then persists ``last_refresh`` as an ISO-8601 UTC string.
-    """
-    from datetime import datetime
-
-    # IDE manages its own state — we do not write back to its SQLite DB
-    if auth_data.get("_source") == "ide":
-        return
-
-    try:
-        accounts = auth_data.get("accounts", [])
-        if not accounts:
-            return
-        account = accounts[0]
-        account["accessToken"] = token_data["access_token"]
-        if "refresh_token" in token_data:
-            account["refreshToken"] = token_data["refresh_token"]
-        auth_data["accounts"] = accounts
-        auth_data["last_refresh"] = datetime.now(UTC).isoformat()
-
-        ANTIGRAVITY_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(ANTIGRAVITY_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(auth_data, f, indent=2)
-        logger.debug("Antigravity credentials refreshed and saved")
-    except (OSError, KeyError) as exc:
-        logger.debug("Failed to save refreshed Antigravity credentials: %s", exc)
-
-
-def get_antigravity_token() -> str | None:
-    """Get the OAuth access token from an Antigravity subscription.
-
-    Credential sources checked in order:
-    1. Antigravity IDE SQLite state DB (native app, macOS/Linux)
-    2. antigravity-auth CLI JSON file
-
-    For IDE credentials the token is read directly (the IDE refreshes it
-    automatically while running).  For JSON credentials an automatic OAuth
-    refresh is attempted when the token is near expiry.
-
-    Returns:
-        The ``ya29.*`` Google OAuth access token, or None if unavailable.
-    """
-    auth_data = _read_antigravity_credentials()
-    if not auth_data:
-        return None
-
-    accounts = auth_data.get("accounts", [])
-    if not accounts:
-        return None
-    account = accounts[0]
-
-    access_token = account.get("accessToken")
-    if not access_token:
-        return None
-
-    if not _is_antigravity_token_expired(auth_data):
-        return access_token
-
-    # Token is expired or near expiry — attempt a refresh
-    refresh_token = account.get("refreshToken")
-    if not refresh_token:
-        logger.warning(
-            "Antigravity token expired and no refresh token available. "
-            "Re-open the Antigravity IDE to refresh, or run 'antigravity-auth accounts add'."
-        )
-        return access_token  # return stale token; proxy may still accept it briefly
-
-    logger.info("Antigravity token expired or near expiry, refreshing...")
-    token_data = _refresh_antigravity_token(refresh_token)
-
-    if token_data and "access_token" in token_data:
-        _save_refreshed_antigravity_credentials(auth_data, token_data)
-        return token_data["access_token"]
-
-    logger.warning(
-        "Antigravity token refresh failed. "
-        "Re-open the Antigravity IDE or run 'antigravity-auth accounts add'."
-    )
-    return access_token
-
-
-def _is_antigravity_proxy_available() -> bool:
-    """Return True if antigravity-auth serve is running on localhost:8069."""
-    import socket
-
-    try:
-        with socket.create_connection(("localhost", 8069), timeout=0.5):
-            return True
-    except (OSError, TimeoutError):
-        return False
-
-
 @dataclass
 class AgentInfo:
     """Information about an exported agent."""
@@ -883,6 +535,9 @@ class AgentInfo:
     constraints: list[dict]
     required_tools: list[str]
     has_tools_module: bool
+    # Multi-entry-point support
+    async_entry_points: list[dict] = field(default_factory=list)
+    is_multi_entry_point: bool = False
 
 
 @dataclass
@@ -940,6 +595,22 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         )
         edges.append(edge)
 
+    # Build AsyncEntryPointSpec objects for multi-entry-point support
+    async_entry_points = []
+    for aep_data in graph_data.get("async_entry_points", []):
+        async_entry_points.append(
+            AsyncEntryPointSpec(
+                id=aep_data["id"],
+                name=aep_data.get("name", aep_data["id"]),
+                entry_node=aep_data["entry_node"],
+                trigger_type=aep_data.get("trigger_type", "manual"),
+                trigger_config=aep_data.get("trigger_config", {}),
+                isolation_level=aep_data.get("isolation_level", "shared"),
+                priority=aep_data.get("priority", 0),
+                max_concurrent=aep_data.get("max_concurrent", 10),
+            )
+        )
+
     # Build GraphSpec
     graph = GraphSpec(
         id=graph_data.get("id", "agent-graph"),
@@ -947,6 +618,7 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
         version=graph_data.get("version", "1.0.0"),
         entry_node=graph_data.get("entry_node", ""),
         entry_points=graph_data.get("entry_points", {}),  # Support pause/resume architecture
+        async_entry_points=async_entry_points,  # Support multi-entry-point agents
         terminal_nodes=graph_data.get("terminal_nodes", []),
         pause_nodes=graph_data.get("pause_nodes", []),  # Support pause/resume architecture
         nodes=nodes,
@@ -1087,6 +759,10 @@ class AgentRunner:
             self._storage_path = default_storage
             self._temp_dir = None
 
+        # Store agent context for subprocess environment (not in global os.environ)
+        self._agent_name = agent_path.name
+        self._storage_path_str = str(self._storage_path)
+
         # Load HIVE_CREDENTIAL_KEY from shell config if not in env.
         # Must happen before MCP subprocesses are spawned so they inherit it.
         _ensure_credential_key_env()
@@ -1098,6 +774,8 @@ class AgentRunner:
 
         # AgentRuntime — unified execution path for all agents
         self._agent_runtime: AgentRuntime | None = None
+        self._uses_async_entry_points = self.graph.has_async_entry_points()
+
         # Pre-load validation: structural checks + credentials.
         # Fails fast with actionable guidance — no MCP noise on screen.
         run_preload_validation(
@@ -1111,18 +789,36 @@ class AgentRunner:
         if tools_path.exists():
             self._tool_registry.discover_from_module(tools_path)
 
-        # Set environment variables for MCP subprocesses
-        # These are inherited by MCP servers (e.g., GCU browser tools)
-        os.environ["HIVE_AGENT_NAME"] = agent_path.name
-        os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)
+        # NOTE: Global environment variables removed to prevent race conditions
+        # between multiple AgentRunner instances. Use _get_subprocess_env() instead
+        # when launching subprocesses (e.g., MCP servers).
+        # os.environ["HIVE_AGENT_NAME"] = agent_path.name  # REMOVED
+        # os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)  # REMOVED
 
         # Auto-discover MCP servers from mcp_servers.json
         mcp_config_path = agent_path / "mcp_servers.json"
         if mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
 
-        # Auto-discover registry-selected MCP servers from mcp_registry.json
-        self._load_registry_mcp_servers(agent_path)
+    def _get_subprocess_env(self, extra_env: dict | None = None) -> dict:
+        """
+        Build environment dictionary for subprocesses with per-instance context.
+
+        This replaces the previous global os.environ assignments to prevent
+        race conditions when multiple AgentRunner instances run in the same process.
+
+        Args:
+            extra_env: Optional additional environment variables to merge
+
+        Returns:
+            Dictionary suitable for passing as env to subprocess.Popen
+        """
+        env = os.environ.copy()
+        env["HIVE_AGENT_NAME"] = self._agent_name
+        env["HIVE_STORAGE_PATH"] = self._storage_path_str
+        if extra_env:
+            env.update(extra_env)
+        return env
 
     @staticmethod
     def _import_agent_module(agent_path: Path):
@@ -1220,31 +916,9 @@ class AgentRunner:
 
             if agent_config and hasattr(agent_config, "max_tokens"):
                 max_tokens = agent_config.max_tokens
-                logger.info(
-                    "Agent default_config overrides max_tokens: %d "
-                    "(configuration.json value ignored)",
-                    max_tokens,
-                )
             else:
                 hive_config = get_hive_config()
                 max_tokens = hive_config.get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
-
-            # Resolve max_context_tokens with priority:
-            #   1. agent loop_config["max_context_tokens"] (explicit, wins silently)
-            #   2. agent default_config.max_context_tokens (logged)
-            #   3. configuration.json llm.max_context_tokens
-            #   4. hardcoded default (32_000)
-            agent_loop_config: dict = dict(getattr(agent_module, "loop_config", {}))
-            if "max_context_tokens" not in agent_loop_config:
-                if agent_config and hasattr(agent_config, "max_context_tokens"):
-                    agent_loop_config["max_context_tokens"] = agent_config.max_context_tokens
-                    logger.info(
-                        "Agent default_config overrides max_context_tokens: %d"
-                        " (configuration.json value ignored)",
-                        agent_config.max_context_tokens,
-                    )
-                else:
-                    agent_loop_config["max_context_tokens"] = get_max_context_tokens()
 
             # Read intro_message from agent metadata (shown on TUI load)
             agent_metadata = getattr(agent_module, "metadata", None)
@@ -1259,12 +933,13 @@ class AgentRunner:
                 "version": "1.0.0",
                 "entry_node": getattr(agent_module, "entry_node", nodes[0].id),
                 "entry_points": getattr(agent_module, "entry_points", {}),
+                "async_entry_points": getattr(agent_module, "async_entry_points", []),
                 "terminal_nodes": getattr(agent_module, "terminal_nodes", []),
                 "pause_nodes": getattr(agent_module, "pause_nodes", []),
                 "nodes": nodes,
                 "edges": edges,
                 "max_tokens": max_tokens,
-                "loop_config": agent_loop_config,
+                "loop_config": getattr(agent_module, "loop_config", {}),
             }
             # Only pass optional fields if explicitly defined by the agent module
             conversation_mode = getattr(agent_module, "conversation_mode", None)
@@ -1275,12 +950,6 @@ class AgentRunner:
                 graph_kwargs["identity_prompt"] = identity_prompt
 
             graph = GraphSpec(**graph_kwargs)
-
-            # Generate flowchart.json if missing (for template/legacy agents)
-            generate_fallback_flowchart(graph, goal, agent_path)
-            # Read skill configuration from agent module
-            agent_default_skills = getattr(agent_module, "default_skills", None)
-            agent_skills = getattr(agent_module, "skills", None)
 
             # Read runtime config (webhook settings, etc.) if defined
             agent_runtime_config = getattr(agent_module, "runtime_config", None)
@@ -1293,7 +962,7 @@ class AgentRunner:
             configure_fn = getattr(agent_module, "configure_for_account", None)
             list_accts_fn = getattr(agent_module, "list_connected_accounts", None)
 
-            runner = cls(
+            return cls(
                 agent_path=agent_path,
                 graph=graph,
                 goal=goal,
@@ -1309,10 +978,6 @@ class AgentRunner:
                 list_accounts=list_accts_fn,
                 credential_store=credential_store,
             )
-            # Stash skill config for use in _setup()
-            runner._agent_default_skills = agent_default_skills
-            runner._agent_skills = agent_skills
-            return runner
 
         # Fallback: load from agent.json (legacy JSON-based agents)
         agent_json_path = agent_path / "agent.json"
@@ -1330,10 +995,7 @@ class AgentRunner:
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON in agent export file: {agent_json_path}") from exc
 
-        # Generate flowchart.json if missing (for legacy JSON-based agents)
-        generate_fallback_flowchart(graph, goal, agent_path)
-
-        runner = cls(
+        return cls(
             agent_path=agent_path,
             graph=graph,
             goal=goal,
@@ -1344,9 +1006,6 @@ class AgentRunner:
             skip_credential_validation=skip_credential_validation or False,
             credential_store=credential_store,
         )
-        runner._agent_default_skills = None
-        runner._agent_skills = None
-        return runner
 
     def register_tool(
         self,
@@ -1427,45 +1086,6 @@ class AgentRunner:
         """Load and register MCP servers from a configuration file."""
         self._tool_registry.load_mcp_config(config_path)
 
-    def _load_registry_mcp_servers(self, agent_path: Path) -> None:
-        """Load and register MCP servers selected via ``mcp_registry.json``."""
-        from framework.runner.mcp_registry import MCPRegistry
-
-        try:
-            registry = MCPRegistry()
-            registry.initialize()
-            server_configs = registry.load_agent_selection(agent_path)
-        except Exception as exc:
-            logger.warning(
-                "Failed to load MCP registry servers for '%s': %s",
-                agent_path.name,
-                exc,
-            )
-            return
-
-        if not server_configs:
-            return
-
-        results = self._tool_registry.load_registry_servers(server_configs)
-        loaded = [result for result in results if result["status"] == "loaded"]
-        skipped = [result for result in results if result["status"] != "loaded"]
-
-        logger.info(
-            "Loaded %d/%d MCP registry server(s) for agent '%s'",
-            len(loaded),
-            len(results),
-            agent_path.name,
-        )
-        if skipped:
-            logger.info(
-                "Skipped MCP registry servers for agent '%s': %s",
-                agent_path.name,
-                [
-                    {"server": result["server"], "reason": result["skipped_reason"]}
-                    for result in skipped
-                ],
-            )
-
     def set_approval_callback(self, callback: Callable) -> None:
         """
         Set a callback for human-in-the-loop approval during execution.
@@ -1496,10 +1116,7 @@ class AgentRunner:
 
         # Create LLM provider
         # Uses LiteLLM which auto-detects the provider from model name
-        # Skip if already injected (e.g. worker agents with a pre-built LLM)
-        if self._llm is not None:
-            pass  # LLM already configured externally
-        elif self.mock_mode:
+        if self.mock_mode:
             # Use mock LLM for testing without real API calls
             from framework.llm.mock import MockLLMProvider
 
@@ -1512,8 +1129,6 @@ class AgentRunner:
             llm_config = config.get("llm", {})
             use_claude_code = llm_config.get("use_claude_code_subscription", False)
             use_codex = llm_config.get("use_codex_subscription", False)
-            use_kimi_code = llm_config.get("use_kimi_code_subscription", False)
-            use_antigravity = llm_config.get("use_antigravity_subscription", False)
             api_base = llm_config.get("api_base")
 
             api_key = None
@@ -1521,28 +1136,14 @@ class AgentRunner:
                 # Get OAuth token from Claude Code subscription
                 api_key = get_claude_code_token()
                 if not api_key:
-                    logger.warning(
-                        "Claude Code subscription configured but no token found. "
-                        "Run 'claude' to authenticate, then try again."
-                    )
+                    print("Warning: Claude Code subscription configured but no token found.")
+                    print("Run 'claude' to authenticate, then try again.")
             elif use_codex:
                 # Get OAuth token from Codex subscription
                 api_key = get_codex_token()
                 if not api_key:
-                    logger.warning(
-                        "Codex subscription configured but no token found. "
-                        "Run 'codex' to authenticate, then try again."
-                    )
-            elif use_kimi_code:
-                # Get API key from Kimi Code CLI config (~/.kimi/config.toml)
-                api_key = get_kimi_code_token()
-                if not api_key:
-                    logger.warning(
-                        "Kimi Code subscription configured but no key found. "
-                        "Run 'kimi /login' to authenticate, then try again."
-                    )
-            elif use_antigravity:
-                pass  # AntigravityProvider handles credentials internally
+                    print("Warning: Codex subscription configured but no token found.")
+                    print("Run 'codex' to authenticate, then try again.")
 
             if api_key and use_claude_code:
                 # Use litellm's built-in Anthropic OAuth support.
@@ -1573,27 +1174,6 @@ class AgentRunner:
                     store=False,
                     allowed_openai_params=["store"],
                 )
-            elif api_key and use_kimi_code:
-                # Kimi Code subscription uses the Kimi coding API (OpenAI-compatible).
-                # The api_base is set automatically by LiteLLMProvider for kimi/ models.
-                self._llm = LiteLLMProvider(
-                    model=self.model,
-                    api_key=api_key,
-                    api_base=api_base,
-                )
-            elif use_antigravity:
-                # Direct OAuth to Google's internal Cloud Code Assist gateway.
-                # No local proxy required — AntigravityProvider handles token
-                # refresh and Gemini-format request/response conversion natively.
-                from framework.llm.antigravity import AntigravityProvider  # noqa: PLC0415
-
-                provider = AntigravityProvider(model=self.model)
-                if not provider.has_credentials():
-                    print(
-                        "Warning: Antigravity credentials not found. "
-                        "Run: uv run python core/antigravity_auth.py auth account add"
-                    )
-                self._llm = provider
             else:
                 # Local models (e.g. Ollama) don't need an API key
                 if self._is_local_model(self.model):
@@ -1625,12 +1205,8 @@ class AgentRunner:
                             if api_key_env:
                                 os.environ[api_key_env] = api_key
                         elif api_key_env:
-                            logger.warning(
-                                "%s not set. LLM calls will fail. "
-                                "Set it with: export %s=your-api-key",
-                                api_key_env,
-                                api_key_env,
-                            )
+                            print(f"Warning: {api_key_env} not set. LLM calls will fail.")
+                            print(f"Set it with: export {api_key_env}=your-api-key")
 
             # Fail fast if the agent needs an LLM but none was configured
             if self._llm is None:
@@ -1724,20 +1300,6 @@ class AgentRunner:
         except Exception:
             pass  # Best-effort — agent works without account info
 
-        # Skill configuration — the runtime handles discovery, loading, trust-gating and
-        # prompt rasterization.  The runner just builds the config.
-        from framework.skills.config import SkillsConfig
-        from framework.skills.manager import SkillsManagerConfig
-
-        skills_manager_config = SkillsManagerConfig(
-            skills_config=SkillsConfig.from_agent_vars(
-                default_skills=getattr(self, "_agent_default_skills", None),
-                skills=getattr(self, "_agent_skills", None),
-            ),
-            project_root=self.agent_path,
-            interactive=self._interactive,
-        )
-
         self._setup_agent_runtime(
             tools,
             tool_executor,
@@ -1745,7 +1307,6 @@ class AgentRunner:
             accounts_data=accounts_data,
             tool_provider_map=tool_provider_map,
             event_bus=event_bus,
-            skills_manager_config=skills_manager_config,
         )
 
     def _get_api_key_env_var(self, model: str) -> str | None:
@@ -1766,8 +1327,6 @@ class AgentRunner:
             return "MISTRAL_API_KEY"
         elif model_lower.startswith("groq/"):
             return "GROQ_API_KEY"
-        elif model_lower.startswith("openrouter/"):
-            return "OPENROUTER_API_KEY"
         elif self._is_local_model(model_lower):
             return None  # Local models don't need an API key
         elif model_lower.startswith("azure/"):
@@ -1780,10 +1339,6 @@ class AgentRunner:
             return "TOGETHER_API_KEY"
         elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
             return "MINIMAX_API_KEY"
-        elif model_lower.startswith("kimi/"):
-            return "KIMI_API_KEY"
-        elif model_lower.startswith("hive/"):
-            return "HIVE_API_KEY"
         else:
             # Default: assume OpenAI-compatible
             return "OPENAI_API_KEY"
@@ -1804,10 +1359,16 @@ class AgentRunner:
             cred_id = "anthropic"
         elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
             cred_id = "minimax"
-        elif model_lower.startswith("kimi/"):
-            cred_id = "kimi"
-        elif model_lower.startswith("hive/"):
-            cred_id = "hive"
+        elif model_lower.startswith("openai/") or model_lower.startswith("gpt-"):
+            cred_id = "openai"
+        elif model_lower.startswith("gemini/") or model_lower.startswith("google/"):
+            cred_id = "gemini"
+        elif model_lower.startswith("groq/"):
+            cred_id = "groq"
+        elif model_lower.startswith("cerebras/"):
+            cred_id = "cerebras"
+        elif model_lower.startswith("mistral/"):
+            cred_id = "mistral"
         # Add more mappings as providers are added to LLM_CREDENTIALS
 
         if cred_id is None:
@@ -1847,13 +1408,23 @@ class AgentRunner:
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         event_bus=None,
-        skills_catalog_prompt: str = "",
-        protocols_prompt: str = "",
-        skill_dirs: list[str] | None = None,
-        skills_manager_config=None,
     ) -> None:
         """Set up multi-entry-point execution using AgentRuntime."""
+        # Convert AsyncEntryPointSpec to EntryPointSpec for AgentRuntime
         entry_points = []
+        for async_ep in self.graph.async_entry_points:
+            ep = EntryPointSpec(
+                id=async_ep.id,
+                name=async_ep.name,
+                entry_node=async_ep.entry_node,
+                trigger_type=async_ep.trigger_type,
+                trigger_config=async_ep.trigger_config,
+                isolation_level=async_ep.isolation_level,
+                priority=async_ep.priority,
+                max_concurrent=async_ep.max_concurrent,
+                max_resurrections=async_ep.max_resurrections,
+            )
+            entry_points.append(ep)
 
         # Always create a primary entry point for the graph's entry node.
         # For multi-entry-point agents this ensures the primary path (e.g.
@@ -1910,24 +1481,10 @@ class AgentRunner:
             accounts_data=accounts_data,
             tool_provider_map=tool_provider_map,
             event_bus=event_bus,
-            skills_manager_config=skills_manager_config,
         )
 
         # Pass intro_message through for TUI display
         self._agent_runtime.intro_message = self.intro_message
-
-    # ------------------------------------------------------------------
-    # Execution modes
-    #
-    # run()              – One-shot, blocking execution for worker agents
-    #                      (headless CLI via ``hive run``). Validates, runs
-    #                      the graph to completion, and returns the result.
-    #
-    # start() / trigger() – Long-lived runtime for the frontend (queen).
-    #                      start() boots the runtime; trigger() sends
-    #                      non-blocking execution requests. Used by the
-    #                      server session manager and API routes.
-    # ------------------------------------------------------------------
 
     async def run(
         self,
@@ -1935,12 +1492,15 @@ class AgentRunner:
         session_state: dict | None = None,
         entry_point_id: str | None = None,
     ) -> ExecutionResult:
-        """One-shot execution for worker agents (headless CLI).
+        """
+        Execute the agent with given input data.
 
-        Validates credentials, runs the graph to completion, and returns
-        the result. Used by ``hive run`` and programmatic callers.
+        Validates credentials before execution. If any required credentials
+        are missing, returns an error result with instructions on how to
+        provide them.
 
-        For the frontend (queen), use start() + trigger() instead.
+        For single-entry-point agents, this is the standard execution path.
+        For multi-entry-point agents, you can optionally specify which entry point to use.
 
         Args:
             input_data: Input data for the agent (e.g., {"lead_id": "123"})
@@ -2066,12 +1626,7 @@ class AgentRunner:
     # === Runtime API ===
 
     async def start(self) -> None:
-        """Boot the agent runtime for the frontend (queen).
-
-        Pair with trigger() to send execution requests. Used by the
-        server session manager. For headless worker agents, use run()
-        instead.
-        """
+        """Start the agent runtime."""
         if self._agent_runtime is None:
             self._setup()
 
@@ -2088,10 +1643,10 @@ class AgentRunner:
         input_data: dict[str, Any],
         correlation_id: str | None = None,
     ) -> str:
-        """Send a non-blocking execution request to a running runtime.
+        """
+        Trigger execution at a specific entry point (non-blocking).
 
-        Used by the server API routes after start(). For headless
-        worker agents, use run() instead.
+        Returns execution ID for tracking.
 
         Args:
             entry_point_id: Which entry point to trigger
@@ -2176,6 +1731,19 @@ class AgentRunner:
             for edge in self.graph.edges
         ]
 
+        # Build async entry points info
+        async_entry_points_info = [
+            {
+                "id": ep.id,
+                "name": ep.name,
+                "entry_node": ep.entry_node,
+                "trigger_type": ep.trigger_type,
+                "isolation_level": ep.isolation_level,
+                "max_concurrent": ep.max_concurrent,
+            }
+            for ep in self.graph.async_entry_points
+        ]
+
         return AgentInfo(
             name=self.graph.id,
             description=self.graph.description,
@@ -2202,6 +1770,8 @@ class AgentRunner:
             ],
             required_tools=sorted(required_tools),
             has_tools_module=(self.agent_path / "tools.py").exists(),
+            async_entry_points=async_entry_points_info,
+            is_multi_entry_point=self._uses_async_entry_points,
         )
 
     def validate(self) -> ValidationResult:
@@ -2516,6 +2086,18 @@ Respond with JSON only:
                 trigger_type="manual",
                 isolation_level="shared",
             )
+        for aep in runner.graph.async_entry_points:
+            entry_points[aep.id] = EntryPointSpec(
+                id=aep.id,
+                name=aep.name,
+                entry_node=aep.entry_node,
+                trigger_type=aep.trigger_type,
+                trigger_config=aep.trigger_config,
+                isolation_level=aep.isolation_level,
+                priority=aep.priority,
+                max_concurrent=aep.max_concurrent,
+            )
+
         await runtime.add_graph(
             graph_id=gid,
             graph=runner.graph,
