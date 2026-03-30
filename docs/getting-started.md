@@ -121,7 +121,6 @@ hive/
 │   │   ├── schemas/        # Data schemas
 │   │   ├── storage/        # File-based persistence
 │   │   ├── testing/        # Testing utilities
-│   │   └── tui/            # Terminal UI dashboard
 │   └── pyproject.toml      # Package metadata
 │
 ├── tools/                  # MCP Tools Package
@@ -147,14 +146,8 @@ hive/
 # Launch the web dashboard in your browser
 hive open
 
-# Browse and run agents in terminal
-hive tui
-
 # Run a specific agent
 hive run exports/my_agent --input '{"task": "Your input here"}'
-
-# Run with TUI dashboard
-hive run exports/my_agent --tui
 
 ```
 
@@ -194,7 +187,7 @@ PYTHONPATH=exports uv run python -m my_agent test --type success
 
 ## Next Steps
 
-1. **Dashboard**: Run `hive open` to launch the web dashboard, or `hive tui` for the terminal UI
+1. **Dashboard**: Run `hive open` to launch the web dashboard
 2. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
 3. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
 4. **Build Agents**: Use the coder-tools `initialize_and_build_agent` tool in Claude Code

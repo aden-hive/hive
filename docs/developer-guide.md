@@ -21,13 +21,13 @@ This guide covers everything you need to know to develop with the Aden Agent Fra
 
 Aden Agent Framework is a Python-based system for building goal-driven, self-improving AI agents.
 
-| Package       | Directory  | Description                               | Tech Stack   |
-| ------------- | ---------- | ----------------------------------------- | ------------ |
-| **framework** | `/core`    | Core runtime, graph executor, protocols   | Python 3.11+ |
-| **tools**     | `/tools`   | MCP tools for agent capabilities          | Python 3.11+ |
-| **exports**   | `/exports` | Agent packages (user-created, gitignored) | Python 3.11+ |
+| Package       | Directory                      | Description                                        | Tech Stack   |
+| ------------- | ------------------------------ | -------------------------------------------------- | ------------ |
+| **framework** | `/core`                        | Core runtime, graph executor, protocols            | Python 3.11+ |
+| **tools**     | `/tools`                       | MCP tools for agent capabilities                   | Python 3.11+ |
+| **exports**   | `/exports`                     | Agent packages (user-created, gitignored)          | Python 3.11+ |
 | **skills**    | `.claude`, `.agents`, `.agent` | Shared skills for Claude/Codex/other coding agents | Markdown     |
-| **codex**     | `.codex`   | Codex CLI project configuration (MCP servers) | TOML         |
+| **codex**     | `.codex`                       | Codex CLI project configuration (MCP servers)      | TOML         |
 
 ### Key Principles
 
@@ -100,7 +100,6 @@ hive/                                    # Repository root
 │   │   ├── storage/                     # File-based persistence
 │   │   ├── testing/                     # Testing utilities
 │   │   ├── tools/                       # Built-in tool implementations
-│   │   ├── tui/                         # Terminal UI dashboard
 │   │   └── utils/                       # Shared utilities
 │   ├── tests/                           # Unit and E2E tests (including dummy agents)
 │   ├── pyproject.toml                   # Package metadata and dependencies
@@ -172,13 +171,11 @@ Use the coder-tools MCP tools from your IDE agent chat (e.g., initialize_and_bui
    ```
 
 2. **Design the Workflow**
-
    - The workflow guides you through defining nodes
    - Each node is a unit of work (LLM call with event_loop)
    - Edges define how execution flows
 
 3. **Generate the Agent**
-
    - The workflow generates a complete Python package in `exports/`
    - Includes: `agent.json`, `tools.py`, `README.md`
 
@@ -235,27 +232,24 @@ If you prefer to build agents manually:
 ### Using the `hive` CLI
 
 ```bash
-# Browse and run agents interactively (Recommended)
-hive tui
+# Launch the web dashboard in your browser
+hive open
 
 # Run a specific agent
 hive run exports/my_agent --input '{"ticket_content": "My login is broken", "customer_id": "CUST-123"}'
-
-# Run with TUI dashboard
-hive run exports/my_agent --tui
 ```
 
 ### CLI Command Reference
 
-| Command                | Description                                                             |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `hive tui`             | Browse agents and launch TUI dashboard                                  |
-| `hive run <path>`      | Execute an agent (`--tui`, `--model`, `--mock`, `--quiet`, `--verbose`) |
-| `hive shell [path]`    | Interactive REPL (`--multi`, `--no-approve`)                            |
-| `hive info <path>`     | Show agent details                                                      |
-| `hive validate <path>` | Validate agent structure                                                |
-| `hive list [dir]`      | List available agents                                                   |
-| `hive dispatch [dir]`  | Multi-agent orchestration                                               |
+| Command                | Description                                                    |
+| ---------------------- | -------------------------------------------------------------- |
+| `hive open`            | Launch the web dashboard in your browser                       |
+| `hive run <path>`      | Execute an agent (`--model`, `--mock`, `--quiet`, `--verbose`) |
+| `hive shell [path]`    | Interactive REPL (`--multi`, `--no-approve`)                   |
+| `hive info <path>`     | Show agent details                                             |
+| `hive validate <path>` | Validate agent structure                                       |
+| `hive list [dir]`      | List available agents                                          |
+| `hive dispatch [dir]`  | Multi-agent orchestration                                      |
 
 ### Using Python Directly
 
