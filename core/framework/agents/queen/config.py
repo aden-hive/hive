@@ -3,6 +3,9 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _load_preferred_model() -> str:
@@ -16,7 +19,7 @@ def _load_preferred_model() -> str:
             if llm.get("provider") and llm.get("model"):
                 return f"{llm['provider']}/{llm['model']}"
         except Exception:
-            pass
+            logger.debug("Could not load preferred model from config", exc_info=True)
     return "anthropic/claude-sonnet-4-20250514"
 
 

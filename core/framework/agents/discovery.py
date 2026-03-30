@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -50,6 +53,7 @@ def _get_last_active(agent_path: Path) -> str | None:
                 if ts and (latest is None or ts > latest):
                     latest = ts
             except Exception:
+                logger.debug("Skipping agent entry: timestamp parse failed", exc_info=True)
                 continue
 
     # 2. Queen sessions
@@ -71,6 +75,7 @@ def _get_last_active(agent_path: Path) -> str | None:
                 if latest is None or ts > latest:
                     latest = ts
             except Exception:
+                logger.debug("Skipping queen session entry", exc_info=True)
                 continue
 
     return latest
@@ -105,6 +110,7 @@ def _count_runs(agent_name: str) -> int:
                     if rid:
                         run_ids.add(rid)
             except Exception:
+                logger.debug("Skipping run_id parse", exc_info=True)
                 continue
     return len(run_ids)
 
@@ -130,7 +136,7 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
                             if isinstance(node.value, ast.List):
                                 node_count = len(node.value.elts)
         except Exception:
-            pass
+            logger.debug("Could not parse agent node count", exc_info=True)
 
     agent_json = agent_path / "agent.json"
     if agent_json.exists():
@@ -145,7 +151,7 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
             tool_count = len(tools)
             tags = data.get("agent", {}).get("tags", [])
         except Exception:
-            pass
+            logger.debug("Could not parse agent metadata", exc_info=True)
 
     return node_count, tool_count, tags
 
@@ -187,7 +193,7 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                         name = meta.get("name", name)
                         desc = meta.get("description", desc)
                     except Exception:
-                        pass
+                        logger.debug("Could not parse agent name/description", exc_info=True)
 
             entries.append(
                 AgentEntry(

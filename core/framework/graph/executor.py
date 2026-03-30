@@ -44,6 +44,7 @@ def _default_max_context_tokens() -> int:
 
         return get_max_context_tokens()
     except Exception:
+        logger.debug("Could not load max context tokens from config, using default", exc_info=True)
         return 32_000
 
 

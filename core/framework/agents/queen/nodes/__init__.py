@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 """Node definitions for Queen agent."""
 
 from pathlib import Path
@@ -19,6 +23,7 @@ def _is_gcu_enabled() -> bool:
 
         return get_gcu_enabled()
     except Exception:
+        logger.debug("Could not determine GCU enabled state", exc_info=True)
         return False
 
 
