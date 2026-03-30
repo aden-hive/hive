@@ -1,10 +1,13 @@
 """Runtime configuration for Job Hunter Agent."""
 
+import os
 from dataclasses import dataclass
 
-from framework.config import RuntimeConfig
+from framework.config import RuntimeConfig, get_preferred_model
 
-default_config = RuntimeConfig()
+default_config = RuntimeConfig(
+    model=os.getenv("MODEL_NAME", get_preferred_model())
+)
 
 
 @dataclass

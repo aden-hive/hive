@@ -7,6 +7,7 @@ from framework.graph.edge import GraphSpec
 from framework.graph.executor import ExecutionResult
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.llm import LiteLLMProvider
+from framework.llm.mock import MockLLMProvider
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
@@ -194,7 +195,9 @@ class JobHunterAgent:
             self._tool_registry.load_mcp_config(mcp_config_path)
 
         llm = None
-        if not mock_mode:
+        if mock_mode:
+            llm = MockLLMProvider()
+        else:
             llm = LiteLLMProvider(
                 model=self.config.model,
                 api_key=self.config.api_key,

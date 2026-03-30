@@ -182,7 +182,7 @@ async def _interactive_shell(verbose=False):
     setup_logging(verbose=verbose)
 
     click.echo("=== Job Hunter Agent ===")
-    click.echo("Paste your resume to get started (or 'quit' to exit):\n")
+    click.echo("Paste your resume OR provide a PDF file path (e.g., /path/to/resume.pdf) to get started (or 'quit' to exit):\n")
 
     agent = JobHunterAgent()
     await agent.start()
@@ -202,7 +202,7 @@ async def _interactive_shell(verbose=False):
 
                 click.echo("\nProcessing...\n")
 
-                result = await agent.trigger_and_wait("start", {"resume": user_input})
+                result = await agent.trigger_and_wait("default", {"resume": user_input})
 
                 if result is None:
                     click.echo("\n[Execution timed out]\n")

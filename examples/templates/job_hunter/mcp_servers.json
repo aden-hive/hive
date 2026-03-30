@@ -1,9 +1,12 @@
 {
   "hive-tools": {
     "transport": "stdio",
-    "command": "uv",
-    "args": ["run", "python", "mcp_server.py", "--stdio"],
-    "cwd": "../../../tools",
+    "command": "C:\\Users\\JANHAVI TUPE\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+    "args": ["tools/mcp_server.py", "--stdio"],
+    "cwd": "D:\\hive",
+    "env": {
+      "PYTHONPATH": "D:\\hive\\tools\\src;D:\\hive\\core"
+    },
     "description": "Hive tools MCP server"
   }
 }

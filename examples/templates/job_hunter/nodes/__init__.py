@@ -7,32 +7,45 @@ from framework.graph import NodeSpec
 intake_node = NodeSpec(
     id="intake",
     name="Intake",
-    description="Analyze resume and identify 3-5 strongest role types",
+    description="Collect resume (pasted text or PDF path), analyze skills and experience, identify 3-5 strongest role types",
     node_type="event_loop",
-    client_facing=False,
+    client_facing=True,
     max_node_visits=1,
-    input_keys=["resume_text"],
+    input_keys=[],
     output_keys=["resume_text", "role_analysis"],
     success_criteria=(
-        "The user's resume has been analyzed and 3-5 target roles identified "
+        "The user's resume has been collected and analyzed, and 3-5 target roles identified "
         "based on their actual experience."
     ),
     system_prompt="""\
-You are a career analyst. Your task is to analyze the user's resume and identify the best role fits.
+You are a career analyst. Your task is to collect the user's resume and identify the best role fits.
 
-**PROCESS:**
+**STEP 1 — Greet and collect resume:**
+Ask the user to paste their resume OR provide a local PDF file path (e.g., /home/user/resume.pdf):
+"Please paste your resume below OR provide a PDF file path. I'll analyze your experience and identify the roles where you have the strongest chance of success."
+
+IMPORTANT:
+- If the input ends with .pdf, you MUST call pdf_read and use its output as resume_text.
+- If the user pastes text directly, use that text as-is. DO NOT use tools in this step.
+
+**STEP 2 — Analyze the resume:**
 1. Identify key skills (technical and soft skills).
 2. Summarize years and types of experience.
-3. Identify 3-5 specific role types where they're most competitive based on their ACTUAL experience.
+3. Identify 3-5 SPECIFIC, GRANULAR role types where they're most competitive.
 
-**OUTPUT:**
-You MUST call set_output to store:
-- set_output("resume_text", "<the full resume text from input>")
+Role specificity matters:
+- BAD: "Software Engineer" (too broad)
+- GOOD: "Backend Engineer (Python/Django)", "Platform Engineer", "API Developer"
+
+Present your analysis and ask if they agree with the identified roles.
+
+**STEP 3 — After user confirms, call set_output:**
+- set_output("resume_text", "<the full resume text>")
 - set_output("role_analysis", "<JSON with: skills, experience_summary, target_roles (3-5 specific role titles)>")
 
-Do NOT wait for user confirmation. Simply perform the analysis and set the outputs.
+When the user says "yes", "sure", "go ahead", or similar, call set_output IMMEDIATELY.
 """,
-    tools=[],
+    tools=["pdf_read"],
 )
 
 # Node 2: Job Search (simple)

@@ -250,7 +250,7 @@ class RuntimeLogStore:
 
         def _write() -> None:
             tmp.write_text(content, encoding="utf-8")
-            tmp.rename(path)
+            tmp.replace(path)  # replace() is atomic and works on Windows unlike rename()
 
         await asyncio.to_thread(_write)
 

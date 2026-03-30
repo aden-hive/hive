@@ -993,6 +993,11 @@ class LiteLLMProvider(LLMProvider):
         model = (self.model or "").lower()
         return model.startswith("minimax/") or model.startswith("minimax-")
 
+    def _is_groq_model(self) -> bool:
+        """Return True when the configured model targets Groq."""
+        model = (self.model or "").lower()
+        return model.startswith("groq/")
+
     def _is_openrouter_model(self) -> bool:
         """Return True when the configured model targets OpenRouter."""
         model = (self.model or "").lower()
@@ -1576,6 +1581,20 @@ class LiteLLMProvider(LLMProvider):
         # MiniMax currently fails in litellm's stream chunk parser for some
         # responses (missing "id" in stream chunks). Use non-stream fallback.
         if self._is_minimax_model():
+            async for event in self._stream_via_nonstream_completion(
+                messages=messages,
+                system=system,
+                tools=tools,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                json_mode=json_mode,
+            ):
+                yield event
+            return
+
+        # Groq returns non-integer stop reasons (e.g. 'tool_use_failed') that
+        # break litellm's stream parser when tools are involved. Use non-stream fallback.
+        if self._is_groq_model() and tools:
             async for event in self._stream_via_nonstream_completion(
                 messages=messages,
                 system=system,
