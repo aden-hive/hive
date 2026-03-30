@@ -152,8 +152,6 @@ def compose_system_prompt(
     accounts_prompt: str | None = None,
     skills_catalog_prompt: str | None = None,
     protocols_prompt: str | None = None,
-    execution_preamble: str | None = None,
-    node_type_preamble: str | None = None,
 ) -> str:
     """Compose the multi-layer system prompt.
 
@@ -164,10 +162,6 @@ def compose_system_prompt(
         accounts_prompt: Connected accounts block (sits between identity and narrative).
         skills_catalog_prompt: Available skills catalog XML (Agent Skills standard).
         protocols_prompt: Default skill operational protocols section.
-        execution_preamble: EXECUTION_SCOPE_PREAMBLE for worker nodes
-            (prepended before focus so the LLM knows its pipeline scope).
-        node_type_preamble: Node-type-specific preamble, e.g. GCU browser
-            best-practices prompt (prepended before focus).
 
     Returns:
         Composed system prompt with all layers present, plus current datetime.
@@ -193,15 +187,6 @@ def compose_system_prompt(
     # Layer 2: Narrative (what's happened so far)
     if narrative:
         parts.append(f"\n--- Context (what has happened so far) ---\n{narrative}")
-
-    # Execution scope preamble (worker nodes — tells the LLM it is one
-    # step in a multi-node pipeline and should not overreach)
-    if execution_preamble:
-        parts.append(f"\n{execution_preamble}")
-
-    # Node-type preamble (e.g. GCU browser best-practices)
-    if node_type_preamble:
-        parts.append(f"\n{node_type_preamble}")
 
     # Layer 3: Focus (current phase directive)
     if focus_prompt:
