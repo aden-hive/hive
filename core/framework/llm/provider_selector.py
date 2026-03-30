@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from typing import Any
 
 from litellm import completion
@@ -19,11 +20,11 @@ from framework.config import (
 logger = logging.getLogger(__name__)
 
 
-async def test_provider(provider_id: str, config: dict) -> tuple[bool, str | None]:
+async def test_provider(provider_id: str, config: dict) -> tuple[bool, str | None, str | None]:
     """Test if a provider actually works (has credits, valid key).
 
     Returns:
-        Tuple of (works, error_message)
+        Tuple of (works, error_message, api_base)
     """
     try:
         model = config["default_model"]
@@ -34,36 +35,41 @@ async def test_provider(provider_id: str, config: dict) -> tuple[bool, str | Non
         else:
             model_name = f"{provider_id}/{model}"
 
-        # Get API key
+        # Get API key and api_base
         api_key = config.get("api_key") or get_api_key(provider_id)
-        if not api_key:
-            return False, "No API key found"
+        api_base = config.get("api_base")  # Get api_base from config
 
-        # Make a minimal test call
-        response = await asyncio.to_thread(
-            completion,
-            model=model_name,
-            messages=[{"role": "user", "content": "test"}],
-            max_tokens=5,
-            api_key=api_key,
-        )
+        if not api_key:
+            return False, "No API key found", None
+
+        # Make a minimal test call with api_base if available
+        completion_kwargs = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": "test"}],
+            "max_tokens": 5,
+            "api_key": api_key,
+        }
+        if api_base:
+            completion_kwargs["api_base"] = api_base
+
+        response = await asyncio.to_thread(completion, **completion_kwargs)
 
         if response and response.choices:
-            return True, None
-        return False, "No response"
+            return True, None, api_base
+        return False, "No response", api_base
 
     except Exception as e:
         error_str = str(e).lower()
         if "credit" in error_str or "balance" in error_str:
-            return False, "No credits available"
+            return False, "No credits available", None
         if "invalid" in error_str or "auth" in error_str or "key" in error_str:
-            return False, "Invalid API key"
+            return False, "Invalid API key", None
         if "rate" in error_str or "limit" in error_str:
-            return False, "Rate limited"
-        return False, str(e)[:100]
+            return False, "Rate limited", None
+        return False, str(e)[:100], None
 
 
-async def test_provider_with_model(provider_id: str, model: str, api_key: str) -> tuple[bool, str | None]:
+async def test_provider_with_model(provider_id: str, model: str, api_key: str, api_base: str | None = None) -> tuple[bool, str | None]:
     """Test a specific model for a provider.
 
     Returns:
@@ -76,14 +82,17 @@ async def test_provider_with_model(provider_id: str, model: str, api_key: str) -
         else:
             model_name = f"{provider_id}/{model}"
 
-        # Make a minimal test call
-        response = await asyncio.to_thread(
-            completion,
-            model=model_name,
-            messages=[{"role": "user", "content": "test"}],
-            max_tokens=5,
-            api_key=api_key,
-        )
+        # Make a minimal test call with api_base if available
+        completion_kwargs = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": "test"}],
+            "max_tokens": 5,
+            "api_key": api_key,
+        }
+        if api_base:
+            completion_kwargs["api_base"] = api_base
+
+        response = await asyncio.to_thread(completion, **completion_kwargs)
 
         if response and response.choices:
             return True, None
@@ -110,30 +119,28 @@ async def get_working_providers() -> dict[str, dict]:
     for provider_id, config in all_providers.items():
         print(f"  Testing {config['name']}... ", end="", flush=True)
 
-        if config["status"] == "available" and config.get("free_tier"):
-            # Free tier providers are assumed working
-            print("✅ Available")
-            working[provider_id] = config
+        # Always test providers to ensure they actually work
+        works, error, api_base = await test_provider(provider_id, config)
+        if works:
+            print("✅ Working")
+            working[provider_id] = {
+                **config,
+                "api_base": api_base,  # Include api_base in result
+            }
         else:
-            # Test if they actually work
-            works, error = await test_provider(provider_id, config)
-            if works:
-                print("✅ Working")
-                working[provider_id] = config
-            else:
-                print(f"❌ {error}")
+            print(f"❌ {error}")
 
     return working
 
 
-async def get_working_models(provider_id: str, api_key: str, models: list[str]) -> list[str]:
+async def get_working_models(provider_id: str, api_key: str, models: list[str], api_base: str | None = None) -> list[str]:
     """Test which models actually work for a provider."""
     working = []
     print(f"\n  Testing models for {provider_id}...")
 
     for model in models:
         print(f"    Testing {model}... ", end="", flush=True)
-        works, error = await test_provider_with_model(provider_id, model, api_key)
+        works, error = await test_provider_with_model(provider_id, model, api_key, api_base)
         if works:
             print("✅")
             working.append(model)
@@ -153,6 +160,11 @@ async def interactive_fallback(original_provider: str, error: Exception) -> dict
     Returns:
         Selected provider config or None to abort
     """
+    # Check if we're in an interactive environment
+    if not sys.stdin.isatty():
+        print(f"\n⚠️ Non-interactive environment. Provider {original_provider} failed: {error}")
+        return None
+
     print("\n" + "=" * 60)
     print(f"⚠️  {original_provider.upper()} FAILED")
     print("=" * 60)
@@ -183,74 +195,86 @@ async def interactive_fallback(original_provider: str, error: Exception) -> dict
     print(f"\n{len(providers_list) + 1}. Abort and show error")
     print("0. Retry with original provider")
 
-    # Get user choice
-    while True:
-        try:
-            choice = input(f"\nSelect option (0-{len(providers_list) + 1}): ")
-            if not choice.strip():
-                continue
+    # Get user choice with non-blocking input
+    try:
+        choice = await asyncio.to_thread(input, f"\nSelect option (0-{len(providers_list) + 1}): ")
+        if not choice.strip():
+            return None
 
-            choice = int(choice)
+        choice = int(choice)
 
-            if choice == 0:
-                print("\n🔄 Retrying with original provider...")
-                return {"retry": True}
+        if choice == 0:
+            print("\n🔄 Retrying with original provider...")
+            return {"retry": True}
 
-            if 1 <= choice <= len(providers_list):
-                selected_id, selected_config = providers_list[choice - 1]
-                print(f"\n✅ Selected: {selected_config['name']}")
+        if 1 <= choice <= len(providers_list):
+            selected_id, selected_config = providers_list[choice - 1]
+            print(f"\n✅ Selected: {selected_config['name']}")
 
-                # Get API key
-                api_key = selected_config.get("api_key") or get_api_key(selected_id)
+            # Get API key and api_base
+            api_key = selected_config.get("api_key") or get_api_key(selected_id)
+            api_base = selected_config.get("api_base")
 
-                # Test which models actually work
-                working_models = await get_working_models(
-                    selected_id,
-                    api_key,
-                    selected_config["models"]
-                )
+            # Test which models actually work
+            working_models = await get_working_models(
+                selected_id,
+                api_key,
+                selected_config["models"],
+                api_base
+            )
 
-                if not working_models:
-                    print("\n❌ No working models found for this provider.")
-                    continue
-
-                # Ask for model selection
-                print(f"\nAvailable models for {selected_config['name']}:")
-                for midx, model in enumerate(working_models, 1):
-                    print(f"  {midx}. {model}")
-
-                model_choice = input(
-                    f"Select model (1-{len(working_models)}, Enter for default): "
-                )
-
-                selected_model = working_models[0]  # Default to first
-                if model_choice.strip():
-                    try:
-                        model_idx = int(model_choice) - 1
-                        if 0 <= model_idx < len(working_models):
-                            selected_model = working_models[model_idx]
-                    except ValueError:
-                        pass
-
-                # Save selection
-                save_provider_selection(selected_id, selected_model)
-
-                return {
-                    "provider": selected_id,
-                    "model": selected_model,
-                    "api_key": api_key,
-                    "name": selected_config["name"],
-                }
-
-            if choice == len(providers_list) + 1:
-                print("\n❌ Aborting. Showing original error.")
+            if not working_models:
+                print("\n❌ No working models found for this provider.")
                 return None
 
-        except ValueError:
-            print("Invalid input. Please enter a number.")
-        except KeyboardInterrupt:
-            print("\n❌ Interrupted.")
+            # Ask for model selection
+            print(f"\nAvailable models for {selected_config['name']}:")
+            for midx, model in enumerate(working_models, 1):
+                print(f"  {midx}. {model}")
+
+            model_choice = await asyncio.to_thread(
+                input,
+                f"Select model (1-{len(working_models)}, Enter for default): "
+            )
+
+            selected_model = working_models[0]  # Default to first
+            if model_choice.strip():
+                try:
+                    model_idx = int(model_choice) - 1
+                    if 0 <= model_idx < len(working_models):
+                        selected_model = working_models[model_idx]
+                except ValueError:
+                    pass
+
+            # Save selection
+            save_provider_selection(selected_id, selected_model)
+
+            result = {
+                "provider": selected_id,
+                "model": selected_model,
+                "api_key": api_key,
+                "name": selected_config["name"],
+            }
+            if api_base:
+                result["api_base"] = api_base
+
+            return result
+
+        if choice == len(providers_list) + 1:
+            print("\n❌ Aborting. Showing original error.")
             return None
+
+    except ValueError:
+        print("Invalid input. Please enter a number.")
+        return None
+    except EOFError:
+        print("\nNo input available.")
+        return None
+    except KeyboardInterrupt:
+        print("\n❌ Interrupted.")
+        return None
+
+    return None
 
 
 async def quick_provider_check() -> dict | None:
@@ -278,14 +302,16 @@ async def quick_provider_check() -> dict | None:
         provider_id = next(iter(free_providers))
         provider = free_providers[provider_id]
 
-        # Get API key
+        # Get API key and api_base
         api_key = provider.get("api_key") or get_api_key(provider_id)
+        api_base = provider.get("api_base")
 
         # Test which models work
         working_models = await get_working_models(
             provider_id,
             api_key,
-            provider["models"]
+            provider["models"],
+            api_base
         )
 
         if working_models:
@@ -295,12 +321,16 @@ async def quick_provider_check() -> dict | None:
 
             save_provider_selection(provider_id, default_model)
 
-            return {
+            result = {
                 "provider": provider_id,
                 "model": default_model,
                 "api_key": api_key,
                 "name": provider["name"],
             }
+            if api_base:
+                result["api_base"] = api_base
+
+            return result
 
     return None
 
@@ -311,6 +341,10 @@ async def interactive_provider_selection() -> dict | None:
     Returns:
         Selected provider config or None
     """
+    # Check if we're in an interactive environment
+    if not sys.stdin.isatty():
+        return None
+
     print("\n" + "=" * 60)
     print("🤖 LLM PROVIDER SELECTION")
     print("=" * 60)
@@ -335,75 +369,88 @@ async def interactive_provider_selection() -> dict | None:
 
     print(f"\n{len(providers_list) + 1}. Skip for now")
 
-    # Get user choice
-    while True:
-        try:
-            choice = input(f"\nSelect provider (1-{len(providers_list) + 1}): ")
-            if not choice.strip():
-                continue
+    # Get user choice with non-blocking input
+    try:
+        choice = await asyncio.to_thread(input, f"\nSelect provider (1-{len(providers_list) + 1}): ")
+        if not choice.strip():
+            return None
 
-            choice = int(choice)
+        choice = int(choice)
 
-            if 1 <= choice <= len(providers_list):
-                selected_id, selected_config = providers_list[choice - 1]
-                print(f"\n✅ Selected: {selected_config['name']}")
+        if 1 <= choice <= len(providers_list):
+            selected_id, selected_config = providers_list[choice - 1]
+            print(f"\n✅ Selected: {selected_config['name']}")
 
-                # Get API key if not already set
-                api_key = selected_config.get("api_key") or get_api_key(selected_id)
+            # Get API key if not already set
+            api_key = selected_config.get("api_key") or get_api_key(selected_id)
+            api_base = selected_config.get("api_base")
 
+            if not api_key:
+                print(f"\nEnter your {selected_config['name']} API key:")
+                api_key = await asyncio.to_thread(input, "API key: ")
+                api_key = api_key.strip()
                 if not api_key:
-                    print(f"\nEnter your {selected_config['name']} API key:")
-                    api_key = input("API key: ").strip()
-                    if not api_key:
-                        print("❌ No API key provided.")
-                        continue
+                    print("❌ No API key provided.")
+                    return None
 
-                # Test which models work
-                working_models = await get_working_models(
-                    selected_id,
-                    api_key,
-                    selected_config["models"]
-                )
+            # Test which models work
+            working_models = await get_working_models(
+                selected_id,
+                api_key,
+                selected_config["models"],
+                api_base
+            )
 
-                if not working_models:
-                    print(f"\n❌ No working models found for {selected_config['name']}.")
-                    print("Please check your API key and try again.")
-                    continue
-
-                # Ask for model selection
-                print(f"\nAvailable models for {selected_config['name']}:")
-                for midx, model in enumerate(working_models, 1):
-                    print(f"  {midx}. {model}")
-
-                model_choice = input(
-                    f"Select model (1-{len(working_models)}, Enter for default): "
-                )
-
-                selected_model = working_models[0]  # Default to first
-                if model_choice.strip():
-                    try:
-                        model_idx = int(model_choice) - 1
-                        if 0 <= model_idx < len(working_models):
-                            selected_model = working_models[model_idx]
-                    except ValueError:
-                        pass
-
-                # Save selection
-                save_provider_selection(selected_id, selected_model)
-
-                return {
-                    "provider": selected_id,
-                    "model": selected_model,
-                    "api_key": api_key,
-                    "name": selected_config["name"],
-                }
-
-            if choice == len(providers_list) + 1:
-                print("\n⏭️  Skipping provider selection.")
+            if not working_models:
+                print(f"\n❌ No working models found for {selected_config['name']}.")
+                print("Please check your API key and try again.")
                 return None
 
-        except ValueError:
-            print("Invalid input. Please enter a number.")
-        except KeyboardInterrupt:
-            print("\n❌ Interrupted.")
+            # Ask for model selection
+            print(f"\nAvailable models for {selected_config['name']}:")
+            for midx, model in enumerate(working_models, 1):
+                print(f"  {midx}. {model}")
+
+            model_choice = await asyncio.to_thread(
+                input,
+                f"Select model (1-{len(working_models)}, Enter for default): "
+            )
+
+            selected_model = working_models[0]  # Default to first
+            if model_choice.strip():
+                try:
+                    model_idx = int(model_choice) - 1
+                    if 0 <= model_idx < len(working_models):
+                        selected_model = working_models[model_idx]
+                except ValueError:
+                    pass
+
+            # Save selection
+            save_provider_selection(selected_id, selected_model)
+
+            result = {
+                "provider": selected_id,
+                "model": selected_model,
+                "api_key": api_key,
+                "name": selected_config["name"],
+            }
+            if api_base:
+                result["api_base"] = api_base
+
+            return result
+
+        if choice == len(providers_list) + 1:
+            print("\n⏭️  Skipping provider selection.")
             return None
+
+    except ValueError:
+        print("Invalid input. Please enter a number.")
+        return None
+    except EOFError:
+        print("\nNo input available.")
+        return None
+    except KeyboardInterrupt:
+        print("\n❌ Interrupted.")
+        return None
+
+    return None
