@@ -1,7 +1,5 @@
-// core/frontend/src/components/AgentGraphEnhanced.tsx
-
-import { memo, useMemo, useState, useRef, useEffect } from "react";
-import { Play, Pause, Loader2, CheckCircle2, ZoomIn, ZoomOut, Move, Download, Search, X } from "lucide-react";
+import { memo, useMemo, useState, useRef, useEffect, useCallback } from "react";
+import { Play, Pause, Loader2, CheckCircle2, ZoomIn, ZoomOut, Move, Download, Search, X, Maximize2, Minimize2 } from "lucide-react";
 
 export type NodeStatus = "running" | "complete" | "pending" | "error" | "looping";
 export type NodeType = "execution" | "trigger";
@@ -90,7 +88,7 @@ function GraphControls({
   scale, onZoomIn, onZoomOut, onResetView, onExport, 
   searchActive, onSearchToggle, searchTerm, onSearchChange,
   searchResultCount, currentResultIndex, onNextResult, onPrevResult, onClearSearch,
-  title, version, runButton, building 
+  title, version, runButton, building, isFullscreen, onToggleFullscreen
 }: any) {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -113,7 +111,7 @@ function GraphControls({
   }, [searchActive]);
 
   return (
-    <div className="px-5 pt-4 pb-2 flex items-center justify-between">
+    <div className="relative px-5 pt-4 pb-2 flex items-center justify-between">
       <div className="flex items-center gap-2">
         <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">{title || "Pipeline"}</p>
         {version && <span className="text-[10px] font-mono font-medium text-muted-foreground/60 border border-border/30 rounded px-1 py-0.5 leading-none">{version}</span>}
@@ -134,6 +132,9 @@ function GraphControls({
         </button>
         <button onClick={onResetView} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50">
           <Move className="w-3.5 h-3.5" />
+        </button>
+        <button onClick={onToggleFullscreen} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50">
+          {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
         </button>
         <div className="relative" ref={exportMenuRef}>
           <button onClick={() => setShowExportMenu(!showExportMenu)} className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50">
@@ -179,6 +180,8 @@ const MARGIN_LEFT = 20;
 const MARGIN_RIGHT = 50;
 const SVG_BASE_W = 320;
 const GAP_X = 12;
+const BACK_EDGE_BASE_OFFSET = 28;
+const BACK_EDGE_INCREMENT = 18;
 
 const statusColors: Record<NodeStatus, { dot: string; bg: string; border: string; glow: string }> = {
   running: { dot: "hsl(45,95%,58%)", bg: "hsl(45,95%,58%,0.08)", border: "hsl(45,95%,58%,0.5)", glow: "hsl(45,95%,58%,0.15)" },
@@ -198,15 +201,78 @@ function truncateLabel(label: string, availablePx: number, fontSize: number): st
   return label.slice(0, Math.max(maxChars - 1, 1)) + "…";
 }
 
-// Mock export functions (replace with actual html2canvas)
-const exportAsPNG = async (svgElement: SVGElement, filename: string) => {
-  console.log("Export PNG:", filename);
-  alert(`Export PNG: ${filename}`);
-};
-const exportAsSVG = (svgElement: SVGElement, filename: string) => {
-  console.log("Export SVG:", filename);
-  alert(`Export SVG: ${filename}`);
-};
+// Real export functions (replace with actual implementation)
+async function exportAsPNG(svgElement: SVGSVGElement, filename: string): Promise<void> {
+  try {
+    // Clone the SVG to avoid modifying the original
+    const clone = svgElement.cloneNode(true) as SVGSVGElement;
+    
+    // Get the current transform and apply it to the clone
+    const transform = svgElement.style.transform;
+    if (transform) {
+      clone.style.transform = transform;
+    }
+    
+    // Use html2canvas or similar library here
+    // For now, we'll use a simple approach
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(clone);
+    const blob = new Blob([svgString], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = svgElement.clientWidth;
+      canvas.height = svgElement.clientHeight;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const pngUrl = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = pngUrl;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(pngUrl);
+          }
+        });
+      }
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  } catch (error) {
+    console.error("Export PNG failed:", error);
+    throw error;
+  }
+}
+
+function exportAsSVG(svgElement: SVGSVGElement, filename: string): void {
+  try {
+    // Clone the SVG to avoid modifying the original
+    const clone = svgElement.cloneNode(true) as SVGSVGElement;
+    
+    // Apply current transform to the clone
+    const transform = svgElement.style.transform;
+    if (transform) {
+      clone.style.transform = transform;
+    }
+    
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(clone);
+    const blob = new Blob([svgString], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    console.error("Export SVG failed:", error);
+    throw error;
+  }
+}
 
 // ============ Main Component ============
 export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, onPause, version, runState: externalRunState, building, queenPhase }: AgentGraphProps) {
@@ -215,15 +281,42 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
   const runBtnRef = useRef<HTMLButtonElement>(null);
   const svgContainerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const graphContainerRef = useRef<HTMLDivElement>(null);
   
   const [viewState, setViewState] = useState<ViewState>({ scale: 1, offsetX: 0, offsetY: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [searchTerm, setSearchTerm] = useState("");
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
-  const [searchResults, setSearchResults] = useState<number[]>([]);
+  const [searchResults, setSearchResults] = useState<string[]>([]);
   const [currentSearchIndex, setCurrentSearchIndex] = useState(0);
   const [showSearch, setShowSearch] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Fullscreen handlers
+  const toggleFullscreen = useCallback(async () => {
+    if (!graphContainerRef.current) return;
+    
+    try {
+      if (!isFullscreen) {
+        await graphContainerRef.current.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch (error) {
+      console.error("Fullscreen error:", error);
+    }
+  }, [isFullscreen]);
+
+  // Listen for fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
 
   const handleRun = () => {
     if (runState !== "idle") return;
@@ -257,47 +350,102 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     }
   };
 
-  const handleSearch = (term: string) => {
+  // Search handlers - now using node IDs instead of indexes
+  const handleSearch = useCallback((term: string) => {
     setSearchTerm(term);
-    if (!term.trim()) { setSearchResults([]); setHighlightedNodeId(null); return; }
-    const results: number[] = [];
-    nodes.forEach((node, idx) => {
-      if (node.label.toLowerCase().includes(term.toLowerCase()) || node.id.toLowerCase().includes(term.toLowerCase())) {
-        results.push(idx);
+    if (!term.trim()) { 
+      setSearchResults([]); 
+      setHighlightedNodeId(null); 
+      return; 
+    }
+    const results: string[] = [];
+    nodes.forEach((node) => {
+      if (node.label.toLowerCase().includes(term.toLowerCase()) || 
+          node.id.toLowerCase().includes(term.toLowerCase())) {
+        results.push(node.id);
       }
     });
     setSearchResults(results);
     setCurrentSearchIndex(0);
-    setHighlightedNodeId(results.length > 0 ? nodes[results[0]].id : null);
-  };
-  const handleNextResult = () => {
+    setHighlightedNodeId(results.length > 0 ? results[0] : null);
+  }, [nodes]);
+
+  const handleNextResult = useCallback(() => {
     if (searchResults.length === 0) return;
     const nextIndex = (currentSearchIndex + 1) % searchResults.length;
     setCurrentSearchIndex(nextIndex);
-    setHighlightedNodeId(nodes[searchResults[nextIndex]].id);
-  };
-  const handlePrevResult = () => {
+    setHighlightedNodeId(searchResults[nextIndex]);
+    
+    // Scroll to highlighted node if needed
+    const highlightedElement = document.getElementById(`node-${searchResults[nextIndex]}`);
+    if (highlightedElement) {
+      highlightedElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [searchResults, currentSearchIndex]);
+
+  const handlePrevResult = useCallback(() => {
     if (searchResults.length === 0) return;
     const prevIndex = (currentSearchIndex - 1 + searchResults.length) % searchResults.length;
     setCurrentSearchIndex(prevIndex);
-    setHighlightedNodeId(nodes[searchResults[prevIndex]].id);
-  };
-  const clearSearch = () => { setSearchTerm(""); setSearchResults([]); setHighlightedNodeId(null); setShowSearch(false); };
+    setHighlightedNodeId(searchResults[prevIndex]);
+    
+    const highlightedElement = document.getElementById(`node-${searchResults[prevIndex]}`);
+    if (highlightedElement) {
+      highlightedElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [searchResults, currentSearchIndex]);
 
-  const handleExportPNG = async () => {
-    if (svgRef.current) {
-      const originalScale = viewState.scale;
-      const originalOffsetX = viewState.offsetX;
-      const originalOffsetY = viewState.offsetY;
+  const clearSearch = useCallback(() => { 
+    setSearchTerm(""); 
+    setSearchResults([]); 
+    setHighlightedNodeId(null); 
+    setShowSearch(false); 
+  }, []);
+
+  // Clean up stale search results when nodes change
+  useEffect(() => {
+    if (searchResults.length > 0) {
+      const validResults = searchResults.filter(id => 
+        nodes.some(node => node.id === id)
+      );
+      if (validResults.length !== searchResults.length) {
+        setSearchResults(validResults);
+        if (highlightedNodeId && !validResults.includes(highlightedNodeId)) {
+          setHighlightedNodeId(validResults[0] || null);
+          setCurrentSearchIndex(0);
+        }
+      }
+    }
+  }, [nodes, searchResults, highlightedNodeId]);
+
+  const handleExportPNG = useCallback(async () => {
+    if (!svgRef.current) return;
+    
+    const originalScale = viewState.scale;
+    const originalOffsetX = viewState.offsetX;
+    const originalOffsetY = viewState.offsetY;
+    
+    try {
+      // Reset view for export
       setViewState({ scale: 1, offsetX: 0, offsetY: 0 });
       await new Promise(resolve => setTimeout(resolve, 100));
       await exportAsPNG(svgRef.current, `${title || "graph"}_${Date.now()}`);
+    } catch (error) {
+      console.error("Export failed:", error);
+    } finally {
+      // Always restore view state
       setViewState({ scale: originalScale, offsetX: originalOffsetX, offsetY: originalOffsetY });
     }
-  };
-  const handleExportSVG = () => {
-    if (svgRef.current) exportAsSVG(svgRef.current, `${title || "graph"}_${Date.now()}`);
-  };
+  }, [title, viewState]);
+
+  const handleExportSVG = useCallback(() => {
+    if (!svgRef.current) return;
+    try {
+      exportAsSVG(svgRef.current, `${title || "graph"}_${Date.now()}`);
+    } catch (error) {
+      console.error("Export failed:", error);
+    }
+  }, [title]);
 
   // Layout computation
   const idxMap = useMemo(() => Object.fromEntries(nodes.map((n, i) => [n.id, i])), [nodes]);
@@ -422,7 +570,7 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     const from = nodePos(edge.fromIdx);
     const to = nodePos(edge.toIdx);
     const rightX = Math.max(from.x, to.x) + layout.nodeW;
-    const rightOffset = 28 + i * 18;
+    const rightOffset = BACK_EDGE_BASE_OFFSET + i * BACK_EDGE_INCREMENT;
     const startX = from.x + layout.nodeW;
     const startY = from.y + NODE_H / 2;
     const endX = to.x + layout.nodeW;
@@ -456,7 +604,7 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     }
     const isHighlighted = highlightedNodeId === node.id;
     return (
-      <g key={node.id} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
+      <g key={node.id} id={`node-${node.id}`} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
         {isHighlighted && <rect x={pos.x - 4} y={pos.y - 4} width={layout.nodeW + 8} height={NODE_H + 8} rx={NODE_H / 2 + 4} fill="none" stroke="hsl(210,100%,60%)" strokeWidth={2} strokeDasharray="4 2" />}
         <rect x={pos.x} y={pos.y} width={layout.nodeW} height={NODE_H} rx={NODE_H / 2} fill={triggerColors.bg} stroke={triggerColors.border} strokeWidth={1} strokeDasharray="4 2" />
         <text x={pos.x + 18} y={pos.y + NODE_H / 2} fill={triggerColors.icon} fontSize={13} textAnchor="middle" dominantBaseline="middle">{icon}</text>
@@ -477,7 +625,7 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
     const displayLabel = truncateLabel(node.label, labelAvailW, fontSize);
     const isHighlighted = highlightedNodeId === node.id;
     return (
-      <g key={node.id} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
+      <g key={node.id} id={`node-${node.id}`} onClick={() => onNodeClick?.(node)} style={{ cursor: onNodeClick ? "pointer" : "default" }}>
         {isHighlighted && <rect x={pos.x - 4} y={pos.y - 4} width={layout.nodeW + 8} height={NODE_H + 8} rx={16} fill="none" stroke="hsl(210,100%,60%)" strokeWidth={2} strokeDasharray="4 2" />}
         {isActive && (
           <>
@@ -502,6 +650,7 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
   };
 
   if (nodes.length === 0) {
+    const isQueenBusy = queenPhase === "building" || queenPhase === "planning";
     return (
       <div className="flex flex-col h-full">
         <div className="px-5 pt-4 pb-2 flex items-center justify-between">
@@ -509,7 +658,7 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
             <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Pipeline</p>
             {version && <span className="text-[10px] font-mono font-medium text-muted-foreground/60 border border-border/30 rounded px-1 py-0.5 leading-none">{version}</span>}
           </div>
-          <RunButton runState={runState} disabled={nodes.length === 0 || queenPhase === "building" || queenPhase === "planning"} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
+          <RunButton runState={runState} disabled={nodes.length === 0 || isQueenBusy} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />
         </div>
         <div className="flex-1 flex items-center justify-center px-5">
           {building ? (
@@ -524,11 +673,21 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
 
   const maxLayer = nodes.length > 0 ? Math.max(...layout.layers) : 0;
   const svgHeight = TOP_Y * 2 + (maxLayer + 1) * NODE_H + maxLayer * GAP_Y + 10;
-  const svgWidth = Math.max(SVG_BASE_W, layout.firstColX + layout.maxCols * layout.nodeW + (layout.maxCols - 1) * GAP_X + MARGIN_RIGHT);
+  
+  // Calculate SVG width including back edge offsets
+  const maxBackEdgeOffset = backEdges.length > 0 
+    ? BACK_EDGE_BASE_OFFSET + (backEdges.length - 1) * BACK_EDGE_INCREMENT + 30
+    : 0;
+  const svgWidth = Math.max(
+    SVG_BASE_W + maxBackEdgeOffset,
+    layout.firstColX + layout.maxCols * layout.nodeW + (layout.maxCols - 1) * GAP_X + MARGIN_RIGHT + maxBackEdgeOffset
+  );
+  
   const transformStyle = { transform: `translate(${viewState.offsetX}px, ${viewState.offsetY}px) scale(${viewState.scale})`, transformOrigin: "0 0", transition: isPanning ? "none" : "transform 0.1s ease", cursor: isPanning ? "grabbing" : "grab" };
+  const isQueenBusy = queenPhase === "building" || queenPhase === "planning";
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" ref={graphContainerRef}>
       <GraphControls
         scale={viewState.scale}
         onZoomIn={handleZoomIn}
@@ -547,7 +706,9 @@ export default function AgentGraphEnhanced({ nodes, title, onNodeClick, onRun, o
         title={title}
         version={version}
         building={building}
-        runButton={<RunButton runState={runState} disabled={nodes.length === 0} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={toggleFullscreen}
+        runButton={<RunButton runState={runState} disabled={nodes.length === 0 || isQueenBusy} onRun={handleRun} onPause={onPause ?? (() => {})} btnRef={runBtnRef} />}
       />
       <div ref={svgContainerRef} className="flex-1 overflow-hidden relative" onMouseDown={handlePanStart} onMouseMove={handlePanMove} onMouseUp={handlePanEnd} onMouseLeave={handlePanEnd} onWheel={handleWheel} style={{ cursor: isPanning ? "grabbing" : "grab" }}>
         <div style={transformStyle}>
