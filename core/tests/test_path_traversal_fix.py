@@ -225,5 +225,28 @@ class TestPathTraversalWithActualFiles:
         assert run_file.exists()
 
 
+class TestSessionStorePathTraversal:
+    """Path traversal protection in SessionStore.get_session_path()."""
+
+    @pytest.fixture
+    def store(self, tmp_path):
+        from framework.storage.session_store import SessionStore
+
+        return SessionStore(tmp_path)
+
+    def test_valid_session_id(self, store):
+        path = store.get_session_path("session_20260206_143022_abc12345")
+        assert path.name == "session_20260206_143022_abc12345"
+
+    def test_blocks_parent_traversal(self, store):
+        with pytest.raises(ValueError, match="Invalid session ID"):
+            store.get_session_path("../../etc/passwd")
+
+    @pytest.mark.asyncio
+    async def test_delete_session_blocks_traversal(self, store):
+        with pytest.raises(ValueError, match="Invalid session ID"):
+            await store.delete_session("../../package")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
