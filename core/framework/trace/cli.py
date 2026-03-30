@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
 
@@ -47,7 +48,7 @@ def _list_sessions(agent_name: str) -> list[dict]:
         return []
 
     sessions = []
-    for session_dir in sorted(sessions_dir.iterdir(), reverse=True):
+    for session_dir in sessions_dir.iterdir():
         if not session_dir.is_dir():
             continue
 
@@ -75,11 +76,13 @@ def _list_sessions(agent_name: str) -> list[dict]:
                 "error": error,
                 "state_file": state_file,
                 "state": state,
+                "started_at": started_at,  # For sorting
             })
         except (json.JSONDecodeError, OSError) as e:
             logger.debug(f"Could not read {state_file}: {e}")
 
-    return sessions
+    # Sort by actual start timestamp, most recent first
+    return sorted(sessions, key=lambda s: s.get("started_at", ""), reverse=True)
 
 
 def _get_conversation_messages(agent_dir: Path, session_id: str) -> list:
@@ -165,8 +168,9 @@ def _display_session_timeline(session: dict) -> None:
     # Final output
     output = result.get("output", {})
     if output:
-        print(f"\n📤 Output: {json.dumps(output, indent=2)[:300]}")
-        if len(json.dumps(output)) > 300:
+        output_json = json.dumps(output, indent=2)
+        print(f"\n📤 Output: {output_json[:300]}")
+        if len(output_json) > 300:
             print("    ...")
 
     print("\n" + "═" * 70)
@@ -194,7 +198,7 @@ def _display_session_summary(sessions: list) -> None:
         print(f"  {short_id:20} | {timestamp:19} | {status_icon} | {steps:3} steps")
 
 
-def cmd_trace_list(args) -> int:
+def cmd_trace_list(args: Namespace) -> int:
     """List recent sessions for an agent."""
     agent_name = args.agent_name
     sessions = _list_sessions(agent_name)
@@ -208,7 +212,7 @@ def cmd_trace_list(args) -> int:
     return 0
 
 
-def cmd_trace_last(args) -> int:
+def cmd_trace_last(args: Namespace) -> int:
     """Show the latest session timeline."""
     agent_name = args.agent_name
     sessions = _list_sessions(agent_name)
@@ -223,7 +227,7 @@ def cmd_trace_last(args) -> int:
     return 0
 
 
-def cmd_trace_show(args) -> int:
+def cmd_trace_show(args: Namespace) -> int:
     """Show a specific session by ID."""
     agent_name = args.agent_name
     session_id = args.session_id
@@ -245,7 +249,7 @@ def cmd_trace_show(args) -> int:
     return 0
 
 
-def cmd_trace_export(args) -> int:
+def cmd_trace_export(args: Namespace) -> int:
     """Export session as JSON."""
     agent_name = args.agent_name
     session_id = args.session_id
@@ -279,7 +283,7 @@ def cmd_trace_export(args) -> int:
         return 1
 
 
-def register_trace_commands(subparsers) -> None:
+def register_trace_commands(subparsers: Any) -> None:
     """Register trace commands with the CLI parser."""
     trace_parser = subparsers.add_parser(
         "trace",
@@ -302,7 +306,7 @@ def register_trace_commands(subparsers) -> None:
     list_parser.add_argument(
         "agent_name",
         type=str,
-        help="Name of the agent (folder name in exports/)"
+        help="Name of the agent (folder name in ~/.hive/agents/)"
     )
     list_parser.set_defaults(func=cmd_trace_list)
 
@@ -315,7 +319,7 @@ def register_trace_commands(subparsers) -> None:
     last_parser.add_argument(
         "agent_name",
         type=str,
-        help="Name of the agent (folder name in exports/)"
+        help="Name of the agent (folder name in ~/.hive/agents/)"
     )
     last_parser.set_defaults(func=cmd_trace_last)
 
@@ -328,7 +332,7 @@ def register_trace_commands(subparsers) -> None:
     show_parser.add_argument(
         "agent_name",
         type=str,
-        help="Name of the agent (folder name in exports/)"
+        help="Name of the agent (folder name in ~/.hive/agents/)"
     )
     show_parser.add_argument(
         "session_id",
@@ -346,7 +350,7 @@ def register_trace_commands(subparsers) -> None:
     export_parser.add_argument(
         "agent_name",
         type=str,
-        help="Name of the agent (folder name in exports/)"
+        help="Name of the agent (folder name in ~/.hive/agents/)"
     )
     export_parser.add_argument(
         "session_id",
