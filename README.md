@@ -49,6 +49,16 @@ Visit [HoneyComb](http://honeycomb.open-hive.com/) to see what jobs are being au
 https://github.com/user-attachments/assets/bf10edc3-06ba-48b6-98ba-d069b15fb69d
 
 
+## Project Structure
+
+The Hive repository is organized into several core directories:
+
+- **core/** – Core runtime responsible for orchestrating the multi-agent system.
+- **tools/** – Tool integrations that agents can use to interact with external systems.
+- **docs/** – Documentation and architecture explanations for the Hive framework.
+- **examples/** – Example implementations demonstrating how to build with Hive.
+- **scripts/** – Utility scripts used for development and setup.
+
 ## Who Is Hive For?
 
 Hive is the harness layer for teams moving AI agents from prototype to production. Models are getting better on their own — the bottleneck is the infrastructure around them: state management, failure recovery, cost control, and observability.
@@ -62,6 +72,7 @@ Hive is a good fit if you:
 - Plan to run agents in **production** where uptime, cost, and auditability matter
 
 Hive may not be the best fit if you’re only experimenting with simple agent chains or one-off scripts.
+
 
 ## When Should You Use Hive?
 
