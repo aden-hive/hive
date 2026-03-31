@@ -7,7 +7,6 @@ and queen orchestration concerns separate.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,166 +15,6 @@ if TYPE_CHECKING:
     from framework.server.session_manager import Session
 
 logger = logging.getLogger(__name__)
-
-_PRIMARY_RESULT_KEYS = (
-    "result",
-    "answer",
-    "final_answer",
-    "final_result",
-    "final_output",
-    "response",
-    "summary",
-    "report",
-)
-_NON_PRIMARY_KEY_TOKENS = (
-    "task",
-    "request",
-    "prompt",
-    "input",
-    "brief",
-    "context",
-    "plan",
-    "step",
-    "given",
-    "target",
-    "relationship",
-    "symbolic",
-    "metadata",
-    "artifact",
-    "file",
-    "path",
-    "url",
-    "link",
-)
-_ARTIFACT_SUFFIXES = {
-    ".csv",
-    ".doc",
-    ".docx",
-    ".gif",
-    ".html",
-    ".jpeg",
-    ".jpg",
-    ".json",
-    ".md",
-    ".pdf",
-    ".png",
-    ".ppt",
-    ".pptx",
-    ".svg",
-    ".txt",
-    ".xlsx",
-    ".xml",
-    ".yaml",
-    ".yml",
-}
-_PRIMARY_RESULT_CHAR_LIMIT = 8000
-
-
-def _stringify_worker_output_value(value: Any) -> str:
-    """Convert worker output values to user-presentable text."""
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, (dict, list)):
-        try:
-            return json.dumps(value, ensure_ascii=False, indent=2)
-        except TypeError:
-            return str(value)
-    return str(value)
-
-
-def _looks_like_artifact_reference(text: str) -> bool:
-    stripped = text.strip()
-    if not stripped:
-        return True
-    if stripped.startswith("[Saved to "):
-        return True
-    if "\n" in stripped:
-        return False
-    if stripped.startswith(("/", "./", "../")):
-        return True
-    return Path(stripped).suffix.lower() in _ARTIFACT_SUFFIXES
-
-
-def _is_non_primary_key(key: str) -> bool:
-    lowered = key.lower()
-    return any(token in lowered for token in _NON_PRIMARY_KEY_TOKENS)
-
-
-def _select_primary_worker_result(output: dict[str, Any]) -> tuple[str, str] | None:
-    """Pick the best worker output to relay verbatim, if one exists."""
-    if not output:
-        return None
-
-    normalized: dict[str, str] = {}
-    for key, value in output.items():
-        text = _stringify_worker_output_value(value).strip()
-        if text:
-            normalized[key] = text
-
-    for key in _PRIMARY_RESULT_KEYS:
-        text = normalized.get(key, "")
-        if text and not _looks_like_artifact_reference(text):
-            return key, text
-
-    candidates: list[tuple[str, str]] = []
-    for key, text in normalized.items():
-        if _is_non_primary_key(key) or _looks_like_artifact_reference(text):
-            continue
-        candidates.append((key, text))
-
-    if len(candidates) == 1:
-        return candidates[0]
-
-    for key, text in candidates:
-        lowered = key.lower()
-        if any(token in lowered for token in ("result", "answer", "summary", "report", "response")):
-            return key, text
-    return None
-
-
-def _format_worker_output_summary(output: dict[str, Any]) -> str:
-    """Build a concise summary of worker output keys for queen handoff."""
-    if not output:
-        return "  (no output keys set)"
-
-    lines: list[str] = []
-    for key, value in output.items():
-        preview = _stringify_worker_output_value(value).strip() or "(empty)"
-        if len(preview) > 200:
-            preview = preview[:200] + "..."
-        lines.append(f"  {key}: {preview}")
-    return "\n".join(lines)
-
-
-def _build_worker_terminal_notification(output: dict[str, Any]) -> str:
-    """Format a worker-completed notification for the queen."""
-    summary = _format_worker_output_summary(output)
-    primary = _select_primary_worker_result(output)
-    if primary is None:
-        return (
-            "[WORKER_TERMINAL] Worker finished successfully.\n"
-            f"Output summary:\n{summary}\n"
-            "Report this to the user. Ask if they want to continue with another run."
-        )
-
-    key, text = primary
-    if len(text) > _PRIMARY_RESULT_CHAR_LIMIT:
-        text = text[:_PRIMARY_RESULT_CHAR_LIMIT].rstrip() + "\n...[truncated]"
-    return (
-        "[WORKER_TERMINAL] Worker finished successfully.\n"
-        f"Output summary:\n{summary}\n"
-        f"Primary result key: {key}\n"
-        "[PRIMARY_RESULT_BEGIN]\n"
-        f"{text}\n"
-        "[PRIMARY_RESULT_END]\n"
-        "Show the PRIMARY_RESULT to the user exactly as written between "
-        "[PRIMARY_RESULT_BEGIN] and [PRIMARY_RESULT_END] before any commentary. "
-        "Do not paraphrase, compress, or reformat it. After that, briefly mention "
-        "any important artifacts or other output keys if useful, then ask if they "
-        "want to continue with another run."
-    )
 
 
 def _client_input_counts_as_planning_ask(event: Any) -> bool:
@@ -484,10 +323,20 @@ async def create_queen(
                         # Mark worker as configured after first successful run
                         session.worker_configured = True
                         output = event.data.get("output", {})
-                        # Keep the worker's primary result intact during the
-                        # queen handoff so the user sees the actual answer,
-                        # not just a paraphrased digest of it.
-                        notification = _build_worker_terminal_notification(output)
+                        output_summary = ""
+                        if output:
+                            for key, value in output.items():
+                                val_str = str(value)
+                                if len(val_str) > 200:
+                                    val_str = val_str[:200] + "..."
+                                output_summary += f"\n  {key}: {val_str}"
+                        _out = output_summary or " (no output keys set)"
+                        notification = (
+                            "[WORKER_TERMINAL] Worker finished successfully.\n"
+                            f"Output:{_out}\n"
+                            "Report this to the user. "
+                            "Ask if they want to continue with another run."
+                        )
                     else:  # EXECUTION_FAILED
                         error = event.data.get("error", "Unknown error")
                         notification = (
