@@ -54,7 +54,7 @@ WHATSAPP_CREDENTIALS = {
         direct_api_key_supported=True,
         api_key_instructions="""See WHATSAPP_ACCESS_TOKEN instructions above.""",
         health_check_endpoint="",
-        credential_id="whatsapp",
+        credential_id="whatsapp_phone_number_id",
         credential_key="phone_number_id",
         credential_group="whatsapp",
     ),
