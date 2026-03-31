@@ -135,29 +135,40 @@ def print_running_prompt(worker_identity: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    import sys
+    import argparse
 
-    phase = sys.argv[1] if len(sys.argv) > 1 else "planning"
+    parser = argparse.ArgumentParser(
+        description="Print queen prompts for a specific phase."
+    )
+    parser.add_argument(
+        "phase",
+        nargs="?",
+        default="planning",
+        choices=["planning", "building", "staging", "running", "all"],
+        help="Which phase prompt to print (default: planning).",
+    )
+    parser.add_argument(
+        "-w",
+        "--worker",
+        dest="worker_identity",
+        default=None,
+        help="Optional worker identity string to append to the prompt.",
+    )
+    args = parser.parse_args()
 
-    if phase == "all":
-        print_planning_prompt()
+    if args.phase == "all":
+        print_planning_prompt(args.worker_identity)
         print("\n\n")
-        print_building_prompt()
+        print_building_prompt(args.worker_identity)
         print("\n\n")
-        print_staging_prompt()
+        print_staging_prompt(args.worker_identity)
         print("\n\n")
-        print_running_prompt()
-    elif phase == "planning":
-        print_planning_prompt()
-    elif phase == "building":
-        print_building_prompt()
-    elif phase == "staging":
-        print_staging_prompt()
-    elif phase == "running":
-        print_running_prompt()
-    else:
-        print(f"Unknown phase: {phase}")
-        print(
-            "Usage: uv run scripts/debug_queen_prompt.py [planning|building|staging|running|all]"
-        )
-        sys.exit(1)
+        print_running_prompt(args.worker_identity)
+    elif args.phase == "planning":
+        print_planning_prompt(args.worker_identity)
+    elif args.phase == "building":
+        print_building_prompt(args.worker_identity)
+    elif args.phase == "staging":
+        print_staging_prompt(args.worker_identity)
+    elif args.phase == "running":
+        print_running_prompt(args.worker_identity)
