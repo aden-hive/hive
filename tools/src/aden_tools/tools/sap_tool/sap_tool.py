@@ -59,9 +59,7 @@ def register_tools(
                 ),
             }
         base_url = base_url.rstrip("/")
-        encoded = base64.b64encode(
-            f"{username}:{password}".encode()
-        ).decode()
+        encoded = base64.b64encode(f"{username}:{password}".encode()).decode()
         headers = {
             "Authorization": f"Basic {encoded}",
             "Accept": "application/json",
