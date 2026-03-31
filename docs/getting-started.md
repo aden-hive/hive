@@ -5,7 +5,7 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 ## Prerequisites
 
 - **Python 3.11+** ([Download](https://www.python.org/downloads/)) - Python 3.12 or 3.13 recommended
-- **pip** - Package installer for Python (comes with Python)
+- **uv** ([Install](https://docs.astral.sh/uv/getting-started/installation/)) - Required workspace/package manager for this repository
 - **git** - Version control
 - **Claude Code** ([Install](https://docs.anthropic.com/claude/docs/claude-code)) - Optional, for using building skills
 
@@ -43,6 +43,8 @@ uv run python -c "import framework; import aden_tools; print('Setup complete')"
 
 > **Note:** On Windows, running `.\quickstart.ps1` requires PowerShell 5.1+. If you see a "running scripts is disabled" error, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first. Alternatively, use WSL — see [environment-setup.md](./environment-setup.md) for details.
 
+> **Workspace note:** Hive uses a `uv` workspace setup. Do not run `pip install -e .` from the repository root, and avoid mixing `pip` and `uv` commands for workspace package management.
+
 ## Building Your First Agent
 
 Agents are not included by default in a fresh clone.
@@ -62,7 +64,7 @@ This is the recommended way to create your first agent.
 - Unix-based shell (macOS, Linux, or Windows via WSL)
 
 ```bash
-# Setup already done via quickstart.sh above
+# Setup is already done via the quickstart command shown above
 
 # Start Claude Code and build an agent
 Use the coder-tools initialize_and_build_agent tool
@@ -232,14 +234,18 @@ echo $HIVE_API_KEY
 ### Package Installation Issues
 
 ```bash
-# Remove and reinstall
-pip uninstall -y framework tools
+# Re-run setup on macOS/Linux
 ./quickstart.sh
+```
+
+```powershell
+# Re-run setup on Windows (PowerShell)
+.\quickstart.ps1
 ```
 
 ## Getting Help
 
 - **Documentation**: Check the `/docs` folder
-- **Issues**: [github.com/adenhq/hive/issues](https://github.com/aden-hive/hive/issues)
+- **Issues**: [github.com/aden-hive/hive/issues](https://github.com/aden-hive/hive/issues)
 - **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
 - **Build Agents**: Use the coder-tools workflow to create agents
