@@ -234,12 +234,12 @@ echo $HIVE_API_KEY
 ### Package Installation Issues
 
 ```bash
-# Re-run setup on macOS/Linux
+# From the repository root, re-run setup on macOS/Linux
 ./quickstart.sh
 ```
 
 ```powershell
-# Re-run setup on Windows (PowerShell)
+# From the repository root, re-run setup on Windows (PowerShell)
 .\quickstart.ps1
 ```
 
