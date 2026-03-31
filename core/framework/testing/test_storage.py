@@ -1,7 +1,7 @@
 """
 File-based storage backend for test data.
 
-Follows the same pattern as framework/storage/backend.py (FileStorage),
+Follows the same pattern as framework/storage/concurrent.py (ConcurrentStorage),
 storing tests as JSON files with indexes for efficient querying.
 """
 

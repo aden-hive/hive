@@ -1022,6 +1022,10 @@ $hiveKey = [System.Environment]::GetEnvironmentVariable("HIVE_API_KEY", "User")
 if (-not $hiveKey) { $hiveKey = $env:HIVE_API_KEY }
 if ($hiveKey) { $HiveCredDetected = $true }
 
+$AntigravityCredDetected = $false
+$antigravityAuthPath = Join-Path $env:USERPROFILE ".hive\antigravity-accounts.json"
+if (Test-Path $antigravityAuthPath) { $AntigravityCredDetected = $true }
+
 # Detect API key providers
 $ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY")
 $ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier", "OpenRouter - Bring any OpenRouter model")
@@ -1034,6 +1038,12 @@ $ProviderMenuUrls     = @(
     "https://cloud.cerebras.ai/",
     "https://openrouter.ai/keys"
 )
+
+$OllamaDetected = $false
+try {
+    $null = & ollama list 2>$null
+    if ($LASTEXITCODE -eq 0) { $OllamaDetected = $true }
+} catch { }
 
 # ── Read previous configuration (if any) ──────────────────────
 $PrevProvider = ""
@@ -1051,6 +1061,7 @@ if (Test-Path $HiveConfigFile) {
             if ($prevLlm.use_claude_code_subscription) { $PrevSubMode = "claude_code" }
             elseif ($prevLlm.use_codex_subscription) { $PrevSubMode = "codex" }
             elseif ($prevLlm.use_kimi_code_subscription) { $PrevSubMode = "kimi_code" }
+            elseif ($prevLlm.use_antigravity_subscription) { $PrevSubMode = "antigravity" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.z.ai*") { $PrevSubMode = "zai_code" }
             elseif ($prevLlm.provider -eq "minimax" -or ($prevLlm.api_base -and $prevLlm.api_base -like "*api.minimax.io*")) { $PrevSubMode = "minimax_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.kimi.com*") { $PrevSubMode = "kimi_code" }
@@ -1070,8 +1081,11 @@ if ($PrevSubMode -or $PrevProvider) {
         "minimax_code" { if ($MinimaxCredDetected) { $prevCredValid = $true } }
         "kimi_code"   { if ($KimiCredDetected)   { $prevCredValid = $true } }
         "hive_llm"    { if ($HiveCredDetected)   { $prevCredValid = $true } }
+        "antigravity" { if ($AntigravityCredDetected) { $prevCredValid = $true } }
         default {
-            if ($PrevEnvVar) {
+            if ($PrevProvider -eq "ollama") {
+                $prevCredValid = $true
+            } elseif ($PrevEnvVar) {
                 $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "Process")
                 if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "User") }
                 if ($envVal) { $prevCredValid = $true }
@@ -1086,17 +1100,20 @@ if ($PrevSubMode -or $PrevProvider) {
             "minimax_code" { $DefaultChoice = "4" }
             "kimi_code"   { $DefaultChoice = "5" }
             "hive_llm"    { $DefaultChoice = "6" }
+            "antigravity" { $DefaultChoice = "7" }
         }
         if (-not $DefaultChoice) {
             switch ($PrevProvider) {
-                "anthropic" { $DefaultChoice = "7" }
-                "openai"    { $DefaultChoice = "8" }
-                "gemini"    { $DefaultChoice = "9" }
-                "groq"      { $DefaultChoice = "10" }
-                "cerebras"  { $DefaultChoice = "11" }
-                "openrouter" { $DefaultChoice = "12" }
+                "anthropic" { $DefaultChoice = "8" }
+                "openai"    { $DefaultChoice = "9" }
+                "gemini"    { $DefaultChoice = "10" }
+                "groq"      { $DefaultChoice = "11" }
+                "cerebras"  { $DefaultChoice = "12" }
+                "openrouter" { $DefaultChoice = "13" }
+                "ollama"     { $DefaultChoice = "14" }
                 "minimax"   { $DefaultChoice = "4" }
                 "kimi"      { $DefaultChoice = "5" }
+                "hive"      { $DefaultChoice = "6" }
             }
         }
     }
@@ -1149,12 +1166,19 @@ Write-Host ") Hive LLM                   " -NoNewline
 Write-Color -Text "(use your Hive API key)" -Color DarkGray -NoNewline
 if ($HiveCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 
+# 7) Antigravity
+Write-Host "  " -NoNewline
+Write-Color -Text "7" -Color Cyan -NoNewline
+Write-Host ") Antigravity Subscription  " -NoNewline
+Write-Color -Text "(use your Google/Gemini plan)" -Color DarkGray -NoNewline
+if ($AntigravityCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
+
 Write-Host ""
 Write-Color -Text "  API key providers:" -Color Cyan
 
-# 7-12) API key providers
+# 8-13) API key providers
 for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
-    $num = $idx + 7
+    $num = $idx + 8
     $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "Process")
     if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "User") }
     Write-Host "  " -NoNewline
@@ -1163,7 +1187,17 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     if ($envVal) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 }
 
-$SkipChoice = 7 + $ProviderMenuEnvVars.Count
+# 14) Local (Ollama) - no API key needed
+Write-Host "  " -NoNewline
+Write-Color -Text "14" -Color Cyan -NoNewline
+if ($OllamaDetected) {
+    Write-Host ") Local (Ollama) - No API key needed  " -NoNewline
+    Write-Color -Text "(ollama detected)" -Color Green
+} else {
+    Write-Host ") Local (Ollama) - No API key needed"
+}
+
+$SkipChoice = 8 + $ProviderMenuEnvVars.Count + 1
 Write-Host "  " -NoNewline
 Write-Color -Text "$SkipChoice" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
@@ -1301,9 +1335,48 @@ switch ($num) {
         }
         Write-Color -Text "  Model: $SelectedModel | API: $HiveLlmEndpoint" -Color DarkGray
     }
-    { $_ -ge 7 -and $_ -le 12 } {
+    7 {
+        # Antigravity Subscription
+        if (-not $AntigravityCredDetected) {
+            Write-Host ""
+            Write-Color -Text "  Setting up Antigravity authentication..." -Color Cyan
+            Write-Host ""
+            Write-Warn "A browser window will open for Google OAuth."
+            Write-Host "  Sign in with your Google account that has Antigravity access."
+            Write-Host ""
+            try {
+                $null = & $UvCmd run python (Join-Path $ScriptDir "core\antigravity_auth.py") auth account add 2>&1
+                if ($LASTEXITCODE -eq 0 -and (Test-Path $antigravityAuthPath)) {
+                    $AntigravityCredDetected = $true
+                }
+            } catch {
+                $AntigravityCredDetected = $false
+            }
+
+            if (-not $AntigravityCredDetected) {
+                Write-Host ""
+                Write-Fail "Authentication failed or was cancelled."
+                Write-Host ""
+                $SelectedProviderId = ""
+            }
+        }
+
+        if ($AntigravityCredDetected) {
+            $SubscriptionMode        = "antigravity"
+            $SelectedProviderId      = "openai"
+            $SelectedModel           = "gemini-3-flash"
+            $SelectedMaxTokens       = 32768
+            $SelectedMaxContextTokens = 1000000
+            Write-Host ""
+            Write-Warn "Using Antigravity can technically cause your account suspension. Please use at your own risk."
+            Write-Host ""
+            Write-Ok "Using Antigravity subscription"
+            Write-Color -Text "  Model: gemini-3-flash | Direct OAuth (no proxy required)" -Color DarkGray
+        }
+    }
+    { $_ -ge 8 -and $_ -le 13 } {
         # API key providers
-        $provIdx = $num - 7
+        $provIdx = $num - 8
         $SelectedEnvVar     = $ProviderMenuEnvVars[$provIdx]
         $SelectedProviderId = $ProviderMenuIds[$provIdx]
         $providerName       = $ProviderMenuNames[$provIdx] -replace ' - .*', ''  # strip description
@@ -1381,6 +1454,75 @@ switch ($num) {
                 # User pressed Enter with existing key — keep it
                 break
             }
+        }
+    }
+    14 {
+        # Local (Ollama)
+        if (-not $OllamaDetected) {
+            Write-Host ""
+            Write-Warn "Ollama depends on a local Ollama server, but 'ollama list' failed."
+            Write-Host "  Please install Ollama (https://ollama.com) and start the server,"
+            Write-Host "  then run this quickstart again."
+            Write-Host ""
+            exit 1
+        }
+        $SelectedProviderId = "ollama"
+        Write-Host ""
+        Write-Ok "Using Local (Ollama)"
+        Write-Host ""
+
+        # Fetch available models
+        $ollamaModels = @()
+        try {
+            $listOutput = & ollama list 2>$null
+            if ($listOutput.Count -gt 1) {
+                for ($i = 1; $i -lt $listOutput.Count; $i++) {
+                    $line = $listOutput[$i].Trim()
+                    if ($line) {
+                        $mName = ($line -split '\s+')[0]
+                        if ($mName) { $ollamaModels += $mName }
+                    }
+                }
+            }
+        } catch { }
+
+        if ($ollamaModels.Count -eq 0) {
+            Write-Warn "No Ollama models found."
+            Write-Host "  Please open another terminal, run 'ollama run <model>' (e.g. 'ollama run llama3'),"
+            Write-Host "  and then run this quickstart again."
+            Write-Host ""
+            exit 1
+        }
+
+        # Show model picker
+        Write-Host "  Select an Ollama model:"
+        Write-Host ""
+        $defaultIdx = "1"
+        for ($i = 0; $i -lt $ollamaModels.Count; $i++) {
+            Write-Color -Text "  $($i + 1)" -Color Cyan -NoNewline
+            Write-Host ") $($ollamaModels[$i])"
+            if ($PrevProvider -eq "ollama" -and $PrevModel -eq $ollamaModels[$i]) {
+                $defaultIdx = [string]($i + 1)
+            }
+        }
+        Write-Host ""
+        
+        while ($true) {
+            $raw = Read-Host "Enter choice (1-$($ollamaModels.Count)) [$defaultIdx]"
+            if ([string]::IsNullOrWhiteSpace($raw)) { $raw = $defaultIdx }
+            if ($raw -match '^\d+$') {
+                $num = [int]$raw
+                if ($num -ge 1 -and $num -le $ollamaModels.Count) {
+                    $SelectedModel = $ollamaModels[$num - 1]
+                    Write-Host ""
+                    Write-Ok "Model: $SelectedModel"
+                    $SelectedMaxTokens = 8192
+                    $SelectedMaxContextTokens = 16384
+                    $SelectedApiBase = "http://localhost:11434"
+                    break
+                }
+            }
+            Write-Color -Text "Invalid choice. Please enter 1-$($ollamaModels.Count)" -Color Red
         }
     }
     { $_ -eq $SkipChoice } {
@@ -1686,6 +1828,8 @@ if ($SelectedProviderId) {
         $config.llm["use_claude_code_subscription"] = $true
     } elseif ($SubscriptionMode -eq "codex") {
         $config.llm["use_codex_subscription"] = $true
+    } elseif ($SubscriptionMode -eq "antigravity") {
+        $config.llm["use_antigravity_subscription"] = $true
     } elseif ($SubscriptionMode -eq "zai_code") {
         $config.llm["api_base"] = "https://api.z.ai/api/coding/paas/v4"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
@@ -1701,8 +1845,13 @@ if ($SelectedProviderId) {
     } elseif ($SelectedProviderId -eq "openrouter") {
         $config.llm["api_base"] = "https://openrouter.ai/api/v1"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
-    } else {
+    } elseif ($SelectedProviderId -eq "ollama") {
+        $config.llm["api_base"] = "http://localhost:11434"
+        $config.llm.Remove("api_key_env_var")
+    } elseif ($SelectedEnvVar) {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
+    } else {
+        $config.llm.Remove("api_key_env_var")
     }
 
     $config | ConvertTo-Json -Depth 4 | Set-Content -Path $HiveConfigFile -Encoding UTF8
@@ -2003,6 +2152,9 @@ if ($SelectedProviderId) {
         Write-Color -Text "  API: api.minimax.io/v1 (OpenAI-compatible)" -Color DarkGray
     } elseif ($SubscriptionMode -eq "codex") {
         Write-Ok "OpenAI Codex Subscription -> $SelectedModel"
+    } elseif ($SubscriptionMode -eq "antigravity") {
+        Write-Ok "Antigravity Subscription -> $SelectedModel"
+        Write-Color -Text "  Direct OAuth (no proxy required)" -Color DarkGray
     } elseif ($SelectedProviderId -eq "openrouter") {
         Write-Ok "OpenRouter API Key -> $SelectedModel"
         Write-Color -Text "  API: openrouter.ai/api/v1 (OpenAI-compatible)" -Color DarkGray

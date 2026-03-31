@@ -963,7 +963,10 @@ class ExecutionStream:
             return
         import json as _json
 
-        session_dir = self._session_store.get_session_path(execution_id)
+        try:
+            session_dir = self._session_store.get_session_path(execution_id)
+        except ValueError:
+            return
         runs_file = session_dir / "runs.jsonl"
         now = datetime.now()
         record = {

@@ -161,6 +161,26 @@ if litellm is not None:
     # (e.g. stream_options for Anthropic) instead of forwarding them verbatim.
     litellm.drop_params = True
 
+
+def _is_ollama_model(model: str) -> bool:
+    """Return True for any Ollama model string (ollama/ or ollama_chat/ prefix)."""
+    return model.startswith("ollama/") or model.startswith("ollama_chat/")
+
+
+def _ensure_ollama_chat_prefix(model: str) -> str:
+    """Normalise Ollama model strings to use the ollama_chat/ prefix.
+
+    LiteLLM requires the ``ollama_chat/`` prefix (not ``ollama/``) to enable
+    native function-calling support.  With ``ollama/``, LiteLLM falls back to
+    JSON-mode tool calls, which the framework cannot parse as real tool calls.
+
+    See: https://docs.litellm.ai/docs/providers/ollama#example-usage---tool-calling
+    """
+    if model.startswith("ollama/"):
+        return "ollama_chat/" + model[len("ollama/") :]
+    return model
+
+
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
@@ -501,7 +521,9 @@ class LiteLLMProvider(LLMProvider):
         # Translate kimi/ prefix to anthropic/ so litellm uses the Anthropic
         # Messages API handler and routes to that endpoint — no special headers needed.
         _original_model = model
-        if model.lower().startswith("kimi/"):
+        if _is_ollama_model(model):
+            model = _ensure_ollama_chat_prefix(model)
+        elif model.lower().startswith("kimi/"):
             model = "anthropic/" + model[len("kimi/") :]
             # Normalise api_base: litellm's Anthropic handler appends /v1/messages,
             # so the base must be https://api.kimi.com/coding (no /v1 suffix).
@@ -676,6 +698,8 @@ class LiteLLMProvider(LLMProvider):
             tool_choice = self._derive_codex_tool_choice(full_messages, tools)
             if tool_choice is not None:
                 kwargs["tool_choice"] = tool_choice
+            elif _is_ollama_model(self.model):
+                kwargs.setdefault("tool_choice", "auto")
         if response_format:
             kwargs["response_format"] = response_format
 
