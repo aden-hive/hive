@@ -41,14 +41,18 @@ def register_tools(
 
     def _get_config() -> tuple[str, dict] | dict[str, str]:
         """Return (base_url, headers) or error dict."""
+        base_url = username = password = None
         if credentials is not None:
-            base_url = credentials.get("sap_base_url")
-            username = credentials.get("sap_username")
-            password = credentials.get("sap_password")
-        else:
-            base_url = os.getenv("SAP_BASE_URL")
-            username = os.getenv("SAP_USERNAME")
-            password = os.getenv("SAP_PASSWORD")
+            try:
+                base_url = credentials.get("sap_base_url")
+                username = credentials.get("sap_username")
+                password = credentials.get("sap_password")
+            except KeyError:
+                pass
+
+        base_url = base_url or os.getenv("SAP_BASE_URL")
+        username = username or os.getenv("SAP_USERNAME")
+        password = password or os.getenv("SAP_PASSWORD")
 
         if not base_url or not username or not password:
             return {

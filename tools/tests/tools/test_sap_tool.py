@@ -22,7 +22,7 @@ def _mock_resp(data, status_code=200):
     return resp
 
 
-def _mock_credentials():
+def _mock_credentials() -> MagicMock:
     creds = MagicMock()
     creds.get.side_effect = lambda key: {
         "sap_base_url": "https://cred-store.s4hana.ondemand.com",
@@ -33,14 +33,14 @@ def _mock_credentials():
 
 
 @pytest.fixture
-def tool_fns(mcp: FastMCP):
+def tool_fns(mcp: FastMCP) -> dict:
     register_tools(mcp, credentials=None)
     tools = mcp._tool_manager._tools
     return {name: tools[name].fn for name in tools}
 
 
 @pytest.fixture
-def tool_fns_with_creds(mcp: FastMCP):
+def tool_fns_with_creds(mcp: FastMCP) -> dict:
     register_tools(mcp, credentials=_mock_credentials())
     tools = mcp._tool_manager._tools
     return {name: tools[name].fn for name in tools}
