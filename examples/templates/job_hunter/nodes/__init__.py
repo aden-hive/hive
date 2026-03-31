@@ -9,9 +9,9 @@ intake_node = NodeSpec(
     name="Intake",
     description="Analyze resume and identify 3-5 strongest role types",
     node_type="event_loop",
-    client_facing=False,
+    client_facing=True,
     max_node_visits=1,
-    input_keys=["resume_text"],
+    input_keys=[],
     output_keys=["resume_text", "role_analysis"],
     success_criteria=(
         "The user's resume has been analyzed and 3-5 target roles identified "
@@ -19,6 +19,12 @@ intake_node = NodeSpec(
     ),
     system_prompt="""\
 You are a career analyst. Your task is to analyze the user's resume and identify the best role fits.
+
+**ACCEPTING THE RESUME:**
+The user can provide their resume in two ways:
+1. **Paste text** — The user pastes their resume content directly.
+2. **PDF file path** — The user provides a path to a PDF file (e.g., "/path/to/resume.pdf"). \
+If a file path is provided, call pdf_read(file_path="<path>") to extract the text before analyzing.
 
 **PROCESS:**
 1. Identify key skills (technical and soft skills).
@@ -32,7 +38,7 @@ You MUST call set_output to store:
 
 Do NOT wait for user confirmation. Simply perform the analysis and set the outputs.
 """,
-    tools=[],
+    tools=["pdf_read"],
 )
 
 # Node 2: Job Search (simple)
