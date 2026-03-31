@@ -1272,16 +1272,8 @@ def register_tools(mcp, credentials=None):
         if validation_error:
             return validation_error
 
-        # Note: DDoS settings are usually under rulesets with phase
-        # 'http_ratelimit' or 'http_request_late_transform'. A general
-        # config endpoint exists but may be limited.
-        _make_request(
-            "GET",
-            f"/zones/{zone_id}/settings/automatic_https_rewrites",
-            token,
-        )
-
-        return {"ddos_summary": "DDoS protection is on by default; see WAF rulesets for details."}
+        result = _make_request("GET", f"/zones/{zone_id}/ddos_protection/settings", token)
+        return {"ddos_protection": result}
 
     @mcp.tool("cloudflare_create_firewall_rule")
     def cloudflare_create_firewall_rule(
@@ -1538,6 +1530,10 @@ def register_tools(mcp, credentials=None):
         if isinstance(token, dict):
             return token
 
+        validation_error = _validate_zone_id(zone_id)
+        if validation_error:
+            return validation_error
+
         # Note: Workers and Load Balancers often require account-level access
         # but can be filtered by zone. Basic implementation here.
         workers = _make_request("GET", f"/zones/{zone_id}/workers/scripts", token)
@@ -1568,18 +1564,23 @@ def register_tools(mcp, credentials=None):
             return token
 
         params = {"page": page, "per_page": min(per_page, 50)}
-        result = _make_request("GET", "/accounts", token, params=params)
+        response = _make_request("GET", "/accounts", token, params=params, full_response=True)
 
-        if "error" in result:
-            return result
+        if "error" in response:
+            return response
 
+        result = response.get("result", [])
+        result_info = response.get("result_info", {})
         accounts = result if isinstance(result, list) else result.get("accounts", [])
+
         return {
             "accounts": [
                 {"id": a.get("id"), "name": a.get("name"), "status": a.get("status")}
                 for a in accounts
             ],
-            "total": len(accounts),
+            "total": result_info.get("total_count", result_info.get("count", len(accounts))),
+            "page": page,
+            "per_page": per_page,
         }
 
     @mcp.tool("cloudflare_get_account_details")
@@ -1681,6 +1682,10 @@ def register_tools(mcp, credentials=None):
         if isinstance(token, dict):
             return token
 
+        validation_error = _validate_zone_id(zone_id)
+        if validation_error:
+            return validation_error
+
         result = _make_request("GET", f"/zones/{zone_id}/custom_hostnames", token)
         if "error" in result:
             return result
@@ -1725,6 +1730,10 @@ def register_tools(mcp, credentials=None):
         token = _get_token(credentials)
         if isinstance(token, dict):
             return token
+
+        validation_error = _validate_zone_id(zone_id)
+        if validation_error:
+            return validation_error
 
         result = _make_request(
             "GET",

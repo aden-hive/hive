@@ -16,11 +16,40 @@ def tools_registry(mcp: FastMCP):
     return mcp._tool_manager._tools
 
 
-def _mock_success_response():
+@pytest.fixture
+def mock_request():
+    """Mock httpx.request and return the mock object."""
+    with patch("aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request") as mock:
+        mock.return_value = _mock_response(200, {"success": True, "result": []})
+        yield mock
+
+
+def _mock_response(status_code: int, json_data: dict):
     mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"success": True, "result": []}
+    mock_resp.status_code = status_code
+    mock_resp.json.return_value = json_data
+    mock_resp.text = str(json_data)
     return mock_resp
+
+
+def _mock_success_response():
+    """Legacy helper for backward compatibility of simple tests."""
+    return _mock_response(200, {"success": True, "result": []})
+
+
+def verify_request(mock_request, method, endpoint, params=None, json_data=None):
+    """Verify that httpx.request was called with expected arguments."""
+    args, kwargs = mock_request.call_args
+    call_method = kwargs.get("method") or (args[0] if args else None)
+    call_url = kwargs.get("url") or (args[1] if len(args) > 1 else None)
+
+    assert call_method == method
+    if call_url:
+        assert call_url.endswith(endpoint)
+    if params:
+        assert kwargs.get("params") == params
+    if json_data:
+        assert kwargs.get("json") == json_data
 
 
 class TestCloudflareIntegration:
@@ -36,16 +65,12 @@ class TestCloudflareIntegration:
 class TestCloudflareTools:
     """Tests for all 54 Cloudflare tools."""
 
-    def test_cloudflare_list_zones(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_zones(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -56,17 +81,14 @@ class TestCloudflareTools:
             result = fn()
             assert isinstance(result, dict)
             assert "error" not in result
+            verify_request(mock_request, "GET", "/zones", params={"page": 1, "per_page": 20})
 
-    def test_cloudflare_get_zone(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_zone(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -74,20 +96,17 @@ class TestCloudflareTools:
             ),
         ):
             fn = tools_registry["cloudflare_get_zone"].fn
-            result = fn(zone_id="z_test")
+            result = fn(zone_id="z123")
             assert isinstance(result, dict)
             assert "error" not in result
+            verify_request(mock_request, "GET", "/zones/z123")
 
-    def test_cloudflare_get_zone_settings(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_zone_settings(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -95,20 +114,17 @@ class TestCloudflareTools:
             ),
         ):
             fn = tools_registry["cloudflare_get_zone_settings"].fn
-            result = fn(zone_id="z_test")
+            result = fn(zone_id="z123")
             assert isinstance(result, dict)
             assert "error" not in result
+            verify_request(mock_request, "GET", "/zones/z123/settings")
 
-    def test_cloudflare_list_zone_custom_pages(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_zone_custom_pages(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -120,16 +136,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_ssl_verification(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_ssl_verification(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -141,16 +153,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_zone_certificates(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_zone_certificates(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -162,16 +170,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_zone_subscriptions(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_zone_subscriptions(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -183,16 +187,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_dnssec_status(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_dnssec_status(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -204,16 +204,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_update_zone_setting(self, tools_registry, monkeypatch):
+    def test_cloudflare_update_zone_setting(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -225,16 +221,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_dns_records(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_dns_records(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -246,16 +238,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_dns_record(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_dns_record(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -267,16 +255,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_dns_record_scan(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_dns_record_scan(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -288,16 +272,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_dns_settings(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_dns_settings(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -309,16 +289,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_dns_analytics_report(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_dns_analytics_report(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -330,16 +306,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_check_domain_dns_health(self, tools_registry, monkeypatch):
+    def test_cloudflare_check_domain_dns_health(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -351,16 +323,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_create_dns_record(self, tools_registry, monkeypatch):
+    def test_cloudflare_create_dns_record(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -372,16 +340,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_update_dns_record(self, tools_registry, monkeypatch):
+    def test_cloudflare_update_dns_record(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -393,16 +357,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_delete_dns_record(self, tools_registry, monkeypatch):
+    def test_cloudflare_delete_dns_record(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -414,16 +374,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_zone_analytics(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_zone_analytics(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -435,16 +391,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_top_analytics(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_top_analytics(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -456,16 +408,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_security_analytics(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_security_analytics(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -477,16 +425,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_cache_analytics(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_cache_analytics(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -498,16 +442,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_performance_analytics(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_performance_analytics(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -519,16 +459,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_http_analytics_report(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_http_analytics_report(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -540,16 +476,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_firewall_events(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_firewall_events(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -561,16 +493,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_security_settings(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_security_settings(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -582,16 +510,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_page_rules(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_page_rules(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -603,16 +527,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_waf_rulesets(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_waf_rulesets(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -624,16 +544,14 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_bot_management_settings(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_bot_management_settings(
+        self, tools_registry, monkeypatch, mock_request
+    ):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -645,16 +563,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_managed_transforms(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_managed_transforms(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -666,16 +580,17 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_ddos_protection_settings(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_ddos_protection_settings(
+        self, tools_registry, monkeypatch, mock_request
+    ):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
+        mock_request.return_value = _mock_response(
+            200, {"success": True, "result": {"enabled": True}}
+        )
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -683,20 +598,17 @@ class TestCloudflareTools:
             ),
         ):
             fn = tools_registry["cloudflare_get_ddos_protection_settings"].fn
-            result = fn(zone_id="z_test")
+            result = fn(zone_id="z123")
             assert isinstance(result, dict)
-            assert "error" not in result
+            assert result["ddos_protection"]["enabled"] is True
+            verify_request(mock_request, "GET", "/zones/z123/ddos_protection/settings")
 
-    def test_cloudflare_create_firewall_rule(self, tools_registry, monkeypatch):
+    def test_cloudflare_create_firewall_rule(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -708,16 +620,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_delete_firewall_rule(self, tools_registry, monkeypatch):
+    def test_cloudflare_delete_firewall_rule(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -729,16 +637,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_speed_settings(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_speed_settings(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -750,16 +654,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_cache_settings(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_cache_settings(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -771,16 +671,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_http_config(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_http_config(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -792,16 +688,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_get_network_settings(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_network_settings(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -813,16 +705,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_purge_cache_all(self, tools_registry, monkeypatch):
+    def test_cloudflare_purge_cache_all(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -834,16 +722,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_purge_cache_files(self, tools_registry, monkeypatch):
+    def test_cloudflare_purge_cache_files(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -855,16 +739,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_advanced_services(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_advanced_services(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -876,16 +756,20 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_accounts(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_accounts(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
+        mock_request.return_value = _mock_response(
+            200,
+            {
+                "success": True,
+                "result": [{"id": "a1", "name": "Account 1"}],
+                "result_info": {"total_count": 50, "page": 1, "per_page": 20},
+            },
+        )
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -893,20 +777,18 @@ class TestCloudflareTools:
             ),
         ):
             fn = tools_registry["cloudflare_list_accounts"].fn
-            result = fn()
-            assert isinstance(result, dict)
-            assert "error" not in result
+            result = fn(page=1, per_page=20)
+            assert result["total"] == 50
+            assert len(result["accounts"]) == 1
+            assert result["page"] == 1
+            verify_request(mock_request, "GET", "/accounts", params={"page": 1, "per_page": 20})
 
-    def test_cloudflare_get_account_details(self, tools_registry, monkeypatch):
+    def test_cloudflare_get_account_details(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -918,16 +800,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_account_members(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_account_members(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -939,16 +817,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_invite_account_member(self, tools_registry, monkeypatch):
+    def test_cloudflare_invite_account_member(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -960,16 +834,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_delete_account_member(self, tools_registry, monkeypatch):
+    def test_cloudflare_delete_account_member(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -981,16 +851,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_custom_hostnames(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_custom_hostnames(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -1002,16 +868,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_audit_logs(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_audit_logs(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -1023,16 +885,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_firewall_rules(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_firewall_rules(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -1044,16 +902,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_access_applications(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_access_applications(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -1065,16 +919,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_r2_buckets(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_r2_buckets(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -1086,16 +936,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_list_pages_projects(self, tools_registry, monkeypatch):
+    def test_cloudflare_list_pages_projects(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -1107,16 +953,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_create_access_policy(self, tools_registry, monkeypatch):
+    def test_cloudflare_create_access_policy(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -1130,16 +972,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_create_worker_route(self, tools_registry, monkeypatch):
+    def test_cloudflare_create_worker_route(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",
@@ -1151,16 +989,12 @@ class TestCloudflareTools:
             assert isinstance(result, dict)
             assert "error" not in result
 
-    def test_cloudflare_set_ssl_mode(self, tools_registry, monkeypatch):
+    def test_cloudflare_set_ssl_mode(self, tools_registry, monkeypatch, mock_request):
         monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "test-key")
         with (
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_zone_id",
                 return_value=None,
-            ),
-            patch(
-                "aden_tools.tools.cloudflare_tool.cloudflare_tool.httpx.request",
-                return_value=_mock_success_response(),
             ),
             patch(
                 "aden_tools.tools.cloudflare_tool.cloudflare_tool._validate_domain",

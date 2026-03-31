@@ -22,14 +22,12 @@ class TestRegistryCompleteness:
     #   which the single-value health check dispatcher can't support
     # - plaid_client_id/plaid_secret: requires POST with both client_id and
     #   secret in JSON body, can't validate with a single credential value
-    # - cloudflare: shares cloudflare_token checker (same credential_group)
     KNOWN_EXCEPTIONS = {
         "google_cse",
         "razorpay",
         "razorpay_secret",
         "plaid_client_id",
         "plaid_secret",
-        "cloudflare",
     }
 
     def test_specs_with_endpoint_have_checkers(self):
