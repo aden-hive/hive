@@ -8,6 +8,7 @@ import {
   Loader2,
   Paperclip,
   X,
+  ChevronDown,
 } from "lucide-react";
 
 export interface ImageContent {
@@ -39,7 +40,6 @@ export interface ChatMessage {
     | "agent"
     | "user"
     | "tool_status"
-    | "worker_input_request"
     | "run_divider";
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
@@ -89,6 +89,10 @@ interface ChatPanelProps {
   queenPhase?: "planning" | "building" | "staging" | "running";
   /** Context window usage for queen and workers */
   contextUsage?: Record<string, ContextUsageEntry>;
+  /** Epoch ms when the current worker run started — for elapsed timer */
+  workerStartedAt?: number;
+  /** Duration in ms of the last completed worker run */
+  workerDuration?: number;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -203,6 +207,148 @@ function ToolActivityRow({ content }: { content: string }) {
     </div>
   );
 }
+
+function formatDuration(ms: number): string {
+  const totalSecs = Math.floor(ms / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+}
+
+const WorkerGroupBubble = memo(
+  function WorkerGroupBubble({
+    messages,
+    isActive,
+    workerStartedAt,
+    workerDuration,
+  }: {
+    workerName: string;
+    messages: ChatMessage[];
+    isActive?: boolean;
+    workerStartedAt?: number;
+    workerDuration?: number;
+  }) {
+    const [collapsed, setCollapsed] = useState(true);
+    const [elapsed, setElapsed] = useState(0);
+
+    // Auto-expand the latest group while worker is actively streaming
+    useEffect(() => {
+      if (isActive) setCollapsed(false);
+    }, [isActive]);
+
+    useEffect(() => {
+      if (!isActive || workerStartedAt == null) { setElapsed(0); return; }
+      setElapsed(Math.floor((Date.now() - workerStartedAt) / 1000));
+      const id = setInterval(() => {
+        setElapsed(Math.floor((Date.now() - workerStartedAt) / 1000));
+      }, 1000);
+      return () => clearInterval(id);
+    }, [isActive, workerStartedAt]);
+
+    const stepCount = messages.filter((m) => m.role === "worker").length;
+    const color = workerColor;
+    const lastAgent = [...messages].reverse().find((m) => m.type !== "tool_status")?.agent;
+
+    const label = isActive
+      ? workerStartedAt != null
+        ? `Working for ${formatDuration(elapsed * 1000)}`
+        : "Working"
+      : workerDuration != null
+        ? `Worked for ${formatDuration(workerDuration)}`
+        : "Worked";
+
+    return (
+      <div>
+        <style>{`
+          @keyframes workerFlow {
+            0%   { background-position: 200% 50%; }
+            100% { background-position: 0% 50%; }
+          }
+          .worker-flow-text {
+            background: linear-gradient(90deg, #818cf8, #6366f1, #38bdf8, #6366f1, #818cf8);
+            background-size: 200% auto;
+            animation: workerFlow 1.2s linear infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+          }
+        `}</style>
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors mb-1.5"
+        >
+          <ChevronDown
+            className={`w-3.5 h-3.5 transition-transform duration-150 ${collapsed ? "-rotate-90" : ""}`}
+          />
+          {isActive && <Loader2 className="w-3 h-3 animate-spin" style={{ color }} />}
+          {isActive ? (
+            <span className="font-medium worker-flow-text">{label}</span>
+          ) : (
+            <span className="font-medium" style={{ color }}>{label}</span>
+          )}
+          <span className="text-muted-foreground/50">
+            — {stepCount} step{stepCount !== 1 ? "s" : ""}
+          </span>
+        </button>
+
+        {!collapsed && (
+          <div className="ml-5 pl-3 border-l border-border/30 space-y-2">
+            {messages.map((m, idx) => {
+              if (m.type === "tool_status") return <ToolActivityRow key={m.id} content={m.content} />;
+              const filtered = messages.slice(0, idx).filter((x) => x.type !== "tool_status");
+              const prevContent = filtered[filtered.length - 1];
+              const isContinuation = prevContent != null && prevContent.agent === m.agent;
+              return (
+                <div key={m.id} className="flex gap-2">
+                  <div className="w-5 flex-shrink-0 flex flex-col items-center">
+                    {isContinuation ? (
+                      <div className="w-px flex-1 bg-border/40 mt-0.5" />
+                    ) : (
+                      <div
+                        className="w-5 h-5 rounded-md flex items-center justify-center mt-0.5"
+                        style={{ backgroundColor: `${color}18`, border: `1px solid ${color}30` }}
+                      >
+                        <Cpu className="w-3 h-3" style={{ color }} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    {!isContinuation && (
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        {isActive && m.agent === lastAgent ? (
+                          <span className="text-xs font-medium worker-flow-text">{m.agent}</span>
+                        ) : (
+                          <span className="text-xs font-medium" style={{ color }}>{m.agent}</span>
+                        )}
+                        <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-md">
+                          Worker
+                        </span>
+                      </div>
+                    )}
+                    <div className="bg-muted/60 rounded-xl rounded-tl-sm px-3 py-2 text-sm leading-relaxed">
+                      <MarkdownContent content={m.content} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.workerName === next.workerName &&
+    prev.isActive === next.isActive &&
+    prev.workerStartedAt === next.workerStartedAt &&
+    prev.workerDuration === next.workerDuration &&
+    prev.messages.length === next.messages.length &&
+    prev.messages[prev.messages.length - 1]?.content ===
+      next.messages[next.messages.length - 1]?.content &&
+    prev.messages.filter(m => m.type === "tool_status").map(m => m.content).join("\0") ===
+      next.messages.filter(m => m.type === "tool_status").map(m => m.content).join("\0"),
+);
+
 
 const MessageBubble = memo(
   function MessageBubble({
@@ -345,6 +491,8 @@ export default function ChatPanel({
   onQuestionDismiss,
   queenPhase,
   contextUsage,
+  workerStartedAt,
+  workerDuration,
   supportsImages = true,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
@@ -374,7 +522,8 @@ export default function ChatPanel({
   // so interleaved queen/tool/system messages don't fragment the bubble.
   type RenderItem =
     | { kind: "message"; msg: ChatMessage }
-    | { kind: "parallel"; groupId: string; groups: SubagentGroup[] };
+    | { kind: "parallel"; groupId: string; groups: SubagentGroup[] }
+    | { kind: "worker-group"; groupId: string; workerName: string; messages: ChatMessage[]; isLast: boolean; workerDuration?: number };
 
   const renderItems = useMemo<RenderItem[]>(() => {
     const items: RenderItem[] = [];
@@ -382,6 +531,30 @@ export default function ChatPanel({
     while (i < threadMessages.length) {
       const msg = threadMessages[i];
       const isSubagent = msg.nodeId?.includes(":subagent:");
+
+      // Group consecutive worker messages (non-subagent) into a collapsible block
+      if (msg.role === "worker" && !isSubagent && !msg.type) {
+        const firstId = msg.id;
+        const workerName = msg.agent || msg.thread || "Worker";
+        const groupMsgs: ChatMessage[] = [];
+        while (i < threadMessages.length) {
+          const m = threadMessages[i];
+          if (m.nodeId?.includes(":subagent:")) break;
+          if (m.type === "user" || m.type === "run_divider") break;
+          if (m.role === "queen") break;
+          groupMsgs.push(m);
+          i++;
+        }
+        const firstCreatedAt = groupMsgs[0]?.createdAt;
+        const lastCreatedAt = groupMsgs[groupMsgs.length - 1]?.createdAt;
+        const inlineDuration =
+          firstCreatedAt != null && lastCreatedAt != null && lastCreatedAt > firstCreatedAt
+            ? lastCreatedAt - firstCreatedAt
+            : undefined;
+        items.push({ kind: "worker-group", groupId: `wg-${firstId}`, workerName, messages: groupMsgs, isLast: false, workerDuration: inlineDuration });
+        continue;
+      }
+
       if (!isSubagent) {
         items.push({ kind: "message", msg });
         i++;
@@ -442,6 +615,13 @@ export default function ChatPanel({
           });
         }
         items.push({ kind: "parallel", groupId: `par-${firstId}`, groups });
+      }
+    }
+    // Mark the last worker-group so it can auto-expand during live streaming
+    for (let j = items.length - 1; j >= 0; j--) {
+      if (items[j].kind === "worker-group") {
+        (items[j] as Extract<RenderItem, { kind: "worker-group" }>).isLast = true;
+        break;
       }
     }
     return items;
@@ -527,6 +707,16 @@ export default function ChatPanel({
               <ParallelSubagentBubble
                 groupId={item.groupId}
                 groups={item.groups}
+              />
+            </div>
+          ) : item.kind === "worker-group" ? (
+            <div key={item.groupId}>
+              <WorkerGroupBubble
+                workerName={item.workerName}
+                messages={item.messages}
+                isActive={item.isLast && isWorkerWaiting}
+                workerStartedAt={item.isLast ? workerStartedAt : undefined}
+                workerDuration={item.isLast ? workerDuration : item.workerDuration}
               />
             </div>
           ) : (
@@ -696,13 +886,17 @@ export default function ChatPanel({
           questions={pendingQuestions}
           onSubmit={onMultiQuestionSubmit}
           onDismiss={onQuestionDismiss}
+          source="queen"
         />
-      ) : pendingQuestion && pendingOptions && onQuestionSubmit ? (
+      ) : pendingQuestion &&
+        pendingOptions &&
+        onQuestionSubmit ? (
         <QuestionWidget
           question={pendingQuestion}
           options={pendingOptions}
           onSubmit={onQuestionSubmit}
           onDismiss={onQuestionDismiss}
+          source="queen"
         />
       ) : (
         <form onSubmit={handleSubmit} className="p-4">

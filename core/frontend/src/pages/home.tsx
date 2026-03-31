@@ -51,6 +51,7 @@ const promptHints = [
   "Run a security scan on my domain",
 ];
 
+
 export default function Home() {
   const navigate = useNavigate();
   const [inputValue, setInputValue] = useState("");
@@ -92,6 +93,15 @@ export default function Home() {
     }
   };
 
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const value = e.target.value;
+    setInputValue(value);
+    // Auto-resize
+    const ta = e.target;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+  }
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <TopBar />
@@ -124,18 +134,8 @@ export default function Home() {
                 ref={textareaRef}
                 rows={1}
                 value={inputValue}
-                onChange={(e) => {
-                  setInputValue(e.target.value);
-                  const ta = e.target;
-                  ta.style.height = "auto";
-                  ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSubmit(e);
-                  }
-                }}
+                onChange={handleInputChange}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
                 placeholder="Describe a task for the hive..."
                 className="w-full bg-transparent px-5 py-4 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none rounded-xl resize-none overflow-y-auto"
               />
@@ -260,6 +260,7 @@ export default function Home() {
           )}
         </div>
       </div>
+
     </div>
   );
 }

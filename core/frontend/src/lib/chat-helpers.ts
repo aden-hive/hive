@@ -105,7 +105,7 @@ export function sseEventToChatMessage(
       if (!snapshot.trim()) return null;
       return {
         id: `stream-${idKey}${llmInnerSuffix}-${event.node_id}`,
-        agent: event.node_id || "Agent",
+        agent: agentDisplayName || event.node_id || "Agent",
         agentColor: "",
         content: snapshot,
         timestamp: "",
