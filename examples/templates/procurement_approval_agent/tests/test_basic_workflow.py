@@ -9,7 +9,19 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+from pytest import MonkeyPatch
+
 from procurement_approval_agent.agent import ProcurementApprovalAgent
+
+
+_QB_ENV_KEYS = (
+    "QUICKBOOKS_CLIENT_ID",
+    "QUICKBOOKS_CLIENT_SECRET",
+    "QUICKBOOKS_REALM_ID",
+    "QUICKBOOKS_REFRESH_TOKEN",
+    "QUICKBOOKS_ENV",
+    "QUICKBOOKS_CREDENTIAL_REF",
+)
 
 
 def _setup_test_data(data_dir: Path) -> None:
@@ -58,6 +70,18 @@ def _set_qb_creds(enabled: bool) -> None:
         os.environ.pop("QUICKBOOKS_REALM_ID", None)
 
 
+def _capture_qb_env() -> dict[str, str | None]:
+    return {key: os.environ.get(key) for key in _QB_ENV_KEYS}
+
+
+def _restore_qb_env(previous_env: dict[str, str | None]) -> None:
+    for key, value in previous_env.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
 def _run_workflow(mock_qb: bool, data_dir: Path) -> tuple[dict, Path]:
     context = {
         "item": "Laptop",
@@ -76,6 +100,7 @@ def _run_workflow(mock_qb: bool, data_dir: Path) -> tuple[dict, Path]:
 
 
 def test_full_workflow_api_path_mock_mode() -> None:
+    previous_qb_env = _capture_qb_env()
     _set_qb_creds(enabled=True)
     with tempfile.TemporaryDirectory() as tmpdir:
         data_dir = Path(tmpdir) / "agent-data"
@@ -114,12 +139,11 @@ def test_full_workflow_api_path_mock_mode() -> None:
                 os.environ.pop("PROCUREMENT_APPROVAL_AGENT_DATA_DIR", None)
             else:
                 os.environ["PROCUREMENT_APPROVAL_AGENT_DATA_DIR"] = previous_data_dir
-            _set_qb_creds(enabled=False)
-            _set_qb_creds(enabled=False)
-            _set_qb_creds(enabled=False)
+            _restore_qb_env(previous_qb_env)
 
 
 def test_full_workflow_csv_fallback_mock_mode() -> None:
+    previous_qb_env = _capture_qb_env()
     _set_qb_creds(enabled=False)
     with tempfile.TemporaryDirectory() as tmpdir:
         data_dir = Path(tmpdir) / "agent-data"
@@ -160,9 +184,11 @@ def test_full_workflow_csv_fallback_mock_mode() -> None:
                 os.environ.pop("PROCUREMENT_APPROVAL_AGENT_DATA_DIR", None)
             else:
                 os.environ["PROCUREMENT_APPROVAL_AGENT_DATA_DIR"] = previous_data_dir
+            _restore_qb_env(previous_qb_env)
 
 
 def test_each_workflow_run_generates_unique_po_artifacts() -> None:
+    previous_qb_env = _capture_qb_env()
     _set_qb_creds(enabled=False)
     with tempfile.TemporaryDirectory() as tmpdir:
         data_dir = Path(tmpdir) / "agent-data"
@@ -190,10 +216,10 @@ def test_each_workflow_run_generates_unique_po_artifacts() -> None:
                 os.environ.pop("PROCUREMENT_APPROVAL_AGENT_DATA_DIR", None)
             else:
                 os.environ["PROCUREMENT_APPROVAL_AGENT_DATA_DIR"] = previous_data_dir
-            _set_qb_creds(enabled=False)
+            _restore_qb_env(previous_qb_env)
 
 
-def test_over_budget_request_is_denied(monkeypatch) -> None:
+def test_over_budget_request_is_denied(monkeypatch: MonkeyPatch) -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         data_dir = Path(tmpdir) / "agent-data"
         _setup_test_data(data_dir)
@@ -219,7 +245,7 @@ def test_over_budget_request_is_denied(monkeypatch) -> None:
         assert result.output["budget_status"] == "denied"
 
 
-def test_unapproved_vendor_is_rejected(monkeypatch) -> None:
+def test_unapproved_vendor_is_rejected(monkeypatch: MonkeyPatch) -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         data_dir = Path(tmpdir) / "agent-data"
         _setup_test_data(data_dir)
@@ -247,6 +273,7 @@ def test_unapproved_vendor_is_rejected(monkeypatch) -> None:
 
 def test_setup_wizard_runs_on_first_execution() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
+        previous_qb_env = _capture_qb_env()
         _set_qb_creds(enabled=False)
         previous_storage_root = os.environ.get("HIVE_AGENT_STORAGE_ROOT")
         os.environ["HIVE_AGENT_STORAGE_ROOT"] = tmpdir
@@ -260,10 +287,12 @@ def test_setup_wizard_runs_on_first_execution() -> None:
                 os.environ.pop("HIVE_AGENT_STORAGE_ROOT", None)
             else:
                 os.environ["HIVE_AGENT_STORAGE_ROOT"] = previous_storage_root
+            _restore_qb_env(previous_qb_env)
 
 
 def test_setup_wizard_is_skipped_after_preference_saved() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
+        previous_qb_env = _capture_qb_env()
         _set_qb_creds(enabled=True)
         previous_storage_root = os.environ.get("HIVE_AGENT_STORAGE_ROOT")
         os.environ["HIVE_AGENT_STORAGE_ROOT"] = tmpdir
@@ -295,3 +324,4 @@ def test_setup_wizard_is_skipped_after_preference_saved() -> None:
                 os.environ.pop("HIVE_AGENT_STORAGE_ROOT", None)
             else:
                 os.environ["HIVE_AGENT_STORAGE_ROOT"] = previous_storage_root
+            _restore_qb_env(previous_qb_env)
