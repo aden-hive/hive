@@ -673,7 +673,18 @@ detect_shell_rc() {
             fi
             ;;
         bash)
-            if [ -f "$HOME/.bashrc" ]; then
+            # Git Bash on Windows commonly starts as a login shell, so prefer
+            # .bash_profile there when it already exists. On Unix-like shells,
+            # keep the traditional .bashrc-first behavior.
+            if [ -n "$MSYSTEM" ] || [ -n "$MINGW_PREFIX" ]; then
+                if [ -f "$HOME/.bash_profile" ]; then
+                    echo "$HOME/.bash_profile"
+                elif [ -f "$HOME/.bashrc" ]; then
+                    echo "$HOME/.bashrc"
+                else
+                    echo "$HOME/.profile"
+                fi
+            elif [ -f "$HOME/.bashrc" ]; then
                 echo "$HOME/.bashrc"
             elif [ -f "$HOME/.bash_profile" ]; then
                 echo "$HOME/.bash_profile"
