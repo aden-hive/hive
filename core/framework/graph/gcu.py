@@ -43,11 +43,8 @@ Follow these rules for reliable, efficient browser interaction.
   `browser_snapshot` separately after every action.
   Only call `browser_snapshot` when you need a fresh view without
   performing an action, or after setting `auto_snapshot=false`.
-- Do NOT use `browser_screenshot` to read text — use
-  `browser_snapshot` for that (compact, searchable, fast).
-- DO use `browser_screenshot` when you need visual context:
-  charts, images, canvas elements, layout verification, or when
-  the snapshot doesn't capture what you need.
+- Do NOT use `browser_screenshot` for reading text content
+  — it produces huge base64 images with no searchable text.
 - Only fall back to `browser_get_text` for extracting specific
   small elements by CSS selector.
 
