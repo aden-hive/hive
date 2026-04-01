@@ -1937,6 +1937,30 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except Exception as e:
+                # Some providers return non-standard finish_reason values
+                # (e.g., kimi-k2.5 sends 'pause_turn') that LiteLLM's
+                # internal stream_chunk_builder rejects via Pydantic
+                # validation.  If we already accumulated content and built
+                # tail_events before the error, the stream was successful —
+                # yield what we have instead of discarding it.
+                if (accumulated_text or tool_calls_acc) and tail_events:
+                    _is_finish_reason_err = (
+                        "finish_reason" in str(e)
+                        and "validation error" in str(e).lower()
+                    )
+                    if _is_finish_reason_err:
+                        logger.warning(
+                            "[stream] %s: LiteLLM finish_reason validation "
+                            "error (non-standard provider value). "
+                            "Content was streamed successfully — "
+                            "using accumulated result. Error: %s",
+                            self.model,
+                            e,
+                        )
+                        for event in tail_events:
+                            yield event
+                        return
+
                 if self._should_use_openrouter_tool_compat(e, tools):
                     _remember_openrouter_tool_compat_model(self.model)
                     async for event in self._stream_via_openrouter_tool_compat(

@@ -1914,6 +1914,7 @@ class GraphExecutor:
             skill_dirs=self.skill_dirs,
             default_skill_warn_ratio=self.context_warn_ratio,
             default_skill_batch_nudge=self.batch_init_nudge,
+            thinking_tags=node_spec.thinking_tags,
         )
 
     VALID_NODE_TYPES = {

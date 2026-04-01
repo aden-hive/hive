@@ -272,6 +272,17 @@ class NodeSpec(BaseModel):
         ),
     )
 
+    # Structured thinking tags — stripped from client-facing output but kept in
+    # conversation history so the LLM sees its own reasoning on subsequent turns.
+    thinking_tags: list[str] | None = Field(
+        default=None,
+        description=(
+            "XML tag names stripped from client output but kept in conversation "
+            "history. e.g. ['situation', 'monologue'] strips <situation>...</situation> "
+            "from the user-facing stream while preserving it for the LLM."
+        ),
+    )
+
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
 
@@ -578,6 +589,9 @@ class NodeContext:
     # the returned dict into node_loop_iteration event data.  Used by
     # the queen to record the current phase per iteration.
     iteration_metadata_provider: Any = None  # Callable[[], dict] | None
+
+    # Structured thinking tags — propagated from NodeSpec.thinking_tags.
+    thinking_tags: list[str] | None = None
 
 
 @dataclass

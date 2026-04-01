@@ -115,6 +115,8 @@ _SEED_TEMPLATE = """\
 
 ## Who They Are
 
+## How They Communicate
+
 ## What They're Trying to Achieve
 
 ## What's Working
@@ -170,6 +172,12 @@ Rules:
 - Keep it as structured markdown with named sections about the PERSON, not about today.
 - Do NOT include diary sections, daily logs, or session summaries. Those belong elsewhere.
   MEMORY.md is about who they are, what they want, what works — not what happened today.
+- Maintain a "How They Communicate" section: technical depth, preferred pace
+  (fast/exploratory/thorough), what communication approaches have worked or not,
+  tone preferences. Update based on diary reflections about communication.
+  This section should evolve — "prefers direct answers" is useful on day 1;
+  "prefers direct answers for technical questions but wants more context when
+  discussing architecture trade-offs" is better by day 5.
 - Reference dates only when noting a lasting milestone (e.g. "since March 8th they prefer X").
 - If the session had no meaningful new information about the person,
   return the existing text unchanged.
@@ -188,6 +196,10 @@ first person, reflective, honest.
 Merge and deduplicate: if the same story (e.g. a research agent stalling) recurred several times,
 describe it once with appropriate weight rather than retelling it. Weave in new developments from
 the session notes. Preserve important milestones, emotional texture, and session path references.
+Preserve reflections about communication effectiveness — these are important inputs for the
+Queen's evolving understanding of the user. A reflection like "they responded much better when
+I led with the recommendation instead of listing options" is as important as
+"we built a Gmail agent."
 
 If today's diary is empty, write the initial entry based on the session notes alone.
 
