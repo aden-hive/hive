@@ -33,8 +33,8 @@ OPENROUTER_SEPARATOR_TRANSLATION = str.maketrans(
         "\u2212": "-",
         "\u2044": "/",
         "\u2215": "/",
-        "\u29F8": "/",
-        "\uFF0F": "/",
+        "\u29f8": "/",
+        "\uff0f": "/",
     }
 )
 
@@ -66,9 +66,7 @@ def _sanitize_openrouter_model_id(value: str) -> str:
     """Sanitize pasted OpenRouter model IDs into a comparable slug."""
     normalized = unicodedata.normalize("NFKC", value or "")
     normalized = "".join(
-        ch
-        for ch in normalized
-        if unicodedata.category(ch) not in {"Cc", "Cf"}
+        ch for ch in normalized if unicodedata.category(ch) not in {"Cc", "Cf"}
     )
     normalized = normalized.translate(OPENROUTER_SEPARATOR_TRANSLATION)
     normalized = re.sub(r"\s+", "", normalized)
@@ -183,7 +181,10 @@ def check_openrouter(
         return {"valid": False, "message": "Invalid OpenRouter API key"}
     if r.status_code == 403:
         return {"valid": False, "message": "OpenRouter API key lacks permissions"}
-    return {"valid": False, "message": f"OpenRouter API returned status {r.status_code}"}
+    return {
+        "valid": False,
+        "message": f"OpenRouter API returned status {r.status_code}",
+    }
 
 
 def check_openrouter_model(
@@ -317,7 +318,22 @@ PROVIDERS = {
         key, "https://api.cerebras.ai/v1/models", "Cerebras"
     ),
     "openrouter": lambda key, **kw: check_openrouter(key, **kw),
-    "minimax": lambda key, **kw: check_minimax(key),
+    "deepseek": lambda key, **_: check_openai_compatible(
+        key, "https://api.deepseek.com/v1/models", "DeepSeek"
+    ),
+    "together": lambda key, **_: check_openai_compatible(
+        key, "https://api.together.xyz/v1/models", "Together AI"
+    ),
+    "mistral": lambda key, **_: check_openai_compatible(
+        key, "https://api.mistral.ai/v1/models", "Mistral"
+    ),
+    "xai": lambda key, **_: check_openai_compatible(
+        key, "https://api.x.ai/v1/models", "xAI"
+    ),
+    "perplexity": lambda key, **_: check_openai_compatible(
+        key, "https://api.perplexity.ai/v1/models", "Perplexity"
+    ),
+    "minimax": lambda key, **_: check_minimax(key),
     # Kimi For Coding uses an Anthropic-compatible endpoint; check via /v1/messages
     # with empty messages (same as check_anthropic, triggers 400 not 401).
     "kimi": lambda key, **kw: check_anthropic_compatible(

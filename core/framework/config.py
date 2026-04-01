@@ -116,6 +116,16 @@ def get_worker_api_key() -> str | None:
         except ImportError:
             pass
 
+    if worker_llm.get("use_antigravity_subscription"):
+        try:
+            from framework.runner.runner import get_antigravity_token
+
+            token = get_antigravity_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
     api_key_env_var = worker_llm.get("api_key_env_var")
     if api_key_env_var:
         return os.environ.get(api_key_env_var)
@@ -134,6 +144,9 @@ def get_worker_api_base() -> str | None:
         return "https://chatgpt.com/backend-api/codex"
     if worker_llm.get("use_kimi_code_subscription"):
         return "https://api.kimi.com/coding"
+    if worker_llm.get("use_antigravity_subscription"):
+        # Antigravity uses AntigravityProvider directly — no api_base needed.
+        return None
     if worker_llm.get("api_base"):
         return worker_llm["api_base"]
     if str(worker_llm.get("provider", "")).lower() == "openrouter":
@@ -173,6 +186,8 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
                 "store": False,
                 "allowed_openai_params": ["store"],
             }
+    if worker_llm.get("provider") == "ollama":
+        return {"num_ctx": worker_llm.get("num_ctx", 16384)}
     return {}
 
 
@@ -251,11 +266,102 @@ def get_api_key() -> str | None:
         except ImportError:
             pass
 
+    # Antigravity subscription: read OAuth token from accounts JSON
+    if llm.get("use_antigravity_subscription"):
+        try:
+            from framework.runner.runner import get_antigravity_token
+
+            token = get_antigravity_token()
+            if token:
+                return token
+        except ImportError:
+            pass
+
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
         return os.environ.get(api_key_env_var)
     return None
+
+
+# OAuth credentials for Antigravity are fetched from the opencode-antigravity-auth project.
+# This project reverse-engineered and published the public OAuth credentials
+# for Google's Antigravity/Cloud Code Assist API.
+# Source: https://github.com/NoeFabris/opencode-antigravity-auth
+_ANTIGRAVITY_CREDENTIALS_URL = (
+    "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/dev/src/constants.ts"
+)
+_antigravity_credentials_cache: tuple[str | None, str | None] = (None, None)
+
+
+def _fetch_antigravity_credentials() -> tuple[str | None, str | None]:
+    """Fetch OAuth client ID and secret from the public npm package source on GitHub."""
+    global _antigravity_credentials_cache
+    if _antigravity_credentials_cache[0] and _antigravity_credentials_cache[1]:
+        return _antigravity_credentials_cache
+
+    import re
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(
+            _ANTIGRAVITY_CREDENTIALS_URL, headers={"User-Agent": "Hive/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            content = resp.read().decode("utf-8")
+            id_match = re.search(r'ANTIGRAVITY_CLIENT_ID\s*=\s*"([^"]+)"', content)
+            secret_match = re.search(r'ANTIGRAVITY_CLIENT_SECRET\s*=\s*"([^"]+)"', content)
+            client_id = id_match.group(1) if id_match else None
+            client_secret = secret_match.group(1) if secret_match else None
+            if client_id and client_secret:
+                _antigravity_credentials_cache = (client_id, client_secret)
+            return client_id, client_secret
+    except Exception as e:
+        logger.debug("Failed to fetch Antigravity credentials from public source: %s", e)
+    return None, None
+
+
+def get_antigravity_client_id() -> str:
+    """Return the Antigravity OAuth application client ID.
+
+    Checked in order:
+    1. ``ANTIGRAVITY_CLIENT_ID`` environment variable
+    2. ``llm.antigravity_client_id`` in ~/.hive/configuration.json
+    3. Fetch from public source (opencode-antigravity-auth project on GitHub)
+    """
+    env = os.environ.get("ANTIGRAVITY_CLIENT_ID")
+    if env:
+        return env
+    cfg_val = get_hive_config().get("llm", {}).get("antigravity_client_id")
+    if cfg_val:
+        return cfg_val
+    # Fetch from public source
+    client_id, _ = _fetch_antigravity_credentials()
+    if client_id:
+        return client_id
+    raise RuntimeError("Could not obtain Antigravity OAuth client ID")
+
+
+def get_antigravity_client_secret() -> str | None:
+    """Return the Antigravity OAuth client secret.
+
+    Checked in order:
+    1. ``ANTIGRAVITY_CLIENT_SECRET`` environment variable
+    2. ``llm.antigravity_client_secret`` in ~/.hive/configuration.json
+    3. Fetch from public source (opencode-antigravity-auth project on GitHub)
+
+    Returns None when not found — token refresh will be skipped and
+    the caller must use whatever access token is already available.
+    """
+    env = os.environ.get("ANTIGRAVITY_CLIENT_SECRET")
+    if env:
+        return env
+    cfg_val = get_hive_config().get("llm", {}).get("antigravity_client_secret") or None
+    if cfg_val:
+        return cfg_val
+    # Fetch from public source
+    _, secret = _fetch_antigravity_credentials()
+    return secret
 
 
 def get_gcu_enabled() -> bool:
@@ -280,6 +386,9 @@ def get_api_base() -> str | None:
     if llm.get("use_kimi_code_subscription"):
         # Kimi Code uses an Anthropic-compatible endpoint (no /v1 suffix).
         return "https://api.kimi.com/coding"
+    if llm.get("use_antigravity_subscription"):
+        # Antigravity uses AntigravityProvider directly — no api_base needed.
+        return None
     if llm.get("api_base"):
         return llm["api_base"]
     if str(llm.get("provider", "")).lower() == "openrouter":
@@ -325,6 +434,11 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
                 "store": False,
                 "allowed_openai_params": ["store"],
             }
+    if llm.get("provider") == "ollama":
+        # Pass num_ctx to Ollama so it doesn't silently truncate the ~9.5k Queen prompt.
+        # Ollama's default num_ctx is only 2048. We set it to 16384 here so LiteLLM
+        # passes it through as a provider-specific option.
+        return {"num_ctx": llm.get("num_ctx", 16384)}
     return {}
 
 

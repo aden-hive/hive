@@ -1478,6 +1478,7 @@ class AgentRuntime:
         graph_id: str | None = None,
         *,
         is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Inject user input into a running client-facing node.
 
@@ -1490,6 +1491,8 @@ class AgentRuntime:
             graph_id: Optional graph to search first (defaults to active graph)
             is_client_input: True when the message originates from a real
                 human user (e.g. /chat endpoint), False for external events.
+            image_content: Optional list of image content blocks (OpenAI
+                image_url format) to include alongside the text.
 
         Returns:
             True if input was delivered, False if no matching node found
@@ -1501,7 +1504,9 @@ class AgentRuntime:
         target = graph_id or self._active_graph_id
         if target in self._graphs:
             for stream in self._graphs[target].streams.values():
-                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
+                if await stream.inject_input(
+                    node_id, content, is_client_input=is_client_input, image_content=image_content
+                ):
                     return True
 
         # Then search all other graphs
@@ -1509,7 +1514,9 @@ class AgentRuntime:
             if gid == target:
                 continue
             for stream in reg.streams.values():
-                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
+                if await stream.inject_input(
+                    node_id, content, is_client_input=is_client_input, image_content=image_content
+                ):
                     return True
         return False
 

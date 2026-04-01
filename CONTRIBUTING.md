@@ -4,7 +4,7 @@
 
 Welcome to Aden Hive, an open-source AI agent framework built for developers who demand production-grade reliability, cross-platform support, and real-world performance. This guide will help you contribute effectively, whether you're fixing bugs, adding features, improving documentation, or building new tools.
 
-Thank you for your interest in contributing! We're especially looking for help building tools, integrations ([check #2805](https://github.com/adenhq/hive/issues/2805)), and example agents for the framework.
+Thank you for your interest in contributing! We're especially looking for help building tools, integrations ([check #2805](https://github.com/aden-hive/hive/issues/2805)), and example agents for the framework.
 
 ---
 
@@ -390,6 +390,8 @@ Aden Hive supports **100+ LLM providers** via LiteLLM, giving users maximum flex
 |----------|--------|-------|
 | **Anthropic** | Claude 3.5 Sonnet, Haiku, Opus | Default provider, best for reasoning |
 | **OpenAI** | GPT-4, GPT-4 Turbo, GPT-4o | Function calling, vision |
+| **OpenRouter** | Any OpenRouter catalog model | Uses `OPENROUTER_API_KEY` and `https://openrouter.ai/api/v1` |
+| **Hive LLM** | `queen`, `kimi-2.5`, `GLM-5` | Uses `HIVE_API_KEY` and the Hive-managed endpoint |
 | **Google** | Gemini 1.5 Pro, Flash | Long context windows |
 | **DeepSeek** | DeepSeek V3 | Cost-effective, strong reasoning |
 | **Mistral** | Mistral Large, Medium, Small | Open weights, EU hosting |
@@ -415,6 +417,10 @@ DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 - **Cost**: DeepSeek or Gemini Flash (budget-conscious)
 - **Privacy**: Ollama with local models (no data leaves server)
 
+**Provider-Specific Notes**
+- **OpenRouter**: store `provider` as `openrouter`, use the raw OpenRouter model ID in `model` (for example `x-ai/grok-4.20-beta`), and use `OPENROUTER_API_KEY`
+- **Hive LLM**: store `provider` as `hive`, use Hive model names such as `queen`, `kimi-2.5`, or `GLM-5`, and use `HIVE_API_KEY`
+
 **For Development**
 - Use cheaper/faster models (Haiku, GPT-4o-mini)
 - Test with multiple providers to catch provider-specific issues
@@ -426,7 +432,7 @@ DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 2. **Add credential handling** in `core/framework/credentials/`
 3. **Add provider-specific configuration** in `core/framework/llm/`
 4. **Write tests** in `core/tests/test_llm_provider.py`
-5. **Update documentation** in `docs/llm_providers.md`
+5. **Update documentation** in `README.md`, `docs/configuration.md`, and any setup guides that mention provider configuration
 
 **Example: Testing LLM Integration**
 

@@ -159,6 +159,26 @@ if litellm is not None:
     # (e.g. stream_options for Anthropic) instead of forwarding them verbatim.
     litellm.drop_params = True
 
+
+def _is_ollama_model(model: str) -> bool:
+    """Return True for any Ollama model string (ollama/ or ollama_chat/ prefix)."""
+    return model.startswith("ollama/") or model.startswith("ollama_chat/")
+
+
+def _ensure_ollama_chat_prefix(model: str) -> str:
+    """Normalise Ollama model strings to use the ollama_chat/ prefix.
+
+    LiteLLM requires the ``ollama_chat/`` prefix (not ``ollama/``) to enable
+    native function-calling support.  With ``ollama/``, LiteLLM falls back to
+    JSON-mode tool calls, which the framework cannot parse as real tool calls.
+
+    See: https://docs.litellm.ai/docs/providers/ollama#example-usage---tool-calling
+    """
+    if model.startswith("ollama/"):
+        return "ollama_chat/" + model[len("ollama/") :]
+    return model
+
+
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
@@ -499,7 +519,9 @@ class LiteLLMProvider(LLMProvider):
         # Translate kimi/ prefix to anthropic/ so litellm uses the Anthropic
         # Messages API handler and routes to that endpoint — no special headers needed.
         _original_model = model
-        if model.lower().startswith("kimi/"):
+        if _is_ollama_model(model):
+            model = _ensure_ollama_chat_prefix(model)
+        elif model.lower().startswith("kimi/"):
             model = "anthropic/" + model[len("kimi/") :]
             # Normalise api_base: litellm's Anthropic handler appends /v1/messages,
             # so the base must be https://api.kimi.com/coding (no /v1 suffix).
@@ -525,6 +547,8 @@ class LiteLLMProvider(LLMProvider):
         self._codex_backend = bool(
             self.api_base and "chatgpt.com/backend-api/codex" in self.api_base
         )
+        # Antigravity routes through a local OpenAI-compatible proxy — no patches needed.
+        self._antigravity = bool(self.api_base and "localhost:8069" in self.api_base)
 
         if litellm is None:
             raise ImportError(
@@ -720,6 +744,10 @@ class LiteLLMProvider(LLMProvider):
         # Add tools if provided
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+            if _is_ollama_model(self.model):
+                # Ollama requires explicit tool_choice=auto for function calling
+                # so future readers don't have to guess.
+                kwargs.setdefault("tool_choice", "auto")
 
         # Add response_format for structured output
         # LiteLLM passes this through to the underlying provider
@@ -917,6 +945,10 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_base"] = self.api_base
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+            if _is_ollama_model(self.model):
+                # Ollama requires explicit tool_choice=auto for function calling
+                # so future readers don't have to guess.
+                kwargs.setdefault("tool_choice", "auto")
         if response_format:
             kwargs["response_format"] = response_format
 
@@ -1618,6 +1650,10 @@ class LiteLLMProvider(LLMProvider):
             kwargs["api_base"] = self.api_base
         if tools:
             kwargs["tools"] = [self._tool_to_openai_format(t) for t in tools]
+            if _is_ollama_model(self.model):
+                # Ollama requires explicit tool_choice=auto for function calling
+                # so future readers don't have to guess.
+                kwargs.setdefault("tool_choice", "auto")
         if response_format:
             kwargs["response_format"] = response_format
         # The Codex ChatGPT backend (Responses API) rejects several params.

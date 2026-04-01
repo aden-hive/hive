@@ -72,6 +72,8 @@ export function sseEventToChatMessage(
         role: "worker",
         thread,
         createdAt,
+        nodeId: event.node_id || undefined,
+        executionId: event.execution_id || undefined,
       };
     }
 
@@ -110,6 +112,8 @@ export function sseEventToChatMessage(
         role: "worker",
         thread,
         createdAt,
+        nodeId: event.node_id || undefined,
+        executionId: event.execution_id || undefined,
       };
     }
 
