@@ -23,7 +23,7 @@ def _safe_pow(base: Any, exp: Any) -> Any:
         abs_base = abs(base)
         if abs_base > 1:
             # Estimate bit growth instead of materializing a huge integer.
-            estimated_bits = exp * (abs_base.bit_length() - 1) + 1
+            estimated_bits = exp * abs_base.bit_length()
             if estimated_bits > MAX_POWER_RESULT_BITS:
                 raise ValueError("Power operation exceeds safe size limit")
 
