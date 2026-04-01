@@ -157,7 +157,7 @@ All bounty types open in parallel. Contributors self-select. Daily progress upda
 PR merged with bounty:* label
   → GitHub Action runs bounty-tracker.ts
   → Calculates points from label
-  → Resolves GitHub → Discord ID via contributors.yml
+  → Resolves GitHub → Discord ID via MongoDB (hive.contributors)
   → Pushes XP to Lurkr API
   → Posts notification to #integrations-announcements
 ```
@@ -166,7 +166,7 @@ See the [Setup Guide](setup-guide.md) for full configuration (Lurkr, webhooks, s
 
 ### Identity Linking
 
-Contributors link GitHub ↔ Discord by opening a [Link Discord Account](https://github.com/aden-hive/hive/issues/new?template=link-discord.yml) issue. A GitHub Action auto-adds them to `contributors.yml` and closes the issue.
+Contributors link GitHub ↔ Discord by running `/link-github` in Discord. The bot verifies ownership via a public gist, then stores the mapping in MongoDB.
 
 Without this link, bounties are still tracked but Lurkr can't push XP to your Discord account.
 
@@ -181,7 +181,7 @@ Without this link, bounties are still tracked but Lurkr can't push XP to your Di
 | Agent Builder role       | Lurkr bot                  | Auto-assigned at level 5                        |
 | OSS Contributor role     | Lurkr bot                  | Auto-assigned at level 15                       |
 | Core Contributor role    | Maintainer                 | Manual (involves money)                         |
-| Identity linking         | contributors.yml           | PR-based, reviewed by maintainers               |
+| Identity linking         | Discord bot → MongoDB      | `/link-github` command with gist verification   |
 
 ## Guides
 
@@ -203,4 +203,4 @@ Without this link, bounties are still tracked but Lurkr can't push XP to your Di
 - `.github/workflows/weekly-leaderboard.yml` — Monday leaderboard post
 - `scripts/bounty-tracker.ts` — Point calculation, Lurkr API, Discord formatting
 - `scripts/setup-bounty-labels.sh` — One-time label setup
-- `contributors.yml` — GitHub ↔ Discord identity mapping
+- MongoDB `hive.contributors` — GitHub ↔ Discord identity mapping (managed by Discord bot)

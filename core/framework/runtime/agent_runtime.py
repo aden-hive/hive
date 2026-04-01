@@ -9,6 +9,7 @@ import asyncio
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
     from framework.graph.goal import Goal
     from framework.llm.provider import LLMProvider, Tool
+    from framework.skills.manager import SkillsManagerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,9 @@ class AgentRuntimeConfig:
     max_history: int = 1000
     execution_result_max: int = 1000
     execution_result_ttl_seconds: float | None = None
+    # Idempotency cache for trigger() deduplication
+    idempotency_ttl_seconds: float = 300.0
+    idempotency_max_keys: int = 10000
     # Webhook server config (only starts if webhook_routes is non-empty)
     webhook_host: str = "127.0.0.1"
     webhook_port: int = 8080
@@ -132,6 +137,11 @@ class AgentRuntime:
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         event_bus: "EventBus | None" = None,
+        skills_manager_config: "SkillsManagerConfig | None" = None,
+        # Deprecated — pass skills_manager_config instead.
+        skills_catalog_prompt: str = "",
+        protocols_prompt: str = "",
+        skill_dirs: list[str] | None = None,
     ):
         """
         Initialize agent runtime.
@@ -153,13 +163,49 @@ class AgentRuntime:
             event_bus: Optional external EventBus. If provided, the runtime shares
                 this bus instead of creating its own. Used by SessionManager to
                 share a single bus between queen, worker, and judge.
+            skills_catalog_prompt: Available skills catalog for system prompt
+            protocols_prompt: Default skill operational protocols for system prompt
+            skill_dirs: Skill base directories for Tier 3 resource access
+            skills_manager_config: Skill configuration — the runtime owns
+                discovery, loading, and prompt renderation internally.
+            skills_catalog_prompt: Deprecated. Pre-rendered skills catalog.
+            protocols_prompt: Deprecated. Pre-rendered operational protocols.
         """
+        from framework.skills.manager import SkillsManager
+
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
         self._runtime_log_store = runtime_log_store
         self._checkpoint_config = checkpoint_config
         self.accounts_prompt = accounts_prompt
+
+        # --- Skill lifecycle: runtime owns the SkillsManager ---
+        if skills_manager_config is not None:
+            # New path: config-driven, runtime handles loading
+            self._skills_manager = SkillsManager(skills_manager_config)
+            self._skills_manager.load()
+        elif skills_catalog_prompt or protocols_prompt:
+            # Legacy path: caller passed pre-rendered strings
+            import warnings
+
+            warnings.warn(
+                "Passing pre-rendered skills_catalog_prompt/protocols_prompt "
+                "is deprecated. Pass skills_manager_config instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self._skills_manager = SkillsManager.from_precomputed(
+                skills_catalog_prompt, protocols_prompt
+            )
+        else:
+            # Bare constructor: auto-load defaults
+            self._skills_manager = SkillsManager()
+            self._skills_manager.load()
+
+        self.skill_dirs: list[str] = self._skills_manager.allowlisted_dirs
+        self.context_warn_ratio: float | None = self._skills_manager.context_warn_ratio
+        self.batch_init_nudge: str | None = self._skills_manager.batch_init_nudge
 
         # Primary graph identity
         self._graph_id: str = graph_id or "primary"
@@ -208,6 +254,10 @@ class AgentRuntime:
         # Next fire time for each timer entry point (ep_id -> datetime)
         self._timer_next_fire: dict[str, float] = {}
 
+        # Idempotency cache for trigger() deduplication
+        self._idempotency_keys: OrderedDict[str, str] = OrderedDict()
+        self._idempotency_times: dict[str, float] = {}
+
         # State
         self._running = False
         self._timers_paused = False
@@ -215,6 +265,18 @@ class AgentRuntime:
 
         # Optional greeting shown to user on TUI load (set by AgentRunner)
         self.intro_message: str = ""
+
+    # ------------------------------------------------------------------
+    # Skill prompt accessors (read by ExecutionStream constructors)
+    # ------------------------------------------------------------------
+
+    @property
+    def skills_catalog_prompt(self) -> str:
+        return self._skills_manager.skills_catalog_prompt
+
+    @property
+    def protocols_prompt(self) -> str:
+        return self._skills_manager.protocols_prompt
 
     def register_entry_point(self, spec: EntryPointSpec) -> None:
         """
@@ -293,6 +355,11 @@ class AgentRuntime:
                     accounts_prompt=self._accounts_prompt,
                     accounts_data=self._accounts_data,
                     tool_provider_map=self._tool_provider_map,
+                    skills_catalog_prompt=self.skills_catalog_prompt,
+                    protocols_prompt=self.protocols_prompt,
+                    skill_dirs=self.skill_dirs,
+                    context_warn_ratio=self.context_warn_ratio,
+                    batch_init_nudge=self.batch_init_nudge,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -393,7 +460,8 @@ class AgentRuntime:
 
                 tc = spec.trigger_config
                 cron_expr = tc.get("cron")
-                interval = tc.get("interval_minutes")
+                _raw_interval = tc.get("interval_minutes")
+                interval = float(_raw_interval) if _raw_interval is not None else None
                 run_immediately = tc.get("run_immediately", False)
 
                 if cron_expr:
@@ -549,7 +617,7 @@ class AgentRuntime:
                             ep_id,
                             cron_expr,
                             run_immediately,
-                            idle_timeout=tc.get("idle_timeout_seconds", 300),
+                            idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
                         )()
                     )
                     self._timer_tasks.append(task)
@@ -679,7 +747,7 @@ class AgentRuntime:
                             ep_id,
                             interval,
                             run_immediately,
-                            idle_timeout=tc.get("idle_timeout_seconds", 300),
+                            idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
                         )()
                     )
                     self._timer_tasks.append(task)
@@ -793,12 +861,29 @@ class AgentRuntime:
         # Primary graph (also stored in self._streams)
         return self._streams.get(entry_point_id)
 
+    def _prune_idempotency_keys(self) -> None:
+        """Prune expired idempotency keys based on TTL and max size."""
+        ttl = self._config.idempotency_ttl_seconds
+        if ttl > 0:
+            cutoff = time.time() - ttl
+            for key, recorded_at in list(self._idempotency_times.items()):
+                if recorded_at < cutoff:
+                    self._idempotency_times.pop(key, None)
+                    self._idempotency_keys.pop(key, None)
+
+        max_keys = self._config.idempotency_max_keys
+        if max_keys > 0:
+            while len(self._idempotency_keys) > max_keys:
+                old_key, _ = self._idempotency_keys.popitem(last=False)
+                self._idempotency_times.pop(old_key, None)
+
     async def trigger(
         self,
         entry_point_id: str,
         input_data: dict[str, Any],
         correlation_id: str | None = None,
         session_state: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
         graph_id: str | None = None,
     ) -> str:
         """
@@ -811,6 +896,10 @@ class AgentRuntime:
             input_data: Input data for the execution
             correlation_id: Optional ID to correlate related executions
             session_state: Optional session state to resume from (with paused_at, memory)
+            idempotency_key: Optional key for deduplication. If a trigger with
+                the same key was already processed within the TTL window, the
+                cached execution_id is returned instead of starting a new
+                execution. Useful for webhook providers that retry on timeout.
             graph_id: Graph to trigger on.  ``None`` uses the active graph
                 first, then falls back to the primary graph.
 
@@ -824,12 +913,32 @@ class AgentRuntime:
         if not self._running:
             raise RuntimeError("AgentRuntime is not running")
 
+        # Idempotency check: return cached execution_id for duplicate keys.
+        if idempotency_key is not None:
+            self._prune_idempotency_keys()
+            cached = self._idempotency_keys.get(idempotency_key)
+            if cached is not None:
+                logger.debug(
+                    "Idempotent trigger: key '%s' already seen, returning %s",
+                    idempotency_key,
+                    cached,
+                )
+                return cached
+
         stream = self._resolve_stream(entry_point_id, graph_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
 
         run_id = uuid.uuid4().hex[:12]
-        return await stream.execute(input_data, correlation_id, session_state, run_id=run_id)
+        exec_id = await stream.execute(input_data, correlation_id, session_state, run_id=run_id)
+
+        # Cache after execute() so the value is always a real execution_id
+        # that callers can use for tracking.
+        if idempotency_key is not None:
+            self._idempotency_keys[idempotency_key] = exec_id
+            self._idempotency_times[idempotency_key] = time.time()
+
+        return exec_id
 
     async def trigger_and_wait(
         self,
@@ -837,6 +946,7 @@ class AgentRuntime:
         input_data: dict[str, Any],
         timeout: float | None = None,
         session_state: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> ExecutionResult | None:
         """
         Trigger execution and wait for completion.
@@ -846,11 +956,17 @@ class AgentRuntime:
             input_data: Input data for the execution
             timeout: Maximum time to wait (seconds)
             session_state: Optional session state to resume from (with paused_at, memory)
+            idempotency_key: Optional key for deduplication (see trigger() for details).
 
         Returns:
             ExecutionResult or None if timeout
         """
-        exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
+        exec_id = await self.trigger(
+            entry_point_id,
+            input_data,
+            session_state=session_state,
+            idempotency_key=idempotency_key,
+        )
         stream = self._resolve_stream(entry_point_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
@@ -926,6 +1042,9 @@ class AgentRuntime:
                 accounts_prompt=self._accounts_prompt,
                 accounts_data=self._accounts_data,
                 tool_provider_map=self._tool_provider_map,
+                skills_catalog_prompt=self.skills_catalog_prompt,
+                protocols_prompt=self.protocols_prompt,
+                skill_dirs=self.skill_dirs,
             )
             if self._running:
                 await stream.start()
@@ -1004,7 +1123,8 @@ class AgentRuntime:
             if spec.trigger_type != "timer":
                 continue
             tc = spec.trigger_config
-            interval = tc.get("interval_minutes")
+            _raw_interval = tc.get("interval_minutes")
+            interval = float(_raw_interval) if _raw_interval is not None else None
             run_immediately = tc.get("run_immediately", False)
 
             if interval and interval > 0 and self._running:
@@ -1149,7 +1269,7 @@ class AgentRuntime:
                         ep_id,
                         interval,
                         run_immediately,
-                        idle_timeout=tc.get("idle_timeout_seconds", 300),
+                        idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
                     )()
                 )
                 timer_tasks.append(task)
@@ -1414,6 +1534,7 @@ class AgentRuntime:
         graph_id: str | None = None,
         *,
         is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Inject user input into a running client-facing node.
 
@@ -1426,6 +1547,8 @@ class AgentRuntime:
             graph_id: Optional graph to search first (defaults to active graph)
             is_client_input: True when the message originates from a real
                 human user (e.g. /chat endpoint), False for external events.
+            image_content: Optional list of image content blocks (OpenAI
+                image_url format) to include alongside the text.
 
         Returns:
             True if input was delivered, False if no matching node found
@@ -1437,7 +1560,9 @@ class AgentRuntime:
         target = graph_id or self._active_graph_id
         if target in self._graphs:
             for stream in self._graphs[target].streams.values():
-                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
+                if await stream.inject_input(
+                    node_id, content, is_client_input=is_client_input, image_content=image_content
+                ):
                     return True
 
         # Then search all other graphs
@@ -1445,7 +1570,9 @@ class AgentRuntime:
             if gid == target:
                 continue
             for stream in reg.streams.values():
-                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
+                if await stream.inject_input(
+                    node_id, content, is_client_input=is_client_input, image_content=image_content
+                ):
                     return True
         return False
 
@@ -1704,6 +1831,11 @@ def create_agent_runtime(
     accounts_data: list[dict] | None = None,
     tool_provider_map: dict[str, str] | None = None,
     event_bus: "EventBus | None" = None,
+    skills_manager_config: "SkillsManagerConfig | None" = None,
+    # Deprecated — pass skills_manager_config instead.
+    skills_catalog_prompt: str = "",
+    protocols_prompt: str = "",
+    skill_dirs: list[str] | None = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -1730,6 +1862,13 @@ def create_agent_runtime(
         accounts_data: Raw account data for per-node prompt generation.
         tool_provider_map: Tool name to provider name mapping for account routing.
         event_bus: Optional external EventBus to share with other components.
+        skills_catalog_prompt: Available skills catalog for system prompt.
+        protocols_prompt: Default skill operational protocols for system prompt.
+        skill_dirs: Skill base directories for Tier 3 resource access.
+        skills_manager_config: Skill configuration — the runtime owns
+            discovery, loading, and prompt renderation internally.
+        skills_catalog_prompt: Deprecated. Pre-rendered skills catalog.
+        protocols_prompt: Deprecated. Pre-rendered operational protocols.
 
     Returns:
         Configured AgentRuntime (not yet started)
@@ -1756,6 +1895,10 @@ def create_agent_runtime(
         accounts_data=accounts_data,
         tool_provider_map=tool_provider_map,
         event_bus=event_bus,
+        skills_manager_config=skills_manager_config,
+        skills_catalog_prompt=skills_catalog_prompt,
+        protocols_prompt=protocols_prompt,
+        skill_dirs=skill_dirs,
     )
 
     for spec in entry_points:

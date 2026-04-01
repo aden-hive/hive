@@ -32,6 +32,7 @@ from framework.observability import set_trace_context
 from framework.runtime.core import Runtime
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
+from framework.utils.io import atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +152,11 @@ class GraphExecutor:
         dynamic_tools_provider: Callable | None = None,
         dynamic_prompt_provider: Callable | None = None,
         iteration_metadata_provider: Callable | None = None,
+        skills_catalog_prompt: str = "",
+        protocols_prompt: str = "",
+        skill_dirs: list[str] | None = None,
+        context_warn_ratio: float | None = None,
+        batch_init_nudge: str | None = None,
     ):
         """
         Initialize the executor.
@@ -176,6 +182,11 @@ class GraphExecutor:
                 tool list (for mode switching)
             dynamic_prompt_provider: Optional callback returning current
                 system prompt (for phase switching)
+            skills_catalog_prompt: Available skills catalog for system prompt
+            protocols_prompt: Default skill operational protocols for system prompt
+            skill_dirs: Skill base directories for Tier 3 resource access
+            context_warn_ratio: Token usage ratio to trigger DS-13 preservation warning
+            batch_init_nudge: System prompt nudge for DS-12 batch auto-detection
         """
         self.runtime = runtime
         self.llm = llm
@@ -197,6 +208,23 @@ class GraphExecutor:
         self.dynamic_tools_provider = dynamic_tools_provider
         self.dynamic_prompt_provider = dynamic_prompt_provider
         self.iteration_metadata_provider = iteration_metadata_provider
+        self.skills_catalog_prompt = skills_catalog_prompt
+        self.protocols_prompt = protocols_prompt
+        self.skill_dirs: list[str] = skill_dirs or []
+        self.context_warn_ratio: float | None = context_warn_ratio
+        self.batch_init_nudge: str | None = batch_init_nudge
+
+        if protocols_prompt:
+            self.logger.info(
+                "GraphExecutor[%s] received protocols_prompt (%d chars)",
+                stream_id,
+                len(protocols_prompt),
+            )
+        else:
+            self.logger.warning(
+                "GraphExecutor[%s] received EMPTY protocols_prompt",
+                stream_id,
+            )
 
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
@@ -226,11 +254,11 @@ class GraphExecutor:
         """
         if not self._storage_path:
             return
+        state_path = self._storage_path / "state.json"
         try:
             import json as _json
             from datetime import datetime
 
-            state_path = self._storage_path / "state.json"
             if state_path.exists():
                 state_data = _json.loads(state_path.read_text(encoding="utf-8"))
             else:
@@ -253,9 +281,14 @@ class GraphExecutor:
             state_data["memory"] = memory_snapshot
             state_data["memory_keys"] = list(memory_snapshot.keys())
 
-            state_path.write_text(_json.dumps(state_data, indent=2), encoding="utf-8")
+            with atomic_write(state_path, encoding="utf-8") as f:
+                _json.dump(state_data, f, indent=2)
         except Exception:
-            pass  # Best-effort — never block execution
+            logger.warning(
+                "Failed to persist progress state to %s",
+                state_path,
+                exc_info=True,
+            )
 
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
@@ -1396,6 +1429,7 @@ class GraphExecutor:
                     next_spec = graph.get_node(current_node_id)
                     if next_spec and next_spec.node_type == "event_loop":
                         from framework.graph.prompt_composer import (
+                            EXECUTION_SCOPE_PREAMBLE,
                             build_accounts_prompt,
                             build_narrative,
                             build_transition_marker,
@@ -1435,9 +1469,14 @@ class GraphExecutor:
                             )
 
                         # Compose new system prompt (Layer 1 + 2 + 3 + accounts)
+                        # Prepend scope preamble to focus so the LLM stays
+                        # within this node's responsibility.
+                        _focus = next_spec.system_prompt
+                        if next_spec.output_keys and _focus:
+                            _focus = f"{EXECUTION_SCOPE_PREAMBLE}\n\n{_focus}"
                         new_system = compose_system_prompt(
                             identity_prompt=getattr(graph, "identity_prompt", None),
-                            focus_prompt=next_spec.system_prompt,
+                            focus_prompt=_focus,
                             narrative=narrative,
                             accounts_prompt=_node_accounts,
                         )
@@ -1799,10 +1838,34 @@ class GraphExecutor:
             if node_spec.tools:
                 available_tools = [t for t in self.tools if t.name in node_spec.tools]
 
-        # Create scoped memory view
+        # Create scoped memory view.
+        # When permissions are restricted (non-empty key lists), auto-include
+        # _-prefixed keys used by default skill protocols so agents can read/write
+        # operational state (e.g. _working_notes, _batch_ledger) regardless of
+        # what the node declares.  When key lists are empty (unrestricted), leave
+        # unchanged — empty means "allow all".
+        read_keys = list(node_spec.input_keys)
+        write_keys = list(node_spec.output_keys)
+        # Only extend lists that were already restricted (non-empty).
+        # Empty means "allow all" — adding keys would accidentally
+        # activate the permission check and block legitimate reads/writes.
+        if read_keys or write_keys:
+            from framework.skills.defaults import SHARED_MEMORY_KEYS as _skill_keys
+
+            existing_underscore = [k for k in memory._data if k.startswith("_")]
+            extra_keys = set(_skill_keys) | set(existing_underscore)
+            # Only inject into read_keys when it was already non-empty — an empty
+            # read_keys means "allow all reads" and injecting skill keys would
+            # inadvertently restrict reads to skill keys only.
+            for k in extra_keys:
+                if read_keys and k not in read_keys:
+                    read_keys.append(k)
+                if write_keys and k not in write_keys:
+                    write_keys.append(k)
+
         scoped_memory = memory.with_permissions(
-            read_keys=node_spec.input_keys,
-            write_keys=node_spec.output_keys,
+            read_keys=read_keys,
+            write_keys=write_keys,
         )
 
         # Build per-node accounts prompt (filtered to this node's tools)
@@ -1846,6 +1909,11 @@ class GraphExecutor:
             dynamic_tools_provider=self.dynamic_tools_provider,
             dynamic_prompt_provider=self.dynamic_prompt_provider,
             iteration_metadata_provider=self.iteration_metadata_provider,
+            skills_catalog_prompt=self.skills_catalog_prompt,
+            protocols_prompt=self.protocols_prompt,
+            skill_dirs=self.skill_dirs,
+            default_skill_warn_ratio=self.context_warn_ratio,
+            default_skill_batch_nudge=self.batch_init_nudge,
         )
 
     VALID_NODE_TYPES = {

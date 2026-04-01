@@ -62,6 +62,7 @@ async def create_queen(
     from framework.agents.queen.nodes.thinking_hook import select_expert_persona
     from framework.graph.event_loop_node import HookContext, HookResult
     from framework.graph.executor import GraphExecutor
+    from framework.runner.mcp_registry import MCPRegistry
     from framework.runner.tool_registry import ToolRegistry
     from framework.runtime.core import Runtime
     from framework.runtime.event_bus import AgentEvent, EventType
@@ -69,6 +70,7 @@ async def create_queen(
         QueenPhaseState,
         register_queen_lifecycle_tools,
     )
+    from framework.tools.queen_memory_tools import register_queen_memory_tools
 
     hive_home = Path.home() / ".hive"
 
@@ -84,6 +86,23 @@ async def create_queen(
             logger.info("Queen: loaded MCP tools from %s", mcp_config)
         except Exception:
             logger.warning("Queen: MCP config failed to load", exc_info=True)
+
+    try:
+        registry = MCPRegistry()
+        registry.initialize()
+        if (queen_pkg_dir / "mcp_registry.json").is_file():
+            queen_registry.set_mcp_registry_agent_path(queen_pkg_dir)
+        registry_configs, selection_max_tools = registry.load_agent_selection(queen_pkg_dir)
+        if registry_configs:
+            results = queen_registry.load_registry_servers(
+                registry_configs,
+                preserve_existing_tools=True,
+                log_collisions=True,
+                max_tools=selection_max_tools,
+            )
+            logger.info("Queen: loaded MCP registry servers: %s", results)
+    except Exception:
+        logger.warning("Queen: MCP registry config failed to load", exc_info=True)
 
     # ---- Phase state --------------------------------------------------
     initial_phase = "staging" if worker_identity else "planning"
@@ -121,6 +140,9 @@ async def create_queen(
         manager_session_id=session.id,
         phase_state=phase_state,
     )
+
+    # ---- Episodic memory tools (always registered) ---------------------
+    register_queen_memory_tools(queen_registry)
 
     # ---- Monitoring tools (only when worker is loaded) ----------------
     if session.worker_runtime:
@@ -216,6 +238,22 @@ async def create_queen(
         + worker_identity
     )
 
+    # ---- Default skill protocols -------------------------------------
+    _queen_skill_dirs: list[str] = []
+    try:
+        from framework.skills.manager import SkillsManager, SkillsManagerConfig
+
+        # Pass project_root so user-scope skills (~/.hive/skills/, ~/.agents/skills/)
+        # are discovered. Queen has no agent-specific project root, so we use its
+        # own directory — the value just needs to be non-None to enable user-scope scanning.
+        _queen_skills_mgr = SkillsManager(SkillsManagerConfig(project_root=Path(__file__).parent))
+        _queen_skills_mgr.load()
+        phase_state.protocols_prompt = _queen_skills_mgr.protocols_prompt
+        phase_state.skills_catalog_prompt = _queen_skills_mgr.skills_catalog_prompt
+        _queen_skill_dirs = _queen_skills_mgr.allowlisted_dirs
+    except Exception:
+        logger.debug("Queen skill loading failed (non-fatal)", exc_info=True)
+
     # ---- Persona hook ------------------------------------------------
     _session_llm = session.llm
     _session_event_bus = session.event_bus
@@ -277,6 +315,7 @@ async def create_queen(
                 dynamic_tools_provider=phase_state.get_current_tools,
                 dynamic_prompt_provider=phase_state.get_current_prompt,
                 iteration_metadata_provider=lambda: {"phase": phase_state.phase},
+                skill_dirs=_queen_skill_dirs,
             )
             session.queen_executor = executor
 

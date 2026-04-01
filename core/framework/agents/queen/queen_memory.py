@@ -31,6 +31,11 @@ def _queen_dir() -> Path:
     return Path.home() / ".hive" / "queen"
 
 
+def format_memory_date(d: date) -> str:
+    """Return a cross-platform long date label without a zero-padded day."""
+    return f"{d.strftime('%B')} {d.day}, {d.year}"
+
+
 def semantic_memory_path() -> Path:
     return _queen_dir() / "MEMORY.md"
 
@@ -91,9 +96,9 @@ def format_for_injection() -> str:
             content = content[:_EPISODIC_CHAR_BUDGET] + "\n\n…(truncated)"
         today = date.today()
         if d == today:
-            label = f"## Today — {d.strftime('%B %-d, %Y')}"
+            label = f"## Today — {format_memory_date(d)}"
         else:
-            label = f"## {d.strftime('%B %-d, %Y')}"
+            label = f"## {format_memory_date(d)}"
         parts.append(f"{label}\n\n{content}")
 
     if not parts:
@@ -127,7 +132,7 @@ def append_episodic_entry(content: str) -> None:
     ep_path = episodic_memory_path()
     ep_path.parent.mkdir(parents=True, exist_ok=True)
     today = date.today()
-    today_str = f"{today.strftime('%B')} {today.day}, {today.year}"
+    today_str = format_memory_date(today)
     timestamp = datetime.now().strftime("%H:%M")
     if not ep_path.exists():
         header = f"# {today_str}\n\n"
@@ -226,7 +231,11 @@ def read_session_context(session_dir: Path, max_messages: int = 80) -> str:
                 elif content:
                     label = "user" if role == "user" else "queen"
                     lines.append(f"[{label}]: {content[:600]}")
+            except (KeyError, TypeError) as exc:
+                logger.debug("Skipping malformed conversation message: %s", exc)
+                continue
             except Exception:
+                logger.warning("Unexpected error parsing conversation message", exc_info=True)
                 continue
         if lines:
             parts.append("## Conversation\n\n" + "\n".join(lines))
@@ -327,7 +336,7 @@ async def consolidate_queen_memory(
         existing_semantic = read_semantic_memory()
         today_journal = read_episodic_memory()
         today = date.today()
-        today_str = f"{today.strftime('%B')} {today.day}, {today.year}"
+        today_str = format_memory_date(today)
         adapt_path = session_dir / "data" / "adapt.md"
 
         user_msg = (
@@ -395,5 +404,5 @@ async def consolidate_queen_memory(
                 f"session: {session_id}\ntime: {datetime.now().isoformat()}\n\n{tb}",
                 encoding="utf-8",
             )
-        except Exception:
-            pass
+        except OSError:
+            pass  # Cannot write error file; original exception already logged

@@ -8,11 +8,12 @@ This guide covers everything you need to know to develop with the Aden Agent Fra
 2. [Initial Setup](#initial-setup)
 3. [Project Structure](#project-structure)
 4. [Building Agents](#building-agents)
-5. [Testing Agents](#testing-agents)
-6. [Code Style & Conventions](#code-style--conventions)
-7. [Git Workflow](#git-workflow)
-8. [Common Tasks](#common-tasks)
-9. [Troubleshooting](#troubleshooting)
+5. [Running Agents](#running-agents)
+6. [Testing Agents](#testing-agents)
+7. [Code Style & Conventions](#code-style--conventions)
+8. [Git Workflow](#git-workflow)
+9. [Common Tasks](#common-tasks)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -40,114 +41,22 @@ Aden Agent Framework is a Python-based system for building goal-driven, self-imp
 
 ## Initial Setup
 
-### Prerequisites
+See [environment-setup.md](./environment-setup.md) for the full setup guide, including Windows, Alpine Linux, and troubleshooting.
 
-Ensure you have installed:
-
-- **Python 3.11+** - [Download](https://www.python.org/downloads/) (3.12 or 3.13 recommended)
-- **uv** - Python package manager ([Install](https://docs.astral.sh/uv/getting-started/installation/))
-- **git** - Version control
-- **Claude Code** - [Install](https://docs.anthropic.com/claude/docs/claude-code) (optional)
-- **Codex CLI** - [Install](https://github.com/openai/codex) (optional)
-
-Verify installation:
+### Quick Start
 
 ```bash
-python --version    # Should be 3.11+
-uv --version        # Should be latest
-git --version       # Any recent version
-```
-
-### Step-by-Step Setup
-
-```bash
-# 1. Clone the repository
 git clone https://github.com/adenhq/hive.git
 cd hive
-
-# 2. Run automated setup
 ./quickstart.sh
 ```
-
-The setup script performs these actions:
-
-1. Checks Python version (3.11+)
-2. Installs `framework` package from `/core` (editable mode)
-3. Installs `aden_tools` package from `/tools` (editable mode)
-4. Fixes package compatibility (upgrades openai for litellm)
-5. Verifies all installations
-
-### API Keys (Optional)
-
-For running agents with real LLMs:
-
-```bash
-# Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
-export ANTHROPIC_API_KEY="your-key-here"
-export OPENAI_API_KEY="your-key-here"        # Optional
-export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search tool
-```
-
-Get API keys:
-
-- **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
-- **OpenAI**: [platform.openai.com](https://platform.openai.com/)
-- **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
-
-### Install Claude Code Skills
-
-```bash
-# Install building-agents and testing-agent skills
-./quickstart.sh
-```
-
-This sets up the MCP tools and workflows for building agents.
-
-### Cursor IDE Support
-
-MCP tools are also available in Cursor. To enable:
-
-1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
-2. Run `MCP: Enable` to enable MCP servers
-3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
-4. Open Agent chat and verify MCP tools are available
-
-### Codex CLI Support
-
-Hive supports [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
-
-Configuration files are tracked in git:
-- `.codex/config.toml` — MCP server config
-
-To use Codex with Hive:
-1. Run `codex` in the repo root
-2. Start the configured MCP-assisted workflow
-
-Example:
-```
-Start Codex in the repo root and use the configured MCP tools
-```
-
-
-### Opencode Support
-To enable Opencode integration:
-
-1. Create/Ensure `.opencode/` directory exists
-2. Configure MCP servers in `.opencode/mcp.json`
-3. Restart Opencode to load the MCP servers
-4. Switch to the Hive agent
-* **Tools:** Accesses `coder-tools` and standard `tools` via standard MCP protocols over stdio.
 
 ### Verify Setup
 
 ```bash
-# Verify package imports
-uv run python -c "import framework; print('✓ framework OK')"
-uv run python -c "import aden_tools; print('✓ aden_tools OK')"
-uv run python -c "import litellm; print('✓ litellm OK')"
-
-# Run an agent (after building one with coder-tools)
-PYTHONPATH=exports uv run python -m your_agent_name validate
+uv run python -c "import framework; print('OK')"
+uv run python -c "import aden_tools; print('OK')"
+uv run python -c "import litellm; print('OK')"
 ```
 
 ---
@@ -174,23 +83,29 @@ hive/                                    # Repository root
 │
 ├── core/                                # CORE FRAMEWORK PACKAGE
 │   ├── framework/                       # Main package code
+│   │   ├── agents/                      # Agent definitions and helpers
 │   │   ├── builder/                     # Agent builder utilities
 │   │   ├── credentials/                 # Credential management
+│   │   ├── debugger/                    # Debugging tools
 │   │   ├── graph/                       # GraphExecutor - executes node graphs
-│   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, etc.)
+│   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, OpenRouter, Hive, etc.)
 │   │   ├── mcp/                         # MCP server integration
+│   │   ├── monitoring/                  # Runtime monitoring
+│   │   ├── observability/               # Structured logging - human-readable and machine-parseable tracing
 │   │   ├── runner/                      # AgentRunner - loads and runs agents
-|   |   ├── observability/               # Structured logging - human-readable and machine-parseable tracing
 │   │   ├── runtime/                     # Runtime environment
 │   │   ├── schemas/                     # Data schemas
+│   │   ├── server/                      # HTTP API server
+│   │   ├── skills/                      # Skill definitions
 │   │   ├── storage/                     # File-based persistence
 │   │   ├── testing/                     # Testing utilities
+│   │   ├── tools/                       # Built-in tool implementations
 │   │   ├── tui/                         # Terminal UI dashboard
-│   │   └── __init__.py
+│   │   └── utils/                       # Shared utilities
+│   ├── tests/                           # Unit and E2E tests (including dummy agents)
 │   ├── pyproject.toml                   # Package metadata and dependencies
 │   ├── README.md                        # Framework documentation
-│   ├── MCP_INTEGRATION_GUIDE.md         # MCP server integration guide
-│   └── docs/                            # Protocol documentation
+│   └── MCP_INTEGRATION_GUIDE.md         # MCP server integration guide
 │
 ├── tools/                               # TOOLS PACKAGE (MCP tools)
 │   ├── src/
@@ -283,37 +198,52 @@ Use the coder-tools MCP tools from your IDE agent chat (e.g., initialize_and_bui
 
 If you prefer to build agents manually:
 
-```python
-# exports/my_agent/agent.json
+```jsonc
+// exports/my_agent/agent.json
 {
-  "goal": {
+  "agent": {
+    "id": "my_agent",
+    "name": "Support Ticket Handler",
+    "version": "1.0.0",
+    "description": "Process customer support tickets"
+  },
+  "graph": {
+    "id": "my_agent-graph",
     "goal_id": "support_ticket",
+    "entry_node": "analyze",
+    "terminal_nodes": ["analyze"],
+    "nodes": [
+      {
+        "id": "analyze",
+        "name": "Analyze Ticket",
+        "description": "Categorize and prioritize the support ticket",
+        "node_type": "event_loop",
+        "system_prompt": "Analyze this support ticket...",
+        "input_keys": ["ticket_content"],
+        "output_keys": ["category", "priority"]
+      }
+    ],
+    "edges": []
+  },
+  "goal": {
+    "id": "support_ticket",
     "name": "Support Ticket Handler",
     "description": "Process customer support tickets",
-    "success_criteria": "Ticket is categorized, prioritized, and routed correctly"
-  },
-  "nodes": [
-    {
-      "node_id": "analyze",
-      "name": "Analyze Ticket",
-      "node_type": "event_loop",
-      "system_prompt": "Analyze this support ticket...",
-      "input_keys": ["ticket_content"],
-      "output_keys": ["category", "priority"]
-    }
-  ],
-  "edges": [
-    {
-      "edge_id": "start_to_analyze",
-      "source": "START",
-      "target": "analyze",
-      "condition": "on_success"
-    }
-  ]
+    "success_criteria": [
+      {
+        "id": "sc-categorized",
+        "description": "Ticket is categorized and prioritized correctly"
+      }
+    ]
+  }
 }
 ```
 
-### Running Agents
+---
+
+## Running Agents
+
+### Using the `hive` CLI
 
 ```bash
 # Browse and run agents interactively (Recommended)
@@ -324,32 +254,34 @@ hive run exports/my_agent --input '{"ticket_content": "My login is broken", "cus
 
 # Run with TUI dashboard
 hive run exports/my_agent --tui
-
 ```
 
-> **Using Python directly:** `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
+### CLI Command Reference
+
+| Command                | Description                                                             |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `hive tui`             | Browse agents and launch TUI dashboard                                  |
+| `hive run <path>`      | Execute an agent (`--tui`, `--model`, `--mock`, `--quiet`, `--verbose`) |
+| `hive shell [path]`    | Interactive REPL (`--multi`, `--no-approve`)                            |
+| `hive info <path>`     | Show agent details                                                      |
+| `hive validate <path>` | Validate agent structure                                                |
+| `hive list [dir]`      | List available agents                                                   |
+| `hive dispatch [dir]`  | Multi-agent orchestration                                               |
+
+### Using Python Directly
+
+```bash
+PYTHONPATH=exports uv run python -m agent_name run --input '{...}'
+```
 
 ---
 
 ## Testing Agents
 
-### Using Built-in Test Commands
+### Agent Tests
 
 ```bash
 # Run tests for an agent
-PYTHONPATH=exports uv run python -m agent_name test
-```
-
-This generates and runs:
-
-- **Constraint tests** - Verify agent respects constraints
-- **Success tests** - Verify agent achieves success criteria
-- **Integration tests** - End-to-end workflows
-
-### Manual Testing
-
-```bash
-# Run all tests for an agent
 PYTHONPATH=exports uv run python -m agent_name test
 
 # Run specific test type
@@ -362,6 +294,32 @@ PYTHONPATH=exports uv run python -m agent_name test --parallel 4
 # Fail fast (stop on first failure)
 PYTHONPATH=exports uv run python -m agent_name test --fail-fast
 ```
+
+### Framework Tests
+
+```bash
+# Run all unit tests (core + tools)
+make test
+
+# Run linting and format checks
+make check
+```
+
+### Dummy Agent Tests (E2E)
+
+The repository includes end-to-end dummy agent tests under `core/tests/dummy_agents/` that run real LLM calls against deterministic graph structures. These are **not** part of CI — run them manually to verify the executor works with real providers.
+
+```bash
+cd core && uv run python tests/dummy_agents/run_all.py
+```
+
+The script detects available LLM credentials and prompts you to pick a provider. For verbose output:
+
+```bash
+cd core && uv run python tests/dummy_agents/run_all.py --verbose
+```
+
+See [environment-setup.md](./environment-setup.md#testing-with-dummy-agents) for the full list of covered agents and details.
 
 ### Writing Custom Tests
 
@@ -535,8 +493,6 @@ chore(deps): update React to 18.2.0
 
 ---
 
----
-
 ## Common Tasks
 
 ### Adding Python Dependencies
@@ -587,16 +543,17 @@ def my_custom_tool(param1: str, param2: int) -> Dict[str, Any]:
     # Implementation
     return {"result": "success", "data": ...}
 
-# Register tool in agent.json
+# Register tool in agent.json (inside "graph" → "nodes")
 {
-  "nodes": [
-    {
-      "node_id": "use_tool",
-      "node_type": "event_loop",
-      "tools": ["my_custom_tool"],
-      ...
-    }
-  ]
+  "graph": {
+    "nodes": [
+      {
+        "id": "use_tool",
+        "node_type": "event_loop",
+        "tools": ["my_custom_tool"]
+      }
+    ]
+  }
 }
 ```
 
@@ -615,15 +572,16 @@ def my_custom_tool(param1: str, param2: int) -> Dict[str, Any]:
   }
 }
 
-# 2. Reference tools in agent.json
+# 2. Reference tools in agent.json (inside "graph" → "nodes")
 {
-  "nodes": [
-    {
-      "node_id": "search",
-      "tools": ["web_search", "web_scrape"],
-      ...
-    }
-  ]
+  "graph": {
+    "nodes": [
+      {
+        "id": "search",
+        "tools": ["web_search", "web_scrape"]
+      }
+    ]
+  }
 }
 ```
 
@@ -633,6 +591,8 @@ def my_custom_tool(param1: str, param2: int) -> Dict[str, Any]:
 # Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
 export ANTHROPIC_API_KEY="your-key-here"
 export OPENAI_API_KEY="your-key-here"
+export OPENROUTER_API_KEY="your-key-here"
+export HIVE_API_KEY="your-key-here"
 export BRAVE_SEARCH_API_KEY="your-key-here"
 
 # Or create .env file (not committed to git)
@@ -651,30 +611,7 @@ hive run exports/my_agent --verbose --input '{"task": "..."}'
 
 ## Troubleshooting
 
-### Port Already in Use
-
-```bash
-# Find process using port
-lsof -i :3000
-lsof -i :4000
-
-# Kill process
-kill -9 <PID>
-
-```
-
-### Environment Variables Not Loading
-
-```bash
-# Verify .env file exists at project root
-cat .env
-
-# Or check shell environment
-echo $ANTHROPIC_API_KEY
-
-# Create .env if needed
-# Then add your API keys
-```
+See [environment-setup.md](./environment-setup.md#troubleshooting) for common setup issues (module not found errors, broken installations, PEP 668, etc.).
 
 ---
 
@@ -684,7 +621,3 @@ echo $ANTHROPIC_API_KEY
 - **Issues**: Search [existing issues](https://github.com/adenhq/hive/issues)
 - **Discord**: Join our [community](https://discord.com/invite/MXE49hrKDk)
 - **Code Review**: Tag a maintainer on your PR
-
----
-
-_Happy coding!_ 🐝

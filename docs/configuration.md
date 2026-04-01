@@ -41,6 +41,12 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # OpenAI (optional, for GPT models via LiteLLM)
 export OPENAI_API_KEY="sk-..."
 
+# OpenRouter (optional, for OpenRouter-hosted models)
+export OPENROUTER_API_KEY="..."
+
+# Hive LLM (optional, for Hive-managed models)
+export HIVE_API_KEY="..."
+
 # Cerebras (optional, used by output cleaner and some nodes)
 export CEREBRAS_API_KEY="..."
 
@@ -49,6 +55,68 @@ export GROQ_API_KEY="..."
 ```
 
 The framework supports 100+ LLM providers through [LiteLLM](https://docs.litellm.ai/docs/providers). Set the corresponding environment variable for your provider.
+
+### Provider Examples
+
+Native Supported Providers (DeepSeek, Mistral, Together AI, xAI, Perplexity):
+
+```json
+{
+  "llm": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "max_tokens": 8192,
+    "api_key_env_var": "DEEPSEEK_API_KEY"
+  }
+}
+```
+
+Notes:
+
+- Set `provider` to `deepseek` (or `mistral`, `together`, `xai`, `perplexity`)
+- Use the standard model name in `model`, for example `deepseek-chat`
+- **No `api_base` is required** for these natively supported providers
+
+OpenRouter:
+
+```json
+{
+  "llm": {
+    "provider": "openrouter",
+    "model": "x-ai/grok-4.20-beta",
+    "max_tokens": 8192,
+    "api_key_env_var": "OPENROUTER_API_KEY",
+    "api_base": "https://openrouter.ai/api/v1"
+  }
+}
+```
+
+Notes:
+
+- Set `provider` to `openrouter`
+- Use the raw OpenRouter model ID in `model`, for example `x-ai/grok-4.20-beta`
+- `api_base` should be `https://openrouter.ai/api/v1`
+- If you paste a model that already starts with `openrouter/`, Hive tolerates and normalizes it
+
+Hive LLM:
+
+```json
+{
+  "llm": {
+    "provider": "hive",
+    "model": "queen",
+    "max_tokens": 32768,
+    "api_key_env_var": "HIVE_API_KEY",
+    "api_base": "https://api.adenhq.com"
+  }
+}
+```
+
+Notes:
+
+- Set `provider` to `hive`
+- Common Hive model values are `queen`, `kimi-2.5`, and `GLM-5`
+- Hive LLM requests use the Hive endpoint at `https://api.adenhq.com`
 
 ### Search & Tools (optional)
 
@@ -191,13 +259,16 @@ cd core && uv pip install -e .
 Ensure the environment variable is set in your current shell session:
 
 ```bash
-echo $ANTHROPIC_API_KEY  # Should print your key
+echo $ANTHROPIC_API_KEY  # Or echo $OPENROUTER_API_KEY / echo $HIVE_API_KEY
 ```
 
 On Windows PowerShell:
 
 ```powershell
 $env:ANTHROPIC_API_KEY = "sk-ant-..."
+# Or:
+$env:OPENROUTER_API_KEY = "your-openrouter-key"
+$env:HIVE_API_KEY = "your-hive-key"
 ```
 
 ### Agent not found

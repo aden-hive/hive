@@ -64,10 +64,14 @@ export const sessionsApi = {
       `/sessions/${sessionId}/entry-points`,
     ),
 
-  updateTriggerTask: (sessionId: string, triggerId: string, task: string) =>
-    api.patch<{ trigger_id: string; task: string }>(
+  updateTrigger: (
+    sessionId: string,
+    triggerId: string,
+    patch: { task?: string; trigger_config?: Record<string, unknown> },
+  ) =>
+    api.patch<{ trigger_id: string; task: string; trigger_config: Record<string, unknown> }>(
       `/sessions/${sessionId}/triggers/${triggerId}`,
-      { task },
+      patch,
     ),
 
   graphs: (sessionId: string) =>
@@ -76,6 +80,10 @@ export const sessionsApi = {
   /** Get persisted eventbus log for a session (works for cold sessions — used for full UI replay). */
   eventsHistory: (sessionId: string) =>
     api.get<{ events: AgentEvent[]; session_id: string }>(`/sessions/${sessionId}/events/history`),
+
+  /** Open the session's data folder in the OS file manager. */
+  revealFolder: (sessionId: string) =>
+    api.post<{ path: string }>(`/sessions/${sessionId}/reveal`),
 
   /** List all queen sessions on disk — live + cold (post-restart). */
   history: () =>
