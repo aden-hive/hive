@@ -214,7 +214,7 @@ def test_load_registry_servers_retries_when_registration_returns_zero(monkeypatc
     registry = ToolRegistry()
     attempts = {"count": 0}
 
-    def fake_register(server_config, use_connection_manager=True):
+    def fake_register(server_config, use_connection_manager=True, **kwargs):
         attempts["count"] += 1
         return 0 if attempts["count"] == 1 else 2
 

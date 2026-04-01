@@ -584,11 +584,19 @@ class CredentialTesterAgent:
             self._tool_registry.load_mcp_config(mcp_config_path)
 
         try:
+            agent_dir = Path(__file__).parent
             registry = MCPRegistry()
             registry.initialize()
-            registry_configs = registry.load_agent_selection(Path(__file__).parent)
+            if (agent_dir / "mcp_registry.json").is_file():
+                self._tool_registry.set_mcp_registry_agent_path(agent_dir)
+            registry_configs, selection_max_tools = registry.load_agent_selection(agent_dir)
             if registry_configs:
-                self._tool_registry.load_registry_servers(registry_configs)
+                self._tool_registry.load_registry_servers(
+                    registry_configs,
+                    preserve_existing_tools=True,
+                    log_collisions=True,
+                    max_tools=selection_max_tools,
+                )
         except Exception:
             logger.warning("MCP registry config failed to load", exc_info=True)
 
