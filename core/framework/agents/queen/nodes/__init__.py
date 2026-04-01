@@ -62,12 +62,6 @@ _SHARED_TOOLS = [
     "get_agent_checkpoint",
 ]
 
-# Episodic memory tools — available in every queen phase.
-_QUEEN_MEMORY_TOOLS = [
-    "write_to_diary",
-    "recall_diary",
-]
-
 # Queen phase-specific tool sets.
 
 # Planning phase: read-only exploration + design, no write tools.
@@ -90,7 +84,7 @@ _QUEEN_PLANNING_TOOLS = [
     "initialize_and_build_agent",
     # Load existing agent (after user confirms)
     "load_built_agent",
-] + _QUEEN_MEMORY_TOOLS
+]
 
 # Building phase: full coding + agent construction tools.
 _QUEEN_BUILDING_TOOLS = (
@@ -101,7 +95,6 @@ _QUEEN_BUILDING_TOOLS = (
         "replan_agent",
         "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
     ]
-    + _QUEEN_MEMORY_TOOLS
 )
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
@@ -118,12 +111,11 @@ _QUEEN_STAGING_TOOLS = [
     "run_agent_with_input",
     "stop_worker_and_edit",
     "stop_worker_and_plan",
-    "write_to_diary",  # Episodic memory — available in all phases
     # Trigger management
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-] + _QUEEN_MEMORY_TOOLS
+]
 
 # Running phase: worker is executing — monitor and control.
 _QUEEN_RUNNING_TOOLS = [
@@ -147,8 +139,7 @@ _QUEEN_RUNNING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-    "write_to_diary",  # Episodic memory — available in all phases
-] + _QUEEN_MEMORY_TOOLS
+]
 
 
 # ---------------------------------------------------------------------------
@@ -849,21 +840,19 @@ diagnosis mode — you already have a built agent, you just need to fix it.
 _queen_memory_instructions = """
 ## Your Cross-Session Memory
 
-Your cross-session memory appears in context under \
-"--- Your Cross-Session Memory ---". \
-Read it at the start of each conversation. If you know this person from past \
-sessions, pick up where you left off — reference what you built together, \
-what they care about, how things went.
+Relevant memories from past sessions may appear in context under \
+"--- Selected Memories ---".  These are automatically selected based on the \
+user's current query.  If you know this person from past sessions, pick up \
+where you left off — reference what you built together, what they care about, \
+how things went.
 
-You keep a diary. Use write_to_diary() when something worth remembering \
-happens: a pipeline went live, the user shared something important, a goal \
-was reached or abandoned. Write in first person, as you actually experienced \
-it. One or two paragraphs is enough.
+Memories older than 1 day include a staleness warning. Treat these as \
+point-in-time observations — verify against current code before asserting \
+as fact.
 
-Use recall_diary() to look up past diary entries when the user asks about \
-previous sessions ("what happened yesterday?", "what did we work on last \
-week?") or when you need past context to make a decision. You can filter by \
-keyword and control how far back to search.
+You do NOT need to manually save or recall memories.  A background \
+reflection agent automatically extracts learnings from each conversation \
+turn and organises them into persistent memory files.
 """
 
 _queen_behavior_always = _queen_behavior_always + _queen_memory_instructions

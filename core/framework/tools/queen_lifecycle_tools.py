@@ -121,6 +121,9 @@ class QueenPhaseState:
     # Community skills catalog (XML) — appended after protocols
     skills_catalog_prompt: str = ""
 
+    # Cached recall block — populated async by recall_selector after each turn.
+    _cached_recall_block: str = ""
+
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
         if self.phase == "planning":
@@ -142,9 +145,7 @@ class QueenPhaseState:
         else:
             base = self.prompt_building
 
-        from framework.agents.queen.queen_memory import format_for_injection
-
-        memory = format_for_injection()
+        memory = self._cached_recall_block
         parts = [base]
         if self.skills_catalog_prompt:
             parts.append(self.skills_catalog_prompt)

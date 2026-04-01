@@ -70,8 +70,6 @@ async def create_queen(
         QueenPhaseState,
         register_queen_lifecycle_tools,
     )
-    from framework.tools.queen_memory_tools import register_queen_memory_tools
-
     hive_home = Path.home() / ".hive"
 
     # ---- Tool registry ------------------------------------------------
@@ -141,9 +139,6 @@ async def create_queen(
         phase_state=phase_state,
     )
 
-    # ---- Episodic memory tools (always registered) ---------------------
-    register_queen_memory_tools(queen_registry)
-
     # ---- Monitoring tools (only when worker is loaded) ----------------
     if session.worker_runtime:
         from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
@@ -183,9 +178,9 @@ async def create_queen(
     phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
     # ---- Cross-session memory ----------------------------------------
-    from framework.agents.queen.queen_memory import seed_if_missing
+    from framework.agents.queen.queen_memory_v2 import init_memory_dir
 
-    seed_if_missing()
+    init_memory_dir()
 
     # ---- Compose phase-specific prompts ------------------------------
     _orig_node = _queen_graph.nodes[0]
@@ -369,6 +364,30 @@ async def create_queen(
                 handler=_on_worker_done,
             )
             session_manager._subscribe_worker_handoffs(session, executor)
+
+            # ---- Reflection + recall memory subscriptions ----------------
+            from framework.agents.queen.recall_selector import update_recall_cache
+            from framework.agents.queen.reflection_agent import subscribe_reflection_triggers
+
+            _reflection_subs = await subscribe_reflection_triggers(
+                session.event_bus, queen_dir, session.llm,
+            )
+
+            async def _on_turn_complete_recall(event):
+                if getattr(event, "stream_id", None) != "queen":
+                    return
+                try:
+                    await update_recall_cache(queen_dir, session.llm, phase_state)
+                except Exception:
+                    logger.debug("recall: cache update failed", exc_info=True)
+
+            _recall_sub = session.event_bus.subscribe(
+                event_types=[EventType.LLM_TURN_COMPLETE],
+                handler=_on_turn_complete_recall,
+            )
+
+            # Store sub IDs on session for teardown.
+            session.memory_reflection_subs = _reflection_subs + [_recall_sub]
 
             logger.info(
                 "Queen starting in %s phase with %d tools: %s",

@@ -45,8 +45,8 @@ class Session:
     phase_state: Any = None  # QueenPhaseState
     # Worker handoff subscription
     worker_handoff_sub: str | None = None
-    # Memory consolidation subscription (fires on CONTEXT_COMPACTED)
-    memory_consolidation_sub: str | None = None
+    # Memory reflection + recall subscriptions
+    memory_reflection_subs: list = field(default_factory=list)  # list[str]
     # Worker run digest subscription (fires on EXECUTION_COMPLETED / EXECUTION_FAILED)
     worker_digest_sub: str | None = None
     # Trigger definitions loaded from agent's triggers.json (available but inactive)
@@ -675,13 +675,13 @@ class SessionManager:
                 pass
             session.worker_digest_sub = None
 
-        # Stop queen and memory consolidation subscription
-        if session.memory_consolidation_sub is not None:
+        # Stop queen and memory reflection/recall subscriptions
+        for sub_id in session.memory_reflection_subs:
             try:
-                session.event_bus.unsubscribe(session.memory_consolidation_sub)
+                session.event_bus.unsubscribe(sub_id)
             except Exception:
                 pass
-            session.memory_consolidation_sub = None
+        session.memory_reflection_subs.clear()
         if session.queen_task is not None:
             session.queen_task.cancel()
             session.queen_task = None
@@ -713,15 +713,15 @@ class SessionManager:
             except Exception as e:
                 logger.error("Error cleaning up worker: %s", e)
 
-        # Final memory consolidation — fire-and-forget so teardown isn't blocked.
-        if _llm is not None and _session_dir.exists():
+        # Final long reflection — fire-and-forget so teardown isn't blocked.
+        if _llm is not None:
             import asyncio
 
-            from framework.agents.queen.queen_memory import consolidate_queen_memory
+            from framework.agents.queen.reflection_agent import run_long_reflection
 
             asyncio.create_task(
-                consolidate_queen_memory(session_id, _session_dir, _llm),
-                name=f"queen-memory-consolidation-{session_id}",
+                run_long_reflection(_llm),
+                name=f"queen-memory-long-reflection-{session_id}",
             )
 
         # Close per-session event log
@@ -1041,31 +1041,9 @@ class SessionManager:
                 except Exception:
                     logger.warning("Cold restore: failed to auto-load worker", exc_info=True)
 
-        # Memory consolidation — triggered by context compaction events.
-        # Compaction is a natural signal that "enough has happened to be worth remembering".
-        _consolidation_llm = session.llm
-        _consolidation_session_dir = queen_dir
-
-        async def _on_compaction(_event) -> None:
-            # Only consolidate on queen compactions — worker and subagent
-            # compactions are frequent and don't warrant a memory update.
-            if getattr(_event, "stream_id", None) != "queen":
-                return
-            from framework.agents.queen.queen_memory import consolidate_queen_memory
-
-            asyncio.create_task(
-                consolidate_queen_memory(
-                    session.id, _consolidation_session_dir, _consolidation_llm
-                ),
-                name=f"queen-memory-consolidation-{session.id}",
-            )
-
-        from framework.runtime.event_bus import EventType as _ET
-
-        session.memory_consolidation_sub = session.event_bus.subscribe(
-            event_types=[_ET.CONTEXT_COMPACTED],
-            handler=_on_compaction,
-        )
+        # Memory reflection/recall subscriptions are set up inside
+        # queen_orchestrator.create_queen() → _queen_loop() and stored
+        # on session.memory_reflection_subs for teardown.
 
     # ------------------------------------------------------------------
     # Queen notifications
