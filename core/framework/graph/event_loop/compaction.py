@@ -587,9 +587,7 @@ def build_emergency_summary(
 
             data_dir = Path(spillover_dir)
             if data_dir.is_dir():
-                all_files = sorted(
-                    f.name for f in data_dir.iterdir() if f.is_file()
-                )
+                all_files = sorted(f.name for f in data_dir.iterdir() if f.is_file())
                 # Separate conversation history files from regular data files
                 conv_files = [f for f in all_files if re.match(r"conversation_\d+\.md$", f)]
                 data_files = [f for f in all_files if f not in conv_files]
