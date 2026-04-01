@@ -558,6 +558,17 @@ class LiteLLMProvider(LLMProvider):
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
 
+        # The Codex ChatGPT backend is a Responses API endpoint at
+        # chatgpt.com/backend-api/codex/responses.  LiteLLM's model registry
+        # marks legacy codex models (gpt-5.3-codex) with mode="responses",
+        # but newer models like gpt-5.4 default to mode="chat".  Force
+        # mode="responses" so litellm routes through the responses_api_bridge.
+        if self._codex_backend and litellm is not None:
+            _strip = self.model.removeprefix("openai/")
+            _entry = litellm.model_cost.get(_strip, {})
+            if _entry.get("mode") != "responses":
+                litellm.model_cost.setdefault(_strip, {})
+                litellm.model_cost[_strip]["mode"] = "responses"
     @staticmethod
     def _default_api_base_for_model(model: str) -> str | None:
         """Return provider-specific default API base when required."""
