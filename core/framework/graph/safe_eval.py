@@ -17,9 +17,7 @@ DEFAULT_TIMEOUT_MS = 100
 
 def _safe_pow(base: Any, exp: Any) -> Any:
     if isinstance(exp, (int, float)) and abs(exp) > MAX_POWER_ABS_EXPONENT:
-        raise ValueError(
-            f"Power exponent exceeds safe limit ({MAX_POWER_ABS_EXPONENT})"
-        )
+        raise ValueError(f"Power exponent exceeds safe limit ({MAX_POWER_ABS_EXPONENT})")
 
     if isinstance(base, int) and isinstance(exp, int) and exp > 0:
         abs_base = abs(base)
