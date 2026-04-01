@@ -1306,9 +1306,9 @@ case $choice in
         if [ "$CODEX_CRED_DETECTED" = true ]; then
             SUBSCRIPTION_MODE="codex"
             SELECTED_PROVIDER_ID="openai"
-            SELECTED_MODEL="gpt-5.3-codex"
-            SELECTED_MAX_TOKENS=16384
-            SELECTED_MAX_CONTEXT_TOKENS=120000  # GPT Codex — 128k context window
+            SELECTED_MODEL="gpt-5.4"
+            SELECTED_MAX_TOKENS=128000
+            SELECTED_MAX_CONTEXT_TOKENS=900000  # GPT-5.4 — 1.05M context window
             echo ""
             echo -e "${GREEN}⬢${NC} Using OpenAI Codex subscription"
         fi

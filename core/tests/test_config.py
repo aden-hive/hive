@@ -83,7 +83,7 @@ class TestCodexConfig:
     def test_get_api_base_uses_shared_codex_backend(self, tmp_path, monkeypatch):
         config_file = tmp_path / "configuration.json"
         config_file.write_text(
-            '{"llm":{"provider":"openai","model":"gpt-5.3-codex","use_codex_subscription":true}}',
+            '{"llm":{"provider":"openai","model":"gpt-5.4","use_codex_subscription":true}}',
             encoding="utf-8",
         )
         monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
@@ -93,7 +93,7 @@ class TestCodexConfig:
     def test_get_llm_extra_kwargs_uses_shared_codex_transport(self, tmp_path, monkeypatch):
         config_file = tmp_path / "configuration.json"
         config_file.write_text(
-            '{"llm":{"provider":"openai","model":"gpt-5.3-codex","use_codex_subscription":true}}',
+            '{"llm":{"provider":"openai","model":"gpt-5.4","use_codex_subscription":true}}',
             encoding="utf-8",
         )
         monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)

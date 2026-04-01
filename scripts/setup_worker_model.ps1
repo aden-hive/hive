@@ -561,9 +561,9 @@ switch ($num) {
         if ($CodexCredDetected) {
             $SubscriptionMode        = "codex"
             $SelectedProviderId      = "openai"
-            $SelectedModel           = "gpt-5.3-codex"
-            $SelectedMaxTokens       = 16384
-            $SelectedMaxContextTokens = 120000
+            $SelectedModel           = "gpt-5.4"
+            $SelectedMaxTokens       = 128000
+            $SelectedMaxContextTokens = 900000
             Write-Host ""
             Write-Ok "Using OpenAI Codex subscription"
         }
