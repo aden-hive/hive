@@ -719,7 +719,7 @@ def test_load_mcp_config_list_format(tmp_path, monkeypatch):
 
     called_with = []
 
-    def fake_load_registry(server_list, log_summary=True):
+    def fake_load_registry(server_list, **kwargs):
         called_with.extend(server_list)
         return []
 
@@ -738,7 +738,7 @@ def test_load_mcp_config_dict_format(tmp_path, monkeypatch):
 
     called_with = []
 
-    def fake_load_registry(server_list, log_summary=True):
+    def fake_load_registry(server_list, **kwargs):
         called_with.extend(server_list)
         return []
 
