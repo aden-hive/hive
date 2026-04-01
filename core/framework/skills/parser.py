@@ -211,6 +211,15 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
             fix=f"Rename the directory to '{name}' or set name to '{parent_dir_name}'.",
         )
 
+    # Coerce compatibility / allowed-tools to list[str] — many SKILL.md files
+    # in the wild use a plain string instead of a YAML list.
+    raw_compat = frontmatter.get("compatibility")
+    if isinstance(raw_compat, str):
+        raw_compat = [raw_compat]
+    raw_tools = frontmatter.get("allowed-tools")
+    if isinstance(raw_tools, str):
+        raw_tools = [raw_tools]
+
     return ParsedSkill(
         name=name,
         description=str(description).strip(),
@@ -219,7 +228,7 @@ def parse_skill_md(path: Path, source_scope: str = "project") -> ParsedSkill | N
         source_scope=source_scope,
         body=body,
         license=frontmatter.get("license"),
-        compatibility=frontmatter.get("compatibility"),
+        compatibility=raw_compat,
         metadata=frontmatter.get("metadata"),
-        allowed_tools=frontmatter.get("allowed-tools"),
+        allowed_tools=raw_tools,
     )
