@@ -5,7 +5,10 @@ One test per strict check — happy path plus each individual failure mode.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+import pytest
 
 from framework.skills.validator import validate_strict
 
@@ -272,6 +275,7 @@ license: MIT
 
 
 class TestCheck11Scripts:
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no POSIX executable bits")
     def test_error_on_non_executable_script(self, tmp_path):
         path = _write_skill(tmp_path, _VALID_CONTENT)
         scripts_dir = path.parent / "scripts"
@@ -285,6 +289,7 @@ class TestCheck11Scripts:
         assert result.passed is False
         assert any("executable" in e.lower() for e in result.errors)
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no POSIX executable bits")
     def test_passes_with_executable_script(self, tmp_path):
         path = _write_skill(tmp_path, _VALID_CONTENT)
         scripts_dir = path.parent / "scripts"
