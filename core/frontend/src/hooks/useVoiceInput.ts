@@ -36,6 +36,7 @@ declare global {
 
 interface UseVoiceInputOptions {
   onResult: (transcript: string) => void;
+  onInterim?: (transcript: string) => void;
   onError?: (error: string) => void;
 }
 
@@ -47,7 +48,7 @@ interface UseVoiceInputReturn {
   error: string | null;
 }
 
-export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseVoiceInputReturn {
+export function useVoiceInput({ onResult, onInterim, onError }: UseVoiceInputOptions): UseVoiceInputReturn {
   const [isListening, setIsListening] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +56,15 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
   const hasReceivedSpeech = useRef(false);
   const isStartingRef = useRef(false);
   const hasStartedRef = useRef(false);
+  const onResultRef = useRef(onResult);
+  const onInterimRef = useRef(onInterim);
+  const onErrorRef = useRef(onError);
+
+  useEffect(() => {
+    onResultRef.current = onResult;
+    onInterimRef.current = onInterim;
+    onErrorRef.current = onError;
+  }, [onResult, onInterim, onError]);
 
   useEffect(() => {
     // Check if SpeechRecognition is supported
@@ -84,13 +94,16 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
           
           console.log(`Transcript (${result.isFinal ? 'final' : 'interim'}):`, transcript);
           
-          // Only process final results
-          if (result.isFinal && transcript.trim()) {
-            console.log("Final transcript:", transcript);
-            onResult(transcript);
-            // Stop after getting final result
-            if (recognitionRef.current) {
-              recognitionRef.current.stop();
+          const trimmedTranscript = transcript.trim();
+          if (trimmedTranscript) {
+            if (result.isFinal) {
+              console.log("Final transcript:", trimmedTranscript);
+              onResultRef.current(trimmedTranscript);
+              if (recognitionRef.current) {
+                recognitionRef.current.stop();
+              }
+            } else {
+              onInterimRef.current?.(trimmedTranscript);
             }
           }
         };
@@ -113,25 +126,19 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
           if (event.error === "not-allowed" || event.error === "permission-denied") {
             const errorMessage = "Microphone permission denied. Please allow microphone access in your browser settings.";
             setError(errorMessage);
-            if (onError) {
-              onError(errorMessage);
-            }
+            onErrorRef.current?.(errorMessage);
             alert(errorMessage);
           } else if (event.error === "no-speech") {
             console.log("No speech detected");
             if (!hasReceivedSpeech.current) {
               const errorMessage = "No speech detected. Please try again and speak clearly.";
               setError(errorMessage);
-              if (onError) {
-                onError(errorMessage);
-              }
+              onErrorRef.current?.(errorMessage);
             }
           } else {
             const errorMessage = `Speech recognition error: ${event.error}`;
             setError(errorMessage);
-            if (onError) {
-              onError(errorMessage);
-            }
+            onErrorRef.current?.(errorMessage);
           }
           
           setIsListening(false);
@@ -162,12 +169,7 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
       }
     } else {
       setIsSupported(false);
-      const errorMessage = "Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.";
-      setError(errorMessage);
-      if (onError) {
-        onError(errorMessage);
-      }
-      console.warn(errorMessage);
+      setError(null);
     }
 
     // Don't cleanup on every render - only on unmount
@@ -185,7 +187,9 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
 
   const startListening = useCallback(() => {
     if (!isSupported || !recognitionRef.current) {
-      console.warn("Speech recognition not supported or not initialized");
+      const errorMessage = "Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.";
+      setError(errorMessage);
+      onErrorRef.current?.(errorMessage);
       return;
     }
 
@@ -213,13 +217,11 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
       const errorMessage = `Failed to start speech recognition: ${err.message || err}`;
       console.error(errorMessage, err);
       setError(errorMessage);
-      if (onError) {
-        onError(errorMessage);
-      }
+      onErrorRef.current?.(errorMessage);
       setIsListening(false);
       isStartingRef.current = false;
     }
-  }, [isSupported, isListening, onError]);
+  }, [isSupported, isListening]);
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current && isListening) {
