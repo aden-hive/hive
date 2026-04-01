@@ -4,13 +4,15 @@ from pathlib import Path
 
 
 @contextmanager
-def atomic_write(path: Path, mode: str = "w", encoding: str = "utf-8"):
+def atomic_write(path: Path, mode: str = "w", encoding: str = "utf-8", chmod: int | None = None):
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
         with open(tmp_path, mode, encoding=encoding) as f:
             yield f
             f.flush()
             os.fsync(f.fileno())
+        if chmod is not None:
+            tmp_path.chmod(chmod)
         tmp_path.replace(path)
     except BaseException:
         tmp_path.unlink(missing_ok=True)
