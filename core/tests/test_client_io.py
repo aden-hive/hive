@@ -99,6 +99,69 @@ async def test_active_request_input_timeout():
         await io.request_input(prompt="waiting", timeout=0.01)
 
 
+@pytest.mark.asyncio
+async def test_active_request_input_cancellation_leak_regression():
+    """
+    Regression test for cancellation during emit_client_input_requested.
+
+    If request_input is cancelled while awaiting the event bus emission, internal state must be
+    reset so that a subsequent request_input can proceed normally.
+    """
+
+    class SlowEventBus(MockEventBus):
+        async def emit_client_input_requested(self, **kwargs) -> None:
+            await asyncio.sleep(1.0)
+            await super().emit_client_input_requested(**kwargs)
+
+    bus = SlowEventBus()
+    io = ActiveNodeClientIO(node_id="n1", event_bus=bus)
+
+    task1 = asyncio.create_task(io.request_input(prompt="Wait"))
+    await asyncio.sleep(0.01)
+    task1.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task1
+
+    task2 = asyncio.create_task(io.request_input(prompt="Second"))
+    await asyncio.sleep(0.01)
+    await io.provide_input("data")
+    assert await task2 == "data"
+
+
+@pytest.mark.asyncio
+async def test_active_request_input_result_read_happens_with_event_active_regression():
+    """
+    Regression test for a critical section gap where _input_event was cleared before _input_result
+    was read, enabling a concurrent request to wipe the result.
+    """
+
+    class ResultTracker:
+        reads_with_event_active: list[bool] = []
+
+        def __get__(self, obj, objtype=None):
+            if obj is None:
+                return self
+            self.reads_with_event_active.append(obj._input_event is not None)
+            return getattr(obj, "_mock_result", None)
+
+        def __set__(self, obj, value):
+            obj._mock_result = value
+
+    class TrackedIO(ActiveNodeClientIO):
+        _input_result = ResultTracker()
+
+    io = TrackedIO(node_id="n1")
+
+    task = asyncio.create_task(io.request_input(prompt="1"))
+    await asyncio.sleep(0.01)
+
+    await io.provide_input("test_data")
+    assert await task == "test_data"
+
+    assert True in TrackedIO._input_result.reads_with_event_active
+
+
 # --- InertNodeClientIO tests ---
 
 
