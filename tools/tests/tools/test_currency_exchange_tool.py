@@ -485,11 +485,9 @@ class TestListCurrenciesTool:
         mcp = MagicMock()
         fns = []
         mcp.tool.return_value = lambda fn: fns.append(fn) or fn
-
         with patch.dict("os.environ", {}, clear=True):
             register_tools(mcp)
-
-        list_fn = next(f for f in fns if f.__name__ == "currency_exchange_list_currencies")
-        result = list_fn()
+            list_fn = next(f for f in fns if f.__name__ == "currency_exchange_list_currencies")
+            result = list_fn()
         assert "error" in result
         assert "not configured" in result["error"]
