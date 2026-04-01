@@ -156,15 +156,20 @@ async def cors_middleware(request: web.Request, handler):
 
 @web.middleware
 async def error_middleware(request: web.Request, handler):
-    """Catch exceptions and return JSON error responses."""
+    """Catch exceptions and return JSON error responses.
+
+    Returns a generic error message to the client to avoid leaking
+    internal details (file paths, config values, stack traces).
+    The full exception is still logged server-side.
+    """
     try:
         return await handler(request)
     except web.HTTPException:
         raise  # Let aiohttp handle its own HTTP exceptions
-    except Exception as e:
-        logger.exception(f"Unhandled error: {e}")
+    except Exception:
+        logger.exception("Unhandled error on %s %s", request.method, request.path)
         return web.json_response(
-            {"error": str(e), "type": type(e).__name__},
+            {"error": "Internal server error"},
             status=500,
         )
 
