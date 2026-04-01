@@ -239,6 +239,7 @@ async def create_queen(
     )
 
     # ---- Default skill protocols -------------------------------------
+    _queen_skill_dirs: list[str] = []
     try:
         from framework.skills.manager import SkillsManager, SkillsManagerConfig
 
@@ -249,6 +250,7 @@ async def create_queen(
         _queen_skills_mgr.load()
         phase_state.protocols_prompt = _queen_skills_mgr.protocols_prompt
         phase_state.skills_catalog_prompt = _queen_skills_mgr.skills_catalog_prompt
+        _queen_skill_dirs = _queen_skills_mgr.allowlisted_dirs
     except Exception:
         logger.debug("Queen skill loading failed (non-fatal)", exc_info=True)
 
@@ -313,6 +315,7 @@ async def create_queen(
                 dynamic_tools_provider=phase_state.get_current_tools,
                 dynamic_prompt_provider=phase_state.get_current_prompt,
                 iteration_metadata_provider=lambda: {"phase": phase_state.phase},
+                skill_dirs=_queen_skill_dirs,
             )
             session.queen_executor = executor
 
