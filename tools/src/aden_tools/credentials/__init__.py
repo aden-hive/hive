@@ -70,6 +70,7 @@ from .brevo import BREVO_CREDENTIALS
 from .browser import get_aden_auth_url, get_aden_setup_url, open_browser
 from .calcom import CALCOM_CREDENTIALS
 from .calendly import CALENDLY_CREDENTIALS
+from .cloudflare import CLOUDFLARE_CREDENTIALS
 from .cloudinary import CLOUDINARY_CREDENTIALS
 from .confluence import CONFLUENCE_CREDENTIALS
 from .databricks import DATABRICKS_CREDENTIALS
@@ -160,6 +161,7 @@ CREDENTIAL_SPECS = {
     **BREVO_CREDENTIALS,
     **CALCOM_CREDENTIALS,
     **CALENDLY_CREDENTIALS,
+    **CLOUDFLARE_CREDENTIALS,
     **CLOUDINARY_CREDENTIALS,
     **CONFLUENCE_CREDENTIALS,
     **DATABRICKS_CREDENTIALS,
@@ -254,6 +256,7 @@ __all__ = [
     "BREVO_CREDENTIALS",
     "CALCOM_CREDENTIALS",
     "CALENDLY_CREDENTIALS",
+    "CLOUDFLARE_CREDENTIALS",
     "CLOUDINARY_CREDENTIALS",
     "CONFLUENCE_CREDENTIALS",
     "DATABRICKS_CREDENTIALS",
