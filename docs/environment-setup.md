@@ -10,8 +10,7 @@ Complete setup guide for building and running goal-driven agents with the Aden A
 ```
 
 > **Note for Windows Users:**
-> Running the setup script on native Windows shells (PowerShell / Git Bash) may sometimes fail due to Python App Execution Aliases.
-> It is **strongly recommended to use WSL (Windows Subsystem for Linux)** for a smoother setup experience.
+> Native Windows is supported via `quickstart.ps1`. Run it in PowerShell 5.1+. Disable "App Execution Aliases" in Windows settings to avoid Python path conflicts.
 
 This will:
 
@@ -25,13 +24,19 @@ This will:
 
 ## Windows Setup
 
-Windows users should use **WSL (Windows Subsystem for Linux)** to set up and run agents.
+Native Windows is supported. Run the PowerShell quickstart:
 
-1. [Install WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install) if you haven't already:
+```powershell
+.\quickstart.ps1
+```
+
+Alternatively, you can use WSL:
+
+1. [Install WSL 2](https://learn.microsoft.com/en-us/windows/wsl/install):
    ```powershell
    wsl --install
    ```
-2. Open your WSL terminal, clone the repo, and run the quickstart script:
+2. Open your WSL terminal, clone the repo, and run:
    ```bash
    ./quickstart.sh
    ```
@@ -61,40 +66,6 @@ source .venv/bin/activate
 ./quickstart.sh
 ```
 
-## Manual Setup (Alternative)
-
-If you prefer to set up manually or the script fails:
-
-### 1. Sync Workspace Dependencies
-
-```bash
-# From repository root - this creates a single .venv at the root
-uv sync
-```
-
-> **Note:** The `uv sync` command uses the workspace configuration in `pyproject.toml` to install both `core` (framework) and `tools` (aden_tools) packages together. This is the recommended approach over individual `pip install -e` commands which may fail due to circular dependencies.
-
-### 2. Activate the Virtual Environment
-
-```bash
-# Linux/macOS
-source .venv/bin/activate
-
-# Windows (PowerShell)
-.venv\Scripts\Activate.ps1
-```
-
-### 3. Verify Installation
-
-```bash
-uv run python -c "import framework; print('✓ framework OK')"
-uv run python -c "import aden_tools; print('✓ aden_tools OK')"
-uv run python -c "import litellm; print('✓ litellm OK')"
-```
-
-> **Windows Tip:**
-> On Windows, if the verification commands fail, ensure you are running them in **WSL** or after **disabling Python App Execution Aliases** in Windows Settings → Apps → App Execution Aliases.
-
 ## Requirements
 
 ### Python Version
@@ -108,52 +79,11 @@ uv run python -c "import litellm; print('✓ litellm OK')"
 - pip (latest version)
 - 2GB+ RAM
 - Internet connection (for LLM API calls)
-- For Windows users: WSL 2 is recommended for full compatibility.
+- For Windows users: PowerShell 5.1+ (native) or WSL 2.
 
 ### API Keys
 
-We recommend using quickstart.sh for LLM API credential setup and /hive-credentials for the tools credentials
-
-## Running Agents
-
-The `hive` CLI is the primary interface for running agents:
-
-```bash
-# Browse and run agents interactively (Recommended)
-hive tui
-
-# Run a specific agent
-hive run exports/my_agent --input '{"task": "Your input here"}'
-
-# Run with TUI dashboard
-hive run exports/my_agent --tui
-```
-
-### CLI Command Reference
-
-| Command                | Description                                                             |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `hive tui`             | Browse agents and launch TUI dashboard                                  |
-| `hive run <path>`      | Execute an agent (`--tui`, `--model`, `--mock`, `--quiet`, `--verbose`) |
-| `hive shell [path]`    | Interactive REPL (`--multi`, `--no-approve`)                            |
-| `hive info <path>`     | Show agent details                                                      |
-| `hive validate <path>` | Validate agent structure                                                |
-| `hive list [dir]`      | List available agents                                                   |
-| `hive dispatch [dir]`  | Multi-agent orchestration                                               |
-
-### Using Python directly (alternative)
-
-```bash
-# From /hive/ directory
-PYTHONPATH=exports uv run python -m agent_name COMMAND
-```
-
-Windows (PowerShell):
-
-```powershell
-$env:PYTHONPATH="core;exports"
-python -m agent_name COMMAND
-```
+We recommend using `quickstart.sh` for LLM API credential setup and the credentials UI/tooling for tool credentials.
 
 ## Building New Agents and Run Flow
 
@@ -165,33 +95,27 @@ Build and run an agent using Claude Code CLI with the agent building skills:
 ./quickstart.sh
 ```
 
-This verifies agent-related Claude Code skills are available:
-
-- `/hive` - Complete workflow for building agents
-- `/hive-create` - Step-by-step build guide
-- `/hive-concepts` - Fundamental concepts
-- `/hive-patterns` - Best practices
-- `/hive-test` - Test and validate agents
+This sets up the MCP tools and workflows for building agents.
 
 ### Cursor IDE Support
 
-Skills are also available in Cursor. To enable:
+MCP tools are also available in Cursor. To enable:
 
 1. Open Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`)
 2. Run `MCP: Enable` to enable MCP servers
 3. Restart Cursor to load the MCP servers from `.cursor/mcp.json`
-4. Type `/` in Agent chat and search for skills (e.g., `/hive-create`)
+4. Open Agent chat and verify MCP tools are available
 
 ### 2. Build an Agent
 
 **Claude Code:**
 ```
-claude> /hive
+Use the coder-tools initialize_and_build_agent tool to scaffold a new agent
 ```
 
 **Codex CLI:**
 ```
-codex> use hive
+Start Codex in the repo root and use the configured MCP tools
 ```
 
 Follow the prompts to:
@@ -206,7 +130,7 @@ This step creates the initial agent structure required for further development.
 ### 3. Define Agent Logic
 
 ```
-claude> /hive-concepts
+claude> architecture guidance
 ```
 
 Follow the prompts to:
@@ -217,36 +141,6 @@ Follow the prompts to:
 4. Discover and validate available tools before use
 
 This step establishes the core concepts and rules needed before building an agent.
-
-### 4. Apply Agent Patterns
-
-```
-claude> /hive-patterns
-```
-
-Follow the prompts to:
-
-1. Apply best-practice agent design patterns
-2. Add pause/resume flows for multi-turn interactions
-3. Improve robustness with routing, fallbacks, and retries
-4. Avoid common anti-patterns during agent construction
-
-This step helps optimize agent design before final testing.
-
-### 5. Test Your Agent
-
-```
-claude> /hive-test
-```
-
-Follow the prompts to:
-
-1. Generate test guidelines for constraints and success criteria
-2. Write agent tests directly under `exports/{agent}/tests/`
-3. Run goal-based evaluation tests
-4. Debug failing tests and iterate on agent improvements
-
-This step verifies that the agent meets its goals before production use.
 
 ## Troubleshooting
 
@@ -367,7 +261,7 @@ hive/
 │   └── pyproject.toml
 │
 ├── exports/                 # Agent packages (user-created, gitignored)
-│   └── your_agent_name/     # Created via /hive-create
+│   └── your_agent_name/     # Created via coder-tools workflow
 │
 └── examples/
     └── templates/           # Pre-built template agents
@@ -419,10 +313,10 @@ The `.mcp.json` at project root configures MCP servers to run through `uv run` i
 ```json
 {
   "mcpServers": {
-    "agent-builder": {
+    "coder-tools": {
       "command": "uv",
-      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
-      "cwd": "core"
+      "args": ["run", "coder_tools_server.py", "--stdio"],
+      "cwd": "tools"
     },
     "tools": {
       "command": "uv",
@@ -459,7 +353,7 @@ This design allows agents in `exports/` to be:
 ### 2. Build Agent (Claude Code)
 
 ```
-claude> /hive
+Use the coder-tools initialize_and_build_agent tool
 Enter goal: "Build an agent that processes customer support tickets"
 ```
 
@@ -472,7 +366,7 @@ PYTHONPATH=exports uv run python -m your_agent_name validate
 ### 4. Test Agent
 
 ```
-claude> /hive-test
+claude> test workflow
 ```
 
 ### 5. Run Agent
@@ -485,30 +379,53 @@ hive tui
 hive run exports/your_agent_name --input '{"task": "..."}'
 ```
 
-## IDE Setup
+## Testing with Dummy Agents
 
-### VSCode
+The repository includes a suite of dummy agents under `core/tests/dummy_agents/` for end-to-end testing against real LLM providers. These are **not** part of CI — they make real API calls and are meant to be run manually to verify the executor works correctly.
 
-Add to `.vscode/settings.json`:
+### Running the Tests
 
-```json
-{
-  "python.analysis.extraPaths": [
-    "${workspaceFolder}/core",
-    "${workspaceFolder}/exports"
-  ],
-  "python.autoComplete.extraPaths": [
-    "${workspaceFolder}/core",
-    "${workspaceFolder}/exports"
-  ]
-}
+```bash
+cd core && uv run python tests/dummy_agents/run_all.py
 ```
 
-### PyCharm
+The script auto-detects available LLM credentials and prompts you to pick a provider. You need at least one of:
 
-1. Open Project Settings → Project Structure
-2. Mark `core` as Sources Root
-3. Mark `exports` as Sources Root
+- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY`
+- `GEMINI_API_KEY`
+- `ZAI_API_KEY`
+- A Claude Code, Codex, or Kimi subscription
+
+For verbose output with live LLM logs, tool calls, and node traversal details:
+
+```bash
+cd core && uv run python tests/dummy_agents/run_all.py --verbose
+```
+
+### What's Covered
+
+| Agent          | Tests | Coverage                                          |
+| -------------- | ----- | ------------------------------------------------- |
+| echo           | 2     | Single-node lifecycle, basic `set_output`          |
+| pipeline       | 4     | Multi-node traversal, `input_mapping`, conversation modes |
+| branch         | 3     | Conditional edges, LLM-driven routing              |
+| parallel_merge | 4     | Fan-out/fan-in, failure strategies                  |
+| retry          | 4     | Retry mechanics, exhaustion, `ON_FAILURE` edges     |
+| feedback_loop  | 3     | Feedback cycles, `max_node_visits`                  |
+| worker         | 4     | Real MCP tools (`example_tool`, `get_current_time`, `save_data`/`load_data`) |
+
+Typical runtime is 1–3 minutes depending on provider latency.
+
+### Running Individual Test Files
+
+You can also run a specific dummy agent test with pytest directly:
+
+```bash
+cd core && uv run pytest tests/dummy_agents/test_echo.py -v
+```
+
+> **Note:** Individual pytest runs require the LLM provider to be configured via the `conftest.py` fixture. The `run_all.py` script handles this automatically.
 
 ## Environment Variables
 
@@ -516,66 +433,21 @@ Add to `.vscode/settings.json`:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENROUTER_API_KEY="your-openrouter-key"  # Optional
+export HIVE_API_KEY="your-hive-key"              # Optional
 ```
+
+Quickstart also supports selecting OpenRouter and Hive LLM interactively. See [configuration.md](./configuration.md) for the full configuration examples.
 
 ### Optional Configuration
 
 ```bash
-# Credentials storage location (default: ~/.aden/credentials)
-export ADEN_CREDENTIALS_PATH="/custom/path"
+# Fernet encryption key for credential store at ~/.hive/credentials
+export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
 # Agent storage location (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
 ```
-
-## Opencode Setup
-
-[Opencode](https://github.com/opencode-ai/opencode) is fully supported as a coding agent.
-
-### Automatic Setup
-
-Run the quickstart script in the root directory:
-
-```bash
-./quickstart.sh
-```
-
-## Codex Setup
-
-[OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+) is supported with project-level config:
-
-- `.codex/config.toml` — MCP server configuration (`agent-builder`)
-- `.agents/skills/` — Symlinks to Hive skills
-
-These files are tracked in git and available on clone. To use Codex with Hive:
-
-1. Run `codex` in the repo root
-2. Type `use hive` to start the agent workflow
-
-Quick verification:
-
-```bash
-test -f .codex/config.toml && echo "OK: Codex config" || echo "MISSING: .codex/config.toml"
-test -d .agents/skills/hive && echo "OK: Skills" || echo "MISSING: .agents/skills/"
-```
-
-## Additional Resources
-
-- **Framework Documentation:** [core/README.md](../core/README.md)
-- **Tools Documentation:** [tools/README.md](../tools/README.md)
-- **Example Agents:** [examples/](../examples/)
-- **Agent Building Guide:** [.claude/skills/hive-create/SKILL.md](../.claude/skills/hive-create/SKILL.md)
-- **Testing Guide:** [.claude/skills/hive-test/SKILL.md](../.claude/skills/hive-test/SKILL.md)
-
-## Contributing
-
-When contributing agent packages:
-
-1. Place agents in `exports/agent_name/`
-2. Follow the standard agent structure (see existing agents)
-3. Include README.md with usage instructions
-4. Add tests if using `/hive-test`
-5. Document required environment variables
 
 ## Support
 

@@ -394,7 +394,7 @@ class TestToolRegistration:
         mcp = MagicMock()
         mcp.tool.return_value = lambda fn: fn
         register_tools(mcp)
-        assert mcp.tool.call_count == 4
+        assert mcp.tool.call_count == 7
 
     def test_no_credentials_returns_error(self):
         mcp = MagicMock()
@@ -672,4 +672,7 @@ class TestCredentialSpec:
         assert "apollo_enrich_company" in spec.tools
         assert "apollo_search_people" in spec.tools
         assert "apollo_search_companies" in spec.tools
-        assert len(spec.tools) == 4
+        assert "apollo_get_person_activities" in spec.tools
+        assert "apollo_list_email_accounts" in spec.tools
+        assert "apollo_bulk_enrich_people" in spec.tools
+        assert len(spec.tools) == 7

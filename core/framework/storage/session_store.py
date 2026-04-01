@@ -62,8 +62,14 @@ class SessionStore:
 
         Returns:
             Path to session directory
+
+        Raises:
+            ValueError: If session_id resolves outside the sessions directory
         """
-        return self.sessions_dir / session_id
+        resolved = (self.sessions_dir / session_id).resolve()
+        if not resolved.is_relative_to(self.sessions_dir.resolve()):
+            raise ValueError(f"Invalid session ID: {session_id}")
+        return resolved
 
     def get_state_path(self, session_id: str) -> Path:
         """
@@ -114,7 +120,7 @@ class SessionStore:
             if not state_path.exists():
                 return None
 
-            return SessionState.model_validate_json(state_path.read_text())
+            return SessionState.model_validate_json(state_path.read_text(encoding="utf-8"))
 
         return await asyncio.to_thread(_read)
 
@@ -151,7 +157,7 @@ class SessionStore:
                     continue
 
                 try:
-                    state = SessionState.model_validate_json(state_path.read_text())
+                    state = SessionState.model_validate_json(state_path.read_text(encoding="utf-8"))
 
                     # Apply filters
                     if status and state.status != status:

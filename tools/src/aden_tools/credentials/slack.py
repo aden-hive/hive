@@ -58,13 +58,16 @@ SLACK_CREDENTIALS = {
             "slack_kick_user_from_channel",
             "slack_delete_file",
             "slack_get_team_stats",
+            "slack_get_channel_info",
+            "slack_list_files",
+            "slack_get_file_info",
         ],
         required=True,
         startup_required=False,
         help_url="https://api.slack.com/apps",
         description="Slack Bot Token (starts with xoxb-)",
         # Auth method support
-        aden_supported=True,
+        aden_supported=False,
         aden_provider_name="slack",
         direct_api_key_supported=True,
         api_key_instructions="""To get a Slack Bot Token:

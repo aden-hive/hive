@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot } from "lucide-react";
+import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot, Radar, Reply, DollarSign, MapPin, Calendar, UserPlus, Twitter } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import type { LucideIcon } from "lucide-react";
 import { agentsApi } from "@/api/agents";
@@ -14,6 +14,13 @@ const AGENT_ICONS: Record<string, LucideIcon> = {
   vulnerability_assessment: Shield,
   deep_research_agent: Search,
   tech_news_reporter: Newspaper,
+  competitive_intel_agent: Radar,
+  email_reply_agent: Reply,
+  hubspot_revenue_leak_detector: DollarSign,
+  local_business_extractor: MapPin,
+  meeting_scheduler: Calendar,
+  sdr_agent: UserPlus,
+  twitter_news_agent: Twitter,
 };
 
 const AGENT_COLORS: Record<string, string> = {
@@ -22,6 +29,13 @@ const AGENT_COLORS: Record<string, string> = {
   vulnerability_assessment: "hsl(15,70%,52%)",
   deep_research_agent: "hsl(210,70%,55%)",
   tech_news_reporter: "hsl(270,60%,55%)",
+  competitive_intel_agent: "hsl(190,70%,45%)",
+  email_reply_agent: "hsl(45,80%,55%)",
+  hubspot_revenue_leak_detector: "hsl(145,60%,42%)",
+  local_business_extractor: "hsl(350,65%,55%)",
+  meeting_scheduler: "hsl(220,65%,55%)",
+  sdr_agent: "hsl(165,55%,45%)",
+  twitter_news_agent: "hsl(200,85%,55%)",
 };
 
 function agentSlug(path: string): string {
@@ -40,6 +54,7 @@ const promptHints = [
 export default function Home() {
   const navigate = useNavigate();
   const [inputValue, setInputValue] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showAgents, setShowAgents] = useState(false);
   const [agents, setAgents] = useState<DiscoverEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -105,19 +120,26 @@ export default function Home() {
           {/* Chat input */}
           <form onSubmit={handleSubmit} className="mb-6">
             <div className="relative border border-border/60 rounded-xl bg-card/50 hover:border-primary/30 focus-within:border-primary/40 transition-colors shadow-sm">
-              <input
+              <textarea
+                ref={textareaRef}
+                rows={1}
                 value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
+                onChange={(e) => {
+                  setInputValue(e.target.value);
+                  const ta = e.target;
+                  ta.style.height = "auto";
+                  ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+                }}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+                  if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     handleSubmit(e);
                   }
                 }}
                 placeholder="Describe a task for the hive..."
-                className="w-full bg-transparent px-5 py-3 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none rounded-xl"
+                className="w-full bg-transparent px-5 py-4 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none rounded-xl resize-none overflow-y-auto"
               />
-              <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              <div className="absolute right-3 bottom-2.5">
                 <button
                   type="submit"
                   disabled={!inputValue.trim()}

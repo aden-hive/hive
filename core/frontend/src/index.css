@@ -72,6 +72,33 @@
     --border: 240 3.7% 15.9%;
     --input: 240 3.7% 15.9%;
     --ring: 45 93% 47%;
+
+    /* Agent graph node status colors */
+    --node-running: 45 95% 58%;
+    --node-looping: 38 90% 55%;
+    --node-complete: 43 70% 45%;
+    --node-pending: 35 15% 28%;
+    --node-pending-bg: 35 10% 12%;
+    --node-pending-border: 35 10% 20%;
+    --node-error: 0 65% 55%;
+
+    /* Agent graph trigger node colors */
+    --trigger-bg: 210 25% 14%;
+    --trigger-border: 210 30% 30%;
+    --trigger-text: 210 30% 65%;
+    --trigger-icon: 210 40% 55%;
+
+    /* Draft graph chrome colors */
+    --draft-edge: 220 10% 30%;
+    --draft-edge-arrow: 220 10% 35%;
+    --draft-edge-label: 220 10% 45%;
+    --draft-back-edge: 220 10% 25%;
+    --draft-group-fill: 220 15% 18%;
+    --draft-group-stroke: 220 10% 40%;
+    --draft-chrome-text: 220 10% 50%;
+    --draft-chrome-text-dim: 220 10% 55%;
+    --draft-node-text: 0 0% 78%;
+    --draft-node-text-hover: 0 0% 92%;
   }
 }
 
@@ -86,6 +113,11 @@
 
   button {
     cursor: pointer;
+  }
+
+  textarea {
+    padding: 0;
+    margin: 0;
   }
 }
 
@@ -161,4 +193,13 @@
 }
 .animate-in.slide-in-from-right {
   animation: slide-in-from-right 0.2s ease-out;
+}
+
+/* Slide-up animation for question widget */
+@keyframes slide-in-from-bottom {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-in.slide-in-from-bottom {
+  animation: slide-in-from-bottom 0.25s ease-out;
 }

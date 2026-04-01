@@ -8,6 +8,8 @@ while preserving the goal-driven approach.
 import asyncio
 import logging
 import time
+import uuid
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,6 +30,7 @@ if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
     from framework.graph.goal import Goal
     from framework.llm.provider import LLMProvider, Tool
+    from framework.skills.manager import SkillsManagerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,9 @@ class AgentRuntimeConfig:
     max_history: int = 1000
     execution_result_max: int = 1000
     execution_result_ttl_seconds: float | None = None
+    # Idempotency cache for trigger() deduplication
+    idempotency_ttl_seconds: float = 300.0
+    idempotency_max_keys: int = 10000
     # Webhook server config (only starts if webhook_routes is non-empty)
     webhook_host: str = "127.0.0.1"
     webhook_port: int = 8080
@@ -131,6 +137,11 @@ class AgentRuntime:
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
         event_bus: "EventBus | None" = None,
+        skills_manager_config: "SkillsManagerConfig | None" = None,
+        # Deprecated — pass skills_manager_config instead.
+        skills_catalog_prompt: str = "",
+        protocols_prompt: str = "",
+        skill_dirs: list[str] | None = None,
     ):
         """
         Initialize agent runtime.
@@ -152,13 +163,49 @@ class AgentRuntime:
             event_bus: Optional external EventBus. If provided, the runtime shares
                 this bus instead of creating its own. Used by SessionManager to
                 share a single bus between queen, worker, and judge.
+            skills_catalog_prompt: Available skills catalog for system prompt
+            protocols_prompt: Default skill operational protocols for system prompt
+            skill_dirs: Skill base directories for Tier 3 resource access
+            skills_manager_config: Skill configuration — the runtime owns
+                discovery, loading, and prompt renderation internally.
+            skills_catalog_prompt: Deprecated. Pre-rendered skills catalog.
+            protocols_prompt: Deprecated. Pre-rendered operational protocols.
         """
+        from framework.skills.manager import SkillsManager
+
         self.graph = graph
         self.goal = goal
         self._config = config or AgentRuntimeConfig()
         self._runtime_log_store = runtime_log_store
         self._checkpoint_config = checkpoint_config
         self.accounts_prompt = accounts_prompt
+
+        # --- Skill lifecycle: runtime owns the SkillsManager ---
+        if skills_manager_config is not None:
+            # New path: config-driven, runtime handles loading
+            self._skills_manager = SkillsManager(skills_manager_config)
+            self._skills_manager.load()
+        elif skills_catalog_prompt or protocols_prompt:
+            # Legacy path: caller passed pre-rendered strings
+            import warnings
+
+            warnings.warn(
+                "Passing pre-rendered skills_catalog_prompt/protocols_prompt "
+                "is deprecated. Pass skills_manager_config instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            self._skills_manager = SkillsManager.from_precomputed(
+                skills_catalog_prompt, protocols_prompt
+            )
+        else:
+            # Bare constructor: auto-load defaults
+            self._skills_manager = SkillsManager()
+            self._skills_manager.load()
+
+        self.skill_dirs: list[str] = self._skills_manager.allowlisted_dirs
+        self.context_warn_ratio: float | None = self._skills_manager.context_warn_ratio
+        self.batch_init_nudge: str | None = self._skills_manager.batch_init_nudge
 
         # Primary graph identity
         self._graph_id: str = graph_id or "primary"
@@ -207,6 +254,10 @@ class AgentRuntime:
         # Next fire time for each timer entry point (ep_id -> datetime)
         self._timer_next_fire: dict[str, float] = {}
 
+        # Idempotency cache for trigger() deduplication
+        self._idempotency_keys: OrderedDict[str, str] = OrderedDict()
+        self._idempotency_times: dict[str, float] = {}
+
         # State
         self._running = False
         self._timers_paused = False
@@ -214,6 +265,18 @@ class AgentRuntime:
 
         # Optional greeting shown to user on TUI load (set by AgentRunner)
         self.intro_message: str = ""
+
+    # ------------------------------------------------------------------
+    # Skill prompt accessors (read by ExecutionStream constructors)
+    # ------------------------------------------------------------------
+
+    @property
+    def skills_catalog_prompt(self) -> str:
+        return self._skills_manager.skills_catalog_prompt
+
+    @property
+    def protocols_prompt(self) -> str:
+        return self._skills_manager.protocols_prompt
 
     def register_entry_point(self, spec: EntryPointSpec) -> None:
         """
@@ -292,6 +355,11 @@ class AgentRuntime:
                     accounts_prompt=self._accounts_prompt,
                     accounts_data=self._accounts_data,
                     tool_provider_map=self._tool_provider_map,
+                    skills_catalog_prompt=self.skills_catalog_prompt,
+                    protocols_prompt=self.protocols_prompt,
+                    skill_dirs=self.skill_dirs,
+                    context_warn_ratio=self.context_warn_ratio,
+                    batch_init_nudge=self.batch_init_nudge,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -349,7 +417,7 @@ class AgentRuntime:
                             return
                         # Skip events originating from this graph's own
                         # executions (e.g. guardian should not fire on
-                        # hive_coder failures — only secondary graphs).
+                        # queen failures — only secondary graphs).
                         if _exclude_own and event.graph_id == self._graph_id:
                             return
                         ep_spec = self._entry_points.get(entry_point_id)
@@ -392,18 +460,24 @@ class AgentRuntime:
 
                 tc = spec.trigger_config
                 cron_expr = tc.get("cron")
-                interval = tc.get("interval_minutes")
+                _raw_interval = tc.get("interval_minutes")
+                interval = float(_raw_interval) if _raw_interval is not None else None
                 run_immediately = tc.get("run_immediately", False)
 
                 if cron_expr:
                     # Cron expression mode — takes priority over interval_minutes
                     try:
                         from croniter import croniter
+                    except ImportError as e:
+                        raise RuntimeError(
+                            "croniter is required for cron-based entry points. "
+                            "Install it with: uv pip install croniter"
+                        ) from e
 
-                        # Validate the expression upfront
+                    try:
                         if not croniter.is_valid(cron_expr):
                             raise ValueError(f"Invalid cron expression: {cron_expr}")
-                    except (ImportError, ValueError) as e:
+                    except ValueError as e:
                         logger.warning(
                             "Entry point '%s' has invalid cron config: %s",
                             ep_id,
@@ -411,7 +485,12 @@ class AgentRuntime:
                         )
                         continue
 
-                    def _make_cron_timer(entry_point_id: str, expr: str, immediate: bool):
+                    def _make_cron_timer(
+                        entry_point_id: str,
+                        expr: str,
+                        immediate: bool,
+                        idle_timeout: float = 300,
+                    ):
                         async def _cron_loop():
                             from croniter import croniter
 
@@ -442,11 +521,28 @@ class AgentRuntime:
                                     await asyncio.sleep(max(0, sleep_secs))
                                     continue
 
-                                # Gate: skip tick if previous execution still running
-                                _stream = self._streams.get(entry_point_id)
-                                if _stream and _stream.active_execution_ids:
-                                    logger.debug(
-                                        "Cron '%s': execution already in progress, skipping tick",
+                                # Gate: skip tick if ANY stream is actively working.
+                                # If the execution is idle (no LLM/tool activity
+                                # beyond idle_timeout) let the timer proceed —
+                                # execute() will cancel the stale execution.
+                                _any_active = False
+                                _min_idle = float("inf")
+                                for _s in self._streams.values():
+                                    if _s.active_execution_ids:
+                                        _any_active = True
+                                        _idle = _s.agent_idle_seconds
+                                        if _idle < _min_idle:
+                                            _min_idle = _idle
+                                logger.info(
+                                    "Cron '%s': gate — active=%s, idle=%.1fs, timeout=%ds",
+                                    entry_point_id,
+                                    _any_active,
+                                    _min_idle,
+                                    idle_timeout,
+                                )
+                                if _any_active and _min_idle < idle_timeout:
+                                    logger.info(
+                                        "Cron '%s': agent actively working, skipping tick",
                                         entry_point_id,
                                     )
                                     self._timer_next_fire[entry_point_id] = (
@@ -517,7 +613,12 @@ class AgentRuntime:
                         return _cron_loop
 
                     task = asyncio.create_task(
-                        _make_cron_timer(ep_id, cron_expr, run_immediately)()
+                        _make_cron_timer(
+                            ep_id,
+                            cron_expr,
+                            run_immediately,
+                            idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
+                        )()
                     )
                     self._timer_tasks.append(task)
                     logger.info(
@@ -529,7 +630,12 @@ class AgentRuntime:
 
                 elif interval and interval > 0:
                     # Fixed interval mode (original behavior)
-                    def _make_timer(entry_point_id: str, mins: float, immediate: bool):
+                    def _make_timer(
+                        entry_point_id: str,
+                        mins: float,
+                        immediate: bool,
+                        idle_timeout: float = 300,
+                    ):
                         async def _timer_loop():
                             interval_secs = mins * 60
                             _persistent_session_id: str | None = None
@@ -551,11 +657,26 @@ class AgentRuntime:
                                     await asyncio.sleep(interval_secs)
                                     continue
 
-                                # Gate: skip tick if previous execution still running
-                                _stream = self._streams.get(entry_point_id)
-                                if _stream and _stream.active_execution_ids:
-                                    logger.debug(
-                                        "Timer '%s': execution already in progress, skipping tick",
+                                # Gate: skip tick if agent is actively working.
+                                # Gate: skip tick if ANY stream is actively working.
+                                _any_active = False
+                                _min_idle = float("inf")
+                                for _s in self._streams.values():
+                                    if _s.active_execution_ids:
+                                        _any_active = True
+                                        _idle = _s.agent_idle_seconds
+                                        if _idle < _min_idle:
+                                            _min_idle = _idle
+                                logger.info(
+                                    "Timer '%s': gate — active=%s, idle=%.1fs, timeout=%ds",
+                                    entry_point_id,
+                                    _any_active,
+                                    _min_idle,
+                                    idle_timeout,
+                                )
+                                if _any_active and _min_idle < idle_timeout:
+                                    logger.info(
+                                        "Timer '%s': agent actively working, skipping tick",
                                         entry_point_id,
                                     )
                                     self._timer_next_fire[entry_point_id] = (
@@ -621,7 +742,14 @@ class AgentRuntime:
 
                         return _timer_loop
 
-                    task = asyncio.create_task(_make_timer(ep_id, interval, run_immediately)())
+                    task = asyncio.create_task(
+                        _make_timer(
+                            ep_id,
+                            interval,
+                            run_immediately,
+                            idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
+                        )()
+                    )
                     self._timer_tasks.append(task)
                     logger.info(
                         "Started timer for entry point '%s' every %s min%s",
@@ -733,12 +861,29 @@ class AgentRuntime:
         # Primary graph (also stored in self._streams)
         return self._streams.get(entry_point_id)
 
+    def _prune_idempotency_keys(self) -> None:
+        """Prune expired idempotency keys based on TTL and max size."""
+        ttl = self._config.idempotency_ttl_seconds
+        if ttl > 0:
+            cutoff = time.time() - ttl
+            for key, recorded_at in list(self._idempotency_times.items()):
+                if recorded_at < cutoff:
+                    self._idempotency_times.pop(key, None)
+                    self._idempotency_keys.pop(key, None)
+
+        max_keys = self._config.idempotency_max_keys
+        if max_keys > 0:
+            while len(self._idempotency_keys) > max_keys:
+                old_key, _ = self._idempotency_keys.popitem(last=False)
+                self._idempotency_times.pop(old_key, None)
+
     async def trigger(
         self,
         entry_point_id: str,
         input_data: dict[str, Any],
         correlation_id: str | None = None,
         session_state: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
         graph_id: str | None = None,
     ) -> str:
         """
@@ -751,6 +896,10 @@ class AgentRuntime:
             input_data: Input data for the execution
             correlation_id: Optional ID to correlate related executions
             session_state: Optional session state to resume from (with paused_at, memory)
+            idempotency_key: Optional key for deduplication. If a trigger with
+                the same key was already processed within the TTL window, the
+                cached execution_id is returned instead of starting a new
+                execution. Useful for webhook providers that retry on timeout.
             graph_id: Graph to trigger on.  ``None`` uses the active graph
                 first, then falls back to the primary graph.
 
@@ -764,11 +913,32 @@ class AgentRuntime:
         if not self._running:
             raise RuntimeError("AgentRuntime is not running")
 
+        # Idempotency check: return cached execution_id for duplicate keys.
+        if idempotency_key is not None:
+            self._prune_idempotency_keys()
+            cached = self._idempotency_keys.get(idempotency_key)
+            if cached is not None:
+                logger.debug(
+                    "Idempotent trigger: key '%s' already seen, returning %s",
+                    idempotency_key,
+                    cached,
+                )
+                return cached
+
         stream = self._resolve_stream(entry_point_id, graph_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
 
-        return await stream.execute(input_data, correlation_id, session_state)
+        run_id = uuid.uuid4().hex[:12]
+        exec_id = await stream.execute(input_data, correlation_id, session_state, run_id=run_id)
+
+        # Cache after execute() so the value is always a real execution_id
+        # that callers can use for tracking.
+        if idempotency_key is not None:
+            self._idempotency_keys[idempotency_key] = exec_id
+            self._idempotency_times[idempotency_key] = time.time()
+
+        return exec_id
 
     async def trigger_and_wait(
         self,
@@ -776,6 +946,7 @@ class AgentRuntime:
         input_data: dict[str, Any],
         timeout: float | None = None,
         session_state: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> ExecutionResult | None:
         """
         Trigger execution and wait for completion.
@@ -785,11 +956,17 @@ class AgentRuntime:
             input_data: Input data for the execution
             timeout: Maximum time to wait (seconds)
             session_state: Optional session state to resume from (with paused_at, memory)
+            idempotency_key: Optional key for deduplication (see trigger() for details).
 
         Returns:
             ExecutionResult or None if timeout
         """
-        exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
+        exec_id = await self.trigger(
+            entry_point_id,
+            input_data,
+            session_state=session_state,
+            idempotency_key=idempotency_key,
+        )
         stream = self._resolve_stream(entry_point_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
@@ -865,6 +1042,9 @@ class AgentRuntime:
                 accounts_prompt=self._accounts_prompt,
                 accounts_data=self._accounts_data,
                 tool_provider_map=self._tool_provider_map,
+                skills_catalog_prompt=self.skills_catalog_prompt,
+                protocols_prompt=self.protocols_prompt,
+                skill_dirs=self.skill_dirs,
             )
             if self._running:
                 await stream.start()
@@ -943,7 +1123,8 @@ class AgentRuntime:
             if spec.trigger_type != "timer":
                 continue
             tc = spec.trigger_config
-            interval = tc.get("interval_minutes")
+            _raw_interval = tc.get("interval_minutes")
+            interval = float(_raw_interval) if _raw_interval is not None else None
             run_immediately = tc.get("run_immediately", False)
 
             if interval and interval > 0 and self._running:
@@ -961,6 +1142,7 @@ class AgentRuntime:
                     local_ep: str,
                     mins: float,
                     immediate: bool,
+                    idle_timeout: float = 300,
                 ):
                     async def _timer_loop():
                         interval_secs = mins * 60
@@ -990,12 +1172,28 @@ class AgentRuntime:
                                 await asyncio.sleep(interval_secs)
                                 continue
 
-                            # Gate: skip tick if previous execution still running
+                            # Gate: skip tick if ANY stream in this graph is actively working.
                             _reg = self._graphs.get(gid)
-                            _stream = _reg.streams.get(local_ep) if _reg else None
-                            if _stream and _stream.active_execution_ids:
-                                logger.debug(
-                                    "Timer '%s::%s': execution already in progress, skipping tick",
+                            _any_active = False
+                            _min_idle = float("inf")
+                            if _reg:
+                                for _sid, _s in _reg.streams.items():
+                                    if _s.active_execution_ids:
+                                        _any_active = True
+                                        _idle = _s.agent_idle_seconds
+                                        if _idle < _min_idle:
+                                            _min_idle = _idle
+                            logger.info(
+                                "Timer '%s::%s': gate — active=%s, idle=%.1fs, timeout=%ds",
+                                gid,
+                                local_ep,
+                                _any_active,
+                                _min_idle,
+                                idle_timeout,
+                            )
+                            if _any_active and _min_idle < idle_timeout:
+                                logger.info(
+                                    "Timer '%s::%s': agent actively working, skipping tick",
                                     gid,
                                     local_ep,
                                 )
@@ -1066,7 +1264,13 @@ class AgentRuntime:
                     return _timer_loop
 
                 task = asyncio.create_task(
-                    _make_timer(graph_id, ep_id, interval, run_immediately)()
+                    _make_timer(
+                        graph_id,
+                        ep_id,
+                        interval,
+                        run_immediately,
+                        idle_timeout=float(tc.get("idle_timeout_seconds", 300)),
+                    )()
                 )
                 timer_tasks.append(task)
                 logger.info("Timer task created for '%s::%s': %s", graph_id, ep_id, task)
@@ -1174,9 +1378,60 @@ class AgentRuntime:
             return float("inf")
         return time.monotonic() - self._last_user_input_time
 
+    @property
+    def agent_idle_seconds(self) -> float:
+        """Seconds since any stream last had activity (LLM call, tool call, etc.).
+
+        Returns the *minimum* idle time across all streams with active
+        executions.  Returns ``float('inf')`` if nothing is running.
+        """
+        min_idle = float("inf")
+        for reg in self._graphs.values():
+            for stream in reg.streams.values():
+                idle = stream.agent_idle_seconds
+                if idle < min_idle:
+                    min_idle = idle
+        return min_idle
+
     def get_graph_registration(self, graph_id: str) -> _GraphRegistration | None:
         """Get the registration for a specific graph (or None)."""
         return self._graphs.get(graph_id)
+
+    def cancel_all_tasks(self, loop: asyncio.AbstractEventLoop) -> bool:
+        """Cancel all running execution tasks across all graphs.
+
+        Schedules the cancellation on *loop* (the agent event loop) so
+        that ``_execution_tasks`` is only read from the thread that owns
+        it, avoiding cross-thread dict access.  Safe to call from any
+        thread (e.g. the Textual UI thread).
+
+        Blocks the caller for up to 5 seconds waiting for the result.
+        For async callers, use :meth:`cancel_all_tasks_async` instead.
+        """
+        future = asyncio.run_coroutine_threadsafe(self.cancel_all_tasks_async(), loop)
+        try:
+            return future.result(timeout=5)
+        except Exception:
+            logger.warning("cancel_all_tasks: timed out or failed")
+            return False
+
+    async def cancel_all_tasks_async(self) -> bool:
+        """Cancel all running execution tasks (runs on the agent loop).
+
+        Iterates ``_execution_tasks`` and calls ``task.cancel()`` directly.
+        Must be awaited on the agent event loop so dict access is
+        thread-safe.  Returns True if at least one task was cancelled.
+        """
+        cancelled = False
+        for gid in self.list_graphs():
+            reg = self.get_graph_registration(gid)
+            if reg:
+                for stream in reg.streams.values():
+                    for task in list(stream._execution_tasks.values()):
+                        if task and not task.done():
+                            task.cancel()
+                            cancelled = True
+        return cancelled
 
     def _get_primary_session_state(
         self,
@@ -1231,8 +1486,8 @@ class AgentRuntime:
                 allowed_keys = set(entry_node.input_keys)
 
         # Search primary graph's streams for an active session.
-        # Skip isolated streams (e.g. health judge) — they have their own
-        # session directories and must never be used as a shared session.
+        # Skip isolated streams — they have their own session directories
+        # and must never be used as a shared session.
         all_streams: list[tuple[str, ExecutionStream]] = []
         for _gid, reg in self._graphs.items():
             for ep_id, stream in reg.streams.items():
@@ -1279,6 +1534,7 @@ class AgentRuntime:
         graph_id: str | None = None,
         *,
         is_client_input: bool = False,
+        image_content: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Inject user input into a running client-facing node.
 
@@ -1291,6 +1547,8 @@ class AgentRuntime:
             graph_id: Optional graph to search first (defaults to active graph)
             is_client_input: True when the message originates from a real
                 human user (e.g. /chat endpoint), False for external events.
+            image_content: Optional list of image content blocks (OpenAI
+                image_url format) to include alongside the text.
 
         Returns:
             True if input was delivered, False if no matching node found
@@ -1302,7 +1560,9 @@ class AgentRuntime:
         target = graph_id or self._active_graph_id
         if target in self._graphs:
             for stream in self._graphs[target].streams.values():
-                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
+                if await stream.inject_input(
+                    node_id, content, is_client_input=is_client_input, image_content=image_content
+                ):
                     return True
 
         # Then search all other graphs
@@ -1310,7 +1570,9 @@ class AgentRuntime:
             if gid == target:
                 continue
             for stream in reg.streams.values():
-                if await stream.inject_input(node_id, content, is_client_input=is_client_input):
+                if await stream.inject_input(
+                    node_id, content, is_client_input=is_client_input, image_content=image_content
+                ):
                     return True
         return False
 
@@ -1368,6 +1630,23 @@ class AgentRuntime:
         # Fallback: primary graph
         return list(self._entry_points.values())
 
+    def get_timer_next_fire_in(self, entry_point_id: str) -> float | None:
+        """Return seconds until the next timer fire for *entry_point_id*.
+
+        Checks the primary graph's ``_timer_next_fire`` dict as well as
+        all registered secondary graphs.  Returns ``None`` when no fire
+        time is recorded (e.g. the timer is currently executing or the
+        entry point is not a timer).
+        """
+        mono = self._timer_next_fire.get(entry_point_id)
+        if mono is not None:
+            return max(0.0, mono - time.monotonic())
+        for reg in self._graphs.values():
+            mono = reg.timer_next_fire.get(entry_point_id)
+            if mono is not None:
+                return max(0.0, mono - time.monotonic())
+        return None
+
     def get_stream(self, entry_point_id: str) -> ExecutionStream | None:
         """Get a specific execution stream."""
         return self._streams.get(entry_point_id)
@@ -1386,6 +1665,11 @@ class AgentRuntime:
                 for executor in stream._active_executors.values():
                     for node_id, node in executor.node_registry.items():
                         if getattr(node, "_awaiting_input", False):
+                            # Skip escalation receivers — those are handled
+                            # by the queen via inject_worker_message(), not
+                            # by the user directly.
+                            if ":escalation:" in node_id:
+                                continue
                             return node_id, graph_id
         return None, None
 
@@ -1547,6 +1831,11 @@ def create_agent_runtime(
     accounts_data: list[dict] | None = None,
     tool_provider_map: dict[str, str] | None = None,
     event_bus: "EventBus | None" = None,
+    skills_manager_config: "SkillsManagerConfig | None" = None,
+    # Deprecated — pass skills_manager_config instead.
+    skills_catalog_prompt: str = "",
+    protocols_prompt: str = "",
+    skill_dirs: list[str] | None = None,
 ) -> AgentRuntime:
     """
     Create and configure an AgentRuntime with entry points.
@@ -1573,6 +1862,13 @@ def create_agent_runtime(
         accounts_data: Raw account data for per-node prompt generation.
         tool_provider_map: Tool name to provider name mapping for account routing.
         event_bus: Optional external EventBus to share with other components.
+        skills_catalog_prompt: Available skills catalog for system prompt.
+        protocols_prompt: Default skill operational protocols for system prompt.
+        skill_dirs: Skill base directories for Tier 3 resource access.
+        skills_manager_config: Skill configuration — the runtime owns
+            discovery, loading, and prompt renderation internally.
+        skills_catalog_prompt: Deprecated. Pre-rendered skills catalog.
+        protocols_prompt: Deprecated. Pre-rendered operational protocols.
 
     Returns:
         Configured AgentRuntime (not yet started)
@@ -1599,6 +1895,10 @@ def create_agent_runtime(
         accounts_data=accounts_data,
         tool_provider_map=tool_provider_map,
         event_bus=event_bus,
+        skills_manager_config=skills_manager_config,
+        skills_catalog_prompt=skills_catalog_prompt,
+        protocols_prompt=protocols_prompt,
+        skill_dirs=skill_dirs,
     )
 
     for spec in entry_points:

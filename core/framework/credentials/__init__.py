@@ -6,7 +6,7 @@ This module provides secure credential storage with:
 - Template-based usage: {{cred.key}} patterns for injection
 - Bipartisan model: Store stores values, tools define usage
 - Provider system: Extensible lifecycle management (refresh, validate)
-- Multiple backends: Encrypted files, env vars, HashiCorp Vault
+- Multiple backends: Encrypted files, env vars
 
 Quick Start:
     from core.framework.credentials import CredentialStore, CredentialObject
@@ -38,10 +38,16 @@ For Aden server sync:
         AdenSyncProvider,
     )
 
-For Vault integration:
-    from core.framework.credentials.vault import HashiCorpVaultStorage
 """
 
+from .key_storage import (
+    delete_aden_api_key,
+    generate_and_save_credential_key,
+    load_aden_api_key,
+    load_credential_key,
+    save_aden_api_key,
+    save_credential_key,
+)
 from .models import (
     CredentialDecryptionError,
     CredentialError,
@@ -132,6 +138,13 @@ __all__ = [
     "CredentialRefreshError",
     "CredentialValidationError",
     "CredentialDecryptionError",
+    # Key storage (bootstrap credentials)
+    "load_credential_key",
+    "save_credential_key",
+    "generate_and_save_credential_key",
+    "load_aden_api_key",
+    "save_aden_api_key",
+    "delete_aden_api_key",
     # Validation
     "ensure_credential_key_env",
     "validate_agent_credentials",

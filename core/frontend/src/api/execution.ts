@@ -34,8 +34,15 @@ export const executionApi = {
       graph_id: graphId,
     }),
 
-  chat: (sessionId: string, message: string) =>
-    api.post<ChatResult>(`/sessions/${sessionId}/chat`, { message }),
+  chat: (sessionId: string, message: string, images?: { type: string; image_url: { url: string } }[]) =>
+    api.post<ChatResult>(`/sessions/${sessionId}/chat`, { message, ...(images?.length ? { images } : {}) }),
+
+  /** Queue context for the queen without triggering an LLM response. */
+  queenContext: (sessionId: string, message: string) =>
+    api.post<ChatResult>(`/sessions/${sessionId}/queen-context`, { message }),
+
+  workerInput: (sessionId: string, message: string) =>
+    api.post<ChatResult>(`/sessions/${sessionId}/worker-input`, { message }),
 
   stop: (sessionId: string, executionId: string) =>
     api.post<StopResult>(`/sessions/${sessionId}/stop`, {

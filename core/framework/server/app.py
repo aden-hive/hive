@@ -11,6 +11,52 @@ from framework.server.session_manager import Session, SessionManager
 logger = logging.getLogger(__name__)
 
 
+# Anchor to the repository root so allowed roots are independent of CWD.
+# app.py lives at core/framework/server/app.py, so four .parent calls
+# reach the repo root where exports/ and examples/ live.
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+
+_ALLOWED_AGENT_ROOTS: tuple[Path, ...] | None = None
+
+
+def _get_allowed_agent_roots() -> tuple[Path, ...]:
+    """Return resolved allowed root directories for agent loading.
+
+    Roots are anchored to the repository root (derived from ``__file__``)
+    so the allowlist is correct regardless of the process's working
+    directory.
+    """
+    global _ALLOWED_AGENT_ROOTS
+    if _ALLOWED_AGENT_ROOTS is None:
+        _ALLOWED_AGENT_ROOTS = (
+            (_REPO_ROOT / "exports").resolve(),
+            (_REPO_ROOT / "examples").resolve(),
+            (Path.home() / ".hive" / "agents").resolve(),
+        )
+    return _ALLOWED_AGENT_ROOTS
+
+
+def validate_agent_path(agent_path: str | Path) -> Path:
+    """Validate that an agent path resolves inside an allowed directory.
+
+    Prevents arbitrary code execution via ``importlib.import_module`` by
+    restricting agent loading to known safe directories: ``exports/``,
+    ``examples/``, and ``~/.hive/agents/``.
+
+    Returns the resolved ``Path`` on success.
+
+    Raises:
+        ValueError: If the path is outside all allowed roots.
+    """
+    resolved = Path(agent_path).expanduser().resolve()
+    for root in _get_allowed_agent_roots():
+        if resolved.is_relative_to(root) and resolved != root:
+            return resolved
+    raise ValueError(
+        "agent_path must be inside an allowed directory (exports/, examples/, or ~/.hive/agents/)"
+    )
+
+
 def safe_path_segment(value: str) -> str:
     """Validate a URL path parameter is a safe filesystem name.
 
@@ -18,7 +64,7 @@ def safe_path_segment(value: str) -> str:
     traversal sequences.  aiohttp decodes ``%2F`` inside route params,
     so a raw ``{session_id}`` can contain ``/`` or ``..`` after decoding.
     """
-    if "/" in value or "\\" in value or ".." in value:
+    if not value or value == "." or "/" in value or "\\" in value or ".." in value:
         raise web.HTTPBadRequest(reason="Invalid path parameter")
     return value
 
@@ -46,6 +92,29 @@ def sessions_dir(session: Session) -> Path:
         raise ValueError("No worker loaded — no worker sessions directory")
     agent_name = session.worker_path.name
     return Path.home() / ".hive" / "agents" / agent_name / "sessions"
+
+
+def cold_sessions_dir(session_id: str) -> Path | None:
+    """Resolve the worker sessions directory from disk for a cold/stopped session.
+
+    Reads agent_path from the queen session's meta.json to find the agent name,
+    then returns ~/.hive/agents/{agent_name}/sessions/.
+    Returns None if meta.json is missing or has no agent_path.
+    """
+    import json
+
+    meta_path = Path.home() / ".hive" / "queen" / "session" / session_id / "meta.json"
+    if not meta_path.exists():
+        return None
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        agent_path = meta.get("agent_path")
+        if not agent_path:
+            return None
+        agent_name = Path(agent_path).name
+        return Path.home() / ".hive" / "agents" / agent_name / "sessions"
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 # Allowed CORS origins (localhost on any port)
@@ -130,41 +199,34 @@ def create_app(model: str | None = None) -> web.Application:
     """
     app = web.Application(middlewares=[cors_middleware, error_middleware])
 
-    # Store manager on app for handlers
-    app["manager"] = SessionManager(model=model)
-
-    # Initialize credential store
+    # Initialize credential store (before SessionManager so it can be shared)
     from framework.credentials.store import CredentialStore
 
     try:
         from framework.credentials.validation import ensure_credential_key_env
 
+        # Load ALL credentials: HIVE_CREDENTIAL_KEY, ADEN_API_KEY, and LLM keys
         ensure_credential_key_env()
 
-        # Ensure HIVE_CREDENTIAL_KEY exists and is persisted (same as TUI setup flow).
-        # ensure_credential_key_env() loads from shell config but won't generate a new
-        # key. Web-only users who never ran the TUI need one auto-generated + persisted
-        # so credentials survive server restarts.
+        # Auto-generate credential key for web-only users who never ran the TUI
         if not os.environ.get("HIVE_CREDENTIAL_KEY"):
             try:
-                from aden_tools.credentials.shell_config import add_env_var_to_shell_config
-                from cryptography.fernet import Fernet
+                from framework.credentials.key_storage import generate_and_save_credential_key
 
-                generated_key = Fernet.generate_key().decode()
-                os.environ["HIVE_CREDENTIAL_KEY"] = generated_key
-                add_env_var_to_shell_config(
-                    "HIVE_CREDENTIAL_KEY",
-                    generated_key,
-                    comment="Encryption key for Hive credential store",
+                generate_and_save_credential_key()
+                logger.info(
+                    "Generated and persisted HIVE_CREDENTIAL_KEY to ~/.hive/secrets/credential_key"
                 )
-                logger.info("Generated and persisted HIVE_CREDENTIAL_KEY to shell config")
             except Exception as exc:
                 logger.warning("Could not auto-persist HIVE_CREDENTIAL_KEY: %s", exc)
 
-        app["credential_store"] = CredentialStore.with_aden_sync()
+        credential_store = CredentialStore.with_aden_sync()
     except Exception:
         logger.debug("Encrypted credential store unavailable, using in-memory fallback")
-        app["credential_store"] = CredentialStore.for_testing({})
+        credential_store = CredentialStore.for_testing({})
+
+    app["credential_store"] = credential_store
+    app["manager"] = SessionManager(model=model, credential_store=credential_store)
 
     # Register shutdown hook
     app.on_shutdown.append(_on_shutdown)

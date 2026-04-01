@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import logging
 import os
 import sys
 from collections.abc import Callable
@@ -36,6 +37,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from framework.graph import NodeSpec
+
+logger = logging.getLogger(__name__)
 
 
 # ANSI colors for terminal output
@@ -256,56 +259,22 @@ class CredentialSetupSession:
 
     def _ensure_credential_key(self) -> bool:
         """Ensure HIVE_CREDENTIAL_KEY is available for encrypted storage."""
-        if os.environ.get("HIVE_CREDENTIAL_KEY"):
+        from .key_storage import generate_and_save_credential_key, load_credential_key
+
+        if load_credential_key():
             return True
-
-        # Try to load from shell config
-        try:
-            from aden_tools.credentials.shell_config import check_env_var_in_shell_config
-
-            found, value = check_env_var_in_shell_config("HIVE_CREDENTIAL_KEY")
-            if found and value:
-                os.environ["HIVE_CREDENTIAL_KEY"] = value
-                return True
-        except ImportError:
-            pass
 
         # Generate a new key
         self._print(f"{Colors.YELLOW}Initializing credential store...{Colors.NC}")
         try:
-            from cryptography.fernet import Fernet
-
-            generated_key = Fernet.generate_key().decode()
-            os.environ["HIVE_CREDENTIAL_KEY"] = generated_key
-
-            # Save to shell config
-            self._save_key_to_shell_config(generated_key)
+            generate_and_save_credential_key()
+            self._print(
+                f"{Colors.GREEN}✓ Encryption key saved to ~/.hive/secrets/credential_key{Colors.NC}"
+            )
             return True
         except Exception as e:
             self._print(f"{Colors.RED}Failed to initialize credential store: {e}{Colors.NC}")
             return False
-
-    def _save_key_to_shell_config(self, key: str) -> None:
-        """Save HIVE_CREDENTIAL_KEY to shell config."""
-        try:
-            from aden_tools.credentials.shell_config import (
-                add_env_var_to_shell_config,
-            )
-
-            success, config_path = add_env_var_to_shell_config(
-                "HIVE_CREDENTIAL_KEY",
-                key,
-                comment="Encryption key for Hive credential store",
-            )
-            if success:
-                self._print(f"{Colors.GREEN}✓ Encryption key saved to {config_path}{Colors.NC}")
-        except Exception:
-            # Fallback: just tell the user
-            self._print("\n")
-            self._print(
-                f"{Colors.YELLOW}Add this to your shell config (~/.zshrc or ~/.bashrc):{Colors.NC}"
-            )
-            self._print(f'  export HIVE_CREDENTIAL_KEY="{key}"')
 
     def _setup_single_credential(self, cred: MissingCredential) -> bool:
         """Set up a single credential. Returns True if configured."""
@@ -399,8 +368,11 @@ class CredentialSetupSession:
         self._print("")
         try:
             api_key = self.password_fn(f"Paste your {cred.env_var}: ").strip()
+        except (EOFError, OSError) as exc:
+            logger.debug("Password input unavailable, falling back to plain input: %s", exc)
+            api_key = self._input(f"Paste your {cred.env_var}: ").strip()
         except Exception:
-            # Fallback to regular input if password input fails
+            logger.warning("Unexpected error reading password input", exc_info=True)
             api_key = self._input(f"Paste your {cred.env_var}: ").strip()
 
         if not api_key:
@@ -437,26 +409,21 @@ class CredentialSetupSession:
 
             try:
                 aden_key = self.password_fn("Paste your ADEN_API_KEY: ").strip()
+            except (EOFError, OSError) as exc:
+                logger.debug("Password input unavailable for ADEN_API_KEY: %s", exc)
+                aden_key = self._input("Paste your ADEN_API_KEY: ").strip()
             except Exception:
+                logger.warning("Unexpected error reading ADEN_API_KEY input", exc_info=True)
                 aden_key = self._input("Paste your ADEN_API_KEY: ").strip()
 
             if not aden_key:
                 self._print(f"{Colors.YELLOW}No key entered. Skipping.{Colors.NC}")
                 return False
 
-            os.environ["ADEN_API_KEY"] = aden_key
+            # Persist to encrypted store and set os.environ
+            from .key_storage import save_aden_api_key
 
-            # Save to shell config
-            try:
-                from aden_tools.credentials.shell_config import add_env_var_to_shell_config
-
-                add_env_var_to_shell_config(
-                    "ADEN_API_KEY",
-                    aden_key,
-                    comment="Aden Platform API key",
-                )
-            except Exception:
-                pass
+            save_aden_api_key(aden_key)
 
         # Sync from Aden
         try:
@@ -476,8 +443,10 @@ class CredentialSetupSession:
                     value = store.get_key(cred_id, cred.credential_key)
                     if value:
                         os.environ[cred.env_var] = value
+                except (KeyError, OSError) as exc:
+                    logger.debug("Could not export credential to env: %s", exc)
                 except Exception:
-                    pass
+                    logger.warning("Unexpected error exporting credential to env", exc_info=True)
                 return True
             else:
                 self._print(
@@ -500,8 +469,11 @@ class CredentialSetupSession:
                 "message": result.message,
                 "details": result.details,
             }
-        except Exception:
+        except ImportError:
             # No health checker available
+            return None
+        except Exception:
+            logger.warning("Health check failed for %s", cred.credential_name, exc_info=True)
             return None
 
     def _store_credential(self, cred: MissingCredential, value: str) -> None:
@@ -604,14 +576,18 @@ def _load_nodes_from_python_agent(agent_path: Path) -> list:
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         return getattr(module, "nodes", [])
+    except (ImportError, OSError) as exc:
+        logger.debug("Could not load agent module: %s", exc)
+        return []
     except Exception:
+        logger.warning("Unexpected error loading agent module", exc_info=True)
         return []
 
 
 def _load_nodes_from_json_agent(agent_json: Path) -> list:
     """Load nodes from a JSON-based agent."""
     try:
-        with open(agent_json) as f:
+        with open(agent_json, encoding="utf-8-sig") as f:
             data = json.load(f)
 
         from framework.graph import NodeSpec
@@ -631,7 +607,11 @@ def _load_nodes_from_json_agent(agent_json: Path) -> list:
                 )
             )
         return nodes
+    except (json.JSONDecodeError, KeyError, OSError) as exc:
+        logger.debug("Could not load JSON agent: %s", exc)
+        return []
     except Exception:
+        logger.warning("Unexpected error loading JSON agent", exc_info=True)
         return []
 
 

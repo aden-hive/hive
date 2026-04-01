@@ -40,6 +40,7 @@ interface CredentialRow {
   adenSupported: boolean; // whether this credential uses OAuth via Aden
   valid: boolean | null; // true = health check passed, false = failed, null = not checked
   validationMessage: string | null;
+  alternativeGroup: string | null; // non-null when multiple providers can satisfy a tool
 }
 
 function requirementToRow(r: AgentCredentialRequirement): CredentialRow {
@@ -54,12 +55,23 @@ function requirementToRow(r: AgentCredentialRequirement): CredentialRow {
     adenSupported: r.aden_supported,
     valid: r.valid,
     validationMessage: r.validation_message,
+    alternativeGroup: r.alternative_group ?? null,
   };
 }
 
 // Module-level cache: credential requirements are static per agent path.
 // Cleared on save/delete so the next fetch picks up updated availability.
 const credentialCache = new Map<string, AgentCredentialRequirement[]>();
+
+/** Clear cached credential requirements so the next modal open fetches fresh data.
+ *  Call with a specific path to clear one entry, or no args to clear all. */
+export function clearCredentialCache(agentPath?: string) {
+  if (agentPath) {
+    credentialCache.delete(agentPath);
+  } else {
+    credentialCache.clear();
+  }
+}
 
 interface CredentialsModalProps {
   agentType: string;
@@ -114,8 +126,13 @@ export default function CredentialsModal({
         // No real path — no credentials to show
         setRows([]);
       }
-    } catch {
-      // Backend unavailable — fall back to legacy props or empty
+    } catch (err) {
+      // Surface the error so the modal shows a meaningful message
+      const message =
+        err instanceof Error ? err.message : "Failed to check credentials";
+      setError(message);
+
+      // Fall back to legacy props or empty rows
       if (legacyCredentials) {
         setRows(legacyCredentials.map(c => ({
           ...c,
@@ -123,6 +140,7 @@ export default function CredentialsModal({
           adenSupported: false,
           valid: null,
           validationMessage: null,
+          alternativeGroup: null,
         })));
       } else {
         setRows([]);
@@ -225,11 +243,28 @@ export default function CredentialsModal({
   if (!open) return null;
 
   const connectedCount = rows.filter(c => c.connected).length;
-  const requiredCount = rows.filter(c => c.required).length;
-  const requiredConnected = rows.filter(c => c.required && c.connected).length;
   const invalidCount = rows.filter(c => c.valid === false).length;
-  const missingCount = requiredCount - requiredConnected;
-  const allRequiredMet = requiredConnected === requiredCount && invalidCount === 0;
+
+  // Alternative groups (e.g. send_email → resend OR google): satisfied if ANY is connected & valid
+  const altGroups = new Map<string, boolean>();
+  for (const c of rows) {
+    if (!c.alternativeGroup) continue;
+    if (!altGroups.has(c.alternativeGroup)) altGroups.set(c.alternativeGroup, false);
+    if (c.connected && c.valid !== false) altGroups.set(c.alternativeGroup, true);
+  }
+  const altGroupsSatisfied = altGroups.size === 0 || [...altGroups.values()].every(Boolean);
+
+  // Non-alternative required credentials
+  const nonAltRequired = rows.filter(c => c.required && !c.alternativeGroup);
+  const nonAltMet = nonAltRequired.every(c => c.connected && c.valid !== false);
+
+  const allRequiredMet = nonAltMet && altGroupsSatisfied;
+
+  // For status banner counts
+  const nonAltMissing = nonAltRequired.filter(c => !c.connected).length;
+  const altGroupsMissing = [...altGroups.values()].filter(v => !v).length;
+  const missingCount = nonAltMissing + altGroupsMissing;
+
   const adenPlatformConnected = rows.find(r => r.id === "aden_api_key")?.connected ?? false;
 
   return (
@@ -259,11 +294,18 @@ export default function CredentialsModal({
           {/* Status banner */}
           {!loading && (
             <div className={`mx-5 mt-4 px-3 py-2.5 rounded-lg border text-xs font-medium flex items-center gap-2 ${
-              allRequiredMet
-                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600"
-                : "bg-destructive/5 border-destructive/20 text-destructive"
+              error && rows.length === 0
+                ? "bg-destructive/5 border-destructive/20 text-destructive"
+                : allRequiredMet
+                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600"
+                  : "bg-destructive/5 border-destructive/20 text-destructive"
             }`}>
-              {allRequiredMet ? (
+              {error && rows.length === 0 ? (
+                <>
+                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="break-words">Failed to check credentials: {error}</span>
+                </>
+              ) : allRequiredMet ? (
                 <>
                   <Shield className="w-3.5 h-3.5" />
                   {rows.length === 0
@@ -314,13 +356,23 @@ export default function CredentialsModal({
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-foreground">{row.name}</span>
                         {row.required && (
-                          <span className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                            row.connected
-                              ? "text-emerald-600/70 bg-emerald-500/10"
-                              : "text-destructive/70 bg-destructive/10"
-                          }`}>
-                            Required
-                          </span>
+                          row.alternativeGroup ? (
+                            <span className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                              row.connected
+                                ? "text-emerald-600/70 bg-emerald-500/10"
+                                : "text-amber-600/70 bg-amber-500/10"
+                            }`}>
+                              Either
+                            </span>
+                          ) : (
+                            <span className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                              row.connected
+                                ? "text-emerald-600/70 bg-emerald-500/10"
+                                : "text-destructive/70 bg-destructive/10"
+                            }`}>
+                              Required
+                            </span>
+                          )
                         )}
                       </div>
                       <p className="text-[11px] text-muted-foreground mt-0.5">{row.description}</p>
@@ -360,17 +412,19 @@ export default function CredentialsModal({
                             <Pencil className="w-3 h-3" />
                           </button>
                         )}
-                        <button
-                          onClick={() => {
-                            setDeletingId(deletingId === row.id ? null : row.id);
-                            if (editingId) { setEditingId(null); setInputValue(""); }
-                          }}
-                          disabled={saving}
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                          title="Delete credential"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                        {!(row.adenSupported && row.id !== "aden_api_key") && (
+                          <button
+                            onClick={() => {
+                              setDeletingId(deletingId === row.id ? null : row.id);
+                              if (editingId) { setEditingId(null); setInputValue(""); }
+                            }}
+                            disabled={saving}
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            title="Delete credential"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
                     ) : row.adenSupported && !adenPlatformConnected && row.id !== "aden_api_key" ? (
                       <span className="text-[11px] text-muted-foreground italic flex-shrink-0">

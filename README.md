@@ -23,11 +23,12 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Agent_Harness-Runtime_Layer-ff6600?style=flat-square" alt="Agent Harness" />
   <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
   <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
   <img src="https://img.shields.io/badge/Headless-Development-purple?style=flat-square" alt="Headless" />
   <img src="https://img.shields.io/badge/Human--in--the--Loop-orange?style=flat-square" alt="HITL" />
-  <img src="https://img.shields.io/badge/Production--Ready-red?style=flat-square" alt="Production" />
+  <img src="https://img.shields.io/badge/Browser-Use-red?style=flat-square" alt="Browser Use" />
 </p>
 <p align="center">
   <img src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai" alt="OpenAI" />
@@ -35,37 +36,42 @@
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
 </p>
 
+<p align="center"><em>The agent harness for production workloads — state management, failure recovery, observability, and human oversight so your agents actually run.</em></p>
+
 ## Overview
 
-Build autonomous, reliable, self-improving AI agents without hardcoding workflows. Define your goal through conversation with a coding agent, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, credential management, and real-time monitoring give you control without sacrificing adaptability.
+Hive is a runtime harness for AI agents in production. You describe your goal in natural language; a coding agent (the queen) generates the agent graph and connection code to achieve it. During execution, the harness manages state isolation, checkpoint-based crash recovery, cost enforcement, and real-time observability. When agents fail, the framework captures failure data, evolves the graph through the coding agent, and redeploys automatically. Built-in human-in-the-loop nodes, browser control, credential management, and parallel execution give you production reliability without sacrificing adaptability.
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
-https://github.com/user-attachments/assets/846c0cc7-ffd6-47fa-b4b7-495494857a55
+Visit [HoneyComb](http://honeycomb.open-hive.com/) to see what jobs are being automated by AI. It’s a stock market for jobs, driven by our community’s AI agent progress. You can long and short jobs (with no real money but compute token)based on how much you think a job is going to be replaced by AI.
+
+https://github.com/user-attachments/assets/bf10edc3-06ba-48b6-98ba-d069b15fb69d
+
 
 ## Who Is Hive For?
 
-Hive is designed for developers and teams who want to build **production-grade AI agents** without manually wiring complex workflows.
+Hive is the harness layer for teams moving AI agents from prototype to production. Models are getting better on their own — the bottleneck is the infrastructure around them: state management, failure recovery, cost control, and observability.
 
 Hive is a good fit if you:
 
 - Want AI agents that **execute real business processes**, not demos
-- Prefer **goal-driven development** over hardcoded workflows
+- Need a **runtime that handles state, recovery, and parallel execution** at scale
 - Need **self-healing and adaptive agents** that improve over time
 - Require **human-in-the-loop control**, observability, and cost limits
-- Plan to run agents in **production environments**
+- Plan to run agents in **production** where uptime, cost, and auditability matter
 
 Hive may not be the best fit if you’re only experimenting with simple agent chains or one-off scripts.
 
 ## When Should You Use Hive?
 
-Use Hive when you need:
+Use Hive when the bottleneck is no longer the model but the harness around it:
 
-- Long-running, autonomous agents
-- Strong guardrails, process, and controls
-- Continuous improvement based on failures
-- Multi-agent coordination
-- A framework that evolves with your goals
+- Long-running agents that need **state persistence and crash recovery**
+- Production workloads requiring **cost enforcement, observability, and audit trails**
+- Agents that **self-heal** through failure capture and graph evolution
+- Multi-agent coordination with **session isolation and shared memory**
+- A framework that **scales with model improvements** rather than fighting them
 
 ## Quick Links
 
@@ -73,7 +79,7 @@ Use Hive when you need:
 - **[Self-Hosting Guide](https://docs.adenhq.com/getting-started/quickstart)** - Deploy Hive on your infrastructure
 - **[Changelog](https://github.com/aden-hive/hive/releases)** - Latest updates and releases
 - **[Roadmap](docs/roadmap.md)** - Upcoming features and plans
-- **[Report Issues](https://github.com/adenhq/hive/issues)** - Bug reports and feature requests
+- **[Report Issues](https://github.com/aden-hive/hive/issues)** - Bug reports and feature requests
 - **[Contributing](CONTRIBUTING.md)** - How to contribute and submit PRs
 
 ## Quick Start
@@ -81,9 +87,10 @@ Use Hive when you need:
 ### Prerequisites
 
 - Python 3.11+ for agent development
-- Claude Code, Codex CLI, or Cursor for utilizing agent skills
+- An LLM provider that powers the agents
+- **ripgrep (optional, recommended on Windows):** The `search_files` tool uses ripgrep for faster file search. If not installed, a Python fallback is used. On Windows: `winget install BurntSushi.ripgrep` or `scoop install ripgrep`
 
-> **Note for Windows Users:** It is strongly recommended to use **WSL (Windows Subsystem for Linux)** or **Git Bash** to run this framework. Some core automation scripts may not execute correctly in standard Command Prompt or PowerShell.
+> **Windows Users:** Native Windows is supported via `quickstart.ps1` and `hive.ps1`. Run these in PowerShell 5.1+. WSL is also an option but not required.
 
 ### Installation
 
@@ -97,9 +104,11 @@ Use Hive when you need:
 git clone https://github.com/aden-hive/hive.git
 cd hive
 
-
-# Run quickstart setup
+# Run quickstart setup (macOS/Linux)
 ./quickstart.sh
+
+# Windows (PowerShell)
+.\quickstart.ps1
 ```
 
 This sets up:
@@ -107,87 +116,51 @@ This sets up:
 - **framework** - Core agent runtime and graph executor (in `core/.venv`)
 - **aden_tools** - MCP tools for agent capabilities (in `tools/.venv`)
 - **credential store** - Encrypted API key storage (`~/.hive/credentials`)
-- **LLM provider** - Interactive default model configuration
+- **LLM provider** - Interactive default model configuration, including Hive LLM and OpenRouter
 - All required Python dependencies with `uv`
+
+- Finally, it will open the Hive interface in your browser
+
+> **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
 
 ### Build Your First Agent
 
-```bash
-# Build an agent using Claude Code
-claude> /hive
+Type the agent you want to build in the home input box. The queen is going to ask you questions and work out a solution with you.
 
-# Test your agent
-claude> /hive-debugger
+<img width="2500" height="1214" alt="Image" src="https://github.com/user-attachments/assets/1ce19141-a78b-46f5-8d64-dbf987e048f4" />
 
-# (at separate terminal) Launch the interactive dashboard
-hive tui
+### Use Template Agents
 
-# Or run directly
-hive run exports/your_agent_name --input '{"key": "value"}'
-```
+Click "Try a sample agent" and check the templates. You can run a template directly or choose to build your version on top of the existing template.
 
-## Coding Agent Support
+### Run Agents
 
-### Codex CLI
+Now you can run an agent by selecting the agent (either an existing agent or example agent). You can click the Run button on the top left, or talk to the queen agent and it can run the agent for you.
 
-Hive includes native support for [OpenAI Codex CLI](https://github.com/openai/codex) (v0.101.0+).
-
-1. **Config:** `.codex/config.toml` with `agent-builder` MCP server (tracked in git)
-2. **Skills:** `.agents/skills/` symlinks to Hive skills (tracked in git)
-3. **Launch:** Run `codex` in the repo root, then type `use hive`
-
-Example:
-
-```
-codex> use hive
-```
-
-### Opencode
-
-Hive includes native support for [Opencode](https://github.com/opencode-ai/opencode).
-
-1. **Setup:** Run the quickstart script
-2. **Launch:** Open Opencode in the project root.
-3. **Activate:** Type `/hive` in the chat to switch to the Hive Agent.
-4. **Verify:** Ask the agent _"List your tools"_ to confirm the connection.
-
-The agent has access to all Hive skills and can scaffold agents, add tools, and debug workflows directly from the chat.
-
-**[📖 Complete Setup Guide](docs/environment-setup.md)** - Detailed instructions for agent development
-
-### Antigravity IDE Support
-
-Skills and MCP servers are also available in [Antigravity IDE](https://antigravity.google/) (Google's AI-powered IDE). **Easiest:** open a terminal in the hive repo folder and run (use `./` — the script is inside the repo):
-
-```bash
-./scripts/setup-antigravity-mcp.sh
-```
-
-**Important:** Always restart/refresh Antigravity IDE after running the setup script—MCP servers only load on startup. After restart, **agent-builder** and **tools** MCP servers should connect. Skills are under `.agent/skills/` (symlinks to `.claude/skills/`). See [docs/antigravity-setup.md](docs/antigravity-setup.md) for manual setup and troubleshooting.
+<img width="2549" height="1174" alt="Screenshot 2026-03-12 at 9 27 36 PM" src="https://github.com/user-attachments/assets/7c7d30fa-9ceb-4c23-95af-b1caa405547d" />
 
 ## Features
 
-- **[Goal-Driven Development](docs/key_concepts/goals_outcome.md)** - Define objectives in natural language; the coding agent generates the agent graph and connection code to achieve them
+- **Browser-Use** - Control the browser on your computer to achieve hard tasks
+- **Parallel Execution** - Execute the generated graph in parallel. This way you can have multiple agents completing the jobs for you
+- **[Goal-Driven Generation](docs/key_concepts/goals_outcome.md)** - Define objectives in natural language; the coding agent generates the agent graph and connection code to achieve them
 - **[Adaptiveness](docs/key_concepts/evolution.md)** - Framework captures failures, calibrates according to the objectives, and evolves the agent graph
 - **[Dynamic Node Connections](docs/key_concepts/graph.md)** - No predefined edges; connection code is generated by any capable LLM based on your goals
 - **SDK-Wrapped Nodes** - Every node gets shared memory, local RLM memory, monitoring, tools, and LLM access out of the box
 - **[Human-in-the-Loop](docs/key_concepts/graph.md#human-in-the-loop)** - Intervention nodes that pause execution for human input with configurable timeouts and escalation
 - **Real-time Observability** - WebSocket streaming for live monitoring of agent execution, decisions, and node-to-node communication
-- **Interactive TUI Dashboard** - Terminal-based dashboard with live graph view, event log, and chat interface for agent interaction
-- **Cost & Budget Control** - Set spending limits, throttles, and automatic model degradation policies
-- **Production-Ready** - Self-hostable, built for scale and reliability
 
 ## Integration
 
 <a href="https://github.com/aden-hive/hive/tree/main/tools/src/aden_tools/tools"><img width="100%" alt="Integration" src="https://github.com/user-attachments/assets/a1573f93-cf02-4bb8-b3d5-b305b05b1e51" /></a>
 Hive is built to be model-agnostic and system-agnostic.
 
-- **LLM flexibility** - Hive Framework is designed to support various types of LLMs, including hosted and local models through LiteLLM-compatible providers.
+- **LLM flexibility** - Hive Framework supports Anthropic, OpenAI, OpenRouter, Hive LLM, and other hosted or local models through LiteLLM-compatible providers.
 - **Business system connectivity** - Hive Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
 
-## Why Aden
+## Why Hive
 
-Hive focuses on generating agents that run real business processes rather than generic agents. Instead of requiring you to manually design workflows, define agent interactions, and handle failures reactively, Hive flips the paradigm: **you describe outcomes, and the system builds itself**—delivering an outcome-driven, adaptive experience with an easy-to-use set of tools and integrations.
+As models improve, the upper bound of what agents can do rises — but their reliability and production value are determined by the harness. Hive focuses on generating agents that run real business processes rather than generic agents. Instead of requiring you to manually design workflows, define agent interactions, and handle failures reactively, Hive flips the paradigm: **you describe outcomes, and the system builds itself**—delivering an outcome-driven, adaptive experience with an easy-to-use set of tools and integrations.
 
 ```mermaid
 flowchart LR
@@ -223,8 +196,9 @@ flowchart LR
 
 ### The Hive Advantage
 
-| Traditional Frameworks     | Hive                                   |
+| Typical Agent Frameworks   | Hive                                   |
 | -------------------------- | -------------------------------------- |
+| Focus on model orchestration | **Production harness**: state, recovery, observability |
 | Hardcode agent workflows   | Describe goals in natural language     |
 | Manual graph definition    | Auto-generated agent graphs            |
 | Reactive error handling    | Outcome-evaluation and adaptiveness    |
@@ -240,35 +214,10 @@ flowchart LR
 4. **Control Plane Monitors** → Real-time metrics, budget enforcement, policy management
 5. **[Adaptiveness](docs/key_concepts/evolution.md)** → On failure, the system evolves the graph and redeploys automatically
 
-## Run Agents
-
-The `hive` CLI is the primary interface for running agents.
-
-```bash
-# Browse and run agents interactively (Recommended)
-hive tui
-
-# Run a specific agent directly
-hive run exports/my_agent --input '{"task": "Your input here"}'
-
-# Run a specific agent with the TUI dashboard
-hive run exports/my_agent --tui
-
-# Interactive REPL
-hive shell
-```
-
-The TUI scans both `exports/` and `examples/templates/` for available agents.
-
-> **Using Python directly (alternative):** You can also run agents with `PYTHONPATH=exports uv run python -m agent_name run --input '{...}'`
-
-See [environment-setup.md](docs/environment-setup.md) for complete setup instructions.
-
 ## Documentation
 
 - **[Developer Guide](docs/developer-guide.md)** - Comprehensive guide for developers
 - [Getting Started](docs/getting-started.md) - Quick setup instructions
-- [TUI Guide](docs/tui-selection-guide.md) - Interactive dashboard usage
 - [Configuration Guide](docs/configuration.md) - All configuration options
 - [Architecture Overview](docs/architecture/README.md) - System design and structure
 
@@ -435,7 +384,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENS
 
 **Q: What LLM providers does Hive support?**
 
-Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, and many more. Simply set the appropriate API key environment variable and specify the model name.
+Hive supports 100+ LLM providers through LiteLLM integration, including OpenAI (GPT-4, GPT-4o), Anthropic (Claude models), Google Gemini, DeepSeek, Mistral, Groq, OpenRouter, and Hive LLM. Simply set the appropriate API key environment variable and specify the model name. See [docs/configuration.md](docs/configuration.md) for provider-specific configuration examples.
 
 **Q: Can I use Hive with local AI models like Ollama?**
 
@@ -443,15 +392,11 @@ Yes! Hive supports local models through LiteLLM. Simply use the model name forma
 
 **Q: What makes Hive different from other agent frameworks?**
 
-Hive generates your entire agent system from natural language goals using a coding agent—you don't hardcode workflows or manually define graphs. When agents fail, the framework automatically captures failure data, [evolves the agent graph](docs/key_concepts/evolution.md), and redeploys. This self-improving loop is unique to Aden.
+Hive is an agent harness, not just an orchestration framework. It provides the production runtime layer — session isolation, checkpoint-based crash recovery, cost enforcement, real-time observability, and human-in-the-loop controls — that makes agents reliable enough to run real workloads. On top of that, Hive generates your entire agent system from natural language goals and automatically [evolves the graph](docs/key_concepts/evolution.md) when agents fail. The combination of a robust harness with self-improving generation is what sets Hive apart.
 
 **Q: Is Hive open-source?**
 
 Yes, Hive is fully open-source under the Apache License 2.0. We actively encourage community contributions and collaboration.
-
-**Q: Can Hive handle complex, production-scale use cases?**
-
-Yes. Hive is explicitly designed for production environments with features like automatic failure recovery, real-time observability, cost controls, and horizontal scaling support. The framework handles both simple automations and complex multi-agent workflows.
 
 **Q: Does Hive support human-in-the-loop workflows?**
 
@@ -477,13 +422,15 @@ Visit [docs.adenhq.com](https://docs.adenhq.com/) for complete guides, API refer
 
 Contributions are welcome! Fork the repository, create your feature branch, implement your changes, and submit a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
-**Q: When will my team start seeing results from Aden's adaptive agents?**
+## Star History
 
-Aden's adaptation loop begins working from the first execution. When an agent fails, the framework captures the failure data, helping developers evolve the agent graph through the coding agent. How quickly this translates to measurable results depends on the complexity of your use case, the quality of your goal definitions, and the volume of executions generating feedback.
-
-**Q: How does Hive compare to other agent frameworks?**
-
-Hive focuses on generating agents that run real business processes, rather than generic agents. This vision emphasizes outcome-driven design, adaptability, and an easy-to-use set of tools and integrations.
+<a href="https://star-history.com/#aden-hive/hive&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=aden-hive/hive&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=aden-hive/hive&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=aden-hive/hive&type=Date" />
+ </picture>
+</a>
 
 ---
 

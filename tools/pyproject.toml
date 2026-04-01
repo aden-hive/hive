@@ -28,9 +28,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "playwright>=1.40.0",
     "playwright-stealth>=1.0.5",
-    "litellm>=1.81.0",
+    "litellm==1.81.7",  # pinned: supply chain attack in >=1.82.7 (adenhq/hive#6783)
     "dnspython>=2.4.0",
     "resend>=2.0.0",
+    "asana>=3.2.0",
+    "google-analytics-data>=0.18.0",
     "framework",
     "stripe>=14.3.0",
     "arxiv>=2.1.0",
@@ -46,6 +48,9 @@ dev = [
 sandbox = [
     "RestrictedPython>=7.0",
 ]
+browser = [
+    "pillow>=10.0.0",
+]
 ocr = [
     "pytesseract>=0.3.10",
     "pillow>=10.0.0",
@@ -59,6 +64,10 @@ sql = [
 bigquery = [
     "google-cloud-bigquery>=3.0.0",
 ]
+databricks = [
+    "databricks-sdk>=0.30.0",
+    "databricks-mcp>=0.1.0",
+]
 all = [
     "RestrictedPython>=7.0",
     "pytesseract>=0.3.10",
@@ -66,6 +75,8 @@ all = [
     "duckdb>=1.0.0",
     "openpyxl>=3.1.0",
     "google-cloud-bigquery>=3.0.0",
+    "databricks-sdk>=0.30.0",
+    "databricks-mcp>=0.1.0",
 ]
 
 [tool.uv.sources]
@@ -106,6 +117,10 @@ lint.isort.section-order = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not live'"
+markers = [
+    "live: Tests that call real external APIs (require credentials, never run in CI)",
+]
 
 [dependency-groups]
 dev = [

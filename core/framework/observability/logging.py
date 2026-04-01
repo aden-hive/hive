@@ -4,8 +4,9 @@ Structured logging with automatic trace context propagation.
 Key Features:
 - Zero developer friction: Standard logger.info() calls get automatic context
 - ContextVar-based propagation: Thread-safe and async-safe
-- Dual output modes: JSON for production, human-readable for development
-- Correlation IDs: trace_id follows entire request flow automatically
+- Dual output modes: JSON for production (full trace_id/execution_id), human-readable for terminal
+- Terminal omits trace_id/execution_id for readability
+- Use ENV=production for file logs with full traceability
 
 Architecture:
     Runtime.start_run() → Generates trace_id, sets context once
@@ -28,6 +29,8 @@ from typing import Any
 # Context variable for trace propagation
 # ContextVar is thread-safe and async-safe - perfect for concurrent agent execution
 trace_context: ContextVar[dict[str, Any] | None] = ContextVar("trace_context", default=None)
+
+_STANDARD_LOG_RECORD_FIELDS = set(logging.makeLogRecord({}).__dict__)
 
 # ANSI escape code pattern (matches \033[...m or \x1b[...m)
 ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-9;]*m|\033\[[0-9;]*m")
@@ -91,6 +94,14 @@ class StructuredFormatter(logging.Formatter):
         if model is not None:
             log_entry["model"] = model
 
+        # Preserve arbitrary structured fields passed via ``extra=...``.
+        for key, value in record.__dict__.items():
+            if key in _STANDARD_LOG_RECORD_FIELDS or key.startswith("_"):
+                continue
+            if key in log_entry:
+                continue
+            log_entry[key] = value
+
         # Add exception info if present (strip ANSI codes from exception text too)
         if record.exc_info:
             exception_text = self.formatException(record.exc_info)
@@ -101,10 +112,11 @@ class StructuredFormatter(logging.Formatter):
 
 class HumanReadableFormatter(logging.Formatter):
     """
-    Human-readable formatter for development.
+    Human-readable formatter for development (terminal output).
 
-    Provides colorized logs with trace context for local debugging.
-    Includes trace_id prefix for correlation - AUTOMATIC!
+    Provides colorized logs for local debugging. Omits trace_id and execution_id
+    from the terminal for readability; use ENV=production (JSON file logs) when
+    traceability is needed.
     """
 
     COLORS = {
@@ -118,18 +130,11 @@ class HumanReadableFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as human-readable string."""
-        # Get trace context - AUTOMATIC!
+        # Get trace context; omit trace_id and execution_id in terminal for readability
         context = trace_context.get() or {}
-        trace_id = context.get("trace_id", "")
-        execution_id = context.get("execution_id", "")
         agent_id = context.get("agent_id", "")
 
-        # Build context prefix
         prefix_parts = []
-        if trace_id:
-            prefix_parts.append(f"trace:{trace_id[:8]}")
-        if execution_id:
-            prefix_parts.append(f"exec:{execution_id[-8:]}")
         if agent_id:
             prefix_parts.append(f"agent:{agent_id}")
 
@@ -148,8 +153,9 @@ class HumanReadableFormatter(logging.Formatter):
         if record_event is not None:
             event = f" [{record_event}]"
 
-        # Format message: [LEVEL] [trace context] message
-        return f"{color}[{level}]{reset} {context_prefix}{record.getMessage()}{event}"
+        timestamp = self.formatTime(record, "%Y-%m-%d %H:%M:%S")
+        # Format message: TIMESTAMP [LEVEL] [trace context] message
+        return f"{timestamp} {color}[{level}]{reset} {context_prefix}{record.getMessage()}{event}"
 
 
 def configure_logging(
@@ -209,6 +215,15 @@ def configure_logging(
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.setLevel(level.upper())
+
+    # Suppress noisy LiteLLM INFO logs (model/provider line + Provider List URL
+    # printed on every single completion call).  Warnings and errors still show.
+    # Honour LITELLM_LOG env var so users can opt-in to debug output.
+    _litellm_level = os.getenv("LITELLM_LOG", "").upper()
+    if _litellm_level and hasattr(logging, _litellm_level):
+        logging.getLogger("LiteLLM").setLevel(getattr(logging, _litellm_level))
+    else:
+        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
     # When in JSON mode, configure known third-party loggers to use JSON formatter
     # This ensures libraries like LiteLLM, httpcore also output clean JSON

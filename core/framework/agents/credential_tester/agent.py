@@ -16,14 +16,17 @@ after the user picks an account programmatically.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from framework.config import get_max_context_tokens
 from framework.graph import Goal, NodeSpec, SuccessCriterion
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import ExecutionResult
 from framework.llm import LiteLLMProvider
+from framework.runner.mcp_registry import MCPRegistry
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
@@ -31,8 +34,12 @@ from framework.runtime.execution_stream import EntryPointSpec
 from .config import default_config
 from .nodes import build_tester_node
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from framework.runner import AgentRunner
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Goal
@@ -106,7 +113,11 @@ def _list_aden_accounts() -> list[dict]:
             for c in integrations
             if c.status == "active"
         ]
+    except (ImportError, OSError) as exc:
+        logger.debug("Could not list Aden accounts: %s", exc)
+        return []
     except Exception:
+        logger.warning("Unexpected error listing Aden accounts", exc_info=True)
         return []
 
 
@@ -118,7 +129,11 @@ def _list_local_accounts() -> list[dict]:
         return [
             info.to_account_dict() for info in LocalCredentialRegistry.default().list_accounts()
         ]
+    except ImportError as exc:
+        logger.debug("Local credential registry unavailable: %s", exc)
+        return []
     except Exception:
+        logger.warning("Unexpected error listing local accounts", exc_info=True)
         return []
 
 
@@ -139,7 +154,11 @@ def _list_env_fallback_accounts() -> list[dict]:
         from framework.credentials.storage import EncryptedFileStorage
 
         encrypted_ids: set[str] = set(EncryptedFileStorage().list_all())
+    except (ImportError, OSError) as exc:
+        logger.debug("Could not read encrypted store: %s", exc)
+        encrypted_ids = set()
     except Exception:
+        logger.warning("Unexpected error reading encrypted store", exc_info=True)
         encrypted_ids = set()
 
     def _is_configured(cred_name: str, spec) -> bool:
@@ -299,8 +318,10 @@ def _activate_local_account(credential_id: str, alias: str) -> None:
 
             if key:
                 os.environ[spec.env_var] = key
+    except (ImportError, KeyError, OSError) as exc:
+        logger.debug("Could not inject credentials: %s", exc)
     except Exception:
-        pass
+        logger.warning("Unexpected error injecting credentials", exc_info=True)
 
 
 def _configure_aden_node(
@@ -406,7 +427,8 @@ nodes = [
         client_facing=True,
         max_node_visits=0,
         input_keys=[],
-        output_keys=[],
+        output_keys=["test_result"],
+        nullable_output_keys=["test_result"],
         tools=["get_account_info"],
         system_prompt="""\
 You are a credential tester. Your job is to help the user verify that their \
@@ -444,7 +466,7 @@ edges = []
 entry_node = "tester"
 entry_points = {"start": "tester"}
 pause_nodes = []
-terminal_nodes = []  # Forever-alive: loops until user exits
+terminal_nodes = ["tester"]  # Tester node can terminate
 
 conversation_mode = "continuous"
 identity_prompt = (
@@ -453,8 +475,7 @@ identity_prompt = (
 )
 loop_config = {
     "max_iterations": 50,
-    "max_tool_calls_per_turn": 10,
-    "max_history_tokens": 32000,
+    "max_tool_calls_per_turn": 30,
 }
 
 # ---------------------------------------------------------------------------
@@ -531,7 +552,7 @@ class CredentialTesterAgent:
             version="1.0.0",
             entry_node="tester",
             entry_points={"start": "tester"},
-            terminal_nodes=[],
+            terminal_nodes=["tester"],  # Tester node can terminate
             pause_nodes=[],
             nodes=[tester_node],
             edges=[],
@@ -539,8 +560,8 @@ class CredentialTesterAgent:
             max_tokens=self.config.max_tokens,
             loop_config={
                 "max_iterations": 50,
-                "max_tool_calls_per_turn": 10,
-                "max_history_tokens": 32000,
+                "max_tool_calls_per_turn": 30,
+                "max_context_tokens": get_max_context_tokens(),
             },
             conversation_mode="continuous",
             identity_prompt=(
@@ -561,6 +582,23 @@ class CredentialTesterAgent:
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
         if mcp_config_path.exists():
             self._tool_registry.load_mcp_config(mcp_config_path)
+
+        try:
+            agent_dir = Path(__file__).parent
+            registry = MCPRegistry()
+            registry.initialize()
+            if (agent_dir / "mcp_registry.json").is_file():
+                self._tool_registry.set_mcp_registry_agent_path(agent_dir)
+            registry_configs, selection_max_tools = registry.load_agent_selection(agent_dir)
+            if registry_configs:
+                self._tool_registry.load_registry_servers(
+                    registry_configs,
+                    preserve_existing_tools=True,
+                    log_collisions=True,
+                    max_tools=selection_max_tools,
+                )
+        except Exception:
+            logger.warning("MCP registry config failed to load", exc_info=True)
 
         extra_kwargs = getattr(self.config, "extra_kwargs", {}) or {}
         llm = LiteLLMProvider(

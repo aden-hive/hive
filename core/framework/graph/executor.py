@@ -26,13 +26,25 @@ from framework.graph.node import (
     NodeSpec,
     SharedMemory,
 )
-from framework.graph.output_cleaner import CleansingConfig, OutputCleaner
 from framework.graph.validator import OutputValidator
-from framework.llm.provider import LLMProvider, Tool
+from framework.llm.provider import LLMProvider, Tool, ToolUse
 from framework.observability import set_trace_context
 from framework.runtime.core import Runtime
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
+from framework.utils.io import atomic_write
+
+logger = logging.getLogger(__name__)
+
+
+def _default_max_context_tokens() -> int:
+    """Resolve max_context_tokens from global config, falling back to 32000."""
+    try:
+        from framework.config import get_max_context_tokens
+
+        return get_max_context_tokens()
+    except Exception:
+        return 32_000
 
 
 @dataclass
@@ -126,7 +138,6 @@ class GraphExecutor:
         tool_executor: Callable | None = None,
         node_registry: dict[str, NodeProtocol] | None = None,
         approval_callback: Callable | None = None,
-        cleansing_config: CleansingConfig | None = None,
         enable_parallel_execution: bool = True,
         parallel_config: ParallelExecutionConfig | None = None,
         event_bus: Any | None = None,
@@ -138,6 +149,14 @@ class GraphExecutor:
         accounts_prompt: str = "",
         accounts_data: list[dict] | None = None,
         tool_provider_map: dict[str, str] | None = None,
+        dynamic_tools_provider: Callable | None = None,
+        dynamic_prompt_provider: Callable | None = None,
+        iteration_metadata_provider: Callable | None = None,
+        skills_catalog_prompt: str = "",
+        protocols_prompt: str = "",
+        skill_dirs: list[str] | None = None,
+        context_warn_ratio: float | None = None,
+        batch_init_nudge: str | None = None,
     ):
         """
         Initialize the executor.
@@ -149,7 +168,6 @@ class GraphExecutor:
             tool_executor: Function to execute tools
             node_registry: Custom node implementations by ID
             approval_callback: Optional callback for human-in-the-loop approval
-            cleansing_config: Optional output cleansing configuration
             enable_parallel_execution: Enable parallel fan-out execution (default True)
             parallel_config: Configuration for parallel execution behavior
             event_bus: Optional event bus for emitting node lifecycle events
@@ -160,6 +178,15 @@ class GraphExecutor:
             accounts_prompt: Connected accounts block for system prompt injection
             accounts_data: Raw account data for per-node prompt generation
             tool_provider_map: Tool name to provider name mapping for account routing
+            dynamic_tools_provider: Optional callback returning current
+                tool list (for mode switching)
+            dynamic_prompt_provider: Optional callback returning current
+                system prompt (for phase switching)
+            skills_catalog_prompt: Available skills catalog for system prompt
+            protocols_prompt: Default skill operational protocols for system prompt
+            skill_dirs: Skill base directories for Tier 3 resource access
+            context_warn_ratio: Token usage ratio to trigger DS-13 preservation warning
+            batch_init_nudge: System prompt nudge for DS-12 batch auto-detection
         """
         self.runtime = runtime
         self.llm = llm
@@ -178,13 +205,26 @@ class GraphExecutor:
         self.accounts_prompt = accounts_prompt
         self.accounts_data = accounts_data
         self.tool_provider_map = tool_provider_map
+        self.dynamic_tools_provider = dynamic_tools_provider
+        self.dynamic_prompt_provider = dynamic_prompt_provider
+        self.iteration_metadata_provider = iteration_metadata_provider
+        self.skills_catalog_prompt = skills_catalog_prompt
+        self.protocols_prompt = protocols_prompt
+        self.skill_dirs: list[str] = skill_dirs or []
+        self.context_warn_ratio: float | None = context_warn_ratio
+        self.batch_init_nudge: str | None = batch_init_nudge
 
-        # Initialize output cleaner
-        self.cleansing_config = cleansing_config or CleansingConfig()
-        self.output_cleaner = OutputCleaner(
-            config=self.cleansing_config,
-            llm_provider=llm,
-        )
+        if protocols_prompt:
+            self.logger.info(
+                "GraphExecutor[%s] received protocols_prompt (%d chars)",
+                stream_id,
+                len(protocols_prompt),
+            )
+        else:
+            self.logger.warning(
+                "GraphExecutor[%s] received EMPTY protocols_prompt",
+                stream_id,
+            )
 
         # Parallel execution settings
         self.enable_parallel_execution = enable_parallel_execution
@@ -192,6 +232,9 @@ class GraphExecutor:
 
         # Pause/resume control
         self._pause_requested = asyncio.Event()
+
+        # Track the currently executing node for external injection routing
+        self.current_node_id: str | None = None
 
     def _write_progress(
         self,
@@ -211,11 +254,11 @@ class GraphExecutor:
         """
         if not self._storage_path:
             return
+        state_path = self._storage_path / "state.json"
         try:
             import json as _json
             from datetime import datetime
 
-            state_path = self._storage_path / "state.json"
             if state_path.exists():
                 state_data = _json.loads(state_path.read_text(encoding="utf-8"))
             else:
@@ -238,9 +281,14 @@ class GraphExecutor:
             state_data["memory"] = memory_snapshot
             state_data["memory_keys"] = list(memory_snapshot.keys())
 
-            state_path.write_text(_json.dumps(state_data, indent=2), encoding="utf-8")
+            with atomic_write(state_path, encoding="utf-8") as f:
+                _json.dump(state_data, f, indent=2)
         except Exception:
-            pass  # Best-effort — never block execution
+            logger.warning(
+                "Failed to persist progress state to %s",
+                state_path,
+                exc_info=True,
+            )
 
     def _validate_tools(self, graph: GraphSpec) -> list[str]:
         """
@@ -283,6 +331,133 @@ class GraphExecutor:
 
         return errors
 
+    # Max chars of formatted messages before proactively splitting for LLM.
+    _PHASE_LLM_CHAR_LIMIT = 240_000
+    _PHASE_LLM_MAX_DEPTH = 10
+
+    async def _phase_llm_compact(
+        self,
+        conversation: Any,
+        next_spec: NodeSpec,
+        messages: list,
+        _depth: int = 0,
+    ) -> str:
+        """Summarise messages for phase-boundary compaction.
+
+        Uses the same recursive binary-search splitting as EventLoopNode.
+        """
+        from framework.graph.conversation import extract_tool_call_history
+        from framework.graph.event_loop_node import _is_context_too_large_error
+
+        if _depth > self._PHASE_LLM_MAX_DEPTH:
+            raise RuntimeError("Phase LLM compaction recursion limit")
+
+        # Format messages
+        lines: list[str] = []
+        for m in messages:
+            if m.role == "tool":
+                c = m.content[:500] + ("..." if len(m.content) > 500 else "")
+                lines.append(f"[tool result]: {c}")
+            elif m.role == "assistant" and m.tool_calls:
+                names = [tc.get("function", {}).get("name", "?") for tc in m.tool_calls]
+                lines.append(
+                    f"[assistant (calls: {', '.join(names)})]: "
+                    f"{m.content[:200] if m.content else ''}"
+                )
+            else:
+                lines.append(f"[{m.role}]: {m.content}")
+        formatted = "\n\n".join(lines)
+
+        # Proactive split
+        if len(formatted) > self._PHASE_LLM_CHAR_LIMIT and len(messages) > 1:
+            summary = await self._phase_llm_compact_split(
+                conversation,
+                next_spec,
+                messages,
+                _depth,
+            )
+        else:
+            max_tokens = getattr(conversation, "_max_context_tokens", 32000)
+            target_tokens = max_tokens // 2
+            target_chars = target_tokens * 4
+
+            prompt = (
+                "You are compacting an AI agent's conversation history "
+                "at a phase boundary.\n\n"
+                f"NEXT PHASE: {next_spec.name}\n"
+            )
+            if next_spec.description:
+                prompt += f"NEXT PHASE PURPOSE: {next_spec.description}\n"
+            prompt += (
+                f"\nCONVERSATION MESSAGES:\n{formatted}\n\n"
+                "INSTRUCTIONS:\n"
+                f"Write a summary of approximately {target_chars} characters "
+                f"(~{target_tokens} tokens).\n"
+                "Preserve user-stated rules, constraints, and preferences "
+                "verbatim. Preserve key decisions and results from earlier "
+                "phases. Preserve context needed for the next phase.\n"
+            )
+            summary_budget = max(1024, max_tokens // 2)
+            try:
+                response = await self._llm.acomplete(
+                    messages=[{"role": "user", "content": prompt}],
+                    system=(
+                        "You are a conversation compactor. Write a detailed "
+                        "summary preserving context for the next phase."
+                    ),
+                    max_tokens=summary_budget,
+                )
+                summary = response.content
+            except Exception as e:
+                if _is_context_too_large_error(e) and len(messages) > 1:
+                    summary = await self._phase_llm_compact_split(
+                        conversation,
+                        next_spec,
+                        messages,
+                        _depth,
+                    )
+                else:
+                    raise
+
+        # Append tool history at top level only
+        if _depth == 0:
+            tool_history = extract_tool_call_history(messages)
+            if tool_history and "TOOLS ALREADY CALLED" not in summary:
+                summary += "\n\n" + tool_history
+
+        return summary
+
+    async def _phase_llm_compact_split(
+        self,
+        conversation: Any,
+        next_spec: NodeSpec,
+        messages: list,
+        _depth: int,
+    ) -> str:
+        """Split messages in half and summarise each half."""
+        mid = max(1, len(messages) // 2)
+        s1 = await self._phase_llm_compact(
+            conversation,
+            next_spec,
+            messages[:mid],
+            _depth + 1,
+        )
+        s2 = await self._phase_llm_compact(
+            conversation,
+            next_spec,
+            messages[mid:],
+            _depth + 1,
+        )
+        return s1 + "\n\n" + s2
+
+    def _get_runtime_log_session_id(self) -> str:
+        """Return the session-backed execution ID for runtime logging, if any."""
+        if not self._storage_path:
+            return ""
+        if self._storage_path.parent.name != "sessions":
+            return ""
+        return self._storage_path.name
+
     async def execute(
         self,
         graph: GraphSpec,
@@ -290,6 +465,7 @@ class GraphExecutor:
         input_data: dict[str, Any] | None = None,
         session_state: dict[str, Any] | None = None,
         checkpoint_config: "CheckpointConfig | None" = None,
+        validate_graph: bool = True,
     ) -> ExecutionResult:
         """
         Execute a graph for a goal.
@@ -299,6 +475,8 @@ class GraphExecutor:
             goal: The goal driving execution
             input_data: Initial input data
             session_state: Optional session state to resume from (with paused_at, memory, etc.)
+            validate_graph: If False, skip graph validation (for test graphs that
+                intentionally break rules)
 
         Returns:
             ExecutionResult with output and metrics
@@ -307,12 +485,13 @@ class GraphExecutor:
         set_trace_context(agent_id=graph.id)
 
         # Validate graph
-        errors = graph.validate()
-        if errors:
-            return ExecutionResult(
-                success=False,
-                error=f"Invalid graph: {errors}",
-            )
+        if validate_graph:
+            result = graph.validate()
+            if result["errors"]:
+                return ExecutionResult(
+                    success=False,
+                    error=f"Invalid graph: {result['errors']}",
+                )
 
         # Validate tool availability
         tool_errors = self._validate_tools(graph)
@@ -337,6 +516,9 @@ class GraphExecutor:
         cumulative_tools: list = []  # Tools accumulate, never removed
         cumulative_tool_names: set[str] = set()
         cumulative_output_keys: list[str] = []  # Output keys from all visited nodes
+
+        # Build node registry for subagent lookup
+        node_registry: dict[str, NodeSpec] = {node.id: node for node in graph.nodes}
 
         # Initialize checkpoint store if checkpointing is enabled
         checkpoint_store: CheckpointStore | None = None
@@ -491,11 +673,14 @@ class GraphExecutor:
         # node doesn't restore a filled OutputAccumulator from the previous
         # webhook run (which would cause the judge to accept immediately).
         # The conversation history is preserved (continuous memory).
+        # Exclude cold restores — those need to continue the conversation
+        # naturally without a "start fresh" marker.
         _is_fresh_shared = bool(
             session_state
             and session_state.get("resume_session_id")
             and not session_state.get("paused_at")
             and not session_state.get("resume_from_checkpoint")
+            and not session_state.get("cold_restore")
         )
         if _is_fresh_shared and is_continuous and self._storage_path:
             try:
@@ -566,10 +751,7 @@ class GraphExecutor:
         )
 
         if self.runtime_logger:
-            # Extract session_id from storage_path if available (for unified sessions)
-            session_id = ""
-            if self._storage_path and self._storage_path.name.startswith("session_"):
-                session_id = self._storage_path.name
+            session_id = self._get_runtime_log_session_id()
             self.runtime_logger.start_run(goal_id=goal.id, session_id=session_id)
 
         self.logger.info(f"🚀 Starting execution: {goal.name}")
@@ -694,6 +876,9 @@ class GraphExecutor:
                     # Execute this node, then pause
                     # (We'll check again after execution and save state)
 
+                # Expose current node for external injection routing
+                self.current_node_id = current_node_id
+
                 self.logger.info(f"\n▶ Step {steps}: {node_spec.name} ({node_spec.node_type})")
                 self.logger.info(f"   Inputs: {node_spec.input_keys}")
                 self.logger.info(f"   Outputs: {node_spec.output_keys}")
@@ -729,8 +914,10 @@ class GraphExecutor:
                     override_tools=cumulative_tools if is_continuous else None,
                     cumulative_output_keys=cumulative_output_keys if is_continuous else None,
                     event_triggered=_event_triggered,
+                    node_registry=node_registry,
                     identity_prompt=getattr(graph, "identity_prompt", ""),
                     narrative=_resume_narrative,
+                    graph=graph,
                 )
 
                 # Log actual input data being read
@@ -789,6 +976,33 @@ class GraphExecutor:
                 # Execute node
                 self.logger.info("   Executing...")
                 result = await node_impl.execute(ctx)
+
+                # GCU tab cleanup: stop the browser profile after a top-level GCU node
+                # finishes so tabs don't accumulate. Mirrors the subagent cleanup in
+                # EventLoopNode._execute_subagent().
+                if node_spec.node_type == "gcu" and self.tool_executor is not None:
+                    try:
+                        from gcu.browser.session import (
+                            _active_profile as _gcu_profile_var,
+                        )
+
+                        _gcu_profile = _gcu_profile_var.get()
+                        _stop_use = ToolUse(
+                            id="gcu-cleanup",
+                            name="browser_stop",
+                            input={"profile": _gcu_profile},
+                        )
+                        _stop_result = self.tool_executor(_stop_use)
+                        if asyncio.iscoroutine(_stop_result) or asyncio.isfuture(_stop_result):
+                            await _stop_result
+                    except ImportError:
+                        pass  # GCU not installed
+                    except Exception as _gcu_exc:
+                        logger.warning(
+                            "GCU browser_stop failed for profile %r: %s",
+                            _gcu_profile,
+                            _gcu_exc,
+                        )
 
                 # Emit node-completed event (skip event_loop nodes)
                 if self._event_bus and node_spec.node_type != "event_loop":
@@ -1130,6 +1344,7 @@ class GraphExecutor:
                             source_result=result,
                             source_node_spec=node_spec,
                             path=path,
+                            node_registry=node_registry,
                         )
 
                         total_tokens += branch_tokens
@@ -1214,6 +1429,7 @@ class GraphExecutor:
                     next_spec = graph.get_node(current_node_id)
                     if next_spec and next_spec.node_type == "event_loop":
                         from framework.graph.prompt_composer import (
+                            EXECUTION_SCOPE_PREAMBLE,
                             build_accounts_prompt,
                             build_narrative,
                             build_transition_marker,
@@ -1253,9 +1469,14 @@ class GraphExecutor:
                             )
 
                         # Compose new system prompt (Layer 1 + 2 + 3 + accounts)
+                        # Prepend scope preamble to focus so the LLM stays
+                        # within this node's responsibility.
+                        _focus = next_spec.system_prompt
+                        if next_spec.output_keys and _focus:
+                            _focus = f"{EXECUTION_SCOPE_PREAMBLE}\n\n{_focus}"
                         new_system = compose_system_prompt(
                             identity_prompt=getattr(graph, "identity_prompt", None),
-                            focus_prompt=next_spec.system_prompt,
+                            focus_prompt=_focus,
                             narrative=narrative,
                             accounts_prompt=_node_accounts,
                         )
@@ -1279,27 +1500,78 @@ class GraphExecutor:
                         # Set current phase for phase-aware compaction
                         continuous_conversation.set_current_phase(next_spec.id)
 
-                        # Opportunistic compaction at transition:
-                        # 1. Prune old tool results (free, no LLM call)
-                        # 2. If still over 80%, do a phase-graduated compact
+                        # Phase-boundary compaction (same flow as EventLoopNode._compact)
                         if continuous_conversation.usage_ratio() > 0.5:
                             await continuous_conversation.prune_old_tool_results(
                                 protect_tokens=2000,
                             )
                         if continuous_conversation.needs_compaction():
+                            _phase_ratio = continuous_conversation.usage_ratio()
                             self.logger.info(
                                 "   Phase-boundary compaction (%.0f%% usage)",
-                                continuous_conversation.usage_ratio() * 100,
+                                _phase_ratio * 100,
                             )
-                            summary = (
-                                f"Summary of earlier phases (before {next_spec.name}). "
-                                "See transition markers for phase details."
+                            _data_dir = (
+                                str(self._storage_path / "data") if self._storage_path else None
                             )
-                            await continuous_conversation.compact(
-                                summary,
-                                keep_recent=4,
-                                phase_graduated=True,
-                            )
+                            # Step 1: Structural compaction (>=80%)
+                            if _data_dir:
+                                _pre = continuous_conversation.usage_ratio()
+                                await continuous_conversation.compact_preserving_structure(
+                                    spillover_dir=_data_dir,
+                                    keep_recent=4,
+                                    phase_graduated=True,
+                                )
+                                if continuous_conversation.usage_ratio() >= 0.9 * _pre:
+                                    await continuous_conversation.compact_preserving_structure(
+                                        spillover_dir=_data_dir,
+                                        keep_recent=4,
+                                        phase_graduated=True,
+                                        aggressive=True,
+                                    )
+
+                            # Step 2: LLM compaction (>95%)
+                            if (
+                                continuous_conversation.usage_ratio() > 0.95
+                                and self._llm is not None
+                            ):
+                                self.logger.info(
+                                    "   LLM phase-boundary compaction (%.0f%% usage)",
+                                    continuous_conversation.usage_ratio() * 100,
+                                )
+                                try:
+                                    _llm_summary = await self._phase_llm_compact(
+                                        continuous_conversation,
+                                        next_spec,
+                                        list(continuous_conversation.messages),
+                                    )
+                                    await continuous_conversation.compact(
+                                        _llm_summary,
+                                        keep_recent=2,
+                                        phase_graduated=True,
+                                    )
+                                except Exception as e:
+                                    self.logger.warning(
+                                        "   Phase LLM compaction failed: %s",
+                                        e,
+                                    )
+
+                            # Step 3: Emergency (only if still over budget)
+                            if continuous_conversation.needs_compaction():
+                                self.logger.warning(
+                                    "   Emergency phase compaction (%.0f%%)",
+                                    continuous_conversation.usage_ratio() * 100,
+                                )
+                                summary = (
+                                    f"Summary of earlier phases "
+                                    f"(before {next_spec.name}). "
+                                    "See transition markers for phase details."
+                                )
+                                await continuous_conversation.compact(
+                                    summary,
+                                    keep_recent=1,
+                                    phase_graduated=True,
+                                )
 
                 # Update input_data for next node
                 input_data = result.output
@@ -1417,7 +1689,7 @@ class GraphExecutor:
             # Return with paused status
             return ExecutionResult(
                 success=False,
-                error="Execution paused by user",
+                error="Execution cancelled",
                 output=saved_memory,
                 steps_executed=steps,
                 total_tokens=total_tokens,
@@ -1553,6 +1825,8 @@ class GraphExecutor:
         event_triggered: bool = False,
         identity_prompt: str = "",
         narrative: str = "",
+        node_registry: dict[str, NodeSpec] | None = None,
+        graph: "GraphSpec | None" = None,
     ) -> NodeContext:
         """Build execution context for a node."""
         # Filter tools to those available to this node
@@ -1564,10 +1838,34 @@ class GraphExecutor:
             if node_spec.tools:
                 available_tools = [t for t in self.tools if t.name in node_spec.tools]
 
-        # Create scoped memory view
+        # Create scoped memory view.
+        # When permissions are restricted (non-empty key lists), auto-include
+        # _-prefixed keys used by default skill protocols so agents can read/write
+        # operational state (e.g. _working_notes, _batch_ledger) regardless of
+        # what the node declares.  When key lists are empty (unrestricted), leave
+        # unchanged — empty means "allow all".
+        read_keys = list(node_spec.input_keys)
+        write_keys = list(node_spec.output_keys)
+        # Only extend lists that were already restricted (non-empty).
+        # Empty means "allow all" — adding keys would accidentally
+        # activate the permission check and block legitimate reads/writes.
+        if read_keys or write_keys:
+            from framework.skills.defaults import SHARED_MEMORY_KEYS as _skill_keys
+
+            existing_underscore = [k for k in memory._data if k.startswith("_")]
+            extra_keys = set(_skill_keys) | set(existing_underscore)
+            # Only inject into read_keys when it was already non-empty — an empty
+            # read_keys means "allow all reads" and injecting skill keys would
+            # inadvertently restrict reads to skill keys only.
+            for k in extra_keys:
+                if read_keys and k not in read_keys:
+                    read_keys.append(k)
+                if write_keys and k not in write_keys:
+                    write_keys.append(k)
+
         scoped_memory = memory.with_permissions(
-            read_keys=node_spec.input_keys,
-            write_keys=node_spec.output_keys,
+            read_keys=read_keys,
+            write_keys=write_keys,
         )
 
         # Build per-node accounts prompt (filtered to this node's tools)
@@ -1581,6 +1879,8 @@ class GraphExecutor:
                 node_tool_names=node_spec.tools,
             )
 
+        goal_context = goal.to_prompt_context()
+
         return NodeContext(
             runtime=self.runtime,
             node_id=node_spec.id,
@@ -1589,7 +1889,7 @@ class GraphExecutor:
             input_data=input_data,
             llm=self.llm,
             available_tools=available_tools,
-            goal_context=goal.to_prompt_context(),
+            goal_context=goal_context,
             goal=goal,  # Pass Goal object for LLM-powered routers
             max_tokens=max_tokens,
             runtime_logger=self.runtime_logger,
@@ -1603,10 +1903,22 @@ class GraphExecutor:
             narrative=narrative,
             execution_id=self._execution_id,
             stream_id=self._stream_id,
+            node_registry=node_registry or {},
+            all_tools=list(self.tools),  # Full catalog for subagent tool resolution
+            shared_node_registry=self.node_registry,  # For subagent escalation routing
+            dynamic_tools_provider=self.dynamic_tools_provider,
+            dynamic_prompt_provider=self.dynamic_prompt_provider,
+            iteration_metadata_provider=self.iteration_metadata_provider,
+            skills_catalog_prompt=self.skills_catalog_prompt,
+            protocols_prompt=self.protocols_prompt,
+            skill_dirs=self.skill_dirs,
+            default_skill_warn_ratio=self.context_warn_ratio,
+            default_skill_batch_nudge=self.batch_init_nudge,
         )
 
     VALID_NODE_TYPES = {
         "event_loop",
+        "gcu",
     }
     # Node types removed in v0.5 — provide migration guidance
     REMOVED_NODE_TYPES = {
@@ -1641,8 +1953,8 @@ class GraphExecutor:
                 f"Must be one of: {sorted(self.VALID_NODE_TYPES)}."
             )
 
-        # Create based on type (only event_loop is valid)
-        if node_spec.node_type == "event_loop":
+        # Create based on type
+        if node_spec.node_type in ("event_loop", "gcu"):
             # Auto-create EventLoopNode with sensible defaults.
             # Custom configs can still be pre-registered via node_registry.
             from framework.graph.event_loop_node import EventLoopNode, LoopConfig
@@ -1672,12 +1984,13 @@ class GraphExecutor:
                 judge=None,  # implicit judge: accept when output_keys are filled
                 config=LoopConfig(
                     max_iterations=lc.get("max_iterations", default_max_iter),
-                    max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 10),
+                    max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 30),
                     tool_call_overflow_margin=lc.get("tool_call_overflow_margin", 0.5),
                     stall_detection_threshold=lc.get("stall_detection_threshold", 3),
-                    max_history_tokens=lc.get("max_history_tokens", 32000),
-                    max_tool_result_chars=lc.get("max_tool_result_chars", 3_000),
+                    max_context_tokens=lc.get("max_context_tokens", _default_max_context_tokens()),
+                    max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
                     spillover_dir=spillover,
+                    hooks=lc.get("hooks", {}),
                 ),
                 tool_executor=self.tool_executor,
                 conversation_store=conv_store,
@@ -1713,52 +2026,6 @@ class GraphExecutor:
                 source_node_name=current_node_spec.name if current_node_spec else current_node_id,
                 target_node_name=target_node_spec.name if target_node_spec else edge.target,
             ):
-                # Validate and clean output before mapping inputs.
-                # Use full memory state (not just result.output) because
-                # target input_keys may come from earlier nodes in the
-                # graph, not only from the immediate source node.
-                if self.cleansing_config.enabled and target_node_spec:
-                    output_to_validate = memory.read_all()
-
-                    validation = self.output_cleaner.validate_output(
-                        output=output_to_validate,
-                        source_node_id=current_node_id,
-                        target_node_spec=target_node_spec,
-                    )
-
-                    if not validation.valid:
-                        self.logger.warning(f"⚠ Output validation failed: {validation.errors}")
-
-                        # Clean the output
-                        cleaned_output = await self.output_cleaner.clean_output(
-                            output=output_to_validate,
-                            source_node_id=current_node_id,
-                            target_node_spec=target_node_spec,
-                            validation_errors=validation.errors,
-                        )
-
-                        # Update result with cleaned output
-                        result.output = cleaned_output
-
-                        # Write cleaned output back to memory (skip validation for LLM output)
-                        for key, value in cleaned_output.items():
-                            memory.write(key, value, validate=False)
-
-                        # Revalidate
-                        revalidation = self.output_cleaner.validate_output(
-                            output=cleaned_output,
-                            source_node_id=current_node_id,
-                            target_node_spec=target_node_spec,
-                        )
-
-                        if revalidation.valid:
-                            self.logger.info("✓ Output cleaned and validated successfully")
-                        else:
-                            self.logger.error(
-                                f"✗ Cleaning failed, errors remain: {revalidation.errors}"
-                            )
-                            # Continue anyway if fallback_to_raw is True
-
                 # Map inputs (skip validation for processed LLM output)
                 mapped = edge.map_inputs(result.output, memory.read_all())
                 for key, value in mapped.items():
@@ -1859,6 +2126,7 @@ class GraphExecutor:
         source_result: NodeResult,
         source_node_spec: Any,
         path: list[str],
+        node_registry: dict[str, NodeSpec] | None = None,
     ) -> tuple[dict[str, NodeResult], int, int]:
         """
         Execute multiple branches in parallel using asyncio.gather.
@@ -1885,6 +2153,10 @@ class GraphExecutor:
                 node_id=edge.target,
                 edge=edge,
             )
+
+        # Track which branch wrote which key for memory conflict detection
+        fanout_written_keys: dict[str, str] = {}  # key -> branch_id that wrote it
+        fanout_keys_lock = asyncio.Lock()
 
         self.logger.info(f"   ⑂ Fan-out: executing {len(branches)} branches in parallel")
         for branch in branches.values():
@@ -1919,32 +2191,6 @@ class GraphExecutor:
             branch.status = "running"
 
             try:
-                # Validate and clean output before mapping inputs (same as _follow_edges).
-                # Use full memory state since target input_keys may come
-                # from earlier nodes, not just the immediate source.
-                if self.cleansing_config.enabled and node_spec:
-                    mem_snapshot = memory.read_all()
-                    validation = self.output_cleaner.validate_output(
-                        output=mem_snapshot,
-                        source_node_id=source_node_spec.id if source_node_spec else "unknown",
-                        target_node_spec=node_spec,
-                    )
-
-                    if not validation.valid:
-                        self.logger.warning(
-                            f"⚠ Output validation failed for branch "
-                            f"{branch.node_id}: {validation.errors}"
-                        )
-                        cleaned_output = await self.output_cleaner.clean_output(
-                            output=mem_snapshot,
-                            source_node_id=source_node_spec.id if source_node_spec else "unknown",
-                            target_node_spec=node_spec,
-                            validation_errors=validation.errors,
-                        )
-                        # Write cleaned output to memory
-                        for key, value in cleaned_output.items():
-                            await memory.write_async(key, value)
-
                 # Map inputs via edge
                 mapped = branch.edge.map_inputs(source_result.output, memory.read_all())
                 for key, value in mapped.items():
@@ -1956,7 +2202,15 @@ class GraphExecutor:
                     branch.retry_count = attempt
 
                     # Build context for this branch
-                    ctx = self._build_context(node_spec, memory, goal, mapped, graph.max_tokens)
+                    ctx = self._build_context(
+                        node_spec,
+                        memory,
+                        goal,
+                        mapped,
+                        graph.max_tokens,
+                        node_registry=node_registry,
+                        graph=graph,
+                    )
                     node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 
                     # Emit node-started event (skip event_loop nodes)
@@ -1995,8 +2249,31 @@ class GraphExecutor:
                         )
 
                     if result.success:
-                        # Write outputs to shared memory using async write
+                        # Write outputs to shared memory with conflict detection
+                        conflict_strategy = self._parallel_config.memory_conflict_strategy
                         for key, value in result.output.items():
+                            async with fanout_keys_lock:
+                                prior_branch = fanout_written_keys.get(key)
+                                if prior_branch and prior_branch != branch.branch_id:
+                                    if conflict_strategy == "error":
+                                        raise RuntimeError(
+                                            f"Memory conflict: key '{key}' already written "
+                                            f"by branch '{prior_branch}', "
+                                            f"conflicting write from '{branch.branch_id}'"
+                                        )
+                                    elif conflict_strategy == "first_wins":
+                                        self.logger.debug(
+                                            f"      ⚠ Skipping write to '{key}' "
+                                            f"(first_wins: already set by {prior_branch})"
+                                        )
+                                        continue
+                                    else:
+                                        # last_wins (default): write and log
+                                        self.logger.debug(
+                                            f"      ⚠ Key '{key}' overwritten "
+                                            f"(last_wins: {prior_branch} -> {branch.branch_id})"
+                                        )
+                                fanout_written_keys[key] = branch.branch_id
                             await memory.write_async(key, value)
 
                         branch.result = result
@@ -2043,9 +2320,11 @@ class GraphExecutor:
 
                 return branch, e
 
-        # Execute all branches concurrently
-        tasks = [execute_single_branch(b) for b in branches.values()]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
+        # Execute all branches concurrently with per-branch timeout
+        timeout = self._parallel_config.branch_timeout_seconds
+        branch_list = list(branches.values())
+        tasks = [asyncio.wait_for(execute_single_branch(b), timeout=timeout) for b in branch_list]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Process results
         total_tokens = 0
@@ -2053,17 +2332,33 @@ class GraphExecutor:
         branch_results: dict[str, NodeResult] = {}
         failed_branches: list[ParallelBranch] = []
 
-        for branch, result in results:
-            path.append(branch.node_id)
+        for i, result in enumerate(results):
+            branch = branch_list[i]
 
-            if isinstance(result, Exception):
+            if isinstance(result, asyncio.TimeoutError):
+                # Branch timed out
+                branch.status = "timed_out"
+                branch.error = f"Branch timed out after {timeout}s"
+                self.logger.warning(
+                    f"      ⏱ Branch {graph.get_node(branch.node_id).name}: "
+                    f"timed out after {timeout}s"
+                )
+                path.append(branch.node_id)
                 failed_branches.append(branch)
-            elif result is None or not result.success:
+            elif isinstance(result, Exception):
+                path.append(branch.node_id)
                 failed_branches.append(branch)
             else:
-                total_tokens += result.tokens_used
-                total_latency += result.latency_ms
-                branch_results[branch.branch_id] = result
+                returned_branch, node_result = result
+                path.append(returned_branch.node_id)
+                if node_result is None or isinstance(node_result, Exception):
+                    failed_branches.append(returned_branch)
+                elif not node_result.success:
+                    failed_branches.append(returned_branch)
+                else:
+                    total_tokens += node_result.tokens_used
+                    total_latency += node_result.latency_ms
+                    branch_results[returned_branch.branch_id] = node_result
 
         # Handle failures based on config
         if failed_branches:

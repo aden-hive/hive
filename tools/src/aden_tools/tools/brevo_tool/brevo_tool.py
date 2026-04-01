@@ -2,9 +2,7 @@
 Brevo Tool - Send transactional emails, SMS, and manage contacts via Brevo API.
 
 Supports:
-- Transactional email sending
-- Transactional SMS sending
-- Contact create/read/update
+- API Key authentication (BREVO_API_KEY)
 
 API Reference: https://developers.brevo.com/reference
 """
@@ -24,7 +22,7 @@ BREVO_API_BASE = "https://api.brevo.com/v3"
 
 
 class _BrevoClient:
-    """Internal client wrapping Brevo API v3 calls."""
+    """Internal client wrapping Brevo API calls."""
 
     def __init__(self, api_key: str):
         self._api_key = api_key
@@ -38,130 +36,105 @@ class _BrevoClient:
         }
 
     def _handle_response(self, response: httpx.Response) -> dict[str, Any]:
-        """Handle common HTTP error codes."""
+        """Handle Brevo API response."""
         if response.status_code == 401:
             return {"error": "Invalid Brevo API key"}
-        if response.status_code == 400:
-            try:
-                detail = response.json()
-                msg = detail.get("message", response.text)
-            except Exception:
-                msg = response.text
-            return {"error": f"Bad request: {msg}"}
         if response.status_code == 403:
-            return {"error": "Brevo API key lacks required permissions"}
+            return {"error": "Access forbidden - check API key permissions"}
         if response.status_code == 404:
             return {"error": "Resource not found"}
         if response.status_code == 429:
             return {"error": "Rate limit exceeded. Try again later."}
-        if response.status_code >= 400:
-            try:
-                detail = response.json().get("message", response.text)
-            except Exception:
-                detail = response.text
-            return {"error": f"Brevo API error (HTTP {response.status_code}): {detail}"}
-        # Success (200, 201, 204)
-        if response.status_code == 204:
+        if response.status_code not in (200, 201, 204):
+            return {"error": f"HTTP error {response.status_code}: {response.text}"}
+        if response.status_code == 204 or not response.content:
             return {"success": True}
-        try:
-            return response.json()
-        except Exception:
-            return {"success": True}
+        return response.json()
 
     def send_email(
         self,
-        to: list[dict[str, str]],
+        to_email: str,
+        to_name: str,
         subject: str,
         html_content: str,
-        sender: dict[str, str],
+        from_email: str,
+        from_name: str,
         text_content: str | None = None,
-        cc: list[dict[str, str]] | None = None,
-        bcc: list[dict[str, str]] | None = None,
-        reply_to: dict[str, str] | None = None,
-        tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Send a transactional email."""
-        payload: dict[str, Any] = {
-            "to": to,
+        body: dict[str, Any] = {
+            "sender": {"email": from_email, "name": from_name},
+            "to": [{"email": to_email, "name": to_name}],
             "subject": subject,
             "htmlContent": html_content,
-            "sender": sender,
         }
         if text_content:
-            payload["textContent"] = text_content
-        if cc:
-            payload["cc"] = cc
-        if bcc:
-            payload["bcc"] = bcc
-        if reply_to:
-            payload["replyTo"] = reply_to
-        if tags:
-            payload["tags"] = tags
+            body["textContent"] = text_content
 
         response = httpx.post(
             f"{BREVO_API_BASE}/smtp/email",
             headers=self._headers,
-            json=payload,
+            json=body,
             timeout=30.0,
         )
         return self._handle_response(response)
 
     def send_sms(
         self,
-        sender: str,
-        recipient: str,
+        to: str,
         content: str,
-        sms_type: str = "transactional",
-        tag: str | None = None,
+        sender: str,
     ) -> dict[str, Any]:
         """Send a transactional SMS."""
-        payload: dict[str, Any] = {
+        body = {
             "sender": sender,
-            "recipient": recipient,
+            "recipient": to,
             "content": content,
-            "type": sms_type,
         }
-        if tag:
-            payload["tag"] = tag
-
         response = httpx.post(
-            f"{BREVO_API_BASE}/transactionalSMS/send",
+            f"{BREVO_API_BASE}/transactionalSMS/sms",
             headers=self._headers,
-            json=payload,
+            json=body,
             timeout=30.0,
         )
         return self._handle_response(response)
 
     def create_contact(
         self,
-        email: str | None = None,
-        attributes: dict[str, Any] | None = None,
+        email: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        phone: str | None = None,
         list_ids: list[int] | None = None,
-        update_enabled: bool = False,
     ) -> dict[str, Any]:
         """Create a new contact."""
-        payload: dict[str, Any] = {}
-        if email:
-            payload["email"] = email
-        if attributes:
-            payload["attributes"] = attributes
+        attributes: dict[str, Any] = {}
+        if first_name:
+            attributes["FIRSTNAME"] = first_name
+        if last_name:
+            attributes["LASTNAME"] = last_name
+        if phone:
+            attributes["SMS"] = phone
+
+        body: dict[str, Any] = {
+            "email": email,
+            "attributes": attributes,
+        }
         if list_ids:
-            payload["listIds"] = list_ids
-        if update_enabled:
-            payload["updateEnabled"] = True
+            body["listIds"] = list_ids
 
         response = httpx.post(
             f"{BREVO_API_BASE}/contacts",
             headers=self._headers,
-            json=payload,
+            json=body,
             timeout=30.0,
         )
         return self._handle_response(response)
 
-    def get_contact(self, identifier: str) -> dict[str, Any]:
-        """Get a contact by email or ID."""
+    def get_contact(self, email: str) -> dict[str, Any]:
+        """Get a contact by email."""
         response = httpx.get(
-            f"{BREVO_API_BASE}/contacts/{identifier}",
+            f"{BREVO_API_BASE}/contacts/{email}",
             headers=self._headers,
             timeout=30.0,
         )
@@ -169,24 +142,83 @@ class _BrevoClient:
 
     def update_contact(
         self,
-        identifier: str,
-        attributes: dict[str, Any] | None = None,
+        email: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        phone: str | None = None,
         list_ids: list[int] | None = None,
-        unlink_list_ids: list[int] | None = None,
     ) -> dict[str, Any]:
-        """Update a contact."""
-        payload: dict[str, Any] = {}
-        if attributes:
-            payload["attributes"] = attributes
+        """Update an existing contact."""
+        attributes: dict[str, Any] = {}
+        if first_name:
+            attributes["FIRSTNAME"] = first_name
+        if last_name:
+            attributes["LASTNAME"] = last_name
+        if phone:
+            attributes["SMS"] = phone
+
+        body: dict[str, Any] = {"attributes": attributes}
         if list_ids:
-            payload["listIds"] = list_ids
-        if unlink_list_ids:
-            payload["unlinkListIds"] = unlink_list_ids
+            body["listIds"] = list_ids
 
         response = httpx.put(
-            f"{BREVO_API_BASE}/contacts/{identifier}",
+            f"{BREVO_API_BASE}/contacts/{email}",
             headers=self._headers,
-            json=payload,
+            json=body,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def get_email_stats(self, message_id: str) -> dict[str, Any]:
+        """Get delivery stats for a sent email."""
+        response = httpx.get(
+            f"{BREVO_API_BASE}/smtp/emails/{message_id}",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def list_contacts(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        modified_since: str | None = None,
+    ) -> dict[str, Any]:
+        """List contacts with pagination."""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if modified_since:
+            params["modifiedSince"] = modified_since
+        response = httpx.get(
+            f"{BREVO_API_BASE}/contacts",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def delete_contact(self, email: str) -> dict[str, Any]:
+        """Delete a contact by email."""
+        response = httpx.delete(
+            f"{BREVO_API_BASE}/contacts/{email}",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def list_email_campaigns(
+        self,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List email campaigns."""
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if status:
+            params["status"] = status
+        response = httpx.get(
+            f"{BREVO_API_BASE}/emailCampaigns",
+            headers=self._headers,
+            params=params,
             timeout=30.0,
         )
         return self._handle_response(response)
@@ -199,197 +231,148 @@ def register_tools(
     """Register Brevo tools with the MCP server."""
 
     def _get_api_key() -> str | None:
-        """Get Brevo API key from credential store or environment."""
         if credentials is not None:
             key = credentials.get("brevo")
             if key is not None and not isinstance(key, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('brevo'), got {type(key).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials, got {type(key).__name__}")
             return key
         return os.getenv("BREVO_API_KEY")
 
     def _get_client() -> _BrevoClient | dict[str, str]:
-        """Get a Brevo client, or return an error dict if no credentials."""
         api_key = _get_api_key()
         if not api_key:
             return {
-                "error": "Brevo API key not configured",
+                "error": "Brevo credentials not configured",
                 "help": (
-                    "Set BREVO_API_KEY environment variable or configure via "
-                    "credential store. Get your key at https://app.brevo.com/settings/keys/api"
+                    "Set BREVO_API_KEY environment variable or configure via credential store. "
+                    "Get your API key at https://app.brevo.com/settings/keys/api"
                 ),
             }
         return _BrevoClient(api_key)
 
     @mcp.tool()
     def brevo_send_email(
-        to: list[dict[str, str]],
+        to_email: str,
+        to_name: str,
         subject: str,
         html_content: str,
-        sender_email: str,
-        sender_name: str = "",
-        text_content: str = "",
-        cc: list[dict[str, str]] | None = None,
-        bcc: list[dict[str, str]] | None = None,
-        reply_to_email: str = "",
-        tags: list[str] | None = None,
-    ) -> dict[str, Any]:
+        from_email: str,
+        from_name: str,
+        text_content: str | None = None,
+    ) -> dict:
         """
         Send a transactional email via Brevo.
 
-        Use this for notifications, alerts, confirmations, or any triggered email.
-
         Args:
-            to: Recipients list. Each item: {"email": "user@example.com", "name": "User Name"}.
-                Name is optional.
-            subject: Email subject line.
-            html_content: Email body as HTML string.
-            sender_email: Sender email address (must be a verified sender in Brevo).
-            sender_name: Sender display name. Optional.
-            text_content: Plain text alternative body. Optional.
-            cc: CC recipients. Same format as 'to'. Optional.
-            bcc: BCC recipients. Same format as 'to'. Optional.
-            reply_to_email: Reply-to email address. Optional.
-            tags: Tags for categorizing the email. Optional.
+            to_email: Recipient email address
+            to_name: Recipient display name
+            subject: Email subject line
+            html_content: HTML body of the email
+            from_email: Sender email address (must be verified in Brevo)
+            from_name: Sender display name
+            text_content: Optional plain text version of the email
 
         Returns:
-            Dict with messageId on success, or error dict on failure.
+            Dict with message ID or error
         """
         client = _get_client()
         if isinstance(client, dict):
             return client
-
-        if not to:
-            return {"error": "At least one recipient is required"}
+        if not to_email or "@" not in to_email:
+            return {"error": "Invalid recipient email address"}
         if not subject:
-            return {"error": "Subject is required"}
+            return {"error": "Email subject cannot be empty"}
         if not html_content:
-            return {"error": "HTML content is required"}
-        if not sender_email:
-            return {"error": "Sender email is required"}
-
-        sender: dict[str, str] = {"email": sender_email}
-        if sender_name:
-            sender["name"] = sender_name
-
-        reply_to = {"email": reply_to_email} if reply_to_email else None
-
+            return {"error": "Email content cannot be empty"}
         try:
             result = client.send_email(
-                to=to,
-                subject=subject,
-                html_content=html_content,
-                sender=sender,
-                text_content=text_content if text_content else None,
-                cc=cc,
-                bcc=bcc,
-                reply_to=reply_to,
-                tags=tags,
+                to_email, to_name, subject, html_content, from_email, from_name, text_content
             )
             if "error" in result:
                 return result
             return {
                 "success": True,
-                "message_id": result.get("messageId", ""),
-                "to": [r.get("email") for r in to],
-                "subject": subject,
+                "message_id": result.get("messageId"),
             }
         except httpx.TimeoutException:
-            return {"error": "Brevo request timed out"}
+            return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
     def brevo_send_sms(
-        sender: str,
-        recipient: str,
+        to: str,
         content: str,
-        sms_type: str = "transactional",
-        tag: str = "",
-    ) -> dict[str, Any]:
+        sender: str,
+    ) -> dict:
         """
         Send a transactional SMS via Brevo.
 
-        Use this for SMS notifications, alerts, or verification messages.
-
         Args:
-            sender: Sender name (max 11 alphanumeric chars) or phone number (max 15 digits).
-            recipient: Recipient phone number with country code (e.g., "33612345678").
-            content: SMS message text. Messages over 160 chars are sent as multiple SMS.
-            sms_type: Either "transactional" or "marketing". Defaults to "transactional".
-            tag: Optional tag for categorizing the SMS.
+            to: Recipient phone number in international format (e.g. '+919876543210')
+            content: SMS message content (max 160 characters for single SMS)
+            sender: Sender name or number (max 11 alphanumeric characters)
 
         Returns:
-            Dict with messageId on success, or error dict on failure.
+            Dict with success status and reference or error
         """
         client = _get_client()
         if isinstance(client, dict):
             return client
-
-        if not sender:
-            return {"error": "Sender is required"}
-        if not recipient:
-            return {"error": "Recipient phone number is required"}
+        if not to.startswith("+"):
+            return {"error": "Phone number must be in international format starting with '+'"}
         if not content:
-            return {"error": "SMS content is required"}
-
+            return {"error": "SMS content cannot be empty"}
+        if len(content) > 640:
+            return {"error": "SMS content too long (max 640 characters)"}
         try:
-            result = client.send_sms(
-                sender=sender,
-                recipient=recipient,
-                content=content,
-                sms_type=sms_type,
-                tag=tag if tag else None,
-            )
+            result = client.send_sms(to, content, sender)
             if "error" in result:
                 return result
             return {
                 "success": True,
-                "message_id": result.get("messageId", ""),
-                "recipient": recipient,
+                "reference": result.get("reference"),
+                "remaining_credits": result.get("remainingCredits"),
             }
         except httpx.TimeoutException:
-            return {"error": "Brevo request timed out"}
+            return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
     def brevo_create_contact(
         email: str,
-        attributes: dict[str, Any] | None = None,
-        list_ids: list[int] | None = None,
-        update_enabled: bool = False,
-    ) -> dict[str, Any]:
+        first_name: str | None = None,
+        last_name: str | None = None,
+        phone: str | None = None,
+        list_ids: str | None = None,
+    ) -> dict:
         """
-        Create a contact in Brevo.
-
-        Use this to add new contacts to your Brevo account for email/SMS campaigns.
+        Create a new contact in Brevo.
 
         Args:
-            email: Contact email address.
-            attributes: Contact attributes in UPPERCASE (e.g., {"FNAME": "John", "LNAME": "Doe"}).
-                Standard attributes: FNAME, LNAME, SMS (phone with country code like +33xxxxxxxxxx).
-            list_ids: List IDs to add the contact to. Optional.
-            update_enabled: If True, updates the contact if it already exists. Defaults to False.
+            email: Contact email address
+            first_name: Optional first name
+            last_name: Optional last name
+            phone: Optional phone number in international format
+            list_ids: Optional comma-separated list IDs to add contact to (e.g. '2,5,8')
 
         Returns:
-            Dict with contact id on success, or error dict on failure.
+            Dict with new contact ID or error
         """
         client = _get_client()
         if isinstance(client, dict):
             return client
-
-        if not email:
-            return {"error": "Email is required"}
-
+        if not email or "@" not in email:
+            return {"error": "Invalid email address"}
+        parsed_list_ids = None
+        if list_ids:
+            try:
+                parsed_list_ids = [int(x.strip()) for x in list_ids.split(",")]
+            except ValueError:
+                return {"error": "list_ids must be comma-separated integers (e.g. '2,5,8')"}
         try:
-            result = client.create_contact(
-                email=email,
-                attributes=attributes,
-                list_ids=list_ids,
-                update_enabled=update_enabled,
-            )
+            result = client.create_contact(email, first_name, last_name, phone, parsed_list_ids)
             if "error" in result:
                 return result
             return {
@@ -398,90 +381,248 @@ def register_tools(
                 "email": email,
             }
         except httpx.TimeoutException:
-            return {"error": "Brevo request timed out"}
+            return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def brevo_get_contact(
-        identifier: str,
-    ) -> dict[str, Any]:
+    def brevo_get_contact(email: str) -> dict:
         """
-        Get a contact from Brevo by email address or contact ID.
+        Retrieve a contact from Brevo by email address.
 
         Args:
-            identifier: Contact email address or numeric contact ID.
+            email: Contact email address to look up
 
         Returns:
-            Dict with contact details (email, attributes, listIds, statistics)
-            or error dict on failure.
+            Dict with contact details or error
         """
         client = _get_client()
         if isinstance(client, dict):
             return client
-
-        if not identifier:
-            return {"error": "Contact identifier (email or ID) is required"}
-
+        if not email or "@" not in email:
+            return {"error": "Invalid email address"}
         try:
-            result = client.get_contact(identifier)
+            result = client.get_contact(email)
             if "error" in result:
                 return result
+            attributes = result.get("attributes", {})
             return {
                 "success": True,
                 "id": result.get("id"),
                 "email": result.get("email"),
-                "attributes": result.get("attributes", {}),
+                "first_name": attributes.get("FIRSTNAME"),
+                "last_name": attributes.get("LASTNAME"),
+                "phone": attributes.get("SMS"),
                 "list_ids": result.get("listIds", []),
                 "email_blacklisted": result.get("emailBlacklisted", False),
                 "sms_blacklisted": result.get("smsBlacklisted", False),
+                "created_at": result.get("createdAt"),
+                "modified_at": result.get("modifiedAt"),
             }
         except httpx.TimeoutException:
-            return {"error": "Brevo request timed out"}
+            return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
     def brevo_update_contact(
-        identifier: str,
-        attributes: dict[str, Any] | None = None,
-        list_ids: list[int] | None = None,
-        unlink_list_ids: list[int] | None = None,
-    ) -> dict[str, Any]:
+        email: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        phone: str | None = None,
+        list_ids: str | None = None,
+    ) -> dict:
         """
-        Update a contact in Brevo.
+        Update an existing contact in Brevo.
 
         Args:
-            identifier: Contact email address or numeric contact ID.
-            attributes: Attributes to update in UPPERCASE (e.g., {"FNAME": "Jane"}).
-            list_ids: List IDs to add the contact to. Optional.
-            unlink_list_ids: List IDs to remove the contact from. Optional.
+            email: Email address of the contact to update
+            first_name: Updated first name
+            last_name: Updated last name
+            phone: Updated phone number in international format
+            list_ids: Comma-separated list IDs to add contact to (e.g. '2,5,8')
 
         Returns:
-            Dict with success status, or error dict on failure.
+            Dict with success status or error
         """
         client = _get_client()
         if isinstance(client, dict):
             return client
-
-        if not identifier:
-            return {"error": "Contact identifier (email or ID) is required"}
-
+        if not email or "@" not in email:
+            return {"error": "Invalid email address"}
+        parsed_list_ids = None
+        if list_ids:
+            try:
+                parsed_list_ids = [int(x.strip()) for x in list_ids.split(",")]
+            except ValueError:
+                return {"error": "list_ids must be comma-separated integers (e.g. '2,5,8')"}
         try:
-            result = client.update_contact(
-                identifier=identifier,
-                attributes=attributes,
-                list_ids=list_ids,
-                unlink_list_ids=unlink_list_ids,
+            result = client.update_contact(email, first_name, last_name, phone, parsed_list_ids)
+            if "error" in result:
+                return result
+            return {"success": True, "email": email}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def brevo_list_contacts(
+        limit: int = 50,
+        offset: int = 0,
+        modified_since: str = "",
+    ) -> dict:
+        """
+        List contacts in Brevo with pagination.
+
+        Args:
+            limit: Number of contacts per page (default 50, max 1000)
+            offset: Pagination offset (default 0)
+            modified_since: Filter by modification date (ISO 8601, optional)
+
+        Returns:
+            Dict with contacts list and total count
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.list_contacts(
+                limit=max(1, min(limit, 1000)),
+                offset=offset,
+                modified_since=modified_since or None,
             )
+            if "error" in result:
+                return result
+            contacts = result.get("contacts", [])
+            return {
+                "count": len(contacts),
+                "total": result.get("count", len(contacts)),
+                "contacts": [
+                    {
+                        "id": c.get("id"),
+                        "email": c.get("email"),
+                        "first_name": (c.get("attributes") or {}).get("FIRSTNAME"),
+                        "last_name": (c.get("attributes") or {}).get("LASTNAME"),
+                        "list_ids": c.get("listIds", []),
+                        "email_blacklisted": c.get("emailBlacklisted", False),
+                        "modified_at": c.get("modifiedAt"),
+                    }
+                    for c in contacts
+                ],
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def brevo_delete_contact(email: str) -> dict:
+        """
+        Delete a contact from Brevo by email address.
+
+        Args:
+            email: Email address of the contact to delete
+
+        Returns:
+            Dict with success status or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        if not email or "@" not in email:
+            return {"error": "Invalid email address"}
+        try:
+            result = client.delete_contact(email)
+            if "error" in result:
+                return result
+            return {"success": True, "email": email, "status": "deleted"}
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def brevo_list_email_campaigns(
+        status: str = "",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """
+        List email campaigns from Brevo.
+
+        Args:
+            status: Filter by status: 'draft', 'sent', 'queued', 'suspended',
+                'inProcess', 'archive' (optional)
+            limit: Number per page (default 50, max 1000)
+            offset: Pagination offset (default 0)
+
+        Returns:
+            Dict with campaigns list (name, subject, status, stats)
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        try:
+            result = client.list_email_campaigns(
+                status=status or None,
+                limit=max(1, min(limit, 1000)),
+                offset=offset,
+            )
+            if "error" in result:
+                return result
+            campaigns = result.get("campaigns", [])
+            return {
+                "count": len(campaigns),
+                "total": result.get("count", len(campaigns)),
+                "campaigns": [
+                    {
+                        "id": c.get("id"),
+                        "name": c.get("name"),
+                        "subject": c.get("subject"),
+                        "status": c.get("status"),
+                        "type": c.get("type"),
+                        "created_at": c.get("createdAt"),
+                        "scheduled_at": c.get("scheduledAt"),
+                        "statistics": c.get("statistics", {}).get("globalStats", {}),
+                    }
+                    for c in campaigns
+                ],
+            }
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def brevo_get_email_stats(message_id: str) -> dict:
+        """
+        Get delivery statistics for a sent transactional email.
+
+        Args:
+            message_id: The message ID returned when the email was sent
+
+        Returns:
+            Dict with delivery status and events or error
+        """
+        client = _get_client()
+        if isinstance(client, dict):
+            return client
+        if not message_id:
+            return {"error": "message_id cannot be empty"}
+        try:
+            result = client.get_email_stats(message_id)
             if "error" in result:
                 return result
             return {
                 "success": True,
-                "identifier": identifier,
-                "message": "Contact updated successfully",
+                "message_id": result.get("messageId"),
+                "email": result.get("email"),
+                "subject": result.get("subject"),
+                "date": result.get("date"),
+                "events": result.get("events", []),
             }
         except httpx.TimeoutException:
-            return {"error": "Brevo request timed out"}
+            return {"error": "Request timed out"}
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}

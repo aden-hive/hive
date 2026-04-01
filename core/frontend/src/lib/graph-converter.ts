@@ -1,9 +1,9 @@
 import type { GraphTopology, NodeSpec } from "@/api/types";
-import type { GraphNode, NodeStatus } from "@/components/AgentGraph";
+import type { GraphNode, NodeStatus } from "@/components/graph-types";
 
 /**
  * Convert a backend GraphTopology (nodes + edges + entry_node) into
- * the GraphNode[] shape that AgentGraph renders.
+ * the GraphNode[] shape that DraftGraph renders.
  *
  * Four jobs:
  *  1. Synthesize trigger nodes from non-manual entry_points
@@ -12,8 +12,27 @@ import type { GraphNode, NodeStatus } from "@/components/AgentGraph";
  *  4. Map session enrichment fields to NodeStatus
  */
 export function topologyToGraphNodes(topology: GraphTopology): GraphNode[] {
-  const { nodes, edges, entry_node, entry_points } = topology;
-  if (nodes.length === 0) return [];
+  const { nodes: allNodes, edges, entry_node, entry_points } = topology;
+  if (allNodes.length === 0) return [];
+
+  // Filter out subagent-only nodes (referenced in sub_agents but not in any edge)
+  const subagentIds = new Set<string>();
+  for (const n of allNodes) {
+    for (const sa of n.sub_agents ?? []) {
+      subagentIds.add(sa);
+    }
+  }
+  const edgeParticipants = new Set<string>();
+  for (const e of edges) {
+    edgeParticipants.add(e.source);
+    edgeParticipants.add(e.target);
+  }
+  const nodes = allNodes.filter(
+    (n) =>
+      !subagentIds.has(n.id) ||
+      edgeParticipants.has(n.id) ||
+      n.id === entry_node,
+  );
 
   // --- Synthesize trigger nodes for non-manual entry points ---
   const schedulerEntryPoints = (entry_points || []).filter(
@@ -29,7 +48,11 @@ export function topologyToGraphNodes(topology: GraphTopology): GraphNode[] {
       status: "pending",
       nodeType: "trigger",
       triggerType: ep.trigger_type,
-      triggerConfig: ep.trigger_config,
+      triggerConfig: {
+        ...ep.trigger_config,
+        ...(ep.next_fire_in != null ? { next_fire_in: ep.next_fire_in } : {}),
+        ...(ep.task ? { task: ep.task } : {}),
+      },
       next: [ep.entry_node],
     });
   }
@@ -45,15 +68,18 @@ export function topologyToGraphNodes(topology: GraphTopology): GraphNode[] {
     adj.set(triggerId, triggerNode.next!);
   }
 
-  // BFS — start from trigger nodes if any, else entry_node
+  // BFS — start from trigger nodes (if any), then entry_node.
+  // Always include entry_node so the DAG ordering stays correct
+  // even when triggers target a node other than entry.
   const order: string[] = [];
   const position = new Map<string, number>();
   const visited = new Set<string>();
 
+  const entryStart = entry_node || nodes[0].id;
   const starts =
     triggerMap.size > 0
-      ? [...triggerMap.keys()]
-      : [entry_node || nodes[0].id];
+      ? [...triggerMap.keys(), entryStart]
+      : [entryStart];
   const queue = [...starts];
   for (const s of starts) visited.add(s);
 

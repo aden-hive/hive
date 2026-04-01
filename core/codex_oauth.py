@@ -15,7 +15,9 @@ import base64
 import hashlib
 import http.server
 import json
+import os
 import platform
+import queue
 import secrets
 import subprocess
 import sys
@@ -26,6 +28,7 @@ import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TextIO
 
 # OAuth constants (from the Codex CLI binary)
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -150,8 +153,9 @@ def save_credentials(token_data: dict, account_id: str) -> None:
     if "id_token" in token_data:
         auth_data["tokens"]["id_token"] = token_data["id_token"]
 
-    CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(CODEX_AUTH_FILE, "w") as f:
+    CODEX_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(CODEX_AUTH_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(auth_data, f, indent=2)
 
 
@@ -163,11 +167,11 @@ def open_browser(url: str) -> bool:
         if system == "Darwin":
             subprocess.Popen(["open", url], stdout=devnull, stderr=devnull)
         elif system == "Windows":
-            subprocess.Popen(["cmd", "/c", "start", url], stdout=devnull, stderr=devnull)
+            os.startfile(url)  # type: ignore[attr-defined]
         else:
             subprocess.Popen(["xdg-open", url], stdout=devnull, stderr=devnull)
         return True
-    except OSError:
+    except (AttributeError, OSError):
         return False
 
 
@@ -264,6 +268,71 @@ def parse_manual_input(value: str, expected_state: str) -> str | None:
     return None
 
 
+def _read_manual_input_lines(
+    manual_inputs: queue.Queue[str],
+    stop_event: threading.Event,
+    stdin: TextIO | None = None,
+) -> None:
+    stream = sys.stdin if stdin is None else stdin
+
+    while not stop_event.is_set():
+        try:
+            manual = stream.readline()
+        except (EOFError, OSError):
+            return
+
+        if not manual:
+            return
+
+        if manual.strip():
+            manual_inputs.put(manual)
+
+
+def wait_for_code_from_callback_or_stdin(
+    expected_state: str,
+    callback_result: list[str | None],
+    callback_done: threading.Event,
+    timeout_secs: float = 120,
+    poll_interval: float = 0.1,
+    stdin: TextIO | None = None,
+) -> str | None:
+    manual_inputs: queue.Queue[str] = queue.Queue()
+    stop_event = threading.Event()
+
+    # Read stdin on a daemon thread so manual paste works on platforms where
+    # select() cannot poll console handles, including Windows terminals.
+    threading.Thread(
+        target=_read_manual_input_lines,
+        args=(manual_inputs, stop_event, stdin),
+        daemon=True,
+    ).start()
+
+    deadline = time.time() + timeout_secs
+    try:
+        while time.time() < deadline:
+            if callback_result[0]:
+                return callback_result[0]
+
+            while True:
+                try:
+                    manual = manual_inputs.get_nowait()
+                except queue.Empty:
+                    break
+
+                code = parse_manual_input(manual, expected_state)
+                if code:
+                    return code
+
+            if callback_done.is_set():
+                return callback_result[0]
+
+            time.sleep(poll_interval)
+
+        return callback_result[0]
+    finally:
+        stop_event.set()
+
+
 def main() -> int:
     # Generate PKCE and state
     verifier, challenge = generate_pkce()
@@ -313,41 +382,28 @@ def main() -> int:
 
         # Start callback server in background
         callback_result: list[str | None] = [None]
+        callback_done = threading.Event()
 
         def run_server() -> None:
-            callback_result[0] = wait_for_callback(state, timeout_secs=120)
+            try:
+                callback_result[0] = wait_for_callback(state, timeout_secs=120)
+            finally:
+                callback_done.set()
 
         server_thread = threading.Thread(target=run_server)
         server_thread.daemon = True
         server_thread.start()
 
-        # Also accept manual input in parallel
-        # We poll for both the server result and stdin
         try:
-            import select
-
-            while server_thread.is_alive():
-                # Check if stdin has data (non-blocking on unix)
-                if hasattr(select, "select"):
-                    ready, _, _ = select.select([sys.stdin], [], [], 0.5)
-                    if ready:
-                        manual = sys.stdin.readline()
-                        if manual.strip():
-                            code = parse_manual_input(manual, state)
-                            if code:
-                                break
-                else:
-                    time.sleep(0.5)
-
-                if callback_result[0]:
-                    code = callback_result[0]
-                    break
-        except (KeyboardInterrupt, EOFError):
+            code = wait_for_code_from_callback_or_stdin(
+                state,
+                callback_result,
+                callback_done,
+                timeout_secs=120,
+            )
+        except KeyboardInterrupt:
             print("\n\033[0;31mCancelled.\033[0m")
             return 1
-
-        if not code:
-            code = callback_result[0]
     else:
         # Manual paste mode
         try:

@@ -1,6 +1,6 @@
 """Graph lifecycle tools for multi-graph sessions.
 
-These tools allow an agent (e.g. hive_coder) to load, unload, start,
+These tools allow an agent (e.g. queen) to load, unload, start,
 restart, and query other agent graphs within the same runtime session.
 
 Usage::
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -48,10 +47,14 @@ def register_graph_tools(registry: ToolRegistry, runtime: AgentRuntime) -> int:
         """
         from framework.runner.runner import AgentRunner
         from framework.runtime.execution_stream import EntryPointSpec
+        from framework.server.app import validate_agent_path
 
-        path = Path(agent_path).resolve()
+        try:
+            path = validate_agent_path(agent_path)
+        except ValueError as e:
+            return json.dumps({"error": str(e)})
         if not path.exists():
-            return json.dumps({"error": f"Agent path does not exist: {path}"})
+            return json.dumps({"error": f"Agent path does not exist: {agent_path}"})
 
         try:
             runner = AgentRunner.load(path)
@@ -73,19 +76,6 @@ def register_graph_tools(registry: ToolRegistry, runtime: AgentRuntime) -> int:
                 entry_node=runner.graph.entry_node,
                 trigger_type="manual",
                 isolation_level="shared",
-            )
-
-        # Async entry points
-        for aep in runner.graph.async_entry_points:
-            entry_points[aep.id] = EntryPointSpec(
-                id=aep.id,
-                name=aep.name,
-                entry_node=aep.entry_node,
-                trigger_type=aep.trigger_type,
-                trigger_config=aep.trigger_config,
-                isolation_level=aep.isolation_level,
-                priority=aep.priority,
-                max_concurrent=aep.max_concurrent,
             )
 
         await runtime.add_graph(

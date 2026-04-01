@@ -483,7 +483,6 @@ class TestEventDrivenEntryPoints:
             version="1.0.0",
             entry_node="process-event",
             entry_points={"start": "process-event"},
-            async_entry_points=[],
             terminal_nodes=[],
             pause_nodes=[],
             nodes=nodes,
