@@ -713,6 +713,7 @@ class EventLoopNode(NodeProtocol):
             _stream_retry_count = 0
             _turn_cancelled = False
             _llm_turn_failed_waiting_input = False
+            _turn_t0 = time.monotonic()
             while True:
                 try:
                     (
@@ -731,11 +732,13 @@ class EventLoopNode(NodeProtocol):
                     ) = await self._run_single_turn(
                         ctx, conversation, tools, iteration, accumulator
                     )
+                    _turn_ms = int((time.monotonic() - _turn_t0) * 1000)
                     logger.info(
-                        "[%s] iter=%d: LLM done — text=%d chars, real_tools=%d, "
+                        "[%s] iter=%d: LLM done (%dms) — text=%d chars, real_tools=%d, "
                         "outputs_set=%s, tokens=%s, accumulator=%s",
                         node_id,
                         iteration,
+                        _turn_ms,
                         len(assistant_text),
                         len(real_tool_results),
                         outputs_set or "[]",
@@ -2095,6 +2098,7 @@ class EventLoopNode(NodeProtocol):
                             inner_turn=inner_turn,
                         )
 
+            _llm_stream_t0 = time.monotonic()
             self._stream_task = asyncio.create_task(_do_stream())
             try:
                 await self._stream_task
@@ -2113,6 +2117,7 @@ class EventLoopNode(NodeProtocol):
                 raise TurnCancelled() from None
             finally:
                 self._stream_task = None
+            _llm_stream_ms = int((time.monotonic() - _llm_stream_t0) * 1000)
 
             # If a recoverable stream error produced an empty response,
             # raise so the outer transient-error retry can handle it
@@ -2124,8 +2129,9 @@ class EventLoopNode(NodeProtocol):
 
             final_text = accumulated_text
             logger.info(
-                "[%s] LLM response: text=%r tool_calls=%s stop=%s model=%s",
+                "[%s] LLM response (%dms): text=%r tool_calls=%s stop=%s model=%s",
                 node_id,
+                _llm_stream_ms,
                 accumulated_text[:300] if accumulated_text else "(empty)",
                 [tc.tool_name for tc in tool_calls] if tool_calls else "[]",
                 token_counts.get("stop_reason", "?"),
