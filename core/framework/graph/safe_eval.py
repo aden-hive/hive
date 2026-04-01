@@ -2,6 +2,29 @@ import ast
 import operator
 from typing import Any
 
+# Power operations can allocate extremely large integers. Keep conservative
+# limits here so untrusted edge conditions cannot exhaust CPU or memory.
+MAX_POWER_ABS_EXPONENT = 1_000
+MAX_POWER_RESULT_BITS = 4_096
+
+
+def _safe_pow(base: Any, exp: Any) -> Any:
+    if isinstance(exp, (int, float)) and abs(exp) > MAX_POWER_ABS_EXPONENT:
+        raise ValueError(
+            f"Power exponent exceeds safe limit ({MAX_POWER_ABS_EXPONENT})"
+        )
+
+    if isinstance(base, int) and isinstance(exp, int) and exp > 0:
+        abs_base = abs(base)
+        if abs_base > 1:
+            # Estimate bit growth instead of materializing a huge integer.
+            estimated_bits = exp * (abs_base.bit_length() - 1) + 1
+            if estimated_bits > MAX_POWER_RESULT_BITS:
+                raise ValueError("Power operation exceeds safe size limit")
+
+    return operator.pow(base, exp)
+
+
 # Safe operators whitelist
 SAFE_OPERATORS = {
     ast.Add: operator.add,
@@ -10,7 +33,7 @@ SAFE_OPERATORS = {
     ast.Div: operator.truediv,
     ast.FloorDiv: operator.floordiv,
     ast.Mod: operator.mod,
-    ast.Pow: operator.pow,
+    ast.Pow: _safe_pow,
     ast.LShift: operator.lshift,
     ast.RShift: operator.rshift,
     ast.BitOr: operator.or_,
