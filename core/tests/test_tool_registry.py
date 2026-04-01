@@ -689,8 +689,8 @@ def test_convert_mcp_tool_strips_context_params():
             "type": "object",
             "properties": {
                 "workspace_id": {"type": "string"},  # context param → stripped
-                "agent_id": {"type": "string"},       # context param → stripped
-                "query": {"type": "string"},           # regular param → kept
+                "agent_id": {"type": "string"},  # context param → stripped
+                "query": {"type": "string"},  # regular param → kept
             },
             "required": ["workspace_id", "query"],
         },
@@ -713,7 +713,9 @@ def test_convert_mcp_tool_strips_context_params():
 def test_load_mcp_config_list_format(tmp_path, monkeypatch):
     """load_mcp_config should accept the {\"servers\": [...]} list format."""
     config_file = tmp_path / "mcp_servers.json"
-    config_file.write_text('{"servers": [{"name": "s1", "transport": "http", "url": "http://localhost:9000"}]}')
+    config_file.write_text(
+        '{"servers": [{"name": "s1", "transport": "http", "url": "http://localhost:9000"}]}'
+    )
 
     called_with = []
 
@@ -787,8 +789,8 @@ def test_resync_returns_false_when_credentials_unchanged(tmp_path, monkeypatch):
             pass
 
     registry._mcp_clients.append(_FakeClient())  # noqa: SLF001
-    registry._mcp_cred_snapshot = set()           # noqa: SLF001
-    registry._mcp_aden_key_snapshot = None        # noqa: SLF001
+    registry._mcp_cred_snapshot = set()  # noqa: SLF001
+    registry._mcp_aden_key_snapshot = None  # noqa: SLF001
 
     # No credentials on disk and env var not set → nothing changed
     monkeypatch.delenv("ADEN_API_KEY", raising=False)
