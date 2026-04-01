@@ -15,8 +15,10 @@ export GITLAB_TOKEN=your_personal_access_token
 Create a personal access token at https://gitlab.com/-/user_settings/personal_access_tokens
 
 Alternatively, configure credentials in the Aden credential store:
-- `gitlab_url`
 - `gitlab_token`
+
+Note: The GitLab URL should be set via the `GITLAB_URL` environment variable
+(defaults to `https://gitlab.com` if not set).
 
 ## Tools (9)
 
