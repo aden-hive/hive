@@ -167,14 +167,15 @@ class TestNodeConversation:
     async def test_token_estimation(self):
         conv = NodeConversation()
         await conv.add_user_message("a" * 400)
-        assert conv.estimate_tokens() == 100
+        # chars // 3 (4/3 safety margin over chars/4 base)
+        assert conv.estimate_tokens() == 400 // 3
 
     @pytest.mark.asyncio
     async def test_update_token_count_overrides_estimate(self):
         """When actual API token count is provided, estimate_tokens uses it."""
         conv = NodeConversation()
         await conv.add_user_message("a" * 400)
-        assert conv.estimate_tokens() == 100  # chars/4 fallback
+        assert conv.estimate_tokens() == 400 // 3  # char-based fallback with safety margin
 
         conv.update_token_count(500)
         assert conv.estimate_tokens() == 500  # actual API value
@@ -188,8 +189,8 @@ class TestNodeConversation:
         assert conv.estimate_tokens() == 500
 
         await conv.compact("summary", keep_recent=0)
-        # Falls back to chars/4 for the summary message
-        assert conv.estimate_tokens() == len("summary") // 4
+        # Falls back to char-based heuristic with 4/3 safety margin (chars // 3)
+        assert conv.estimate_tokens() == len("summary") // 3
 
     @pytest.mark.asyncio
     async def test_clear_resets_token_count(self):
@@ -207,7 +208,8 @@ class TestNodeConversation:
         """usage_ratio returns estimate / max_context_tokens."""
         conv = NodeConversation(max_context_tokens=1000)
         await conv.add_user_message("a" * 400)
-        assert conv.usage_ratio() == pytest.approx(0.1)  # 100/1000
+        # 400 // 3 = 133 tokens (with safety margin), so 133/1000
+        assert conv.usage_ratio() == pytest.approx(400 // 3 / 1000)
 
         conv.update_token_count(800)
         assert conv.usage_ratio() == pytest.approx(0.8)  # 800/1000

@@ -44,6 +44,7 @@ from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .calendly_tool import register_tools as register_calendly
+from .cloudflare_tool import register_tools as register_cloudflare
 from .cloudinary_tool import register_tools as register_cloudinary
 from .confluence_tool import register_tools as register_confluence
 from .csv_tool import register_tools as register_csv
@@ -253,6 +254,7 @@ def _register_unverified(
     register_stripe(mcp, credentials=credentials)
     register_postgres(mcp, credentials=credentials)
     register_calendly(mcp, credentials=credentials)
+    register_cloudflare(mcp, credentials=credentials)
     register_cloudinary(mcp, credentials=credentials)
     register_confluence(mcp, credentials=credentials)
     register_databricks(mcp, credentials=credentials)

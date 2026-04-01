@@ -408,6 +408,9 @@ class NodeConversation:
         )
         self._messages.append(msg)
         self._next_seq += 1
+        # Invalidate stale API token count so estimate_tokens() uses
+        # the char-based heuristic which reflects the new message.
+        self._last_api_input_tokens = None
         await self._persist(msg)
         return msg
 
@@ -425,6 +428,7 @@ class NodeConversation:
         )
         self._messages.append(msg)
         self._next_seq += 1
+        self._last_api_input_tokens = None
         await self._persist(msg)
         return msg
 
@@ -448,6 +452,7 @@ class NodeConversation:
         )
         self._messages.append(msg)
         self._next_seq += 1
+        self._last_api_input_tokens = None
         await self._persist(msg)
         return msg
 
@@ -528,12 +533,15 @@ class NodeConversation:
 
         Uses actual API input token count when available (set via
         :meth:`update_token_count`), otherwise falls back to a
-        ``total_chars / 4`` heuristic that includes both message content
-        AND tool_call argument sizes.
+        character-based heuristic that includes message content, tool_call
+        arguments, and image blocks.  The heuristic applies a 4/3 safety
+        margin to avoid under-counting (inspired by Claude Code's compact
+        service).
         """
         if self._last_api_input_tokens is not None:
             return self._last_api_input_tokens
         total_chars = 0
+        image_tokens = 0
         for m in self._messages:
             total_chars += len(m.content)
             if m.tool_calls:
@@ -541,7 +549,11 @@ class NodeConversation:
                     func = tc.get("function", {})
                     total_chars += len(func.get("arguments", ""))
                     total_chars += len(func.get("name", ""))
-        return total_chars // 4
+            if m.image_content:
+                # Images/documents have a fixed token cost per block
+                image_tokens += len(m.image_content) * 2000
+        # Apply 4/3 safety margin to character-based estimate
+        return (total_chars * 4) // (3 * 4) + image_tokens
 
     def update_token_count(self, actual_input_tokens: int) -> None:
         """Store actual API input token count for more accurate compaction.
