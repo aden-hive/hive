@@ -754,11 +754,27 @@ class ToolRegistry:
                 self._mcp_server_tools[server_name].add(mcp_tool.name)
                 count += 1
 
-            logger.info(f"Registered {count} tools from MCP server '{config.name}'")
+            logger.info(
+                "MCP Registry Load",
+                extra={
+                    "server": config.name,
+                    "status": "success",
+                    "tools_loaded": count,
+                    "skipped_reason": None,
+                },
+            )
             return count
 
         except Exception as e:
-            logger.error(f"Failed to register MCP server: {e}")
+            logger.error(
+                "MCP Registry Load",
+                extra={
+                    "server": server_config.get("name", "unknown"),
+                    "status": "failed",
+                    "tools_loaded": 0,
+                    "skipped_reason": str(e),
+                },
+            )
             if "Connection closed" in str(e) and os.name == "nt":
                 logger.debug(
                     "On Windows, check that the MCP subprocess starts (e.g. uv in PATH, "

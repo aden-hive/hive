@@ -14,6 +14,8 @@ from typing import Any, Literal
 
 import httpx
 
+from framework.runner.mcp_errors import MCPToolNotFoundError
+
 logger = logging.getLogger(__name__)
 
 
@@ -456,7 +458,10 @@ class MCPClient:
             self.connect()
 
         if tool_name not in self._tools:
-            raise ValueError(f"Unknown tool: {tool_name}")
+            raise MCPToolNotFoundError(
+                server=self.config.name,
+                tool_name=tool_name,
+            )
 
         if self.config.transport == "stdio":
             with self._stdio_call_lock:
@@ -507,7 +512,10 @@ class MCPClient:
                 content_item = result.content[0]
                 if hasattr(content_item, "text"):
                     error_text = content_item.text
-            raise RuntimeError(f"MCP tool '{tool_name}' failed: {error_text}")
+            raise RuntimeError(
+                f"[Server: {self.config.name}] [Transport: {self.config.transport}] "
+                f"Tool '{tool_name}' failed: {error_text}"
+            )
 
         # Extract content — preserve image blocks alongside text
         if result.content:
@@ -558,11 +566,17 @@ class MCPClient:
             data = response.json()
 
             if "error" in data:
-                raise RuntimeError(f"Tool execution error: {data['error']}")
+                raise RuntimeError(
+                    f"[Server: {self.config.name}] [Transport: {self.config.transport}] "
+                    f"Tool '{tool_name}' failed: {data['error']}"
+                )
 
             return data.get("result", {}).get("content", [])
         except Exception as e:
-            raise RuntimeError(f"Failed to call tool via HTTP: {e}") from e
+            raise RuntimeError(
+                f"[Server: {self.config.name}] [Transport: {self.config.transport}] "
+                f"Failed to call tool via HTTP: Tool '{tool_name}' failed: {e}"
+            ) from e
 
     def _reconnect(self) -> None:
         """Reconnect to the configured MCP server."""
