@@ -8,6 +8,7 @@ the context-window-exceeded error detector.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -446,8 +447,11 @@ async def execute_tool(
         # Offload the executor call to a thread.  Sync MCP executors
         # block on future.result() — running in a thread keeps the
         # event loop free so asyncio.wait_for can fire the timeout.
+        # Copy the current context so contextvars (e.g. data_dir from
+        # execution context) propagate into the worker thread.
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, tool_executor, tool_use)
+        ctx = contextvars.copy_context()
+        result = await loop.run_in_executor(None, ctx.run, tool_executor, tool_use)
         # Async executors return a coroutine — await it on the loop
         if asyncio.iscoroutine(result) or asyncio.isfuture(result):
             result = await result
