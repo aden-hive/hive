@@ -8,6 +8,7 @@ tooling, CI gates, and hive skill doctor.
 from __future__ import annotations
 
 import stat
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -134,9 +135,10 @@ def validate_strict(path: Path) -> ValidationResult:
         warnings.append("No 'license' field — consider adding a license (e.g. MIT, Apache-2.0).")
 
     # 11. Scripts in scripts/ exist and are executable
+    # Windows has no POSIX executable bits; skip this check there.
     base_dir = path.parent
     scripts_dir = base_dir / "scripts"
-    if scripts_dir.is_dir():
+    if scripts_dir.is_dir() and sys.platform != "win32":
         for script_path in sorted(scripts_dir.iterdir()):
             if script_path.is_file():
                 if not (script_path.stat().st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)):
