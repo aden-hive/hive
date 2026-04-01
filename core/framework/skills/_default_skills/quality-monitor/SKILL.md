@@ -8,7 +8,7 @@ metadata:
 
 ## Operational Protocol: Quality Self-Assessment
 
-Every 5 iterations, self-assess:
+Every {{assessment_interval}} iterations, self-assess:
 
 1. On-task? Still working toward the stated objective?
 2. Thorough? Cutting corners compared to earlier?

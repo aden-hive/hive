@@ -470,6 +470,9 @@ class EventLoopNode(NodeProtocol):
         # Store skill dirs for AS-9 file-read interception in _execute_tool
         self._skill_dirs: list[str] = ctx.skill_dirs
 
+        # DS-13: context preservation warning state
+        _context_warn_sent = False
+
         # Verdict counters for runtime logging
         _accept_count = _retry_count = _escalate_count = _continue_count = 0
 
@@ -595,6 +598,19 @@ class EventLoopNode(NodeProtocol):
                         node_id,
                         len(ctx.protocols_prompt),
                     )
+
+                # DS-12: batch auto-detection — prepend ledger-init nudge when input looks batch-y
+                if ctx.default_skill_batch_nudge:
+                    from framework.skills.defaults import is_batch_scenario as _is_batch
+
+                    _input_text = (
+                        (ctx.goal_context or "")
+                        + " "
+                        + " ".join(str(v) for v in ctx.input_data.values() if v)
+                    )
+                    if _is_batch(_input_text):
+                        system_prompt = f"{system_prompt}\n\n{ctx.default_skill_batch_nudge}"
+                        logger.info("[%s] DS-12: batch scenario detected, nudge injected", node_id)
 
                 # Inject agent working memory (adapt.md).
                 # If it doesn't exist yet, seed it with available context.
@@ -889,6 +905,27 @@ class EventLoopNode(NodeProtocol):
                         tool_results=real_tool_results,
                         token_counts=turn_tokens,
                     )
+
+                    # DS-13: inject context preservation warning once when token usage
+                    # crosses warn_ratio (default 0.45), before the 0.6 framework prune
+                    if (
+                        ctx.default_skill_warn_ratio is not None
+                        and not _context_warn_sent
+                        and conversation.usage_ratio() >= ctx.default_skill_warn_ratio
+                    ):
+                        _ratio_pct = int(conversation.usage_ratio() * 100)
+                        await conversation.add_user_message(
+                            f"[CONTEXT ALERT — {_ratio_pct}% used] "
+                            "Extract all critical data to `_working_notes` and "
+                            "`_preserved_data` now — context pruning occurs at 60% usage."
+                        )
+                        _context_warn_sent = True
+                        logger.info(
+                            "[%s] DS-13: context preservation warning injected at %d%%",
+                            node_id,
+                            _ratio_pct,
+                        )
+
                     break  # success — exit retry loop
 
                 except TurnCancelled:
