@@ -94,6 +94,18 @@ class TestArithmetic:
     def test_power(self):
         assert safe_eval("2 ** 10") == 1024
 
+    def test_power_large_exponent_blocked(self):
+        with pytest.raises(ValueError, match="Power exponent"):
+            safe_eval("2 ** 1001")
+
+    def test_power_large_result_blocked(self):
+        with pytest.raises(ValueError, match="Power operation"):
+            safe_eval("99 ** 1000")
+
+    def test_nested_power_blocked(self):
+        with pytest.raises(ValueError, match="Power exponent"):
+            safe_eval("2 ** 2 ** 20")
+
     def test_complex_expression(self):
         assert safe_eval("(2 + 3) * 4 - 1") == 19
 
