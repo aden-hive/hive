@@ -51,10 +51,18 @@ def _execution_timeout(timeout_ms: int | None):
     can_use_alarm = (
         hasattr(signal, "SIGALRM")
         and hasattr(signal, "ITIMER_REAL")
+        and hasattr(signal, "getitimer")
         and hasattr(signal, "setitimer")
         and threading.current_thread() is threading.main_thread()
     )
     if not can_use_alarm:
+        yield
+        return
+
+    current_delay, current_interval = signal.getitimer(signal.ITIMER_REAL)
+    if current_delay > 0 or current_interval > 0:
+        # safe_eval runs inside a shared framework process, so it must not
+        # replace a timer another subsystem already owns.
         yield
         return
 
@@ -63,12 +71,12 @@ def _execution_timeout(timeout_ms: int | None):
 
     old_handler = signal.getsignal(signal.SIGALRM)
     signal.signal(signal.SIGALRM, _handle_timeout)
-    signal.setitimer(signal.ITIMER_REAL, timeout_ms / 1000)
+    old_delay, old_interval = signal.setitimer(signal.ITIMER_REAL, timeout_ms / 1000)
     try:
         yield
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, old_handler)
+        signal.setitimer(signal.ITIMER_REAL, old_delay, old_interval)
 
 
 # Safe operators whitelist
