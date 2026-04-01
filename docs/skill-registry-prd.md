@@ -884,14 +884,13 @@ Phase 0 and Phase 1 can proceed in parallel — default skills depend on the pro
 | Q1  | Should the registry repo live under `aden-hive` org or a shared `agentskills` org?                                                     | Platform            | Open   |
 | Q2  | Should default skill protocols be adaptive (e.g., `hive.batch-ledger` adjusts checkpoint frequency based on item size)?                | Engineering         | Open   |
 | Q3  | Should default skills be tunable per-node (not just per-agent)?                                                                        | Engineering         | Open   |
-| Q4  | How should default skill protocols interact with existing `adapt.md` working memory? Should `_working_notes` replace or supplement it? | Engineering         | Open   |
-| Q5  | Should `hive.quality-monitor` self-assessments feed into judge decisions (auto-trigger RETRY on self-reported degradation)?            | Engineering         | Open   |
-| Q6  | What is the right combined token budget for default skill prompts? 2000 tokens proposed — configurable or fixed?                       | Engineering         | Open   |
-| Q7  | Should Hive support subagent delegation for skill execution (run skill in isolated session, return summary)?                           | Engineering         | Open   |
-| Q8  | Should Hive also scan `.claude/skills/` for pragmatic compatibility with Claude Code's native skill location?                          | Engineering         | Open   |
-| Q9  | What is the process for promoting a `community` skill to `verified`?                                                                   | Platform + Security | Open   |
-| Q10 | Should the registry support private/enterprise skill indexes (`hive skill config --index-url`)?                                        | Platform            | Open   |
-| Q11 | Should `hive skill test` use the official `skills-ref` library or a Hive-native implementation?                                        | Engineering         | Open   |
+| Q4  | Should `hive.quality-monitor` self-assessments feed into judge decisions (auto-trigger RETRY on self-reported degradation)?            | Engineering         | Open   |
+| Q5  | What is the right combined token budget for default skill prompts? 2000 tokens proposed — configurable or fixed?                       | Engineering         | Open   |
+| Q6  | Should Hive support subagent delegation for skill execution (run skill in isolated session, return summary)?                           | Engineering         | Open   |
+| Q7  | Should Hive also scan `.claude/skills/` for pragmatic compatibility with Claude Code's native skill location?                          | Engineering         | Open   |
+| Q8  | What is the process for promoting a `community` skill to `verified`?                                                                   | Platform + Security | Open   |
+| Q9  | Should the registry support private/enterprise skill indexes (`hive skill config --index-url`)?                                        | Platform            | Open   |
+| Q10 | Should `hive skill test` use the official `skills-ref` library or a Hive-native implementation?                                        | Engineering         | Open   |
 | Q12 | How should skill-level telemetry (activation counts, eval pass rates) be collected without compromising privacy?                       | Product + Privacy   | Open   |
 
 ---

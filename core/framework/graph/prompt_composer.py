@@ -264,7 +264,6 @@ def build_transition_marker(
     memory: SharedMemory,
     cumulative_tool_names: list[str],
     data_dir: Path | str | None = None,
-    adapt_content: str | None = None,
 ) -> str:
     """Build a 'State of the World' transition marker.
 
@@ -278,7 +277,6 @@ def build_transition_marker(
         memory: Current shared memory state.
         cumulative_tool_names: All tools available (cumulative set).
         data_dir: Path to spillover data directory.
-        adapt_content: Agent working memory (adapt.md) content.
 
     Returns:
         Transition marker message text.
@@ -343,10 +341,6 @@ def build_transition_marker(
                     sections.append(
                         "\nData files (use load_data to access):\n" + "\n".join(file_lines)
                     )
-
-    # Agent working memory
-    if adapt_content:
-        sections.append(f"\n--- Agent Memory ---\n{adapt_content}")
 
     # Available tools
     if cumulative_tool_names:

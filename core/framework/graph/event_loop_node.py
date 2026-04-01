@@ -80,7 +80,6 @@ from framework.graph.event_loop.tool_result_handler import (
     execute_tool,
     extract_json_metadata,
     is_transient_error,
-    record_learning,
     restore_spill_counter,
     truncate_tool_result,
 )
@@ -476,38 +475,6 @@ class EventLoopNode(NodeProtocol):
                     if _is_batch(_input_text):
                         system_prompt = f"{system_prompt}\n\n{ctx.default_skill_batch_nudge}"
                         logger.info("[%s] DS-12: batch scenario detected, nudge injected", node_id)
-
-                # Inject agent working memory (adapt.md).
-                # If it doesn't exist yet, seed it with available context.
-                if self._config.spillover_dir:
-                    _adapt_path = Path(self._config.spillover_dir) / "adapt.md"
-                    if not _adapt_path.exists():
-                        _adapt_path.parent.mkdir(parents=True, exist_ok=True)
-                        seed = (
-                            f"## Identity\n{ctx.accounts_prompt}\n"
-                            if ctx.accounts_prompt
-                            else "# Session Working Memory\n"
-                        )
-                        _adapt_path.write_text(seed, encoding="utf-8")
-                    if _adapt_path.exists():
-                        _adapt_text = _adapt_path.read_text(encoding="utf-8").strip()
-                        if _adapt_text:
-                            system_prompt = (
-                                f"{system_prompt}\n\n"
-                                "--- Session Working Memory ---\n"
-                                f"{_adapt_text}\n"
-                                "--- End Session Working Memory ---\n\n"
-                                "Maintain your session working memory by calling "
-                                'save_data("adapt.md", ...) or edit_data("adapt.md", ...)'
-                                " as you work.\n"
-                                "This is session-scoped scratch space. "
-                                "IMMEDIATELY save: account/identity rules, "
-                                "behavioral constraints, and preferences specific to "
-                                "this session. Also record current task state, "
-                                "decisions, and working notes. "
-                                "For lasting knowledge about the user, use "
-                                "update_queen_memory() and append_queen_journal() instead."
-                            )
 
                 conversation = NodeConversation(
                     system_prompt=system_prompt,
@@ -2215,7 +2182,6 @@ class EventLoopNode(NodeProtocol):
                                 ),
                                 is_error=False,
                             )
-                        self._record_learning(key, stored)
                         outputs_set_this_turn.append(key)
                         await self._publish_output_key_set(stream_id, node_id, key, execution_id)
                     logged_tool_calls.append(
@@ -2977,20 +2943,6 @@ class EventLoopNode(NodeProtocol):
             tc=tc,
             timeout=self._config.tool_call_timeout_seconds,
             skill_dirs=getattr(self, "_skill_dirs", []),
-        )
-
-    def _record_learning(self, key: str, value: Any) -> None:
-        """Append a set_output value to adapt.md as a learning entry.
-
-        Called at set_output time — the moment knowledge is produced — so that
-        adapt.md accumulates the agent's outputs across the session.  Since
-        adapt.md is injected into the system prompt, these persist through
-        any compaction.
-        """
-        return record_learning(
-            key=key,
-            value=value,
-            spillover_dir=self._config.spillover_dir,
         )
 
     def _next_spill_filename(self, tool_name: str) -> str:

@@ -1,9 +1,8 @@
 """Queen global cross-session memory.
 
-Three-tier memory architecture:
+Two-tier memory architecture:
   ~/.hive/queen/MEMORY.md                            — semantic (who, what, why)
   ~/.hive/queen/memories/MEMORY-YYYY-MM-DD.md        — episodic (daily journals)
-  ~/.hive/queen/session/{id}/data/adapt.md           — working (session-scoped)
 
 Semantic and episodic files are injected at queen session start.
 
@@ -197,20 +196,13 @@ no preamble, no code fences.
 
 
 def read_session_context(session_dir: Path, max_messages: int = 80) -> str:
-    """Extract a readable transcript from conversation parts + adapt.md.
+    """Extract a readable transcript from conversation parts.
 
-    Reads the last ``max_messages`` conversation parts and the session's
-    adapt.md (working memory). Tool results are omitted — only user and
-    assistant turns (with tool-call names noted) are included.
+    Reads the last ``max_messages`` conversation parts. Tool results are
+    omitted — only user and assistant turns (with tool-call names noted)
+    are included.
     """
     parts: list[str] = []
-
-    # Working notes
-    adapt_path = session_dir / "data" / "adapt.md"
-    if adapt_path.exists():
-        text = adapt_path.read_text(encoding="utf-8").strip()
-        if text:
-            parts.append(f"## Session Working Notes (adapt.md)\n\n{text}")
 
     # Conversation transcript
     parts_dir = session_dir / "conversations" / "parts"
@@ -306,12 +298,12 @@ async def consolidate_queen_memory(
 ) -> None:
     """Update MEMORY.md and append a diary entry based on the current session.
 
-    Reads conversation parts and adapt.md from session_dir. Called
-    periodically in the background and once at session end. Failures are
-    logged and silently swallowed so they never block teardown.
+    Reads conversation parts from session_dir. Called periodically in
+    the background and once at session end. Failures are logged and
+    silently swallowed so they never block teardown.
 
     Args:
-        session_id: The session ID (used for the adapt.md path reference).
+        session_id: The session ID.
         session_dir: Path to the session directory (~/.hive/queen/session/{id}).
         llm: LLMProvider instance (must support acomplete()).
     """
@@ -337,7 +329,6 @@ async def consolidate_queen_memory(
         today_journal = read_episodic_memory()
         today = date.today()
         today_str = format_memory_date(today)
-        adapt_path = session_dir / "data" / "adapt.md"
 
         user_msg = (
             f"## Existing Semantic Memory (MEMORY.md)\n\n"
@@ -347,7 +338,7 @@ async def consolidate_queen_memory(
             f"{session_context}\n\n"
             f"## Session Reference\n\n"
             f"Session ID: {session_id}\n"
-            f"Session path: {adapt_path}\n"
+            f"Session dir: {session_dir}\n"
         )
 
         logger.debug(

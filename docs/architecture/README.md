@@ -231,7 +231,6 @@ flowchart LR
         File1["web_search_1.txt"]
         File2["web_scrape_2.txt"]
         Conv1["conversation_1.md"]
-        Adapt["adapt.md"]
     end
 
     SaveFile --> SpilloverDir
@@ -256,7 +255,6 @@ flowchart LR
     subgraph SysPrompt [System Prompt Injection]
         FileList["DATA FILES:<br/>  - web_search_1.txt<br/>  - web_scrape_2.txt"]
         ConvList["CONVERSATION HISTORY:<br/>  - conversation_1.md"]
-        AdaptInline["AGENT MEMORY:<br/>(adapt.md inlined)"]
     end
 
     SpilloverDir -->|"Listed on<br/>every turn"| SysPrompt
@@ -277,7 +275,7 @@ flowchart LR
 
 **4. File pointers survive compaction.** When the conversation exceeds the context budget, structure-preserving compaction (`compact_preserving_structure`) keeps tool-call messages (which are already tiny pointers) and spills freeform text (user/assistant prose) to numbered `conversation_N.md` files. A reference message replaces the removed text: `"[Previous conversation saved to 'conversation_1.md'. Use load_data('conversation_1.md') to review if needed.]"`. This means the agent retains exact knowledge of every tool it called and where each result is stored.
 
-**5. The system prompt lists all files** in the spillover directory on every turn. Data files (spilled tool results) and conversation history files are listed separately. `adapt.md` (agent memory / learned preferences) is inlined directly into the system prompt rather than listed — it survives even emergency compaction.
+**5. The system prompt lists all files** in the spillover directory on every turn. Data files (spilled tool results) and conversation history files are listed separately.
 
 ### Why This Pattern
 
@@ -291,7 +289,7 @@ flowchart LR
 
 ## Memory Reflection Logic
 
-Agents in Hive maintain memory through four interconnected mechanisms: a durable working memory file (`adapt.md`), the conversation history itself, a structured output accumulator, and a three-layer prompt composition system. Together they form a reflection loop where outputs, judge feedback, and execution state are continuously folded back into the agent's context.
+Agents in Hive maintain memory through three interconnected mechanisms: the conversation history itself, a structured output accumulator, and a three-layer prompt composition system. Together they form a reflection loop where outputs, judge feedback, and execution state are continuously folded back into the agent's context.
 
 ```mermaid
 flowchart TB
@@ -317,18 +315,6 @@ flowchart TB
 
     SetOutput --> OA_Mem
     OA_Mem --> OA_Cursor
-
-    %% =========================================
-    %% ADAPT.MD (AGENT WORKING MEMORY)
-    %% =========================================
-    subgraph AdaptMD [adapt.md — Agent Working Memory]
-        Seed["Seeded with<br/>identity + accounts"]
-        RecordLearning["_record_learning():<br/>append output entry<br/>(truncated to 500 chars)"]
-        AgentEdit["Agent calls<br/>save_data / edit_data<br/>to write rules,<br/>preferences, notes"]
-    end
-
-    SetOutput -->|"triggers"| RecordLearning
-    Seed -.->|"first run"| AdaptMD
 
     %% =========================================
     %% JUDGE EVALUATION PIPELINE
@@ -394,11 +380,9 @@ flowchart TB
         Layer1["Layer 1 — Identity<br/>(static, never changes)"]
         Layer2["Layer 2 — Narrative<br/>(auto-built from<br/>SharedMemory +<br/>execution path)"]
         Layer3["Layer 3 — Focus<br/>(current node's<br/>system_prompt)"]
-        InlinedAdapt["adapt.md inlined<br/>(survives compaction)"]
     end
 
     SharedMem -->|"read_all()"| Layer2
-    AdaptMD -->|"inlined every turn"| InlinedAdapt
 
     %% =========================================
     %% NEXT ITERATION
@@ -417,7 +401,6 @@ flowchart TB
     %% =========================================
     %% STYLING
     %% =========================================
-    style AdaptMD fill:#e8f5e9
     style PromptOnion fill:#e3f2fd
     style JudgePipeline fill:#fff3e0
     style ConvHistory fill:#f3e5f5
@@ -425,17 +408,15 @@ flowchart TB
 
 ### How It Works
 
-**1. Outputs trigger dual persistence.** When the LLM calls `set_output(key, value)`, two things happen simultaneously: the `OutputAccumulator` stores the value in memory and writes through to the `ConversationStore` cursor (for crash recovery), and `_record_learning()` appends a truncated entry (≤500 chars) to `adapt.md` under an `## Outputs` section. Duplicate keys are updated in-place, not appended.
+**1. Outputs are persisted via the accumulator.** When the LLM calls `set_output(key, value)`, the `OutputAccumulator` stores the value in memory and writes through to the `ConversationStore` cursor (for crash recovery).
 
-**2. adapt.md is the agent's durable working memory.** It is seeded on first run with identity and account info. The agent can also write to it directly via `save_data("adapt.md", ...)` or `edit_data("adapt.md", ...)` — storing user rules, behavioral constraints, preferences, and working notes. Unlike conversation history, `adapt.md` is inlined directly into the system prompt every turn, so it survives all compaction tiers including emergency compaction. It is the last thing standing when context is tight.
+**2. Judge feedback becomes conversation memory.** When the judge issues a RETRY verdict with feedback, that feedback is injected as a `[Judge feedback]: ...` user message into the conversation. On the next LLM turn, the agent sees its prior attempt, the judge's critique, and can adjust. This is the core reflexion mechanism — in-context learning without model retraining.
 
-**3. Judge feedback becomes conversation memory.** When the judge issues a RETRY verdict with feedback, that feedback is injected as a `[Judge feedback]: ...` user message into the conversation. On the next LLM turn, the agent sees its prior attempt, the judge's critique, and can adjust. This is the core reflexion mechanism — in-context learning without model retraining.
+**3. The three-layer prompt onion refreshes each turn.** Layer 1 (identity) is static. Layer 2 (narrative) is rebuilt deterministically from `SharedMemory.read_all()` and the execution path — listing completed phases and current state values. Layer 3 (focus) is the current node's `system_prompt`. At phase transitions in continuous mode, Layer 3 swaps while Layers 1-2 and the full conversation history carry forward.
 
-**4. The three-layer prompt onion refreshes each turn.** Layer 1 (identity) is static. Layer 2 (narrative) is rebuilt deterministically from `SharedMemory.read_all()` and the execution path — listing completed phases and current state values. Layer 3 (focus) is the current node's `system_prompt`. At phase transitions in continuous mode, Layer 3 swaps while Layers 1-2 and the full conversation history carry forward.
+**4. Phase transitions inject structured reflection.** When execution moves between nodes, a transition marker is inserted into the conversation containing: what phase completed, all outputs in memory, available data files, available tools, and an explicit reflection prompt: *"Before proceeding, briefly reflect: what went well in the previous phase? Are there any gaps or surprises worth noting?"* This engineered metacognition surfaces issues before they compound.
 
-**5. Phase transitions inject structured reflection.** When execution moves between nodes, a transition marker is inserted into the conversation containing: what phase completed, all outputs in memory, available data files, agent memory content, available tools, and an explicit reflection prompt: *"Before proceeding, briefly reflect: what went well in the previous phase? Are there any gaps or surprises worth noting?"* This engineered metacognition surfaces issues before they compound.
-
-**6. Shared memory connects phases.** On ACCEPT, the accumulator's outputs are written to `SharedMemory`. The narrative layer reads these values to describe progress. In continuous mode, subsequent nodes see both the conversation history (what was discussed) and the structured memory (what was decided). In isolated mode, a `ContextHandoff` summarizes the prior node's conversation for the next node's input.
+**5. Shared memory connects phases.** On ACCEPT, the accumulator's outputs are written to `SharedMemory`. The narrative layer reads these values to describe progress. In continuous mode, subsequent nodes see both the conversation history (what was discussed) and the structured memory (what was decided). In isolated mode, a `ContextHandoff` summarizes the prior node's conversation for the next node's input.
 
 ### The Judge Evaluation Pipeline
 
@@ -1078,7 +1059,7 @@ class SignalWeights:
 | **Rule Generation**           | Research               | Transforming human decisions into deterministic rules (closing the loop)     |
 | **HybridJudge**               | Engineering            | Implementation of triangulation with priority-ordered evaluation             |
 | **Reflexion Loop**            | Engineering            | Worker-Judge architecture with RETRY/REPLAN/ESCALATE                         |
-| **Memory Reflection**         | Engineering            | adapt.md durable memory, 3-layer prompt onion, judge feedback injection      |
+| **Memory Reflection**         | Engineering            | 3-layer prompt onion, judge feedback injection, shared memory                |
 | **Graph Execution**           | Engineering            | Node composition, shared memory, edge traversal, sub-agent delegation        |
 | **HITL Protocol**             | Engineering            | Pause/resume, approval workflows, escalation handling                        |
 
@@ -1096,7 +1077,7 @@ The Hive Agent Framework addresses the fundamental reliability crisis in agentic
 
 4. **The Foundation**: Goal-driven architecture ensures we're optimizing for user intent, not metric gaming. The reflexion loop between Worker Bees and Judge enables learning from failure without expensive search.
 
-5. **The Memory System**: Agents reflect through four mechanisms — `adapt.md` (durable working memory inlined into the system prompt, surviving all compaction), the conversation history (carrying judge feedback as injected user messages), the three-layer prompt onion (identity → narrative → focus, rebuilt each turn from shared memory), and structured phase transition markers with explicit reflection prompts at node boundaries.
+5. **The Memory System**: Agents reflect through three mechanisms — the conversation history (carrying judge feedback as injected user messages), the three-layer prompt onion (identity → narrative → focus, rebuilt each turn from shared memory), and structured phase transition markers with explicit reflection prompts at node boundaries.
 
 6. **The Learning Path**: Human escalations aren't just fallbacks—they're training signals. Confidence calibration tunes thresholds automatically. Rule generation transforms repeated human decisions into deterministic automation.
 

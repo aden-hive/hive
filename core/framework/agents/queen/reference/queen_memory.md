@@ -20,7 +20,6 @@
 │           │       ├── conversation_2.md
 │           │       └── ...
 │           └── data/
-│               ├── adapt.md              ← Working memory (session-scoped)
 │               ├── web_search_1.txt      ← Spillover: large tool results
 │               ├── web_search_2.txt
 │               └── ...
@@ -28,13 +27,12 @@
 
 ---
 
-## The three memory tiers
+## The two memory tiers
 
 | File | Tier | Written by | Read at |
 |---|---|---|---|
 | `MEMORY.md` | Semantic | Consolidation LLM (auto, post-session) | Session start (injected into system prompt) |
 | `memories/MEMORY-YYYY-MM-DD.md` | Episodic | Queen via `write_to_diary` tool + consolidation LLM | Session start (today's file injected) |
-| `data/adapt.md` | Working | Queen via `update_session_notes` tool | Every turn (inlined in system prompt) |
 
 ---
 
@@ -52,7 +50,6 @@ in the original directory rather than fragmenting across multiple folders.
 end. It reads:
 
 1. `conversations/parts/*.json` — full message history (user + assistant turns; tool results skipped)
-2. `data/adapt.md` — current working notes
 
 It then makes two LLM writes:
 

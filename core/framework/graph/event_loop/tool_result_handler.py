@@ -476,49 +476,6 @@ async def execute_tool(
     return result
 
 
-def record_learning(key: str, value: Any, spillover_dir: str | None) -> None:
-    """Append a set_output value to adapt.md as a learning entry.
-
-    Called at set_output time — the moment knowledge is produced — so that
-    adapt.md accumulates the agent's outputs across the session.  Since
-    adapt.md is injected into the system prompt, these persist through
-    any compaction.
-    """
-    if not spillover_dir:
-        return
-    try:
-        adapt_path = Path(spillover_dir) / "adapt.md"
-        adapt_path.parent.mkdir(parents=True, exist_ok=True)
-        content = adapt_path.read_text(encoding="utf-8") if adapt_path.exists() else ""
-
-        if "## Outputs" not in content:
-            content += "\n\n## Outputs\n"
-
-        # Truncate long values for memory (full value is in shared memory)
-        v_str = str(value)
-        if len(v_str) > 500:
-            v_str = v_str[:500] + "…"
-
-        entry = f"- {key}: {v_str}\n"
-
-        # Replace existing entry for same key (update, not duplicate)
-        lines = content.splitlines(keepends=True)
-        replaced = False
-        for i, line in enumerate(lines):
-            if line.startswith(f"- {key}:"):
-                lines[i] = entry
-                replaced = True
-                break
-        if replaced:
-            content = "".join(lines)
-        else:
-            content += entry
-
-        adapt_path.write_text(content, encoding="utf-8")
-    except Exception as e:
-        logger.warning("Failed to record learning for key=%s: %s", key, e)
-
-
 def next_spill_filename(tool_name: str, counter: int) -> str:
     """Return a short, monotonic filename for a tool result spill."""
     # Shorten common tool name prefixes to save tokens
