@@ -169,7 +169,12 @@ export default function Home() {
 
           {/* Voice error message */}
           {voiceError && (
-            <div className="text-xs text-destructive text-center mb-4 px-2 py-2 bg-destructive/10 rounded-lg">
+            <div
+              role="alert"
+              aria-live="assertive"
+              aria-atomic="true"
+              className="text-xs text-destructive text-center mb-4 px-2 py-2 bg-destructive/10 rounded-lg"
+            >
               {voiceError}
             </div>
           )}
@@ -201,6 +206,8 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={isListening ? stopListening : startListening}
+                    aria-label={isListening ? "Stop voice input" : "Start voice input"}
+                    aria-pressed={isListening}
                     className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
                       isListening
                         ? "bg-primary text-primary-foreground animate-pulse"
