@@ -19,6 +19,7 @@ Alternatively, configure credentials in the Aden credential store:
 
 Note: The GitLab URL should be set via the `GITLAB_URL` environment variable
 (defaults to `https://gitlab.com` if not set).
+Tip: If you use GitLab.com, you can omit `GITLAB_URL`.
 
 ## Tools (9)
 
