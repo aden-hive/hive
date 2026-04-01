@@ -9,6 +9,7 @@ AST nodes, disallowed function calls).
 
 import pytest
 
+import framework.graph.safe_eval as safe_eval_module
 from framework.graph.safe_eval import safe_eval
 
 # ---------------------------------------------------------------------------
@@ -108,6 +109,25 @@ class TestArithmetic:
 
     def test_complex_expression(self):
         assert safe_eval("(2 + 3) * 4 - 1") == 19
+
+
+class TestExecutionTimeout:
+    def test_default_timeout(self):
+        assert safe_eval_module.DEFAULT_TIMEOUT_MS == 100
+
+    def test_timeout_must_be_positive(self):
+        with pytest.raises(ValueError, match="timeout_ms"):
+            safe_eval("1 + 1", timeout_ms=0)
+
+    def test_timeout_can_be_disabled(self):
+        assert safe_eval("1 + 1", timeout_ms=None) == 2
+
+    def test_timeout_exceeded_raises(self, monkeypatch):
+        ticks = iter([0.0, 1.0])
+        monkeypatch.setattr(safe_eval_module.time, "perf_counter", lambda: next(ticks))
+
+        with pytest.raises(TimeoutError, match="1ms"):
+            safe_eval("1 + 1", timeout_ms=1)
 
 
 # ---------------------------------------------------------------------------
