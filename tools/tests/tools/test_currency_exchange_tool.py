@@ -28,12 +28,12 @@ from aden_tools.tools.currency_exchange_tool.currency_exchange_tool import (
 
 
 class TestCurrencyExchangeClient:
-    def setup_method(self):
+    def setup_method(self) -> None:
         self.client = _CurrencyExchangeClient("test_api_key_123")
 
     # --- _handle_response ---
 
-    def test_handle_response_success(self):
+    def test_handle_response_success(self) -> None:
         response = MagicMock()
         response.status_code = 200
         response.json.return_value = {"result": "success", "conversion_rates": {"EUR": 0.92}}
@@ -62,7 +62,7 @@ class TestCurrencyExchangeClient:
         assert "Rate limit" in result["error"]
 
     @pytest.mark.parametrize("status_code", [400, 403, 404, 500, 503])
-    def test_handle_response_other_errors(self, status_code):
+    def test_handle_response_other_errors(self, status_code) -> None:
         response = MagicMock()
         response.status_code = status_code
         response.text = "Server error"
@@ -81,7 +81,7 @@ class TestCurrencyExchangeClient:
             ("unknown-error-type", "API error"),
         ],
     )
-    def test_handle_response_api_level_errors(self, error_type, expected_substring):
+    def test_handle_response_api_level_errors(self, error_type, expected_substring) -> None:
         response = MagicMock()
         response.status_code = 200
         response.json.return_value = {"result": "error", "error-type": error_type}
@@ -92,7 +92,7 @@ class TestCurrencyExchangeClient:
     # --- get_latest_rates ---
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_get_latest_rates_success(self, mock_get):
+    def test_get_latest_rates_success(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
@@ -113,7 +113,7 @@ class TestCurrencyExchangeClient:
         assert result["conversion_rates"]["EUR"] == 0.92
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_get_latest_rates_lowercases_code(self, mock_get):
+    def test_get_latest_rates_lowercases_code(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200, json=MagicMock(return_value={"result": "success"})
         )
@@ -124,7 +124,7 @@ class TestCurrencyExchangeClient:
     # --- convert_currency ---
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_convert_currency_success(self, mock_get):
+    def test_convert_currency_success(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
@@ -147,7 +147,7 @@ class TestCurrencyExchangeClient:
         assert result["conversion_rate"] == 83.5
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_convert_currency_lowercases_codes(self, mock_get):
+    def test_convert_currency_lowercases_codes(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200, json=MagicMock(return_value={"result": "success"})
         )
@@ -158,7 +158,7 @@ class TestCurrencyExchangeClient:
     # --- get_supported_currencies ---
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_get_supported_currencies_success(self, mock_get):
+    def test_get_supported_currencies_success(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
@@ -182,13 +182,13 @@ class TestCurrencyExchangeClient:
 
 
 class TestToolRegistration:
-    def test_register_tools_registers_three_tools(self):
+    def test_register_tools_registers_three_tools(self) -> None:
         mcp = MagicMock()
         mcp.tool.return_value = lambda fn: fn
         register_tools(mcp)
         assert mcp.tool.call_count == 3
 
-    def test_no_api_key_returns_error(self):
+    def test_no_api_key_returns_error(self) -> None:
         mcp = MagicMock()
         registered_fns = []
         mcp.tool.return_value = lambda fn: registered_fns.append(fn) or fn
@@ -204,7 +204,7 @@ class TestToolRegistration:
         assert "not configured" in result["error"]
         assert "help" in result
 
-    def test_api_key_from_env_var(self):
+    def test_api_key_from_env_var(self) -> None:
         mcp = MagicMock()
         registered_fns = []
         mcp.tool.return_value = lambda fn: registered_fns.append(fn) or fn
@@ -244,24 +244,22 @@ class TestToolRegistration:
 
 
 class TestGetRatesTool:
-    def setup_method(self):
+    def setup_method(self) -> None:
         self.mcp = MagicMock()
         self.fns = []
         self.mcp.tool.return_value = lambda fn: self.fns.append(fn) or fn
-        self.env_patcher = patch.dict(
-            "os.environ", {"EXCHANGERATE_API_KEY": "test_key_xyz"}
-        )
+        self.env_patcher = patch.dict("os.environ", {"EXCHANGERATE_API_KEY": "test_key_xyz"})
         self.env_patcher.start()
         register_tools(self.mcp)
 
-    def teardown_method(self):
+    def teardown_method(self) -> None:
         self.env_patcher.stop()
 
     def _fn(self, name):
         return next(f for f in self.fns if f.__name__ == name)
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_get_rates_success(self, mock_get):
+    def test_get_rates_success(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
@@ -281,25 +279,23 @@ class TestGetRatesTool:
         assert result["last_updated"] == 1700000000
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_get_rates_api_error_propagates(self, mock_get):
+    def test_get_rates_api_error_propagates(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"result": "error", "error-type": "unsupported-code"}
-            ),
+            json=MagicMock(return_value={"result": "error", "error-type": "unsupported-code"}),
         )
         result = self._fn("currency_exchange_get_rates")(base_currency="XYZ")
         assert "error" in result
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_get_rates_timeout(self, mock_get):
+    def test_get_rates_timeout(self, mock_get) -> None:
         mock_get.side_effect = httpx.TimeoutException("timed out")
         result = self._fn("currency_exchange_get_rates")(base_currency="USD")
         assert "error" in result
         assert "timed out" in result["error"]
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_get_rates_network_error(self, mock_get):
+    def test_get_rates_network_error(self, mock_get) -> None:
         mock_get.side_effect = httpx.RequestError("connection refused")
         result = self._fn("currency_exchange_get_rates")(base_currency="USD")
         assert "error" in result
@@ -312,24 +308,22 @@ class TestGetRatesTool:
 
 
 class TestConvertTool:
-    def setup_method(self):
+    def setup_method(self) -> None:
         self.mcp = MagicMock()
         self.fns = []
         self.mcp.tool.return_value = lambda fn: self.fns.append(fn) or fn
-        self.env_patcher = patch.dict(
-            "os.environ", {"EXCHANGERATE_API_KEY": "test_key_xyz"}
-        )
+        self.env_patcher = patch.dict("os.environ", {"EXCHANGERATE_API_KEY": "test_key_xyz"})
         self.env_patcher.start()
         register_tools(self.mcp)
 
-    def teardown_method(self):
+    def teardown_method(self) -> None:
         self.env_patcher.stop()
 
     def _fn(self, name):
         return next(f for f in self.fns if f.__name__ == name)
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_convert_success(self, mock_get):
+    def test_convert_success(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
@@ -353,14 +347,14 @@ class TestConvertTool:
         assert result["converted_amount"] == 835.0
         assert result["exchange_rate"] == 83.5
 
-    def test_convert_zero_amount_rejected(self):
+    def test_convert_zero_amount_rejected(self) -> None:
         result = self._fn("currency_exchange_convert")(
             from_currency="USD", to_currency="INR", amount=0
         )
         assert "error" in result
         assert "greater than 0" in result["error"]
 
-    def test_convert_negative_amount_rejected(self):
+    def test_convert_negative_amount_rejected(self) -> None:
         result = self._fn("currency_exchange_convert")(
             from_currency="USD", to_currency="INR", amount=-50.0
         )
@@ -368,12 +362,10 @@ class TestConvertTool:
         assert "greater than 0" in result["error"]
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_convert_api_error_propagates(self, mock_get):
+    def test_convert_api_error_propagates(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"result": "error", "error-type": "unsupported-code"}
-            ),
+            json=MagicMock(return_value={"result": "error", "error-type": "unsupported-code"}),
         )
         result = self._fn("currency_exchange_convert")(
             from_currency="USD", to_currency="XYZ", amount=100.0
@@ -381,7 +373,7 @@ class TestConvertTool:
         assert "error" in result
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_convert_timeout(self, mock_get):
+    def test_convert_timeout(self, mock_get) -> None:
         mock_get.side_effect = httpx.TimeoutException("timeout")
         result = self._fn("currency_exchange_convert")(
             from_currency="USD", to_currency="EUR", amount=100.0
@@ -390,7 +382,7 @@ class TestConvertTool:
         assert "timed out" in result["error"]
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_convert_network_error(self, mock_get):
+    def test_convert_network_error(self, mock_get) -> None:
         mock_get.side_effect = httpx.RequestError("network error")
         result = self._fn("currency_exchange_convert")(
             from_currency="USD", to_currency="EUR", amount=100.0
@@ -405,24 +397,22 @@ class TestConvertTool:
 
 
 class TestListCurrenciesTool:
-    def setup_method(self):
+    def setup_method(self) -> None:
         self.mcp = MagicMock()
         self.fns = []
         self.mcp.tool.return_value = lambda fn: self.fns.append(fn) or fn
-        self.env_patcher = patch.dict(
-            "os.environ", {"EXCHANGERATE_API_KEY": "test_key_xyz"}
-        )
+        self.env_patcher = patch.dict("os.environ", {"EXCHANGERATE_API_KEY": "test_key_xyz"})
         self.env_patcher.start()
         register_tools(self.mcp)
 
-    def teardown_method(self):
+    def teardown_method(self) -> None:
         self.env_patcher.stop()
 
     def _fn(self, name):
         return next(f for f in self.fns if f.__name__ == name)
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_list_currencies_success(self, mock_get):
+    def test_list_currencies_success(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200,
             json=MagicMock(
@@ -444,44 +434,40 @@ class TestListCurrenciesTool:
         assert result["currencies"][2] == {"code": "INR", "name": "Indian Rupee"}
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_list_currencies_api_error_propagates(self, mock_get):
+    def test_list_currencies_api_error_propagates(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"result": "error", "error-type": "invalid-key"}
-            ),
+            json=MagicMock(return_value={"result": "error", "error-type": "invalid-key"}),
         )
         result = self._fn("currency_exchange_list_currencies")()
         assert "error" in result
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_list_currencies_timeout(self, mock_get):
+    def test_list_currencies_timeout(self, mock_get) -> None:
         mock_get.side_effect = httpx.TimeoutException("timeout")
         result = self._fn("currency_exchange_list_currencies")()
         assert "error" in result
         assert "timed out" in result["error"]
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_list_currencies_network_error(self, mock_get):
+    def test_list_currencies_network_error(self, mock_get) -> None:
         mock_get.side_effect = httpx.RequestError("network error")
         result = self._fn("currency_exchange_list_currencies")()
         assert "error" in result
         assert "Network error" in result["error"]
 
     @patch("aden_tools.tools.currency_exchange_tool.currency_exchange_tool.httpx.get")
-    def test_list_currencies_empty_list(self, mock_get):
+    def test_list_currencies_empty_list(self, mock_get) -> None:
         mock_get.return_value = MagicMock(
             status_code=200,
-            json=MagicMock(
-                return_value={"result": "success", "supported_codes": []}
-            ),
+            json=MagicMock(return_value={"result": "success", "supported_codes": []}),
         )
         result = self._fn("currency_exchange_list_currencies")()
         assert result["success"] is True
         assert result["count"] == 0
         assert result["currencies"] == []
 
-    def test_no_api_key_returns_error(self):
+    def test_no_api_key_returns_error(self) -> None:
         mcp = MagicMock()
         fns = []
         mcp.tool.return_value = lambda fn: fns.append(fn) or fn
