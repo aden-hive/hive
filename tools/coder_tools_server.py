@@ -135,6 +135,18 @@ def _resolve_path(path: str) -> str:
         raise ValueError(f"Access denied: '{path}' is outside the project root.") from err
     if common != PROJECT_ROOT:
         raise ValueError(f"Access denied: '{path}' is outside the project root.")
+
+    real_resolved = os.path.realpath(resolved)
+    real_root = os.path.realpath(PROJECT_ROOT)
+    try:
+        real_common = os.path.commonpath([real_resolved, real_root])
+    except ValueError:
+        real_common = ""
+    if real_common != real_root:
+        raise ValueError(
+            f"Access denied: '{path}' resolves to a symlink target "
+            "outside the project root."
+        )
     return resolved
 
 
