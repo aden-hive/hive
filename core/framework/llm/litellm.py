@@ -557,11 +557,17 @@ class LiteLLMProvider(LLMProvider):
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
 
-        # Note: The Codex ChatGPT backend is a Responses API endpoint at
+        # The Codex ChatGPT backend is a Responses API endpoint at
         # chatgpt.com/backend-api/codex/responses.  LiteLLM's model registry
-        # correctly marks codex models with mode="responses", so we do NOT
-        # override the mode.  The responses_api_bridge in litellm handles
-        # converting Chat Completions requests to Responses API format.
+        # marks legacy codex models (gpt-5.3-codex) with mode="responses",
+        # but newer models like gpt-5.4 default to mode="chat".  Force
+        # mode="responses" so litellm routes through the responses_api_bridge.
+        if self._codex_backend and litellm is not None:
+            _strip = self.model.removeprefix("openai/")
+            _entry = litellm.model_cost.get(_strip, {})
+            if _entry.get("mode") != "responses":
+                litellm.model_cost.setdefault(_strip, {})
+                litellm.model_cost[_strip]["mode"] = "responses"
 
     @staticmethod
     def _default_api_base_for_model(model: str) -> str | None:
@@ -698,6 +704,8 @@ class LiteLLMProvider(LLMProvider):
             tool_choice = self._derive_codex_tool_choice(full_messages, tools)
             if tool_choice is not None:
                 kwargs["tool_choice"] = tool_choice
+            elif _is_ollama_model(self.model):
+                kwargs.setdefault("tool_choice", "auto")
         if response_format:
             kwargs["response_format"] = response_format
 
@@ -1271,19 +1279,67 @@ class LiteLLMProvider(LLMProvider):
     @staticmethod
     def _normalize_pythonish_tool_arguments(raw_arguments: str) -> str:
         """Convert common JSON-like literals into a form ast.literal_eval can parse."""
-        return re.sub(
-            r"\b(true|false|null)\b",
-            lambda match: {
-                "true": "True",
-                "false": "False",
-                "null": "None",
-            }[match.group(1)],
-            raw_arguments,
-        )
+        replacements = {
+            "true": "True",
+            "false": "False",
+            "null": "None",
+        }
+        out: list[str] = []
+        token: list[str] = []
+        in_string = False
+        string_quote = ""
+        escaped = False
+
+        def flush_token() -> None:
+            if not token:
+                return
+            word = "".join(token)
+            out.append(replacements.get(word, word))
+            token.clear()
+
+        for char in raw_arguments:
+            if in_string:
+                out.append(char)
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == string_quote:
+                    in_string = False
+                continue
+
+            if char in {'"', "'"}:
+                flush_token()
+                in_string = True
+                string_quote = char
+                out.append(char)
+                continue
+
+            if char.isalpha():
+                token.append(char)
+                continue
+
+            flush_token()
+            out.append(char)
+
+        flush_token()
+        return "".join(out)
+
+    @staticmethod
+    def _strip_tool_argument_fence(raw_arguments: str) -> str:
+        """Remove surrounding fenced-code markers from streamed tool arguments."""
+        stripped = raw_arguments.strip()
+        if not stripped.startswith("```") or not stripped.endswith("```"):
+            return stripped
+
+        lines = stripped.splitlines()
+        if len(lines) >= 2:
+            return "\n".join(lines[1:-1]).strip()
+        return stripped.strip("`").strip()
 
     def _parse_pythonish_tool_arguments(self, raw_arguments: str) -> dict[str, Any] | None:
         """Parse single-quoted / trailing-comma argument payloads safely."""
-        stripped = raw_arguments.strip().strip("`")
+        stripped = self._strip_tool_argument_fence(raw_arguments)
         if not stripped or stripped[0] != "{":
             return None
         candidate = self._close_truncated_json_fragment(stripped)
@@ -1296,9 +1352,7 @@ class LiteLLMProvider(LLMProvider):
 
     def _parse_tool_call_arguments(self, raw_arguments: str, tool_name: str) -> dict[str, Any]:
         """Parse streamed tool arguments, repairing truncation when possible."""
-        stripped = raw_arguments.strip()
-        if stripped.startswith("```") and stripped.endswith("```"):
-            stripped = stripped.strip("`").strip()
+        stripped = self._strip_tool_argument_fence(raw_arguments)
         try:
             parsed = json.loads(stripped) if stripped else {}
         except json.JSONDecodeError:

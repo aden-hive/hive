@@ -243,10 +243,50 @@ class TestToolConversion:
 
     def test_parse_tool_call_arguments_recovers_pythonish_payloads(self):
         """Single-quoted and trailing-comma argument payloads should be recovered."""
-        provider = LiteLLMProvider(model="openai/gpt-5.3-codex", api_key="test-key")
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.4",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex",
+        )
 
         parsed = provider._parse_tool_call_arguments(
             "{'question': 'Continue?', 'options': ['Yes', 'No'],}",
+            "ask_user",
+        )
+
+        assert parsed == {
+            "question": "Continue?",
+            "options": ["Yes", "No"],
+        }
+
+    def test_parse_tool_call_arguments_keeps_null_inside_strings(self):
+        """Literal normalization should not mutate quoted text values."""
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.4",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex",
+        )
+
+        parsed = provider._parse_tool_call_arguments(
+            "{'hypothesis': 'null hypothesis', 'approved': false}",
+            "summarize",
+        )
+
+        assert parsed == {
+            "hypothesis": "null hypothesis",
+            "approved": False,
+        }
+
+    def test_parse_tool_call_arguments_strips_json_code_fences(self):
+        """Fence stripping should remove the language tag before JSON parsing."""
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.4",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex",
+        )
+
+        parsed = provider._parse_tool_call_arguments(
+            '```json\n{"question":"Continue?","options":["Yes","No"]}\n```',
             "ask_user",
         )
 
@@ -758,7 +798,7 @@ class TestCodexEmptyStreamRecovery:
         from framework.llm.stream_events import FinishEvent, TextDeltaEvent
 
         provider = LiteLLMProvider(
-            model="openai/gpt-5.3-codex",
+            model="openai/gpt-5.4",
             api_key="test-key",
             api_base="https://chatgpt.com/backend-api/codex",
         )
@@ -816,7 +856,7 @@ class TestCodexEmptyStreamRecovery:
         from framework.llm.stream_events import FinishEvent, ToolCallEvent
 
         provider = LiteLLMProvider(
-            model="openai/gpt-5.3-codex",
+            model="openai/gpt-5.4",
             api_key="test-key",
             api_base="https://chatgpt.com/backend-api/codex/responses",
         )
@@ -878,12 +918,34 @@ class TestCodexEmptyStreamRecovery:
 
 
 class TestCodexRequestHardening:
+    def test_codex_backend_forces_responses_mode_for_newer_models(self):
+        """Codex backend should force LiteLLM through the Responses bridge."""
+        import litellm
+
+        original = litellm.model_cost.get("gpt-5.4")
+        litellm.model_cost["gpt-5.4"] = {"mode": "chat"}
+
+        try:
+            provider = LiteLLMProvider(
+                model="openai/gpt-5.4",
+                api_key="test-key",
+                api_base="https://chatgpt.com/backend-api/codex",
+            )
+            assert provider._codex_backend is True
+            assert litellm.model_cost["gpt-5.4"]["mode"] == "responses"
+        finally:
+            if original is None:
+                litellm.model_cost.pop("gpt-5.4", None)
+            else:
+                litellm.model_cost["gpt-5.4"] = original
+
     def test_codex_build_completion_kwargs_splits_prompt_and_forces_tool_choice(self):
         """Codex requests should chunk large system prompts and require tools when needed."""
         provider = LiteLLMProvider(
-            model="openai/gpt-5.3-codex",
+            model="openai/gpt-5.4",
             api_key="test-key",
             api_base="https://chatgpt.com/backend-api/codex/responses",
+            store=True,
         )
         kwargs = provider._build_completion_kwargs(
             messages=[{"role": "user", "content": "hi"}],
@@ -916,7 +978,7 @@ class TestCodexRequestHardening:
         from types import SimpleNamespace
 
         provider = LiteLLMProvider(
-            model="openai/gpt-5.3-codex",
+            model="openai/gpt-5.4",
             api_key="test-key",
             api_base="https://chatgpt.com/backend-api/codex",
         )

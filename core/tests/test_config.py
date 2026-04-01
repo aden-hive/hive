@@ -9,7 +9,7 @@ from framework.config import (
     get_llm_extra_kwargs,
     get_preferred_model,
 )
-from framework.llm.codex_backend import CODEX_API_BASE
+from framework.llm.codex_backend import CODEX_API_BASE, is_codex_api_base, normalize_codex_api_base
 
 
 class TestGetHiveConfig:
@@ -83,7 +83,7 @@ class TestCodexConfig:
     def test_get_api_base_uses_shared_codex_backend(self, tmp_path, monkeypatch):
         config_file = tmp_path / "configuration.json"
         config_file.write_text(
-            '{"llm":{"provider":"openai","model":"gpt-5.3-codex","use_codex_subscription":true}}',
+            '{"llm":{"provider":"openai","model":"gpt-5.4","use_codex_subscription":true}}',
             encoding="utf-8",
         )
         monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
@@ -93,7 +93,7 @@ class TestCodexConfig:
     def test_get_llm_extra_kwargs_uses_shared_codex_transport(self, tmp_path, monkeypatch):
         config_file = tmp_path / "configuration.json"
         config_file.write_text(
-            '{"llm":{"provider":"openai","model":"gpt-5.3-codex","use_codex_subscription":true}}',
+            '{"llm":{"provider":"openai","model":"gpt-5.4","use_codex_subscription":true}}',
             encoding="utf-8",
         )
         monkeypatch.setattr("framework.config.HIVE_CONFIG_FILE", config_file)
@@ -111,3 +111,20 @@ class TestCodexConfig:
             "User-Agent": "CodexBar",
             "ChatGPT-Account-Id": "acct_123",
         }
+
+    def test_codex_api_base_detection_requires_real_chatgpt_origin(self):
+        assert is_codex_api_base("https://chatgpt.com/backend-api/codex")
+        assert is_codex_api_base("https://chatgpt.com/backend-api/codex/responses")
+        assert not is_codex_api_base(
+            "https://proxy.example/v1?target=https://chatgpt.com/backend-api/codex"
+        )
+
+    def test_normalize_codex_api_base_strips_only_real_responses_suffix(self):
+        assert (
+            normalize_codex_api_base("https://chatgpt.com/backend-api/codex/responses")
+            == CODEX_API_BASE
+        )
+        assert (
+            normalize_codex_api_base("https://proxy.example/v1/responses")
+            == "https://proxy.example/v1/responses"
+        )
