@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot, Radar, Reply, DollarSign, MapPin, Calendar, UserPlus, Twitter, Mic } from "lucide-react";
 import TopBar from "@/components/TopBar";
@@ -60,6 +60,9 @@ export default function Home() {
   const [agents, setAgents] = useState<DiscoverEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const voiceErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceResultTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch agents on mount so data is ready when user toggles
   useEffect(() => {
@@ -78,6 +81,18 @@ export default function Home() {
       });
   }, []);
 
+  // Clean up voice error timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (voiceErrorTimeoutRef.current) {
+        clearTimeout(voiceErrorTimeoutRef.current);
+      }
+      if (voiceResultTimeoutRef.current) {
+        clearTimeout(voiceResultTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleSelect = (agentPath: string) => {
     navigate(`/workspace?agent=${encodeURIComponent(agentPath)}`);
   };
@@ -94,19 +109,32 @@ export default function Home() {
   };
 
   // Voice input integration
-  const handleVoiceResult = (transcript: string) => {
+  const handleVoiceResult = useCallback((transcript: string) => {
     setInputValue(transcript);
-    // Automatically submit after setting the value
-    setTimeout(() => {
+    // Clear any pending navigation timeout
+    if (voiceResultTimeoutRef.current) {
+      clearTimeout(voiceResultTimeoutRef.current);
+    }
+    // Brief delay to let UI reflect final transcript before navigating
+    voiceResultTimeoutRef.current = setTimeout(() => {
       navigate(`/workspace?agent=new-agent&prompt=${encodeURIComponent(transcript.trim())}`);
     }, 100);
-  };
+  }, [navigate]);
+
+  const handleVoiceError = useCallback((error: string) => {
+    console.error("Voice input error:", error);
+    setVoiceError(error);
+    // Clear any pending error timeout
+    if (voiceErrorTimeoutRef.current) {
+      clearTimeout(voiceErrorTimeoutRef.current);
+    }
+    // Auto-clear after 4 seconds
+    voiceErrorTimeoutRef.current = setTimeout(() => setVoiceError(null), 4000);
+  }, []);
 
   const { isListening, isSupported, startListening, stopListening } = useVoiceInput({
     onResult: handleVoiceResult,
-    onError: (error) => {
-      console.error("Voice input error:", error);
-    },
+    onError: handleVoiceError,
   });
 
   // Debug: log when isListening changes
@@ -138,6 +166,13 @@ export default function Home() {
               I'm your Queen Bee — I create and coordinate worker agents to handle tasks for you.
             </p>
           </div>
+
+          {/* Voice error message */}
+          {voiceError && (
+            <div className="text-xs text-destructive text-center mb-4 px-2 py-2 bg-destructive/10 rounded-lg">
+              {voiceError}
+            </div>
+          )}
 
           {/* Chat input */}
           <form onSubmit={handleSubmit} className="mb-6">

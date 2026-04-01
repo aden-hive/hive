@@ -121,6 +121,7 @@ export function useVoiceInput({ onResult, onError }: UseVoiceInputOptions): UseV
             console.log("No speech detected");
             if (!hasReceivedSpeech.current) {
               const errorMessage = "No speech detected. Please try again and speak clearly.";
+              setError(errorMessage);
               if (onError) {
                 onError(errorMessage);
               }
