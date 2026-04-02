@@ -70,6 +70,7 @@ tmp/
 temp/
 
 exports/*
+!exports/support_ticket_agent/
 
 .claude/settings.local.json
 
