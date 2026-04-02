@@ -1,8 +1,7 @@
 """Subagent execution for the event loop.
 
 Handles the full subagent lifecycle: validation, context setup, tool filtering,
-conversation store derivation, execution, and cleanup.  Also includes the
-_EscalationReceiver helper used for subagent → queen escalation routing.
+conversation store derivation, execution, and cleanup.
 """
 
 from __future__ import annotations
@@ -28,39 +27,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class EscalationReceiver:
-    """Temporary receiver registered in node_registry for subagent escalation routing.
-
-    When a subagent calls ``report_to_parent(wait_for_response=True)``, the callback
-    creates one of these, registers it under a unique escalation ID in the executor's
-    ``node_registry``, and awaits ``wait()``.  The TUI / runner calls
-    ``inject_input(escalation_id, content)`` which the ``ExecutionStream`` routes here
-    via ``inject_event()`` — matching the same ``hasattr(node, "inject_event")`` check
-    used for regular ``EventLoopNode`` instances.
-    """
-
-    def __init__(self) -> None:
-        self._event = asyncio.Event()
-        self._response: str | None = None
-        self._awaiting_input = True  # So inject_message() can prefer us
-
-    async def inject_event(
-        self,
-        content: str,
-        *,
-        is_client_input: bool = False,
-        image_content: list[dict[str, Any]] | None = None,
-    ) -> None:
-        """Called by ExecutionStream.inject_input() when the user responds."""
-        self._response = content
-        self._event.set()
-
-    async def wait(self) -> str | None:
-        """Block until inject_event() delivers the user's response."""
-        await self._event.wait()
-        return self._response
-
-
 async def execute_subagent(
     ctx: NodeContext,
     agent_id: str,
@@ -68,7 +34,7 @@ async def execute_subagent(
     *,
     config: LoopConfig,
     event_loop_node_cls: type[EventLoopNode],
-    escalation_receiver_cls: type[EscalationReceiver],
+    escalation_receiver_cls: Callable[[], Any],
     accumulator: OutputAccumulator | None = None,
     event_bus: EventBus | None = None,
     tool_executor: Callable[[ToolUse], ToolResult | Awaitable[ToolResult]] | None = None,
