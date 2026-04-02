@@ -1455,6 +1455,21 @@ class TestOutputAccumulator:
         assert acc.get("key2") == "val2"
         assert acc.has_all_keys(["key1", "key2"]) is True
 
+    @pytest.mark.asyncio
+    async def test_run_scoped_cursor_state(self, tmp_path):
+        store = FileConversationStore(tmp_path / "acc_runs")
+        acc_a = OutputAccumulator(store=store, run_id="run-a")
+        acc_b = OutputAccumulator(store=store, run_id="run-b")
+
+        await acc_a.set("result", "alpha")
+        await acc_b.set("result", "beta")
+
+        restored_a = await OutputAccumulator.restore(store, run_id="run-a")
+        restored_b = await OutputAccumulator.restore(store, run_id="run-b")
+
+        assert restored_a.get("result") == "alpha"
+        assert restored_b.get("result") == "beta"
+
 
 # ===========================================================================
 # Transient error retry (ITEM 2)

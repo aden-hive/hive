@@ -8,10 +8,22 @@ from typing import Any
 from aiohttp import web
 
 from framework.credentials.validation import validate_agent_credentials
+from framework.graph.conversation import LEGACY_RUN_ID
 from framework.server.app import resolve_session, safe_path_segment, sessions_dir
 from framework.server.routes_sessions import _credential_error_response
 
 logger = logging.getLogger(__name__)
+
+
+def _load_checkpoint_run_id(cp_path) -> str | None:
+    try:
+        checkpoint = json.loads(cp_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    run_id = checkpoint.get("run_id")
+    if isinstance(run_id, str) and run_id:
+        return run_id
+    return LEGACY_RUN_ID
 
 
 async def handle_trigger(request: web.Request) -> web.Response:
@@ -260,22 +272,21 @@ async def handle_resume(request: web.Request) -> web.Response:
     except (json.JSONDecodeError, OSError) as e:
         return web.json_response({"error": f"Failed to read session: {e}"}, status=500)
 
-    if checkpoint_id:
-        resume_session_state = {
-            "resume_session_id": worker_session_id,
-            "resume_from_checkpoint": checkpoint_id,
-        }
-    else:
-        progress = state.get("progress", {})
-        paused_at = progress.get("paused_at") or progress.get("resume_from")
-        resume_session_state = {
-            "resume_session_id": worker_session_id,
-            "data_buffer": state.get("data_buffer", state.get("memory", {})),
-            "execution_path": progress.get("path", []),
-            "node_visit_counts": progress.get("node_visit_counts", {}),
-        }
-        if paused_at:
-            resume_session_state["paused_at"] = paused_at
+    if not checkpoint_id:
+        return web.json_response(
+            {"error": "checkpoint_id is required; non-checkpoint resume is no longer supported"},
+            status=400,
+        )
+
+    cp_path = session_dir / "checkpoints" / f"{checkpoint_id}.json"
+    if not cp_path.exists():
+        return web.json_response({"error": "Checkpoint not found"}, status=404)
+
+    resume_session_state = {
+        "resume_session_id": worker_session_id,
+        "resume_from_checkpoint": checkpoint_id,
+        "run_id": _load_checkpoint_run_id(cp_path),
+    }
 
     entry_points = session.graph_runtime.get_entry_points()
     if not entry_points:
@@ -442,6 +453,7 @@ async def handle_replay(request: web.Request) -> web.Response:
     replay_session_state = {
         "resume_session_id": worker_session_id,
         "resume_from_checkpoint": checkpoint_id,
+        "run_id": _load_checkpoint_run_id(cp_path),
     }
 
     execution_id = await session.graph_runtime.trigger(

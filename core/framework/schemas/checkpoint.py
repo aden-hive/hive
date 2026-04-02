@@ -23,6 +23,7 @@ class Checkpoint(BaseModel):
     checkpoint_id: str  # Format: cp_{type}_{node_id}_{timestamp}
     checkpoint_type: str  # "node_start" | "node_complete" | "loop_iteration"
     session_id: str
+    run_id: str | None = None
 
     # Timestamps
     created_at: str  # ISO 8601 format
@@ -50,6 +51,7 @@ class Checkpoint(BaseModel):
         cls,
         checkpoint_type: str,
         session_id: str,
+        run_id: str | None,
         current_node: str,
         execution_path: list[str],
         data_buffer: dict[str, Any],
@@ -65,6 +67,7 @@ class Checkpoint(BaseModel):
         Args:
             checkpoint_type: Type of checkpoint (node_start, node_complete, etc.)
             session_id: Session this checkpoint belongs to
+            run_id: Logical run this checkpoint belongs to
             current_node: Node ID at checkpoint time
             execution_path: List of node IDs executed so far
             data_buffer: Full data buffer state snapshot
@@ -87,6 +90,7 @@ class Checkpoint(BaseModel):
             checkpoint_id=checkpoint_id,
             checkpoint_type=checkpoint_type,
             session_id=session_id,
+            run_id=run_id,
             created_at=datetime.now().isoformat(),
             current_node=current_node,
             next_node=next_node,

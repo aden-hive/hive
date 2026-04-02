@@ -7,7 +7,12 @@ from typing import Any
 
 import pytest
 
-from framework.graph.conversation import Message, NodeConversation, extract_tool_call_history
+from framework.graph.conversation import (
+    LEGACY_RUN_ID,
+    Message,
+    NodeConversation,
+    extract_tool_call_history,
+)
 from framework.storage.conversation_store import FileConversationStore
 
 # ---------------------------------------------------------------------------
@@ -41,8 +46,21 @@ class MockConversationStore:
     async def read_cursor(self) -> dict[str, Any] | None:
         return self._cursor
 
-    async def delete_parts_before(self, seq: int) -> None:
-        self._parts = {k: v for k, v in self._parts.items() if k >= seq}
+    async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
+        kept: dict[int, dict] = {}
+        for key, value in self._parts.items():
+            if key >= seq:
+                kept[key] = value
+                continue
+            if run_id is None:
+                continue
+            part_run_id = value.get("run_id")
+            if run_id == LEGACY_RUN_ID:
+                if part_run_id not in (None, LEGACY_RUN_ID):
+                    kept[key] = value
+            elif part_run_id != run_id:
+                kept[key] = value
+        self._parts = kept
 
     async def close(self) -> None:
         pass
@@ -468,6 +486,42 @@ class TestPersistence:
         assert restored.message_count == 2
         assert restored.next_seq == 2
         assert restored.messages[0].content == "u1"
+
+    @pytest.mark.asyncio
+    async def test_restore_filters_parts_by_run_id(self):
+        store = MockConversationStore()
+        await store.write_meta({"system_prompt": "hello"})
+        await store.write_part(0, {"seq": 0, "role": "user", "content": "legacy"})
+        await store.write_part(1, {"seq": 1, "role": "user", "content": "run-a", "run_id": "run-a"})
+        await store.write_part(
+            2,
+            {"seq": 2, "role": "assistant", "content": "run-b", "run_id": "run-b"},
+        )
+        await store.write_cursor({"next_seq": 3, "runs": {"run-a": {"iteration": 1}}})
+
+        restored = await NodeConversation.restore(store, run_id="run-a")
+        assert restored is not None
+        assert [m.content for m in restored.messages] == ["run-a"]
+        assert restored.next_seq == 3
+
+        legacy = await NodeConversation.restore(store, run_id=LEGACY_RUN_ID)
+        assert legacy is not None
+        assert [m.content for m in legacy.messages] == ["legacy"]
+
+    @pytest.mark.asyncio
+    async def test_clear_only_deletes_parts_for_active_run(self):
+        store = MockConversationStore()
+        conv_a = NodeConversation(system_prompt="hello", store=store, run_id="run-a")
+        conv_b = NodeConversation(system_prompt="hello", store=store, run_id="run-b")
+
+        await conv_a.add_user_message("a1")
+        await conv_b.add_user_message("b1")
+
+        await conv_a.clear()
+
+        restored_b = await NodeConversation.restore(store, run_id="run-b")
+        assert restored_b is not None
+        assert [m.content for m in restored_b.messages] == ["b1"]
 
     @pytest.mark.asyncio
     async def test_restore_preserves_tool_messages(self):

@@ -9,7 +9,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from framework.graph.conversation import ConversationStore
+from framework.graph.conversation import (
+    ConversationStore,
+    get_run_cursor,
+    update_run_cursor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,17 +120,18 @@ class OutputAccumulator:
     store: ConversationStore | None = None
     spillover_dir: str | None = None
     max_value_chars: int = 0
+    run_id: str | None = None
 
     async def set(self, key: str, value: Any) -> None:
         """Set a key-value pair, auto-spilling large values to files."""
         value = self._auto_spill(key, value)
         self.values[key] = value
         if self.store:
-            cursor = await self.store.read_cursor() or {}
-            outputs = cursor.get("outputs", {})
+            cursor = await self.store.read_cursor()
+            run_cursor = get_run_cursor(cursor, self.run_id) or {}
+            outputs = run_cursor.get("outputs", {})
             outputs[key] = value
-            cursor["outputs"] = outputs
-            await self.store.write_cursor(cursor)
+            await self.store.write_cursor(update_run_cursor(cursor, self.run_id, {"outputs": outputs}))
 
     def _auto_spill(self, key: str, value: Any) -> Any:
         """Save large values to a file and return a reference string."""
@@ -171,12 +176,19 @@ class OutputAccumulator:
         return all(key in self.values and self.values[key] is not None for key in required)
 
     @classmethod
-    async def restore(cls, store: ConversationStore) -> OutputAccumulator:
+    async def restore(
+        cls,
+        store: ConversationStore,
+        run_id: str | None = None,
+    ) -> OutputAccumulator:
         cursor = await store.read_cursor()
+        run_cursor = get_run_cursor(cursor, run_id)
         values = {}
-        if cursor and "outputs" in cursor:
+        if run_cursor and "outputs" in run_cursor:
+            values = run_cursor["outputs"]
+        elif run_id is None and cursor and "outputs" in cursor:
             values = cursor["outputs"]
-        return cls(values=values, store=store)
+        return cls(values=values, store=store, run_id=run_id)
 
 
 __all__ = [

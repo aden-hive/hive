@@ -736,7 +736,7 @@ class TestExecution:
 class TestResume:
     @pytest.mark.asyncio
     async def test_resume_from_session_state(self, sample_session, tmp_agent_dir):
-        """Resume using session state (paused_at)."""
+        """Direct state-based resume is rejected; checkpoint resume is required."""
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
@@ -748,11 +748,9 @@ class TestResume:
                 "/api/sessions/test_agent/resume",
                 json={"session_id": session_id},
             )
-            assert resp.status == 200
+            assert resp.status == 400
             data = await resp.json()
-            assert data["execution_id"] == "exec_test_123"
-            assert data["resumed_from"] == session_id
-            assert data["checkpoint_id"] is None
+            assert "checkpoint_id is required" in data["error"]
 
     @pytest.mark.asyncio
     async def test_resume_with_checkpoint(self, sample_session, tmp_agent_dir):
@@ -761,6 +759,7 @@ class TestResume:
         tmp_path, agent_name, base = tmp_agent_dir
 
         session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        session.graph_runtime.trigger = AsyncMock(return_value="exec_test_123")
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
@@ -774,6 +773,8 @@ class TestResume:
             assert resp.status == 200
             data = await resp.json()
             assert data["checkpoint_id"] == "cp_node_complete_node_a_001"
+            _, kwargs = session.graph_runtime.trigger.await_args
+            assert kwargs["session_state"]["run_id"] == "__legacy_run__"
 
     @pytest.mark.asyncio
     async def test_resume_missing_session_id(self):
@@ -844,6 +845,7 @@ class TestReplay:
         tmp_path, agent_name, base = tmp_agent_dir
 
         session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
+        session.graph_runtime.trigger = AsyncMock(return_value="exec_test_123")
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
@@ -858,6 +860,8 @@ class TestReplay:
             data = await resp.json()
             assert data["execution_id"] == "exec_test_123"
             assert data["replayed_from"] == session_id
+            _, kwargs = session.graph_runtime.trigger.await_args
+            assert kwargs["session_state"]["run_id"] == "__legacy_run__"
 
     @pytest.mark.asyncio
     async def test_replay_missing_fields(self):

@@ -160,7 +160,7 @@ class MockConversationStore:
     async def read_cursor(self) -> dict[str, Any] | None:
         return self._cursor
 
-    async def delete_parts_before(self, seq: int) -> None:
+    async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         keys_to_delete = [k for k in self._parts if k < seq]
         for k in keys_to_delete:
             del self._parts[k]

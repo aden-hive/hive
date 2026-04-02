@@ -19,6 +19,7 @@ from typing import Any
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
+from framework.graph.conversation import LEGACY_RUN_ID, get_run_cursor
 from framework.graph.node import (
     NodeContext,
     NodeProtocol,
@@ -143,6 +144,7 @@ class GraphExecutor:
         event_bus: Any | None = None,
         stream_id: str = "",
         execution_id: str = "",
+        run_id: str = "",
         runtime_logger: Any = None,
         storage_path: str | Path | None = None,
         loop_config: dict[str, Any] | None = None,
@@ -199,6 +201,7 @@ class GraphExecutor:
         self._event_bus = event_bus
         self._stream_id = stream_id
         self._execution_id = execution_id or getattr(runtime, "execution_id", "")
+        self._run_id = run_id
         self.runtime_logger = runtime_logger
         self._storage_path = Path(storage_path) if storage_path else None
         self._loop_config = loop_config or {}
@@ -280,6 +283,8 @@ class GraphExecutor:
             buffer_snapshot = buffer.read_all()
             state_data["data_buffer"] = buffer_snapshot
             state_data["buffer_keys"] = list(buffer_snapshot.keys())
+            if self._run_id:
+                state_data["current_run_id"] = self._run_id
 
             with atomic_write(state_path, encoding="utf-8") as f:
                 _json.dump(state_data, f, indent=2)
@@ -543,11 +548,25 @@ class GraphExecutor:
                     buffer.write(key, value, validate=False)
                 self.logger.info(f"📥 Restored session state with {len(buffer_data)} buffer keys")
 
+        # Logical worker run boundary:
+        # - fresh triggers use the ExecutionStream-provided run_id
+        # - checkpoint resumes may pin a prior run_id in session_state/checkpoint
+        active_run_id = session_state.get("run_id") if session_state else None
+        if not active_run_id:
+            active_run_id = self._run_id
+        self._run_id = active_run_id or ""
+
         # Write new input data to buffer (each key individually).
         # Skip when resuming from a paused session — restored buffer already
         # contains all state including the original input, and re-writing
         # input_data would overwrite intermediate results with stale values.
-        _is_resuming = bool(session_state and session_state.get("paused_at"))
+        _is_resuming = bool(
+            session_state
+            and (
+                session_state.get("paused_at")
+                or session_state.get("resume_from_checkpoint")
+            )
+        )
         if input_data and not _is_resuming:
             for key, value in input_data.items():
                 buffer.write(key, value)
@@ -595,6 +614,8 @@ class GraphExecutor:
                         f"🔄 Resuming from checkpoint: {checkpoint_id} "
                         f"(node: {checkpoint.current_node})"
                     )
+                    checkpoint_run_id = checkpoint.run_id or LEGACY_RUN_ID
+                    self._run_id = checkpoint_run_id
 
                     # Restore buffer from checkpoint
                     for key, value in checkpoint.data_buffer.items():
@@ -616,120 +637,18 @@ class GraphExecutor:
                     self.logger.warning(
                         f"Checkpoint {checkpoint_id} not found, resuming from normal entry point"
                     )
-                    # Check if resuming from paused_at (fallback to session state)
-                    paused_at = session_state.get("paused_at") if session_state else None
-                    if paused_at and graph.get_node(paused_at) is not None:
-                        current_node_id = paused_at
-                        self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
-                    else:
-                        current_node_id = graph.get_entry_point(session_state)
+                    current_node_id = graph.get_entry_point(session_state)
 
             except Exception as e:
                 self.logger.error(
                     f"Failed to load checkpoint {checkpoint_id}: {e}, "
                     f"resuming from normal entry point"
                 )
-                # Check if resuming from paused_at (fallback to session state)
-                paused_at = session_state.get("paused_at") if session_state else None
-                if paused_at and graph.get_node(paused_at) is not None:
-                    current_node_id = paused_at
-                    self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
-                else:
-                    current_node_id = graph.get_entry_point(session_state)
-        else:
-            # Check if resuming from paused_at (session state resume)
-            paused_at = session_state.get("paused_at") if session_state else None
-            node_ids = [n.id for n in graph.nodes]
-            self.logger.debug(f"paused_at={paused_at}, available node IDs={node_ids}")
-
-            if paused_at and graph.get_node(paused_at) is not None:
-                # Resume from paused_at node directly (works for any node, not just pause_nodes)
-                current_node_id = paused_at
-
-                # Restore execution path from session state if available
-                if session_state:
-                    execution_path = session_state.get("execution_path", [])
-                    if execution_path:
-                        path.extend(execution_path)
-                        self.logger.info(
-                            f"🔄 Resuming from paused node: {paused_at} "
-                            f"(restored path: {execution_path})"
-                        )
-                    else:
-                        self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
-                else:
-                    self.logger.info(f"🔄 Resuming from paused node: {paused_at}")
-            else:
-                # Fall back to normal entry point logic
-                self.logger.warning(
-                    f"⚠ paused_at={paused_at} is not a valid node, falling back to entry point"
-                )
                 current_node_id = graph.get_entry_point(session_state)
+        else:
+            current_node_id = graph.get_entry_point(session_state)
 
         steps = 0
-
-        # Fresh shared-session execution: clear stale cursor so the entry
-        # node doesn't restore a filled OutputAccumulator from the previous
-        # webhook run (which would cause the judge to accept immediately).
-        # The conversation history is preserved (continuous buffer).
-        # Exclude cold restores — those need to continue the conversation
-        # naturally without a "start fresh" marker.
-        _is_fresh_shared = bool(
-            session_state
-            and session_state.get("resume_session_id")
-            and not session_state.get("paused_at")
-            and not session_state.get("resume_from_checkpoint")
-            and not session_state.get("cold_restore")
-        )
-        if _is_fresh_shared and is_continuous and self._storage_path:
-            try:
-                from framework.storage.conversation_store import FileConversationStore
-
-                entry_conv_path = self._storage_path / "conversations"
-                if entry_conv_path.exists():
-                    _store = FileConversationStore(base_path=entry_conv_path)
-
-                    # Read cursor to find next seq for the transition marker.
-                    _cursor = await _store.read_cursor() or {}
-                    _next_seq = _cursor.get("next_seq", 0)
-                    if _next_seq == 0:
-                        # Fallback: scan part files for max seq
-                        _parts = await _store.read_parts()
-                        if _parts:
-                            _next_seq = max(p.get("seq", 0) for p in _parts) + 1
-
-                    # Reset cursor — clears stale accumulator outputs and
-                    # iteration counter so the node starts fresh work while
-                    # the conversation thread carries forward.
-                    await _store.write_cursor({})
-
-                    # Append a transition marker so the LLM knows a new
-                    # event arrived and previous results are outdated.
-                    await _store.write_part(
-                        _next_seq,
-                        {
-                            "role": "user",
-                            "content": (
-                                "--- NEW EVENT TRIGGER ---\n"
-                                "A new event has been received. "
-                                "Process this as a fresh request — "
-                                "previous outputs are no longer valid."
-                            ),
-                            "seq": _next_seq,
-                            "is_transition_marker": True,
-                        },
-                    )
-                    self.logger.info(
-                        "🔄 Cleared stale cursor and added transition marker "
-                        "for shared-session entry node '%s'",
-                        current_node_id,
-                    )
-            except Exception:
-                self.logger.debug(
-                    "Could not prepare conversation store for shared-session entry node '%s'",
-                    current_node_id,
-                    exc_info=True,
-                )
 
         if session_state and current_node_id != graph.entry_node:
             self.logger.info(f"🔄 Resuming from: {current_node_id}")
@@ -790,6 +709,7 @@ class GraphExecutor:
                         "data_buffer": saved_buffer,  # Include buffer for resume
                         "execution_path": list(path),
                         "node_visit_counts": dict(node_visit_counts),
+                        "run_id": self._run_id,
                     }
 
                     # Create a pause checkpoint
@@ -1192,6 +1112,7 @@ class GraphExecutor:
                                 "execution_path": list(path),
                                 "node_visit_counts": dict(node_visit_counts),
                                 "resume_from": current_node_id,
+                                "run_id": self._run_id,
                             }
 
                             return ExecutionResult(
@@ -1236,6 +1157,7 @@ class GraphExecutor:
                         "execution_path": list(path),
                         "node_visit_counts": dict(node_visit_counts),
                         "next_node": None,  # Will resume from entry point
+                        "run_id": self._run_id,
                     }
 
                     self.runtime.end_run(
@@ -1611,6 +1533,7 @@ class GraphExecutor:
                     "data_buffer": output,  # output IS buffer.read_all()
                     "execution_path": list(path),
                     "node_visit_counts": dict(node_visit_counts),
+                    "run_id": self._run_id,
                 },
             )
 
@@ -1630,7 +1553,8 @@ class GraphExecutor:
                     cursor_path = self._storage_path / "conversations" / "cursor.json"
                     if cursor_path.exists():
                         cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
-                        wip_outputs = cursor_data.get("outputs", {})
+                        run_cursor = get_run_cursor(cursor_data, self._run_id or None) or {}
+                        wip_outputs = run_cursor.get("outputs", {})
                         for key, value in wip_outputs.items():
                             if value is not None:
                                 buffer.write(key, value, validate=False)
@@ -1652,6 +1576,7 @@ class GraphExecutor:
                 "data_buffer": saved_buffer,
                 "execution_path": list(path),
                 "node_visit_counts": dict(node_visit_counts),
+                "run_id": self._run_id,
             }
 
             # Calculate quality metrics
@@ -1731,7 +1656,8 @@ class GraphExecutor:
                     cursor_path = self._storage_path / "conversations" / "cursor.json"
                     if cursor_path.exists():
                         cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
-                        for key, value in cursor_data.get("outputs", {}).items():
+                        run_cursor = get_run_cursor(cursor_data, self._run_id or None) or {}
+                        for key, value in run_cursor.get("outputs", {}).items():
                             if value is not None:
                                 buffer.write(key, value, validate=False)
                 except Exception:
@@ -1747,6 +1673,7 @@ class GraphExecutor:
                 "execution_path": list(path),
                 "node_visit_counts": dict(node_visit_counts),
                 "resume_from": current_node_id,
+                "run_id": self._run_id,
             }
 
             # Mark latest checkpoint for resume on failure
@@ -1883,6 +1810,7 @@ class GraphExecutor:
             identity_prompt=identity_prompt,
             narrative=narrative,
             execution_id=self._execution_id,
+            run_id=self._run_id,
             stream_id=self._stream_id,
             node_registry=node_registry or {},
             all_tools=list(self.tools),  # Full catalog for subagent tool resolution
@@ -2400,6 +2328,7 @@ class GraphExecutor:
         return Checkpoint.create(
             checkpoint_type=checkpoint_type,
             session_id=self._storage_path.name if self._storage_path else "unknown",
+            run_id=self._run_id or None,
             current_node=current_node,
             execution_path=execution_path,
             data_buffer=buffer.read_all(),

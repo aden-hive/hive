@@ -550,6 +550,14 @@ class ExecutionStream:
             correlation_id = execution_id
 
         # Create execution context
+        effective_run_id = None
+        if session_state:
+            existing_run_id = session_state.get("run_id")
+            if isinstance(existing_run_id, str) and existing_run_id:
+                effective_run_id = existing_run_id
+        if effective_run_id is None:
+            effective_run_id = run_id
+
         ctx = ExecutionContext(
             id=execution_id,
             correlation_id=correlation_id,
@@ -558,7 +566,7 @@ class ExecutionStream:
             input_data=input_data,
             isolation_level=self.entry_spec.get_isolation_level(),
             session_state=session_state,
-            run_id=run_id,
+            run_id=effective_run_id,
         )
 
         async with self._lock:
@@ -700,6 +708,7 @@ class ExecutionStream:
                         event_bus=self._scoped_event_bus,
                         stream_id=self.stream_id,
                         execution_id=execution_id,
+                        run_id=ctx.run_id or "",
                         storage_path=exec_storage,
                         runtime_logger=runtime_logger,
                         loop_config=self.graph.loop_config,
@@ -1044,6 +1053,7 @@ class ExecutionStream:
                     agent_id=self.graph.id,
                     entry_point=self.entry_spec.id,
                 )
+                state.current_run_id = ctx.run_id
             else:
                 # Create initial state — when resuming, preserve the previous
                 # execution's progress so crashes don't lose track of state.
@@ -1076,6 +1086,7 @@ class ExecutionStream:
                     progress=progress,
                     memory=ss.get("data_buffer", ss.get("memory", {})),
                     input_data=ctx.input_data,
+                    current_run_id=ctx.run_id,
                 )
 
             # Handle error case

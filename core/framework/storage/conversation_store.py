@@ -29,6 +29,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from framework.graph.conversation import LEGACY_RUN_ID
+
 
 class FileConversationStore:
     """File-per-part ConversationStore.
@@ -95,14 +97,23 @@ class FileConversationStore:
     async def read_cursor(self) -> dict[str, Any] | None:
         return await self._run(self._read_json, self._base / "cursor.json")
 
-    async def delete_parts_before(self, seq: int) -> None:
+    async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         def _delete() -> None:
             if not self._parts_dir.exists():
                 return
             for f in self._parts_dir.glob("*.json"):
                 file_seq = int(f.stem)
                 if file_seq < seq:
-                    f.unlink()
+                    if run_id is None:
+                        f.unlink()
+                        continue
+                    data = self._read_json(f) or {}
+                    part_run_id = data.get("run_id")
+                    if run_id == LEGACY_RUN_ID:
+                        if part_run_id in (None, LEGACY_RUN_ID):
+                            f.unlink()
+                    elif part_run_id == run_id:
+                        f.unlink()
 
         await self._run(_delete)
 

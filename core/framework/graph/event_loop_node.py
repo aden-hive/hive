@@ -367,6 +367,7 @@ class EventLoopNode(NodeProtocol):
                 store=self._conversation_store,
                 spillover_dir=self._config.spillover_dir,
                 max_value_chars=self._config.max_output_value_chars,
+                run_id=ctx.run_id or None,
             )
             start_iteration = 0
             _restored_recent_responses: list[str] = []
@@ -480,6 +481,7 @@ class EventLoopNode(NodeProtocol):
                     max_context_tokens=self._config.max_context_tokens,
                     output_keys=ctx.node_spec.output_keys or None,
                     store=self._conversation_store,
+                    run_id=ctx.run_id or None,
                 )
                 # Stamp phase for first node in continuous mode
                 if _is_continuous:
@@ -488,6 +490,7 @@ class EventLoopNode(NodeProtocol):
                     store=self._conversation_store,
                     spillover_dir=self._config.spillover_dir,
                     max_value_chars=self._config.max_output_value_chars,
+                    run_id=ctx.run_id or None,
                 )
                 start_iteration = 0
 

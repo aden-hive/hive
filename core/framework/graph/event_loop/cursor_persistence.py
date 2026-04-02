@@ -14,7 +14,12 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from framework.graph.conversation import ConversationStore, NodeConversation
+from framework.graph.conversation import (
+    ConversationStore,
+    NodeConversation,
+    get_run_cursor,
+    update_run_cursor,
+)
 from framework.graph.event_loop.types import LoopConfig, OutputAccumulator, TriggerEvent
 from framework.graph.node import NodeContext
 from framework.llm.capabilities import supports_image_tool_results
@@ -56,20 +61,22 @@ async def restore(
     conversation = await NodeConversation.restore(
         conversation_store,
         phase_id=phase_filter,
+        run_id=ctx.run_id or None,
     )
     if conversation is None:
         return None
 
-    accumulator = await OutputAccumulator.restore(conversation_store)
+    accumulator = await OutputAccumulator.restore(conversation_store, run_id=ctx.run_id or None)
     accumulator.spillover_dir = config.spillover_dir
     accumulator.max_value_chars = config.max_output_value_chars
 
     cursor = await conversation_store.read_cursor()
-    start_iteration = cursor.get("iteration", 0) + 1 if cursor else 0
+    run_cursor = get_run_cursor(cursor, ctx.run_id or None)
+    start_iteration = run_cursor.get("iteration", 0) + 1 if run_cursor else 0
 
     # Restore stall/doom-loop detection state
-    recent_responses: list[str] = cursor.get("recent_responses", []) if cursor else []
-    raw_fps = cursor.get("recent_tool_fingerprints", []) if cursor else []
+    recent_responses: list[str] = run_cursor.get("recent_responses", []) if run_cursor else []
+    raw_fps = run_cursor.get("recent_tool_fingerprints", []) if run_cursor else []
     recent_tool_fingerprints: list[list[tuple[str, str]]] = [
         [tuple(pair) for pair in fps]  # type: ignore[misc]
         for fps in raw_fps
@@ -107,24 +114,21 @@ async def write_cursor(
     detection state so that resume picks up exactly where execution stopped.
     """
     if conversation_store:
-        cursor = await conversation_store.read_cursor() or {}
-        cursor.update(
-            {
-                "iteration": iteration,
-                "node_id": ctx.node_id,
-                "next_seq": conversation.next_seq,
-                "outputs": accumulator.to_dict(),
-            }
-        )
+        cursor = await conversation_store.read_cursor()
+        run_cursor = {
+            "iteration": iteration,
+            "node_id": ctx.node_id,
+            "outputs": accumulator.to_dict(),
+        }
         # Persist stall/doom-loop detection state for reliable resume
         if recent_responses is not None:
-            cursor["recent_responses"] = recent_responses
+            run_cursor["recent_responses"] = recent_responses
         if recent_tool_fingerprints is not None:
             # Convert list[list[tuple]] → list[list[list]] for JSON
-            cursor["recent_tool_fingerprints"] = [
+            run_cursor["recent_tool_fingerprints"] = [
                 [list(pair) for pair in fps] for fps in recent_tool_fingerprints
             ]
-        await conversation_store.write_cursor(cursor)
+        await conversation_store.write_cursor(update_run_cursor(cursor, ctx.run_id or None, run_cursor))
 
 
 async def drain_injection_queue(
