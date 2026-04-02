@@ -1,0 +1,144 @@
+{
+  "original_draft": {
+    "agent_name": "viral_tech_copywriter",
+    "goal": "Capture a marketing brief through conversation, normalize it into structured JSON, and produce hook-heavy, platform-specific copy without fabricating facts.",
+    "description": "",
+    "success_criteria": [
+      "Intake produces a raw_brief with product, ICP, and platforms",
+      "structured_brief matches schema and uses only provided facts",
+      "Multiple distinct hook angles, not trivial paraphrases",
+      "Requested platforms receive tailored copy with CTAs where apt",
+      "Honors tone, banned phrases, and no fabricated metrics"
+    ],
+    "constraints": [
+      "Do not invent customers, metrics, logos, or press quotes",
+      "Flag uncertain claims in verify_flags or notes, not as facts",
+      "normalize-brief and write-package must emit parseable JSON strings"
+    ],
+    "nodes": [
+      {
+        "id": "intake",
+        "name": "Intake",
+        "description": "Greets the user, gathers or clarifies the marketing brief, then outputs raw_brief for normalization.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [],
+        "output_keys": [
+          "raw_brief"
+        ],
+        "success_criteria": "The raw_brief captures product, audience, differentiation, optional proof, tone, banned phrases, and target platforms from the conversation.",
+        "sub_agents": [],
+        "flowchart_type": "start",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#8aad3f"
+      },
+      {
+        "id": "normalize-brief",
+        "name": "Normalize brief",
+        "description": "Normalizes raw_brief into fixed-schema structured_brief JSON.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "raw_brief"
+        ],
+        "output_keys": [
+          "structured_brief"
+        ],
+        "success_criteria": "structured_brief is valid JSON matching the required schema.",
+        "sub_agents": [],
+        "flowchart_type": "process",
+        "flowchart_shape": "rectangle",
+        "flowchart_color": "#b5a575"
+      },
+      {
+        "id": "write-package",
+        "name": "Write copy package",
+        "description": "Produces hooks and per-channel copy from structured_brief.",
+        "node_type": "event_loop",
+        "tools": [],
+        "input_keys": [
+          "structured_brief"
+        ],
+        "output_keys": [
+          "copy_package"
+        ],
+        "success_criteria": "copy_package is valid JSON with distinct hooks and content for requested platforms only.",
+        "sub_agents": [],
+        "flowchart_type": "terminal",
+        "flowchart_shape": "stadium",
+        "flowchart_color": "#b5453a"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge-0",
+        "source": "intake",
+        "target": "normalize-brief",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      },
+      {
+        "id": "edge-1",
+        "source": "normalize-brief",
+        "target": "write-package",
+        "condition": "on_success",
+        "description": "",
+        "label": ""
+      }
+    ],
+    "entry_node": "intake",
+    "terminal_nodes": [
+      "write-package"
+    ],
+    "flowchart_legend": {
+      "start": {
+        "shape": "stadium",
+        "color": "#8aad3f"
+      },
+      "terminal": {
+        "shape": "stadium",
+        "color": "#b5453a"
+      },
+      "process": {
+        "shape": "rectangle",
+        "color": "#b5a575"
+      },
+      "decision": {
+        "shape": "diamond",
+        "color": "#d89d26"
+      },
+      "io": {
+        "shape": "parallelogram",
+        "color": "#d06818"
+      },
+      "document": {
+        "shape": "document",
+        "color": "#c4b830"
+      },
+      "database": {
+        "shape": "cylinder",
+        "color": "#508878"
+      },
+      "subprocess": {
+        "shape": "subroutine",
+        "color": "#887a48"
+      },
+      "browser": {
+        "shape": "hexagon",
+        "color": "#cc8850"
+      }
+    }
+  },
+  "flowchart_map": {
+    "intake": [
+      "intake"
+    ],
+    "normalize-brief": [
+      "normalize-brief"
+    ],
+    "write-package": [
+      "write-package"
+    ]
+  }
+}
