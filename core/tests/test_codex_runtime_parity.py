@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -412,7 +413,7 @@ async def test_queen_auto_blocked_planning_progresses_to_building(tmp_path, monk
     assert init_payload["success"] is True
     assert phase_state.phase == "building"
     assert phase_state.agent_path is not None
-    assert phase_state.agent_path.endswith("exports/codex_runtime_agent")
+    assert Path(phase_state.agent_path).parts[-2:] == ("exports", "codex_runtime_agent")
     assert recorded_init_inputs["agent_name"] == "codex_runtime_agent"
     assert "_draft" in recorded_init_inputs
     assert recorded_init_inputs["_draft"]["entry_node"] == "intake"
