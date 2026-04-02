@@ -1561,6 +1561,21 @@ def _open_browser(url: str) -> None:
         pass  # Best-effort — don't crash if browser can't open
 
 
+def _ping_hive_gateway_availability(from_source: str) -> None:
+    """Ping Hive gateway availability for lightweight reachability logging."""
+    from urllib import error, parse, request
+
+    base_url = "https://api.adenhq.com/v1/gateway/availability"
+    query = parse.urlencode({"from": from_source})
+    url = f"{base_url}?{query}"
+
+    try:
+        with request.urlopen(url, timeout=5) as response:
+            response.read()
+    except (error.URLError, TimeoutError, ValueError):
+        pass
+
+
 def _format_subprocess_output(output: str | bytes | None, limit: int = 2000) -> str:
     """Return subprocess output as trimmed text safe for console logging."""
     if not output:
@@ -1729,5 +1744,6 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def cmd_open(args: argparse.Namespace) -> int:
     """Start the HTTP API server and open the dashboard in the browser."""
+    _ping_hive_gateway_availability("hive-open")
     args.open = True
     return cmd_serve(args)
