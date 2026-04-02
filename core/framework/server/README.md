@@ -22,7 +22,7 @@ server/
 ├── app.py                 # Application factory, middleware, static serving
 ├── session_manager.py     # Session lifecycle (create/load graph/unload/stop)
 ├── sse.py                 # Server-Sent Events helper
-├── routes_sessions.py     # Session lifecycle, info, worker-session browsing, discovery
+├── routes_sessions.py     # Session lifecycle, info, and discovery
 ├── routes_execution.py    # Trigger, inject, chat, stop, resume, replay
 ├── routes_events.py       # SSE event streaming
 ├── routes_graphs.py       # Graph topology & node inspection
@@ -152,10 +152,10 @@ POST /api/sessions/{session_id}/trigger
 // Returns: { "execution_id": "..." }
 ```
 
-**Chat** routes messages with priority:
-1. Worker awaiting input -> inject into worker node
-2. Queen active -> inject into queen conversation
-3. Neither available -> 503
+**Chat** always delivers messages to the queen conversation.
+Worker-originated questions are still shown in the UI, but the user's reply
+is mediated by the queen, which can then relay it to the blocked worker via
+`inject_message()` when appropriate.
 
 ```jsonc
 POST /api/sessions/{session_id}/chat
@@ -253,25 +253,6 @@ GET .../nodes/{node_id}/logs?session_id=ws_id&level=all
 ```
 
 Log levels: `summary` (run stats), `details` (per-node execution), `tools` (tool calls + LLM text).
-
-### Worker Session Browsing
-
-Browse persisted execution runs on disk.
-
-| Method | Route | Description |
-|--------|-------|-------------|
-| `GET` | `/api/sessions/{session_id}/worker-sessions` | List worker sessions |
-| `GET` | `/api/sessions/{session_id}/worker-sessions/{ws_id}` | Worker session state |
-| `DELETE` | `/api/sessions/{session_id}/worker-sessions/{ws_id}` | Delete worker session |
-| `GET` | `/api/sessions/{session_id}/worker-sessions/{ws_id}/checkpoints` | List checkpoints |
-| `POST` | `/api/sessions/{session_id}/worker-sessions/{ws_id}/checkpoints/{cp_id}/restore` | Restore from checkpoint |
-| `GET` | `/api/sessions/{session_id}/worker-sessions/{ws_id}/messages` | Get conversation messages |
-
-**Messages** support filtering:
-```
-GET .../messages?node_id=gather_info      # filter by node
-GET .../messages?client_only=true         # only user inputs + client-facing assistant outputs
-```
 
 ### Credentials
 

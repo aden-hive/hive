@@ -105,8 +105,9 @@ async def handle_inject(request: web.Request) -> web.Response:
 async def handle_chat(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/chat — send a message to the queen.
 
-    The input box is permanently connected to the queen agent.
-    Worker input is handled separately via /worker-input.
+    The input box is permanently connected to the queen agent, including
+    replies to worker-originated questions. The queen decides whether to
+    relay the user's answer back into the worker via inject_message().
 
     Body: {"message": "hello", "images": [{"type": "image_url", "image_url": {"url": "data:..."}}]}
 
@@ -119,6 +120,7 @@ async def handle_chat(request: web.Request) -> web.Response:
 
     body = await request.json()
     message = body.get("message", "")
+    display_message = body.get("display_message")
     image_content = body.get("images") or None  # list[dict] | None
 
     if not message and not image_content:
@@ -139,7 +141,9 @@ async def handle_chat(request: web.Request) -> web.Response:
                     node_id="queen",
                     execution_id=session.id,
                     data={
-                        "content": message,
+                        # Allow the UI to display a user-friendly echo while
+                        # the queen receives a richer relay wrapper.
+                        "content": display_message if display_message is not None else message,
                         "image_count": len(image_content) if image_content else 0,
                     },
                 )
@@ -207,46 +211,6 @@ async def handle_queen_context(request: web.Request) -> web.Response:
         logger.error("Failed to revive queen for context: %s", e)
 
     return web.json_response({"error": "Queen not available"}, status=503)
-
-
-async def handle_worker_input(request: web.Request) -> web.Response:
-    """POST /api/sessions/{session_id}/worker-input — send input to waiting worker node.
-
-    Auto-discovers the worker node currently awaiting input and injects the message.
-    Returns 404 if no worker node is awaiting input.
-
-    Body: {"message": "..."}
-    """
-    session, err = resolve_session(request)
-    if err:
-        return err
-
-    body = await request.json()
-    message = body.get("message", "")
-
-    if not message:
-        return web.json_response({"error": "message is required"}, status=400)
-
-    if not session.graph_runtime:
-        return web.json_response({"error": "No graph loaded"}, status=503)
-
-    node_id, graph_id = session.graph_runtime.find_awaiting_node()
-    if not node_id:
-        return web.json_response({"error": "No worker node awaiting input"}, status=404)
-
-    delivered = await session.graph_runtime.inject_input(
-        node_id,
-        message,
-        graph_id=graph_id,
-        is_client_input=True,
-    )
-    return web.json_response(
-        {
-            "status": "injected",
-            "node_id": node_id,
-            "delivered": delivered,
-        }
-    )
 
 
 async def handle_goal_progress(request: web.Request) -> web.Response:
@@ -517,7 +481,6 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/sessions/{session_id}/inject", handle_inject)
     app.router.add_post("/api/sessions/{session_id}/chat", handle_chat)
     app.router.add_post("/api/sessions/{session_id}/queen-context", handle_queen_context)
-    app.router.add_post("/api/sessions/{session_id}/worker-input", handle_worker_input)
     app.router.add_post("/api/sessions/{session_id}/pause", handle_pause)
     app.router.add_post("/api/sessions/{session_id}/resume", handle_resume)
     app.router.add_post("/api/sessions/{session_id}/stop", handle_stop)

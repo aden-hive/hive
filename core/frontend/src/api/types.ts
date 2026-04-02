@@ -79,59 +79,9 @@ export interface StopResult {
   error?: string;
 }
 
-export interface ResumeResult {
-  execution_id: string;
-  resumed_from: string;
-  checkpoint_id: string | null;
-}
-
-export interface ReplayResult {
-  execution_id: string;
-  replayed_from: string;
-  checkpoint_id: string;
-}
-
 export interface GoalProgress {
   progress: number;
   criteria: unknown[];
-}
-
-// --- Session types ---
-
-export interface SessionSummary {
-  session_id: string;
-  status?: string;
-  started_at?: string | null;
-  completed_at?: string | null;
-  steps?: number;
-  paused_at?: string | null;
-  checkpoint_count: number;
-}
-
-export interface SessionDetail {
-  status: string;
-  started_at: string;
-  completed_at: string | null;
-  input_data: Record<string, unknown>;
-  memory: Record<string, unknown>;
-  progress: {
-    current_node: string | null;
-    paused_at: string | null;
-    steps_executed: number;
-    path: string[];
-    node_visit_counts: Record<string, number>;
-    nodes_with_failures: string[];
-    resume_from?: string;
-  };
-}
-
-export interface Checkpoint {
-  checkpoint_id: string;
-  current_node: string | null;
-  next_node: string | null;
-  is_clean: boolean;
-  timestamp: string | null;
-  error?: string;
 }
 
 export interface Message {

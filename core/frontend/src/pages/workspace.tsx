@@ -1156,7 +1156,6 @@ export default function Workspace() {
       });
 
       // Restore messages when rejoining an existing session OR cold-restoring from disk.
-      let isWorkerRunning = false;
       const restoredMsgs: ChatMessage[] = [];
       // For cold-restore, use the old session ID. For live resume, use current session.
       const historyId = coldRestoreId ?? (isResumedSession ? session.session_id : undefined);
@@ -1171,17 +1170,6 @@ export default function Workspace() {
         if (restored.flowchartMap && !restoredFlowchartMap) {
           restoredFlowchartMap = restored.flowchartMap;
           restoredOriginalDraft = restored.originalDraft;
-        }
-
-        // Check worker status (needed for isWorkerRunning flag)
-        try {
-          const { sessions: workerSessions } = await sessionsApi.workerSessions(historyId);
-          const resumable = workerSessions.find(
-            (s) => s.status === "active" || s.status === "paused",
-          );
-          isWorkerRunning = resumable?.status === "active";
-        } catch {
-          // Worker session listing failed — not critical
         }
       }
 
@@ -1213,7 +1201,6 @@ export default function Workspace() {
         ready: true,
         loading: false,
         queenReady: !!(isResumedSession || hasRestoredContent),
-        ...(isWorkerRunning ? { workerRunState: "running" } : {}),
         // Restore flowchart overlay from persisted events
         ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
         ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
@@ -2617,6 +2604,96 @@ export default function Workspace() {
       };
     });
 
+  const buildWorkerReplyForQueen = useCallback((answer: string) => {
+    const state = agentStates[activeWorker];
+    const question = (state?.pendingQuestion || "").trim();
+    const options = state?.pendingOptions;
+    const lastWorkerMessage = [...(activeSession?.messages || [])]
+      .reverse()
+      .find(msg => msg.role === "worker" && msg.type !== "tool_status" && msg.type !== "run_divider" && msg.content.trim());
+    const workerContext = !question ? (lastWorkerMessage?.content || "").trim() : "";
+
+    if (question && options?.length) {
+      return [
+        `[Worker asked: ${JSON.stringify(question)} | Options: ${options.map(opt => JSON.stringify(opt)).join(", ")}]`,
+        `User answered: ${JSON.stringify(answer)}`,
+        "If a worker is blocked waiting, relay this answer with inject_message().",
+      ].join("\n");
+    }
+
+    if (question) {
+      return [
+        `[Worker asked: ${JSON.stringify(question)}]`,
+        `User answered: ${JSON.stringify(answer)}`,
+        "If a worker is blocked waiting, relay this answer with inject_message().",
+      ].join("\n");
+    }
+
+    if (workerContext) {
+      return [
+        "[Worker is awaiting input]",
+        `Worker context: ${JSON.stringify(workerContext.slice(0, 600))}`,
+        `User answered: ${JSON.stringify(answer)}`,
+        "If a worker is blocked waiting, relay this answer with inject_message().",
+      ].join("\n");
+    }
+
+    return [
+      "[Worker is awaiting input]",
+      `User answered: ${JSON.stringify(answer)}`,
+      "If a worker is blocked waiting, relay this answer with inject_message().",
+    ].join("\n");
+  }, [activeSession?.messages, activeWorker, agentStates]);
+
+  const sendWorkerReplyViaQueen = useCallback((text: string, thread: string) => {
+    if (!activeSession) return;
+    const state = agentStates[activeWorker];
+    if (!state?.sessionId || !state?.ready) return;
+
+    const userMsg: ChatMessage = {
+      id: makeId(), agent: "You", agentColor: "",
+      content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
+    };
+    setSessionsByAgent(prev => ({
+      ...prev,
+      [activeWorker]: prev[activeWorker].map(s =>
+        s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
+      ),
+    }));
+
+    updateAgentState(activeWorker, {
+      awaitingInput: false,
+      workerInputMessageId: null,
+      isTyping: true,
+      queenIsTyping: true,
+      pendingQuestion: null,
+      pendingOptions: null,
+      pendingQuestions: null,
+      pendingQuestionSource: null,
+    });
+
+    executionApi.chat(
+      state.sessionId,
+      buildWorkerReplyForQueen(text),
+      undefined,
+      text,
+    ).catch((err: unknown) => {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const errorChatMsg: ChatMessage = {
+        id: makeId(), agent: "System", agentColor: "",
+        content: `Failed to send message: ${errMsg}`,
+        timestamp: "", type: "system", thread, createdAt: Date.now(),
+      };
+      setSessionsByAgent(prev => ({
+        ...prev,
+        [activeWorker]: prev[activeWorker].map(s =>
+          s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
+        ),
+      }));
+      updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false });
+    });
+  }, [activeSession, activeWorker, agentStates, buildWorkerReplyForQueen, updateAgentState]);
+
   // --- handleSend ---
   const handleSend = useCallback((text: string, thread: string, images?: import("@/components/ChatPanel").ImageContent[]) => {
     if (!activeSession) return;
@@ -2641,38 +2718,10 @@ export default function Workspace() {
       return;
     }
 
-    // If worker is awaiting free-text input (no options / no QuestionWidget),
-    // route the message directly to the worker instead of the queen.
+    // If a worker is awaiting free-text input, route the user's answer through
+    // the queen so she can decide how to relay it back into the graph.
     if (agentStates[activeWorker]?.awaitingInput && agentStates[activeWorker]?.pendingQuestionSource === "worker" && !agentStates[activeWorker]?.pendingOptions) {
-      const state = agentStates[activeWorker];
-      if (state?.sessionId && state?.ready) {
-        const userMsg: ChatMessage = {
-          id: makeId(), agent: "You", agentColor: "",
-          content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
-        };
-        setSessionsByAgent(prev => ({
-          ...prev,
-          [activeWorker]: prev[activeWorker].map(s =>
-            s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
-          ),
-        }));
-        updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
-        executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          const errorChatMsg: ChatMessage = {
-            id: makeId(), agent: "System", agentColor: "",
-            content: `Failed to send to worker: ${errMsg}`,
-            timestamp: "", type: "system", thread, createdAt: Date.now(),
-          };
-          setSessionsByAgent(prev => ({
-            ...prev,
-            [activeWorker]: prev[activeWorker].map(s =>
-              s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
-            ),
-          }));
-          updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
-        });
-      }
+      sendWorkerReplyViaQueen(text, thread);
       return;
     }
 
@@ -2725,97 +2774,18 @@ export default function Workspace() {
       }));
       updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
     }
-  }, [activeWorker, activeSession, agentStates, updateAgentState]);
+  }, [activeWorker, activeSession, agentStates, sendWorkerReplyViaQueen, updateAgentState]);
 
-  // --- handleWorkerReply: send user input to the worker via dedicated endpoint ---
+  // --- handleWorkerReply: send worker-directed answers through the queen ---
   const handleWorkerReply = useCallback((text: string) => {
-    if (!activeSession) return;
-    const state = agentStates[activeWorker];
-    if (!state?.sessionId || !state?.ready) return;
+    sendWorkerReplyViaQueen(text, activeWorker);
+  }, [activeWorker, sendWorkerReplyViaQueen]);
 
-    // Add user reply to chat thread
-    const userMsg: ChatMessage = {
-      id: makeId(), agent: "You", agentColor: "",
-      content: text, timestamp: "", type: "user", thread: activeWorker, createdAt: Date.now(),
-    };
-    setSessionsByAgent(prev => ({
-      ...prev,
-      [activeWorker]: prev[activeWorker].map(s =>
-        s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
-      ),
-    }));
-
-    // Clear awaiting state optimistically
-    updateAgentState(activeWorker, { awaitingInput: false, workerInputMessageId: null, isTyping: true, pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
-
-    executionApi.workerInput(state.sessionId, text).catch((err: unknown) => {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const errorChatMsg: ChatMessage = {
-        id: makeId(), agent: "System", agentColor: "",
-        content: `Failed to send to worker: ${errMsg}`,
-        timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
-      };
-      setSessionsByAgent(prev => ({
-        ...prev,
-        [activeWorker]: prev[activeWorker].map(s =>
-          s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
-        ),
-      }));
-      updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
-    });
-  }, [activeWorker, activeSession, agentStates, updateAgentState]);
-
-  // --- handleWorkerQuestionAnswer: route predefined answers direct to worker, "Other" through queen ---
+  // --- handleWorkerQuestionAnswer: route all worker answers through the queen ---
   const handleWorkerQuestionAnswer = useCallback((answer: string, isOther: boolean) => {
-    if (!activeSession) return;
-    const state = agentStates[activeWorker];
-    const question = state?.pendingQuestion || "";
-    const opts = state?.pendingOptions;
-
-    if (isOther) {
-      // "Other" free-text → route through queen for evaluation
-      updateAgentState(activeWorker, { pendingQuestion: null, pendingOptions: null, pendingQuestions: null, pendingQuestionSource: null });
-      if (question && opts && state?.sessionId && state?.ready) {
-        const formatted = `[Worker asked: "${question}" | Options: ${opts.join(", ")}]\nUser answered: "${answer}"`;
-        const userMsg: ChatMessage = {
-          id: makeId(), agent: "You", agentColor: "",
-          content: answer, timestamp: "", type: "user", thread: activeWorker, createdAt: Date.now(),
-        };
-        setSessionsByAgent(prev => ({
-          ...prev,
-          [activeWorker]: prev[activeWorker].map(s =>
-            s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
-          ),
-        }));
-        updateAgentState(activeWorker, { isTyping: true, queenIsTyping: true });
-        executionApi.chat(state.sessionId, formatted).catch((err: unknown) => {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          const errorChatMsg: ChatMessage = {
-            id: makeId(), agent: "System", agentColor: "",
-            content: `Failed to send message: ${errMsg}`,
-            timestamp: "", type: "system", thread: activeWorker, createdAt: Date.now(),
-          };
-          setSessionsByAgent(prev => ({
-            ...prev,
-            [activeWorker]: prev[activeWorker].map(s =>
-              s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
-            ),
-          }));
-          updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false });
-        });
-      } else {
-        handleSend(answer, activeWorker);
-      }
-    } else {
-      // Predefined option → send directly to worker
-      handleWorkerReply(answer);
-      // Queue context for queen (fire-and-forget, no LLM response triggered)
-      if (question && state?.sessionId && state?.ready) {
-        const notification = `[Worker asked: "${question}" | User selected: "${answer}"]`;
-        executionApi.queenContext(state.sessionId, notification).catch(() => { });
-      }
-    }
-  }, [activeWorker, activeSession, agentStates, handleWorkerReply, handleSend, updateAgentState, setSessionsByAgent]);
+    void isOther;
+    handleWorkerReply(answer);
+  }, [handleWorkerReply]);
 
   // --- handleQueenQuestionAnswer: submit queen's own question answer via /chat ---
   // The queen asked the question herself, so she already has context — just send the raw answer.
@@ -2854,10 +2824,19 @@ export default function Workspace() {
       awaitingInput: false,
     });
 
-    // Unblock the waiting node with a dismiss signal
+    // Let the queen decide how to relay the dismissal to the blocked worker.
     const dismissMsg = `[User dismissed the question: "${question}"]`;
     if (source === "worker") {
-      executionApi.workerInput(state.sessionId, dismissMsg).catch(() => { });
+      executionApi.chat(
+        state.sessionId,
+        [
+          question ? `[Worker asked: ${JSON.stringify(question)}]` : "[Worker is awaiting input]",
+          "User dismissed the question.",
+          "If a worker is blocked waiting, relay this dismissal with inject_message() so it can continue or clean up.",
+        ].join("\n"),
+        undefined,
+        "",
+      ).catch(() => { });
     } else {
       executionApi.chat(state.sessionId, dismissMsg).catch(() => { });
     }

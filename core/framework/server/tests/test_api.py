@@ -617,6 +617,28 @@ class TestExecution:
             assert data["delivered"] is True
 
     @pytest.mark.asyncio
+    async def test_chat_publishes_display_message_when_provided(self):
+        session = _make_session()
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/chat",
+                json={
+                    "message": '[Worker asked: "Need approval"]\nUser answered: "Ship it"',
+                    "display_message": "Ship it",
+                },
+            )
+            assert resp.status == 200
+
+        published_event = session.event_bus.publish.await_args.args[0]
+        assert published_event.data["content"] == "Ship it"
+        session.queen_executor.node_registry["queen"].inject_event.assert_awaited_once_with(
+            '[Worker asked: "Need approval"]\nUser answered: "Ship it"',
+            is_client_input=True,
+            image_content=None,
+        )
+
+    @pytest.mark.asyncio
     async def test_chat_prefers_queen_even_when_node_waiting(self):
         """When the queen is alive, /chat routes to queen even if a node is waiting."""
         session = _make_session()
@@ -643,6 +665,17 @@ class TestExecution:
                 json={"message": "hello"},
             )
             assert resp.status == 503
+
+    @pytest.mark.asyncio
+    async def test_worker_input_route_removed(self):
+        session = _make_session()
+        app = _make_app_with_session(session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/sessions/test_agent/worker-input",
+                json={"message": "hello"},
+            )
+            assert resp.status == 404
 
     @pytest.mark.asyncio
     async def test_chat_missing_message(self):
@@ -857,329 +890,6 @@ class TestReplay:
                 },
             )
             assert resp.status == 404
-
-
-class TestWorkerSessions:
-    @pytest.mark.asyncio
-    async def test_list_sessions(self, sample_session, tmp_agent_dir):
-        session_id, session_dir, state = sample_session
-        tmp_path, agent_name, base = tmp_agent_dir
-
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/sessions/test_agent/worker-sessions")
-            assert resp.status == 200
-            data = await resp.json()
-            assert len(data["sessions"]) == 1
-            assert data["sessions"][0]["session_id"] == session_id
-            assert data["sessions"][0]["status"] == "paused"
-            assert data["sessions"][0]["steps"] == 5
-
-    @pytest.mark.asyncio
-    async def test_list_sessions_includes_custom_id(self, custom_id_session, tmp_agent_dir):
-        session_id, session_dir, state = custom_id_session
-        tmp_path, agent_name, base = tmp_agent_dir
-
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/sessions/test_agent/worker-sessions")
-            assert resp.status == 200
-            data = await resp.json()
-            assert len(data["sessions"]) == 1
-            assert data["sessions"][0]["session_id"] == session_id
-            assert data["sessions"][0]["status"] == "paused"
-
-    @pytest.mark.asyncio
-    async def test_list_sessions_empty(self, tmp_agent_dir):
-        tmp_path, agent_name, base = tmp_agent_dir
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/sessions/test_agent/worker-sessions")
-            assert resp.status == 200
-            data = await resp.json()
-            assert data["sessions"] == []
-
-    @pytest.mark.asyncio
-    async def test_get_session(self, sample_session, tmp_agent_dir):
-        session_id, session_dir, state = sample_session
-        tmp_path, agent_name, base = tmp_agent_dir
-
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get(f"/api/sessions/test_agent/worker-sessions/{session_id}")
-            assert resp.status == 200
-            data = await resp.json()
-            assert data["status"] == "paused"
-            assert data["memory"]["key1"] == "value1"
-
-    @pytest.mark.asyncio
-    async def test_get_session_not_found(self, tmp_agent_dir):
-        tmp_path, agent_name, base = tmp_agent_dir
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get("/api/sessions/test_agent/worker-sessions/nonexistent")
-            assert resp.status == 404
-
-    @pytest.mark.asyncio
-    async def test_delete_session(self, sample_session, tmp_agent_dir):
-        session_id, session_dir, state = sample_session
-        tmp_path, agent_name, base = tmp_agent_dir
-
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.delete(f"/api/sessions/test_agent/worker-sessions/{session_id}")
-            assert resp.status == 200
-            data = await resp.json()
-            assert data["deleted"] == session_id
-
-            # Verify deleted
-            assert not session_dir.exists()
-
-    @pytest.mark.asyncio
-    async def test_delete_session_not_found(self, tmp_agent_dir):
-        tmp_path, agent_name, base = tmp_agent_dir
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.delete("/api/sessions/test_agent/worker-sessions/nonexistent")
-            assert resp.status == 404
-
-    @pytest.mark.asyncio
-    async def test_list_checkpoints(self, sample_session, tmp_agent_dir):
-        session_id, session_dir, state = sample_session
-        tmp_path, agent_name, base = tmp_agent_dir
-
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get(
-                f"/api/sessions/test_agent/worker-sessions/{session_id}/checkpoints"
-            )
-            assert resp.status == 200
-            data = await resp.json()
-            assert len(data["checkpoints"]) == 1
-            cp = data["checkpoints"][0]
-            assert cp["checkpoint_id"] == "cp_node_complete_node_a_001"
-            assert cp["current_node"] == "node_a"
-            assert cp["is_clean"] is True
-
-    @pytest.mark.asyncio
-    async def test_restore_checkpoint(self, sample_session, tmp_agent_dir):
-        session_id, session_dir, state = sample_session
-        tmp_path, agent_name, base = tmp_agent_dir
-
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.post(
-                f"/api/sessions/test_agent/worker-sessions/{session_id}"
-                "/checkpoints/cp_node_complete_node_a_001/restore"
-            )
-            assert resp.status == 200
-            data = await resp.json()
-            assert data["execution_id"] == "exec_test_123"
-            assert data["restored_from"] == session_id
-            assert data["checkpoint_id"] == "cp_node_complete_node_a_001"
-
-    @pytest.mark.asyncio
-    async def test_restore_checkpoint_not_found(self, sample_session, tmp_agent_dir):
-        session_id, session_dir, state = sample_session
-        tmp_path, agent_name, base = tmp_agent_dir
-
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.post(
-                f"/api/sessions/test_agent/worker-sessions/{session_id}/checkpoints/nonexistent_cp/restore"
-            )
-            assert resp.status == 404
-
-
-class TestMessages:
-    @pytest.mark.asyncio
-    async def test_get_messages(self, sample_session, tmp_agent_dir):
-        session_id, session_dir, state = sample_session
-        tmp_path, agent_name, base = tmp_agent_dir
-
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get(
-                f"/api/sessions/test_agent/worker-sessions/{session_id}/messages"
-            )
-            assert resp.status == 200
-            data = await resp.json()
-            msgs = data["messages"]
-            assert len(msgs) == 3
-            # Should be sorted by seq
-            assert msgs[0]["seq"] == 1
-            assert msgs[0]["role"] == "user"
-            assert msgs[0]["_node_id"] == "node_a"
-            assert msgs[1]["seq"] == 2
-            assert msgs[1]["role"] == "assistant"
-            assert msgs[2]["seq"] == 3
-            assert msgs[2]["_node_id"] == "node_b"
-
-    @pytest.mark.asyncio
-    async def test_get_messages_filtered_by_node(self, sample_session, tmp_agent_dir):
-        session_id, session_dir, state = sample_session
-        tmp_path, agent_name, base = tmp_agent_dir
-
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get(
-                f"/api/sessions/test_agent/worker-sessions/{session_id}/messages?node_id=node_a"
-            )
-            assert resp.status == 200
-            data = await resp.json()
-            msgs = data["messages"]
-            assert len(msgs) == 2
-            assert all(m["_node_id"] == "node_a" for m in msgs)
-
-    @pytest.mark.asyncio
-    async def test_get_messages_no_conversations(self, tmp_agent_dir):
-        """Session without conversations directory returns empty list."""
-        tmp_path, agent_name, base = tmp_agent_dir
-        worker_session_id = "session_empty"
-        session_dir = base / "sessions" / worker_session_id
-        session_dir.mkdir(parents=True)
-        (session_dir / "state.json").write_text(json.dumps({"status": "completed"}))
-
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get(
-                f"/api/sessions/test_agent/worker-sessions/{worker_session_id}/messages"
-            )
-            assert resp.status == 200
-            data = await resp.json()
-            assert data["messages"] == []
-
-    @pytest.mark.asyncio
-    async def test_get_messages_client_only(self, tmp_agent_dir):
-        """client_only=true keeps user+client-facing assistant."""
-        tmp_path, agent_name, base = tmp_agent_dir
-        worker_session_id = "session_client_only"
-        session_dir = base / "sessions" / worker_session_id
-        session_dir.mkdir(parents=True)
-        (session_dir / "state.json").write_text(json.dumps({"status": "completed"}))
-
-        # node_a is NOT client-facing, chat_node IS
-        conv_a = session_dir / "conversations" / "node_a" / "parts"
-        conv_a.mkdir(parents=True)
-        (conv_a / "0001.json").write_text(
-            json.dumps({"seq": 1, "role": "user", "content": "system prompt"})
-        )
-        (conv_a / "0002.json").write_text(
-            json.dumps({"seq": 2, "role": "assistant", "content": "internal work"})
-        )
-        (conv_a / "0003.json").write_text(
-            json.dumps({"seq": 3, "role": "tool", "content": "tool result"})
-        )
-
-        conv_chat = session_dir / "conversations" / "chat_node" / "parts"
-        conv_chat.mkdir(parents=True)
-        (conv_chat / "0004.json").write_text(
-            json.dumps({"seq": 4, "role": "user", "content": "hi", "is_client_input": True})
-        )
-        (conv_chat / "0005.json").write_text(
-            json.dumps({"seq": 5, "role": "assistant", "content": "hello!"})
-        )
-        (conv_chat / "0006.json").write_text(
-            json.dumps(
-                {
-                    "seq": 6,
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [{"id": "tc1", "function": {"name": "search"}}],
-                }
-            )
-        )
-        (conv_chat / "0007.json").write_text(
-            json.dumps(
-                {
-                    "seq": 7,
-                    "role": "user",
-                    "content": "marker",
-                    "is_transition_marker": True,
-                }
-            )
-        )
-
-        nodes = [
-            MockNodeSpec(id="node_a", name="Node A", client_facing=False),
-            MockNodeSpec(id="chat_node", name="Chat", client_facing=True),
-        ]
-        session = _make_session(
-            tmp_dir=tmp_path / ".hive" / "agents" / agent_name,
-            nodes=nodes,
-        )
-        session.runner.graph = MockGraphSpec(nodes=nodes)
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get(
-                f"/api/sessions/test_agent/worker-sessions/{worker_session_id}/messages?client_only=true"
-            )
-            assert resp.status == 200
-            msgs = (await resp.json())["messages"]
-            # Keep: seq 4 (user+is_client_input), seq 5 (assistant from chat_node)
-            # Drop: seq 1,2,3,6,7 (internal / tool / tool_calls / marker)
-            assert len(msgs) == 2
-            assert msgs[0]["seq"] == 4
-            assert msgs[0]["role"] == "user"
-            assert msgs[1]["seq"] == 5
-            assert msgs[1]["role"] == "assistant"
-            assert msgs[1]["_node_id"] == "chat_node"
-
-    @pytest.mark.asyncio
-    async def test_get_messages_client_only_no_runner_returns_all(self, tmp_agent_dir):
-        """client_only=true with no runner skips filtering (returns all messages)."""
-        tmp_path, agent_name, base = tmp_agent_dir
-        worker_session_id = "session_no_runner"
-        session_dir = base / "sessions" / worker_session_id
-        session_dir.mkdir(parents=True)
-        (session_dir / "state.json").write_text(json.dumps({"status": "completed"}))
-
-        conv = session_dir / "conversations" / "node_a" / "parts"
-        conv.mkdir(parents=True)
-        (conv / "0001.json").write_text(json.dumps({"seq": 1, "role": "user", "content": "hello"}))
-        (conv / "0002.json").write_text(
-            json.dumps({"seq": 2, "role": "assistant", "content": "response"})
-        )
-
-        session = _make_session(tmp_dir=tmp_path / ".hive" / "agents" / agent_name)
-        session.runner = None  # Simulate runner not available
-        app = _make_app_with_session(session)
-
-        async with TestClient(TestServer(app)) as client:
-            resp = await client.get(
-                f"/api/sessions/test_agent/worker-sessions/{worker_session_id}/messages?client_only=true"
-            )
-            assert resp.status == 200
-            msgs = (await resp.json())["messages"]
-            # No runner -> can't resolve client-facing nodes -> returns all messages
-            assert len(msgs) == 2
 
 
 class TestGraphNodes:

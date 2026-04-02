@@ -3,9 +3,6 @@ import type {
   AgentEvent,
   LiveSession,
   LiveSessionDetail,
-  SessionSummary,
-  SessionDetail,
-  Checkpoint,
   EntryPoint,
 } from "./types";
 
@@ -92,31 +89,4 @@ export const sessionsApi = {
   /** Permanently delete a history session (stops live session + removes disk files). */
   deleteHistory: (sessionId: string) =>
     api.delete<{ deleted: string }>(`/sessions/history/${sessionId}`),
-
-  // --- Worker session browsing (persisted execution runs) ---
-
-  workerSessions: (sessionId: string) =>
-    api.get<{ sessions: SessionSummary[] }>(
-      `/sessions/${sessionId}/worker-sessions`,
-    ),
-
-  workerSession: (sessionId: string, wsId: string) =>
-    api.get<SessionDetail>(
-      `/sessions/${sessionId}/worker-sessions/${wsId}`,
-    ),
-
-  deleteWorkerSession: (sessionId: string, wsId: string) =>
-    api.delete<{ deleted: string }>(
-      `/sessions/${sessionId}/worker-sessions/${wsId}`,
-    ),
-
-  checkpoints: (sessionId: string, wsId: string) =>
-    api.get<{ checkpoints: Checkpoint[] }>(
-      `/sessions/${sessionId}/worker-sessions/${wsId}/checkpoints`,
-    ),
-
-  restore: (sessionId: string, wsId: string, checkpointId: string) =>
-    api.post<{ execution_id: string }>(
-      `/sessions/${sessionId}/worker-sessions/${wsId}/checkpoints/${checkpointId}/restore`,
-    ),
 };

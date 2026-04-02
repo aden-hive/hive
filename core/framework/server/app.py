@@ -94,29 +94,6 @@ def sessions_dir(session: Session) -> Path:
     return Path.home() / ".hive" / "agents" / agent_name / "sessions"
 
 
-def cold_sessions_dir(session_id: str) -> Path | None:
-    """Resolve the worker sessions directory from disk for a cold/stopped session.
-
-    Reads agent_path from the queen session's meta.json to find the agent name,
-    then returns ~/.hive/agents/{agent_name}/sessions/.
-    Returns None if meta.json is missing or has no agent_path.
-    """
-    import json
-
-    meta_path = Path.home() / ".hive" / "queen" / "session" / session_id / "meta.json"
-    if not meta_path.exists():
-        return None
-    try:
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        agent_path = meta.get("agent_path")
-        if not agent_path:
-            return None
-        agent_name = Path(agent_path).name
-        return Path.home() / ".hive" / "agents" / agent_name / "sessions"
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
 # Allowed CORS origins (localhost on any port)
 _CORS_ORIGINS = {"http://localhost", "http://127.0.0.1"}
 
