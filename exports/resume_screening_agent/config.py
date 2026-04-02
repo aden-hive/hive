@@ -9,17 +9,15 @@ default_config = RuntimeConfig()
 
 @dataclass
 class AgentMetadata:
-    name: str = "Deep Research Agent"
+    name: str = "Resume Screening Agent"
     version: str = "1.0.0"
     description: str = (
-        "Interactive research agent that rigorously investigates topics through "
-        "multi-source search, quality evaluation, and synthesis - with TUI conversation "
-        "at key checkpoints for user guidance and feedback."
+        "An agent that screens and evaluates resumes against job requirements, "
+        "providing structured assessments of candidate qualifications and fit."
     )
     intro_message: str = (
-        "Hi! I'm your deep research assistant. Tell me a topic and I'll investigate it "
-        "thoroughly — searching multiple sources, evaluating quality, and synthesizing "
-        "a comprehensive report. What would you like me to research?"
+        "Hi! I'm your resume screening assistant. Share a resume and job requirements, "
+        "and I'll evaluate the candidate's qualifications."
     )
 
 

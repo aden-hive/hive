@@ -8,7 +8,7 @@
       "mcp_server.py",
       "--stdio"
     ],
-    "cwd": "../../../tools",
+    "cwd": "../../tools",
     "description": "Hive tools MCP server providing web_search, web_scrape, and write_to_file"
   }
 }

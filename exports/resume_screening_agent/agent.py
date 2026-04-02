@@ -111,7 +111,7 @@ edges = [
         source="review",
         target="research",
         condition=EdgeCondition.CONDITIONAL,
-        condition_expr="needs_more_research == True",
+        condition_expr="str(needs_more_research).lower() == 'true'",
         priority=1,
     ),
     # review -> report (user satisfied)
@@ -120,7 +120,7 @@ edges = [
         source="review",
         target="report",
         condition=EdgeCondition.CONDITIONAL,
-        condition_expr="needs_more_research == False",
+        condition_expr="str(needs_more_research).lower() != 'true'",
         priority=2,
     ),
     # report -> research (user wants deeper research on current topic)
@@ -150,7 +150,7 @@ pause_nodes = []
 terminal_nodes = []
 
 
-class DeepResearchAgent:
+class ResumeScreeningAgent:
     """
     Deep Research Agent — 4-node pipeline with user checkpoints.
 
@@ -182,7 +182,7 @@ class DeepResearchAgent:
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
         return GraphSpec(
-            id="deep-research-agent-graph",
+            id="resume-screening-agent-graph",
             goal_id=self.goal.id,
             version="1.0.0",
             entry_node=self.entry_node,
@@ -204,7 +204,7 @@ class DeepResearchAgent:
         """Set up the executor with all components."""
         from pathlib import Path
 
-        self._storage_path = Path.home() / ".hive" / "agents" / "deep_research_agent"
+        self._storage_path = Path.home() / ".hive" / "agents" / "resume_screening_agent"
         self._storage_path.mkdir(parents=True, exist_ok=True)
 
         self._tool_registry = ToolRegistry()
@@ -236,13 +236,14 @@ class DeepResearchAgent:
 
         entry_point_specs = [
             EntryPointSpec(
-                id="default",
-                name="Default",
+                id="start",
+                name="Start Screening",
                 entry_node=self.entry_node,
                 trigger_type="manual",
                 isolation_level="shared",
-            )
-        ]
+                )
+                
+            ]
 
         self._agent_runtime = create_agent_runtime(
             graph=self._graph,
@@ -270,7 +271,7 @@ class DeepResearchAgent:
 
     async def trigger_and_wait(
         self,
-        entry_point: str = "default",
+        entry_point: str = "start",
         input_data: dict | None = None,
         timeout: float | None = None,
         session_state: dict | None = None,
@@ -292,8 +293,8 @@ class DeepResearchAgent:
         await self.start(mock_mode=mock_mode)
         try:
             result = await self.trigger_and_wait(
-                "default", context, session_state=session_state
-            )
+                "start", context, session_state=session_state
+                )
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
             await self.stop()
@@ -350,4 +351,4 @@ class DeepResearchAgent:
 
 
 # Create default instance
-default_agent = DeepResearchAgent()
+default_agent = ResumeScreeningAgent()
