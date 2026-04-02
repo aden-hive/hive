@@ -619,6 +619,7 @@ class TestExecution:
     @pytest.mark.asyncio
     async def test_chat_publishes_display_message_when_provided(self):
         session = _make_session()
+        queen_node = session.queen_executor.node_registry["queen"]
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -632,7 +633,7 @@ class TestExecution:
 
         published_event = session.event_bus.publish.await_args.args[0]
         assert published_event.data["content"] == "Ship it"
-        session.queen_executor.node_registry["queen"].inject_event.assert_awaited_once_with(
+        queen_node.inject_event.assert_awaited_once_with(
             '[Worker asked: "Need approval"]\nUser answered: "Ship it"',
             is_client_input=True,
             image_content=None,
@@ -675,7 +676,9 @@ class TestExecution:
                 "/api/sessions/test_agent/worker-input",
                 json={"message": "hello"},
             )
-            assert resp.status == 404
+            # No POST handler remains for this path; aiohttp falls through to an
+            # overlapping GET/HEAD route and reports method-not-allowed.
+            assert resp.status == 405
 
     @pytest.mark.asyncio
     async def test_chat_missing_message(self):

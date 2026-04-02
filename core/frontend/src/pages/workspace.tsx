@@ -2808,7 +2808,7 @@ export default function Workspace() {
   }, [activeWorker, handleSend, updateAgentState]);
 
   // --- handleQuestionDismiss: user closed the question widget without answering ---
-  // Injects a dismiss signal so the blocked node can continue.
+  // Worker dismissals still go through the queen so she can unblock the graph.
   const handleQuestionDismiss = useCallback(() => {
     const state = agentStates[activeWorker];
     if (!state?.sessionId) return;

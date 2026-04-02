@@ -67,7 +67,6 @@ class AgentOrchestrator:
         self._agents: dict[str, RegisteredAgent] = {}
         self._llm = llm
         self._model = model
-        self._message_log: list[AgentMessage] = []
 
         # Auto-create LLM - LiteLLM auto-detects provider and API key from model name
         if self._llm is None:
@@ -98,32 +97,6 @@ class AgentOrchestrator:
             priority: Higher = checked first for routing
         """
         runner = AgentRunner.load(agent_path)
-        info = runner.info()
-
-        self._agents[name] = RegisteredAgent(
-            name=name,
-            runner=runner,
-            description=info.description,
-            capabilities=capabilities or [],
-            priority=priority,
-        )
-
-    def register_runner(
-        self,
-        name: str,
-        runner: AgentRunner,
-        capabilities: list[str] | None = None,
-        priority: int = 0,
-    ) -> None:
-        """
-        Register an existing AgentRunner.
-
-        Args:
-            name: Unique name for this agent
-            runner: AgentRunner instance
-            capabilities: Optional list of capability keywords
-            priority: Higher = checked first for routing
-        """
         info = runner.info()
 
         self._agents[name] = RegisteredAgent(
@@ -173,7 +146,6 @@ class AgentOrchestrator:
             content=request,
         )
         messages.append(initial_message)
-        self._message_log.append(initial_message)
 
         # Step 1: Check capabilities of all agents
         capabilities = await self._check_all_capabilities(request)
@@ -207,7 +179,6 @@ class AgentOrchestrator:
                     parent_id=initial_message.id,
                 )
                 messages.append(msg)
-                self._message_log.append(msg)
                 tasks.append(self._send_to_agent(agent_name, msg))
 
             responses = await asyncio.gather(*tasks, return_exceptions=True)
@@ -217,7 +188,6 @@ class AgentOrchestrator:
                     results[agent_name] = {"error": str(response)}
                 else:
                     messages.append(response)
-                    self._message_log.append(response)
                     results[agent_name] = response.content
                     handled_by.append(agent_name)
         else:
@@ -234,12 +204,10 @@ class AgentOrchestrator:
                     parent_id=initial_message.id,
                 )
                 messages.append(msg)
-                self._message_log.append(msg)
 
                 try:
                     response = await self._send_to_agent(agent_name, msg)
                     messages.append(response)
-                    self._message_log.append(response)
                     results[agent_name] = response.content
                     handled_by.append(agent_name)
 
@@ -259,93 +227,6 @@ class AgentOrchestrator:
             results=results,
             messages=messages,
         )
-
-    async def relay(
-        self,
-        from_agent: str,
-        to_agent: str,
-        content: dict,
-        intent: str = "",
-    ) -> AgentMessage:
-        """
-        Relay a message from one agent to another.
-
-        Args:
-            from_agent: Source agent name
-            to_agent: Target agent name
-            content: Message content
-            intent: Description of what's being asked
-
-        Returns:
-            Response message from target agent
-        """
-        if to_agent not in self._agents:
-            raise ValueError(f"Unknown agent: {to_agent}")
-
-        message = AgentMessage(
-            type=MessageType.HANDOFF,
-            from_agent=from_agent,
-            to_agent=to_agent,
-            intent=intent,
-            content=content,
-        )
-        self._message_log.append(message)
-
-        response = await self._send_to_agent(to_agent, message)
-        self._message_log.append(response)
-
-        return response
-
-    async def broadcast(
-        self,
-        content: dict,
-        intent: str = "",
-        exclude: list[str] | None = None,
-    ) -> dict[str, AgentMessage]:
-        """
-        Send a message to all agents.
-
-        Args:
-            content: Message content
-            intent: Description of what's being asked
-            exclude: Agent names to exclude
-
-        Returns:
-            Dict of agent name -> response message
-        """
-        exclude = exclude or []
-        responses: dict[str, AgentMessage] = {}
-
-        message = AgentMessage(
-            type=MessageType.BROADCAST,
-            from_agent="orchestrator",
-            intent=intent,
-            content=content,
-        )
-        self._message_log.append(message)
-
-        tasks = []
-        agent_names = []
-        for name in self._agents:
-            if name not in exclude:
-                agent_names.append(name)
-                tasks.append(self._send_to_agent(name, message))
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for name, result in zip(agent_names, results, strict=False):
-            if isinstance(result, Exception):
-                responses[name] = AgentMessage(
-                    type=MessageType.RESPONSE,
-                    from_agent=name,
-                    content={"error": str(result)},
-                    parent_id=message.id,
-                )
-            else:
-                responses[name] = result
-                self._message_log.append(result)
-
-        return responses
 
     async def _check_all_capabilities(
         self,
@@ -501,14 +382,6 @@ Respond with JSON only:
         """Send a message to an agent and get response."""
         agent = self._agents[agent_name]
         return await agent.runner.receive_message(message)
-
-    def get_message_log(self) -> list[AgentMessage]:
-        """Get full message log for debugging/tracing."""
-        return list(self._message_log)
-
-    def clear_message_log(self) -> None:
-        """Clear the message log."""
-        self._message_log.clear()
 
     def cleanup(self) -> None:
         """Clean up all agent resources."""

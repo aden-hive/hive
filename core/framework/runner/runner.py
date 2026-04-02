@@ -854,17 +854,6 @@ def get_antigravity_token() -> str | None:
     return access_token
 
 
-def _is_antigravity_proxy_available() -> bool:
-    """Return True if antigravity-auth serve is running on localhost:8069."""
-    import socket
-
-    try:
-        with socket.create_connection(("localhost", 8069), timeout=0.5):
-            return True
-    except (OSError, TimeoutError):
-        return False
-
-
 @dataclass
 class AgentInfo:
     """Information about an exported agent."""
@@ -2118,18 +2107,6 @@ class AgentRunner:
             input_data=input_data,
             correlation_id=correlation_id,
         )
-
-    async def get_goal_progress(self) -> dict[str, Any]:
-        """
-        Get goal progress across all execution streams.
-
-        Returns:
-            Dict with overall_progress, criteria_status, constraint_violations, etc.
-        """
-        if self._agent_runtime is None:
-            self._setup()
-
-        return await self._agent_runtime.get_goal_progress()
 
     def get_entry_points(self) -> list[EntryPointSpec]:
         """

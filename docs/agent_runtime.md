@@ -55,7 +55,6 @@ result = await runner.run({"query": "continue"}, session_state=saved_state)
 await runner.start()                           # Start the runtime
 await runner.stop()                            # Stop the runtime
 exec_id = await runner.trigger("default", {})  # Non-blocking trigger
-progress = await runner.get_goal_progress()    # Goal evaluation
 entry_points = runner.get_entry_points()       # List entry points
 
 # Context manager
