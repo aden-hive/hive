@@ -13,6 +13,15 @@ from framework.graph.event_loop_node import (
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Constraint, Goal, GoalStatus, SuccessCriterion
 from framework.graph.node import NodeContext, NodeProtocol, NodeResult, NodeSpec
+from framework.graph.worker_agent import (
+    Activation,
+    FanOutTag,
+    FanOutTracker,
+    GraphContext,
+    WorkerAgent,
+    WorkerCompletion,
+    WorkerLifecycle,
+)
 
 __all__ = [
     # Goal
@@ -45,4 +54,12 @@ __all__ = [
     # Context Handoff
     "ContextHandoff",
     "HandoffContext",
+    # Worker Agent
+    "WorkerAgent",
+    "WorkerLifecycle",
+    "WorkerCompletion",
+    "Activation",
+    "FanOutTag",
+    "FanOutTracker",
+    "GraphContext",
 ]

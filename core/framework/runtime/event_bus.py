@@ -115,6 +115,10 @@ class EventType(StrEnum):
     NODE_RETRY = "node_retry"
     EDGE_TRAVERSED = "edge_traversed"
 
+    # Worker agent lifecycle (event-driven graph execution)
+    WORKER_COMPLETED = "worker_completed"
+    WORKER_FAILED = "worker_failed"
+
     # Context management
     CONTEXT_COMPACTED = "context_compacted"
     CONTEXT_USAGE_UPDATED = "context_usage_updated"
@@ -1087,6 +1091,54 @@ class EventBus:
                     "target_node": target_node,
                     "edge_condition": edge_condition,
                 },
+            )
+        )
+
+    async def emit_worker_completed(
+        self,
+        stream_id: str,
+        node_id: str,
+        worker_id: str,
+        success: bool,
+        output: dict[str, Any],
+        activations: list[dict[str, Any]] | None = None,
+        execution_id: str | None = None,
+        **extra_data: Any,
+    ) -> None:
+        """Emit worker completed event with outgoing activations."""
+        data: dict[str, Any] = {
+            "worker_id": worker_id,
+            "success": success,
+            "output": output,
+            "activations": activations or [],
+            **extra_data,
+        }
+        await self.publish(
+            AgentEvent(
+                type=EventType.WORKER_COMPLETED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data=data,
+            )
+        )
+
+    async def emit_worker_failed(
+        self,
+        stream_id: str,
+        node_id: str,
+        worker_id: str,
+        error: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit worker failed event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.WORKER_FAILED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"worker_id": worker_id, "error": error},
             )
         )
 

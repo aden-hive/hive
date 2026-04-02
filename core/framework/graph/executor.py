@@ -687,1030 +687,17 @@ class GraphExecutor:
             )
 
         try:
-            while steps < graph.max_steps:
-                steps += 1
-
-                # Check for pause request
-                if self._pause_requested.is_set():
-                    self.logger.info("⏸ Pause detected - stopping at node boundary")
-
-                    # Emit pause event
-                    if self._event_bus:
-                        await self._event_bus.emit_execution_paused(
-                            stream_id=self._stream_id,
-                            node_id=current_node_id,
-                            reason="User requested pause (Ctrl+Z)",
-                            execution_id=self._execution_id,
-                        )
-
-                    # Create session state for pause
-                    saved_buffer = buffer.read_all()
-                    pause_session_state: dict[str, Any] = {
-                        "data_buffer": saved_buffer,  # Include buffer for resume
-                        "execution_path": list(path),
-                        "node_visit_counts": dict(node_visit_counts),
-                        "run_id": self._run_id,
-                    }
-
-                    # Create a pause checkpoint
-                    if checkpoint_store:
-                        pause_checkpoint = self._create_checkpoint(
-                            checkpoint_type="pause",
-                            current_node=current_node_id,
-                            execution_path=path,
-                            buffer=buffer,
-                            next_node=current_node_id,
-                            is_clean=True,
-                        )
-                        await checkpoint_store.save_checkpoint(pause_checkpoint)
-                        pause_session_state["latest_checkpoint_id"] = pause_checkpoint.checkpoint_id
-                        pause_session_state["resume_from_checkpoint"] = (
-                            pause_checkpoint.checkpoint_id
-                        )
-
-                    # Return with paused status
-                    return ExecutionResult(
-                        success=False,
-                        output=saved_buffer,
-                        path=path,
-                        paused_at=current_node_id,
-                        error="Execution paused by user request",
-                        session_state=pause_session_state,
-                        node_visit_counts=dict(node_visit_counts),
-                    )
-
-                # Get current node
-                node_spec = graph.get_node(current_node_id)
-                if node_spec is None:
-                    raise RuntimeError(f"Node not found: {current_node_id}")
-
-                # Enforce max_node_visits (feedback/callback edge support)
-                # Don't increment visit count on retries — retries are not new visits
-                if not _is_retry:
-                    cnt = node_visit_counts.get(current_node_id, 0) + 1
-                    node_visit_counts[current_node_id] = cnt
-                _is_retry = False
-                max_visits = getattr(node_spec, "max_node_visits", 0)
-                if max_visits > 0 and node_visit_counts[current_node_id] > max_visits:
-                    self.logger.warning(
-                        f"   ⊘ Node '{node_spec.name}' visit limit reached "
-                        f"({node_visit_counts[current_node_id]}/{max_visits}), skipping"
-                    )
-                    # Skip execution — follow outgoing edges using current buffer
-                    skip_result = NodeResult(success=True, output=buffer.read_all())
-                    next_node = await self._follow_edges(
-                        graph=graph,
-                        goal=goal,
-                        current_node_id=current_node_id,
-                        current_node_spec=node_spec,
-                        result=skip_result,
-                        buffer=buffer,
-                    )
-                    if next_node is None:
-                        self.logger.info("   → No more edges after visit limit, ending")
-                        break
-                    current_node_id = next_node
-                    continue
-
-                path.append(current_node_id)
-
-                # Clear stale nullable outputs from previous visits.
-                # When a node is re-visited (e.g. review → process-batch → review),
-                # nullable outputs from the PREVIOUS visit linger in the data buffer.
-                # This causes stale edge conditions to fire (e.g. "feedback is not None"
-                # from visit 1 triggers even when visit 2 sets "final_summary" instead).
-                # Clearing them ensures only the CURRENT visit's outputs affect routing.
-                if node_visit_counts.get(current_node_id, 0) > 1:
-                    nullable_keys = getattr(node_spec, "nullable_output_keys", None) or []
-                    for key in nullable_keys:
-                        if buffer.read(key) is not None:
-                            buffer.write(key, None, validate=False)
-                            self.logger.info(
-                                f"   🧹 Cleared stale nullable output '{key}' from previous visit"
-                            )
-
-                # Check if pause (HITL) before execution
-                if current_node_id in graph.pause_nodes:
-                    self.logger.info(f"⏸ Paused at HITL node: {node_spec.name}")
-                    # Execute this node, then pause
-                    # (We'll check again after execution and save state)
-
-                # Expose current node for external injection routing
-                self.current_node_id = current_node_id
-
-                self.logger.info(f"\n▶ Step {steps}: {node_spec.name} ({node_spec.node_type})")
-                self.logger.info(f"   Inputs: {node_spec.input_keys}")
-                self.logger.info(f"   Outputs: {node_spec.output_keys}")
-
-                # Continuous mode: accumulate tools and output keys from this node
-                if is_continuous and node_spec.tools:
-                    for t in self.tools:
-                        if t.name in node_spec.tools and t.name not in cumulative_tool_names:
-                            cumulative_tools.append(t)
-                            cumulative_tool_names.add(t.name)
-                if is_continuous and node_spec.output_keys:
-                    for k in node_spec.output_keys:
-                        if k not in cumulative_output_keys:
-                            cumulative_output_keys.append(k)
-
-                # Build resume narrative (Layer 2) when restoring a session
-                # so the EventLoopNode can rebuild the full 3-layer system prompt.
-                _resume_narrative = ""
-                if _is_resuming and path:
-                    from framework.graph.prompt_composer import build_narrative
-
-                    _resume_narrative = build_narrative(buffer, path, graph)
-
-                # Build context for node
-                ctx = self._build_context(
-                    node_spec=node_spec,
-                    buffer=buffer,
-                    goal=goal,
-                    input_data=input_data or {},
-                    max_tokens=graph.max_tokens,
-                    continuous_mode=is_continuous,
-                    inherited_conversation=continuous_conversation if is_continuous else None,
-                    override_tools=cumulative_tools if is_continuous else None,
-                    cumulative_output_keys=cumulative_output_keys if is_continuous else None,
-                    event_triggered=_event_triggered,
-                    node_registry=node_registry,
-                    identity_prompt=getattr(graph, "identity_prompt", ""),
-                    narrative=_resume_narrative,
-                    graph=graph,
-                )
-
-                # Log actual input data being read
-                if node_spec.input_keys:
-                    self.logger.info("   Reading from data buffer:")
-                    for key in node_spec.input_keys:
-                        value = buffer.read(key)
-                        if value is not None:
-                            # Truncate long values for readability
-                            value_str = str(value)
-                            if len(value_str) > 200:
-                                value_str = value_str[:200] + "..."
-                            self.logger.info(f"      {key}: {value_str}")
-
-                # Get or create node implementation
-                node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
-
-                # Validate inputs
-                validation_errors = node_impl.validate_input(ctx)
-                if validation_errors:
-                    self.logger.warning(f"⚠ Validation warnings: {validation_errors}")
-                    self.runtime.report_problem(
-                        severity="warning",
-                        description=f"Validation errors for {current_node_id}: {validation_errors}",
-                    )
-
-                # CHECKPOINT: node_start
-                if (
-                    checkpoint_store
-                    and checkpoint_config
-                    and checkpoint_config.should_checkpoint_node_start()
-                ):
-                    checkpoint = self._create_checkpoint(
-                        checkpoint_type="node_start",
-                        current_node=node_spec.id,
-                        execution_path=list(path),
-                        buffer=buffer,
-                        is_clean=(sum(node_retry_counts.values()) == 0),
-                    )
-
-                    if checkpoint_config.async_checkpoint:
-                        # Non-blocking checkpoint save
-                        asyncio.create_task(checkpoint_store.save_checkpoint(checkpoint))
-                    else:
-                        # Blocking checkpoint save
-                        await checkpoint_store.save_checkpoint(checkpoint)
-
-                # Emit node-started event (skip event_loop nodes — they emit their own)
-                if self._event_bus and node_spec.node_type != "event_loop":
-                    await self._event_bus.emit_node_loop_started(
-                        stream_id=self._stream_id,
-                        node_id=current_node_id,
-                        execution_id=self._execution_id,
-                    )
-
-                # Execute node
-                self.logger.info("   Executing...")
-                result = await node_impl.execute(ctx)
-
-                # GCU tab cleanup: stop the browser profile after a top-level GCU node
-                # finishes so tabs don't accumulate. Mirrors the subagent cleanup in
-                # EventLoopNode._execute_subagent().
-                if node_spec.node_type == "gcu" and self.tool_executor is not None:
-                    try:
-                        from gcu.browser.session import (
-                            _active_profile as _gcu_profile_var,
-                        )
-
-                        _gcu_profile = _gcu_profile_var.get()
-                        _stop_use = ToolUse(
-                            id="gcu-cleanup",
-                            name="browser_stop",
-                            input={"profile": _gcu_profile},
-                        )
-                        _stop_result = self.tool_executor(_stop_use)
-                        if asyncio.iscoroutine(_stop_result) or asyncio.isfuture(_stop_result):
-                            await _stop_result
-                    except ImportError:
-                        pass  # GCU not installed
-                    except Exception as _gcu_exc:
-                        logger.warning(
-                            "GCU browser_stop failed for profile %r: %s",
-                            _gcu_profile,
-                            _gcu_exc,
-                        )
-
-                # Emit node-completed event (skip event_loop nodes)
-                if self._event_bus and node_spec.node_type != "event_loop":
-                    await self._event_bus.emit_node_loop_completed(
-                        stream_id=self._stream_id,
-                        node_id=current_node_id,
-                        iterations=1,
-                        execution_id=self._execution_id,
-                    )
-
-                # Ensure runtime logging has an L2 entry for this node
-                if self.runtime_logger:
-                    self.runtime_logger.ensure_node_logged(
-                        node_id=node_spec.id,
-                        node_name=node_spec.name,
-                        node_type=node_spec.node_type,
-                        success=result.success,
-                        error=result.error,
-                        tokens_used=result.tokens_used,
-                        latency_ms=result.latency_ms,
-                    )
-
-                if result.success:
-                    # Validate output before accepting it.
-                    # Skip for event_loop nodes — their judge system is
-                    # the sole acceptance mechanism (see WP-8).  Empty
-                    # strings and other flexible outputs are legitimate
-                    # for LLM-driven nodes that already passed the judge.
-                    if (
-                        result.output
-                        and node_spec.output_keys
-                        and node_spec.node_type != "event_loop"
-                    ):
-                        validation = self.validator.validate_all(
-                            output=result.output,
-                            expected_keys=node_spec.output_keys,
-                            check_hallucination=True,
-                            nullable_keys=node_spec.nullable_output_keys,
-                        )
-                        if not validation.success:
-                            self.logger.error(f"   ✗ Output validation failed: {validation.error}")
-                            result = NodeResult(
-                                success=False,
-                                error=f"Output validation failed: {validation.error}",
-                                output={},
-                                tokens_used=result.tokens_used,
-                                latency_ms=result.latency_ms,
-                            )
-
-                if result.success:
-                    self.logger.info(
-                        f"   ✓ Success (tokens: {result.tokens_used}, "
-                        f"latency: {result.latency_ms}ms)"
-                    )
-
-                    # Generate and log human-readable summary
-                    summary = result.to_summary(node_spec)
-                    self.logger.info(f"   📝 Summary: {summary}")
-
-                    # Log what was written to buffer (detailed view)
-                    if result.output:
-                        self.logger.info("   Written to data buffer:")
-                        for key, value in result.output.items():
-                            value_str = str(value)
-                            if len(value_str) > 200:
-                                value_str = value_str[:200] + "..."
-                            self.logger.info(f"      {key}: {value_str}")
-
-                    # Write node outputs to buffer BEFORE edge evaluation
-                    # This enables direct key access in conditional expressions (e.g., "score > 80")
-                    # Without this, conditional edges can only use output['key'] syntax
-                    if result.output:
-                        for key, value in result.output.items():
-                            buffer.write(key, value, validate=False)
-                else:
-                    self.logger.error(f"   ✗ Failed: {result.error}")
-
-                total_tokens += result.tokens_used
-                total_latency += result.latency_ms
-
-                # Handle failure
-                if not result.success:
-                    # Track retries per node
-                    node_retry_counts[current_node_id] = (
-                        node_retry_counts.get(current_node_id, 0) + 1
-                    )
-
-                    # [CORRECTED] Use node_spec.max_retries instead of hardcoded 3
-                    max_retries = getattr(node_spec, "max_retries", 3)
-
-                    # EventLoopNode instances handle retry internally via judge —
-                    # executor retry would cause catastrophic retry multiplication.
-                    # Only override for actual EventLoopNode instances, not custom
-                    # NodeProtocol implementations that happen to use node_type="event_loop"
-                    from framework.graph.event_loop_node import EventLoopNode
-
-                    if isinstance(node_impl, EventLoopNode) and max_retries > 0:
-                        self.logger.warning(
-                            f"EventLoopNode '{node_spec.id}' has max_retries={max_retries}. "
-                            "Overriding to 0 — event loop nodes handle retry internally via judge."
-                        )
-                        max_retries = 0
-
-                    if node_retry_counts[current_node_id] < max_retries:
-                        # Retry - don't increment steps for retries
-                        steps -= 1
-
-                        # --- EXPONENTIAL BACKOFF ---
-                        retry_count = node_retry_counts[current_node_id]
-                        # Backoff formula: 1.0 * (2^(retry - 1)) -> 1s, 2s, 4s...
-                        delay = 1.0 * (2 ** (retry_count - 1))
-                        self.logger.info(f"   Using backoff: Sleeping {delay}s before retry...")
-                        await asyncio.sleep(delay)
-                        # --------------------------------------
-
-                        self.logger.info(
-                            f"   ↻ Retrying ({node_retry_counts[current_node_id]}/{max_retries})..."
-                        )
-
-                        # Emit retry event
-                        if self._event_bus:
-                            await self._event_bus.emit_node_retry(
-                                stream_id=self._stream_id,
-                                node_id=current_node_id,
-                                retry_count=retry_count,
-                                max_retries=max_retries,
-                                error=result.error or "",
-                                execution_id=self._execution_id,
-                            )
-
-                        _is_retry = True
-                        continue
-                    else:
-                        # Max retries exceeded - check for failure handlers
-                        self.logger.error(
-                            f"   ✗ Max retries ({max_retries}) exceeded for node {current_node_id}"
-                        )
-
-                        # Check if there's an ON_FAILURE edge to follow
-                        next_node = await self._follow_edges(
-                            graph=graph,
-                            goal=goal,
-                            current_node_id=current_node_id,
-                            current_node_spec=node_spec,
-                            result=result,  # result.success=False triggers ON_FAILURE
-                            buffer=buffer,
-                        )
-
-                        if next_node:
-                            # Found a failure handler - route to it
-                            self.logger.info(f"   → Routing to failure handler: {next_node}")
-                            current_node_id = next_node
-                            continue  # Continue execution with handler
-                        else:
-                            # No failure handler - terminate execution
-                            self.runtime.report_problem(
-                                severity="critical",
-                                description=(
-                                    f"Node {current_node_id} failed after "
-                                    f"{max_retries} attempts: {result.error}"
-                                ),
-                            )
-                            self.runtime.end_run(
-                                success=False,
-                                output_data=buffer.read_all(),
-                                narrative=(
-                                    f"Failed at {node_spec.name} after "
-                                    f"{max_retries} retries: {result.error}"
-                                ),
-                            )
-
-                            # Calculate quality metrics
-                            total_retries_count = sum(node_retry_counts.values())
-                            nodes_failed = list(node_retry_counts.keys())
-
-                            if self.runtime_logger:
-                                await self.runtime_logger.end_run(
-                                    status="failure",
-                                    duration_ms=total_latency,
-                                    node_path=path,
-                                    execution_quality="failed",
-                                )
-
-                            # Save buffer for potential resume
-                            saved_buffer = buffer.read_all()
-                            failure_session_state = {
-                                "data_buffer": saved_buffer,
-                                "execution_path": list(path),
-                                "node_visit_counts": dict(node_visit_counts),
-                                "resume_from": current_node_id,
-                                "run_id": self._run_id,
-                            }
-
-                            return ExecutionResult(
-                                success=False,
-                                error=(
-                                    f"Node '{node_spec.name}' failed after "
-                                    f"{max_retries} attempts: {result.error}"
-                                ),
-                                output=saved_buffer,
-                                steps_executed=steps,
-                                total_tokens=total_tokens,
-                                total_latency_ms=total_latency,
-                                path=path,
-                                total_retries=total_retries_count,
-                                nodes_with_failures=nodes_failed,
-                                retry_details=dict(node_retry_counts),
-                                had_partial_failures=len(nodes_failed) > 0,
-                                execution_quality="failed",
-                                node_visit_counts=dict(node_visit_counts),
-                                session_state=failure_session_state,
-                            )
-
-                # Check if we just executed a pause node - if so, save state and return
-                # This must happen BEFORE determining next node, since pause nodes may have no edges
-                if node_spec.id in graph.pause_nodes:
-                    self.logger.info("💾 Saving session state after pause node")
-
-                    # Emit pause event
-                    if self._event_bus:
-                        await self._event_bus.emit_execution_paused(
-                            stream_id=self._stream_id,
-                            node_id=node_spec.id,
-                            reason="HITL pause node",
-                            execution_id=self._execution_id,
-                        )
-
-                    saved_buffer = buffer.read_all()
-                    session_state_out = {
-                        "paused_at": node_spec.id,
-                        "resume_from": f"{node_spec.id}_resume",  # Resume key
-                        "data_buffer": saved_buffer,
-                        "execution_path": list(path),
-                        "node_visit_counts": dict(node_visit_counts),
-                        "next_node": None,  # Will resume from entry point
-                        "run_id": self._run_id,
-                    }
-
-                    self.runtime.end_run(
-                        success=True,
-                        output_data=saved_buffer,
-                        narrative=f"Paused at {node_spec.name} after {steps} steps",
-                    )
-
-                    # Calculate quality metrics
-                    total_retries_count = sum(node_retry_counts.values())
-                    nodes_failed = [nid for nid, count in node_retry_counts.items() if count > 0]
-                    exec_quality = "degraded" if total_retries_count > 0 else "clean"
-
-                    if self.runtime_logger:
-                        await self.runtime_logger.end_run(
-                            status="success",
-                            duration_ms=total_latency,
-                            node_path=path,
-                            execution_quality=exec_quality,
-                        )
-
-                    return ExecutionResult(
-                        success=True,
-                        output=saved_buffer,
-                        steps_executed=steps,
-                        total_tokens=total_tokens,
-                        total_latency_ms=total_latency,
-                        path=path,
-                        paused_at=node_spec.id,
-                        session_state=session_state_out,
-                        total_retries=total_retries_count,
-                        nodes_with_failures=nodes_failed,
-                        retry_details=dict(node_retry_counts),
-                        had_partial_failures=len(nodes_failed) > 0,
-                        execution_quality=exec_quality,
-                        node_visit_counts=dict(node_visit_counts),
-                    )
-
-                # Check if this is a terminal node - if so, we're done
-                if node_spec.id in graph.terminal_nodes:
-                    self.logger.info(f"✓ Reached terminal node: {node_spec.name}")
-                    break
-
-                # Determine next node
-                if result.next_node:
-                    # Router explicitly set next node
-                    self.logger.info(f"   → Router directing to: {result.next_node}")
-
-                    # Emit edge traversed event for router-directed edge
-                    if self._event_bus:
-                        await self._event_bus.emit_edge_traversed(
-                            stream_id=self._stream_id,
-                            source_node=current_node_id,
-                            target_node=result.next_node,
-                            edge_condition="router",
-                            execution_id=self._execution_id,
-                        )
-
-                    current_node_id = result.next_node
-                    self._write_progress(current_node_id, path, buffer, node_visit_counts)
-                else:
-                    # Get all traversable edges for fan-out detection
-                    traversable_edges = await self._get_all_traversable_edges(
-                        graph=graph,
-                        goal=goal,
-                        current_node_id=current_node_id,
-                        current_node_spec=node_spec,
-                        result=result,
-                        buffer=buffer,
-                    )
-
-                    if not traversable_edges:
-                        self.logger.info("   → No more edges, ending execution")
-                        break  # No valid edge, end execution
-
-                    # Check for fan-out (multiple traversable edges)
-                    if self.enable_parallel_execution and len(traversable_edges) > 1:
-                        # Find convergence point (fan-in node)
-                        targets = [e.target for e in traversable_edges]
-                        fan_in_node = self._find_convergence_node(graph, targets)
-
-                        # Emit edge traversed events for fan-out branches
-                        if self._event_bus:
-                            for edge in traversable_edges:
-                                await self._event_bus.emit_edge_traversed(
-                                    stream_id=self._stream_id,
-                                    source_node=current_node_id,
-                                    target_node=edge.target,
-                                    edge_condition=edge.condition.value
-                                    if hasattr(edge.condition, "value")
-                                    else str(edge.condition),
-                                    execution_id=self._execution_id,
-                                )
-
-                        # Execute branches in parallel
-                        (
-                            _branch_results,
-                            branch_tokens,
-                            branch_latency,
-                        ) = await self._execute_parallel_branches(
-                            graph=graph,
-                            goal=goal,
-                            edges=traversable_edges,
-                            buffer=buffer,
-                            source_result=result,
-                            source_node_spec=node_spec,
-                            path=path,
-                            node_registry=node_registry,
-                        )
-
-                        total_tokens += branch_tokens
-                        total_latency += branch_latency
-
-                        # Continue from fan-in node
-                        if fan_in_node:
-                            self.logger.info(f"   ⑃ Fan-in: converging at {fan_in_node}")
-                            current_node_id = fan_in_node
-                            self._write_progress(current_node_id, path, buffer, node_visit_counts)
-                        else:
-                            # No convergence point - branches are terminal
-                            self.logger.info("   → Parallel branches completed (no convergence)")
-                            break
-                    else:
-                        # Sequential: follow single edge (existing logic via _follow_edges)
-                        next_node = await self._follow_edges(
-                            graph=graph,
-                            goal=goal,
-                            current_node_id=current_node_id,
-                            current_node_spec=node_spec,
-                            result=result,
-                            buffer=buffer,
-                        )
-                        if next_node is None:
-                            self.logger.info("   → No more edges, ending execution")
-                            break
-                        next_spec = graph.get_node(next_node)
-                        self.logger.info(f"   → Next: {next_spec.name if next_spec else next_node}")
-
-                        # Emit edge traversed event for sequential edge
-                        if self._event_bus:
-                            await self._event_bus.emit_edge_traversed(
-                                stream_id=self._stream_id,
-                                source_node=current_node_id,
-                                target_node=next_node,
-                                execution_id=self._execution_id,
-                            )
-
-                        # CHECKPOINT: node_complete (after determining next node)
-                        if (
-                            checkpoint_store
-                            and checkpoint_config
-                            and checkpoint_config.should_checkpoint_node_complete()
-                        ):
-                            checkpoint = self._create_checkpoint(
-                                checkpoint_type="node_complete",
-                                current_node=node_spec.id,
-                                execution_path=list(path),
-                                buffer=buffer,
-                                next_node=next_node,
-                                is_clean=(sum(node_retry_counts.values()) == 0),
-                            )
-
-                            if checkpoint_config.async_checkpoint:
-                                asyncio.create_task(checkpoint_store.save_checkpoint(checkpoint))
-                            else:
-                                await checkpoint_store.save_checkpoint(checkpoint)
-
-                        # Periodic checkpoint pruning
-                        if (
-                            checkpoint_store
-                            and checkpoint_config
-                            and checkpoint_config.should_prune_checkpoints(len(path))
-                        ):
-                            asyncio.create_task(
-                                checkpoint_store.prune_checkpoints(
-                                    max_age_days=checkpoint_config.checkpoint_max_age_days
-                                )
-                            )
-
-                        current_node_id = next_node
-
-                # Write progress snapshot at node transition
-                self._write_progress(current_node_id, path, buffer, node_visit_counts)
-
-                # Continuous mode: thread conversation forward with transition marker
-                if is_continuous and result.conversation is not None:
-                    continuous_conversation = result.conversation
-
-                    # Look up the next node spec for the transition marker
-                    next_spec = graph.get_node(current_node_id)
-                    if next_spec and next_spec.node_type == "event_loop":
-                        from framework.graph.prompt_composer import (
-                            EXECUTION_SCOPE_PREAMBLE,
-                            build_accounts_prompt,
-                            build_narrative,
-                            build_transition_marker,
-                            compose_system_prompt,
-                        )
-
-                        # Build Layer 2 (narrative) from current state
-                        narrative = build_narrative(buffer, path, graph)
-
-                        # Build per-node accounts prompt for the next node
-                        _node_accounts = self.accounts_prompt or None
-                        if self.accounts_data and self.tool_provider_map:
-                            _node_accounts = (
-                                build_accounts_prompt(
-                                    self.accounts_data,
-                                    self.tool_provider_map,
-                                    node_tool_names=next_spec.tools,
-                                )
-                                or None
-                            )
-
-                        # Compose new system prompt (Layer 1 + 2 + 3 + accounts)
-                        # Prepend scope preamble to focus so the LLM stays
-                        # within this node's responsibility.
-                        _focus = next_spec.system_prompt
-                        if next_spec.output_keys and _focus:
-                            _focus = f"{EXECUTION_SCOPE_PREAMBLE}\n\n{_focus}"
-                        new_system = compose_system_prompt(
-                            identity_prompt=getattr(graph, "identity_prompt", None),
-                            focus_prompt=_focus,
-                            narrative=narrative,
-                            accounts_prompt=_node_accounts,
-                        )
-                        continuous_conversation.update_system_prompt(new_system)
-
-                        # Insert transition marker into conversation
-                        data_dir = str(self._storage_path / "data") if self._storage_path else None
-                        marker = build_transition_marker(
-                            previous_node=node_spec,
-                            next_node=next_spec,
-                            buffer=buffer,
-                            cumulative_tool_names=sorted(cumulative_tool_names),
-                            data_dir=data_dir,
-                        )
-                        await continuous_conversation.add_user_message(
-                            marker,
-                            is_transition_marker=True,
-                        )
-
-                        # Set current phase for phase-aware compaction
-                        continuous_conversation.set_current_phase(next_spec.id)
-
-                        # Phase-boundary compaction (same flow as EventLoopNode._compact)
-                        if continuous_conversation.usage_ratio() > 0.5:
-                            await continuous_conversation.prune_old_tool_results(
-                                protect_tokens=2000,
-                            )
-                        if continuous_conversation.needs_compaction():
-                            _phase_ratio = continuous_conversation.usage_ratio()
-                            self.logger.info(
-                                "   Phase-boundary compaction (%.0f%% usage)",
-                                _phase_ratio * 100,
-                            )
-                            _data_dir = (
-                                str(self._storage_path / "data") if self._storage_path else None
-                            )
-                            # Step 1: Structural compaction (>=80%)
-                            if _data_dir:
-                                _pre = continuous_conversation.usage_ratio()
-                                await continuous_conversation.compact_preserving_structure(
-                                    spillover_dir=_data_dir,
-                                    keep_recent=4,
-                                    phase_graduated=True,
-                                )
-                                if continuous_conversation.usage_ratio() >= 0.9 * _pre:
-                                    await continuous_conversation.compact_preserving_structure(
-                                        spillover_dir=_data_dir,
-                                        keep_recent=4,
-                                        phase_graduated=True,
-                                        aggressive=True,
-                                    )
-
-                            # Step 2: LLM compaction (>95%)
-                            if (
-                                continuous_conversation.usage_ratio() > 0.95
-                                and self._llm is not None
-                            ):
-                                self.logger.info(
-                                    "   LLM phase-boundary compaction (%.0f%% usage)",
-                                    continuous_conversation.usage_ratio() * 100,
-                                )
-                                try:
-                                    _llm_summary = await self._phase_llm_compact(
-                                        continuous_conversation,
-                                        next_spec,
-                                        list(continuous_conversation.messages),
-                                    )
-                                    await continuous_conversation.compact(
-                                        _llm_summary,
-                                        keep_recent=2,
-                                        phase_graduated=True,
-                                    )
-                                except Exception as e:
-                                    self.logger.warning(
-                                        "   Phase LLM compaction failed: %s",
-                                        e,
-                                    )
-
-                            # Step 3: Emergency (only if still over budget)
-                            if continuous_conversation.needs_compaction():
-                                self.logger.warning(
-                                    "   Emergency phase compaction (%.0f%%)",
-                                    continuous_conversation.usage_ratio() * 100,
-                                )
-                                summary = (
-                                    f"Summary of earlier phases "
-                                    f"(before {next_spec.name}). "
-                                    "See transition markers for phase details."
-                                )
-                                await continuous_conversation.compact(
-                                    summary,
-                                    keep_recent=1,
-                                    phase_graduated=True,
-                                )
-
-                # Update input_data for next node
-                input_data = result.output
-
-            # Collect output
-            output = buffer.read_all()
-
-            self.logger.info("\n✓ Execution complete!")
-            self.logger.info(f"   Steps: {steps}")
-            self.logger.info(f"   Path: {' → '.join(path)}")
-            self.logger.info(f"   Total tokens: {total_tokens}")
-            self.logger.info(f"   Total latency: {total_latency}ms")
-
-            # Calculate execution quality metrics
-            total_retries_count = sum(node_retry_counts.values())
-            nodes_failed = [nid for nid, count in node_retry_counts.items() if count > 0]
-            exec_quality = "degraded" if total_retries_count > 0 else "clean"
-
-            # Update narrative to reflect execution quality
-            quality_suffix = ""
-            if exec_quality == "degraded":
-                retries = total_retries_count
-                failed = len(nodes_failed)
-                quality_suffix = f" ({retries} retries across {failed} nodes)"
-
-            self.runtime.end_run(
-                success=True,
-                output_data=output,
-                narrative=(
-                    f"Executed {steps} steps through path: {' -> '.join(path)}{quality_suffix}"
-                ),
-            )
-
-            if self.runtime_logger:
-                await self.runtime_logger.end_run(
-                    status="success" if exec_quality != "failed" else "failure",
-                    duration_ms=total_latency,
-                    node_path=path,
-                    execution_quality=exec_quality,
-                )
-
-            return ExecutionResult(
-                success=True,
-                output=output,
-                steps_executed=steps,
-                total_tokens=total_tokens,
-                total_latency_ms=total_latency,
-                path=path,
-                total_retries=total_retries_count,
-                nodes_with_failures=nodes_failed,
-                retry_details=dict(node_retry_counts),
-                had_partial_failures=len(nodes_failed) > 0,
-                execution_quality=exec_quality,
-                node_visit_counts=dict(node_visit_counts),
-                session_state={
-                    "data_buffer": output,  # output IS buffer.read_all()
-                    "execution_path": list(path),
-                    "node_visit_counts": dict(node_visit_counts),
-                    "run_id": self._run_id,
-                },
-            )
-
-        except asyncio.CancelledError:
-            # Handle cancellation (e.g., TUI quit) - save as paused instead of failed
-            self.logger.info("⏸ Execution cancelled - saving state for resume")
-
-            # Flush WIP accumulator outputs from the interrupted node's
-            # cursor.json into DataBuffer so they survive resume.  The
-            # accumulator writes to cursor.json on every set() call, but
-            # only writes to DataBuffer when the judge ACCEPTs.  Without
-            # this, edge conditions checking these keys see None on resume.
-            if current_node_id and self._storage_path:
-                try:
-                    import json as _json
-
-                    cursor_path = self._storage_path / "conversations" / "cursor.json"
-                    if cursor_path.exists():
-                        cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
-                        run_cursor = get_run_cursor(cursor_data, self._run_id or None) or {}
-                        wip_outputs = run_cursor.get("outputs", {})
-                        for key, value in wip_outputs.items():
-                            if value is not None:
-                                buffer.write(key, value, validate=False)
-                        if wip_outputs:
-                            self.logger.info(
-                                "Flushed %d WIP accumulator outputs to buffer: %s",
-                                len(wip_outputs),
-                                list(wip_outputs.keys()),
-                            )
-                except Exception:
-                    self.logger.debug(
-                        "Could not flush accumulator outputs from cursor",
-                        exc_info=True,
-                    )
-
-            # Save buffer and state for resume
-            saved_buffer = buffer.read_all()
-            session_state_out: dict[str, Any] = {
-                "data_buffer": saved_buffer,
-                "execution_path": list(path),
-                "node_visit_counts": dict(node_visit_counts),
-                "run_id": self._run_id,
-            }
-
-            # Calculate quality metrics
-            total_retries_count = sum(node_retry_counts.values())
-            nodes_failed = [nid for nid, count in node_retry_counts.items() if count > 0]
-            exec_quality = "degraded" if total_retries_count > 0 else "clean"
-
-            if self.runtime_logger:
-                await self.runtime_logger.end_run(
-                    status="paused",
-                    duration_ms=total_latency,
-                    node_path=path,
-                    execution_quality=exec_quality,
-                )
-
-            # Return with paused status
-            return ExecutionResult(
-                success=False,
-                error="Execution cancelled",
-                output=saved_buffer,
-                steps_executed=steps,
-                total_tokens=total_tokens,
-                total_latency_ms=total_latency,
-                path=path,
-                paused_at=current_node_id,  # Save where we were
-                session_state=session_state_out,
-                total_retries=total_retries_count,
-                nodes_with_failures=nodes_failed,
-                retry_details=dict(node_retry_counts),
-                had_partial_failures=len(nodes_failed) > 0,
-                execution_quality=exec_quality,
-                node_visit_counts=dict(node_visit_counts),
-            )
-
-        except Exception as e:
-            import traceback
-
-            stack_trace = traceback.format_exc()
-
-            self.runtime.report_problem(
-                severity="critical",
-                description=str(e),
-            )
-            self.runtime.end_run(
-                success=False,
-                narrative=f"Failed at step {steps}: {e}",
-            )
-
-            # Log the crashing node to L2 with full stack trace
-            if self.runtime_logger and node_spec is not None:
-                self.runtime_logger.ensure_node_logged(
-                    node_id=node_spec.id,
-                    node_name=node_spec.name,
-                    node_type=node_spec.node_type,
-                    success=False,
-                    error=str(e),
-                    stacktrace=stack_trace,
-                )
-
-            # Calculate quality metrics even for exceptions
-            total_retries_count = sum(node_retry_counts.values())
-            nodes_failed = list(node_retry_counts.keys())
-
-            if self.runtime_logger:
-                await self.runtime_logger.end_run(
-                    status="failure",
-                    duration_ms=total_latency,
-                    node_path=path,
-                    execution_quality="failed",
-                )
-
-            # Flush WIP accumulator outputs (same as CancelledError path)
-            if current_node_id and self._storage_path:
-                try:
-                    import json as _json
-
-                    cursor_path = self._storage_path / "conversations" / "cursor.json"
-                    if cursor_path.exists():
-                        cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
-                        run_cursor = get_run_cursor(cursor_data, self._run_id or None) or {}
-                        for key, value in run_cursor.get("outputs", {}).items():
-                            if value is not None:
-                                buffer.write(key, value, validate=False)
-                except Exception:
-                    self.logger.debug(
-                        "Could not flush accumulator outputs from cursor",
-                        exc_info=True,
-                    )
-
-            # Save buffer and state for potential resume
-            saved_buffer = buffer.read_all()
-            session_state_out: dict[str, Any] = {
-                "data_buffer": saved_buffer,
-                "execution_path": list(path),
-                "node_visit_counts": dict(node_visit_counts),
-                "resume_from": current_node_id,
-                "run_id": self._run_id,
-            }
-
-            # Mark latest checkpoint for resume on failure
-            if checkpoint_store:
-                try:
-                    checkpoints = await checkpoint_store.list_checkpoints()
-                    if checkpoints:
-                        # Find latest clean checkpoint
-                        index = await checkpoint_store.load_index()
-                        if index:
-                            latest_clean = index.get_latest_clean_checkpoint()
-                            if latest_clean:
-                                session_state_out["resume_from_checkpoint"] = (
-                                    latest_clean.checkpoint_id
-                                )
-                                session_state_out["latest_checkpoint_id"] = (
-                                    latest_clean.checkpoint_id
-                                )
-                                self.logger.info(
-                                    f"💾 Marked checkpoint for resume: {latest_clean.checkpoint_id}"
-                                )
-                except Exception as checkpoint_err:
-                    self.logger.warning(f"Failed to mark checkpoint for resume: {checkpoint_err}")
-
-            return ExecutionResult(
-                success=False,
-                error=str(e),
-                output=saved_buffer,
-                steps_executed=steps,
-                path=path,
-                total_retries=total_retries_count,
-                nodes_with_failures=nodes_failed,
-                retry_details=dict(node_retry_counts),
-                had_partial_failures=len(nodes_failed) > 0,
-                execution_quality="failed",
-                node_visit_counts=dict(node_visit_counts),
-                session_state=session_state_out,
+            return await self._execute_with_workers(
+                graph=graph,
+                goal=goal,
+                buffer=buffer,
+                input_data=input_data or {},
+                session_state=session_state,
+                node_visit_counts=node_visit_counts,
+                is_continuous=is_continuous,
+                checkpoint_store=checkpoint_store,
+                checkpoint_config=checkpoint_config,
+                _ctx_token=_ctx_token,
             )
 
         finally:
@@ -1718,6 +705,7 @@ class GraphExecutor:
                 from framework.runner.tool_registry import ToolRegistry
 
                 ToolRegistry.reset_execution_context(_ctx_token)
+
 
     def _build_context(
         self,
@@ -2335,3 +1323,335 @@ class GraphExecutor:
             next_node=next_node,
             is_clean=is_clean,
         )
+
+    # ------------------------------------------------------------------
+    # Worker-based execution
+    # ------------------------------------------------------------------
+
+    async def _execute_with_workers(
+        self,
+        graph: GraphSpec,
+        goal: Goal,
+        buffer: DataBuffer,
+        input_data: dict[str, Any],
+        session_state: dict[str, Any] | None,
+        node_visit_counts: dict[str, int],
+        is_continuous: bool,
+        checkpoint_store: CheckpointStore | None,
+        checkpoint_config: CheckpointConfig | None,
+        _ctx_token: Any,
+    ) -> ExecutionResult:
+        """Execute a graph using event-driven WorkerAgents.
+
+        Replaces the imperative while-loop with autonomous workers that
+        self-activate based on edge conditions and fan-out tracking.
+        """
+        from framework.graph.worker_agent import (
+            Activation,
+            FanOutTag,
+            GraphContext,
+            WorkerAgent,
+            WorkerCompletion,
+            WorkerLifecycle,
+        )
+        from framework.runtime.event_bus import AgentEvent, EventType
+
+        # Build shared graph context
+        gc = GraphContext(
+            graph=graph,
+            goal=goal,
+            buffer=buffer,
+            runtime=self.runtime,
+            llm=self.llm,
+            tools=self.tools,
+            tool_executor=self.tool_executor,
+            event_bus=self._event_bus,
+            execution_id=self._execution_id,
+            stream_id=self._stream_id,
+            run_id=self._run_id,
+            storage_path=self._storage_path,
+            runtime_logger=self.runtime_logger,
+            node_registry=dict(self.node_registry),
+            node_spec_registry={node.id: node for node in graph.nodes},
+            parallel_config=self._parallel_config,
+            is_continuous=is_continuous,
+            accounts_prompt=self.accounts_prompt,
+            accounts_data=self.accounts_data,
+            tool_provider_map=self.tool_provider_map,
+            skills_catalog_prompt=self.skills_catalog_prompt,
+            protocols_prompt=self.protocols_prompt,
+            skill_dirs=self.skill_dirs,
+            context_warn_ratio=self.context_warn_ratio,
+            batch_init_nudge=self.batch_init_nudge,
+            dynamic_tools_provider=self.dynamic_tools_provider,
+            dynamic_prompt_provider=self.dynamic_prompt_provider,
+            iteration_metadata_provider=self.iteration_metadata_provider,
+            loop_config=self._loop_config,
+            node_visit_counts=dict(node_visit_counts),
+        )
+
+        # Create one WorkerAgent per node
+        workers: dict[str, WorkerAgent] = {}
+        for node_spec in graph.nodes:
+            workers[node_spec.id] = WorkerAgent(node_spec=node_spec, graph_context=gc)
+
+        # Identify entry workers (zero incoming edges) and terminal workers
+        entry_worker_ids = [wid for wid, w in workers.items() if w.is_entry]
+        terminal_worker_ids = set(graph.terminal_nodes or [])
+
+        self.logger.info(
+            f"🚀 Worker execution: {len(workers)} workers, "
+            f"{len(entry_worker_ids)} entry, {len(terminal_worker_ids)} terminal"
+        )
+
+        # Completion tracking
+        completed_terminals: set[str] = set()
+        failed_workers: dict[str, str] = {}  # worker_id -> error
+        all_completions: dict[str, WorkerCompletion] = {}
+        completion_event = asyncio.Event()
+
+        # Total metrics
+        total_tokens = 0
+        total_latency = 0
+
+        def _deserialize_activations(data_list: list[dict]) -> list[Activation]:
+            """Reconstruct Activation objects from event data."""
+            activations = []
+            for act_data in data_list:
+                edge_id = act_data["edge_id"]
+                edge = None
+                for e in graph.edges:
+                    if e.id == edge_id:
+                        edge = e
+                        break
+                if not edge:
+                    continue
+
+                fan_out_tags = []
+                for tag_data in act_data.get("fan_out_tags", []):
+                    fan_out_tags.append(
+                        FanOutTag(
+                            fan_out_id=tag_data["fan_out_id"],
+                            fan_out_source=tag_data["fan_out_source"],
+                            branches=frozenset(tag_data["branches"]),
+                            via_branch=tag_data["via_branch"],
+                        )
+                    )
+
+                activations.append(
+                    Activation(
+                        source_id=act_data["source_id"],
+                        target_id=act_data["target_id"],
+                        edge_id=edge_id,
+                        edge=edge,
+                        mapped_inputs=act_data.get("mapped_inputs", {}),
+                        fan_out_tags=fan_out_tags,
+                    )
+                )
+            return activations
+
+        def _check_graph_done() -> bool:
+            """Check if all terminal workers have completed or failed."""
+            if not terminal_worker_ids:
+                # No terminals: check if all workers are done
+                return all(
+                    w.lifecycle in (WorkerLifecycle.COMPLETED, WorkerLifecycle.FAILED)
+                    for w in workers.values()
+                )
+            for tid in terminal_worker_ids:
+                if tid not in completed_terminals and tid not in failed_workers:
+                    return False
+            return True
+
+        # Subscribe to worker events
+        sub_completed = None
+        sub_failed = None
+
+        async def _on_worker_completed(event: AgentEvent) -> None:
+            nonlocal total_tokens, total_latency
+
+            data = event.data
+            worker_id = data["worker_id"]
+
+            # Accumulate metrics
+            total_tokens += data.get("tokens_used", 0)
+            total_latency += data.get("latency_ms", 0)
+
+            # Deserialize activations
+            activations = _deserialize_activations(data.get("activations", []))
+
+            completion = WorkerCompletion(
+                worker_id=worker_id,
+                success=data.get("success", True),
+                output=data.get("output", {}),
+                tokens_used=data.get("tokens_used", 0),
+                latency_ms=data.get("latency_ms", 0),
+                conversation=data.get("conversation"),
+                activations=activations,
+            )
+            all_completions[worker_id] = completion
+
+            # Update cumulative tools/keys for continuous mode
+            if is_continuous:
+                src_spec = graph.get_node(worker_id)
+                if src_spec and src_spec.tools:
+                    for t in self.tools:
+                        if t.name in src_spec.tools and t.name not in gc.cumulative_tool_names:
+                            gc.cumulative_tools.append(t)
+                            gc.cumulative_tool_names.add(t.name)
+                if src_spec and src_spec.output_keys:
+                    for k in src_spec.output_keys:
+                        if k not in gc.cumulative_output_keys:
+                            gc.cumulative_output_keys.append(k)
+
+                # Thread conversation
+                if completion.conversation is not None:
+                    gc.continuous_conversation = completion.conversation
+
+            self.logger.info(
+                f"  ✓ Worker completed: {worker_id} "
+                f"({len(activations)} outgoing activation(s))"
+            )
+
+            # Route activations to target workers
+            for activation in activations:
+                target_worker = workers.get(activation.target_id)
+                if not target_worker:
+                    continue
+                if target_worker.lifecycle != WorkerLifecycle.PENDING:
+                    continue
+
+                target_worker.receive_activation(activation)
+
+                if target_worker.check_readiness():
+                    inherited = activation.fan_out_tags
+                    target_worker.activate(inherited_tags=inherited)
+
+            # Track terminal completion
+            if worker_id in terminal_worker_ids:
+                completed_terminals.add(worker_id)
+
+            # Update visit counts
+            gc.node_visit_counts[worker_id] = gc.node_visit_counts.get(worker_id, 0) + 1
+
+            # Write progress
+            self._write_progress(
+                current_node_id=worker_id,
+                path=gc.path,
+                buffer=buffer,
+                node_visit_counts=gc.node_visit_counts,
+            )
+
+            if _check_graph_done():
+                completion_event.set()
+
+        async def _on_worker_failed(event: AgentEvent) -> None:
+            data = event.data
+            worker_id = data["worker_id"]
+            error = data.get("error", "Unknown error")
+
+            failed_workers[worker_id] = error
+            self.logger.error(f"  ✗ Worker failed: {worker_id} - {error}")
+
+            if worker_id in terminal_worker_ids:
+                completed_terminals.add(worker_id)
+
+            if _check_graph_done():
+                completion_event.set()
+
+        # Subscribe to events
+        if self._event_bus:
+            sub_completed = self._event_bus.subscribe(
+                event_types=[EventType.WORKER_COMPLETED],
+                handler=_on_worker_completed,
+                filter_stream=self._stream_id,
+                filter_execution=self._execution_id,
+            )
+            sub_failed = self._event_bus.subscribe(
+                event_types=[EventType.WORKER_FAILED],
+                handler=_on_worker_failed,
+                filter_stream=self._stream_id,
+                filter_execution=self._execution_id,
+            )
+
+        try:
+            # Activate entry workers
+            for wid in entry_worker_ids:
+                workers[wid].activate(inherited_tags=[])
+                self.logger.info(f"  → Activated entry worker: {wid}")
+
+            # Wait for all terminal workers to complete
+            if terminal_worker_ids:
+                await completion_event.wait()
+            else:
+                # No terminal nodes defined — wait for all workers
+                await asyncio.sleep(0.1)
+                for _ in range(graph.max_steps * 10):  # Safety bound
+                    if _check_graph_done():
+                        break
+                    await asyncio.sleep(0.1)
+
+            # Assemble result
+            terminal_output: dict[str, Any] = {}
+            for tid in terminal_worker_ids:
+                if tid in all_completions:
+                    terminal_output.update(all_completions[tid].output)
+
+            if not terminal_output and all_completions:
+                last_id = gc.path[-1] if gc.path else None
+                if last_id and last_id in all_completions:
+                    terminal_output = all_completions[last_id].output
+
+            # Quality assessment
+            has_failures = bool(failed_workers)
+            exec_quality = "failed" if has_failures else "clean"
+
+            saved_buffer = buffer.read_all()
+            session_state_out = {
+                "data_buffer": saved_buffer,
+                "execution_path": list(gc.path),
+                "node_visit_counts": dict(gc.node_visit_counts),
+                "run_id": self._run_id,
+            }
+
+            success = not has_failures
+            self.runtime.end_run(
+                success=success,
+                narrative=f"Completed {len(gc.path)} steps via {len(workers)} workers",
+            )
+
+            if self.runtime_logger:
+                await self.runtime_logger.end_run(
+                    status="success" if success else "failure",
+                    duration_ms=total_latency,
+                    node_path=gc.path,
+                    execution_quality=exec_quality,
+                )
+
+            return ExecutionResult(
+                success=success,
+                output=terminal_output or saved_buffer,
+                error=(
+                    "; ".join(f"{k}: {v}" for k, v in failed_workers.items())
+                    if failed_workers
+                    else None
+                ),
+                steps_executed=len(gc.path),
+                total_tokens=total_tokens,
+                total_latency_ms=total_latency,
+                path=gc.path,
+                session_state=session_state_out,
+                total_retries=0,
+                nodes_with_failures=list(failed_workers.keys()),
+                retry_details={},
+                had_partial_failures=has_failures,
+                execution_quality=exec_quality,
+                node_visit_counts=dict(gc.node_visit_counts),
+            )
+
+        finally:
+            if self._event_bus:
+                if sub_completed:
+                    self._event_bus.unsubscribe(sub_completed)
+                if sub_failed:
+                    self._event_bus.unsubscribe(sub_failed)

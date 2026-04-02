@@ -373,7 +373,7 @@ claude> test workflow
 
 ```bash
 # Interactive dashboard
-hive tui
+hive open
 
 # Or run directly
 hive run exports/your_agent_name --input '{"task": "..."}'

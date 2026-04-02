@@ -246,8 +246,8 @@ If you prefer to build agents manually:
 ### Using the `hive` CLI
 
 ```bash
-# Browse and run agents interactively (Recommended)
-hive tui
+# Open the browser dashboard (Recommended for interactive use)
+hive open
 
 # Run a specific agent
 hive run exports/my_agent --input '{"ticket_content": "My login is broken", "customer_id": "CUST-123"}'
@@ -272,7 +272,6 @@ hive run exports/my_agent --model claude-sonnet-4-20250514
 
 | Command                | Description                                                             |
 | ---------------------- | ----------------------------------------------------------------------- |
-| `hive tui`             | Browse agents and launch TUI dashboard                                  |
 | `hive run <path>`      | Execute an agent (see flags below)                                      |
 | `hive shell [path]`    | Interactive REPL (`--no-approve`)                                       |
 | `hive serve`           | Start HTTP API server                                                   |
