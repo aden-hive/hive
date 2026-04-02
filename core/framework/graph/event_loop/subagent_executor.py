@@ -307,12 +307,16 @@ async def execute_subagent(
         conversation_store=subagent_conv_store,
     )
 
-    # Inject a unique GCU browser profile for this subagent
+    # Inject a GCU browser profile for this subagent.
+    # Use just agent_id (not subagent_instance) so the profile is stable
+    # across multiple calls to the same subagent type. This allows
+    # cookies/auth to persist between runs.
     _profile_token = None
+    _subagent_profile = agent_id  # Stable profile per agent type
     try:
         from gcu.browser.session import set_active_profile as _set_gcu_profile
 
-        _profile_token = _set_gcu_profile(f"{agent_id}-{subagent_instance}")
+        _profile_token = _set_gcu_profile(_subagent_profile)
     except ImportError:
         pass  # GCU tools not installed; no-op
 
@@ -392,21 +396,8 @@ async def execute_subagent(
 
             _gcu_profile_var.reset(_profile_token)
 
-            # Stop the browser session for this subagent's profile
-            if tool_executor is not None:
-                _subagent_profile = f"{agent_id}-{subagent_instance}"
-                try:
-                    _stop_use = ToolUse(
-                        id="gcu-cleanup",
-                        name="browser_stop",
-                        input={"profile": _subagent_profile},
-                    )
-                    _stop_result = tool_executor(_stop_use)
-                    if asyncio.iscoroutine(_stop_result) or asyncio.isfuture(_stop_result):
-                        await _stop_result
-                except Exception as _gcu_exc:
-                    logger.warning(
-                        "GCU browser_stop failed for profile %r: %s",
-                        _subagent_profile,
-                        _gcu_exc,
-                    )
+            # NOTE: We intentionally do NOT call browser_stop() here.
+            # Keeping the browser session alive allows cookies and auth state
+            # to persist across multiple subagent calls. The browser will be
+            # cleaned up when the parent agent stops or when explicitly
+            # requested via browser_stop().
