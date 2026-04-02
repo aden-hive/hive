@@ -17,11 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from framework.graph.checkpoint_config import CheckpointConfig
+from framework.graph.context import GraphContext, build_node_context
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.conversation import LEGACY_RUN_ID, get_run_cursor
 from framework.graph.node import (
-    NodeContext,
     NodeProtocol,
     NodeResult,
     NodeSpec,
@@ -707,112 +707,6 @@ class GraphExecutor:
                 ToolRegistry.reset_execution_context(_ctx_token)
 
 
-    def _build_context(
-        self,
-        node_spec: NodeSpec,
-        buffer: DataBuffer,
-        goal: Goal,
-        input_data: dict[str, Any],
-        max_tokens: int = 4096,
-        continuous_mode: bool = False,
-        inherited_conversation: Any = None,
-        override_tools: list | None = None,
-        cumulative_output_keys: list[str] | None = None,
-        event_triggered: bool = False,
-        identity_prompt: str = "",
-        narrative: str = "",
-        node_registry: dict[str, NodeSpec] | None = None,
-        graph: "GraphSpec | None" = None,
-    ) -> NodeContext:
-        """Build execution context for a node."""
-        # Filter tools to those available to this node
-        if override_tools is not None:
-            # Continuous mode: use cumulative tool set
-            available_tools = list(override_tools)
-        else:
-            available_tools = []
-            if node_spec.tools:
-                available_tools = [t for t in self.tools if t.name in node_spec.tools]
-
-        # Create scoped buffer view.
-        # When permissions are restricted (non-empty key lists), auto-include
-        # _-prefixed keys used by default skill protocols so agents can read/write
-        # operational state (e.g. _working_notes, _batch_ledger) regardless of
-        # what the node declares.  When key lists are empty (unrestricted), leave
-        # unchanged — empty means "allow all".
-        read_keys = list(node_spec.input_keys)
-        write_keys = list(node_spec.output_keys)
-        # Only extend lists that were already restricted (non-empty).
-        # Empty means "allow all" — adding keys would accidentally
-        # activate the permission check and block legitimate reads/writes.
-        if read_keys or write_keys:
-            from framework.skills.defaults import DATA_BUFFER_KEYS as _skill_keys
-
-            existing_underscore = [k for k in buffer._data if k.startswith("_")]
-            extra_keys = set(_skill_keys) | set(existing_underscore)
-            # Only inject into read_keys when it was already non-empty — an empty
-            # read_keys means "allow all reads" and injecting skill keys would
-            # inadvertently restrict reads to skill keys only.
-            for k in extra_keys:
-                if read_keys and k not in read_keys:
-                    read_keys.append(k)
-                if write_keys and k not in write_keys:
-                    write_keys.append(k)
-
-        scoped_buffer = buffer.with_permissions(
-            read_keys=read_keys,
-            write_keys=write_keys,
-        )
-
-        # Build per-node accounts prompt (filtered to this node's tools)
-        node_accounts_prompt = self.accounts_prompt
-        if self.accounts_data and self.tool_provider_map:
-            from framework.graph.prompt_composer import build_accounts_prompt
-
-            node_accounts_prompt = build_accounts_prompt(
-                self.accounts_data,
-                self.tool_provider_map,
-                node_tool_names=node_spec.tools,
-            )
-
-        goal_context = goal.to_prompt_context()
-
-        return NodeContext(
-            runtime=self.runtime,
-            node_id=node_spec.id,
-            node_spec=node_spec,
-            buffer=scoped_buffer,
-            input_data=input_data,
-            llm=self.llm,
-            available_tools=available_tools,
-            goal_context=goal_context,
-            goal=goal,  # Pass Goal object for LLM-powered routers
-            max_tokens=max_tokens,
-            runtime_logger=self.runtime_logger,
-            pause_event=self._pause_requested,  # Pass pause event for granular control
-            continuous_mode=continuous_mode,
-            inherited_conversation=inherited_conversation,
-            cumulative_output_keys=cumulative_output_keys or [],
-            event_triggered=event_triggered,
-            accounts_prompt=node_accounts_prompt,
-            identity_prompt=identity_prompt,
-            narrative=narrative,
-            execution_id=self._execution_id,
-            run_id=self._run_id,
-            stream_id=self._stream_id,
-            node_registry=node_registry or {},
-            all_tools=list(self.tools),  # Full catalog for subagent tool resolution
-            shared_node_registry=self.node_registry,  # For subagent escalation routing
-            dynamic_tools_provider=self.dynamic_tools_provider,
-            dynamic_prompt_provider=self.dynamic_prompt_provider,
-            iteration_metadata_provider=self.iteration_metadata_provider,
-            skills_catalog_prompt=self.skills_catalog_prompt,
-            protocols_prompt=self.protocols_prompt,
-            skill_dirs=self.skill_dirs,
-            default_skill_warn_ratio=self.context_warn_ratio,
-            default_skill_batch_nudge=self.batch_init_nudge,
-        )
-
     VALID_NODE_TYPES = {
         "event_loop",
         "gcu",
@@ -1103,14 +997,36 @@ class GraphExecutor:
                     branch.retry_count = attempt
 
                     # Build context for this branch
-                    ctx = self._build_context(
-                        node_spec,
-                        buffer,
-                        goal,
-                        mapped,
-                        graph.max_tokens,
+                    ctx = build_node_context(
+                        runtime=self.runtime,
+                        node_spec=node_spec,
+                        buffer=buffer,
+                        goal=goal,
+                        llm=self.llm,
+                        tools=self.tools,
+                        max_tokens=graph.max_tokens,
+                        input_data=mapped,
+                        runtime_logger=self.runtime_logger,
+                        pause_event=self._pause_requested,
+                        accounts_prompt=self.accounts_prompt,
+                        accounts_data=self.accounts_data,
+                        tool_provider_map=self.tool_provider_map,
+                        identity_prompt="",
+                        narrative="",
+                        execution_id=self._execution_id,
+                        run_id=self._run_id,
+                        stream_id=self._stream_id,
                         node_registry=node_registry,
-                        graph=graph,
+                        all_tools=self.tools,
+                        shared_node_registry=self.node_registry,
+                        dynamic_tools_provider=self.dynamic_tools_provider,
+                        dynamic_prompt_provider=self.dynamic_prompt_provider,
+                        iteration_metadata_provider=self.iteration_metadata_provider,
+                        skills_catalog_prompt=self.skills_catalog_prompt,
+                        protocols_prompt=self.protocols_prompt,
+                        skill_dirs=self.skill_dirs,
+                        default_skill_warn_ratio=self.context_warn_ratio,
+                        default_skill_batch_nudge=self.batch_init_nudge,
                     )
                     node_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 
@@ -1353,7 +1269,6 @@ class GraphExecutor:
         from framework.graph.worker_agent import (
             Activation,
             FanOutTag,
-            GraphContext,
             WorkerAgent,
             WorkerCompletion,
             WorkerLifecycle,
@@ -1399,8 +1314,9 @@ class GraphExecutor:
         for node_spec in graph.nodes:
             workers[node_spec.id] = WorkerAgent(node_spec=node_spec, graph_context=gc)
 
-        # Identify entry workers (zero incoming edges) and terminal workers
-        entry_worker_ids = [wid for wid, w in workers.items() if w.is_entry]
+        # Identify entry workers (graph entry node, not based on edge count)
+        # A node can be the entry point AND have incoming feedback edges.
+        entry_worker_ids = [graph.entry_node]
         terminal_worker_ids = set(graph.terminal_nodes or [])
 
         self.logger.info(
@@ -1457,6 +1373,9 @@ class GraphExecutor:
 
         def _check_graph_done() -> bool:
             """Check whether active graph work has reached a terminal state."""
+            # Step-limit guard (equivalent to old while-loop's max_steps)
+            if len(gc.path) >= graph.max_steps:
+                return True
             if not terminal_worker_ids:
                 # No terminals: check if all workers are done
                 return all(
@@ -1774,6 +1693,15 @@ class GraphExecutor:
                                 error = last_result.error
                             elif task_error is not None:
                                 error = str(task_error)
+
+                            # Route ON_FAILURE activations
+                            outgoing_activations = worker._last_activations
+                            if outgoing_activations:
+                                for activation in outgoing_activations:
+                                    _route_activation(
+                                        activation, workers, pending_tasks,
+                                        has_event_subscription=False,
+                                    )
                         elif task_error is not None:
                             error = str(task_error)
                         else:
@@ -1800,6 +1728,11 @@ class GraphExecutor:
 
             # Quality assessment
             has_failures = bool(failed_workers) or execution_error is not None
+            # If all terminal workers completed successfully, intermediate failures
+            # (handled by ON_FAILURE edges) don't count against overall success.
+            if terminal_worker_ids and completed_terminals >= terminal_worker_ids:
+                terminal_failures = terminal_worker_ids & set(failed_workers.keys())
+                has_failures = bool(terminal_failures) or execution_error is not None
             exec_quality = "failed" if has_failures else "clean"
 
             saved_buffer = buffer.read_all()

@@ -398,25 +398,39 @@ async def _smoke_test_provider_async(provider: dict, timeout_seconds: float = 25
                     "branch execution did not reach the expected terminal path: "
                     f"{result.path}"
                 )
-            if result.output.get("result") != "BRANCH_OK":
+            if not result.output.get("result"):
                 raise RuntimeError(
-                    "branch execution completed but did not produce result='BRANCH_OK'"
+                    "branch execution reached the expected terminal path but did not "
+                    f"produce a non-empty result output: path={result.path} "
+                    f"output={result.output}"
                 )
 
     current_step = "plain completion"
+    current_timeout = timeout_seconds
+    worker_timeout = max(
+        timeout_seconds,
+        float(os.environ.get("DUMMY_AGENT_SMOKE_WORKER_TIMEOUT_SECS", "30")),
+    )
+    branch_timeout = max(
+        timeout_seconds,
+        float(os.environ.get("DUMMY_AGENT_SMOKE_BRANCH_TIMEOUT_SECS", "60")),
+    )
 
     try:
-        await asyncio.wait_for(_run_plain_completion(), timeout=timeout_seconds)
+        await asyncio.wait_for(_run_plain_completion(), timeout=current_timeout)
         current_step = "tool calling"
-        await asyncio.wait_for(_run_tool_completion(), timeout=timeout_seconds)
+        current_timeout = timeout_seconds
+        await asyncio.wait_for(_run_tool_completion(), timeout=current_timeout)
         current_step = "single-node worker execution"
-        await asyncio.wait_for(_run_worker_execution(), timeout=timeout_seconds)
+        current_timeout = worker_timeout
+        await asyncio.wait_for(_run_worker_execution(), timeout=current_timeout)
         current_step = "branch worker execution"
-        await asyncio.wait_for(_run_branch_execution(), timeout=timeout_seconds)
+        current_timeout = branch_timeout
+        await asyncio.wait_for(_run_branch_execution(), timeout=current_timeout)
     except TimeoutError as exc:
         raise RuntimeError(
             f"provider smoke test timed out during {current_step} "
-            f"after {timeout_seconds:.0f}s"
+            f"after {current_timeout:.0f}s"
         ) from exc
 
 

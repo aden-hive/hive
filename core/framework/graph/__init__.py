@@ -1,5 +1,6 @@
 """Graph structures: Goals, Nodes, Edges, and Execution."""
 
+from framework.graph.context import GraphContext
 from framework.graph.context_handoff import ContextHandoff, HandoffContext
 from framework.graph.conversation import ConversationStore, Message, NodeConversation
 from framework.graph.edge import DEFAULT_MAX_TOKENS, EdgeCondition, EdgeSpec, GraphSpec
@@ -17,7 +18,6 @@ from framework.graph.worker_agent import (
     Activation,
     FanOutTag,
     FanOutTracker,
-    GraphContext,
     WorkerAgent,
     WorkerCompletion,
     WorkerLifecycle,

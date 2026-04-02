@@ -19,17 +19,15 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
-from framework.graph.goal import Goal
+from framework.graph.context import GraphContext, build_node_context_from_graph_context
+from framework.graph.edge import EdgeCondition, EdgeSpec
 from framework.graph.node import (
-    DataBuffer,
     NodeContext,
     NodeProtocol,
     NodeResult,
     NodeSpec,
 )
 from framework.graph.validator import OutputValidator
-from framework.runtime.core import Runtime
 
 logger = logging.getLogger(__name__)
 
@@ -104,58 +102,6 @@ class RetryState:
     attempt: int = 0
     max_retries: int = 3
     is_event_loop: bool = False
-
-
-@dataclass
-class GraphContext:
-    """Shared state for one graph execution run.
-
-    Consolidates the 20+ constructor params on ``GraphExecutor.__init__``
-    into a single object shared by reference across all workers.
-    """
-
-    graph: GraphSpec
-    goal: Goal
-    buffer: DataBuffer
-    runtime: Runtime
-    llm: Any  # LLMProvider
-    tools: list[Any]  # list[Tool]
-    tool_executor: Any  # Callable
-    event_bus: Any  # GraphScopedEventBus
-    execution_id: str
-    stream_id: str
-    run_id: str
-    storage_path: Any  # Path | None
-    runtime_logger: Any = None
-    node_registry: dict[str, NodeProtocol] = field(default_factory=dict)
-    node_spec_registry: dict[str, NodeSpec] = field(default_factory=dict)
-    # Parallel execution config
-    parallel_config: Any = None  # ParallelExecutionConfig | None
-    # Continuous mode
-    is_continuous: bool = False
-    continuous_conversation: Any = None
-    cumulative_tools: list[Any] = field(default_factory=list)
-    cumulative_tool_names: set[str] = field(default_factory=set)
-    cumulative_output_keys: list[str] = field(default_factory=list)
-    # Accounts / skills / dynamic providers
-    accounts_prompt: str = ""
-    accounts_data: list[dict] | None = None
-    tool_provider_map: dict[str, str] | None = None
-    skills_catalog_prompt: str = ""
-    protocols_prompt: str = ""
-    skill_dirs: list[str] = field(default_factory=list)
-    context_warn_ratio: float | None = None
-    batch_init_nudge: str | None = None
-    dynamic_tools_provider: Any = None
-    dynamic_prompt_provider: Any = None
-    iteration_metadata_provider: Any = None
-    # Loop config for EventLoopNode creation
-    loop_config: dict[str, Any] = field(default_factory=dict)
-    # Thread-safe execution state
-    path: list[str] = field(default_factory=list)
-    node_visit_counts: dict[str, int] = field(default_factory=dict)
-    _path_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    _visits_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 # ---------------------------------------------------------------------------
@@ -379,9 +325,12 @@ class WorkerAgent:
                 )
                 await self._publish_completion(completion)
             else:
+                # Evaluate outgoing edges even on failure (ON_FAILURE edges)
+                activations = await self._evaluate_outgoing_edges(result)
+
                 self.lifecycle = WorkerLifecycle.FAILED
                 self._last_result = result
-                self._last_activations = []
+                self._last_activations = activations
                 await self._publish_failure(result.error or "Unknown error")
         except Exception as exc:
             error = str(exc) or type(exc).__name__
@@ -396,9 +345,16 @@ class WorkerAgent:
     ) -> NodeResult:
         """Execute node with exponential backoff retry."""
         gc = self._gc
-        max_retries = 0 if self.retry_state.is_event_loop else self.retry_state.max_retries
+        # Only skip retries for actual EventLoopNode instances (they handle
+        # retries internally).  Custom NodeProtocol impls registered via
+        # register_node should be retried by the executor.
+        from framework.graph.event_loop_node import EventLoopNode as _ELN
+        if isinstance(node_impl, _ELN):
+            max_retries = 0
+        else:
+            max_retries = self.retry_state.max_retries
 
-        for attempt in range(max_retries + 1):
+        for attempt in range(max(1, max_retries)):
             # Check pause
             await self._run_gate.wait()
 
@@ -413,13 +369,13 @@ class WorkerAgent:
                     return result
 
                 # Failure
-                if attempt < max_retries:
+                if attempt + 1 < max(1, max_retries):
                     delay = 1.0 * (2**attempt)
                     logger.warning(
                         "Worker %s failed (attempt %d/%d), retrying in %.1fs: %s",
                         self.node_spec.id,
                         attempt + 1,
-                        max_retries + 1,
+                        max_retries,
                         delay,
                         result.error,
                     )
@@ -435,24 +391,33 @@ class WorkerAgent:
                     await asyncio.sleep(delay)
                     continue
                 else:
-                    return result
+                    return NodeResult(
+                        success=False,
+                        error=f"failed after {attempt + 1} attempts: {result.error}",
+                    )
 
             except Exception as exc:
-                if attempt < max_retries:
+                if attempt < max(1, max_retries) - 1:
                     delay = 1.0 * (2**attempt)
                     logger.warning(
                         "Worker %s raised %s (attempt %d/%d), retrying in %.1fs",
                         self.node_spec.id,
                         type(exc).__name__,
                         attempt + 1,
-                        max_retries + 1,
+                        max(1, max_retries),
                         delay,
                     )
                     await asyncio.sleep(delay)
                     continue
-                return NodeResult(success=False, error=str(exc))
+                return NodeResult(
+                    success=False,
+                    error=f"failed after {attempt + 1} attempts: {exc}",
+                )
 
-        return NodeResult(success=False, error="Max retries exceeded")
+        return NodeResult(
+            success=False,
+            error=f"failed after {max(1, max_retries)} attempts",
+        )
 
     # ------------------------------------------------------------------
     # Edge evaluation (source-side)
@@ -624,88 +589,10 @@ class WorkerAgent:
 
     def _build_node_context(self) -> NodeContext:
         """Build NodeContext for this worker's execution."""
-        gc = self._gc
-        node_spec = self.node_spec
-
-        # Filter tools
-        if gc.is_continuous and gc.cumulative_tools:
-            available_tools = list(gc.cumulative_tools)
-        else:
-            available_tools = []
-            if node_spec.tools:
-                available_tools = [t for t in gc.tools if t.name in node_spec.tools]
-
-        # Scoped buffer
-        read_keys = list(node_spec.input_keys)
-        write_keys = list(node_spec.output_keys)
-        if read_keys or write_keys:
-            from framework.skills.defaults import DATA_BUFFER_KEYS as _skill_keys
-
-            existing_underscore = [k for k in gc.buffer._data if k.startswith("_")]
-            extra_keys = set(_skill_keys) | set(existing_underscore)
-            for k in extra_keys:
-                if read_keys and k not in read_keys:
-                    read_keys.append(k)
-                if write_keys and k not in write_keys:
-                    write_keys.append(k)
-
-        scoped_buffer = gc.buffer.with_permissions(read_keys=read_keys, write_keys=write_keys)
-
-        # Per-node accounts prompt
-        node_accounts_prompt = gc.accounts_prompt
-        if gc.accounts_data and gc.tool_provider_map:
-            from framework.graph.prompt_composer import build_accounts_prompt
-
-            node_accounts_prompt = build_accounts_prompt(
-                gc.accounts_data,
-                gc.tool_provider_map,
-                node_tool_names=node_spec.tools,
-            ) or gc.accounts_prompt
-
-        # Input data from buffer
-        input_data: dict[str, Any] = {}
-        for key in node_spec.input_keys:
-            val = gc.buffer.read(key)
-            if val is not None:
-                input_data[key] = val
-
-        # Continuous mode: thread conversation
-        inherited_conversation = None
-        if gc.is_continuous and gc.continuous_conversation:
-            inherited_conversation = gc.continuous_conversation
-
-        return NodeContext(
-            runtime=gc.runtime,
-            node_id=node_spec.id,
-            node_spec=node_spec,
-            buffer=scoped_buffer,
-            input_data=input_data,
-            llm=gc.llm,
-            available_tools=available_tools,
-            goal_context=gc.goal.to_prompt_context(),
-            goal=gc.goal,
-            max_tokens=gc.graph.max_tokens,
-            runtime_logger=gc.runtime_logger,
+        return build_node_context_from_graph_context(
+            self._gc,
+            node_spec=self.node_spec,
             pause_event=self._pause_requested,
-            continuous_mode=gc.is_continuous,
-            inherited_conversation=inherited_conversation,
-            cumulative_output_keys=list(gc.cumulative_output_keys) if gc.is_continuous else [],
-            accounts_prompt=node_accounts_prompt,
-            identity_prompt=getattr(gc.graph, "identity_prompt", "") or "",
-            execution_id=gc.execution_id,
-            run_id=gc.run_id,
-            stream_id=gc.stream_id,
-            node_registry=gc.node_spec_registry,
-            all_tools=list(gc.tools),
-            shared_node_registry=gc.node_registry,
-            dynamic_tools_provider=gc.dynamic_tools_provider,
-            dynamic_prompt_provider=gc.dynamic_prompt_provider,
-            iteration_metadata_provider=gc.iteration_metadata_provider,
-            skills_catalog_prompt=gc.skills_catalog_prompt,
-            protocols_prompt=gc.protocols_prompt,
-            skill_dirs=list(gc.skill_dirs),
-            default_skill_warn_ratio=gc.context_warn_ratio,
-            default_skill_batch_nudge=gc.batch_init_nudge,
         )
 
     # ------------------------------------------------------------------
