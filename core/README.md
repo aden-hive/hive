@@ -22,6 +22,8 @@ uv pip install -e .
 Agent scaffolding is handled by the `coder-tools` MCP server (in `tools/coder_tools_server.py`), which provides the `initialize_and_build_agent` tool and related utilities. The package generation logic lives directly in `tools/coder_tools_server.py`.
 
 See the [Getting Started Guide](../docs/getting-started.md) for building agents.
+For skill installation, authoring, and tuning guidance, see
+[Agent Skills User Guide](../docs/skills-user-guide.md).
 
 ## Quick Start
 

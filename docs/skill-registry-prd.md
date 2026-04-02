@@ -859,6 +859,25 @@ Skills and MCP servers are complementary:
 | "Evaluating skill quality"             | Contributors      | Setting up evals, writing assertions, iterating with the eval-driven loop      |
 | Starter pack guide                     | Users             | Finding, installing, and customizing starter packs                             |
 
+### 12.1 Draft-Then-Finalize Delivery Model
+
+To reduce launch risk while Phase 2 and Phase 3 are still moving, documentation work should follow a
+two-step model:
+
+1. Draft narrative and structure early (conceptual guides, examples, cookbook scaffolding).
+2. Finalize CLI- and registry-dependent details only after behavior is frozen.
+
+Dependency-gated sections must be tracked explicitly:
+- Gate A (Phase 2 / `#6369`): keep docs aligned with shipped `hive skill` commands (flags, examples,
+  diagnostics language). Treat CLI as the source of truth once implemented.
+- Gate B (`#6370`): registry paths, starter pack details, index examples, contribution flow specifics.
+
+Minimum readiness bar before requesting docs review:
+- Re-run all command snippets against current CLI behavior.
+- Validate install/search/pack onboarding against actual registry state.
+- Replace every dependency TODO anchor.
+- Get at least one non-author docs review.
+
 ---
 
 ## 13. Phased Delivery
