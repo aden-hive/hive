@@ -176,6 +176,7 @@ _shared_browser: Browser | None = None
 _shared_playwright: Any = None
 _shared_chrome_process: Any = None  # ChromeProcess | None (avoid circular import)
 _shared_cdp_port: int | None = None
+_shared_is_external: bool = False  # True when connected to the user's Chrome (not launched by us)
 
 # ---------------------------------------------------------------------------
 # Dynamic viewport sizing
@@ -268,16 +269,71 @@ def _get_viewport(scale: float | None = None) -> dict[str, int]:
     return {"width": int(w * scale), "height": int(h * scale)}
 
 
+async def _find_existing_cdp_url() -> str | None:
+    """Return a CDP endpoint URL if an existing Chrome instance is reachable.
+
+    Checks ``HIVE_BROWSER_CDP_URL`` first, then the standard port 9222.
+    Returns None if no responsive Chrome is found.
+    """
+    import urllib.error
+    import urllib.request
+
+    candidates = [os.environ.get("HIVE_BROWSER_CDP_URL"), "http://127.0.0.1:9222"]
+
+    loop = asyncio.get_running_loop()
+    for url in candidates:
+        if not url:
+            continue
+        try:
+            def _probe(u: str = url) -> bool:
+                req = urllib.request.Request(f"{u}/json/version")
+                with urllib.request.urlopen(req, timeout=1) as resp:
+                    return resp.status == 200
+
+            ok = await loop.run_in_executor(None, _probe)
+            if ok:
+                return url
+        except Exception:
+            continue
+    return None
+
+
 async def get_shared_browser(headless: bool = True) -> Browser:
-    """Get or create the shared browser instance for agent contexts."""
-    global _shared_browser, _shared_playwright, _shared_chrome_process, _shared_cdp_port
+    """Get or create the shared browser instance for agent contexts.
+
+    If the Beeline extension is connected and the user's Chrome has CDP enabled
+    (``HIVE_BROWSER_CDP_URL`` or port 9222), Playwright attaches to it instead
+    of launching a new process.  Otherwise falls back to launching Chrome.
+    """
+    global _shared_browser, _shared_playwright, _shared_chrome_process, _shared_cdp_port, _shared_is_external
 
     if _shared_browser and _shared_browser.is_connected():
         return _shared_browser
 
+    # ── Try the user's existing Chrome first ──────────────────────────────
+    from .bridge import get_bridge
+
+    bridge = get_bridge()
+    if bridge and bridge.is_connected:
+        cdp_url = await _find_existing_cdp_url()
+        if cdp_url:
+            _shared_playwright = await async_playwright().start()
+            _shared_browser = await _shared_playwright.chromium.connect_over_cdp(cdp_url)
+            _shared_is_external = True
+            logger.info("Beeline: connected to user's Chrome via CDP at %s", cdp_url)
+            return _shared_browser
+        else:
+            logger.info(
+                "Beeline extension connected but no CDP endpoint found; "
+                "launching Chrome (start Chrome with --remote-debugging-port=9222 "
+                "or set HIVE_BROWSER_CDP_URL to use your existing browser)"
+            )
+
+    # ── Fall back: launch a new Chrome process ────────────────────────────
     from .chrome_launcher import launch_chrome
     from .port_manager import allocate_port
 
+    _shared_is_external = False
     cdp_port = allocate_port("__shared__")
     _shared_cdp_port = cdp_port
     _shared_chrome_process = await launch_chrome(
@@ -294,27 +350,34 @@ async def get_shared_browser(headless: bool = True) -> Browser:
 
 
 async def close_shared_browser() -> None:
-    """Close the shared browser and clean up all agent contexts."""
-    global _shared_browser, _shared_playwright, _shared_chrome_process, _shared_cdp_port
+    """Close the shared browser and clean up all agent contexts.
+
+    When connected to the user's existing Chrome (``_shared_is_external``),
+    we only disconnect Playwright — we never kill a browser we didn't launch.
+    """
+    global _shared_browser, _shared_playwright, _shared_chrome_process, _shared_cdp_port, _shared_is_external
 
     if _shared_browser:
-        await _shared_browser.close()
+        if not _shared_is_external:
+            await _shared_browser.close()
         _shared_browser = None
-        logger.info("Closed shared browser")
+        logger.info("Disconnected from %s browser", "external" if _shared_is_external else "shared")
 
     if _shared_playwright:
         await _shared_playwright.stop()
         _shared_playwright = None
 
-    if _shared_chrome_process:
+    if _shared_chrome_process and not _shared_is_external:
         await _shared_chrome_process.kill()
         _shared_chrome_process = None
 
-    if _shared_cdp_port is not None:
+    if _shared_cdp_port is not None and not _shared_is_external:
         from .port_manager import release_port
 
         release_port(_shared_cdp_port)
         _shared_cdp_port = None
+
+    _shared_is_external = False
 
 
 @dataclass
@@ -367,6 +430,9 @@ class BrowserSession:
 
     # Chrome subprocess handle (standard sessions only)
     _chrome_process: Any = None  # ChromeProcess | None
+
+    # Chrome tab group ID assigned by the Beeline bridge (agent sessions only)
+    _group_id: int | None = None
 
     def _is_running(self) -> bool:
         """Check if browser is currently running."""
@@ -450,6 +516,72 @@ class BrowserSession:
         self.page_meta.clear()
         self.ref_maps.clear()
 
+    async def _start_as_agent_context(self, bridge) -> dict:
+        """Start by creating a context on the shared browser.
+
+        Called from ``start()`` when the Beeline bridge is connected.
+        Already inside ``self._lock``.
+
+        When connected to the user's Chrome (external browser), we try to
+        reuse storage state from existing contexts so the agent inherits
+        the user's login sessions (LinkedIn, etc.).
+        """
+        browser = await get_shared_browser()
+
+        # Try to inherit cookies/storage from existing context when connected
+        # to user's Chrome. This preserves login state.
+        storage_state = None
+        if _shared_is_external:
+            existing_contexts = browser.contexts
+            if existing_contexts:
+                try:
+                    storage_state = await existing_contexts[0].storage_state()
+                    logger.info(
+                        "Beeline: inheriting storage state from user's Chrome "
+                        "(%d cookies, %d origins)",
+                        len(storage_state.get("cookies", [])),
+                        len(storage_state.get("origins", [])),
+                    )
+                except Exception as exc:
+                    logger.debug("Could not get storage state: %s", exc)
+
+        context = await browser.new_context(
+            viewport=_get_viewport(),
+            user_agent=BROWSER_USER_AGENT,
+            locale="en-US",
+            storage_state=storage_state,  # Inherit login cookies!
+        )
+        await context.add_init_script(STEALTH_SCRIPT)
+
+        self.browser = browser
+        self.context = context
+        self.session_type = "agent"
+
+        # Create a labelled tab group in the user's Chrome
+        try:
+            result = await bridge.create_context(self.profile)
+            self._group_id = result.get("groupId")
+            logger.info("Beeline: tab group %d for '%s'", self._group_id, self.profile)
+        except Exception as exc:
+            logger.debug("Beeline: could not create tab group: %s", exc)
+
+        # Open the initial blank tab
+        first_page = await context.new_page()
+        await first_page.set_viewport_size(_get_viewport())
+        target_id = f"tab_{id(first_page)}"
+        self._register_page(first_page, target_id, origin="startup")
+        await first_page.set_content(HIVE_START_PAGE)
+        context.on("page", self._handle_popup_page)
+
+        return {
+            "ok": True,
+            "status": "started",
+            "profile": self.profile,
+            "session_type": "agent",
+            "group_id": self._group_id,
+            "inherited_storage": storage_state is not None,
+        }
+
     async def start(self, headless: bool = True, persistent: bool = True) -> dict:
         """
         Start the browser.
@@ -473,6 +605,14 @@ class BrowserSession:
                     "cdp_port": self.cdp_port,
                 }
 
+            # ── Shared-browser path (bridge connected or shared browser already up) ──
+            from .bridge import get_bridge
+
+            bridge = get_bridge()
+            if bridge and bridge.is_connected:
+                return await self._start_as_agent_context(bridge)
+
+            # ── Fallback: launch a dedicated Chrome process ───────────────────────
             from .chrome_launcher import launch_chrome
             from .port_manager import allocate_port
 
@@ -591,6 +731,19 @@ class BrowserSession:
     async def stop(self) -> dict:
         """Stop the browser and clean up resources."""
         async with self._lock:
+            # Tell the Beeline extension to close the tab group for this agent
+            if self._group_id is not None:
+                from .bridge import get_bridge
+
+                bridge = get_bridge()
+                if bridge and bridge.is_connected:
+                    try:
+                        await bridge.destroy_context(self._group_id)
+                        logger.info("Beeline: closed tab group %d for '%s'", self._group_id, self.profile)
+                    except Exception as exc:
+                        logger.debug("Beeline: could not destroy tab group: %s", exc)
+                self._group_id = None
+
             # Release CDP port if allocated
             if self.cdp_port:
                 from .port_manager import release_port
@@ -670,11 +823,25 @@ class BrowserSession:
         )
         await context.add_init_script(STEALTH_SCRIPT)
 
+        # Ask the Beeline extension to create a labelled tab group for this agent
+        group_id: int | None = None
+        from .bridge import get_bridge
+
+        bridge = get_bridge()
+        if bridge and bridge.is_connected:
+            try:
+                result = await bridge.create_context(agent_id)
+                group_id = result.get("groupId")
+                logger.info("Beeline: created tab group %d for agent '%s'", group_id, agent_id)
+            except Exception as exc:
+                logger.debug("Beeline: could not create tab group: %s", exc)
+
         session = BrowserSession(
             profile=agent_id,
             browser=browser,
             context=context,
             session_type="agent",
+            _group_id=group_id,
         )
 
         # Auto-track pages opened by popups / target="_blank" links
@@ -864,6 +1031,26 @@ class BrowserSession:
         page.on("close", lambda tid=target_id: self._handle_page_close(tid))
         if set_active:
             self.active_page_id = target_id
+        if self._group_id is not None:
+            asyncio.ensure_future(self._group_page_in_bridge(page))
+
+    async def _group_page_in_bridge(self, page: Page) -> None:
+        """Get this page's CDP target ID and move it into the agent's tab group."""
+        if self._group_id is None or self.context is None:
+            return
+        from .bridge import get_bridge
+
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return
+        try:
+            cdp = await self.context.new_cdp_session(page)
+            info = await cdp.send("Target.getTargetInfo")
+            cdp_target_id = info["targetInfo"]["targetId"]
+            await cdp.detach()
+            await bridge.group_tab_by_target(cdp_target_id, self._group_id)
+        except Exception as exc:
+            logger.debug("Could not group tab in bridge: %s", exc)
 
     def _capture_console(self, target_id: str, msg: Any) -> None:
         """Capture console messages for a tab."""
