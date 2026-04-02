@@ -3532,6 +3532,13 @@ class EventLoopNode(NodeProtocol):
         iteration: int | None = None,
         inner_turn: int = 0,
     ) -> None:
+        # Strip leading whitespace from first output chunk for client_facing nodes
+        # (some LLMs like Kimi output leading whitespace before text)
+        if ctx.node_spec.client_facing and not snapshot and content:
+            content = content.lstrip()
+            if not content:  # Content was all whitespace
+                return
+
         return await publish_text_delta(
             event_bus=self._event_bus,
             stream_id=stream_id,
