@@ -11,7 +11,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
     """Register browser lifecycle management tools."""
 
     @mcp.tool()
-    async def browser_status(profile: str = "default") -> dict:
+    async def browser_status(profile: str | None = None) -> dict:
         """
         Get the current status of the browser.
 
@@ -26,7 +26,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     async def browser_start(
-        profile: str = "default",
+        profile: str | None = None,
     ) -> dict:
         """
         Start the browser with a persistent profile.
@@ -45,7 +45,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         return await session.start(headless=False, persistent=True)
 
     @mcp.tool()
-    async def browser_stop(profile: str = "default") -> dict:
+    async def browser_stop(profile: str | None = None) -> dict:
         """
         Stop the browser and close all tabs.
 

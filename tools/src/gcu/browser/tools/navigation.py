@@ -18,7 +18,7 @@ def register_navigation_tools(mcp: FastMCP) -> None:
     async def browser_navigate(
         url: str,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         wait_until: str = "domcontentloaded",
     ) -> dict:
         """
@@ -57,7 +57,7 @@ def register_navigation_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def browser_go_back(
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
     ) -> dict:
         """
         Navigate back in browser history.
@@ -83,7 +83,7 @@ def register_navigation_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def browser_go_forward(
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
     ) -> dict:
         """
         Navigate forward in browser history.
@@ -109,7 +109,7 @@ def register_navigation_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def browser_reload(
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
     ) -> dict:
         """
         Reload the current page.

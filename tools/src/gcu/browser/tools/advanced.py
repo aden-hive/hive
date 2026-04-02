@@ -29,7 +29,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
         selector: str | None = None,
         text: str | None = None,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
     ) -> dict:
         """
@@ -78,7 +78,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
     async def browser_evaluate(
         script: str,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
     ) -> dict:
         """
         Execute JavaScript in the browser context.
@@ -106,7 +106,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
     async def browser_get_text(
         selector: str,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
     ) -> dict:
         """
@@ -148,7 +148,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
         selector: str,
         attribute: str,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
     ) -> dict:
         """
@@ -191,7 +191,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
         width: int,
         height: int,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
     ) -> dict:
         """
         Resize the browser viewport.
@@ -226,7 +226,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
         selector: str,
         file_paths: list[str],
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
     ) -> dict:
         """
@@ -282,7 +282,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
         action: Literal["accept", "dismiss"] = "accept",
         prompt_text: str | None = None,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
     ) -> dict:
         """

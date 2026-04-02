@@ -79,7 +79,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
     async def browser_click(
         selector: str,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         button: Literal["left", "right", "middle"] = "left",
         double_click: bool = False,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
@@ -143,7 +143,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         x: float,
         y: float,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         button: Literal["left", "right", "middle"] = "left",
         auto_snapshot: bool = True,
     ) -> dict:
@@ -192,7 +192,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         selector: str,
         text: str,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         delay_ms: int = 0,
         clear_first: bool = True,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
@@ -250,7 +250,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         selector: str,
         value: str,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         auto_snapshot: bool = True,
     ) -> dict:
@@ -302,7 +302,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         key: str,
         selector: str | None = None,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
     ) -> dict:
         """
@@ -343,7 +343,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
     async def browser_hover(
         selector: str,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
     ) -> dict:
         """
@@ -381,7 +381,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         selector: str,
         values: list[str],
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         auto_snapshot: bool = True,
     ) -> dict:
@@ -436,7 +436,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         amount: int = 500,
         selector: str | None = None,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         auto_snapshot: bool = True,
     ) -> dict:
         """
@@ -504,7 +504,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         start_selector: str,
         end_selector: str,
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         auto_snapshot: bool = True,
     ) -> dict:

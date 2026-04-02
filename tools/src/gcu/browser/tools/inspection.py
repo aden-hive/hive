@@ -197,7 +197,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def browser_screenshot(
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         full_page: bool = False,
         selector: str | None = None,
         image_type: Literal["png", "jpeg"] = "png",
@@ -278,7 +278,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def browser_snapshot(
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         mode: Literal["aria", "cdp"] = "aria",
     ) -> dict:
         """
@@ -347,7 +347,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def browser_console(
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         level: str | None = None,
     ) -> dict:
         """
@@ -380,7 +380,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def browser_pdf(
         target_id: str | None = None,
-        profile: str = "default",
+        profile: str | None = None,
         path: str | None = None,
     ) -> dict:
         """

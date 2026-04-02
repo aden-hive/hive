@@ -15,7 +15,7 @@ def register_tab_tools(mcp: FastMCP) -> None:
     """Register browser tab management tools."""
 
     @mcp.tool()
-    async def browser_tabs(profile: str = "default") -> dict:
+    async def browser_tabs(profile: str | None = None) -> dict:
         """
         List all open browser tabs with origin and age metadata.
 
@@ -54,7 +54,7 @@ def register_tab_tools(mcp: FastMCP) -> None:
     async def browser_open(
         url: str,
         background: bool = False,
-        profile: str = "default",
+        profile: str | None = None,
         wait_until: str = "load",
     ) -> dict:
         """
@@ -87,7 +87,7 @@ def register_tab_tools(mcp: FastMCP) -> None:
             return {"ok": False, "error": f"Browser error: {e!s}"}
 
     @mcp.tool()
-    async def browser_close(target_id: str | None = None, profile: str = "default") -> dict:
+    async def browser_close(target_id: str | None = None, profile: str | None = None) -> dict:
         """
         Close a browser tab.
 
@@ -102,7 +102,7 @@ def register_tab_tools(mcp: FastMCP) -> None:
         return await session.close_tab(target_id)
 
     @mcp.tool()
-    async def browser_focus(target_id: str, profile: str = "default") -> dict:
+    async def browser_focus(target_id: str, profile: str | None = None) -> dict:
         """
         Focus a browser tab.
 
@@ -117,7 +117,7 @@ def register_tab_tools(mcp: FastMCP) -> None:
         return await session.focus_tab(target_id)
 
     @mcp.tool()
-    async def browser_close_all(keep_active: bool = True, profile: str = "default") -> dict:
+    async def browser_close_all(keep_active: bool = True, profile: str | None = None) -> dict:
         """
         Close all browser tabs, optionally keeping the active tab.
 
@@ -143,7 +143,7 @@ def register_tab_tools(mcp: FastMCP) -> None:
         return {"ok": True, "closed_count": closed, "remaining": len(session.pages)}
 
     @mcp.tool()
-    async def browser_close_finished(keep_active: bool = True, profile: str = "default") -> dict:
+    async def browser_close_finished(keep_active: bool = True, profile: str | None = None) -> dict:
         """
         Close all agent-opened and popup tabs that you are done with.
 
