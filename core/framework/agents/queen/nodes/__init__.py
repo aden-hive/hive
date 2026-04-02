@@ -135,7 +135,6 @@ _QUEEN_RUNNING_TOOLS = [
     "inject_message",
     # Monitoring
     "get_worker_health_summary",
-    "notify_operator",
     "set_trigger",
     "remove_trigger",
     "list_triggers",
@@ -668,7 +667,6 @@ The worker is running. You have monitoring and lifecycle tools:
 - get_graph_status(focus?) — Brief status. Drill in: activity, memory, tools, issues, progress
 - inject_message(content) — Send a message to the running worker
 - get_worker_health_summary() — Read the latest health data
-- notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
 - stop_graph() — Stop the worker and return to STAGING phase, then ask the user what to do next
 - stop_graph_and_plan() — Stop and switch to PLANNING phase to discuss changes \
 with the user first (DEFAULT for most modification requests)
@@ -1198,64 +1196,6 @@ _queen_style = """
 """
 
 
-# ---------------------------------------------------------------------------
-# Node definitions
-# ---------------------------------------------------------------------------
-
-
-ticket_triage_node = NodeSpec(
-    id="ticket_triage",
-    name="Ticket Triage",
-    description=(
-        "Queen's triage node. Receives an EscalationTicket via event-driven "
-        "entry point and decides: dismiss or notify the operator."
-    ),
-    node_type="event_loop",
-    client_facing=True,  # Operator can chat with queen once connected (Ctrl+Q)
-    max_node_visits=0,
-    input_keys=["ticket"],
-    output_keys=["intervention_decision"],
-    nullable_output_keys=["intervention_decision"],
-    success_criteria=(
-        "A clear intervention decision: either dismissed with documented reasoning, "
-        "or operator notified via notify_operator with specific analysis."
-    ),
-    tools=["notify_operator"],
-    system_prompt="""\
-You are the Queen. A worker health issue has been escalated to you. \
-The ticket is in your memory under key "ticket". Read it carefully.
-
-## Dismiss criteria — do NOT call notify_operator:
-- severity is "low" AND steps_since_last_accept < 8
-- Cause is clearly a transient issue (single API timeout, brief stall that \
-  self-resolved based on the evidence)
-- Evidence shows the agent is making real progress despite bad verdicts
-
-## Intervene criteria — call notify_operator:
-- severity is "high" or "critical"
-- steps_since_last_accept >= 10 with no sign of recovery
-- stall_minutes > 4 (worker definitively stuck)
-- Evidence shows a doom loop (same error, same tool, no progress)
-- Cause suggests a logic bug, missing configuration, or unrecoverable state
-
-## When intervening:
-Call notify_operator with:
-  ticket_id: <ticket["ticket_id"]>
-  analysis: "<2-3 sentences: what is wrong, why it matters, suggested action>"
-  urgency: "<low|medium|high|critical>"
-
-## After deciding:
-set_output("intervention_decision", "dismissed: <reason>" or "escalated: <summary>")
-
-Be conservative but not passive. You are the last quality gate before the human \
-is disturbed. One unnecessary alert is less costly than alert fatigue — but \
-genuine stuck agents must be caught.
-""",
-)
-
-ALL_QUEEN_TRIAGE_TOOLS = ["notify_operator"]
-
-
 queen_node = NodeSpec(
     id="queen",
     name="Queen",
@@ -1295,9 +1235,7 @@ ALL_QUEEN_TOOLS = sorted(
 )
 
 __all__ = [
-    "ticket_triage_node",
     "queen_node",
-    "ALL_QUEEN_TRIAGE_TOOLS",
     "ALL_QUEEN_TOOLS",
     "_QUEEN_PLANNING_TOOLS",
     "_QUEEN_BUILDING_TOOLS",

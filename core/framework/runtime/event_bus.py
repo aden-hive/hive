@@ -128,10 +128,6 @@ class EventType(StrEnum):
     # Escalation (agent requests handoff to queen)
     ESCALATION_REQUESTED = "escalation_requested"
 
-    # Worker health monitoring
-    WORKER_ESCALATION_TICKET = "worker_escalation_ticket"
-    QUEEN_INTERVENTION_REQUESTED = "queen_intervention_requested"
-
     # Execution resurrection (auto-restart on non-fatal failure)
     EXECUTION_RESURRECTED = "execution_resurrected"
 
@@ -1169,52 +1165,6 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"reason": reason, "context": context},
-            )
-        )
-
-    async def emit_worker_escalation_ticket(
-        self,
-        stream_id: str,
-        node_id: str,
-        ticket: dict,
-        execution_id: str | None = None,
-    ) -> None:
-        """Emitted when worker shows a degradation pattern."""
-        await self.publish(
-            AgentEvent(
-                type=EventType.WORKER_ESCALATION_TICKET,
-                stream_id=stream_id,
-                node_id=node_id,
-                execution_id=execution_id,
-                data={"ticket": ticket},
-            )
-        )
-
-    async def emit_queen_intervention_requested(
-        self,
-        stream_id: str,
-        node_id: str,
-        ticket_id: str,
-        analysis: str,
-        severity: str,
-        queen_graph_id: str,
-        queen_stream_id: str,
-        execution_id: str | None = None,
-    ) -> None:
-        """Emitted by queen when she decides the operator should be involved."""
-        await self.publish(
-            AgentEvent(
-                type=EventType.QUEEN_INTERVENTION_REQUESTED,
-                stream_id=stream_id,
-                node_id=node_id,
-                execution_id=execution_id,
-                data={
-                    "ticket_id": ticket_id,
-                    "analysis": analysis,
-                    "severity": severity,
-                    "queen_graph_id": queen_graph_id,
-                    "queen_stream_id": queen_stream_id,
-                },
             )
         )
 

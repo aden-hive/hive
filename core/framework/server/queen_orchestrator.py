@@ -145,9 +145,7 @@ async def create_queen(
 
         register_worker_monitoring_tools(
             queen_registry,
-            session.event_bus,
             session.worker_path,
-            stream_id="queen",
             worker_graph_id=session.graph_runtime._graph_id,
             default_session_id=session.id,
         )

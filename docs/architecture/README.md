@@ -46,7 +46,7 @@ flowchart TB
         J_C["Criteria"]
         J_P["Principles"]
         J_EL["Event loop"] <--> J_S["Timer<br/>(2-min tick)"]
-        J_T["get_worker_health_summary<br/>emit_escalation_ticket"]
+        J_T["get_worker_health_summary"]
         J_CV["Continuous Conversation<br/>(judge memory)"]
     end
 
@@ -105,14 +105,12 @@ flowchart TB
     J_C <-.->|"aligns<br/>(design-time)"| WB_SP
     J_P <-.->|"aligns<br/>(design-time)"| QB_SP
 
-    %% Judge runtime: reads worker logs, publishes escalations via Event Bus
-    %% NO direct Judge→Queen connection at runtime — fully decoupled via Event Bus
+    %% Judge runtime: reads worker logs for health inspection
     J_T -->|"Reads logs"| WTM
-    J_EL -->|"EscalationTicket"| EB
 
     %% Pub/Sub Logic
     AN -->|"publish"| EB
-    EB -->|"subscribe<br/>(node events +<br/>escalation tickets)"| QB_C
+    EB -->|"subscribe<br/>(node events)"| QB_C
 
     %% Sub-Agent Delegation
     ELN_EL -->|"delegate_to_sub_agent"| SA_DT
@@ -155,8 +153,8 @@ flowchart TB
 | ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Event Loop Node**     | Entry point | Listens for external events (schedulers, webhooks, SSE), triggers the event loop, and delegates to sub-agents. Its conversation mirrors the Worker Bees conversation for context continuity.                                                                 |
 | **Worker Bees**         | Execution   | A graph of nodes that execute the actual work. Each node in the graph can become the Active Node. Workers maintain their own conversation and system prompt, and read/write to shared memory.                                                                |
-| **Judge**               | Evaluation  | Runs as an **isolated graph** alongside the worker on a 2-minute timer. Reads worker session logs via `get_worker_health_summary`, accumulates observations in a continuous conversation (its own memory), and emits structured `EscalationTicket` events to the Event Bus when it detects degradation. **Disengaged from the Queen at runtime** — the Queen receives escalation tickets only through Event Bus subscriptions, not via a direct connection. Criteria and principles align with Worker/Queen system prompts at design-time. |
-| **Queen Bee**           | Oversight   | The orchestration layer. Subscribes to Active Node events via the Event Bus, receives escalation reports from the Judge, and has read/write access to shared memory and credentials. Users can talk directly to the Queen Bee.                               |
+| **Judge**               | Evaluation  | Runs as an **isolated graph** alongside the worker on a 2-minute timer. Reads worker session logs via `get_worker_health_summary` and accumulates observations in a continuous conversation (its own memory) to assess worker health trends. Criteria and principles align with Worker/Queen system prompts at design-time. |
+| **Queen Bee**           | Oversight   | The orchestration layer. Subscribes to Active Node events via the Event Bus and has read/write access to shared memory and credentials. Users can talk directly to the Queen Bee.                               |
 | **Sub-Agent Framework** | Delegation  | Enables parent nodes to delegate tasks to specialized sub-agents via `delegate_to_sub_agent`. Sub-agents run as independent EventLoopNodes with read-only memory snapshots, their own conversation, and a `SubagentJudge`. They report progress via `report_to_parent` and can escalate to users via `wait_for_response`. Multiple delegations execute in parallel. Nested delegation is prevented. |
 | **Infra**               | Services    | Shared infrastructure: Tool Registry (assigned to Event Loop Nodes and Sub-Agents), Write-through Conversation Memory (logs across RAM and disk), Shared Memory (state on disk), Event Bus (pub/sub in RAM), and Credential Store (encrypted on disk or cloud). |
 
@@ -164,7 +162,7 @@ flowchart TB
 
 - **External triggers**: Schedulers, Webhooks, and SSE events flow into the Event Loop Node's listener, which triggers the event loop to delegate to sub-agents or start browser-based tasks.
 - **User interaction**: Users talk directly to Worker Bees (for task execution) or the Queen Bee (for oversight). Users also have read/write access to the Credential Store.
-- **Judge monitoring (runtime-decoupled)**: The Judge runs as an isolated graph on a 2-minute timer. It reads worker session logs via tools, tracks trends in its continuous conversation, and publishes `EscalationTicket` events to the Event Bus when it detects degradation patterns (doom loops, stalls, excessive retries). The Queen receives these tickets as an Event Bus subscriber — there is no direct Judge→Queen connection at runtime.
+- **Judge monitoring**: The Judge runs as an isolated graph on a 2-minute timer. It reads worker session logs via tools and tracks trends in its continuous conversation to detect degradation patterns such as doom loops, stalls, and excessive retries.
 - **Sub-agent delegation**: A parent Event Loop Node invokes `delegate_to_sub_agent` to spawn specialized sub-agents. Each sub-agent receives a read-only memory snapshot, a fresh conversation, and filtered tools from the Tool Registry. A `SubagentJudge` auto-accepts when all output keys are filled. Sub-agents report progress via `report_to_parent` (fire-and-forget) and can escalate to the user via `wait_for_response` through an `_EscalationReceiver`. Multiple delegations run in parallel; nested delegation is blocked to prevent recursion.
 - **Pub/Sub**: The Active Node publishes events to the Event Bus. The Queen Bee subscribes for real-time visibility. Sub-agent progress reports are also published to the Event Bus.
 - **Adaptiveness**: The Codebase modifies Worker Bees, enabling the framework to evolve agent graphs across versions.
@@ -1069,7 +1067,7 @@ class SignalWeights:
 
 The Hive Agent Framework addresses the fundamental reliability crisis in agentic systems through a layered architecture of **Event Loop Nodes**, **Worker Bees**, **Judges**, and a **Queen Bee**, unified by **Triangulated Verification** and a roadmap toward **Online Learning**:
 
-1. **The Architecture**: External events enter through Event Loop Nodes, which trigger Worker Bees to execute graph-based tasks. Parent nodes delegate specialized work to Sub-Agents — independent EventLoopNodes with read-only memory, filtered tools, and a SubagentJudge — that execute in parallel and report results back. A Judge runs as an isolated graph on a 2-minute timer, reading worker logs and publishing `EscalationTicket` events to the Event Bus — fully disengaged from the Queen at runtime. A Queen Bee provides oversight, receives escalation tickets and node events as an Event Bus subscriber. Shared infrastructure (memory, credentials, tool registry) connects all subsystems.
+1. **The Architecture**: External events enter through Event Loop Nodes, which trigger Worker Bees to execute graph-based tasks. Parent nodes delegate specialized work to Sub-Agents — independent EventLoopNodes with read-only memory, filtered tools, and a SubagentJudge — that execute in parallel and report results back. A Judge runs as an isolated graph on a 2-minute timer, reading worker logs to assess health. A Queen Bee provides oversight and receives node events as an Event Bus subscriber. Shared infrastructure (memory, credentials, tool registry) connects all subsystems.
 
 2. **The Problem**: No single evaluation signal is trustworthy. Tests can be gamed, model confidence is miscalibrated, LLM judges hallucinate.
 

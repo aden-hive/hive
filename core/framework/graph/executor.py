@@ -295,8 +295,7 @@ class GraphExecutor:
         Validate that all tools declared by reachable nodes are available.
 
         Only checks nodes reachable from graph.entry_node via edges.
-        Nodes belonging to other entry points (e.g. the coder node when
-        entering via ticket_triage) are skipped — they will be validated
+        Nodes belonging to other entry points are skipped — they will be validated
         when their own entry point triggers execution.
 
         Returns:
