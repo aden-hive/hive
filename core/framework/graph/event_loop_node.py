@@ -2359,6 +2359,7 @@ class EventLoopNode(NodeProtocol):
                                     "tool_input": tc.tool_input,
                                     "content": result.content,
                                     "is_error": result.is_error,
+                                    "is_duplicate_set_output": True,
                                     "start_timestamp": _tc_ts,
                                     "duration_s": round(time.time() - _tc_start, 3),
                                 }
@@ -2451,11 +2452,16 @@ class EventLoopNode(NodeProtocol):
                             )
 
                     if display_prompt:
+                        snapshot = (
+                            f"{accumulated_text}{display_prompt}"
+                            if accumulated_text
+                            else display_prompt
+                        )
                         await self._publish_text_delta(
                             stream_id,
                             node_id,
                             content=display_prompt,
-                            snapshot=display_prompt,
+                            snapshot=snapshot,
                             ctx=ctx,
                             execution_id=execution_id,
                             iteration=iteration,
@@ -3076,7 +3082,11 @@ class EventLoopNode(NodeProtocol):
             return False
 
         return not any(
-            tc.get("is_error") and tc.get("tool_name") != "set_output" for tc in logged_tool_calls
+            tc.get("is_error")
+            and (
+                tc.get("tool_name") != "set_output" or not tc.get("is_duplicate_set_output", False)
+            )
+            for tc in logged_tool_calls
         )
 
     # -------------------------------------------------------------------

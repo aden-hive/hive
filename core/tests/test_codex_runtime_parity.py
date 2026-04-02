@@ -76,11 +76,18 @@ def tool_call_scenario(
     tool_name: str,
     tool_input: dict[str, Any],
     tool_use_id: str = "call_1",
+    text: str = "",
 ) -> list:
-    return [
-        ToolCallEvent(tool_use_id=tool_use_id, tool_name=tool_name, tool_input=tool_input),
-        FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"),
-    ]
+    events = []
+    if text:
+        events.append(TextDeltaEvent(content=text, snapshot=text))
+    events.append(
+        ToolCallEvent(tool_use_id=tool_use_id, tool_name=tool_name, tool_input=tool_input)
+    )
+    events.append(
+        FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock")
+    )
+    return events
 
 
 def multi_tool_call_scenario(*calls: tuple[str, dict[str, Any], str]) -> list:
@@ -305,6 +312,58 @@ async def test_queen_ask_user_emits_result_text_before_question_widget(runtime, 
 
 
 @pytest.mark.asyncio
+async def test_queen_ask_user_preserves_prior_streamed_text_in_snapshot(runtime, memory):
+    spec = NodeSpec(
+        id="queen",
+        name="Queen",
+        description="Planning node",
+        node_type="event_loop",
+        output_keys=[],
+        client_facing=True,
+    )
+    llm = MockStreamingLLM(
+        scenarios=[
+            tool_call_scenario(
+                "ask_user",
+                {
+                    "question": (
+                        "Root cause: the database pool is exhausted.\n\n"
+                        "What would you like to do next?"
+                    ),
+                    "options": ["Rerun", "Stop"],
+                },
+                tool_use_id="ask_1",
+                text="I checked the failing run.\n\n",
+            )
+        ]
+    )
+    bus = EventBus()
+    output_events = []
+
+    async def capture_output(event):
+        output_events.append(event)
+
+    bus.subscribe([EventType.CLIENT_OUTPUT_DELTA], capture_output, filter_stream="queen")
+
+    node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+    ctx = build_ctx(runtime, spec, memory, llm, stream_id="queen")
+
+    async def shutdown():
+        await asyncio.sleep(0.05)
+        node.signal_shutdown()
+
+    task = asyncio.create_task(shutdown())
+    result = await node.execute(ctx)
+    await task
+
+    assert result.success is True
+    assert [event.data["snapshot"] for event in output_events] == [
+        "I checked the failing run.\n\n",
+        "I checked the failing run.\n\nRoot cause: the database pool is exhausted.",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_worker_auto_completes_after_duplicate_set_output(runtime, memory):
     spec = NodeSpec(
         id="worker",
@@ -344,6 +403,35 @@ async def test_worker_auto_completes_after_duplicate_set_output(runtime, memory)
     assert result.success is True
     assert result.output["result"] == "done"
     assert llm._call_index == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_invalid_set_output_error_blocks_auto_complete(runtime, memory):
+    spec = NodeSpec(
+        id="worker",
+        name="Worker",
+        description="Internal worker node",
+        node_type="event_loop",
+        output_keys=["result"],
+    )
+    llm = MockStreamingLLM(
+        scenarios=[
+            multi_tool_call_scenario(
+                ("set_output", {"key": "result", "value": "done"}, "set_valid"),
+                ("set_output", {"key": "wrong_key", "value": "oops"}, "set_invalid"),
+            ),
+            text_scenario("Done"),
+        ]
+    )
+
+    node = EventLoopNode(config=LoopConfig(max_iterations=3, max_tool_calls_per_turn=3))
+    ctx = build_ctx(runtime, spec, memory, llm, stream_id="worker")
+
+    result = await node.execute(ctx)
+
+    assert result.success is True
+    assert result.output["result"] == "done"
+    assert llm._call_index == 2
 
 
 @pytest.mark.asyncio
