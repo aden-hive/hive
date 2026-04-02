@@ -759,10 +759,16 @@ prompt_model_selection() {
                     model_hc_msg="$(echo "$model_hc_result" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null)" || true
                     model_hc_canonical="$(echo "$model_hc_result" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('model',''))" 2>/dev/null)" || true
                     if [ "$model_hc_valid" = "True" ]; then
-                        if [ -n "$model_hc_canonical" ]; then
-                            normalized_model="$model_hc_canonical"
+                        # Preserve user's original model if it contains a tier suffix (e.g., :free, :thinking)
+                        # to avoid OpenRouter replacing it with a different model ID
+                        if [[ "$normalized_model" =~ :(free|thinking|default)$ ]]; then
+                            echo -e "${GREEN}ok${NC}"
+                        else
+                            if [ -n "$model_hc_canonical" ]; then
+                                normalized_model="$model_hc_canonical"
+                            fi
+                            echo -e "${GREEN}ok${NC}"
                         fi
-                        echo -e "${GREEN}ok${NC}"
                     elif [ "$model_hc_valid" = "False" ]; then
                         echo -e "${RED}failed${NC}"
                         echo -e "  ${YELLOW}⚠ $model_hc_msg${NC}"
