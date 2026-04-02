@@ -274,13 +274,12 @@ hive run exports/my_agent --model claude-sonnet-4-20250514
 | ---------------------- | ----------------------------------------------------------------------- |
 | `hive tui`             | Browse agents and launch TUI dashboard                                  |
 | `hive run <path>`      | Execute an agent (see flags below)                                      |
-| `hive shell [path]`    | Interactive REPL (`--multi`, `--no-approve`)                            |
+| `hive shell [path]`    | Interactive REPL (`--no-approve`)                                       |
 | `hive serve`           | Start HTTP API server                                                   |
 | `hive open`            | Start server + open dashboard in browser                                |
 | `hive info <path>`     | Show agent details                                                      |
 | `hive validate <path>` | Validate agent structure                                                |
 | `hive list [dir]`      | List available agents                                                   |
-| `hive dispatch [dir]`  | Multi-agent orchestration                                               |
 
 ### `hive run` flags
 

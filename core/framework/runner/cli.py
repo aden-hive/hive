@@ -124,46 +124,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     list_parser.set_defaults(func=cmd_list)
 
-    # dispatch command (multi-agent)
-    dispatch_parser = subparsers.add_parser(
-        "dispatch",
-        help="Dispatch request to multiple agents",
-        description="Route a request to the best agent(s) using the orchestrator.",
-    )
-    dispatch_parser.add_argument(
-        "agents_dir",
-        type=str,
-        nargs="?",
-        default="exports",
-        help="Directory containing agent folders (default: exports)",
-    )
-    dispatch_parser.add_argument(
-        "--input",
-        "-i",
-        type=str,
-        required=True,
-        help="Input context as JSON string",
-    )
-    dispatch_parser.add_argument(
-        "--intent",
-        type=str,
-        help="Description of what you want to accomplish",
-    )
-    dispatch_parser.add_argument(
-        "--agents",
-        "-a",
-        type=str,
-        nargs="+",
-        help="Specific agent names to use (default: all in directory)",
-    )
-    dispatch_parser.add_argument(
-        "--quiet",
-        "-q",
-        action="store_true",
-        help="Only output the final result JSON",
-    )
-    dispatch_parser.set_defaults(func=cmd_dispatch)
-
     # shell command (interactive agent session)
     shell_parser = subparsers.add_parser(
         "shell",
@@ -181,11 +141,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         type=str,
         default="exports",
         help="Directory containing agents (default: exports)",
-    )
-    shell_parser.add_argument(
-        "--multi",
-        action="store_true",
-        help="Enable multi-agent mode with orchestrator",
     )
     shell_parser.add_argument(
         "--no-approve",
@@ -729,118 +684,6 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_dispatch(args: argparse.Namespace) -> int:
-    """Dispatch request to multiple agents via orchestrator."""
-    from framework.runner import AgentOrchestrator
-
-    # Parse input
-    try:
-        context = json.loads(args.input)
-    except json.JSONDecodeError as e:
-        print(f"Error parsing --input JSON: {e}", file=sys.stderr)
-        return 1
-
-    # Find agents
-    agents_dir = Path(args.agents_dir)
-    if not agents_dir.exists():
-        print(f"Directory not found: {agents_dir}", file=sys.stderr)
-        return 1
-
-    # Create orchestrator and register agents
-    orchestrator = AgentOrchestrator()
-
-    agent_paths = []
-    if args.agents:
-        # Use specific agents
-        for agent_name in args.agents:
-            # Guard against full paths: if the name contains path separators
-            # (e.g. "exports/my_agent"), it will be doubled with agents_dir
-            agent_name_path = Path(agent_name)
-            if len(agent_name_path.parts) > 1:
-                print(
-                    f"Error: --agents expects agent names, not paths. "
-                    f"Use: --agents {agent_name_path.name} "
-                    f"instead of --agents {agent_name}",
-                    file=sys.stderr,
-                )
-                return 1
-            agent_path = agents_dir / agent_name
-            if not _is_valid_agent_dir(agent_path):
-                print(f"Agent not found: {agent_path}", file=sys.stderr)
-                return 1
-            agent_paths.append((agent_name, agent_path))
-    else:
-        # Discover all agents
-        for path in agents_dir.iterdir():
-            if _is_valid_agent_dir(path):
-                agent_paths.append((path.name, path))
-
-    if not agent_paths:
-        print(f"No agents found in {agents_dir}", file=sys.stderr)
-        return 1
-
-    # Register agents
-    for name, path in agent_paths:
-        try:
-            orchestrator.register(name, path)
-            if not args.quiet:
-                print(f"Registered agent: {name}")
-        except Exception as e:
-            print(f"Failed to register {name}: {e}", file=sys.stderr)
-
-    if not args.quiet:
-        print()
-        print(f"Input: {json.dumps(context)}")
-        if args.intent:
-            print(f"Intent: {args.intent}")
-        print()
-        print("=" * 60)
-        print("Dispatching to agents...")
-        print("=" * 60)
-        print()
-
-    # Dispatch
-    result = asyncio.run(orchestrator.dispatch(context, intent=args.intent))
-
-    # Output results
-    if args.quiet:
-        output = {
-            "success": result.success,
-            "handled_by": result.handled_by,
-            "results": result.results,
-            "error": result.error,
-        }
-        print(json.dumps(output, indent=2, default=str))
-    else:
-        print()
-        print("=" * 60)
-        print(f"Success: {result.success}")
-        print(f"Handled by: {', '.join(result.handled_by) or 'none'}")
-        if result.error:
-            print(f"Error: {result.error}")
-        print("=" * 60)
-
-        if result.results:
-            print("\n--- Results by Agent ---")
-            for agent_name, data in result.results.items():
-                print(f"\n{agent_name}:")
-                status = data.get("status", "unknown")
-                print(f"  Status: {status}")
-                if "completed_steps" in data:
-                    print(f"  Steps: {len(data['completed_steps'])}")
-                if "results" in data:
-                    results_preview = json.dumps(data["results"], default=str)
-                    if len(results_preview) > 200:
-                        results_preview = results_preview[:200] + "..."
-                    print(f"  Results: {results_preview}")
-
-        if not args.quiet:
-            print(f"\nMessage trace: {len(result.messages)} messages")
-
-    orchestrator.cleanup()
-    return 0 if result.success else 1
-
-
 def _interactive_approval(request):
     """Interactive approval callback for HITL mode."""
     from framework.graph import ApprovalDecision, ApprovalResult
@@ -938,11 +781,6 @@ def cmd_shell(args: argparse.Namespace) -> int:
 
     agents_dir = Path(args.agents_dir)
 
-    # Multi-agent mode with orchestrator
-    if args.multi:
-        return _interactive_multi(agents_dir)
-
-    # Single agent mode
     agent_path = args.agent_path
     if not agent_path:
         # List available agents and let user choose
@@ -1414,108 +1252,6 @@ def _select_agent(agents_dir: Path) -> str | None:
         except (EOFError, KeyboardInterrupt):
             print()
             return None
-
-
-def _interactive_multi(agents_dir: Path) -> int:
-    """Interactive multi-agent mode with orchestrator."""
-    from framework.runner import AgentOrchestrator
-
-    if not agents_dir.exists():
-        print(f"Directory not found: {agents_dir}", file=sys.stderr)
-        return 1
-
-    orchestrator = AgentOrchestrator()
-    agent_count = 0
-
-    # Register all agents
-    for path in agents_dir.iterdir():
-        if _is_valid_agent_dir(path):
-            try:
-                orchestrator.register(path.name, path)
-                agent_count += 1
-            except Exception as e:
-                print(f"Warning: Failed to register {path.name}: {e}")
-
-    if agent_count == 0:
-        print(f"No agents found in {agents_dir}", file=sys.stderr)
-        return 1
-
-    print(f"\n{'=' * 60}")
-    print("Multi-Agent Interactive Mode")
-    print(f"Registered {agent_count} agents")
-    print(f"{'=' * 60}")
-    print("\nCommands:")
-    print("  /agents  - List registered agents")
-    print("  /quit    - Exit")
-    print("  {...}    - JSON input to dispatch")
-    print()
-
-    while True:
-        try:
-            user_input = input(">>> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nExiting...")
-            break
-
-        if not user_input:
-            continue
-
-        if user_input == "/quit":
-            break
-
-        if user_input == "/agents":
-            print("\nRegistered agents:")
-            for agent in orchestrator.list_agents():
-                print(f"  - {agent['name']}: {agent['description'][:60]}...")
-            print()
-            continue
-
-        # Parse intent if provided
-        intent = None
-        if user_input.startswith("/intent "):
-            parts = user_input.split(" ", 2)
-            if len(parts) >= 3:
-                intent = parts[1]
-                user_input = parts[2]
-
-        # Try to parse as JSON
-        try:
-            context = json.loads(user_input)
-        except json.JSONDecodeError:
-            print("Error: Invalid JSON input. Use {...} format.")
-            continue
-
-        print(f"\nDispatching: {json.dumps(context)}")
-        if intent:
-            print(f"Intent: {intent}")
-        print("-" * 40)
-
-        result = asyncio.run(orchestrator.dispatch(context, intent=intent))
-
-        print(f"\nSuccess: {result.success}")
-        print(f"Handled by: {', '.join(result.handled_by) or 'none'}")
-
-        if result.error:
-            print(f"Error: {result.error}")
-
-        if result.results:
-            print("\nResults by agent:")
-            for agent_name, data in result.results.items():
-                print(f"\n  {agent_name}:")
-                status = data.get("status", "unknown")
-                print(f"    Status: {status}")
-                if "results" in data:
-                    results_preview = json.dumps(data["results"], default=str)
-                    if len(results_preview) > 150:
-                        results_preview = results_preview[:150] + "..."
-                    print(f"    Results: {results_preview}")
-
-        print(f"\nMessage trace: {len(result.messages)} messages")
-        print()
-
-    orchestrator.cleanup()
-    return 0
-
 
 def cmd_setup_credentials(args: argparse.Namespace) -> int:
     """Interactive credential setup for an agent."""
