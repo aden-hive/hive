@@ -11,7 +11,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
-from framework.graph.event_loop_node import EventLoopNode, LoopConfig
+from framework.graph.event_loop_node import (
+    EventLoopNode,
+    LoopConfig,
+    _assistant_text_requires_input,
+)
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
 from framework.graph.node import NodeContext, NodeSpec, SharedMemory
@@ -30,7 +34,7 @@ from framework.tools.queen_lifecycle_tools import (
 class MockStreamingLLM(LLMProvider):
     """Mock LLM that replays deterministic stream scenarios."""
 
-    def __init__(self, scenarios: list[list] | None = None):
+    def __init__(self, scenarios: list[list[Any]] | None = None):
         self.scenarios = scenarios or []
         self._call_index = 0
 
@@ -43,7 +47,11 @@ class MockStreamingLLM(LLMProvider):
     ) -> AsyncIterator:
         if not self.scenarios:
             return
-        events = self.scenarios[self._call_index % len(self.scenarios)]
+        if self._call_index >= len(self.scenarios):
+            raise RuntimeError(
+                "MockStreamingLLM received more stream() calls than configured scenarios"
+            )
+        events = self.scenarios[self._call_index]
         self._call_index += 1
         for event in events:
             yield event
@@ -143,6 +151,59 @@ async def execute_registered_tool(executor, name: str, tool_input: dict[str, Any
     if asyncio.iscoroutine(result) or asyncio.isfuture(result):
         result = await result
     return result
+
+
+def test_auto_blocked_planning_only_counts_real_reply_requests() -> None:
+    status_event = AgentEvent(
+        type=EventType.CLIENT_INPUT_REQUESTED,
+        stream_id="queen",
+        data={
+            "auto_blocked": True,
+            "assistant_text_requires_input": _assistant_text_requires_input(
+                "We still need to confirm the schema before building."
+            ),
+        },
+    )
+    assert status_event.data["assistant_text_requires_input"] is False
+    assert _client_input_counts_as_planning_ask(status_event) is False
+
+    summary_event = AgentEvent(
+        type=EventType.CLIENT_INPUT_REQUESTED,
+        stream_id="queen",
+        data={
+            "auto_blocked": True,
+            "assistant_text_requires_input": _assistant_text_requires_input(
+                "Here is what I found so far."
+            ),
+        },
+    )
+    assert summary_event.data["assistant_text_requires_input"] is False
+    assert _client_input_counts_as_planning_ask(summary_event) is False
+
+    request_event = AgentEvent(
+        type=EventType.CLIENT_INPUT_REQUESTED,
+        stream_id="queen",
+        data={
+            "auto_blocked": True,
+            "assistant_text_requires_input": _assistant_text_requires_input(
+                "Please confirm the schema before I build the agent."
+            ),
+        },
+    )
+    assert request_event.data["assistant_text_requires_input"] is True
+    assert _client_input_counts_as_planning_ask(request_event) is True
+
+
+@pytest.mark.asyncio
+async def test_mock_streaming_llm_raises_on_unexpected_extra_stream_call() -> None:
+    llm = MockStreamingLLM(scenarios=[text_scenario("hello")])
+
+    events = [event async for event in llm.stream(messages=[])]
+    assert len(events) == 2
+
+    with pytest.raises(RuntimeError, match="more stream\\(\\) calls than configured scenarios"):
+        async for _ in llm.stream(messages=[]):
+            pass
 
 
 @pytest.mark.asyncio
@@ -283,6 +344,45 @@ async def test_worker_auto_completes_after_duplicate_set_output(runtime, memory)
     assert result.success is True
     assert result.output["result"] == "done"
     assert llm._call_index == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_auto_complete_uses_normal_success_epilogue(runtime, memory):
+    spec = NodeSpec(
+        id="worker",
+        name="Worker",
+        description="Internal worker node",
+        node_type="event_loop",
+        output_keys=["result"],
+    )
+    llm = MockStreamingLLM(
+        scenarios=[
+            tool_call_scenario(
+                "set_output",
+                {"key": "result", "value": "done"},
+                tool_use_id="set_1",
+            )
+        ]
+    )
+
+    node = EventLoopNode(config=LoopConfig(max_iterations=2))
+    ctx = build_ctx(runtime, spec, memory, llm, stream_id="worker")
+    ctx.continuous_mode = True
+    ctx.runtime_logger = MagicMock()
+
+    result = await node.execute(ctx)
+
+    assert result.success is True
+    assert result.output["result"] == "done"
+    assert memory.read("result") == "done"
+    assert result.conversation is not None
+    assert result.conversation.estimate_tokens() == 10
+    assert ctx.runtime_logger.log_step.call_count == 1
+    assert ctx.runtime_logger.log_step.call_args.kwargs["verdict"] == "ACCEPT"
+    assert ctx.runtime_logger.log_node_complete.call_count == 1
+    assert ctx.runtime_logger.log_node_complete.call_args.kwargs["success"] is True
+    assert ctx.runtime_logger.log_node_complete.call_args.kwargs["exit_status"] == "success"
+    assert ctx.runtime_logger.log_node_complete.call_args.kwargs["accept_count"] == 1
 
 
 @pytest.mark.asyncio

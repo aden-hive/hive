@@ -166,7 +166,18 @@ def _is_context_too_large_error(exc: BaseException) -> bool:
 
 _ASSISTANT_INPUT_PATTERNS = (
     re.compile(r"\?\s*$"),
-    re.compile(r"\b(let me know|tell me|share|choose|pick|approve|confirm|which|what)\b", re.I),
+    re.compile(r"(?:^|[\n.!?]\s*)(?:let me know|tell me|share)\b", re.I),
+    re.compile(
+        r"(?:^|[\n.!?]\s*)(?:please\s+|kindly\s+)?(?:confirm|approve|choose|pick)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b("
+        r"what would you like|what should (?:i|we)|which option|which one|"
+        r"would you like|do you want|can you|could you|are you okay with"
+        r")\b",
+        re.I,
+    ),
     re.compile(r"\bready to proceed\b", re.I),
 )
 _QUESTION_WIDGET_FALLBACK = "Choose an option below."
@@ -1001,6 +1012,12 @@ class EventLoopNode(NodeProtocol):
             if _llm_turn_failed_waiting_input:
                 continue
 
+            # Feed actual API token count back for accurate estimation even
+            # on auto-complete exits that return before the judge path.
+            turn_input = turn_tokens.get("input", 0)
+            if turn_input > 0:
+                conversation.update_token_count(turn_input)
+
             if self._should_auto_complete_after_outputs(
                 ctx=ctx,
                 accumulator=accumulator,
@@ -1015,6 +1032,8 @@ class EventLoopNode(NodeProtocol):
                     node_id,
                     iteration,
                 )
+                for key, value in accumulator.to_dict().items():
+                    ctx.memory.write(key, value, validate=False)
                 await self._write_cursor(
                     ctx,
                     conversation,
@@ -1025,6 +1044,37 @@ class EventLoopNode(NodeProtocol):
                 )
                 await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
+                _accept_count += 1
+                if ctx.runtime_logger:
+                    iter_latency_ms = int((time.time() - iter_start) * 1000)
+                    ctx.runtime_logger.log_step(
+                        node_id=node_id,
+                        node_type="event_loop",
+                        step_index=iteration,
+                        verdict="ACCEPT",
+                        verdict_feedback="Required outputs satisfied via set_output.",
+                        tool_calls=logged_tool_calls,
+                        llm_text=assistant_text,
+                        input_tokens=turn_tokens.get("input", 0),
+                        output_tokens=turn_tokens.get("output", 0),
+                        latency_ms=iter_latency_ms,
+                    )
+                    ctx.runtime_logger.log_node_complete(
+                        node_id=node_id,
+                        node_name=ctx.node_spec.name,
+                        node_type="event_loop",
+                        success=True,
+                        total_steps=iteration + 1,
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        latency_ms=latency_ms,
+                        exit_status="success",
+                        accept_count=_accept_count,
+                        retry_count=_retry_count,
+                        escalate_count=_escalate_count,
+                        continue_count=_continue_count,
+                    )
                 return NodeResult(
                     success=True,
                     output=accumulator.to_dict(),
@@ -1032,11 +1082,6 @@ class EventLoopNode(NodeProtocol):
                     latency_ms=latency_ms,
                     conversation=conversation if _is_continuous else None,
                 )
-
-            # 6e'. Feed actual API token count back for accurate estimation
-            turn_input = turn_tokens.get("input", 0)
-            if turn_input > 0:
-                conversation.update_token_count(turn_input)
 
             # 6e''. Post-turn compaction check (catches tool-result bloat).
             # Skip if pre-turn already compacted this iteration — two compactions
