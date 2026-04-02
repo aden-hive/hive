@@ -257,10 +257,53 @@ fi
 
 # Check for Chrome/Edge (required for GCU browser tools)
 echo -n "  Checking for Chrome/Edge browser... "
-if uv run python -c "from gcu.browser.chrome_finder import find_chrome; assert find_chrome()" > /dev/null 2>&1; then
+# Check common browser locations
+CHROME_FOUND=false
+for browser in "google-chrome" "google-chrome-stable" "chromium" "chromium-browser" "microsoft-edge"; do
+    if command -v "$browser" &> /dev/null; then
+        CHROME_FOUND=true
+        break
+    fi
+done
+# Also check common desktop locations (for macOS/Windows)
+if [ "$CHROME_FOUND" = false ]; then
+    for path in "/Applications/Google Chrome.app" "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" "/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" "$HOME/Applications/Google Chrome.app" "$HOME/.local/share/applications/google-chrome.desktop"; do
+        if [ -e "$path" ]; then
+            CHROME_FOUND=true
+            break
+        fi
+    done
+fi
+if [ "$CHROME_FOUND" = true ]; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${YELLOW}not found — install Chrome or Edge for browser tools${NC}"
+fi
+
+# Ensure playwright is installed for web scraping tools
+echo -n "  Checking playwright installation... "
+if uv run python -c "import playwright" > /dev/null 2>&1; then
+    # Check if browser binaries are installed
+    if uv run playwright install --dry-run chromium > /dev/null 2>&1; then
+        echo -e "${GREEN}ok${NC}"
+    else
+        echo -e "${YELLOW}installing browser...${NC}"
+        uv run playwright install chromium > /dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            echo -e "  ${GREEN}✓ playwright chromium installed${NC}"
+        else
+            echo -e "  ${YELLOW}⚠ playwright browser installation failed (web scraping may not work)${NC}"
+        fi
+    fi
+else
+    echo -e "${YELLOW}not found — installing...${NC}"
+    uv pip install playwright playwright-stealth > /dev/null 2>&1
+    uv run playwright install chromium > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo -e "  ${GREEN}✓ playwright installed${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ playwright installation failed (web scraping may not work)${NC}"
+    fi
 fi
 
 cd "$SCRIPT_DIR"

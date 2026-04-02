@@ -8,16 +8,26 @@ No Playwright required - all operations go through the Chrome extension.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fastmcp import FastMCP
 
 from ..bridge import get_bridge
+from ..session import _active_profile
+from ..telemetry import log_context_event, log_tool_call
 
 logger = logging.getLogger(__name__)
 
 # Track active contexts per profile
 _contexts: dict[str, dict[str, Any]] = {}
+
+
+def _resolve_profile(profile: str | None) -> str:
+    """Resolve profile name, using context variable if not provided."""
+    if profile is not None:
+        return profile
+    return _active_profile.get()
 
 
 def register_lifecycle_tools(mcp: FastMCP) -> None:
@@ -34,22 +44,27 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with browser status
         """
+        start = time.perf_counter()
+        params = {"profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {
+            result = {
                 "ok": False,
                 "error": "Browser extension not connected",
                 "connected": False,
             }
+            log_tool_call("browser_status", params, result=result)
+            return result
 
-        profile_name = profile or "default"
+        profile_name = _resolve_profile(profile)
         ctx = _contexts.get(profile_name)
 
         if ctx:
             try:
                 tabs_result = await bridge.list_tabs(ctx.get("groupId"))
                 tabs = tabs_result.get("tabs", [])
-                return {
+                result = {
                     "ok": True,
                     "connected": True,
                     "profile": profile_name,
@@ -58,22 +73,43 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                     "activeTab": ctx.get("activeTabId"),
                     "tabs": len(tabs),
                 }
+                log_tool_call(
+                    "browser_status",
+                    params,
+                    result=result,
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                )
+                return result
             except Exception as e:
-                return {
+                result = {
                     "ok": True,
                     "connected": True,
                     "profile": profile_name,
                     "running": False,
                     "error": str(e),
                 }
+                log_tool_call(
+                    "browser_status",
+                    params,
+                    result=result,
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                )
+                return result
 
-        return {
+        result = {
             "ok": True,
             "connected": True,
             "profile": profile_name,
             "running": False,
             "tabs": 0,
         }
+        log_tool_call(
+            "browser_status",
+            params,
+            result=result,
+            duration_ms=(time.perf_counter() - start) * 1000,
+        )
+        return result
 
     @mcp.tool()
     async def browser_start(profile: str | None = None) -> dict:
@@ -89,28 +125,39 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with start status including groupId and initial tabId
         """
+        start = time.perf_counter()
+        params = {"profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {
+            result = {
                 "ok": False,
                 "error": (
-                    "Browser extension not connected. "
-                    "Install the Beeline extension and connect it."
+                    "Browser extension not connected. Install the Beeline extension and connect it."
                 ),
             }
+            log_tool_call("browser_start", params, result=result)
+            return result
 
-        profile_name = profile or "default"
+        profile_name = _resolve_profile(profile)
 
         # Check if already running
         if profile_name in _contexts:
             ctx = _contexts[profile_name]
-            return {
+            result = {
                 "ok": True,
                 "status": "already_running",
                 "profile": profile_name,
                 "groupId": ctx.get("groupId"),
                 "activeTabId": ctx.get("activeTabId"),
             }
+            log_tool_call(
+                "browser_start",
+                params,
+                result=result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
 
         try:
             result = await bridge.create_context(profile_name)
@@ -129,16 +176,29 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                 tab_id,
             )
 
-            return {
+            log_context_event("start", profile_name, group_id=group_id, tab_id=tab_id)
+
+            result = {
                 "ok": True,
                 "status": "started",
                 "profile": profile_name,
                 "groupId": group_id,
                 "activeTabId": tab_id,
             }
+            log_tool_call(
+                "browser_start",
+                params,
+                result=result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
         except Exception as e:
             logger.exception("Failed to start browser context")
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_start", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_stop(profile: str | None = None) -> dict:
@@ -151,15 +211,27 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with stop status
         """
+        start = time.perf_counter()
+        params = {"profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_stop", params, result=result)
+            return result
 
-        profile_name = profile or "default"
+        profile_name = _resolve_profile(profile)
         ctx = _contexts.pop(profile_name, None)
 
         if not ctx:
-            return {"ok": True, "status": "not_running", "profile": profile_name}
+            result = {"ok": True, "status": "not_running", "profile": profile_name}
+            log_tool_call(
+                "browser_stop",
+                params,
+                result=result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
 
         try:
             group_id = ctx.get("groupId")
@@ -173,12 +245,27 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                     closed_tabs,
                 )
 
-            return {
+            log_context_event(
+                "stop", profile_name, group_id=group_id, details={"closed_tabs": closed_tabs}
+            )
+
+            result = {
                 "ok": True,
                 "status": "stopped",
                 "profile": profile_name,
                 "closedTabs": closed_tabs,
             }
+            log_tool_call(
+                "browser_stop",
+                params,
+                result=result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
         except Exception as e:
             logger.exception("Failed to stop browser context")
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_stop", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result

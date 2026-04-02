@@ -24,7 +24,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any
+
+from .telemetry import (
+    log_bridge_message,
+    log_cdp_command,
+    log_connection_event,
+    log_context_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +40,16 @@ BRIDGE_PORT = 9229
 
 # CDP wait_until values
 VALID_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
+
+
+def _get_active_profile() -> str:
+    """Get the current active profile from context variable."""
+    try:
+        from .session import _active_profile as ap
+
+        return ap.get()
+    except Exception:
+        return "default"
 
 
 class BeelineBridge:
@@ -42,6 +60,7 @@ class BeelineBridge:
         self._server: object | None = None  # websockets.Server
         self._pending: dict[str, asyncio.Future] = {}
         self._counter = 0
+        self._cdp_attached: set[int] = set()  # Track tabs with CDP attached
 
     @property
     def is_connected(self) -> bool:
@@ -75,6 +94,7 @@ class BeelineBridge:
 
     async def _handle_connection(self, ws) -> None:
         logger.info("Chrome extension connected")
+        log_connection_event("connect")
         self._ws = ws
         try:
             async for raw in ws:
@@ -85,6 +105,7 @@ class BeelineBridge:
 
                 if msg.get("type") == "hello":
                     logger.info("Extension hello: version=%s", msg.get("version"))
+                    log_connection_event("hello", {"version": msg.get("version")})
                     continue
 
                 msg_id = msg.get("id")
@@ -92,13 +113,20 @@ class BeelineBridge:
                     fut = self._pending.pop(msg_id)
                     if not fut.done():
                         if "error" in msg:
+                            log_bridge_message(
+                                "recv", "response", msg_id=msg_id, error=msg["error"]
+                            )
                             fut.set_exception(RuntimeError(msg["error"]))
                         else:
+                            log_bridge_message(
+                                "recv", "response", msg_id=msg_id, result=msg.get("result")
+                            )
                             fut.set_result(msg.get("result", {}))
         except Exception:
             pass
         finally:
             logger.info("Chrome extension disconnected")
+            log_connection_event("disconnect")
             self._ws = None
             # Cancel any pending requests
             for fut in self._pending.values():
@@ -114,16 +142,33 @@ class BeelineBridge:
         msg_id = str(self._counter)
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending[msg_id] = fut
+        start = time.perf_counter()
+
+        log_bridge_message("send", type_, msg_id=msg_id, params=params)
+
         try:
             await self._ws.send(json.dumps({"id": msg_id, "type": type_, **params}))
-            return await asyncio.wait_for(fut, timeout=30.0)
+            result = await asyncio.wait_for(fut, timeout=30.0)
+            duration_ms = (time.perf_counter() - start) * 1000
+            log_bridge_message("send", type_, msg_id=msg_id, result=result, duration_ms=duration_ms)
+            return result
         except TimeoutError:
             self._pending.pop(msg_id, None)
+            log_bridge_message("send", type_, msg_id=msg_id, error="timeout")
             raise RuntimeError(f"Bridge command '{type_}' timed out") from None
 
     async def _cdp(self, tab_id: int, method: str, params: dict | None = None) -> dict:
         """Send a CDP command to a tab."""
-        return await self._send("cdp", tabId=tab_id, method=method, params=params or {})
+        start = time.perf_counter()
+        try:
+            result = await self._send("cdp", tabId=tab_id, method=method, params=params or {})
+            duration_ms = (time.perf_counter() - start) * 1000
+            log_cdp_command(tab_id, method, params, result, duration_ms=duration_ms)
+            return result
+        except Exception as e:
+            duration_ms = (time.perf_counter() - start) * 1000
+            log_cdp_command(tab_id, method, params, error=str(e), duration_ms=duration_ms)
+            raise
 
     # ── Context (Tab Group) Management ─────────────────────────────────────────
 
@@ -132,11 +177,17 @@ class BeelineBridge:
 
         Returns {"groupId": int, "tabId": int}.
         """
-        return await self._send("context.create", agentId=agent_id)
+        result = await self._send("context.create", agentId=agent_id)
+        log_context_event(
+            "create", agent_id, group_id=result.get("groupId"), tab_id=result.get("tabId")
+        )
+        return result
 
     async def destroy_context(self, group_id: int) -> dict:
         """Close all tabs in the group and remove it."""
-        return await self._send("context.destroy", groupId=group_id)
+        result = await self._send("context.destroy", groupId=group_id)
+        log_context_event("destroy", _get_active_profile(), group_id=group_id, details=result)
+        return result
 
     # ── Tab Management ─────────────────────────────────────────────────────────
 
@@ -173,11 +224,18 @@ class BeelineBridge:
 
         Returns {"ok": bool}.
         """
-        return await self._send("cdp.attach", tabId=tab_id)
+        if tab_id in self._cdp_attached:
+            return {"ok": True, "attached": False, "message": "Already attached"}
+        result = await self._send("cdp.attach", tabId=tab_id)
+        if result.get("ok"):
+            self._cdp_attached.add(tab_id)
+        return result
 
     async def cdp_detach(self, tab_id: int) -> dict:
         """Detach CDP debugger from a tab."""
-        return await self._send("cdp.detach", tabId=tab_id)
+        result = await self._send("cdp.detach", tabId=tab_id)
+        self._cdp_attached.discard(tab_id)
+        return result
 
     # ── Navigation ─────────────────────────────────────────────────────────────
 
@@ -562,9 +620,7 @@ class BeelineBridge:
 
         return {"ok": True, "action": "hover", "selector": selector}
 
-    async def scroll(
-        self, tab_id: int, direction: str = "down", amount: int = 500
-    ) -> dict:
+    async def scroll(self, tab_id: int, direction: str = "down", amount: int = 500) -> dict:
         """Scroll the page."""
         await self.cdp_attach(tab_id)
 
@@ -619,10 +675,12 @@ class BeelineBridge:
     async def evaluate(self, tab_id: int, script: str) -> dict:
         """Execute JavaScript in the page."""
         await self.cdp_attach(tab_id)
+        # Wrap in IIFE to allow return statements at top level
+        wrapped_script = f"(function() {{ {script} }})()"
         result = await self._cdp(
             tab_id,
             "Runtime.evaluate",
-            {"expression": script, "returnByValue": True, "awaitPromise": True},
+            {"expression": wrapped_script, "returnByValue": True, "awaitPromise": True},
         )
 
         if "exceptionDetails" in result:
@@ -722,8 +780,15 @@ class BeelineBridge:
 
             # Add ref for interactive elements
             interactive_roles = {
-                "button", "link", "textbox", "checkbox",
-                "radio", "combobox", "menuitem", "tab", "searchbox",
+                "button",
+                "link",
+                "textbox",
+                "checkbox",
+                "radio",
+                "combobox",
+                "menuitem",
+                "tab",
+                "searchbox",
             }
             if role in interactive_roles or name:
                 ref_counter[0] += 1
@@ -841,9 +906,7 @@ class BeelineBridge:
             "mimeType": "image/png",
         }
 
-    async def wait_for_selector(
-        self, tab_id: int, selector: str, timeout_ms: int = 30000
-    ) -> dict:
+    async def wait_for_selector(self, tab_id: int, selector: str, timeout_ms: int = 30000) -> dict:
         """Wait for an element to appear."""
         await self.cdp_attach(tab_id)
 

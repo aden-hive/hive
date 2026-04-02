@@ -49,6 +49,8 @@ sandbox = [
 ]
 browser = [
     "pillow>=10.0.0",
+    "playwright>=1.40.0",
+    "playwright-stealth>=2.0.0",
 ]
 ocr = [
     "pytesseract>=0.3.10",
@@ -76,6 +78,8 @@ all = [
     "google-cloud-bigquery>=3.0.0",
     "databricks-sdk>=0.30.0",
     "databricks-mcp>=0.1.0",
+    "playwright>=1.40.0",
+    "playwright-stealth>=2.0.0",
 ]
 
 [tool.uv.sources]

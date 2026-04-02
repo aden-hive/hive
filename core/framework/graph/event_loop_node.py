@@ -423,6 +423,11 @@ class EventLoopNode(NodeProtocol):
                 _restored_recent_responses = []
                 _restored_tool_fingerprints = []
 
+                # Clear any stale conversation parts before starting fresh.
+                # This ensures a clean slate even if the store directory is reused.
+                if self._conversation_store is not None:
+                    await self._conversation_store.clear()
+
                 # Fresh conversation: either isolated mode or first node in continuous mode.
                 from framework.graph.prompt_composer import (
                     EXECUTION_SCOPE_PREAMBLE,
@@ -2586,40 +2591,117 @@ class EventLoopNode(NodeProtocol):
             # Phase 2b: execute subagent delegations in parallel.
             if pending_subagent:
                 _subagent_timeout = self._config.subagent_timeout_seconds
+                _inactivity_timeout = self._config.subagent_inactivity_timeout_seconds
 
                 async def _timed_subagent(
                     _ctx: NodeContext,
                     _tc: ToolCallEvent,
                     _acc: OutputAccumulator = accumulator,
-                    _timeout: float = _subagent_timeout,
+                    _wall_timeout: float = _subagent_timeout,
+                    _activity_timeout: float = _inactivity_timeout,
                 ) -> tuple[ToolResult | BaseException, str, float]:
                     _s = time.time()
                     _iso = datetime.now(UTC).isoformat()
+                    _last_activity = _s
+                    _activity_event = asyncio.Event()
+
+                    async def _watchdog() -> None:
+                        """Watchdog that times out only after inactivity period."""
+                        nonlocal _last_activity
+                        while True:
+                            _now = time.time()
+                            _inactive_for = _now - _last_activity
+                            _remaining = _activity_timeout - _inactive_for
+
+                            if _remaining <= 0:
+                                # Inactivity timeout reached
+                                return
+
+                            try:
+                                await asyncio.wait_for(
+                                    _activity_event.wait(),
+                                    timeout=_remaining
+                                )
+                                _activity_event.clear()
+                            except TimeoutError:
+                                # Check again in case activity happened during wait
+                                continue
+
+                    async def _run_with_activity_timeout(
+                        _coro,
+                    ) -> ToolResult:
+                        """Run subagent with activity-based timeout."""
+                        _watchdog_task = asyncio.create_task(_watchdog())
+                        try:
+                            _result = await _coro
+                            return _result
+                        finally:
+                            _watchdog_task.cancel()
+                            try:
+                                await _watchdog_task
+                            except asyncio.CancelledError:
+                                pass
+
                     try:
-                        _coro = self._execute_subagent(
-                            _ctx,
-                            _tc.tool_input.get("agent_id", ""),
-                            _tc.tool_input.get("task", ""),
-                            accumulator=_acc,
-                        )
-                        if _timeout > 0:
-                            _r = await asyncio.wait_for(_coro, timeout=_timeout)
-                        else:
-                            _r = await _coro
+                        # Subscribe to subagent activity events to reset inactivity timer
+                        async def _on_subagent_activity(event) -> None:
+                            nonlocal _last_activity
+                            _last_activity = time.time()
+                            _activity_event.set()
+
+                        _sub_id = None
+                        if self._event_bus and _activity_timeout > 0:
+                            from framework.runtime.event_bus import EventType
+                            _sub_id = self._event_bus.subscribe(
+                                event_types=[
+                                    EventType.TOOL_CALL_STARTED,
+                                    EventType.LLM_TEXT_DELTA,
+                                    EventType.EXECUTION_STARTED,
+                                ],
+                                handler=_on_subagent_activity,
+                            )
+
+                        try:
+                            _coro = self._execute_subagent(
+                                _ctx,
+                                _tc.tool_input.get("agent_id", ""),
+                                _tc.tool_input.get("task", ""),
+                                accumulator=_acc,
+                            )
+
+                            if _activity_timeout > 0:
+                                # Use activity-based timeout with wall-clock max
+                                _result_coro = _run_with_activity_timeout(_coro)
+                                if _wall_timeout > 0:
+                                    _r = await asyncio.wait_for(
+                                        _result_coro, timeout=_wall_timeout
+                                    )
+                                else:
+                                    _r = await _result_coro
+                            elif _wall_timeout > 0:
+                                _r = await asyncio.wait_for(_coro, timeout=_wall_timeout)
+                            else:
+                                _r = await _coro
+                        finally:
+                            if _sub_id and self._event_bus:
+                                self._event_bus.unsubscribe(_sub_id)
+
                     except TimeoutError:
                         _agent_id = _tc.tool_input.get("agent_id", "unknown")
+                        _elapsed = time.time() - _s
                         logger.warning(
-                            "Subagent '%s' timed out after %.0fs",
+                            "Subagent '%s' timed out after %.0fs (inactivity threshold: %.0fs)",
                             _agent_id,
-                            _timeout,
+                            _elapsed,
+                            _activity_timeout if _activity_timeout > 0 else _wall_timeout,
                         )
                         _r = ToolResult(
                             tool_use_id=_tc.tool_use_id,
                             content=(
                                 f"Subagent '{_agent_id}' timed out after "
-                                f"{_timeout:.0f}s. The delegation took "
-                                "too long and was cancelled. Try a simpler task "
-                                "or break it into smaller pieces."
+                                f"{_elapsed:.0f}s of inactivity. "
+                                "The subagent was not making progress. "
+                                "Try a simpler task or break it into smaller pieces."
                             ),
                             is_error=True,
                         )

@@ -80,8 +80,13 @@ class LoopConfig:
     # Per-tool-call timeout.
     tool_call_timeout_seconds: float = 60.0
 
-    # Subagent delegation timeout.
-    subagent_timeout_seconds: float = 600.0
+    # Subagent delegation timeout (wall-clock max).
+    subagent_timeout_seconds: float = 3600.0
+
+    # Subagent inactivity timeout - only timeout if no activity for this duration.
+    # This resets whenever the subagent makes progress (tool calls, LLM responses).
+    # Set to 0 to use only the wall-clock timeout.
+    subagent_inactivity_timeout_seconds: float = 300.0
 
     # Lifecycle hooks.
     hooks: dict[str, list] | None = None

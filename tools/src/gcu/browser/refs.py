@@ -14,32 +14,36 @@ if TYPE_CHECKING:
     from .session import BrowserSession
 
 # Role sets for interactive elements
-INTERACTIVE_ROLES: frozenset[str] = frozenset({
-    "button",
-    "checkbox",
-    "combobox",
-    "link",
-    "listbox",
-    "menuitem",
-    "menuitemcheckbox",
-    "menuitemradio",
-    "option",
-    "radio",
-    "scrollbar",
-    "searchbox",
-    "slider",
-    "spinbutton",
-    "switch",
-    "tab",
-    "textbox",
-    "treeitem",
-})
+INTERACTIVE_ROLES: frozenset[str] = frozenset(
+    {
+        "button",
+        "checkbox",
+        "combobox",
+        "link",
+        "listbox",
+        "menuitem",
+        "menuitemcheckbox",
+        "menuitemradio",
+        "option",
+        "radio",
+        "scrollbar",
+        "searchbox",
+        "slider",
+        "spinbutton",
+        "switch",
+        "tab",
+        "textbox",
+        "treeitem",
+    }
+)
 
-NAMED_CONTENT_ROLES: frozenset[str] = frozenset({
-    "cell",
-    "heading",
-    "img",
-})
+NAMED_CONTENT_ROLES: frozenset[str] = frozenset(
+    {
+        "cell",
+        "heading",
+        "img",
+    }
+)
 
 # Regex for parsing aria snapshot lines
 _LINE_RE = re.compile(r"^(\s*-\s+)(\w+)(?:\s+\"([^\"]*)\")?(.*?)$")

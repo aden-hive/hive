@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Literal
 
 from fastmcp import FastMCP
 
 from ..bridge import get_bridge
+from ..telemetry import log_tool_call
 from .tabs import _get_context
 
 logger = logging.getLogger(__name__)
@@ -58,9 +60,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
 
         try:
             if selector:
-                result = await bridge.wait_for_selector(
-                    target_tab, selector, timeout_ms=timeout_ms
-                )
+                result = await bridge.wait_for_selector(target_tab, selector, timeout_ms=timeout_ms)
                 if result.get("ok"):
                     return {
                         "ok": True,
@@ -70,9 +70,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
                     }
                 return result
             elif text:
-                result = await bridge.wait_for_text(
-                    target_tab, text, timeout_ms=timeout_ms
-                )
+                result = await bridge.wait_for_text(target_tab, text, timeout_ms=timeout_ms)
                 if result.get("ok"):
                     return {
                         "ok": True,
@@ -275,6 +273,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
 
         try:
             from pathlib import Path
+
             for path in file_paths:
                 if not Path(path).exists():
                     return {"ok": False, "error": f"File not found: {path}"}

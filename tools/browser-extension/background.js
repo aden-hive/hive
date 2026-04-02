@@ -134,13 +134,29 @@ async function dispatch(type, params) {
 
     // ── Debugger (CDP) ────────────────────────────────────────────────────
     case "cdp.attach": {
-      await chrome.debugger.attach({ tabId: params.tabId }, "1.3");
-      return { ok: true };
+      try {
+        await chrome.debugger.attach({ tabId: params.tabId }, "1.3");
+        return { ok: true, attached: true };
+      } catch (err) {
+        // Already attached is OK
+        if (err.message.includes("already attached") || err.message.includes("Debugger")) {
+          return { ok: true, attached: false, message: "Already attached" };
+        }
+        throw err;
+      }
     }
 
     case "cdp.detach": {
-      await chrome.debugger.detach({ tabId: params.tabId });
-      return { ok: true };
+      try {
+        await chrome.debugger.detach({ tabId: params.tabId });
+        return { ok: true };
+      } catch (err) {
+        // Not attached is OK
+        if (err.message.includes("not attached") || err.message.includes("Debugger")) {
+          return { ok: true, message: "Was not attached" };
+        }
+        throw err;
+      }
     }
 
     case "cdp": {

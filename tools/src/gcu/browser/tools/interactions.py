@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Literal
 
 from fastmcp import FastMCP
 
 from ..bridge import get_bridge
+from ..telemetry import log_tool_call
 from .tabs import _get_context
 
 logger = logging.getLogger(__name__)
@@ -44,29 +46,54 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with click result and coordinates
         """
+        start = time.perf_counter()
+        params = {
+            "selector": selector,
+            "tab_id": tab_id,
+            "profile": profile,
+            "button": button,
+            "double_click": double_click,
+        }
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_click", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_click", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_click", params, result=result)
+            return result
 
         try:
-            result = await bridge.click(
+            click_result = await bridge.click(
                 target_tab,
                 selector,
                 button=button,
                 click_count=2 if double_click else 1,
                 timeout_ms=timeout_ms,
             )
-            return result
+            log_tool_call(
+                "browser_click",
+                params,
+                result=click_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return click_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_click", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_click_coordinate(
@@ -89,23 +116,45 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with click result
         """
+        start = time.perf_counter()
+        params = {"x": x, "y": y, "tab_id": tab_id, "profile": profile, "button": button}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_click_coordinate", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_click_coordinate", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_click_coordinate", params, result=result)
+            return result
 
         try:
-            result = await bridge.click_coordinate(target_tab, x, y, button=button)
-            return result
+            click_result = await bridge.click_coordinate(target_tab, x, y, button=button)
+            log_tool_call(
+                "browser_click_coordinate",
+                params,
+                result=click_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return click_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_click_coordinate",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
 
     @mcp.tool()
     async def browser_type(
@@ -132,20 +181,29 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with type result
         """
+        start = time.perf_counter()
+        params = {"selector": selector, "text": text, "tab_id": tab_id, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_type", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_type", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_type", params, result=result)
+            return result
 
         try:
-            result = await bridge.type_text(
+            type_result = await bridge.type_text(
                 target_tab,
                 selector,
                 text,
@@ -153,9 +211,19 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 delay_ms=delay_ms,
                 timeout_ms=timeout_ms,
             )
-            return result
+            log_tool_call(
+                "browser_type",
+                params,
+                result=type_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return type_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_type", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_fill(
@@ -209,23 +277,42 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with press result
         """
+        start = time.perf_counter()
+        params = {"key": key, "selector": selector, "tab_id": tab_id, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_press", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_press", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_press", params, result=result)
+            return result
 
         try:
-            result = await bridge.press_key(target_tab, key, selector=selector)
-            return result
+            press_result = await bridge.press_key(target_tab, key, selector=selector)
+            log_tool_call(
+                "browser_press",
+                params,
+                result=press_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return press_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_press", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_hover(
@@ -246,23 +333,42 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with hover result
         """
+        start = time.perf_counter()
+        params = {"selector": selector, "tab_id": tab_id, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_hover", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_hover", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_hover", params, result=result)
+            return result
 
         try:
-            result = await bridge.hover(target_tab, selector, timeout_ms=timeout_ms)
-            return result
+            hover_result = await bridge.hover(target_tab, selector, timeout_ms=timeout_ms)
+            log_tool_call(
+                "browser_hover",
+                params,
+                result=hover_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return hover_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_hover", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_select(
@@ -283,23 +389,42 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with select result
         """
+        start = time.perf_counter()
+        params = {"selector": selector, "values": values, "tab_id": tab_id, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_select", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_select", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_select", params, result=result)
+            return result
 
         try:
-            result = await bridge.select_option(target_tab, selector, values)
-            return result
+            select_result = await bridge.select_option(target_tab, selector, values)
+            log_tool_call(
+                "browser_select",
+                params,
+                result=select_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return select_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_select", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_scroll(
@@ -320,23 +445,42 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with scroll result
         """
+        start = time.perf_counter()
+        params = {"direction": direction, "amount": amount, "tab_id": tab_id, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_scroll", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_scroll", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_scroll", params, result=result)
+            return result
 
         try:
-            result = await bridge.scroll(target_tab, direction=direction, amount=amount)
-            return result
+            scroll_result = await bridge.scroll(target_tab, direction=direction, amount=amount)
+            log_tool_call(
+                "browser_scroll",
+                params,
+                result=scroll_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return scroll_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_scroll", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_drag(
@@ -362,17 +506,31 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with drag result
         """
+        drag_start = time.perf_counter()
+        params = {
+            "start_selector": start_selector,
+            "end_selector": end_selector,
+            "tab_id": tab_id,
+            "profile": profile,
+        }
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_drag", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_drag", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_drag", params, result=result)
+            return result
 
         try:
             # Get coordinates for both elements and perform drag via CDP
@@ -397,7 +555,9 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 await asyncio.sleep(0.1)
 
             if not start_node:
-                return {"ok": False, "error": f"Start element not found: {start_selector}"}
+                result = {"ok": False, "error": f"Start element not found: {start_selector}"}
+                log_tool_call("browser_drag", params, result=result)
+                return result
 
             end_node = None
             while asyncio.get_event_loop().time() < deadline:
@@ -412,15 +572,13 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 await asyncio.sleep(0.1)
 
             if not end_node:
-                return {"ok": False, "error": f"End element not found: {end_selector}"}
+                result = {"ok": False, "error": f"End element not found: {end_selector}"}
+                log_tool_call("browser_drag", params, result=result)
+                return result
 
             # Get box models
-            start_box = await bridge._cdp(
-                target_tab, "DOM.getBoxModel", {"nodeId": start_node}
-            )
-            end_box = await bridge._cdp(
-                target_tab, "DOM.getBoxModel", {"nodeId": end_node}
-            )
+            start_box = await bridge._cdp(target_tab, "DOM.getBoxModel", {"nodeId": start_node})
+            end_box = await bridge._cdp(target_tab, "DOM.getBoxModel", {"nodeId": end_node})
 
             sc = start_box.get("content", [])
             ec = end_box.get("content", [])
@@ -459,7 +617,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 },
             )
 
-            return {
+            result = {
                 "ok": True,
                 "action": "drag",
                 "from": start_selector,
@@ -467,5 +625,19 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 "fromCoords": {"x": start_x, "y": start_y},
                 "toCoords": {"x": end_x, "y": end_y},
             }
+            log_tool_call(
+                "browser_drag",
+                params,
+                result=result,
+                duration_ms=(time.perf_counter() - drag_start) * 1000,
+            )
+            return result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_drag",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - drag_start) * 1000,
+            )
+            return result

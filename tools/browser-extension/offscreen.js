@@ -9,32 +9,57 @@
 const HIVE_WS_URL = "ws://127.0.0.1:9229/bridge";
 
 let ws = null;
+let reconnectAttempts = 0;
 
 function connect() {
-  ws = new WebSocket(HIVE_WS_URL);
+  // Don't try to reconnect too fast
+  const delay = Math.min(reconnectAttempts * 1000, 5000);
 
-  ws.onopen = () => {
-    chrome.runtime.sendMessage({ _beeline: true, type: "ws_open" });
-  };
+  if (reconnectAttempts > 0) {
+    console.log(`[Beeline] Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1})...`);
+  }
 
-  ws.onmessage = (event) => {
-    chrome.runtime.sendMessage({ _beeline: true, type: "ws_message", data: event.data });
-  };
+  setTimeout(() => {
+    try {
+      ws = new WebSocket(HIVE_WS_URL);
 
-  ws.onclose = () => {
-    chrome.runtime.sendMessage({ _beeline: true, type: "ws_close" });
-    setTimeout(connect, 2000);
-  };
+      ws.onopen = () => {
+        console.log("[Beeline] WebSocket connected to Hive");
+        reconnectAttempts = 0;
+        chrome.runtime.sendMessage({ _beeline: true, type: "ws_open" });
+      };
 
-  ws.onerror = () => {
-    ws.close();
-  };
+      ws.onmessage = (event) => {
+        chrome.runtime.sendMessage({ _beeline: true, type: "ws_message", data: event.data });
+      };
+
+      ws.onclose = (event) => {
+        console.log(`[Beeline] WebSocket closed: code=${event.code}`);
+        chrome.runtime.sendMessage({ _beeline: true, type: "ws_close" });
+        reconnectAttempts++;
+        setTimeout(connect, 2000);
+      };
+
+      ws.onerror = (error) => {
+        console.error("[Beeline] WebSocket error:", error);
+        ws.close();
+      };
+    } catch (error) {
+      console.error("[Beeline] Failed to create WebSocket:", error);
+      reconnectAttempts++;
+      setTimeout(connect, 2000);
+    }
+  }, delay);
 }
 
 // Forward outbound messages from the service worker onto the WebSocket.
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg._beeline && msg.type === "ws_send" && ws?.readyState === WebSocket.OPEN) {
-    ws.send(msg.data);
+  if (msg._beeline && msg.type === "ws_send") {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(msg.data);
+    } else {
+      console.warn("[Beeline] Cannot send - WebSocket not connected");
+    }
   }
 });
 

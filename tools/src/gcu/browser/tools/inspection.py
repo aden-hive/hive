@@ -9,12 +9,14 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import time
 from typing import Literal
 
 from fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent
 
 from ..bridge import get_bridge
+from ..telemetry import log_tool_call
 from .tabs import _get_context
 
 logger = logging.getLogger(__name__)
@@ -47,52 +49,98 @@ def register_inspection_tools(mcp: FastMCP) -> None:
         Returns:
             List of content blocks: text metadata + image
         """
+        start = time.perf_counter()
+        params = {
+            "tab_id": tab_id,
+            "profile": profile,
+            "full_page": full_page,
+            "selector": selector,
+        }
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return [
+            result = [
                 TextContent(
                     type="text",
                     text=json.dumps({"ok": False, "error": "Extension not connected"}),
                 )
             ]
+            log_tool_call(
+                "browser_screenshot",
+                params,
+                result={"ok": False, "error": "Extension not connected"},
+            )
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
             err_msg = json.dumps({"ok": False, "error": "Browser not started"})
+            log_tool_call(
+                "browser_screenshot", params, result={"ok": False, "error": "Browser not started"}
+            )
             return [TextContent(type="text", text=err_msg)]
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return [
+            result = [
                 TextContent(type="text", text=json.dumps({"ok": False, "error": "No active tab"}))
             ]
+            log_tool_call(
+                "browser_screenshot", params, result={"ok": False, "error": "No active tab"}
+            )
+            return result
 
         try:
             if selector:
                 logger.warning("Element screenshots not supported, capturing full page")
 
-            result = await bridge.screenshot(target_tab, full_page=full_page)
+            screenshot_result = await bridge.screenshot(target_tab, full_page=full_page)
 
-            if not result.get("ok"):
-                return [TextContent(type="text", text=json.dumps(result))]
+            if not screenshot_result.get("ok"):
+                log_tool_call(
+                    "browser_screenshot",
+                    params,
+                    result=screenshot_result,
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                )
+                return [TextContent(type="text", text=json.dumps(screenshot_result))]
 
-            data = result.get("data")
-            mime_type = result.get("mimeType", "image/png")
+            data = screenshot_result.get("data")
+            mime_type = screenshot_result.get("mimeType", "image/png")
 
-            meta = json.dumps({
-                "ok": True,
-                "tabId": target_tab,
-                "url": result.get("url", ""),
-                "imageType": mime_type.split("/")[-1],
-                "size": len(base64.b64decode(data)) if data else 0,
-                "fullPage": full_page,
-            })
+            meta = json.dumps(
+                {
+                    "ok": True,
+                    "tabId": target_tab,
+                    "url": screenshot_result.get("url", ""),
+                    "imageType": mime_type.split("/")[-1],
+                    "size": len(base64.b64decode(data)) if data else 0,
+                    "fullPage": full_page,
+                }
+            )
+
+            log_tool_call(
+                "browser_screenshot",
+                params,
+                result={
+                    "ok": True,
+                    "size": len(base64.b64decode(data)) if data else 0,
+                    "url": screenshot_result.get("url", ""),
+                },
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
 
             return [
                 TextContent(type="text", text=meta),
                 ImageContent(type="image", data=data, mimeType=mime_type),
             ]
         except Exception as e:
+            log_tool_call(
+                "browser_screenshot",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
             return [TextContent(type="text", text=json.dumps({"ok": False, "error": str(e)}))]
 
     @mcp.tool()
@@ -121,23 +169,45 @@ def register_inspection_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with the snapshot text tree, URL, and tab ID
         """
+        start = time.perf_counter()
+        params = {"tab_id": tab_id, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_snapshot", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_snapshot", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_snapshot", params, result=result)
+            return result
 
         try:
-            result = await bridge.snapshot(target_tab)
-            return result
+            snapshot_result = await bridge.snapshot(target_tab)
+            log_tool_call(
+                "browser_snapshot",
+                params,
+                result=snapshot_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return snapshot_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_snapshot",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
 
     @mcp.tool()
     async def browser_console(
@@ -159,13 +229,15 @@ def register_inspection_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with console messages
         """
-        # Console capture requires subscribing to Runtime.consoleAPICalled events
-        # which needs persistent event handling.
-        return {
+        result = {
             "ok": True,
             "message": "Console capture not yet implemented",
             "suggestion": "Use browser_evaluate to check specific values or errors",
         }
+        log_tool_call(
+            "browser_console", {"tab_id": tab_id, "profile": profile, "level": level}, result=result
+        )
+        return result
 
     @mcp.tool()
     async def browser_html(
@@ -184,17 +256,26 @@ def register_inspection_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with HTML content
         """
+        start = time.perf_counter()
+        params = {"tab_id": tab_id, "profile": profile, "selector": selector}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_html", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_html", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_html", params, result=result)
+            return result
 
         try:
             import json as json_mod
@@ -208,15 +289,36 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             else:
                 script = "document.documentElement.outerHTML"
 
-            result = await bridge.evaluate(target_tab, script)
+            eval_result = await bridge.evaluate(target_tab, script)
 
-            if result.get("ok"):
-                return {
+            if eval_result.get("ok"):
+                result = {
                     "ok": True,
                     "tabId": target_tab,
-                    "html": result.get("result"),
+                    "html": eval_result.get("result"),
                     "selector": selector,
                 }
-            return result
+                log_tool_call(
+                    "browser_html",
+                    params,
+                    result={
+                        "ok": True,
+                        "selector": selector,
+                        "html_length": len(eval_result.get("result") or ""),
+                    },
+                    duration_ms=(time.perf_counter() - start) * 1000,
+                )
+                return result
+            log_tool_call(
+                "browser_html",
+                params,
+                result=eval_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return eval_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_html", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result

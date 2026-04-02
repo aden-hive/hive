@@ -7,11 +7,13 @@ All operations go through the Beeline extension via CDP.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Literal
 
 from fastmcp import FastMCP
 
 from ..bridge import get_bridge
+from ..telemetry import log_tool_call
 from .tabs import _get_context
 
 logger = logging.getLogger(__name__)
@@ -43,28 +45,51 @@ def register_navigation_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with navigation result (url, title)
         """
+        start = time.perf_counter()
+        params = {"url": url, "tab_id": tab_id, "profile": profile, "wait_until": wait_until}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_navigate", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_navigate", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab. Open a tab first with browser_open."}
+            result = {"ok": False, "error": "No active tab. Open a tab first with browser_open."}
+            log_tool_call("browser_navigate", params, result=result)
+            return result
 
         try:
-            result = await bridge.navigate(target_tab, url, wait_until=wait_until)
-            return {
+            nav_result = await bridge.navigate(target_tab, url, wait_until=wait_until)
+            result = {
                 "ok": True,
                 "tabId": target_tab,
-                "url": result.get("url"),
-                "title": result.get("title"),
+                "url": nav_result.get("url"),
+                "title": nav_result.get("title"),
             }
+            log_tool_call(
+                "browser_navigate",
+                params,
+                result=result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_navigate",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
 
     @mcp.tool()
     async def browser_go_back(
@@ -81,23 +106,42 @@ def register_navigation_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with navigation result
         """
+        start = time.perf_counter()
+        params = {"tab_id": tab_id, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_go_back", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_go_back", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_go_back", params, result=result)
+            return result
 
         try:
-            result = await bridge.go_back(target_tab)
-            return result
+            nav_result = await bridge.go_back(target_tab)
+            log_tool_call(
+                "browser_go_back",
+                params,
+                result=nav_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return nav_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_go_back", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_go_forward(
@@ -114,23 +158,45 @@ def register_navigation_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with navigation result
         """
+        start = time.perf_counter()
+        params = {"tab_id": tab_id, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_go_forward", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_go_forward", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_go_forward", params, result=result)
+            return result
 
         try:
-            result = await bridge.go_forward(target_tab)
-            return result
+            nav_result = await bridge.go_forward(target_tab)
+            log_tool_call(
+                "browser_go_forward",
+                params,
+                result=nav_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return nav_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_go_forward",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
 
     @mcp.tool()
     async def browser_reload(
@@ -147,20 +213,39 @@ def register_navigation_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with reload result
         """
+        start = time.perf_counter()
+        params = {"tab_id": tab_id, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_reload", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_reload", params, result=result)
+            return result
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No active tab"}
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_reload", params, result=result)
+            return result
 
         try:
-            result = await bridge.reload(target_tab)
-            return result
+            nav_result = await bridge.reload(target_tab)
+            log_tool_call(
+                "browser_reload",
+                params,
+                result=nav_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return nav_result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_reload", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result

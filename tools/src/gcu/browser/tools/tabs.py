@@ -7,19 +7,29 @@ All operations go through the Beeline extension - no Playwright required.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fastmcp import FastMCP
 
 from ..bridge import get_bridge
+from ..session import _active_profile
+from ..telemetry import log_tool_call
 from .lifecycle import _contexts
 
 logger = logging.getLogger(__name__)
 
 
 def _get_context(profile: str | None = None) -> dict[str, Any] | None:
-    """Get the context for a profile."""
-    profile_name = profile or "default"
+    """Get the context for a profile.
+
+    If profile is None, uses the _active_profile context variable
+    (set by subagent executor to the agent_id).
+    """
+    if profile is not None:
+        profile_name = profile
+    else:
+        profile_name = _active_profile.get()
     return _contexts.get(profile_name)
 
 
@@ -43,26 +53,44 @@ def register_tab_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with list of tabs and counts
         """
+        start = time.perf_counter()
+        params = {"profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_tabs", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_tabs", params, result=result)
+            return result
 
         try:
             result = await bridge.list_tabs(ctx.get("groupId"))
             tabs = result.get("tabs", [])
 
-            return {
+            result = {
                 "ok": True,
                 "tabs": tabs,
                 "total": len(tabs),
                 "activeTabId": ctx.get("activeTabId"),
             }
+            log_tool_call(
+                "browser_tabs",
+                params,
+                result=result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_tabs", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_open(
@@ -84,13 +112,20 @@ def register_tab_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with new tab info (id, url, title)
         """
+        start = time.perf_counter()
+        params = {"url": url, "background": background, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_open", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_open", params, result=result)
+            return result
 
         try:
             # Create tab in the group
@@ -105,15 +140,26 @@ def register_tab_tools(mcp: FastMCP) -> None:
             # Navigate and wait for load
             nav_result = await bridge.navigate(tab_id, url, wait_until="load")
 
-            return {
+            result = {
                 "ok": True,
                 "tabId": tab_id,
                 "url": nav_result.get("url", url),
                 "title": nav_result.get("title", ""),
                 "background": background,
             }
+            log_tool_call(
+                "browser_open",
+                params,
+                result=result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_open", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_close(
@@ -130,18 +176,27 @@ def register_tab_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with close status
         """
+        start = time.perf_counter()
+        params = {"tab_id": tab_id, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_close", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_close", params, result=result)
+            return result
 
         # Use active tab if not specified
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            return {"ok": False, "error": "No tab to close"}
+            result = {"ok": False, "error": "No tab to close"}
+            log_tool_call("browser_close", params, result=result)
+            return result
 
         try:
             await bridge.close_tab(target_tab)
@@ -152,9 +207,20 @@ def register_tab_tools(mcp: FastMCP) -> None:
                 tabs = result.get("tabs", [])
                 ctx["activeTabId"] = tabs[0].get("id") if tabs else None
 
-            return {"ok": True, "closed": target_tab}
+            result = {"ok": True, "closed": target_tab}
+            log_tool_call(
+                "browser_close",
+                params,
+                result=result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_close", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_focus(tab_id: int, profile: str | None = None) -> dict:
@@ -168,20 +234,38 @@ def register_tab_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with focus status
         """
+        start = time.perf_counter()
+        params = {"tab_id": tab_id, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_focus", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_focus", params, result=result)
+            return result
 
         try:
             await bridge.activate_tab(tab_id)
             ctx["activeTabId"] = tab_id
-            return {"ok": True, "tabId": tab_id}
+            result = {"ok": True, "tabId": tab_id}
+            log_tool_call(
+                "browser_focus",
+                params,
+                result=result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_focus", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
+            )
+            return result
 
     @mcp.tool()
     async def browser_close_all(
@@ -199,13 +283,20 @@ def register_tab_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with number of closed tabs and remaining count
         """
+        start = time.perf_counter()
+        params = {"keep_active": keep_active, "profile": profile}
+
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
-            return {"ok": False, "error": "Browser extension not connected"}
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_close_all", params, result=result)
+            return result
 
         ctx = _get_context(profile)
         if not ctx:
-            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_close_all", params, result=result)
+            return result
 
         try:
             result = await bridge.list_tabs(ctx.get("groupId"))
@@ -231,13 +322,27 @@ def register_tab_tools(mcp: FastMCP) -> None:
                 remaining = result.get("tabs", [])
                 ctx["activeTabId"] = remaining[0].get("id") if remaining else None
 
-            return {
+            result = {
                 "ok": True,
                 "closed_count": closed,
                 "remaining": len(tabs) - closed,
             }
+            log_tool_call(
+                "browser_close_all",
+                params,
+                result=result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_close_all",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
 
     @mcp.tool()
     async def browser_close_finished(
