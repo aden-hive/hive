@@ -318,7 +318,22 @@ PROVIDERS = {
         key, "https://api.cerebras.ai/v1/models", "Cerebras"
     ),
     "openrouter": lambda key, **kw: check_openrouter(key, **kw),
-    "minimax": lambda key, **kw: check_minimax(key),
+    "deepseek": lambda key, **_: check_openai_compatible(
+        key, "https://api.deepseek.com/v1/models", "DeepSeek"
+    ),
+    "together": lambda key, **_: check_openai_compatible(
+        key, "https://api.together.xyz/v1/models", "Together AI"
+    ),
+    "mistral": lambda key, **_: check_openai_compatible(
+        key, "https://api.mistral.ai/v1/models", "Mistral"
+    ),
+    "xai": lambda key, **_: check_openai_compatible(
+        key, "https://api.x.ai/v1/models", "xAI"
+    ),
+    "perplexity": lambda key, **_: check_openai_compatible(
+        key, "https://api.perplexity.ai/v1/models", "Perplexity"
+    ),
+    "minimax": lambda key, **_: check_minimax(key),
     # Kimi For Coding uses an Anthropic-compatible endpoint; check via /v1/messages
     # with empty messages (same as check_anthropic, triggers 400 not 401).
     "kimi": lambda key, **kw: check_anthropic_compatible(

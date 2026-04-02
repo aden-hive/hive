@@ -14,5 +14,5 @@ When a tool call fails:
 2. Decide — transient: retry once. Structural fixable: fix and retry.
    Structural unfixable: record as failed, move to next item.
    Blocking all progress: record escalation note.
-3. Adapt — if same tool failed 3+ times, stop using it and find alternative.
+3. Adapt — if same tool failed {{max_retries_per_tool}}+ times, stop using it and find alternative.
    Update plan in notes. Never silently drop the failed item.

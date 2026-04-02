@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from framework.skills.config import SkillsConfig
 from framework.skills.parser import ParsedSkill, parse_skill_md
@@ -17,6 +18,56 @@ logger = logging.getLogger(__name__)
 
 # Default skills directory relative to this module
 _DEFAULT_SKILLS_DIR = Path(__file__).parent / "_default_skills"
+
+# Default config values per skill — used for {{placeholder}} substitution
+_SKILL_DEFAULTS: dict[str, dict[str, Any]] = {
+    "hive.quality-monitor": {"assessment_interval": 5},
+    "hive.error-recovery": {"max_retries_per_tool": 3},
+    "hive.context-preservation": {"warn_at_usage_ratio_pct": 45},
+    "hive.batch-ledger": {"checkpoint_every_n": 5},
+}
+
+# Keywords that indicate a batch processing scenario (DS-12)
+_BATCH_KEYWORDS: tuple[str, ...] = (
+    "list of",
+    "collection of",
+    "set of",
+    "batch of",
+    "each item",
+    "for each",
+    "process all",
+    "records",
+    "entries",
+    "rows",
+    "items",
+)
+
+_BATCH_INIT_NUDGE = (
+    "Note: your input appears to describe a batch operation. "
+    "Initialize `_batch_ledger` with the total item count before processing."
+)
+
+
+def is_batch_scenario(text: str) -> bool:
+    """Return True if *text* contains batch-processing indicators (DS-12)."""
+    lower = text.lower()
+    return any(kw in lower for kw in _BATCH_KEYWORDS)
+
+
+def _apply_overrides(skill_name: str, body: str, overrides: dict[str, Any]) -> str:
+    """Substitute {{placeholder}} values in a skill body using overrides + defaults."""
+    defaults = _SKILL_DEFAULTS.get(skill_name, {})
+    # Convert float warn_at_usage_ratio → warn_at_usage_ratio_pct for the placeholder
+    if "warn_at_usage_ratio" in overrides:
+        overrides = dict(overrides)
+        overrides.setdefault(
+            "warn_at_usage_ratio_pct", int(float(overrides["warn_at_usage_ratio"]) * 100)
+        )
+    values = {**defaults, **overrides}
+    for key, val in values.items():
+        body = body.replace(f"{{{{{key}}}}}", str(val))
+    return body
+
 
 # Ordered list of default skills (name → directory)
 SKILL_REGISTRY: dict[str, str] = {
@@ -123,8 +174,10 @@ class DefaultSkillManager:
             skill = self._skills.get(skill_name)
             if skill is None:
                 continue
-            # Use the full body — each SKILL.md contains exactly one protocol section
-            parts.append(skill.body)
+            # Apply config overrides to {{placeholder}} values before injection
+            overrides = self._config.get_default_overrides(skill_name)
+            body = _apply_overrides(skill_name, skill.body, overrides)
+            parts.append(body)
 
         if len(parts) <= 1:
             return ""
@@ -198,3 +251,28 @@ class DefaultSkillManager:
     def active_skills(self) -> dict[str, ParsedSkill]:
         """All active default skills keyed by name."""
         return dict(self._skills)
+
+    @property
+    def batch_init_nudge(self) -> str | None:
+        """Nudge text to prepend to system prompt when batch input detected (DS-12).
+
+        Returns None if ``hive.batch-ledger`` is disabled or auto_detect_batch is False.
+        """
+        if "hive.batch-ledger" not in self._skills:
+            return None
+        overrides = self._config.get_default_overrides("hive.batch-ledger")
+        if overrides.get("auto_detect_batch") is False:
+            return None
+        return _BATCH_INIT_NUDGE
+
+    @property
+    def context_warn_ratio(self) -> float | None:
+        """Token usage ratio at which to inject a context preservation warning (DS-13).
+
+        Returns None if ``hive.context-preservation`` is disabled.
+        Defaults to 0.45 when the skill is active but no override is set.
+        """
+        if "hive.context-preservation" not in self._skills:
+            return None
+        overrides = self._config.get_default_overrides("hive.context-preservation")
+        return float(overrides.get("warn_at_usage_ratio", 0.45))

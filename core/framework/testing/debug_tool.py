@@ -73,7 +73,9 @@ class DebugTool:
 
         Args:
             test_storage: Storage for test and result data
-            runtime_storage: Optional FileStorage for Runtime data
+            runtime_storage: Optional storage backend for Runtime data.
+                Must expose a synchronous ``load_run_sync(run_id)`` method
+                (e.g. ``ConcurrentStorage``).
         """
         self.test_storage = test_storage
         self.runtime_storage = runtime_storage
@@ -233,7 +235,9 @@ class DebugTool:
             return {}
 
         try:
-            run = self.runtime_storage.load_run(run_id)
+            # Use the synchronous loader — _get_runtime_data is not async
+            # and ConcurrentStorage.load_run() is a coroutine.
+            run = self.runtime_storage.load_run_sync(run_id)
             if not run:
                 return {"error": f"Run {run_id} not found"}
 

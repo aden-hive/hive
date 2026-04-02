@@ -23,6 +23,7 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Agent_Harness-Runtime_Layer-ff6600?style=flat-square" alt="Agent Harness" />
   <img src="https://img.shields.io/badge/AI_Agents-Self--Improving-brightgreen?style=flat-square" alt="AI Agents" />
   <img src="https://img.shields.io/badge/Multi--Agent-Systems-blue?style=flat-square" alt="Multi-Agent" />
   <img src="https://img.shields.io/badge/Headless-Development-purple?style=flat-square" alt="Headless" />
@@ -35,39 +36,42 @@
   <img src="https://img.shields.io/badge/Google_Gemini-supported-4285F4?style=flat-square&logo=google" alt="Gemini" />
 </p>
 
+<p align="center"><em>The agent harness for production workloads — state management, failure recovery, observability, and human oversight so your agents actually run.</em></p>
+
 ## Overview
 
-Generate a swarm of worker agents with a coding agent(queen) that control them. Define your goal through conversation with hive queen, and the framework generates a node graph with dynamically created connection code. When things break, the framework captures failure data, evolves the agent through the coding agent, and redeploys. Built-in human-in-the-loop nodes, browser use, credential management, and real-time monitoring give you control without sacrificing adaptability.
+Hive is a runtime harness for AI agents in production. You describe your goal in natural language; a coding agent (the queen) generates the agent graph and connection code to achieve it. During execution, the harness manages state isolation, checkpoint-based crash recovery, cost enforcement, and real-time observability. When agents fail, the framework captures failure data, evolves the graph through the coding agent, and redeploys automatically. Built-in human-in-the-loop nodes, browser control, credential management, and parallel execution give you production reliability without sacrificing adaptability.
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
+Visit [HoneyComb](http://honeycomb.open-hive.com/) to see what jobs are being automated by AI. It’s a stock market for jobs, driven by our community’s AI agent progress. You can long and short jobs (with no real money but compute token)based on how much you think a job is going to be replaced by AI.
 
 https://github.com/user-attachments/assets/bf10edc3-06ba-48b6-98ba-d069b15fb69d
 
 
 ## Who Is Hive For?
 
-Hive is designed for developers and teams who want to build many **autonomous AI agents** fast without manually wiring complex workflows.
+Hive is the harness layer for teams moving AI agents from prototype to production. Models are getting better on their own — the bottleneck is the infrastructure around them: state management, failure recovery, cost control, and observability.
 
 Hive is a good fit if you:
 
 - Want AI agents that **execute real business processes**, not demos
-- Need **fast or high volume agent execution** over open workflow
+- Need a **runtime that handles state, recovery, and parallel execution** at scale
 - Need **self-healing and adaptive agents** that improve over time
 - Require **human-in-the-loop control**, observability, and cost limits
-- Plan to run agents in **production environments**
+- Plan to run agents in **production** where uptime, cost, and auditability matter
 
 Hive may not be the best fit if you’re only experimenting with simple agent chains or one-off scripts.
 
 ## When Should You Use Hive?
 
-Use Hive when you need:
+Use Hive when the bottleneck is no longer the model but the harness around it:
 
-- Long-running, autonomous agents
-- Strong guardrails, process, and controls
-- Continuous improvement based on failures
-- Multi-agent coordination
-- A framework that evolves with your goals
+- Long-running agents that need **state persistence and crash recovery**
+- Production workloads requiring **cost enforcement, observability, and audit trails**
+- Agents that **self-heal** through failure capture and graph evolution
+- Multi-agent coordination with **session isolation and shared memory**
+- A framework that **scales with model improvements** rather than fighting them
 
 ## Quick Links
 
@@ -154,9 +158,9 @@ Hive is built to be model-agnostic and system-agnostic.
 - **LLM flexibility** - Hive Framework supports Anthropic, OpenAI, OpenRouter, Hive LLM, and other hosted or local models through LiteLLM-compatible providers.
 - **Business system connectivity** - Hive Framework is designed to connect to all kinds of business systems as tools, such as CRM, support, messaging, data, file, and internal APIs via MCP.
 
-## Why Aden
+## Why Hive
 
-Hive focuses on generating agents that run real business processes rather than generic agents. Instead of requiring you to manually design workflows, define agent interactions, and handle failures reactively, Hive flips the paradigm: **you describe outcomes, and the system builds itself**—delivering an outcome-driven, adaptive experience with an easy-to-use set of tools and integrations.
+As models improve, the upper bound of what agents can do rises — but their reliability and production value are determined by the harness. Hive focuses on generating agents that run real business processes rather than generic agents. Instead of requiring you to manually design workflows, define agent interactions, and handle failures reactively, Hive flips the paradigm: **you describe outcomes, and the system builds itself**—delivering an outcome-driven, adaptive experience with an easy-to-use set of tools and integrations.
 
 ```mermaid
 flowchart LR
@@ -192,8 +196,9 @@ flowchart LR
 
 ### The Hive Advantage
 
-| Traditional Frameworks     | Hive                                   |
+| Typical Agent Frameworks   | Hive                                   |
 | -------------------------- | -------------------------------------- |
+| Focus on model orchestration | **Production harness**: state, recovery, observability |
 | Hardcode agent workflows   | Describe goals in natural language     |
 | Manual graph definition    | Auto-generated agent graphs            |
 | Reactive error handling    | Outcome-evaluation and adaptiveness    |
@@ -387,7 +392,7 @@ Yes! Hive supports local models through LiteLLM. Simply use the model name forma
 
 **Q: What makes Hive different from other agent frameworks?**
 
-Hive generates your entire agent system from natural language goals using a coding agent—you don't hardcode workflows or manually define graphs. When agents fail, the framework automatically captures failure data, [evolves the agent graph](docs/key_concepts/evolution.md), and redeploys. This self-improving loop is unique to Aden.
+Hive is an agent harness, not just an orchestration framework. It provides the production runtime layer — session isolation, checkpoint-based crash recovery, cost enforcement, real-time observability, and human-in-the-loop controls — that makes agents reliable enough to run real workloads. On top of that, Hive generates your entire agent system from natural language goals and automatically [evolves the graph](docs/key_concepts/evolution.md) when agents fail. The combination of a robust harness with self-improving generation is what sets Hive apart.
 
 **Q: Is Hive open-source?**
 

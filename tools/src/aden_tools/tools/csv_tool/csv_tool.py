@@ -2,6 +2,7 @@
 
 import csv
 import os
+import re
 
 from fastmcp import FastMCP
 
@@ -330,39 +331,39 @@ def register_tools(mcp: FastMCP) -> None:
             if not query or not query.strip():
                 return {"error": "query cannot be empty"}
 
-            # Security: only allow SELECT statements
-            query_upper = query.strip().upper()
-            if not query_upper.startswith("SELECT"):
+            # Security: allow SELECT/WITH only
+            query_upper = query.lstrip().upper()
+            if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
                 return {"error": "Only SELECT queries are allowed for security reasons"}
 
-            # Disallowed keywords for security
-            disallowed = [
-                "INSERT",
-                "UPDATE",
-                "DELETE",
-                "DROP",
-                "CREATE",
-                "ALTER",
-                "TRUNCATE",
-                "EXEC",
-                "EXECUTE",
-            ]
-            for keyword in disallowed:
-                if keyword in query_upper:
-                    return {"error": f"'{keyword}' is not allowed in queries"}
+            # Disallowed keywords for security (word-boundary match to avoid
+            # false positives on column names like created_at, updated_at, etc.)
+            _WRITE_PATTERN = re.compile(
+                r"\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|EXEC|EXECUTE)\b",
+                re.IGNORECASE,
+            )
+            match = _WRITE_PATTERN.search(query)
+            if match:
+                return {"error": f"'{match.group().upper()}' is not allowed in queries"}
 
-            # Execute query using in-memory DuckDB
+            # Block obvious multi-statement / injection attempts
+            q_lower = query.lower()
+            for token in [";", "--", "/*", "*/"]:
+                if token in q_lower:
+                    return {"error": "Multiple statements or comments are not allowed"}
+
             con = duckdb.connect(":memory:")
             try:
-                # Load CSV as 'data' table
-                con.execute(f"CREATE TABLE data AS SELECT * FROM read_csv_auto('{secure_path}')")
+                # SAFE: parameter binding (no string interpolation)
+                con.execute(
+                    "CREATE TABLE data AS SELECT * FROM read_csv_auto(?)",
+                    [str(secure_path)],
+                )
 
-                # Execute user query
                 result = con.execute(query)
                 columns = [desc[0] for desc in result.description]
                 rows = result.fetchall()
 
-                # Convert to list of dicts
                 rows_as_dicts = [dict(zip(columns, row, strict=False)) for row in rows]
 
                 return {
@@ -374,12 +375,12 @@ def register_tools(mcp: FastMCP) -> None:
                     "rows": rows_as_dicts,
                     "row_count": len(rows_as_dicts),
                 }
+
             finally:
                 con.close()
 
         except Exception as e:
             error_msg = str(e)
-            # Make DuckDB errors more readable
             if "Catalog Error" in error_msg:
                 return {"error": f"SQL error: {error_msg}. Remember the table is named 'data'."}
             return {"error": f"Query failed: {error_msg}"}
