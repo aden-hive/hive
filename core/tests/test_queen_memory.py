@@ -399,3 +399,158 @@ async def test_long_reflection(tmp_path: Path):
     assert (mem_dir / "dup-a.md").exists()
     assert "merged" in (mem_dir / "dup-a.md").read_text()
     assert llm.acomplete.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Bug 1: Path traversal prevention
+# ---------------------------------------------------------------------------
+
+
+def test_path_traversal_read(tmp_path: Path):
+    from framework.agents.queen.reflection_agent import _execute_tool
+
+    (tmp_path / "safe.md").write_text("safe content")
+    result = _execute_tool("read_memory_file", {"filename": "../../etc/passwd"}, tmp_path)
+    assert "ERROR" in result
+    assert "path components not allowed" in result.lower() or "escapes" in result.lower()
+
+
+def test_path_traversal_write(tmp_path: Path):
+    from framework.agents.queen.reflection_agent import _execute_tool
+
+    result = _execute_tool(
+        "write_memory_file",
+        {"filename": "../escape.md", "content": "---\nname: evil\n---\nbad"},
+        tmp_path,
+    )
+    assert "ERROR" in result
+    assert not (tmp_path.parent / "escape.md").exists()
+
+
+def test_path_traversal_delete(tmp_path: Path):
+    from framework.agents.queen.reflection_agent import _execute_tool
+
+    (tmp_path / "target.md").write_text("content")
+    result = _execute_tool("delete_memory_file", {"filename": "../target.md"}, tmp_path)
+    assert "ERROR" in result
+    assert (tmp_path / "target.md").exists()  # not deleted
+
+
+def test_safe_path_accepted(tmp_path: Path):
+    from framework.agents.queen.reflection_agent import _execute_tool
+
+    result = _execute_tool(
+        "write_memory_file",
+        {"filename": "good-file.md", "content": "---\nname: good\n---\ncontent"},
+        tmp_path,
+    )
+    assert "Wrote" in result
+    assert (tmp_path / "good-file.md").exists()
+
+    result = _execute_tool("read_memory_file", {"filename": "good-file.md"}, tmp_path)
+    assert "content" in result
+
+    result = _execute_tool("delete_memory_file", {"filename": "good-file.md"}, tmp_path)
+    assert "Deleted" in result
+
+
+# ---------------------------------------------------------------------------
+# Bug 2: Failed reflections do not advance cursor
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cursor_not_advanced_on_llm_failure(tmp_path: Path):
+    from framework.agents.queen.reflection_agent import run_short_reflection
+
+    parts_dir = tmp_path / "session" / "conversations" / "parts"
+    parts_dir.mkdir(parents=True)
+    for i in range(3):
+        (parts_dir / f"{i:010d}.json").write_text(
+            json.dumps({"role": "user", "content": f"message {i}"})
+        )
+
+    cursor_file = tmp_path / ".cursor.json"
+    qm.write_cursor(0, cursor_file)
+
+    llm = AsyncMock()
+    llm.acomplete.side_effect = RuntimeError("LLM down")
+
+    # Patch read_cursor/write_cursor to use our temp cursor file.
+    import unittest.mock as mock
+    with mock.patch("framework.agents.queen.reflection_agent.read_cursor", return_value=0), \
+         mock.patch("framework.agents.queen.reflection_agent.write_cursor") as mock_write:
+        await run_short_reflection(tmp_path / "session", llm, memory_dir=tmp_path / "mem")
+
+        # write_cursor should NOT have been called since the LLM failed.
+        mock_write.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cursor_advanced_on_success(tmp_path: Path):
+    from framework.agents.queen.reflection_agent import run_short_reflection
+
+    parts_dir = tmp_path / "session" / "conversations" / "parts"
+    parts_dir.mkdir(parents=True)
+    for i in range(3):
+        (parts_dir / f"{i:010d}.json").write_text(
+            json.dumps({"role": "user", "content": f"message {i}"})
+        )
+
+    llm = AsyncMock()
+    llm.acomplete.return_value = MagicMock(content="Nothing to remember.", raw_response={})
+
+    import unittest.mock as mock
+    with mock.patch("framework.agents.queen.reflection_agent.read_cursor", return_value=0), \
+         mock.patch("framework.agents.queen.reflection_agent.write_cursor") as mock_write:
+        await run_short_reflection(tmp_path / "session", llm, memory_dir=tmp_path / "mem")
+
+        mock_write.assert_called_once_with(2)
+
+
+# ---------------------------------------------------------------------------
+# Bug 3: Compaction fallback only when cursor > max_all_seq
+# ---------------------------------------------------------------------------
+
+
+def test_compaction_fallback_when_cursor_evicted(tmp_path: Path):
+    """When cursor_seq > max file seq, fallback triggers (compaction happened)."""
+    parts_dir = tmp_path / "conversations" / "parts"
+    parts_dir.mkdir(parents=True)
+    for i in range(3):
+        (parts_dir / f"{i:010d}.json").write_text(
+            json.dumps({"role": "user", "content": f"msg {i}"})
+        )
+
+    # Cursor is at 999, but max file seq is 2 → compation evicted files.
+    msgs, max_seq = qm.read_messages_since_cursor(tmp_path, 999)
+    assert len(msgs) == 3
+
+
+def test_no_compaction_fallback_when_up_to_date(tmp_path: Path):
+    """When cursor_seq == max file seq, should return empty (not all files)."""
+    parts_dir = tmp_path / "conversations" / "parts"
+    parts_dir.mkdir(parents=True)
+    for i in range(3):
+        (parts_dir / f"{i:010d}.json").write_text(
+            json.dumps({"role": "user", "content": f"msg {i}"})
+        )
+
+    # Cursor is at 2 (max seq) → already up-to-date, should return nothing.
+    msgs, max_seq = qm.read_messages_since_cursor(tmp_path, 2)
+    assert len(msgs) == 0
+
+
+def test_no_compaction_fallback_when_behind(tmp_path: Path):
+    """When cursor_seq < max file seq but no new_files, shouldn't happen normally.
+    But verify: cursor_seq=0 with files at 0,1,2 should return 1,2 (seq > 0)."""
+    parts_dir = tmp_path / "conversations" / "parts"
+    parts_dir.mkdir(parents=True)
+    for i in range(3):
+        (parts_dir / f"{i:010d}.json").write_text(
+            json.dumps({"role": "user", "content": f"msg {i}"})
+        )
+
+    msgs, max_seq = qm.read_messages_since_cursor(tmp_path, 0)
+    assert len(msgs) == 2  # seq 1 and 2
+    assert max_seq == 2
