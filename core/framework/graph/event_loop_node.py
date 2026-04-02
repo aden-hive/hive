@@ -3031,8 +3031,7 @@ class EventLoopNode(NodeProtocol):
             return False
 
         return not any(
-            tc.get("is_error") and tc.get("tool_name") != "set_output"
-            for tc in logged_tool_calls
+            tc.get("is_error") and tc.get("tool_name") != "set_output" for tc in logged_tool_calls
         )
 
     # -------------------------------------------------------------------

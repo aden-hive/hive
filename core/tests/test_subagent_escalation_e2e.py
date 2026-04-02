@@ -578,7 +578,7 @@ async def test_mark_complete_e2e_through_execution_stream(tmp_path):
     # Call 1 (subagent turn 1): report_to_parent(mark_complete=True) → sets flag
     # Call 2 (subagent turn 2): text finish (inner loop exit) → _evaluate sees flag → ACCEPT
     # Call 3 (parent turn 2): set_output("result", "...")
-    # Call 4 (parent turn 3): text finish
+    # Parent now auto-completes immediately after required outputs are satisfied.
     scenarios: list[list[StreamEvent]] = [
         # Call 0: Parent delegates
         [
@@ -615,11 +615,6 @@ async def test_mark_complete_e2e_through_execution_stream(tmp_path):
                 tool_use_id="set_1",
             ),
             FinishEvent(stop_reason="tool_use", input_tokens=10, output_tokens=5, model="mock"),
-        ],
-        # Call 4: Parent finishes
-        [
-            TextDeltaEvent(content="Task complete.", snapshot="Task complete."),
-            FinishEvent(stop_reason="end_turn", input_tokens=5, output_tokens=5, model="mock"),
         ],
     ]
 
@@ -682,8 +677,9 @@ async def test_mark_complete_e2e_through_execution_stream(tmp_path):
 
     # 4. The subagent did NOT need to call set_output — it used mark_complete
     # Verify by checking LLM call count: subagent only needed 2 calls
-    # (report_to_parent + text finish), not 3+ (report + set_output + text finish)
-    assert llm._call_index == 5, (
-        f"Expected 5 LLM calls total (delegate + report + finish + set_output + finish), "
+    # (report_to_parent + text finish), and the parent now auto-completes
+    # immediately after its required set_output.
+    assert llm._call_index == 4, (
+        f"Expected 4 LLM calls total (delegate + report + finish + set_output), "
         f"got {llm._call_index}"
     )
