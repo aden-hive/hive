@@ -154,6 +154,40 @@ class TestMlflowLogRun:
         assert result["metrics_logged"] == 0
         assert result["tags_logged"] == 0
 
+    def test_log_run_with_partial_failures(self, tool_fns):
+        """Test logging run with some failures in parameter/metric logging."""
+
+        def mock_side_effect(*args, **kwargs):
+            # First call is run creation, rest alternate between success and failure
+            if "run" not in mock_side_effect.call_count_map:
+                mock_side_effect.call_count_map["run"] = 0
+            mock_side_effect.call_count_map["run"] += 1
+
+            if mock_side_effect.call_count_map["run"] == 1:
+                return _mock_resp({"run": {"info": {"run_id": "run-test"}}})
+            elif mock_side_effect.call_count_map["run"] % 2 == 0:
+                # Every other call fails
+                return _mock_resp({"error": "API error"}, status_code=400)
+            else:
+                return _mock_resp({})
+
+        mock_side_effect.call_count_map = {}
+
+        with patch.dict("os.environ", ENV):
+            with patch(
+                "aden_tools.tools.mlflow_tool.mlflow_tool.httpx.post",
+                side_effect=mock_side_effect,
+            ):
+                result = tool_fns["mlflow_log_run"](
+                    experiment_id="0",
+                    parameters={"p1": "v1", "p2": "v2"},
+                    metrics={"m1": 0.5, "m2": 0.7},
+                )
+
+        # Should have logged some but not all
+        assert result["run_id"] == "run-test"
+        assert "warnings" in result or result["parameters_logged"] < 2
+
 
 class TestMlflowGetMetrics:
     """Test mlflow_get_metrics tool."""
@@ -314,7 +348,7 @@ class TestMlflowTransitionModelStage:
 
         with patch.dict("os.environ", ENV):
             with patch(
-                "aden_tools.tools.mlflow_tool.mlflow_tool.httpx.patch",
+                "aden_tools.tools.mlflow_tool.mlflow_tool.httpx.post",
                 return_value=_mock_resp(response),
             ):
                 result = tool_fns["mlflow_transition_model_stage"](

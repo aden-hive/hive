@@ -26,16 +26,22 @@ if TYPE_CHECKING:
 def _get_tracking_uri(credentials: CredentialStoreAdapter | None) -> str:
     """Get MLflow tracking URI from credentials or environment."""
     if credentials is not None:
-        uri = credentials.get("mlflow_tracking_uri")
-        if uri:
-            return uri
+        try:
+            uri = credentials.get("mlflow_tracking_uri")
+            if uri:
+                return uri
+        except (KeyError, AttributeError):
+            pass
     return os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 
 
 def _get_token(credentials: CredentialStoreAdapter | None) -> str | None:
     """Get MLflow token from credentials or environment."""
     if credentials is not None:
-        return credentials.get("mlflow_token")
+        try:
+            return credentials.get("mlflow_token")
+        except (KeyError, AttributeError):
+            pass
     return os.getenv("MLFLOW_TOKEN")
 
 
@@ -190,10 +196,16 @@ def register_tools(
         if not run_id:
             return {"error": "Failed to create run"}
 
+        # Track successful logging counts
+        params_logged = 0
+        metrics_logged = 0
+        tags_logged = 0
+        errors = []
+
         # Log parameters
         if parameters:
             for param_name, param_value in parameters.items():
-                _make_request(
+                resp = _make_request(
                     "POST",
                     tracking_uri,
                     "/mlflow/runs/log-parameter",
@@ -204,11 +216,15 @@ def register_tools(
                         "value": str(param_value),
                     },
                 )
+                if "error" not in resp:
+                    params_logged += 1
+                else:
+                    errors.append(f"Failed to log parameter {param_name}: {resp['error']}")
 
         # Log metrics
         if metrics:
             for metric_name, metric_value in metrics.items():
-                _make_request(
+                resp = _make_request(
                     "POST",
                     tracking_uri,
                     "/mlflow/runs/log-metric",
@@ -220,11 +236,15 @@ def register_tools(
                         "timestamp": int(__import__("time").time() * 1000),
                     },
                 )
+                if "error" not in resp:
+                    metrics_logged += 1
+                else:
+                    errors.append(f"Failed to log metric {metric_name}: {resp['error']}")
 
         # Log tags
         if tags:
             for tag_name, tag_value in tags.items():
-                _make_request(
+                resp = _make_request(
                     "POST",
                     tracking_uri,
                     "/mlflow/runs/set-tag",
@@ -235,15 +255,22 @@ def register_tools(
                         "value": str(tag_value),
                     },
                 )
+                if "error" not in resp:
+                    tags_logged += 1
+                else:
+                    errors.append(f"Failed to log tag {tag_name}: {resp['error']}")
 
-        return {
+        result = {
             "run_id": run_id,
             "experiment_id": experiment_id,
             "status": "created",
-            "parameters_logged": len(parameters) if parameters else 0,
-            "metrics_logged": len(metrics) if metrics else 0,
-            "tags_logged": len(tags) if tags else 0,
+            "parameters_logged": params_logged,
+            "metrics_logged": metrics_logged,
+            "tags_logged": tags_logged,
         }
+        if errors:
+            result["warnings"] = errors
+        return result
 
     @mcp.tool()
     def mlflow_get_metrics(run_id: str) -> dict:
@@ -314,7 +341,7 @@ def register_tools(
             Dict with registered model version details.
         """
         payload = {
-            "model_uri": model_uri,
+            "source": model_uri,
             "name": name,
         }
         if tags:
@@ -323,7 +350,7 @@ def register_tools(
         return _make_request(
             "POST",
             tracking_uri,
-            "/mlflow/registered-models/create",
+            "/mlflow/model-versions/create",
             token=token,
             json_data=payload,
         )
@@ -389,7 +416,7 @@ def register_tools(
             }
 
         return _make_request(
-            "PATCH",
+            "POST",
             tracking_uri,
             "/mlflow/model-versions/transition-stage",
             token=token,
