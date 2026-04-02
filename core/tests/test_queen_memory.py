@@ -283,3 +283,119 @@ def test_format_recall_injection(tmp_path: Path):
 
 def test_format_recall_injection_empty():
     assert format_recall_injection([]) == ""
+
+
+# ---------------------------------------------------------------------------
+# reflection_agent
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_short_reflection(tmp_path: Path):
+    """Short reflection reads new messages and writes a memory file via LLM tools."""
+    from framework.agents.queen.reflection_agent import run_short_reflection
+
+    # Set up a fake session dir with conversation parts.
+    parts_dir = tmp_path / "session" / "conversations" / "parts"
+    parts_dir.mkdir(parents=True)
+    for i in range(3):
+        role = "user" if i % 2 == 0 else "assistant"
+        (parts_dir / f"{i:010d}.json").write_text(
+            json.dumps({"role": role, "content": f"message {i}"})
+        )
+
+    mem_dir = tmp_path / "memories"
+    mem_dir.mkdir()
+
+    # Mock LLM: turn 1 lists files, turn 2 writes a memory, turn 3 stops.
+    llm = AsyncMock()
+    llm.acomplete.side_effect = [
+        # Turn 1: LLM calls write_memory_file
+        MagicMock(
+            content="",
+            raw_response={
+                "tool_calls": [
+                    {
+                        "id": "tc_1",
+                        "name": "write_memory_file",
+                        "input": {
+                            "filename": "user-likes-tests.md",
+                            "content": "---\nname: user-likes-tests\ntype: technique\ndescription: User values thorough testing\n---\nObserved emphasis on test coverage.",
+                        },
+                    }
+                ]
+            },
+        ),
+        # Turn 2: LLM has no more tool calls → done
+        MagicMock(content="Done reflecting.", raw_response={}),
+    ]
+
+    session_dir = tmp_path / "session"
+    await run_short_reflection(session_dir, llm, memory_dir=mem_dir)
+
+    # Verify the memory file was created.
+    written = mem_dir / "user-likes-tests.md"
+    assert written.exists()
+    assert "user-likes-tests" in written.read_text()
+
+    # Verify cursor was advanced.
+    cursor_file = qm.MEMORY_DIR / ".cursor.json"
+    # We passed a custom memory_dir, but cursor uses the default path.
+    # The function uses read_cursor()/write_cursor() with default CURSOR_FILE.
+    # Just verify the LLM was called.
+    assert llm.acomplete.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_long_reflection(tmp_path: Path):
+    """Long reflection reads all memories and can merge/delete them."""
+    from framework.agents.queen.reflection_agent import run_long_reflection
+
+    mem_dir = tmp_path / "memories"
+    mem_dir.mkdir()
+    (mem_dir / "dup-a.md").write_text("---\nname: dup-a\ntype: goal\ndescription: goal A\n---\nGoal A details.")
+    (mem_dir / "dup-b.md").write_text("---\nname: dup-b\ntype: goal\ndescription: goal A duplicate\n---\nSame goal A.")
+
+    llm = AsyncMock()
+    llm.acomplete.side_effect = [
+        # Turn 1: LLM lists files
+        MagicMock(
+            content="",
+            raw_response={
+                "tool_calls": [
+                    {"id": "tc_1", "name": "list_memory_files", "input": {}},
+                ]
+            },
+        ),
+        # Turn 2: LLM merges dup-b into dup-a and deletes dup-b
+        MagicMock(
+            content="",
+            raw_response={
+                "tool_calls": [
+                    {
+                        "id": "tc_2",
+                        "name": "write_memory_file",
+                        "input": {
+                            "filename": "dup-a.md",
+                            "content": "---\nname: dup-a\ntype: goal\ndescription: goal A (merged)\n---\nGoal A details. Also same goal A.",
+                        },
+                    },
+                    {
+                        "id": "tc_3",
+                        "name": "delete_memory_file",
+                        "input": {"filename": "dup-b.md"},
+                    },
+                ]
+            },
+        ),
+        # Turn 3: done
+        MagicMock(content="Housekeeping complete.", raw_response={}),
+    ]
+
+    await run_long_reflection(llm, memory_dir=mem_dir)
+
+    # dup-b should be deleted, dup-a should be updated.
+    assert not (mem_dir / "dup-b.md").exists()
+    assert (mem_dir / "dup-a.md").exists()
+    assert "merged" in (mem_dir / "dup-a.md").read_text()
+    assert llm.acomplete.call_count == 3

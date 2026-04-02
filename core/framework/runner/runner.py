@@ -1493,16 +1493,11 @@ class AgentRunner:
 
         configure_logging(level="INFO", format="auto")
 
-        # Set up session context for tools (workspace_id, agent_id, session_id)
-        workspace_id = "default"  # Could be derived from storage path
+        # Set up session context for tools (agent_id)
         agent_id = self.graph.id or "unknown"
-        # Use "current" as a stable session_id for persistent memory
-        session_id = "current"
 
         self._tool_registry.set_session_context(
-            workspace_id=workspace_id,
             agent_id=agent_id,
-            session_id=session_id,
         )
 
         # Create LLM provider

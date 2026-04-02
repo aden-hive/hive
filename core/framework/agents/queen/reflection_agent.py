@@ -124,6 +124,7 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
     """Execute a reflection tool synchronously.  Returns the result string."""
     if name == "list_memory_files":
         files = scan_memory_files(memory_dir)
+        logger.debug("reflect: tool list_memory_files → %d files", len(files))
         if not files:
             return "(no memory files yet)"
         return format_memory_manifest(files)
@@ -154,6 +155,7 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
                 return f"ERROR: File cap reached ({MAX_FILES}).  Delete a file first."
         memory_dir.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+        logger.debug("reflect: tool write_memory_file → %s (%d chars)", filename, len(content))
         return f"Wrote {filename} ({len(content)} chars)."
 
     if name == "delete_memory_file":
@@ -162,6 +164,7 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
         if not path.exists():
             return f"ERROR: File not found: {filename}"
         path.unlink()
+        logger.debug("reflect: tool delete_memory_file → %s", filename)
         return f"Deleted {filename}."
 
     return f"ERROR: Unknown tool: {name}"
@@ -187,6 +190,7 @@ async def _reflection_loop(
     2-turn pattern (batch reads in turn 1, batch writes in turn 2).
     """
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_msg}]
+    logger.debug("reflect: starting loop (max %d turns)", max_turns)
 
     for _turn in range(max_turns):
         try:
@@ -226,9 +230,11 @@ async def _reflection_loop(
 
         # No tool calls → agent is done.
         if not tool_calls_raw:
+            logger.debug("reflect: loop done after %d turn(s) (no tool calls)", _turn + 1)
             break
 
         # Execute each tool call and append results.
+        logger.debug("reflect: turn %d — executing %d tool call(s): %s", _turn + 1, len(tool_calls_raw), [tc["name"] for tc in tool_calls_raw])
         for tc in tool_calls_raw:
             result = _execute_tool(tc["name"], tc.get("input", {}), memory_dir)
             messages.append({
@@ -318,7 +324,10 @@ async def run_short_reflection(
     messages, max_seq = read_messages_since_cursor(session_dir, cursor_seq)
 
     if not messages:
+        logger.debug("reflect: short — no new messages since cursor %d", cursor_seq)
         return
+
+    logger.debug("reflect: short — %d new messages (cursor %d → %d)", len(messages), cursor_seq, max_seq)
 
     # Build a readable transcript of the new messages.
     transcript_lines: list[str] = []
@@ -363,8 +372,10 @@ async def run_long_reflection(
     files = scan_memory_files(mem_dir)
 
     if not files:
+        logger.debug("reflect: long — no memory files to organise")
         return
 
+    logger.debug("reflect: long — organising %d memory files", len(files))
     manifest = format_memory_manifest(files)
     user_msg = (
         f"## Current memory manifest ({len(files)} files)\n\n"
@@ -415,6 +426,7 @@ async def subscribe_reflection_triggers(
         async with _lock:
             try:
                 _short_count += 1
+                logger.debug("reflect: turn complete — short count %d/%d", _short_count, _LONG_REFLECT_INTERVAL)
                 if _short_count % _LONG_REFLECT_INTERVAL == 0:
                     await run_short_reflection(session_dir, llm, mem_dir)
                     await run_long_reflection(llm, mem_dir)

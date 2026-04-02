@@ -95,8 +95,10 @@ async def select_memories(
     mem_dir = memory_dir or MEMORY_DIR
     files = scan_memory_files(mem_dir)
     if not files:
+        logger.debug("recall: no memory files found, skipping selection")
         return []
 
+    logger.debug("recall: selecting from %d memory files for query: %.80s", len(files), query)
     manifest = format_memory_manifest(files)
 
     user_msg_parts = [f"## User query\n\n{query}\n\n## Available memories\n\n{manifest}"]
@@ -116,7 +118,9 @@ async def select_memories(
         selected = data.get("selected_memories", [])
         # Validate: only return filenames that actually exist.
         valid_names = {f.filename for f in files}
-        return [s for s in selected if s in valid_names][:5]
+        result = [s for s in selected if s in valid_names][:5]
+        logger.debug("recall: selected %d memories: %s", len(result), result)
+        return result
     except Exception:
         logger.debug("recall: memory selection failed, returning []", exc_info=True)
         return []
@@ -159,6 +163,7 @@ def format_recall_injection(
         return ""
 
     body = "\n\n---\n\n".join(blocks)
+    logger.debug("recall: injecting %d memory blocks into context", len(blocks))
     return f"--- Selected Memories ---\n\n{body}\n\n--- End Selected Memories ---"
 
 
@@ -183,7 +188,9 @@ async def update_recall_cache(
     # Extract latest user message as the query.
     query = _extract_latest_user_query(session_dir)
     if not query:
+        logger.debug("recall: no user query found, skipping cache update")
         return
+    logger.debug("recall: updating cache for query: %.80s", query)
 
     try:
         selected = await select_memories(query, llm, mem_dir)

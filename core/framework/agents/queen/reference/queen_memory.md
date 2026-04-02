@@ -1,60 +1,127 @@
-# Queen Memory — File System Structure
+# Queen Memory v2 — File-Per-Memory Architecture
 
 ```
 ~/.hive/
 ├── queen/
-│   ├── MEMORY.md                          ← Semantic memory
 │   ├── memories/
-│   │   ├── MEMORY-2026-03-09.md           ← Episodic memory (today)
-│   │   ├── MEMORY-2026-03-08.md
+│   │   ├── .cursor.json                     ← Cursor: last processed message seq
+│   │   ├── .reflection_error.txt            ← Last reflection error traceback
+│   │   ├── .legacy/                         ← Archived v1 MEMORY.md files
+│   │   ├── user-prefers-tests.md            ← Individual memory files
+│   │   ├── project-api-patterns.md
 │   │   └── ...
 │   └── session/
-│       └── {session_id}/                  ← One dir per session (or resumed-from session)
+│       └── {session_id}/
 │           ├── conversations/
 │           │   ├── parts/
-│           │   │   ├── 00001.json         ← One file per message (role, content, tool_calls)
-│           │   │   ├── 00002.json
+│           │   │   ├── 0000000001.json
 │           │   │   └── ...
 │           │   └── spillover/
-│           │       ├── conversation_1.md  ← Compacted old conversation segments
-│           │       ├── conversation_2.md
 │           │       └── ...
 │           └── data/
-│               ├── web_search_1.txt      ← Spillover: large tool results
-│               ├── web_search_2.txt
 │               └── ...
 ```
 
 ---
 
-## The two memory tiers
+## How it works
 
-| File | Tier | Written by | Read at |
-|---|---|---|---|
-| `MEMORY.md` | Semantic | Consolidation LLM (auto, post-session) | Session start (injected into system prompt) |
-| `memories/MEMORY-YYYY-MM-DD.md` | Episodic | Queen via `write_to_diary` tool + consolidation LLM | Session start (today's file injected) |
+Queen memory has two subsystems: **Reflect** (writing) and **Recall** (reading).
+
+### Reflect — incremental memory extraction
+
+After each queen turn, a lightweight background agent inspects the new messages and extracts learnings into individual `.md` files.
+
+- **Short reflection** — every queen turn. Reads messages since the last cursor position, passes them to a mini LLM loop (max 5 turns) with restricted tools that can list/read/write/delete memory files. Advances the cursor on success.
+- **Long reflection** — every 5 short reflections, on context compaction, and at session end. Reads all memory files holistically to organize, deduplicate, and trim noise.
+
+Both run under an `asyncio.Lock` — if a trigger fires while a reflection is active, it's skipped (messages will be reconsidered next time).
+
+### Recall — pre-turn memory selection
+
+Before each turn, a single structured-output LLM call picks up to 5 relevant memories from the file index. The selected files are read, prepended with staleness warnings for files older than 1 day, and injected into the system prompt via `phase_state._cached_recall_block`.
+
+Recall runs as a background task after each `LLM_TURN_COMPLETE` and caches the result. This means memories are technically one turn behind — acceptable because the user's next query isn't known yet when the prompt is composed.
 
 ---
 
-## Session directory naming
+## Memory file format
 
-The session directory name is **`queen_resume_from`** when a cold-restore resumes an existing
-session, otherwise the new **`session_id`**. This means resumed sessions accumulate all messages
-in the original directory rather than fragmenting across multiple folders.
+Each file uses YAML frontmatter (convention enforced by prompt, not code):
+
+```markdown
+---
+name: {{memory name}}
+description: {{one-line description — used to decide relevance in future conversations}}
+type: {{goal, environment, technique, reference}}
+---
+
+{{memory content}}
+```
+
+Parsing is **lenient**: broken or missing frontmatter degrades gracefully. Files show up in scans with `None` description and no type. Nothing rejects or repairs malformed files.
 
 ---
 
-## Consolidation
+## Limits
 
-`consolidate_queen_memory()` runs every **5 minutes** in the background and once more at session
-end. It reads:
+| Setting | Value |
+|---------|-------|
+| Max memory files | 200 |
+| Max file size | 4 KB |
+| Max recall selections per turn | 5 |
+| Reflection loop max turns | 5 |
+| Long reflection interval | Every 5 short reflections |
 
-1. `conversations/parts/*.json` — full message history (user + assistant turns; tool results skipped)
+---
 
-It then makes two LLM writes:
+## Cursor-based incremental processing
 
-- Rewrites `MEMORY.md` in place (semantic memory — queen never touches this herself)
-- Appends a timestamped prose entry to today's `memories/MEMORY-YYYY-MM-DD.md`
+The cursor (`.cursor.json`) stores the last processed message sequence number. On each short reflection:
 
-If the combined transcript exceeds ~200 K characters it is recursively binary-compacted via the
-LLM before being sent to the consolidation model (mirrors `EventLoopNode._llm_compact`).
+1. Read all `parts/*.json` files where `seq > cursor`
+2. **Compaction fallback**: if no files match (cursor evicted by compaction), read all visible parts instead
+3. Pass new messages to reflection LLM
+4. Advance cursor to the new max seq
+
+---
+
+## Debugging
+
+Enable debug logging to see reflect and recall activity:
+
+```bash
+# With hive serve
+hive serve --debug
+
+# With hive run
+hive run --debug path/to/agent
+```
+
+This sets the log level to DEBUG, which shows:
+
+| Logger prefix | What you see |
+|---|---|
+| `reflect: short` | Message count, cursor range, "no new messages" |
+| `reflect: long` | File count being organized |
+| `reflect: loop` | Turn-by-turn progress, tool call names |
+| `reflect: tool` | Individual tool results (write/delete/list) |
+| `reflect: turn complete` | Short count progress (e.g. `3/5`) |
+| `recall:` | File scan count, selected filenames, injection block count |
+| `recall: cache` | Cache update/skip with truncated query |
+
+For tests:
+
+```bash
+uv run pytest core/tests/test_queen_memory.py -v --log-cli-level=DEBUG
+```
+
+---
+
+## Migration from v1
+
+On first run, `init_memory_dir()` calls `migrate_legacy_memories()` which:
+
+1. Reads old `MEMORY.md` and recent `MEMORY-YYYY-MM-DD.md` files
+2. Converts each section/entry into an individual memory file
+3. Archives originals to `~/.hive/queen/memories/.legacy/`

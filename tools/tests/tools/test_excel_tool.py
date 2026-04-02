@@ -19,9 +19,9 @@ if openpyxl_available:
     from aden_tools.tools.excel_tool.excel_tool import register_tools
 
 # Test IDs for sandbox
-TEST_WORKSPACE_ID = "test-workspace"
+TEST_AGENT_ID = "test-workspace"
 TEST_AGENT_ID = "test-agent"
-TEST_SESSION_ID = "test-session"
+current = "test-session"
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def excel_read_fn(excel_tools):
 @pytest.fixture
 def session_dir(tmp_path: Path) -> Path:
     """Create and return the session directory within the sandbox."""
-    session_path = tmp_path / TEST_WORKSPACE_ID / TEST_AGENT_ID / TEST_SESSION_ID
+    session_path = tmp_path / TEST_AGENT_ID / "current"
     session_path.mkdir(parents=True, exist_ok=True)
     return session_path
 
@@ -161,9 +161,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert result["success"] is True
@@ -180,9 +180,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="multi_sheet.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 sheet="Products",
             )
 
@@ -197,9 +197,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="multi_sheet.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 sheet="NonExistent",
             )
 
@@ -212,9 +212,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 limit=2,
             )
 
@@ -231,9 +231,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 offset=1,
             )
 
@@ -248,9 +248,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="large.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 limit=10,
                 offset=50,
             )
@@ -268,9 +268,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="nonexistent.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert "error" in result
@@ -285,9 +285,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="data.txt",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert "error" in result
@@ -298,9 +298,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="empty.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert result["success"] is True
@@ -312,9 +312,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="headers_only.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert result["success"] is True
@@ -330,7 +330,7 @@ class TestExcelRead:
                 path="basic.xlsx",
                 workspace_id="",
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert "error" in result
@@ -340,9 +340,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id="",
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert "error" in result
@@ -352,7 +352,7 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
                 session_id="",
             )
@@ -364,9 +364,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="../../../etc/passwd.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert "error" in result
@@ -376,9 +376,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 limit=-1,
             )
 
@@ -390,9 +390,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 offset=-1,
             )
 
@@ -404,9 +404,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 offset=100,
             )
 
@@ -420,9 +420,9 @@ class TestExcelRead:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_read_fn(
                 path="dates.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert result["success"] is True
@@ -438,9 +438,9 @@ class TestExcelWrite:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_write"](
                 path="output.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 columns=["name", "age", "city"],
                 rows=[
                     {"name": "Alice", "age": 30, "city": "NYC"},
@@ -462,9 +462,9 @@ class TestExcelWrite:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_write"](
                 path="output.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 columns=["id", "value"],
                 rows=[{"id": 1, "value": 100}],
                 sheet="MyData",
@@ -478,9 +478,9 @@ class TestExcelWrite:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_write"](
                 path="subdir/nested/output.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 columns=["id"],
                 rows=[{"id": 1}],
             )
@@ -493,9 +493,9 @@ class TestExcelWrite:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_write"](
                 path="output.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 columns=[],
                 rows=[],
             )
@@ -508,9 +508,9 @@ class TestExcelWrite:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_write"](
                 path="output.txt",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 columns=["id"],
                 rows=[],
             )
@@ -523,9 +523,9 @@ class TestExcelWrite:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_write"](
                 path="output.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 columns=["name", "age"],
                 rows=[],
             )
@@ -542,9 +542,9 @@ class TestExcelAppend:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_append"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 rows=[
                     {"name": "David", "age": 28, "city": "Seattle"},
                     {"name": "Eve", "age": 32, "city": "Boston"},
@@ -560,9 +560,9 @@ class TestExcelAppend:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_append"](
                 path="multi_sheet.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 rows=[{"id": 3, "name": "Doohickey", "price": 49.99}],
                 sheet="Products",
             )
@@ -576,9 +576,9 @@ class TestExcelAppend:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_append"](
                 path="nonexistent.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 rows=[{"name": "Alice"}],
             )
 
@@ -590,9 +590,9 @@ class TestExcelAppend:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_append"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 rows=[],
             )
 
@@ -607,9 +607,9 @@ class TestExcelAppend:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_append"](
                 path="data.txt",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 rows=[{"name": "Bob"}],
             )
 
@@ -625,9 +625,9 @@ class TestExcelInfo:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_info"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert result["success"] is True
@@ -645,9 +645,9 @@ class TestExcelInfo:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_info"](
                 path="multi_sheet.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert result["success"] is True
@@ -661,9 +661,9 @@ class TestExcelInfo:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_info"](
                 path="nonexistent.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert "error" in result
@@ -677,9 +677,9 @@ class TestExcelInfo:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_info"](
                 path="data.txt",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert "error" in result
@@ -694,9 +694,9 @@ class TestExcelSheetList:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sheet_list"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert result["success"] is True
@@ -708,9 +708,9 @@ class TestExcelSheetList:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sheet_list"](
                 path="multi_sheet.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert result["success"] is True
@@ -724,9 +724,9 @@ class TestExcelSheetList:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sheet_list"](
                 path="nonexistent.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert "error" in result
@@ -740,9 +740,9 @@ class TestExcelSheetList:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sheet_list"](
                 path="data.txt",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert "error" in result
@@ -764,9 +764,9 @@ class TestExcelIntegration:
             # Write
             write_result = excel_tools["excel_write"](
                 path="test.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 columns=["name", "score"],
                 rows=test_data,
             )
@@ -775,9 +775,9 @@ class TestExcelIntegration:
             # Read back
             read_result = excel_tools["excel_read"](
                 path="test.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert read_result["success"] is True
@@ -791,9 +791,9 @@ class TestExcelIntegration:
             # Write initial data
             excel_tools["excel_write"](
                 path="test.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 columns=["id", "value"],
                 rows=[{"id": 1, "value": "A"}, {"id": 2, "value": "B"}],
             )
@@ -801,18 +801,18 @@ class TestExcelIntegration:
             # Append more data
             excel_tools["excel_append"](
                 path="test.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 rows=[{"id": 3, "value": "C"}, {"id": 4, "value": "D"}],
             )
 
             # Read back
             read_result = excel_tools["excel_read"](
                 path="test.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
             )
 
         assert read_result["success"] is True
@@ -834,9 +834,9 @@ class TestExcelSql:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 query="SELECT * FROM data",
             )
 
@@ -849,9 +849,9 @@ class TestExcelSql:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 query="SELECT * FROM data WHERE age > 25",
             )
 
@@ -863,9 +863,9 @@ class TestExcelSql:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 query="SELECT COUNT(*) as count, AVG(age) as avg_age FROM data",
             )
 
@@ -878,9 +878,9 @@ class TestExcelSql:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sql"](
                 path="multi_sheet.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 query="SELECT * FROM data WHERE price > 100",
                 sheet="Products",
             )
@@ -894,9 +894,9 @@ class TestExcelSql:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sql"](
                 path="multi_sheet.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 query="SELECT e.name, p.name as product FROM Employees e, Products p",
             )
 
@@ -909,9 +909,9 @@ class TestExcelSql:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 query="",
             )
 
@@ -923,9 +923,9 @@ class TestExcelSql:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 query="DELETE FROM data",
             )
 
@@ -937,9 +937,9 @@ class TestExcelSql:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 query="DROP TABLE data",
             )
 
@@ -950,9 +950,9 @@ class TestExcelSql:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sql"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 query="INSERT INTO data VALUES ('x', 1, 'y')",
             )
 
@@ -963,9 +963,9 @@ class TestExcelSql:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_sql"](
                 path="nonexistent.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 query="SELECT * FROM data",
             )
 
@@ -981,9 +981,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="Alice",
             )
 
@@ -996,9 +996,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="alice",
                 case_sensitive=False,
             )
@@ -1011,9 +1011,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="alice",
                 case_sensitive=True,
             )
@@ -1027,9 +1027,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="NYC",
                 match_type="exact",
             )
@@ -1043,9 +1043,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="Ch",
                 match_type="starts_with",
             )
@@ -1059,9 +1059,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="multi_sheet.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="Alice",
             )
 
@@ -1075,9 +1075,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="multi_sheet.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="Widget",
                 sheet="Products",
             )
@@ -1091,9 +1091,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="name",
                 match_type="exact",
             )
@@ -1106,9 +1106,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="ZZZZNOTFOUND",
             )
 
@@ -1121,9 +1121,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="",
             )
 
@@ -1135,9 +1135,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="basic.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="test",
                 match_type="invalid",
             )
@@ -1150,9 +1150,9 @@ class TestExcelSearch:
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
             result = excel_tools["excel_search"](
                 path="nonexistent.xlsx",
-                workspace_id=TEST_WORKSPACE_ID,
+                workspace_id=TEST_AGENT_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
+                session_id=current,
                 search_term="test",
             )
 

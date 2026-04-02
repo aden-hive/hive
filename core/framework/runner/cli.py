@@ -51,6 +51,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Show detailed execution logs (steps, LLM calls, etc.)",
     )
+    run_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show all debug-level logs",
+    )
 
     run_parser.add_argument(
         "--model",
@@ -387,6 +392,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     # Set logging level (quiet by default for cleaner output)
     if args.quiet:
         configure_logging(level="ERROR")
+    elif getattr(args, "debug", False):
+        configure_logging(level="DEBUG")
     elif getattr(args, "verbose", False):
         configure_logging(level="INFO")
     else:

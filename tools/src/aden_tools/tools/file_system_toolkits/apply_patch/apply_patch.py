@@ -3,7 +3,7 @@ import os
 import diff_match_patch as dmp_module
 from mcp.server.fastmcp import FastMCP
 
-from ..security import get_secure_path
+from ..security import get_sandboxed_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -11,7 +11,7 @@ def register_tools(mcp: FastMCP) -> None:
 
     @mcp.tool()
     def apply_patch(
-        path: str, patch_text: str, workspace_id: str, agent_id: str, session_id: str
+        path: str, patch_text: str, agent_id: str
     ) -> dict:
         """
         Purpose
@@ -31,18 +31,16 @@ def register_tools(mcp: FastMCP) -> None:
             Always read the file first. Never patch blindly.
 
         Args:
-            path: The path to the file (relative to session root)
+            path: The path to the file (relative to agent sandbox)
             patch_text: The patch text to apply
-            workspace_id: The ID of the workspace
             agent_id: The ID of the agent
-            session_id: The ID of the current session
 
         Returns:
             Dict with application status and patch results, or error dict
         """
         # Logic duplicated from apply_diff for atomic isolation
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
             if not os.path.exists(secure_path):
                 return {"error": f"File not found at {path}"}
 
