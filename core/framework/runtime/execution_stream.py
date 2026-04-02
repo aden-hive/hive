@@ -357,7 +357,7 @@ class ExecutionStream:
 
         Each entry is ``{"node_id": ..., "execution_id": ...}``.
         The currently executing node is placed first so that
-        ``inject_worker_message`` targets the active node, not a stale one.
+        ``inject_message`` targets the active node, not a stale one.
         """
         injectable: list[dict[str, str]] = []
         current_first: list[dict[str, str]] = []

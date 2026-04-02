@@ -83,7 +83,7 @@ class MockStream:
     _active_executors: dict = field(default_factory=dict)
     active_execution_ids: set = field(default_factory=set)
 
-    async def cancel_execution(self, execution_id: str) -> bool:
+    async def cancel_execution(self, execution_id: str, reason: str | None = None) -> bool:
         return execution_id in self._execution_tasks
 
 
@@ -171,6 +171,7 @@ def _make_session(
     graph = MockGraphSpec(nodes=nodes or [], edges=edges or [])
     rt = runtime or MockRuntime(graph=graph, log_store=log_store)
     runner = MagicMock()
+    runner.cleanup = AsyncMock()
     runner.intro_message = "Test intro"
 
     mock_event_bus = MagicMock()
@@ -185,10 +186,10 @@ def _make_session(
         llm=mock_llm,
         loaded_at=1000000.0,
         queen_executor=queen_executor,
-        worker_id=agent_id,
+        graph_id=agent_id,
         worker_path=agent_path,
         runner=runner,
-        worker_runtime=rt,
+        graph_runtime=rt,
         worker_info=MockAgentInfo(),
     )
 
@@ -368,7 +369,7 @@ class TestSessionCRUD:
     async def test_create_session_with_worker_forwards_session_id(self):
         app = create_app()
         manager = app["manager"]
-        manager.create_session_with_worker = AsyncMock(
+        manager.create_session_with_worker_graph = AsyncMock(
             return_value=_make_session(agent_id="my-custom-session")
         )
 
@@ -384,7 +385,7 @@ class TestSessionCRUD:
 
         assert resp.status == 201
         assert data["session_id"] == "my-custom-session"
-        manager.create_session_with_worker.assert_awaited_once_with(
+        manager.create_session_with_worker_graph.assert_awaited_once_with(
             str(EXAMPLE_AGENT_PATH.resolve()),
             agent_id=None,
             session_id="my-custom-session",
@@ -616,10 +617,10 @@ class TestExecution:
             assert data["delivered"] is True
 
     @pytest.mark.asyncio
-    async def test_chat_injects_when_node_waiting(self):
-        """When a node is awaiting input, /chat should inject instead of trigger."""
+    async def test_chat_prefers_queen_even_when_node_waiting(self):
+        """When the queen is alive, /chat routes to queen even if a node is waiting."""
         session = _make_session()
-        session.worker_runtime.find_awaiting_node = lambda: ("chat_node", "primary")
+        session.graph_runtime.find_awaiting_node = lambda: ("chat_node", "primary")
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -628,8 +629,7 @@ class TestExecution:
             )
             assert resp.status == 200
             data = await resp.json()
-            assert data["status"] == "injected"
-            assert data["node_id"] == "chat_node"
+            assert data["status"] == "queen"
             assert data["delivered"] is True
 
     @pytest.mark.asyncio
@@ -767,7 +767,7 @@ class TestStop:
     async def test_stop_found(self):
         session = _make_session()
         # Put a mock task in the stream so cancel_execution returns True
-        session.worker_runtime._mock_streams["default"]._execution_tasks["exec_abc"] = MagicMock()
+        session.graph_runtime._mock_streams["default"]._execution_tasks["exec_abc"] = MagicMock()
         app = _make_app_with_session(session)
         async with TestClient(TestServer(app)) as client:
             resp = await client.post(
@@ -1381,7 +1381,7 @@ class TestLogs:
     async def test_logs_no_log_store(self):
         """Agent without log store returns 404."""
         session = _make_session()
-        session.worker_runtime._runtime_log_store = None
+        session.graph_runtime._runtime_log_store = None
         app = _make_app_with_session(session)
 
         async with TestClient(TestServer(app)) as client:
@@ -1704,11 +1704,11 @@ class TestSSEFormat:
 
 class TestErrorMiddleware:
     @pytest.mark.asyncio
-    async def test_404_on_unknown_api_route(self):
+    async def test_unknown_api_route_falls_back_to_frontend(self):
         app = create_app()
         async with TestClient(TestServer(app)) as client:
             resp = await client.get("/api/nonexistent")
-            assert resp.status == 404
+            assert resp.status == 200
 
 
 class TestCleanupStaleActiveSessions:

@@ -4,7 +4,7 @@ Storage layout:
     ~/.hive/agents/{agent_name}/runs/{run_id}/digest.md
 
 Each completed or failed worker run gets one digest file.  The queen reads
-these via get_worker_status(focus='diary') before digging into live runtime
+these via get_graph_status(focus='diary') before digging into live runtime
 logs — the diary is a cheap, persistent record that survives across sessions.
 """
 

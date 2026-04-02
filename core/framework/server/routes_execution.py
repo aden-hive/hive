@@ -23,8 +23,8 @@ async def handle_trigger(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
     # Validate credentials before running — deferred from load time to avoid
     # showing the modal before the user clicks Run.  Runs in executor because
@@ -59,7 +59,7 @@ async def handle_trigger(request: web.Request) -> web.Response:
     if "resume_session_id" not in session_state:
         session_state["resume_session_id"] = session.id
 
-    execution_id = await session.worker_runtime.trigger(
+    execution_id = await session.graph_runtime.trigger(
         entry_point_id,
         input_data,
         session_state=session_state,
@@ -87,8 +87,8 @@ async def handle_inject(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
     body = await request.json()
     node_id = body.get("node_id")
@@ -98,7 +98,7 @@ async def handle_inject(request: web.Request) -> web.Response:
     if not node_id:
         return web.json_response({"error": "node_id is required"}, status=400)
 
-    delivered = await session.worker_runtime.inject_input(node_id, content, graph_id=graph_id)
+    delivered = await session.graph_runtime.inject_input(node_id, content, graph_id=graph_id)
     return web.json_response({"delivered": delivered})
 
 
@@ -227,14 +227,14 @@ async def handle_worker_input(request: web.Request) -> web.Response:
     if not message:
         return web.json_response({"error": "message is required"}, status=400)
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded"}, status=503)
 
-    node_id, graph_id = session.worker_runtime.find_awaiting_node()
+    node_id, graph_id = session.graph_runtime.find_awaiting_node()
     if not node_id:
         return web.json_response({"error": "No worker node awaiting input"}, status=404)
 
-    delivered = await session.worker_runtime.inject_input(
+    delivered = await session.graph_runtime.inject_input(
         node_id,
         message,
         graph_id=graph_id,
@@ -255,10 +255,10 @@ async def handle_goal_progress(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
-    progress = await session.worker_runtime.get_goal_progress()
+    progress = await session.graph_runtime.get_goal_progress()
     return web.json_response(progress, dumps=lambda obj: json.dumps(obj, default=str))
 
 
@@ -271,8 +271,8 @@ async def handle_resume(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
     body = await request.json()
     worker_session_id = body.get("session_id")
@@ -313,13 +313,13 @@ async def handle_resume(request: web.Request) -> web.Response:
         if paused_at:
             resume_session_state["paused_at"] = paused_at
 
-    entry_points = session.worker_runtime.get_entry_points()
+    entry_points = session.graph_runtime.get_entry_points()
     if not entry_points:
         return web.json_response({"error": "No entry points available"}, status=400)
 
     input_data = state.get("input_data", {})
 
-    execution_id = await session.worker_runtime.trigger(
+    execution_id = await session.graph_runtime.trigger(
         entry_points[0].id,
         input_data=input_data,
         session_state=resume_session_state,
@@ -337,7 +337,7 @@ async def handle_resume(request: web.Request) -> web.Response:
 async def handle_pause(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/pause — pause the worker (queen stays alive).
 
-    Mirrors the queen's stop_worker() tool: cancels all active worker
+    Mirrors the queen's stop_graph() tool: cancels all active worker
     executions, pauses timers so nothing auto-restarts, but does NOT
     touch the queen so she can observe and react to the pause.
     """
@@ -345,10 +345,10 @@ async def handle_pause(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
-    runtime = session.worker_runtime
+    runtime = session.graph_runtime
     cancelled = []
 
     for graph_id in runtime.list_graphs():
@@ -397,8 +397,8 @@ async def handle_stop(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
     body = await request.json()
     execution_id = body.get("execution_id")
@@ -406,8 +406,8 @@ async def handle_stop(request: web.Request) -> web.Response:
     if not execution_id:
         return web.json_response({"error": "execution_id is required"}, status=400)
 
-    for graph_id in session.worker_runtime.list_graphs():
-        reg = session.worker_runtime.get_graph_registration(graph_id)
+    for graph_id in session.graph_runtime.list_graphs():
+        reg = session.graph_runtime.get_graph_registration(graph_id)
         if reg is None:
             continue
         for _ep_id, stream in reg.streams.items():
@@ -452,8 +452,8 @@ async def handle_replay(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
     body = await request.json()
     worker_session_id = body.get("session_id")
@@ -471,7 +471,7 @@ async def handle_replay(request: web.Request) -> web.Response:
     if not cp_path.exists():
         return web.json_response({"error": "Checkpoint not found"}, status=404)
 
-    entry_points = session.worker_runtime.get_entry_points()
+    entry_points = session.graph_runtime.get_entry_points()
     if not entry_points:
         return web.json_response({"error": "No entry points available"}, status=400)
 
@@ -480,7 +480,7 @@ async def handle_replay(request: web.Request) -> web.Response:
         "resume_from_checkpoint": checkpoint_id,
     }
 
-    execution_id = await session.worker_runtime.trigger(
+    execution_id = await session.graph_runtime.trigger(
         entry_points[0].id,
         input_data={},
         session_state=replay_session_state,

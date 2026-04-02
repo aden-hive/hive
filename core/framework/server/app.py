@@ -183,7 +183,7 @@ async def handle_health(request: web.Request) -> web.Response:
         {
             "status": "ok",
             "sessions": len(sessions),
-            "agents_loaded": sum(1 for s in sessions if s.worker_runtime is not None),
+            "agents_loaded": sum(1 for s in sessions if s.graph_runtime is not None),
         }
     )
 

@@ -140,7 +140,7 @@ async def create_queen(
     )
 
     # ---- Monitoring tools (only when worker is loaded) ----------------
-    if session.worker_runtime:
+    if session.graph_runtime:
         from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
 
         register_worker_monitoring_tools(
@@ -148,7 +148,7 @@ async def create_queen(
             session.event_bus,
             session.worker_path,
             stream_id="queen",
-            worker_graph_id=session.worker_runtime._graph_id,
+            worker_graph_id=session.graph_runtime._graph_id,
             default_session_id=session.id,
         )
 

@@ -106,11 +106,11 @@ _QUEEN_STAGING_TOOLS = [
     "run_command",
     # Agent inspection
     "list_credentials",
-    "get_worker_status",
+    "get_graph_status",
     # Launch or go back
     "run_agent_with_input",
-    "stop_worker_and_edit",
-    "stop_worker_and_plan",
+    "stop_graph_and_edit",
+    "stop_graph_and_plan",
     # Trigger management
     "set_trigger",
     "remove_trigger",
@@ -127,12 +127,12 @@ _QUEEN_RUNNING_TOOLS = [
     # Credentials
     "list_credentials",
     # Worker lifecycle
-    "stop_worker",
-    "stop_worker_and_edit",
-    "stop_worker_and_plan",
-    "get_worker_status",
+    "stop_graph",
+    "stop_graph_and_edit",
+    "stop_graph_and_plan",
+    "get_graph_status",
     "run_agent_with_input",
-    "inject_worker_message",
+    "inject_message",
     # Monitoring
     "get_worker_health_summary",
     "notify_operator",
@@ -452,7 +452,7 @@ in one call. Do NOT run these steps individually.
 ## Debugging Built Agents
 When a user says "my agent is failing" or "debug this agent":
 1. list_agent_sessions("{agent_name}") — find the session
-2. get_worker_status(focus="issues") — check for problems
+2. get_graph_status(focus="issues") — check for problems
 3. list_agent_checkpoints / get_agent_checkpoint — trace execution
 
 # Implementation Workflow
@@ -647,17 +647,17 @@ _queen_tools_staging = """
 The agent is loaded and ready to run. You can inspect it and launch it:
 - Read-only: read_file, list_directory, search_files, run_command
 - list_credentials(credential_id?) — Verify credentials are configured
-- get_worker_status(focus?) — Brief status. Drill in with focus: memory, tools, issues, progress
+- get_graph_status(focus?) — Brief status. Drill in with focus: memory, tools, issues, progress
 - run_agent_with_input(task) — Start the worker and switch to RUNNING phase
-- stop_worker_and_plan() — Go to PLANNING phase to discuss changes with the user \
+- stop_graph_and_plan() — Go to PLANNING phase to discuss changes with the user \
 first (DEFAULT for most modification requests)
-- stop_worker_and_edit() — Go to BUILDING phase for immediate, specific fixes
+- stop_graph_and_edit() — Go to BUILDING phase for immediate, specific fixes
 - set_trigger(trigger_id, trigger_type?, trigger_config?) — Activate a trigger (timer)
 - remove_trigger(trigger_id) — Deactivate a trigger
 - list_triggers() — List all triggers and their active/inactive status
 
 You do NOT have write tools. To modify the agent, prefer \
-stop_worker_and_plan() unless the user gave a specific instruction.
+stop_graph_and_plan() unless the user gave a specific instruction.
 """
 
 _queen_tools_running = """
@@ -665,27 +665,27 @@ _queen_tools_running = """
 
 The worker is running. You have monitoring and lifecycle tools:
 - Read-only: read_file, list_directory, search_files, run_command
-- get_worker_status(focus?) — Brief status. Drill in: activity, memory, tools, issues, progress
-- inject_worker_message(content) — Send a message to the running worker
+- get_graph_status(focus?) — Brief status. Drill in: activity, memory, tools, issues, progress
+- inject_message(content) — Send a message to the running worker
 - get_worker_health_summary() — Read the latest health data
 - notify_operator(ticket_id, analysis, urgency) — Alert the user (use sparingly)
-- stop_worker() — Stop the worker and return to STAGING phase, then ask the user what to do next
-- stop_worker_and_plan() — Stop and switch to PLANNING phase to discuss changes \
+- stop_graph() — Stop the worker and return to STAGING phase, then ask the user what to do next
+- stop_graph_and_plan() — Stop and switch to PLANNING phase to discuss changes \
 with the user first (DEFAULT for most modification requests)
-- stop_worker_and_edit() — Stop and switch to BUILDING phase for specific fixes
+- stop_graph_and_edit() — Stop and switch to BUILDING phase for specific fixes
 
 You do NOT have write tools. To modify the agent, prefer \
-stop_worker_and_plan() unless the user gave a specific instruction. \
-To just stop without modifying, call stop_worker().
-- stop_worker_and_edit() — Stop the worker and switch back to BUILDING phase
+stop_graph_and_plan() unless the user gave a specific instruction. \
+To just stop without modifying, call stop_graph().
+- stop_graph_and_edit() — Stop the worker and switch back to BUILDING phase
 - set_trigger(trigger_id, trigger_type?, trigger_config?) — Activate a trigger (timer)
 - remove_trigger(trigger_id) — Deactivate a trigger
 - list_triggers() — List all triggers and their active/inactive status
 
 You do NOT have write tools or agent construction tools. \
-If you need to modify the agent, call stop_worker_and_edit() to switch back \
+If you need to modify the agent, call stop_graph_and_edit() to switch back \
 to BUILDING phase. To stop the worker and ask the user what to do next, call \
-stop_worker() to return to STAGING phase.
+stop_graph() to return to STAGING phase.
 """
 
 # -- Behavior shared across all phases --
@@ -763,7 +763,7 @@ status only:
 1. Use plain, user-facing wording about load/run state; avoid internal phase \
 labels ("staging phase", "building phase", "running phase") unless the user \
 explicitly asks for phase details.
-2. If loaded, prefer this format: "<worker_name> has been loaded. <one sentence \
+2. If loaded, prefer this format: "<graph_name> has been loaded. <one sentence \
 on what it does from Worker Profile>."
 3. Do NOT include identity details unless the user explicitly asks about identity.
 4. THEN call ask_user to prompt them — do NOT just write text.
@@ -825,7 +825,7 @@ the plan first.
 
 ## Diagnosis mode (returning from staging/running)
 
-If you entered planning from a running/staged agent (via stop_worker_and_plan), \
+If you entered planning from a running/staged agent (via stop_graph_and_plan), \
 your priority is diagnosis, not new design:
 1. Inspect the agent's checkpoints, sessions, and logs to understand what went wrong
 2. Summarize the root cause to the user
@@ -922,7 +922,7 @@ run_agent_with_input(task) (if in staging) or load then run (if in building)
 - Anything else → do it yourself. Do NOT reframe user requests into \
 subtasks to justify delegation.
 - Building, modifying, or configuring agents is ALWAYS your job. \
-Use stop_worker_and_edit when you need to.
+Use stop_graph_and_edit when you need to.
 
 ## When the user says "run", "execute", or "start" (without specifics)
 
@@ -937,7 +937,7 @@ If NO worker is loaded, say so and offer to build one.
 
 ## When in staging phase (agent loaded, not running):
 - Tell the user the agent is loaded and ready in plain language (for example, \
-"<worker_name> has been loaded.").
+"<graph_name> has been loaded.").
 - Avoid lead-ins like "A worker is loaded and ready in staging phase: ...".
 - For tasks matching the worker's goal: ALWAYS ask the user for their \
 specific input BEFORE calling run_agent_with_input(task). NEVER make up \
@@ -946,7 +946,7 @@ or assume what the user wants. Use ask_user to collect the task details \
 compose a structured task description from their input and call \
 run_agent_with_input(task). The worker has no intake node — it receives \
 your task and starts processing.
-- If the user wants to modify the agent, call stop_worker_and_edit().
+- If the user wants to modify the agent, call stop_graph_and_edit().
 
 ## When idle (worker not running):
 - Greet the user. Mention what the worker can do in one sentence.
@@ -974,13 +974,13 @@ building something new.
 
 ## Fixing or Modifying the loaded worker
 
-Use stop_worker_and_plan() when:
+Use stop_graph_and_plan() when:
 - The user says "modify", "improve", "fix", or "change" without specifics
 - The request is vague or open-ended ("make it better", "it's not working right")
 - You need to understand the user's intent before making changes
 - The issue requires inspecting logs, checkpoints, or past runs first
 
-Use stop_worker_and_edit() only when:
+Use stop_graph_and_edit() only when:
 - The user gave a specific, concrete instruction ("add save_data to the gather node")
 - You already discussed the fix in a previous planning session
 - The change is trivial and unambiguous (rename, toggle a flag)
@@ -994,7 +994,7 @@ whether to call run_agent_with_input(task).
 
 ### When the user says "Enable trigger <id>" (or clicks Enable in the UI):
 
-1. Call get_worker_status(focus="memory") to check if the worker has \
+1. Call get_graph_status(focus="memory") to check if the worker has \
 saved configuration (rules, preferences, settings from a prior run).
 2. If memory contains saved config: compose a task string from it \
 (e.g. "Process inbox emails using saved rules") and call \
@@ -1027,15 +1027,15 @@ You wake up when:
 - A worker escalation arrives (`[WORKER_ESCALATION_REQUEST]`)
 - The worker finishes (`[WORKER_TERMINAL]`)
 
-If the user asks for progress, call get_worker_status() ONCE and report. \
-If the summary mentions issues, follow up with get_worker_status(focus="issues").
+If the user asks for progress, call get_graph_status() ONCE and report. \
+If the summary mentions issues, follow up with get_graph_status(focus="issues").
 
 ## Subagent delegations (browser automation, GCU)
 
 When the worker delegates to a subagent (e.g., GCU browser automation), expect it \
 to take 2-5 minutes. During this time:
 - Progress will show 0% — this is NORMAL. The subagent only calls set_output at the end.
-- Check get_worker_status(focus="full") for "subagent_activity" — this shows the \
+- Check get_graph_status(focus="full") for "subagent_activity" — this shows the \
 subagent's latest reasoning text and confirms it is making real progress.
 - Do NOT conclude the subagent is stuck just because progress is 0% or because \
 you see repeated browser_click/browser_snapshot calls — that is the expected \
@@ -1076,33 +1076,33 @@ When an escalation requires user input (auth blocks, human review), the worker \
 or its subagent is BLOCKED and waiting for your response. You MUST follow this \
 exact two-step sequence:
   Step 1: call ask_user() to get the user's answer.
-  Step 2: call inject_worker_message() with the user's answer IMMEDIATELY after.
+  Step 2: call inject_message() with the user's answer IMMEDIATELY after.
 If you skip Step 2, the worker/subagent stays blocked FOREVER and the task hangs. \
-NEVER respond to the user without also calling inject_worker_message() to unblock \
+NEVER respond to the user without also calling inject_message() to unblock \
 the worker. Even if the user says "skip" or "cancel", you must still relay that \
-decision via inject_worker_message() so the worker can clean up.
+decision via inject_message() so the worker can clean up.
 
 **Auth blocks / credential issues:**
 - ALWAYS ask the user (unless user explicitly told you how to handle this).
 - The worker cannot proceed without valid credentials.
 - Explain which credential is missing or invalid.
 - Step 1: ask_user for guidance — "Provide credentials", "Skip this task", "Stop and edit agent"
-- Step 2: inject_worker_message() with the user's response to unblock the worker.
+- Step 2: inject_message() with the user's response to unblock the worker.
 
 **Need human review / approval:**
 - ALWAYS ask the user (unless user explicitly told you how to handle this).
 - The worker is explicitly requesting human judgment.
 - Present the context clearly (what decision is needed, what are the options).
 - Step 1: ask_user with the actual decision options.
-- Step 2: inject_worker_message() with the user's decision to unblock the worker.
+- Step 2: inject_message() with the user's decision to unblock the worker.
 
 **Errors / unexpected failures:**
 - Explain what went wrong in plain terms.
-- Ask the user: "Fix the agent and retry?" → use stop_worker_and_edit() if yes.
-- Or offer: "Diagnose the issue" → use stop_worker_and_plan() to investigate first.
+- Ask the user: "Fix the agent and retry?" → use stop_graph_and_edit() if yes.
+- Or offer: "Diagnose the issue" → use stop_graph_and_plan() to investigate first.
 - Or offer: "Retry as-is", "Skip this task", "Abort run"
 - (Skip asking if user explicitly told you to auto-retry or auto-skip errors.)
-- If the escalation had wait_for_response: inject_worker_message() with the decision.
+- If the escalation had wait_for_response: inject_message() with the decision.
 
 **Informational / progress updates:**
 - Acknowledge briefly and let the worker continue.
@@ -1117,15 +1117,15 @@ stages, tools, and edges from the loaded worker. Do NOT enter the \
 agent building workflow — you are describing what already exists, not \
 building something new.
 
-- Call get_worker_status(focus="issues") for more details when needed.
+- Call get_graph_status(focus="issues") for more details when needed.
 
 ## Fixing or Modifying the loaded worker
 
 When the user asks to fix, change, modify, or update the loaded worker \
 (e.g., "change the report node", "add a node", "delete node X"):
 
-**Default: use stop_worker_and_plan().** Most modification requests need \
-discussion first. Only use stop_worker_and_edit() when the user gave a \
+**Default: use stop_graph_and_plan().** Most modification requests need \
+discussion first. Only use stop_graph_and_edit() when the user gave a \
 specific, unambiguous instruction or you already agreed on the fix.
 
 ## Trigger Handling
@@ -1134,7 +1134,7 @@ You will receive [TRIGGER: ...] messages when a scheduled timer fires. \
 These are framework-level signals, not user messages.
 
 Rules:
-- Check get_worker_status() before calling run_agent_with_input(task). If the worker \
+- Check get_graph_status() before calling run_agent_with_input(task). If the worker \
 is already RUNNING, decide: skip this trigger, or note it for after completion.
 - When multiple [TRIGGER] messages arrive at once, read them all before acting. \
 Batch your response — do not call run_agent_with_input() once per trigger.
@@ -1168,9 +1168,9 @@ _queen_tools_docs = (
     "- replan_agent() → switches back to PLANNING phase (only when user explicitly requests)\n"
     "- load_built_agent(path) → switches to STAGING phase\n"
     "- run_agent_with_input(task) → starts worker, switches to RUNNING phase\n"
-    "- stop_worker() → stops worker, switches to STAGING phase (ask user: re-run or edit?)\n"
-    "- stop_worker_and_edit() → stops worker (if running), switches to BUILDING phase\n"
-    "- stop_worker_and_plan() → stops worker (if running), switches to PLANNING phase\n"
+    "- stop_graph() → stops worker, switches to STAGING phase (ask user: re-run or edit?)\n"
+    "- stop_graph_and_edit() → stops worker (if running), switches to BUILDING phase\n"
+    "- stop_graph_and_plan() → stops worker (if running), switches to PLANNING phase\n"
 )
 
 _queen_behavior = (

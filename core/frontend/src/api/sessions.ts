@@ -12,7 +12,7 @@ import type {
 export const sessionsApi = {
   // --- Session lifecycle ---
 
-  /** Create a session. If agentPath is provided, loads worker in one step. */
+  /** Create a session. If agentPath is provided, loads a graph in one step. */
   create: (agentPath?: string, agentId?: string, model?: string, initialPrompt?: string, queenResumeFrom?: string) =>
     api.post<LiveSession>("/sessions", {
       agent_path: agentPath,
@@ -25,7 +25,7 @@ export const sessionsApi = {
   /** List all active sessions. */
   list: () => api.get<{ sessions: LiveSession[] }>("/sessions"),
 
-  /** Get session detail (includes entry_points, graphs when worker is loaded). */
+  /** Get session detail (includes entry_points, graphs when a graph is loaded). */
   get: (sessionId: string) =>
     api.get<LiveSessionDetail>(`/sessions/${sessionId}`),
 
@@ -35,23 +35,23 @@ export const sessionsApi = {
       `/sessions/${sessionId}`,
     ),
 
-  // --- Worker lifecycle ---
+  // --- Graph lifecycle ---
 
-  loadWorker: (
+  loadGraph: (
     sessionId: string,
     agentPath: string,
-    workerId?: string,
+    graphId?: string,
     model?: string,
   ) =>
-    api.post<LiveSession>(`/sessions/${sessionId}/worker`, {
+    api.post<LiveSession>(`/sessions/${sessionId}/graph`, {
       agent_path: agentPath,
-      worker_id: workerId,
+      graph_id: graphId,
       model,
     }),
 
-  unloadWorker: (sessionId: string) =>
-    api.delete<{ session_id: string; worker_unloaded: boolean }>(
-      `/sessions/${sessionId}/worker`,
+  unloadGraph: (sessionId: string) =>
+    api.delete<{ session_id: string; graph_unloaded: boolean }>(
+      `/sessions/${sessionId}/graph`,
     ),
 
   // --- Session info ---

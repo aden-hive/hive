@@ -2,8 +2,8 @@
 
 export interface LiveSession {
   session_id: string;
-  worker_id: string | null;
-  worker_name: string | null;
+  graph_id: string | null;
+  graph_name: string | null;
   has_worker: boolean;
   agent_path: string;
   description: string;
@@ -330,7 +330,7 @@ export type EventTypeName =
   | "webhook_received"
   | "custom"
   | "escalation_requested"
-  | "worker_loaded"
+  | "worker_graph_loaded"
   | "credentials_required"
   | "queen_phase_changed"
   | "subagent_report"

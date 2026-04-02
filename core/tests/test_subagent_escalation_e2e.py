@@ -4,7 +4,7 @@ Tests the FULL routing chain:
   ExecutionStream → GraphExecutor → EventLoopNode → _execute_subagent
   → _report_callback registers _EscalationReceiver in executor.node_registry
   → emit ESCALATION_REQUESTED (queen handles the escalation)
-  → queen inject_worker_message() finds _EscalationReceiver via get_waiting_nodes()
+  → queen inject_message() finds _EscalationReceiver via get_waiting_nodes()
   → receiver.inject_event("done") unblocks the subagent
   → subagent continues and completes
 """
@@ -235,7 +235,7 @@ async def test_escalation_e2e_through_execution_stream(tmp_path):
             await asyncio.sleep(0.05)
             # Route through the REAL inject_input chain — find the waiting
             # escalation receiver via get_waiting_nodes() (mirrors what
-            # inject_worker_message does in the queen lifecycle tools).
+            # inject_message does in the queen lifecycle tools).
             stream = stream_holder[0]
             waiting = stream.get_waiting_nodes()
             assert waiting, "Should have a waiting escalation receiver"

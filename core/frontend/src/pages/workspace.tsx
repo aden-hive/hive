@@ -1118,7 +1118,7 @@ export default function Workspace() {
       // At this point liveSession is guaranteed set — if both reconnect and create
       // failed, the throw inside the catch exits the outer try block.
       const session = liveSession!;
-      const displayName = formatAgentDisplayName(session.worker_name || agentType);
+      const displayName = formatAgentDisplayName(session.graph_name || agentType);
       const initialPhase = restoredPhase || session.queen_phase || (session.has_worker ? "staging" : "planning");
       queenPhaseRef.current[agentType] = initialPhase;
       updateAgentState(agentType, {
@@ -2305,10 +2305,10 @@ export default function Workspace() {
           break;
         }
 
-        case "worker_loaded": {
-          const workerName = event.data?.worker_name as string | undefined;
+        case "worker_graph_loaded": {
+          const graphName = event.data?.graph_name as string | undefined;
           const agentPathFromEvent = event.data?.agent_path as string | undefined;
-          const displayName = formatAgentDisplayName(workerName || baseAgentType(agentType));
+          const displayName = formatAgentDisplayName(graphName || baseAgentType(agentType));
 
           // Invalidate cached credential requirements so the modal fetches
           // fresh data the next time it opens (the new agent may have
@@ -2868,8 +2868,8 @@ export default function Workspace() {
     if (!state?.sessionId) return;
 
     try {
-      await sessionsApi.loadWorker(state.sessionId, agentPath);
-      // Success: worker_loaded SSE event will handle UI updates automatically
+      await sessionsApi.loadGraph(state.sessionId, agentPath);
+      // Success: worker_graph_loaded SSE event will handle UI updates automatically
     } catch (err) {
       // 424 = credentials required — open the credentials modal
       if (err instanceof ApiError && err.status === 424) {

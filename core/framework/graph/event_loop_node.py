@@ -181,7 +181,7 @@ class _EscalationReceiver:
     def __init__(self) -> None:
         self._event = asyncio.Event()
         self._response: str | None = None
-        self._awaiting_input = True  # So inject_worker_message() can prefer us
+        self._awaiting_input = True  # So inject_message() can prefer us
 
     async def inject_event(
         self,
@@ -1842,7 +1842,7 @@ class EventLoopNode(NodeProtocol):
                 Each dict has id, prompt, and optional options.
             emit_client_request: When False, wait silently without publishing
                 CLIENT_INPUT_REQUESTED. Used for worker waits where input is
-                expected from the queen via inject_worker_message().
+                expected from the queen via inject_message().
 
         Returns True if input arrived, False if shutdown was signaled.
         """

@@ -312,7 +312,7 @@ class TestHTTPEndpointsRejectMaliciousPaths:
                 session_id = (await create_resp.json())["session_id"]
 
                 resp = await client.post(
-                    f"/api/sessions/{session_id}/worker",
+                    f"/api/sessions/{session_id}/graph",
                     json={"agent_path": "/tmp/evil"},
                 )
                 assert resp.status == 400

@@ -42,7 +42,7 @@ class EscalationReceiver:
     def __init__(self) -> None:
         self._event = asyncio.Event()
         self._response: str | None = None
-        self._awaiting_input = True  # So inject_worker_message() can prefer us
+        self._awaiting_input = True  # So inject_message() can prefer us
 
     async def inject_event(
         self,

@@ -1683,10 +1683,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
         # Preload agents specified via --agent
         for agent_path in args.agent:
             try:
-                session = await manager.create_session_with_worker(agent_path, model=model)
+                session = await manager.create_session_with_worker_graph(agent_path, model=model)
                 info = session.worker_info
-                name = info.name if info else session.worker_id
-                print(f"Loaded agent: {session.worker_id} ({name})")
+                name = info.name if info else session.graph_id
+                print(f"Loaded agent: {session.graph_id} ({name})")
             except Exception as e:
                 print(f"Error loading {agent_path}: {e}")
 
@@ -1709,7 +1709,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         if has_frontend:
             print(f"Dashboard: {dashboard_url}")
         print(f"Health: {dashboard_url}/api/health")
-        print(f"Agents loaded: {sum(1 for s in manager.list_sessions() if s.worker_runtime)}")
+        print(f"Agents loaded: {sum(1 for s in manager.list_sessions() if s.graph_runtime)}")
         print()
         print("Press Ctrl+C to stop")
 

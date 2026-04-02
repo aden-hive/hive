@@ -9,14 +9,14 @@ ENDPOINT: POST /api/sessions (line 103)
 FUNCTION: async def handle_create_session(request: web.Request) -> web.Response
 
 - Accepts optional "agent_path" in request body
-- If agent_path provided: calls manager.create_session_with_worker()
+- If agent_path provided: calls manager.create_session_with_worker_graph()
 - If no agent_path: calls manager.create_session()
 - Returns 201 with session details
 
 CALL CHAIN:
 handle_create_session (line 103)
   ├─ validate_agent_path(agent_path) [line 128]
-  ├─ manager.create_session_with_worker() [line 135] OR manager.create_session() [line 143]
+  ├─ manager.create_session_with_worker_graph() [line 135] OR manager.create_session() [line 143]
   └─ _session_to_live_dict(session) [line 169]
 
 
@@ -26,16 +26,16 @@ STEP 2: SESSION CREATION (MANAGER LAYER)
 
 FILE: /Users/timothy/repo/hive/core/framework/server/session_manager.py
 
-FLOW A: Create Session with Worker (Single Step)
+FLOW A: Create Session with Graph (Single Step)
 ─────────────────────────────────────────────────
 
-FUNCTION: async def create_session_with_worker() (line 128)
+FUNCTION: async def create_session_with_worker_graph() (line 128)
   - Creates session infrastructure (EventBus, LLM)
   - Loads worker agent
   - Starts queen
   
 CALL SEQUENCE:
-create_session_with_worker (line 128)
+create_session_with_worker_graph (line 128)
   ├─ _create_session_core(model=model) [line 150]
   │  │ Creates RuntimeConfig, LiteLLMProvider, EventBus
   │  │ Creates Session dataclass with event_bus and llm
@@ -45,12 +45,12 @@ create_session_with_worker (line 128)
   ├─ _load_worker_core(session, agent_path, worker_id) [line 153]
   │  │ Loads AgentRunner (blocking I/O via executor)
   │  │ Calls runner._setup(event_bus=session.event_bus)
-  │  │ Starts worker_runtime if not already running
+  │  │ Starts graph_runtime if not already running
   │  │ Cleans up stale sessions on disk
-  │  │ Updates session.runner, session.worker_runtime, etc.
+  │  │ Updates session.runner, session.graph_runtime, etc.
   │  └─ returns None (modifies session in-place)
   │
-  ├─ build_worker_profile(session.worker_runtime) [line 162]
+  ├─ build_worker_profile(session.graph_runtime) [line 162]
   │  └─ returns worker identity string for queen
   │
   └─ _start_queen(session, worker_identity) [line 166]
@@ -256,7 +256,7 @@ STEP 7: QUEEN STARTUP (CONCURRENT WITH WORKER)
 FILE: /Users/timothy/repo/hive/core/framework/server/session_manager.py
 
 FUNCTION: _start_queen() (line 394)
-CALLED BY: create_session() OR create_session_with_worker()
+CALLED BY: create_session() OR create_session_with_worker_graph()
 
 QUEEN STARTUP SEQUENCE:
 _start_queen(session, worker_identity, initial_prompt) (line 394)

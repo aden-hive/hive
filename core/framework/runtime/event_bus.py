@@ -135,8 +135,8 @@ class EventType(StrEnum):
     # Execution resurrection (auto-restart on non-fatal failure)
     EXECUTION_RESURRECTED = "execution_resurrected"
 
-    # Worker lifecycle (session manager → frontend)
-    WORKER_LOADED = "worker_loaded"
+    # Graph lifecycle (session manager → frontend)
+    WORKER_GRAPH_LOADED = "worker_graph_loaded"
     CREDENTIALS_REQUIRED = "credentials_required"
 
     # Draft graph (planning phase — lightweight graph preview)

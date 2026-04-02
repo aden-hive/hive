@@ -5,8 +5,8 @@ Session-primary routes:
 - GET    /api/sessions                               — list all active sessions
 - GET    /api/sessions/{session_id}                  — session detail
 - DELETE /api/sessions/{session_id}                  — stop session entirely
-- POST   /api/sessions/{session_id}/worker           — load a worker into session
-- DELETE /api/sessions/{session_id}/worker           — unload worker from session
+- POST   /api/sessions/{session_id}/graph            — load a graph into session
+- DELETE /api/sessions/{session_id}/graph            — unload graph from session
 - GET    /api/sessions/{session_id}/stats            — runtime statistics
 - GET    /api/sessions/{session_id}/entry-points     — list entry points
 - PATCH  /api/sessions/{session_id}/triggers/{id}   — update trigger task
@@ -60,9 +60,9 @@ def _session_to_live_dict(session) -> dict:
     queen_model: str = getattr(getattr(session, "runner", None), "model", "") or ""
     return {
         "session_id": session.id,
-        "worker_id": session.worker_id,
-        "worker_name": info.name if info else session.worker_id,
-        "has_worker": session.worker_runtime is not None,
+        "graph_id": session.graph_id,
+        "graph_name": info.name if info else session.graph_id,
+        "has_worker": session.graph_runtime is not None,
         "agent_path": str(session.worker_path) if session.worker_path else "",
         "description": info.description if info else "",
         "goal": info.goal_name if info else "",
@@ -72,7 +72,7 @@ def _session_to_live_dict(session) -> dict:
         "intro_message": getattr(session.runner, "intro_message", "") or "",
         "queen_phase": phase_state.phase
         if phase_state
-        else ("staging" if session.worker_runtime else "planning"),
+        else ("staging" if session.graph_runtime else "planning"),
         "queen_supports_images": supports_image_tool_results(queen_model) if queen_model else True,
     }
 
@@ -118,16 +118,16 @@ async def handle_create_session(request: web.Request) -> web.Response:
     """POST /api/sessions — create a session.
 
     Body: {
-        "agent_path": "..." (optional — if provided, creates session with worker),
-        "agent_id": "..." (optional — worker ID override),
+        "agent_path": "..." (optional — if provided, creates session with graph),
+        "agent_id": "..." (optional — graph ID override),
         "session_id": "..." (optional — custom session ID),
         "model": "..." (optional),
         "initial_prompt": "..." (optional — first user message for the queen),
     }
 
-    When agent_path is provided, creates a session with a worker in one step
+    When agent_path is provided, creates a session with a graph in one step
     (equivalent to the old POST /api/agents). Otherwise creates a queen-only
-    session that can later have a worker loaded via POST /sessions/{id}/worker.
+    session that can later have a graph loaded via POST /sessions/{id}/graph.
     """
     manager = _get_manager(request)
     body = await request.json() if request.can_read_body else {}
@@ -148,8 +148,8 @@ async def handle_create_session(request: web.Request) -> web.Response:
 
     try:
         if agent_path:
-            # One-step: create session + load worker
-            session = await manager.create_session_with_worker(
+            # One-step: create session + load graph
+            session = await manager.create_session_with_worker_graph(
                 agent_path,
                 agent_id=agent_id,
                 session_id=session_id,
@@ -170,7 +170,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
         if "currently loading" in msg:
             resolved_id = agent_id or (Path(agent_path).name if agent_path else "")
             return web.json_response(
-                {"error": msg, "worker_id": resolved_id, "loading": True},
+                {"error": msg, "graph_id": resolved_id, "loading": True},
                 status=409,
             )
         return web.json_response({"error": msg}, status=409)
@@ -224,8 +224,8 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
 
     data = _session_to_live_dict(session)
 
-    if session.worker_runtime:
-        rt = session.worker_runtime
+    if session.graph_runtime:
+        rt = session.graph_runtime
         data["entry_points"] = [
             {
                 "id": ep.id,
@@ -257,7 +257,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
             if mono is not None:
                 entry["next_fire_in"] = max(0.0, mono - time.monotonic())
             data["entry_points"].append(entry)
-        data["graphs"] = session.worker_runtime.list_graphs()
+        data["graphs"] = session.graph_runtime.list_graphs()
 
     return web.json_response(data)
 
@@ -278,14 +278,14 @@ async def handle_stop_session(request: web.Request) -> web.Response:
 
 
 # ------------------------------------------------------------------
-# Worker lifecycle
+# Graph lifecycle
 # ------------------------------------------------------------------
 
 
-async def handle_load_worker(request: web.Request) -> web.Response:
-    """POST /api/sessions/{session_id}/worker — load a worker into a session.
+async def handle_load_graph(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/graph — load a graph into a session.
 
-    Body: {"agent_path": "...", "worker_id": "..." (optional), "model": "..." (optional)}
+    Body: {"agent_path": "...", "graph_id": "..." (optional), "model": "..." (optional)}
     """
     manager = _get_manager(request)
     session_id = request.match_info["session_id"]
@@ -300,14 +300,14 @@ async def handle_load_worker(request: web.Request) -> web.Response:
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
 
-    worker_id = body.get("worker_id")
+    graph_id = body.get("graph_id")
     model = body.get("model")
 
     try:
-        session = await manager.load_worker(
+        session = await manager.load_graph(
             session_id,
             agent_path,
-            worker_id=worker_id,
+            graph_id=graph_id,
             model=model,
         )
     except ValueError as e:
@@ -318,18 +318,18 @@ async def handle_load_worker(request: web.Request) -> web.Response:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
             return resp
-        logger.exception("Error loading worker: %s", e)
+        logger.exception("Error loading graph: %s", e)
         return web.json_response({"error": "Internal server error"}, status=500)
 
     return web.json_response(_session_to_live_dict(session))
 
 
-async def handle_unload_worker(request: web.Request) -> web.Response:
-    """DELETE /api/sessions/{session_id}/worker — unload worker, keep queen alive."""
+async def handle_unload_graph(request: web.Request) -> web.Response:
+    """DELETE /api/sessions/{session_id}/graph — unload graph, keep queen alive."""
     manager = _get_manager(request)
     session_id = request.match_info["session_id"]
 
-    removed = await manager.unload_worker(session_id)
+    removed = await manager.unload_graph(session_id)
     if not removed:
         session = manager.get_session(session_id)
         if session is None:
@@ -338,11 +338,11 @@ async def handle_unload_worker(request: web.Request) -> web.Response:
                 status=404,
             )
         return web.json_response(
-            {"error": "No worker loaded in this session"},
+            {"error": "No graph loaded in this session"},
             status=409,
         )
 
-    return web.json_response({"session_id": session_id, "worker_unloaded": True})
+    return web.json_response({"session_id": session_id, "graph_unloaded": True})
 
 
 # ------------------------------------------------------------------
@@ -362,7 +362,7 @@ async def handle_session_stats(request: web.Request) -> web.Response:
             status=404,
         )
 
-    stats = session.worker_runtime.get_stats() if session.worker_runtime else {}
+    stats = session.graph_runtime.get_stats() if session.graph_runtime else {}
     return web.json_response(stats)
 
 
@@ -378,7 +378,7 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
             status=404,
         )
 
-    rt = session.worker_runtime
+    rt = session.graph_runtime
     eps = rt.get_entry_points() if rt else []
     entry_points = [
         {
@@ -580,7 +580,7 @@ async def handle_session_graphs(request: web.Request) -> web.Response:
             status=404,
         )
 
-    graphs = session.worker_runtime.list_graphs() if session.worker_runtime else []
+    graphs = session.graph_runtime.list_graphs() if session.graph_runtime else []
     return web.json_response({"graphs": graphs})
 
 
@@ -726,8 +726,8 @@ async def handle_restore_checkpoint(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
     ws_id = request.match_info.get("ws_id") or request.match_info.get("session_id", "")
     ws_id = safe_path_segment(ws_id)
@@ -737,7 +737,7 @@ async def handle_restore_checkpoint(request: web.Request) -> web.Response:
     if not cp_path.exists():
         return web.json_response({"error": "Checkpoint not found"}, status=404)
 
-    entry_points = session.worker_runtime.get_entry_points()
+    entry_points = session.graph_runtime.get_entry_points()
     if not entry_points:
         return web.json_response({"error": "No entry points available"}, status=400)
 
@@ -746,7 +746,7 @@ async def handle_restore_checkpoint(request: web.Request) -> web.Response:
         "resume_from_checkpoint": checkpoint_id,
     }
 
-    execution_id = await session.worker_runtime.trigger(
+    execution_id = await session.graph_runtime.trigger(
         entry_points[0].id,
         input_data={},
         session_state=restore_session_state,
@@ -1026,9 +1026,9 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/sessions/{session_id}", handle_get_live_session)
     app.router.add_delete("/api/sessions/{session_id}", handle_stop_session)
 
-    # Worker lifecycle
-    app.router.add_post("/api/sessions/{session_id}/worker", handle_load_worker)
-    app.router.add_delete("/api/sessions/{session_id}/worker", handle_unload_worker)
+    # Graph lifecycle
+    app.router.add_post("/api/sessions/{session_id}/graph", handle_load_graph)
+    app.router.add_delete("/api/sessions/{session_id}/graph", handle_unload_graph)
 
     # Session info
     app.router.add_post("/api/sessions/{session_id}/reveal", handle_reveal_session_folder)
