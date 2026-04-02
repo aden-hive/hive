@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Hive Browser Bridge",
+  "version": "1.0.0",
+  "description": "Connects Hive AI subagents to your existing browser via isolated tab groups",
+  "permissions": [
+    "debugger",
+    "tabs",
+    "tabGroups",
+    "offscreen",
+    "storage",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Hive Browser Bridge"
+  }
+}
