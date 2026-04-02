@@ -514,6 +514,10 @@ else:
     config["worker_llm"].pop("antigravity_client_secret", None)
     config["worker_llm"].pop("antigravity_client_id", None)
 
+# Handle ollama (no api_key_env_var needed for local)
+if provider_id == "ollama":
+    config["worker_llm"].pop("api_key_env_var", None)
+
 if api_base:
     config["worker_llm"]["api_base"] = api_base
 else:
@@ -620,6 +624,15 @@ elif [ -f "$HOME/.hive/antigravity-accounts.json" ]; then
     ANTIGRAVITY_CRED_DETECTED=true
 fi
 
+# Detect Ollama (local models)
+OLLAMA_CRED_DETECTED=false
+if command -v ollama &>/dev/null; then
+    # Check if ollama is running by attempting to list models
+    if ollama list &>/dev/null 2>&1; then
+        OLLAMA_CRED_DETECTED=true
+    fi
+fi
+
 # Detect API key providers
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     for env_var in "${!PROVIDER_NAMES[@]}"; do
@@ -668,6 +681,8 @@ try:
         sub = "minimax_code"
     elif llm.get("provider", "") == "hive" or "adenhq.com" in llm.get("api_base", ""):
         sub = "hive_llm"
+    elif llm.get("provider", "") == "ollama":
+        sub = "ollama"
     elif "api.z.ai" in llm.get("api_base", ""):
         sub = "zai_code"
     print(f"PREV_SUB_MODE={sub}")
@@ -688,6 +703,7 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
         kimi_code)   [ "$KIMI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         hive_llm)    [ "$HIVE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         antigravity) [ "$ANTIGRAVITY_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        ollama)      [ "$OLLAMA_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         *)
             # API key provider — check if the env var is set
             if [ -n "$PREV_ENV_VAR" ] && [ -n "${!PREV_ENV_VAR}" ]; then
@@ -705,15 +721,17 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
             kimi_code)   DEFAULT_CHOICE=5 ;;
             hive_llm)    DEFAULT_CHOICE=6 ;;
             antigravity) DEFAULT_CHOICE=7 ;;
+            ollama)      DEFAULT_CHOICE=8 ;;
         esac
         if [ -z "$DEFAULT_CHOICE" ]; then
             case "$PREV_PROVIDER" in
-                anthropic) DEFAULT_CHOICE=8 ;;
-                openai)    DEFAULT_CHOICE=9 ;;
-                gemini)    DEFAULT_CHOICE=10 ;;
-                groq)      DEFAULT_CHOICE=11 ;;
-                cerebras)  DEFAULT_CHOICE=12 ;;
-                openrouter) DEFAULT_CHOICE=13 ;;
+                ollama)     DEFAULT_CHOICE=8 ;;
+                anthropic) DEFAULT_CHOICE=9 ;;
+                openai)    DEFAULT_CHOICE=10 ;;
+                gemini)    DEFAULT_CHOICE=11 ;;
+                groq)      DEFAULT_CHOICE=12 ;;
+                cerebras)  DEFAULT_CHOICE=13 ;;
+                openrouter) DEFAULT_CHOICE=14 ;;
                 minimax)   DEFAULT_CHOICE=4 ;;
                 kimi)      DEFAULT_CHOICE=5 ;;
                 hive)      DEFAULT_CHOICE=6 ;;
@@ -776,14 +794,21 @@ else
     echo -e "  ${CYAN}7)${NC} Antigravity Subscription  ${DIM}(use your Google/Gemini plan)${NC}"
 fi
 
+# 8) Ollama (local)
+if [ "$OLLAMA_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}8)${NC} Ollama (local)            ${DIM}(run locally with ollama)${NC}  ${GREEN}(available)${NC}"
+else
+    echo -e "  ${CYAN}8)${NC} Ollama (local)            ${DIM}(run locally with ollama)${NC}"
+fi
+
 echo ""
 echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 
-# 8-13) API key providers — show (credential detected) if key already set
+# 9-14) API key providers — show (credential detected) if key already set
 PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY)
 PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model")
 for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
-    num=$((idx + 8))
+    num=$((idx + 9))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
     if [ -n "${!env_var}" ]; then
         echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}  ${GREEN}(credential detected)${NC}"
@@ -792,7 +817,7 @@ for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     fi
 done
 
-SKIP_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]}))
+SKIP_CHOICE=$((9 + ${#PROVIDER_MENU_ENVS[@]}))
 echo -e "  ${CYAN}$SKIP_CHOICE)${NC} Skip for now"
 echo ""
 
@@ -974,36 +999,72 @@ case $choice in
         fi
         ;;
     8)
+        # Ollama (local)
+        SUBSCRIPTION_MODE="ollama"
+        SELECTED_PROVIDER_ID="ollama"
+        SELECTED_MAX_TOKENS=4096
+        SELECTED_MAX_CONTEXT_TOKENS=16384
+        PROVIDER_NAME="Ollama"
+
+        # Get list of installed models
+        echo ""
+        echo -e "${BOLD}Available Ollama models:${NC}"
+        OLLAMA_MODELS=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | grep -v '^$' | head -20)
+        if [ -z "$OLLAMA_MODELS" ]; then
+            echo -e "${RED}No models found. Make sure 'ollama serve' is running and you have models installed.${NC}"
+            echo ""
+            read -r -p "Press Enter to continue... "
+            continue
+        fi
+
+        # Build menu
+        MODEL_COUNT=0
+        declare -a MODEL_NAMES
+        while IFS= read -r model; do
+            MODEL_COUNT=$((MODEL_COUNT + 1))
+            MODEL_NAMES+=("$model")
+            echo -e "  ${CYAN}$MODEL_COUNT)${NC} $model"
+        done <<< "$OLLAMA_MODELS"
+
+        echo ""
+        read -r -p "Select model (1-$MODEL_COUNT) [1]: " model_choice
+        model_choice="${model_choice:-1}"
+        if [[ "$model_choice" =~ ^[0-9]+$ ]] && [ "$model_choice" -ge 1 ] && [ "$model_choice" -le "$MODEL_COUNT" ]; then
+            SELECTED_MODEL="${MODEL_NAMES[$((model_choice-1))]}"
+        else
+            SELECTED_MODEL="${MODEL_NAMES[0]}"
+        fi
+
+        echo ""
+        echo -e "${GREEN}⬢${NC} Using Ollama (local)"
+        echo -e "  ${DIM}Model: $SELECTED_MODEL | URL: http://localhost:11434${NC}"
+        echo ""
+        ;;
+    9)
         SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
         SELECTED_PROVIDER_ID="anthropic"
         PROVIDER_NAME="Anthropic"
         SIGNUP_URL="https://console.anthropic.com/settings/keys"
         ;;
-    9)
+    10)
         SELECTED_ENV_VAR="OPENAI_API_KEY"
         SELECTED_PROVIDER_ID="openai"
         PROVIDER_NAME="OpenAI"
         SIGNUP_URL="https://platform.openai.com/api-keys"
         ;;
-    10)
-        SELECTED_ENV_VAR="GEMINI_API_KEY"
-        SELECTED_PROVIDER_ID="gemini"
-        PROVIDER_NAME="Google Gemini"
-        SIGNUP_URL="https://aistudio.google.com/apikey"
-        ;;
-    11)
+    12)
         SELECTED_ENV_VAR="GROQ_API_KEY"
         SELECTED_PROVIDER_ID="groq"
         PROVIDER_NAME="Groq"
         SIGNUP_URL="https://console.groq.com/keys"
         ;;
-    12)
+    13)
         SELECTED_ENV_VAR="CEREBRAS_API_KEY"
         SELECTED_PROVIDER_ID="cerebras"
         PROVIDER_NAME="Cerebras"
         SIGNUP_URL="https://cloud.cerebras.ai/"
         ;;
-    13)
+    14)
         SELECTED_ENV_VAR="OPENROUTER_API_KEY"
         SELECTED_PROVIDER_ID="openrouter"
         SELECTED_API_BASE="https://openrouter.ai/api/v1"
@@ -1175,6 +1236,8 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
         save_worker_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "hive_llm" ]; then
         save_worker_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
+    elif [ "$SUBSCRIPTION_MODE" = "ollama" ]; then
+        save_worker_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null || SAVE_OK=false
     elif [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
         save_worker_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     else

@@ -324,6 +324,16 @@ if (Test-Path $antigravityVscdbPath) { $AntigravityCredDetected = $true }
 $antigravityAccountsPath = Join-Path $env:USERPROFILE ".hive\antigravity-accounts.json"
 if (Test-Path $antigravityAccountsPath) { $AntigravityCredDetected = $true }
 
+# Detect Ollama (local models)
+$OllamaCredDetected = $false
+$ollamaCmd = Get-Command ollama -ErrorAction SilentlyContinue
+if ($ollamaCmd) {
+    try {
+        $ollamaList = & ollama list 2>&1
+        if ($LASTEXITCODE -eq 0) { $OllamaCredDetected = $true }
+    } catch { }
+}
+
 # Detect API key providers
 $ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY")
 $ProviderMenuNames    = @("Anthropic (Claude) - Recommended", "OpenAI (GPT)", "Google Gemini - Free tier available", "Groq - Fast, free tier", "Cerebras - Fast, free tier", "OpenRouter - Bring any OpenRouter model")
@@ -358,6 +368,7 @@ if (Test-Path $HiveConfigFile) {
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.z.ai*") { $PrevSubMode = "zai_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.kimi.com*") { $PrevSubMode = "kimi_code" }
             elseif ($prevLlm.provider -eq "hive" -or ($prevLlm.api_base -and $prevLlm.api_base -like "*adenhq.com*")) { $PrevSubMode = "hive_llm" }
+            elseif ($prevLlm.provider -eq "ollama") { $PrevSubMode = "ollama" }
         }
     } catch { }
 }
@@ -374,6 +385,7 @@ if ($PrevSubMode -or $PrevProvider) {
         "kimi_code"     { if ($KimiCredDetected)        { $prevCredValid = $true } }
         "hive_llm"      { if ($HiveCredDetected)        { $prevCredValid = $true } }
         "antigravity"   { if ($AntigravityCredDetected) { $prevCredValid = $true } }
+        "ollama"        { if ($OllamaCredDetected)      { $prevCredValid = $true } }
         default {
             if ($PrevEnvVar) {
                 $envVal = [System.Environment]::GetEnvironmentVariable($PrevEnvVar, "Process")
@@ -391,15 +403,17 @@ if ($PrevSubMode -or $PrevProvider) {
             "kimi_code"     { $DefaultChoice = "5" }
             "hive_llm"      { $DefaultChoice = "6" }
             "antigravity"   { $DefaultChoice = "7" }
+            "ollama"        { $DefaultChoice = "8" }
         }
         if (-not $DefaultChoice) {
             switch ($PrevProvider) {
-                "anthropic"  { $DefaultChoice = "8" }
-                "openai"     { $DefaultChoice = "9" }
-                "gemini"     { $DefaultChoice = "10" }
-                "groq"       { $DefaultChoice = "11" }
-                "cerebras"   { $DefaultChoice = "12" }
-                "openrouter" { $DefaultChoice = "13" }
+                "ollama"      { $DefaultChoice = "8" }
+                "anthropic"  { $DefaultChoice = "9" }
+                "openai"     { $DefaultChoice = "10" }
+                "gemini"     { $DefaultChoice = "11" }
+                "groq"       { $DefaultChoice = "12" }
+                "cerebras"   { $DefaultChoice = "13" }
+                "openrouter" { $DefaultChoice = "14" }
                 "minimax"    { $DefaultChoice = "4" }
                 "kimi"       { $DefaultChoice = "5" }
                 "hive"       { $DefaultChoice = "6" }
@@ -462,12 +476,19 @@ Write-Host ") Antigravity Subscription  " -NoNewline
 Write-Color -Text "(use your Google/Gemini plan)" -Color DarkGray -NoNewline
 if ($AntigravityCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 
+# 8) Ollama (local)
+Write-Host "  " -NoNewline
+Write-Color -Text "8" -Color Cyan -NoNewline
+Write-Host ") Ollama (local)            " -NoNewline
+Write-Color -Text "(run locally with ollama)" -Color DarkGray -NoNewline
+if ($OllamaCredDetected) { Write-Color -Text "  (available)" -Color Green } else { Write-Host "" }
+
 Write-Host ""
 Write-Color -Text "  API key providers:" -Color Cyan
 
-# 8-13) API key providers
+# 9-14) API key providers
 for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
-    $num = $idx + 8
+    $num = $idx + 9
     $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "Process")
     if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "User") }
     Write-Host "  " -NoNewline
@@ -476,7 +497,7 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     if ($envVal) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 }
 
-$SkipChoice = 8 + $ProviderMenuEnvVars.Count
+$SkipChoice = 9 + $ProviderMenuEnvVars.Count
 Write-Host "  " -NoNewline
 Write-Color -Text "$SkipChoice" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
@@ -662,9 +683,68 @@ switch ($num) {
             Write-Color -Text "  Model: gemini-3-flash | Direct OAuth (no proxy required)" -Color DarkGray
         }
     }
-    { $_ -ge 8 -and $_ -le 13 } {
+    8 {
+        # Ollama (local)
+        $SubscriptionMode         = "ollama"
+        $SelectedProviderId       = "ollama"
+        $SelectedMaxTokens        = 4096
+        $SelectedMaxContextTokens = 16384
+
+        # Get list of installed models
+        Write-Host ""
+        Write-Color -Text "Available Ollama models:" -Color White
+
+        try {
+            $ollamaList = & ollama list 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                $models = $ollamaList | Select-Object -Skip 1 | ForEach-Object {
+                    ($_ -split '\s+')[0]
+                } | Where-Object { $_ -ne "" } | Select-Object -First 20
+
+                if ($models) {
+                    $modelNum = 1
+                    foreach ($model in $models) {
+                        Write-Host "  " -NoNewline
+                        Write-Color -Text "$modelNum" -Color Cyan -NoNewline
+                        Write-Host ") $model"
+                        $modelNum++
+                    }
+
+                    Write-Host ""
+                    $defaultIdx = 1
+                    $modelChoice = Read-Host "Select model (1-$($models.Count)) [$defaultIdx]"
+                    if ([string]::IsNullOrWhiteSpace($modelChoice)) { $modelChoice = $defaultIdx }
+
+                    if ($modelChoice -match '^\d+$' -and $modelChoice -ge 1 -and $modelChoice -le $models.Count) {
+                        $SelectedModel = $models[$modelChoice - 1]
+                    } else {
+                        $SelectedModel = $models[0]
+                    }
+                } else {
+                    Write-Warn "No models found. Make sure 'ollama serve' is running and you have models installed."
+                    Read-Host "Press Enter to continue"
+                    continue
+                }
+            } else {
+                Write-Warn "Could not list models. Make sure 'ollama serve' is running."
+                Read-Host "Press Enter to continue"
+                continue
+            }
+        } catch {
+            Write-Warn "Error running ollama: $_"
+            Write-Warn "Make sure 'ollama serve' is running before using workers."
+            Read-Host "Press Enter to continue"
+            continue
+        }
+
+        Write-Host ""
+        Write-Ok "Using Ollama (local)"
+        Write-Color -Text "  Model: $SelectedModel | URL: http://localhost:11434" -Color DarkGray
+        Write-Host ""
+    }
+    { $_ -ge 9 -and $_ -le 14 } {
         # API key providers
-        $provIdx = $num - 8
+        $provIdx = $num - 9
         $SelectedEnvVar     = $ProviderMenuEnvVars[$provIdx]
         $SelectedProviderId = $ProviderMenuIds[$provIdx]
         $providerName       = $ProviderMenuNames[$provIdx] -replace ' - .*', ''  # strip description
@@ -1091,6 +1171,8 @@ if ($SelectedProviderId) {
     } elseif ($SubscriptionMode -eq "hive_llm") {
         $workerLlm["api_base"] = $HiveLlmEndpoint
         $workerLlm["api_key_env_var"] = $SelectedEnvVar
+    } elseif ($SubscriptionMode -eq "ollama") {
+        # Ollama is local - no api_key_env_var needed
     } elseif ($SelectedProviderId -eq "openrouter") {
         $workerLlm["api_base"] = "https://openrouter.ai/api/v1"
         $workerLlm["api_key_env_var"] = $SelectedEnvVar
