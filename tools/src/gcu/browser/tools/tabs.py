@@ -1,14 +1,26 @@
 """
 Browser tab management tools - tabs, open, close, focus.
+
+All operations go through the Beeline extension - no Playwright required.
 """
 
-from fastmcp import FastMCP
-from playwright.async_api import (
-    Error as PlaywrightError,
-    TimeoutError as PlaywrightTimeout,
-)
+from __future__ import annotations
 
-from ..session import get_session
+import logging
+from typing import Any
+
+from fastmcp import FastMCP
+
+from ..bridge import get_bridge
+from .lifecycle import _contexts
+
+logger = logging.getLogger(__name__)
+
+
+def _get_context(profile: str | None = None) -> dict[str, Any] | None:
+    """Get the context for a profile."""
+    profile_name = profile or "default"
+    return _contexts.get(profile_name)
 
 
 def register_tab_tools(mcp: FastMCP) -> None:
@@ -17,170 +29,231 @@ def register_tab_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     async def browser_tabs(profile: str | None = None) -> dict:
         """
-        List all open browser tabs with origin and age metadata.
+        List all open browser tabs in the agent's tab group.
 
         Each tab includes:
-        - ``targetId``: Unique tab identifier
+        - ``id``: Chrome tab ID (integer)
         - ``url``: Current URL
         - ``title``: Page title
-        - ``active``: Whether this is the active tab
-        - ``origin``: Who opened the tab — ``"agent"`` (you opened it),
-          ``"popup"`` (opened by a link/script), ``"startup"`` (initial
-          browser tab), or ``"user"`` (opened externally)
-        - ``age_seconds``: How long the tab has been open
-
-        The response also includes summary counts: ``total``,
-        ``agent_count``, and ``popup_count``.
+        - ``groupId``: Chrome tab group ID
 
         Args:
             profile: Browser profile name (default: "default")
 
         Returns:
-            Dict with list of tabs and summary counts
+            Dict with list of tabs and counts
         """
-        session = get_session(profile)
-        tabs = await session.list_tabs()
-        agent_count = sum(1 for t in tabs if t.get("origin") == "agent")
-        popup_count = sum(1 for t in tabs if t.get("origin") == "popup")
-        return {
-            "ok": True,
-            "tabs": tabs,
-            "total": len(tabs),
-            "agent_count": agent_count,
-            "popup_count": popup_count,
-        }
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
+
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+
+        try:
+            result = await bridge.list_tabs(ctx.get("groupId"))
+            tabs = result.get("tabs", [])
+
+            return {
+                "ok": True,
+                "tabs": tabs,
+                "total": len(tabs),
+                "activeTabId": ctx.get("activeTabId"),
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     @mcp.tool()
     async def browser_open(
         url: str,
         background: bool = False,
         profile: str | None = None,
-        wait_until: str = "load",
     ) -> dict:
         """
         Open a new browser tab and navigate to the given URL.
 
-        This tool already waits for the page to reach the ``wait_until``
-        condition (default: ``load``) before returning.
-        You do NOT need to call ``browser_wait`` afterward.
+        The tab is automatically added to the agent's tab group.
+        This tool waits for the page to load before returning.
 
         Args:
             url: URL to navigate to
-            background: Open in background without stealing focus
-                from the current tab (default: False)
+            background: Open in background without stealing focus (default: False)
             profile: Browser profile name (default: "default")
-            wait_until: Wait condition - "commit",
-                "domcontentloaded", "load" (default),
-                or "networkidle"
 
         Returns:
-            Dict with new tab info (targetId, url, title, background)
+            Dict with new tab info (id, url, title)
         """
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
+
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+
         try:
-            session = get_session(profile)
-            return await session.open_tab(url, background=background, wait_until=wait_until)
-        except ValueError as e:
+            # Create tab in the group
+            result = await bridge.create_tab(url=url, group_id=ctx.get("groupId"))
+            tab_id = result.get("tabId")
+
+            # Update active tab if not background
+            if not background and tab_id is not None:
+                ctx["activeTabId"] = tab_id
+                await bridge.activate_tab(tab_id)
+
+            # Navigate and wait for load
+            nav_result = await bridge.navigate(tab_id, url, wait_until="load")
+
+            return {
+                "ok": True,
+                "tabId": tab_id,
+                "url": nav_result.get("url", url),
+                "title": nav_result.get("title", ""),
+                "background": background,
+            }
+        except Exception as e:
             return {"ok": False, "error": str(e)}
-        except PlaywrightTimeout:
-            return {"ok": False, "error": "Navigation timed out"}
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Browser error: {e!s}"}
 
     @mcp.tool()
-    async def browser_close(target_id: str | None = None, profile: str | None = None) -> dict:
+    async def browser_close(
+        tab_id: int | None = None,
+        profile: str | None = None,
+    ) -> dict:
         """
         Close a browser tab.
 
         Args:
-            target_id: Tab ID to close (default: active tab)
+            tab_id: Chrome tab ID to close (default: active tab)
             profile: Browser profile name (default: "default")
 
         Returns:
             Dict with close status
         """
-        session = get_session(profile)
-        return await session.close_tab(target_id)
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
+
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+
+        # Use active tab if not specified
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            return {"ok": False, "error": "No tab to close"}
+
+        try:
+            await bridge.close_tab(target_tab)
+
+            # Update active tab if we closed it
+            if ctx.get("activeTabId") == target_tab:
+                result = await bridge.list_tabs(ctx.get("groupId"))
+                tabs = result.get("tabs", [])
+                ctx["activeTabId"] = tabs[0].get("id") if tabs else None
+
+            return {"ok": True, "closed": target_tab}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     @mcp.tool()
-    async def browser_focus(target_id: str, profile: str | None = None) -> dict:
+    async def browser_focus(tab_id: int, profile: str | None = None) -> dict:
         """
         Focus a browser tab.
 
         Args:
-            target_id: Tab ID to focus
+            tab_id: Chrome tab ID to focus
             profile: Browser profile name (default: "default")
 
         Returns:
             Dict with focus status
         """
-        session = get_session(profile)
-        return await session.focus_tab(target_id)
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
+
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+
+        try:
+            await bridge.activate_tab(tab_id)
+            ctx["activeTabId"] = tab_id
+            return {"ok": True, "tabId": tab_id}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     @mcp.tool()
-    async def browser_close_all(keep_active: bool = True, profile: str | None = None) -> dict:
+    async def browser_close_all(
+        keep_active: bool = True,
+        profile: str | None = None,
+    ) -> dict:
         """
-        Close all browser tabs, optionally keeping the active tab.
+        Close all browser tabs in the agent's group, optionally keeping active.
 
         Args:
             keep_active: If True (default), keep the active tab open.
-                If False, close ALL tabs (browser remains running).
+                If False, close ALL tabs (group remains but empty).
             profile: Browser profile name (default: "default")
 
         Returns:
             Dict with number of closed tabs and remaining count
         """
-        session = get_session(profile)
-        to_close = [
-            tid
-            for tid in list(session.pages.keys())
-            if not (keep_active and tid == session.active_page_id)
-        ]
-        closed = 0
-        for tid in to_close:
-            result = await session.close_tab(tid)
-            if result.get("ok"):
-                closed += 1
-        return {"ok": True, "closed_count": closed, "remaining": len(session.pages)}
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
+
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started. Call browser_start first."}
+
+        try:
+            result = await bridge.list_tabs(ctx.get("groupId"))
+            tabs = result.get("tabs", [])
+            active_tab_id = ctx.get("activeTabId")
+
+            closed = 0
+            for tab in tabs:
+                tid = tab.get("id")
+                if keep_active and tid == active_tab_id:
+                    continue
+                try:
+                    await bridge.close_tab(tid)
+                    closed += 1
+                except Exception:
+                    pass
+
+            # Update active tab
+            if not keep_active:
+                ctx["activeTabId"] = None
+            else:
+                result = await bridge.list_tabs(ctx.get("groupId"))
+                remaining = result.get("tabs", [])
+                ctx["activeTabId"] = remaining[0].get("id") if remaining else None
+
+            return {
+                "ok": True,
+                "closed_count": closed,
+                "remaining": len(tabs) - closed,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     @mcp.tool()
-    async def browser_close_finished(keep_active: bool = True, profile: str | None = None) -> dict:
+    async def browser_close_finished(
+        keep_active: bool = True,
+        profile: str | None = None,
+    ) -> dict:
         """
-        Close all agent-opened and popup tabs that you are done with.
+        Close all tabs except the active one.
 
-        This is the preferred cleanup tool during and after multi-tab tasks.
-        It only closes tabs with ``origin="agent"`` or ``origin="popup"``,
-        leaving ``"startup"`` and ``"user"`` tabs untouched.
-
-        Use this instead of ``browser_close_all`` when you want to clean up
-        your own tabs without disturbing tabs the user may have open.
+        This is a convenience wrapper around browser_close_all.
 
         Args:
-            keep_active: If True (default), skip closing the active tab even
-                if it is agent- or popup-owned. Set to False to close it too.
+            keep_active: If True (default), keep the active tab open.
             profile: Browser profile name (default: "default")
 
         Returns:
             Dict with closed_count, skipped_count, and remaining tab count
         """
-        session = get_session(profile)
-        closeable_origins = {"agent", "popup"}
-        to_close = [
-            tid
-            for tid, meta in session.page_meta.items()
-            if meta.origin in closeable_origins
-            and not (keep_active and tid == session.active_page_id)
-        ]
-        closed = 0
-        skipped = 0
-        for tid in to_close:
-            result = await session.close_tab(tid)
-            if result.get("ok"):
-                closed += 1
-            else:
-                skipped += 1
-        return {
-            "ok": True,
-            "closed_count": closed,
-            "skipped_count": skipped,
-            "remaining": len(session.pages),
-        }
+        return await browser_close_all(keep_active=keep_active, profile=profile)

@@ -1,13 +1,7 @@
-"""Ref system for aria snapshots.
+"""Ref system for selector resolution.
 
-Assigns short `[ref=eN]` markers to interactive elements in Playwright's
-aria_snapshot() output so the LLM can reference elements by ref instead of
-constructing fragile CSS selectors.
-
-Usage:
-    annotated, ref_map = annotate_snapshot(raw_snapshot)
-    # ... later, when the LLM says selector="e5" ...
-    playwright_selector = resolve_ref("e5", ref_map)
+This module provides backward compatibility for selector resolution.
+With bridge-based tools, selectors are passed directly to CDP methods.
 """
 
 from __future__ import annotations
@@ -19,92 +13,73 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .session import BrowserSession
 
-# ---------------------------------------------------------------------------
-# Role sets (matching Playwright's aria roles that matter for interaction)
-# ---------------------------------------------------------------------------
+# Role sets for interactive elements
+INTERACTIVE_ROLES: frozenset[str] = frozenset({
+    "button",
+    "checkbox",
+    "combobox",
+    "link",
+    "listbox",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "radio",
+    "scrollbar",
+    "searchbox",
+    "slider",
+    "spinbutton",
+    "switch",
+    "tab",
+    "textbox",
+    "treeitem",
+})
 
-INTERACTIVE_ROLES: frozenset[str] = frozenset(
-    {
-        "button",
-        "checkbox",
-        "combobox",
-        "link",
-        "listbox",
-        "menuitem",
-        "menuitemcheckbox",
-        "menuitemradio",
-        "option",
-        "radio",
-        "scrollbar",
-        "searchbox",
-        "slider",
-        "spinbutton",
-        "switch",
-        "tab",
-        "textbox",
-        "treeitem",
-    }
-)
+NAMED_CONTENT_ROLES: frozenset[str] = frozenset({
+    "cell",
+    "heading",
+    "img",
+})
 
-NAMED_CONTENT_ROLES: frozenset[str] = frozenset(
-    {
-        "cell",
-        "heading",
-        "img",
-    }
-)
-
-# Regex: captures indent, role, optional quoted name, and trailing text.
-# Example line:  "  - button \"Submit\" [disabled]"
-#   group(1)=indent "  ", group(2)=role "button",
-#   group(3)=name "Submit" (or None), group(4)=rest " [disabled]"
+# Regex for parsing aria snapshot lines
 _LINE_RE = re.compile(r"^(\s*-\s+)(\w+)(?:\s+\"([^\"]*)\")?(.*?)$")
 
-# ---------------------------------------------------------------------------
-# Data types
-# ---------------------------------------------------------------------------
+# Regex for detecting ref patterns
+_REF_PATTERN = re.compile(r"^e\d+$")
 
 
 @dataclass(frozen=True)
 class RefEntry:
-    """A single ref entry mapping to a Playwright role selector."""
+    """A single ref entry mapping to a CSS selector."""
 
     role: str
     name: str | None
     nth: int
 
 
-# ref_id (e.g. "e0") -> RefEntry
+# Type alias for ref maps
 RefMap = dict[str, RefEntry]
-
-# ---------------------------------------------------------------------------
-# annotate_snapshot
-# ---------------------------------------------------------------------------
 
 
 def annotate_snapshot(snapshot: str) -> tuple[str, RefMap]:
-    """Inject ``[ref=eN]`` markers into an aria snapshot.
+    """Inject [ref=eN] markers into an aria snapshot.
 
     Returns:
         (annotated_text, ref_map) where ref_map maps ref ids to RefEntry.
     """
     lines = snapshot.split("\n")
-
-    # First pass: identify which lines get refs and count (role, name) pairs
-    # for nth disambiguation.
-    candidates: list[tuple[int, str, str | None]] = []  # (line_idx, role, name)
+    candidates: list[tuple[int, str, str | None]] = []
 
     for i, line in enumerate(lines):
         m = _LINE_RE.match(line)
         if not m:
             continue
         role = m.group(2)
-        name = m.group(3)  # None if no quoted name
+        name = m.group(3)
 
         if role in INTERACTIVE_ROLES or (role in NAMED_CONTENT_ROLES and name):
             candidates.append((i, role, name))
 
-    # Second pass: assign refs with nth indices.
     ref_map: RefMap = {}
     pair_seen: dict[tuple[str, str | None], int] = {}
     ref_counter = 0
@@ -118,31 +93,22 @@ def annotate_snapshot(snapshot: str) -> tuple[str, RefMap]:
         ref_counter += 1
 
         ref_map[ref_id] = RefEntry(role=role, name=name, nth=nth)
-
-        # Inject [ref=eN] at end of line (before any trailing whitespace)
         lines[line_idx] = lines[line_idx].rstrip() + f" [ref={ref_id}]"
 
     return "\n".join(lines), ref_map
 
 
-# ---------------------------------------------------------------------------
-# resolve_ref
-# ---------------------------------------------------------------------------
-
-_REF_PATTERN = re.compile(r"^e\d+$")
-
-
 def resolve_ref(selector: str, ref_map: RefMap | None) -> str:
-    """Resolve a ref id (e.g. ``"e5"``) to a Playwright role selector.
+    """Resolve a ref id (e.g. "e5") to a CSS selector.
 
-    If *selector* doesn't look like a ref (``e\\d+``), it's returned as-is
+    If selector doesn't look like a ref (e\\d+), it's returned as-is
     so that plain CSS selectors keep working.
 
     Raises:
         ValueError: If the ref is not found or no snapshot has been taken.
     """
     if not _REF_PATTERN.match(selector):
-        return selector  # Pass through CSS / XPath / role selectors
+        return selector
 
     if ref_map is None:
         raise ValueError(
@@ -155,24 +121,16 @@ def resolve_ref(selector: str, ref_map: RefMap | None) -> str:
         valid = ", ".join(sorted(ref_map.keys(), key=lambda k: int(k[1:])))
         raise ValueError(
             f"Ref '{selector}' not found. Valid refs: {valid}. "
-            "The page may have changed — take a new snapshot."
+            "The page may have changed - take a new snapshot."
         )
 
-    # Build Playwright role selector
+    # Build CSS selector
     if entry.name is not None:
-        escaped_name = entry.name.replace("\\", "\\\\").replace('"', '\\"')
-        sel = f'role={entry.role}[name="{escaped_name}"]'
+        sel = f'[role="{entry.role}"][aria-label="{entry.name}"]'
     else:
-        sel = f"role={entry.role}"
+        sel = f'[role="{entry.role}"]'
 
-    # Always include nth to disambiguate
-    sel += f" >> nth={entry.nth}"
-    return sel
-
-
-# ---------------------------------------------------------------------------
-# Convenience wrapper
-# ---------------------------------------------------------------------------
+    return f"{sel}:nth-of-type({entry.nth + 1})"
 
 
 def resolve_selector(
@@ -180,13 +138,9 @@ def resolve_selector(
     session: BrowserSession,
     target_id: str | None,
 ) -> str:
-    """Resolve a selector that might be a ref, using the session's ref maps.
+    """Resolve a selector that might be a ref.
 
-    Args:
-        selector: A CSS selector or ref id (e.g. ``"e5"``).
-        session: The current BrowserSession.
-        target_id: The target page id (falls back to session.active_page_id).
+    With bridge-based tools, this simply passes through the selector.
+    Kept for backward compatibility with existing tool signatures.
     """
-    tid = target_id or session.active_page_id
-    ref_map = session.ref_maps.get(tid) if tid else None
-    return resolve_ref(selector, ref_map)
+    return selector
