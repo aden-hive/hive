@@ -481,6 +481,16 @@ class NodeContext:
     execution_id: str = ""
     run_id: str = ""
 
+    @property
+    def effective_run_id(self) -> str | None:
+        """Normalized run_id: returns run_id if truthy, otherwise None.
+
+        The field defaults to ``""``; callers should use this property
+        instead of ``self.run_id or None`` to avoid silently falling
+        back to session-scoped storage.
+        """
+        return self.run_id or None
+
     # Stream identity — the ExecutionStream this node runs within.
     # Falls back to node_id when not set (legacy / standalone executor).
     stream_id: str = ""

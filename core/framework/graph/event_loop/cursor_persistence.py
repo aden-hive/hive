@@ -61,17 +61,17 @@ async def restore(
     conversation = await NodeConversation.restore(
         conversation_store,
         phase_id=phase_filter,
-        run_id=ctx.run_id or None,
+        run_id=ctx.effective_run_id,
     )
     if conversation is None:
         return None
 
-    accumulator = await OutputAccumulator.restore(conversation_store, run_id=ctx.run_id or None)
+    accumulator = await OutputAccumulator.restore(conversation_store, run_id=ctx.effective_run_id)
     accumulator.spillover_dir = config.spillover_dir
     accumulator.max_value_chars = config.max_output_value_chars
 
     cursor = await conversation_store.read_cursor()
-    run_cursor = get_run_cursor(cursor, ctx.run_id or None)
+    run_cursor = get_run_cursor(cursor, ctx.effective_run_id)
     start_iteration = run_cursor.get("iteration", 0) + 1 if run_cursor else 0
 
     # Restore stall/doom-loop detection state
@@ -128,7 +128,7 @@ async def write_cursor(
             run_cursor["recent_tool_fingerprints"] = [
                 [list(pair) for pair in fps] for fps in recent_tool_fingerprints
             ]
-        await conversation_store.write_cursor(update_run_cursor(cursor, ctx.run_id or None, run_cursor))
+        await conversation_store.write_cursor(update_run_cursor(cursor, ctx.effective_run_id, run_cursor))
 
 
 async def drain_injection_queue(

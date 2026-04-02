@@ -12,6 +12,7 @@ from framework.graph.conversation import (
     Message,
     NodeConversation,
     extract_tool_call_history,
+    is_legacy_run_id,
 )
 from framework.storage.conversation_store import FileConversationStore
 
@@ -55,8 +56,8 @@ class MockConversationStore:
             if run_id is None:
                 continue
             part_run_id = value.get("run_id")
-            if run_id == LEGACY_RUN_ID:
-                if part_run_id not in (None, LEGACY_RUN_ID):
+            if is_legacy_run_id(run_id):
+                if not is_legacy_run_id(part_run_id):
                     kept[key] = value
             elif part_run_id != run_id:
                 kept[key] = value

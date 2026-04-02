@@ -250,7 +250,10 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
 def _load_resume_state(
     agent_path: str, session_id: str, checkpoint_id: str | None = None
 ) -> dict | None:
-    """Load session or checkpoint state for headless resume.
+    """Load checkpoint state for headless resume.
+
+    All resumes require a checkpoint. If ``checkpoint_id`` is not provided
+    the latest checkpoint is auto-discovered.
 
     Args:
         agent_path: Path to the agent folder (e.g., exports/my_agent)
@@ -258,7 +261,7 @@ def _load_resume_state(
         checkpoint_id: Optional checkpoint ID within the session
 
     Returns:
-        session_state dict for executor, or None if not found
+        session_state dict for executor, or None if no checkpoint found
     """
     agent_name = Path(agent_path).name
     agent_work_dir = Path.home() / ".hive" / "agents" / agent_name
@@ -267,40 +270,37 @@ def _load_resume_state(
     if not session_dir.exists():
         return None
 
-    if checkpoint_id:
-        # Checkpoint-based resume: load checkpoint and extract state
-        cp_path = session_dir / "checkpoints" / f"{checkpoint_id}.json"
-        if not cp_path.exists():
+    # Auto-discover latest checkpoint when not specified
+    if not checkpoint_id:
+        cp_dir = session_dir / "checkpoints"
+        if cp_dir.exists():
+            checkpoints = sorted(
+                cp_dir.glob("*.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if checkpoints:
+                checkpoint_id = checkpoints[0].stem
+        if not checkpoint_id:
             return None
-        try:
-            cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return None
-        return {
-            "resume_session_id": session_id,
-            "data_buffer": cp_data.get("data_buffer", cp_data.get("shared_memory", {})),
-            "paused_at": cp_data.get("next_node") or cp_data.get("current_node"),
-            "execution_path": cp_data.get("execution_path", []),
-            "node_visit_counts": {},
-        }
-    else:
-        # Session state resume: load state.json
-        state_path = session_dir / "state.json"
-        if not state_path.exists():
-            return None
-        try:
-            state_data = json.loads(state_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return None
-        progress = state_data.get("progress", {})
-        paused_at = progress.get("paused_at") or progress.get("resume_from")
-        return {
-            "resume_session_id": session_id,
-            "data_buffer": state_data.get("data_buffer", state_data.get("memory", {})),
-            "paused_at": paused_at,
-            "execution_path": progress.get("path", []),
-            "node_visit_counts": progress.get("node_visit_counts", {}),
-        }
+
+    cp_path = session_dir / "checkpoints" / f"{checkpoint_id}.json"
+    if not cp_path.exists():
+        return None
+    try:
+        cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    return {
+        "resume_session_id": session_id,
+        "resume_from_checkpoint": checkpoint_id,
+        "run_id": cp_data.get("run_id") or None,
+        "data_buffer": cp_data.get("data_buffer", cp_data.get("shared_memory", {})),
+        "paused_at": cp_data.get("next_node") or cp_data.get("current_node"),
+        "execution_path": cp_data.get("execution_path", []),
+        "node_visit_counts": cp_data.get("node_visit_counts", {}),
+    }
 
 
 def _prompt_before_start(agent_path: str, runner, model: str | None = None):

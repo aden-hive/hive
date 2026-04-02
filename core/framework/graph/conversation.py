@@ -11,6 +11,11 @@ from typing import Any, Literal, Protocol, runtime_checkable
 LEGACY_RUN_ID = "__legacy_run__"
 
 
+def is_legacy_run_id(run_id: str | None) -> bool:
+    """True when run_id represents pre-migration (no run boundary) data."""
+    return run_id is None or run_id == LEGACY_RUN_ID
+
+
 @dataclass
 class Message:
     """A single message in a conversation.
@@ -1131,17 +1136,28 @@ class NodeConversation:
         await self._write_next_seq()
 
     async def _persist_meta(self) -> None:
-        """Lazily write conversation metadata to the store (called once)."""
+        """Lazily write conversation metadata to the store (called once).
+
+        When ``self._run_id`` is set, metadata is keyed under
+        ``meta["runs"][run_id]`` so multiple runs can coexist in the same
+        session.  Legacy (no run_id) sessions write flat for backward compat.
+        """
         if self._store is None:
             return
-        await self._store.write_meta(
-            {
-                "system_prompt": self._system_prompt,
-                "max_context_tokens": self._max_context_tokens,
-                "compaction_threshold": self._compaction_threshold,
-                "output_keys": self._output_keys,
-            }
-        )
+        run_meta = {
+            "system_prompt": self._system_prompt,
+            "max_context_tokens": self._max_context_tokens,
+            "compaction_threshold": self._compaction_threshold,
+            "output_keys": self._output_keys,
+        }
+        if self._run_id:
+            existing = await self._store.read_meta() or {}
+            runs = dict(existing.get("runs", {}))
+            runs[self._run_id] = run_meta
+            existing["runs"] = runs
+            await self._store.write_meta(existing)
+        else:
+            await self._store.write_meta(run_meta)
         self._meta_persisted = True
 
     async def _write_next_seq(self) -> None:
@@ -1175,6 +1191,12 @@ class NodeConversation:
         if meta is None:
             return None
 
+        # Extract run-scoped metadata when available
+        if run_id and isinstance(meta.get("runs"), dict):
+            run_meta = meta["runs"].get(run_id)
+            if run_meta is not None:
+                meta = run_meta
+
         conv = cls(
             system_prompt=meta.get("system_prompt", ""),
             max_context_tokens=meta.get("max_context_tokens", 32000),
@@ -1187,8 +1209,8 @@ class NodeConversation:
 
         parts = await store.read_parts()
         if run_id is not None:
-            if run_id == LEGACY_RUN_ID:
-                parts = [p for p in parts if p.get("run_id") in (None, LEGACY_RUN_ID)]
+            if is_legacy_run_id(run_id):
+                parts = [p for p in parts if is_legacy_run_id(p.get("run_id"))]
             else:
                 parts = [p for p in parts if p.get("run_id") == run_id]
         if phase_id:

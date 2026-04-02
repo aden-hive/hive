@@ -29,7 +29,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from framework.graph.conversation import LEGACY_RUN_ID
+from framework.graph.conversation import LEGACY_RUN_ID, is_legacy_run_id
 
 
 class FileConversationStore:
@@ -109,8 +109,8 @@ class FileConversationStore:
                         continue
                     data = self._read_json(f) or {}
                     part_run_id = data.get("run_id")
-                    if run_id == LEGACY_RUN_ID:
-                        if part_run_id in (None, LEGACY_RUN_ID):
+                    if is_legacy_run_id(run_id):
+                        if is_legacy_run_id(part_run_id):
                             f.unlink()
                     elif part_run_id == run_id:
                         f.unlink()

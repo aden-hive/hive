@@ -169,11 +169,10 @@ class SessionState(BaseModel):
     def is_resumable(self) -> bool:
         """Can this session be resumed?
 
-        Every non-completed session is resumable. If resume_from/paused_at
-        aren't set, the executor falls back to the graph entry point —
-        so we don't gate on those. Even catastrophic failures are resumable.
+        Only sessions with a valid checkpoint can be resumed.
+        State-based resume (without a checkpoint) is no longer supported.
         """
-        return self.status != SessionStatus.COMPLETED
+        return self.is_resumable_from_checkpoint
 
     @computed_field
     @property
@@ -294,7 +293,11 @@ class SessionState(BaseModel):
         )
 
     def to_session_state_dict(self) -> dict[str, Any]:
-        """Convert to session_state format for GraphExecutor.execute()."""
+        """Convert to session_state format for GraphExecutor.execute().
+
+        NOTE: state-based resume via paused_at/resume_from is deprecated.
+        Use checkpoint-based resume (``resume_from_checkpoint`` key) instead.
+        """
         # Derive resume target: explicit > last node in path > entry point
         resume_from = (
             self.progress.resume_from
