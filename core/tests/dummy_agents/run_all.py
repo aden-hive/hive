@@ -26,6 +26,7 @@ API_KEY_PROVIDERS = [
     ("ANTHROPIC_API_KEY", "Anthropic (Claude)", "claude-sonnet-4-20250514"),
     ("OPENAI_API_KEY", "OpenAI", "gpt-5-mini"),
     ("GEMINI_API_KEY", "Google Gemini", "gemini/gemini-3-flash-preview"),
+    ("KIMI_API_KEY", "Kimi", "kimi-k2.5"),
     ("ZAI_API_KEY", "ZAI (GLM)", "openai/glm-5"),
     ("GROQ_API_KEY", "Groq", "moonshotai/kimi-k2-instruct-0905"),
     ("MISTRAL_API_KEY", "Mistral", "mistral-large-latest"),
@@ -103,9 +104,11 @@ def detect_available() -> list[dict]:
         available.append(
             {
                 "name": "Kimi Code (subscription)",
-                "model": "moonshotai/kimi-k2-instruct-0905",
+                # Keep in sync with quickstart.sh / setup_worker_model.sh.
+                "model": "kimi-k2.5",
                 "api_key": token,
                 "source": "kimi_sub",
+                "api_base": "https://api.kimi.com/coding",
             }
         )
 
@@ -122,6 +125,9 @@ def detect_available() -> list[dict]:
             # ZAI requires an api_base (OpenAI-compatible endpoint)
             if env_var == "ZAI_API_KEY":
                 entry["api_base"] = "https://api.z.ai/api/coding/paas/v4"
+            # Kimi Code uses the coding endpoint selected by quickstart.
+            elif env_var == "KIMI_API_KEY":
+                entry["api_base"] = "https://api.kimi.com/coding"
             available.append(entry)
 
     return available
@@ -136,7 +142,9 @@ def prompt_provider_selection() -> dict:
         print("  Set an API key environment variable, e.g.:")
         print("    export ANTHROPIC_API_KEY=sk-...")
         print("    export OPENAI_API_KEY=sk-...")
+        print("    export KIMI_API_KEY=...")
         print("  Or authenticate with Claude Code: claude")
+        print("  Or authenticate with Kimi Code: kimi /login")
         sys.exit(1)
 
     if len(available) == 1:

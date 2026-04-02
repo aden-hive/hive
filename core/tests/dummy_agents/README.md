@@ -14,6 +14,7 @@ The script detects available credentials and prompts you to pick a provider. You
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `GEMINI_API_KEY`
+- `KIMI_API_KEY`
 - `ZAI_API_KEY`
 - Claude Code / Codex / Kimi subscription
 
