@@ -1,11 +1,5 @@
 """Graph structures: Goals, Nodes, Edges, and Execution."""
 
-from framework.graph.client_io import (
-    ActiveNodeClientIO,
-    ClientIOGateway,
-    InertNodeClientIO,
-    NodeClientIO,
-)
 from framework.graph.context_handoff import ContextHandoff, HandoffContext
 from framework.graph.conversation import ConversationStore, Message, NodeConversation
 from framework.graph.edge import DEFAULT_MAX_TOKENS, EdgeCondition, EdgeSpec, GraphSpec
@@ -51,9 +45,4 @@ __all__ = [
     # Context Handoff
     "ContextHandoff",
     "HandoffContext",
-    # Client I/O
-    "NodeClientIO",
-    "ActiveNodeClientIO",
-    "InertNodeClientIO",
-    "ClientIOGateway",
 ]
