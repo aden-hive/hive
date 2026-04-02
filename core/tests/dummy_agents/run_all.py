@@ -10,31 +10,33 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 TESTS_DIR = Path(__file__).parent
 
 # ── provider registry ────────────────────────────────────────────────
 
-# (env_var, display_name, default_model) — models match quickstart.sh defaults
+# (env_var, display_name, litellm_model, display_model)
+# display_model matches quickstart.sh labels; litellm_model is what LiteLLMProvider needs.
 API_KEY_PROVIDERS = [
-    ("ANTHROPIC_API_KEY", "Anthropic (Claude)", "claude-sonnet-4-20250514"),
-    ("OPENAI_API_KEY", "OpenAI", "gpt-5-mini"),
-    ("GEMINI_API_KEY", "Google Gemini", "gemini/gemini-3-flash-preview"),
-    ("KIMI_API_KEY", "Kimi", "kimi-k2.5"),
-    ("ZAI_API_KEY", "ZAI (GLM)", "openai/glm-5"),
-    ("GROQ_API_KEY", "Groq", "moonshotai/kimi-k2-instruct-0905"),
-    ("MISTRAL_API_KEY", "Mistral", "mistral-large-latest"),
-    ("CEREBRAS_API_KEY", "Cerebras", "cerebras/zai-glm-4.7"),
-    ("TOGETHER_API_KEY", "Together AI", "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo"),
-    ("DEEPSEEK_API_KEY", "DeepSeek", "deepseek-chat"),
-    ("MINIMAX_API_KEY", "MiniMax", "MiniMax-M2.5"),
-    ("HIVE_API_KEY", "Hive LLM", "hive/queen"),
+    ("ANTHROPIC_API_KEY", "Anthropic (Claude)", "claude-sonnet-4-20250514", "claude-sonnet-4-20250514"),
+    ("OPENAI_API_KEY", "OpenAI", "gpt-5-mini", "gpt-5-mini"),
+    ("GEMINI_API_KEY", "Google Gemini", "gemini/gemini-3-flash-preview", "gemini/gemini-3-flash-preview"),
+    ("KIMI_API_KEY", "Kimi", "kimi/kimi-k2.5", "kimi-k2.5"),
+    ("ZAI_API_KEY", "ZAI (GLM)", "openai/glm-5", "openai/glm-5"),
+    ("GROQ_API_KEY", "Groq", "moonshotai/kimi-k2-instruct-0905", "moonshotai/kimi-k2-instruct-0905"),
+    ("MISTRAL_API_KEY", "Mistral", "mistral-large-latest", "mistral-large-latest"),
+    ("CEREBRAS_API_KEY", "Cerebras", "cerebras/zai-glm-4.7", "cerebras/zai-glm-4.7"),
+    ("TOGETHER_API_KEY", "Together AI", "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo", "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+    ("DEEPSEEK_API_KEY", "DeepSeek", "deepseek-chat", "deepseek-chat"),
+    ("MINIMAX_API_KEY", "MiniMax", "MiniMax-M2.5", "MiniMax-M2.5"),
+    ("HIVE_API_KEY", "Hive LLM", "hive/queen", "hive/queen"),
 ]
 
 
@@ -82,6 +84,7 @@ def detect_available() -> list[dict]:
             {
                 "name": "Claude Code (subscription)",
                 "model": "claude-sonnet-4-20250514",
+                "display_model": "claude-sonnet-4-20250514",
                 "api_key": token,
                 "source": "claude_code_sub",
                 "extra_headers": {"authorization": f"Bearer {token}"},
@@ -94,6 +97,7 @@ def detect_available() -> list[dict]:
             {
                 "name": "Codex (subscription)",
                 "model": "gpt-5-mini",
+                "display_model": "gpt-5-mini",
                 "api_key": token,
                 "source": "codex_sub",
             }
@@ -104,8 +108,10 @@ def detect_available() -> list[dict]:
         available.append(
             {
                 "name": "Kimi Code (subscription)",
-                # Keep in sync with quickstart.sh / setup_worker_model.sh.
-                "model": "kimi-k2.5",
+                # Quickstart displays "kimi-k2.5", but LiteLLMProvider needs the
+                # provider-prefixed form to route through the Kimi coding endpoint.
+                "model": "kimi/kimi-k2.5",
+                "display_model": "kimi-k2.5",
                 "api_key": token,
                 "source": "kimi_sub",
                 "api_base": "https://api.kimi.com/coding",
@@ -113,12 +119,13 @@ def detect_available() -> list[dict]:
         )
 
     # API key providers (env vars)
-    for env_var, name, default_model in API_KEY_PROVIDERS:
+    for env_var, name, default_model, display_model in API_KEY_PROVIDERS:
         key = os.environ.get(env_var)
         if key:
             entry = {
                 "name": f"{name} (${env_var})",
                 "model": default_model,
+                "display_model": display_model,
                 "api_key": key,
                 "source": env_var,
             }
@@ -149,12 +156,12 @@ def prompt_provider_selection() -> dict:
 
     if len(available) == 1:
         choice = available[0]
-        print(f"\n  Using: {choice['name']} ({choice['model']})")
+        print(f"\n  Using: {choice['name']} ({choice.get('display_model', choice['model'])})")
         return choice
 
     print("\n  Available LLM providers:\n")
     for i, p in enumerate(available, 1):
-        print(f"    {i}) {p['name']}  [{p['model']}]")
+        print(f"    {i}) {p['name']}  [{p.get('display_model', p['model'])}]")
 
     print()
     while True:
@@ -163,11 +170,169 @@ def prompt_provider_selection() -> dict:
             idx = int(raw) - 1
             if 0 <= idx < len(available):
                 choice = available[idx]
-                print(f"\n  Using: {choice['name']} ({choice['model']})\n")
+                print(
+                    f"\n  Using: {choice['name']} "
+                    f"({choice.get('display_model', choice['model'])})\n"
+                )
                 return choice
         except (ValueError, EOFError):
             pass
         print(f"  Please enter a number between 1 and {len(available)}")
+
+
+async def _smoke_test_provider_async(provider: dict, timeout_seconds: float = 25.0) -> None:
+    """Fail fast if the selected provider cannot complete a tiny request.
+
+    This catches the common "pytest looks frozen on the first test" failure mode
+    where the first real LLM call hangs or never reaches a usable response.
+    """
+    from framework.llm.litellm import LiteLLMProvider
+    from framework.llm.provider import Tool
+    from framework.graph.edge import GraphSpec
+    from framework.graph.executor import GraphExecutor
+    from framework.graph.goal import Goal
+    from framework.graph.node import NodeSpec
+    from framework.runtime.core import Runtime
+
+    kwargs = {
+        "model": provider["model"],
+        "api_key": provider["api_key"],
+    }
+    if provider.get("api_base"):
+        kwargs["api_base"] = provider["api_base"]
+    if provider.get("extra_headers"):
+        kwargs["extra_headers"] = provider["extra_headers"]
+
+    llm = LiteLLMProvider(**kwargs)
+
+    async def _run_plain_completion() -> None:
+        result = await llm.acomplete(
+            messages=[{"role": "user", "content": "Reply with exactly OK."}],
+            max_tokens=8,
+        )
+        content = (result.content or "").strip()
+        if not content:
+            raise RuntimeError("provider returned an empty completion during smoke test")
+
+    async def _run_tool_completion() -> None:
+        tool = Tool(
+            name="record_result",
+            description="Record the final result string.",
+            parameters={
+                "properties": {
+                    "value": {
+                        "type": "string",
+                        "description": "The result to record.",
+                    }
+                },
+                "required": ["value"],
+            },
+        )
+        response = await llm.acomplete(
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Call the record_result tool exactly once with value='OK'. "
+                        "Do not answer with plain text."
+                    ),
+                }
+            ],
+            tools=[tool],
+            max_tokens=32,
+        )
+
+        raw = response.raw_response
+        tool_calls = []
+        if raw is not None and getattr(raw, "choices", None):
+            msg = raw.choices[0].message
+            tool_calls = msg.tool_calls or []
+
+        if not tool_calls:
+            raise RuntimeError("provider completed but did not return any tool calls")
+
+    async def _run_worker_execution() -> None:
+        with TemporaryDirectory(prefix="dummy-worker-smoke-") as tmpdir:
+            tmp_path = Path(tmpdir)
+            runtime = Runtime(storage_path=tmp_path / "runtime")
+            executor = GraphExecutor(
+                runtime=runtime,
+                llm=llm,
+                storage_path=tmp_path / "session",
+                loop_config={"max_iterations": 4},
+            )
+            graph = GraphSpec(
+                id="dummy-worker-smoke",
+                goal_id="dummy-worker-smoke-goal",
+                entry_node="worker",
+                entry_points={"start": "worker"},
+                terminal_nodes=["worker"],
+                nodes=[
+                    NodeSpec(
+                        id="worker",
+                        name="Worker Smoke Test",
+                        description="Minimal worker-path smoke test",
+                        node_type="event_loop",
+                        input_keys=["task"],
+                        output_keys=["result"],
+                        system_prompt=(
+                            "You are a worker test node. Read the 'task' input. "
+                            "You MUST call set_output with key='result' and value='OK'. "
+                            "Do not use plain text as the final answer."
+                        ),
+                    )
+                ],
+                edges=[],
+                memory_keys=["task", "result"],
+                conversation_mode="continuous",
+            )
+            goal = Goal(
+                id="dummy-worker-smoke-goal",
+                name="Dummy Worker Smoke",
+                description="Verify the current worker execution implementation can finish.",
+            )
+            result = await executor.execute(
+                graph,
+                goal,
+                {"task": "Return OK by calling set_output."},
+                validate_graph=False,
+            )
+            if not result.success:
+                raise RuntimeError(result.error or "worker execution smoke failed")
+            if result.output.get("result") != "OK":
+                raise RuntimeError(
+                    "worker execution completed but did not produce result='OK'"
+                )
+
+    await asyncio.wait_for(_run_plain_completion(), timeout=timeout_seconds)
+    await asyncio.wait_for(_run_tool_completion(), timeout=timeout_seconds)
+    await asyncio.wait_for(_run_worker_execution(), timeout=timeout_seconds)
+
+
+def smoke_test_provider(provider: dict, timeout_seconds: float = 25.0) -> None:
+    """Run a tiny real completion before starting pytest."""
+    print("  Running provider smoke test...", end=" ", flush=True)
+    started = time.time()
+    try:
+        asyncio.run(_smoke_test_provider_async(provider, timeout_seconds=timeout_seconds))
+    except TimeoutError:
+        print("FAILED")
+        print(
+            "  The selected provider did not complete a tiny request within "
+            f"{timeout_seconds:.0f}s."
+        )
+        print(
+            "  This usually means the provider is unreachable, rate-limited, "
+            "or hanging on the selected model/API base."
+        )
+        sys.exit(1)
+    except Exception as e:
+        print("FAILED")
+        print(f"  Provider smoke test failed: {type(e).__name__}: {e}")
+        sys.exit(1)
+
+    elapsed = time.time() - started
+    print(f"OK ({elapsed:.1f}s)")
 
 
 # ── test runner ──────────────────────────────────────────────────────
@@ -316,6 +481,7 @@ def main() -> int:
 
     # Step 1: detect credentials and let user pick
     provider = prompt_provider_selection()
+    smoke_test_provider(provider)
 
     # Step 2: inject selection into conftest module state
     from tests.dummy_agents.conftest import set_llm_selection

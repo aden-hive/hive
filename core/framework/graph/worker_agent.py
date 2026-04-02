@@ -215,6 +215,10 @@ class WorkerAgent:
         self._tokens_used: int = 0
         self._latency_ms: int = 0
 
+        # Last execution result (accessible by polling executor)
+        self._last_result: NodeResult | None = None
+        self._last_activations: list[Activation] = []
+
     # ------------------------------------------------------------------
     # Public activation interface
     # ------------------------------------------------------------------
@@ -258,6 +262,23 @@ class WorkerAgent:
             return bool(self._received_activations)
         return all(t.is_complete for t in self._active_fan_outs.values())
 
+    def reset_for_revisit(self) -> None:
+        """Reset a completed worker so it can execute again (feedback loops).
+
+        Preserves the node implementation (cached) but clears lifecycle,
+        activation, and result state.
+        """
+        self.lifecycle = WorkerLifecycle.PENDING
+        self._inherited_fan_out_tags = []
+        self._active_fan_outs = {}
+        self._received_activations = []
+        self._has_been_activated = False
+        self._task = None
+        self._last_result = None
+        self._last_activations = []
+        self._tokens_used = 0
+        self._latency_ms = 0
+
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------
@@ -272,11 +293,35 @@ class WorkerAgent:
             for key, value in activation.mapped_inputs.items():
                 gc.buffer.write(key, value, validate=False)
 
-        # Clear stale nullable outputs on re-visit
+        # Increment visit count (always, even if skipped)
         async with gc._visits_lock:
             visit_count = gc.node_visit_counts.get(node_spec.id, 0) + 1
             gc.node_visit_counts[node_spec.id] = visit_count
 
+        # Check max_node_visits — skip execution but still propagate edges
+        if node_spec.max_node_visits > 0 and visit_count > node_spec.max_node_visits:
+            logger.info(
+                "Worker %s: visit %d exceeds max_node_visits=%d, skipping",
+                node_spec.id, visit_count, node_spec.max_node_visits,
+            )
+            # Build a synthetic success result from current buffer state
+            existing_output: dict[str, Any] = {}
+            for key in node_spec.output_keys:
+                val = gc.buffer.read(key)
+                if val is not None:
+                    existing_output[key] = val
+
+            result = NodeResult(success=True, output=existing_output)
+
+            # Evaluate outgoing edges so the cycle continues
+            activations = await self._evaluate_outgoing_edges(result)
+
+            self.lifecycle = WorkerLifecycle.COMPLETED
+            self._last_result = result
+            self._last_activations = activations
+            return
+
+        # Clear stale nullable outputs on re-visit
         if visit_count > 1:
             nullable_keys = getattr(node_spec, "nullable_output_keys", None) or []
             for key in nullable_keys:
@@ -317,6 +362,8 @@ class WorkerAgent:
 
             # Publish completion
             self.lifecycle = WorkerLifecycle.COMPLETED
+            self._last_result = result
+            self._last_activations = activations
             completion = WorkerCompletion(
                 worker_id=node_spec.id,
                 success=True,
@@ -655,6 +702,8 @@ class WorkerAgent:
         gc = self._gc
         if not gc.event_bus:
             return
+        if not hasattr(gc.event_bus, "emit_worker_completed"):
+            return
 
         # Serialize activations to dicts for event data
         activations_data = []
@@ -697,6 +746,8 @@ class WorkerAgent:
         """Publish WORKER_FAILED event."""
         gc = self._gc
         if not gc.event_bus:
+            return
+        if not hasattr(gc.event_bus, "emit_worker_failed"):
             return
 
         await gc.event_bus.emit_worker_failed(

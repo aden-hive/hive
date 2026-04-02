@@ -1463,6 +1463,40 @@ class GraphExecutor:
                     return False
             return True
 
+        def _route_activation(
+            activation: Activation,
+            workers_map: dict[str, WorkerAgent],
+            pending_tasks_map: dict[str, asyncio.Task],
+            *,
+            has_event_subscription: bool,
+        ) -> None:
+            """Route an activation to its target worker.
+
+            Handles re-visiting completed workers (feedback loops) by
+            resetting them to PENDING before activation.
+            """
+            target_worker = workers_map.get(activation.target_id)
+            if not target_worker:
+                return
+
+            # If target is already running, skip
+            if target_worker.lifecycle == WorkerLifecycle.RUNNING:
+                return
+
+            # If target completed (feedback loop), reset for re-visit
+            if target_worker.lifecycle in (WorkerLifecycle.COMPLETED, WorkerLifecycle.FAILED):
+                target_worker.reset_for_revisit()
+
+            if target_worker.lifecycle != WorkerLifecycle.PENDING:
+                return
+
+            target_worker.receive_activation(activation)
+
+            if target_worker.check_readiness():
+                target_worker.activate(inherited_tags=activation.fan_out_tags)
+                if target_worker._task is not None:
+                    pending_tasks_map[activation.target_id] = target_worker._task
+
         # Subscribe to worker events
         sub_completed = None
         sub_failed = None
@@ -1515,17 +1549,10 @@ class GraphExecutor:
 
             # Route activations to target workers
             for activation in activations:
-                target_worker = workers.get(activation.target_id)
-                if not target_worker:
-                    continue
-                if target_worker.lifecycle != WorkerLifecycle.PENDING:
-                    continue
-
-                target_worker.receive_activation(activation)
-
-                if target_worker.check_readiness():
-                    inherited = activation.fan_out_tags
-                    target_worker.activate(inherited_tags=inherited)
+                _route_activation(
+                    activation, workers, pending_tasks,
+                    has_event_subscription=False,
+                )
 
             # Track terminal completion
             if worker_id in terminal_worker_ids:
@@ -1536,7 +1563,7 @@ class GraphExecutor:
 
             # Write progress
             self._write_progress(
-                current_node_id=worker_id,
+                current_node=worker_id,
                 path=gc.path,
                 buffer=buffer,
                 node_visit_counts=gc.node_visit_counts,
@@ -1559,8 +1586,11 @@ class GraphExecutor:
             if _check_graph_done():
                 completion_event.set()
 
-        # Subscribe to events
-        if self._event_bus:
+        # Subscribe to events (only if event bus has subscribe capability)
+        has_event_subscription = (
+            self._event_bus is not None and hasattr(self._event_bus, "subscribe")
+        )
+        if has_event_subscription:
             sub_completed = self._event_bus.subscribe(
                 event_types=[EventType.WORKER_COMPLETED],
                 handler=_on_worker_completed,
@@ -1580,16 +1610,124 @@ class GraphExecutor:
                 workers[wid].activate(inherited_tags=[])
                 self.logger.info(f"  → Activated entry worker: {wid}")
 
-            # Wait for all terminal workers to complete
-            if terminal_worker_ids:
-                await completion_event.wait()
+            # Wait for completion — two strategies depending on event bus availability
+            if has_event_subscription and sub_completed is not None:
+                # Event-driven: wait for completion events
+                if terminal_worker_ids:
+                    await completion_event.wait()
+                else:
+                    for _ in range(graph.max_steps * 10):
+                        if _check_graph_done():
+                            break
+                        await asyncio.sleep(0.1)
             else:
-                # No terminal nodes defined — wait for all workers
-                await asyncio.sleep(0.1)
-                for _ in range(graph.max_steps * 10):  # Safety bound
+                # No event bus: poll worker tasks directly and route completions inline
+                pending_tasks: dict[str, asyncio.Task] = {}
+                for wid, w in workers.items():
+                    if w._task is not None:
+                        pending_tasks[wid] = w._task
+
+                max_polls = graph.max_steps * 100
+                for poll_idx in range(max_polls):
+                    await asyncio.sleep(0.01)
+
+                    newly_done: list[str] = []
+                    for wid, task in list(pending_tasks.items()):
+                        if task.done():
+                            newly_done.append(wid)
+
+                    for wid in newly_done:
+                        task = pending_tasks.pop(wid)
+                        worker = workers[wid]
+
+                        if worker.lifecycle == WorkerLifecycle.COMPLETED:
+                            # Read result directly from the worker
+                            last_result = worker._last_result
+                            outgoing_activations = worker._last_activations
+
+                            if last_result:
+                                completion_output = last_result.output or {}
+                                completion_tokens = getattr(last_result, "tokens_used", 0) or 0
+                                completion_latency = getattr(last_result, "latency_ms", 0) or 0
+                                completion_conversation = getattr(last_result, "conversation", None)
+                            else:
+                                completion_output = {}
+                                completion_tokens = 0
+                                completion_latency = 0
+                                completion_conversation = None
+
+                            total_tokens += completion_tokens
+                            total_latency += completion_latency
+
+                            all_completions[wid] = WorkerCompletion(
+                                worker_id=wid,
+                                success=True,
+                                output=completion_output,
+                                tokens_used=completion_tokens,
+                                latency_ms=completion_latency,
+                                conversation=completion_conversation,
+                                activations=outgoing_activations,
+                            )
+
+                            # Continuous mode accumulation
+                            if is_continuous:
+                                src_spec = graph.get_node(wid)
+                                if src_spec and src_spec.tools:
+                                    for t in self.tools:
+                                        if (
+                                            t.name in src_spec.tools
+                                            and t.name not in gc.cumulative_tool_names
+                                        ):
+                                            gc.cumulative_tools.append(t)
+                                            gc.cumulative_tool_names.add(t.name)
+                                if src_spec and src_spec.output_keys:
+                                    for k in src_spec.output_keys:
+                                        if k not in gc.cumulative_output_keys:
+                                            gc.cumulative_output_keys.append(k)
+                                if completion_conversation is not None:
+                                    gc.continuous_conversation = completion_conversation
+
+                            self.logger.info(
+                                f"  ✓ Worker completed: {wid} "
+                                f"({len(outgoing_activations)} outgoing activation(s))"
+                            )
+
+                            # Route activations
+                            for activation in outgoing_activations:
+                                _route_activation(
+                                    activation, workers, pending_tasks,
+                                    has_event_subscription=False,
+                                )
+
+                            if wid in terminal_worker_ids:
+                                completed_terminals.add(wid)
+
+                            gc.node_visit_counts[wid] = gc.node_visit_counts.get(wid, 0) + 1
+
+                            self._write_progress(
+                                current_node=wid,
+                                path=gc.path,
+                                buffer=buffer,
+                                node_visit_counts=gc.node_visit_counts,
+                            )
+
+                        elif worker.lifecycle == WorkerLifecycle.FAILED:
+                            error = "Worker failed"
+                            try:
+                                exc = task.exception()
+                                if exc:
+                                    error = str(exc)
+                            except Exception:
+                                pass
+                            failed_workers[wid] = error
+                            self.logger.error(f"  ✗ Worker failed: {wid} - {error}")
+                            if wid in terminal_worker_ids:
+                                completed_terminals.add(wid)
+
                     if _check_graph_done():
                         break
-                    await asyncio.sleep(0.1)
+                else:
+                    self.logger.warning("Worker polling exceeded safety bound")
 
             # Assemble result
             terminal_output: dict[str, Any] = {}
@@ -1650,7 +1788,7 @@ class GraphExecutor:
             )
 
         finally:
-            if self._event_bus:
+            if has_event_subscription and self._event_bus:
                 if sub_completed:
                     self._event_bus.unsubscribe(sub_completed)
                 if sub_failed:

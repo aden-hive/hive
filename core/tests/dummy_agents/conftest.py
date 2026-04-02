@@ -6,6 +6,8 @@ Run via: cd core && uv run python tests/dummy_agents/run_all.py
 
 from __future__ import annotations
 
+import asyncio
+import os
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,7 @@ _selected_model: str | None = None
 _selected_api_key: str | None = None
 _selected_extra_headers: dict[str, str] | None = None
 _selected_api_base: str | None = None
+_EXECUTION_TIMEOUT_SECS = float(os.environ.get("DUMMY_AGENT_EXEC_TIMEOUT_SECS", "90"))
 
 
 def set_llm_selection(
@@ -128,7 +131,7 @@ def make_executor(
         tools = list(tool_registry.get_tools().values())
         tool_executor = tool_registry.get_executor()
 
-    return GraphExecutor(
+    executor = GraphExecutor(
         runtime=runtime,
         llm=llm,
         tools=tools,
@@ -138,3 +141,23 @@ def make_executor(
         loop_config=loop_config or {"max_iterations": 10},
         storage_path=storage_path,
     )
+
+    original_execute = executor.execute
+
+    async def execute_with_timeout(*args, **kwargs):
+        try:
+            return await asyncio.wait_for(
+                original_execute(*args, **kwargs),
+                timeout=_EXECUTION_TIMEOUT_SECS,
+            )
+        except TimeoutError as e:
+            raise TimeoutError(
+                "Dummy agent execution timed out after "
+                f"{_EXECUTION_TIMEOUT_SECS:.0f}s. "
+                "This usually means the current worker execution path "
+                "(GraphExecutor -> WorkerAgent -> EventLoopNode) is stuck "
+                "waiting on the provider or tool-calling behavior."
+            ) from e
+
+    executor.execute = execute_with_timeout  # type: ignore[method-assign]
+    return executor
