@@ -386,35 +386,9 @@ class EventLoopNode(NodeProtocol):
                 # execution preamble and node-type preamble.  The stored
                 # prompt may be stale after code changes or when runtime-
                 # injected context (e.g. worker identity) has changed.
-                from framework.graph.prompt_composer import (
-                    EXECUTION_SCOPE_PREAMBLE,
-                    compose_system_prompt,
-                )
+                from framework.graph.prompting import build_system_prompt_for_node_context
 
-                _exec_preamble = None
-                if (
-                    not ctx.is_subagent_mode
-                    and ctx.node_spec.node_type in ("event_loop", "gcu")
-                    and ctx.node_spec.output_keys
-                ):
-                    _exec_preamble = EXECUTION_SCOPE_PREAMBLE
-
-                _node_type_preamble = None
-                if ctx.node_spec.node_type == "gcu":
-                    from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
-
-                    _node_type_preamble = GCU_BROWSER_SYSTEM_PROMPT
-
-                _current_prompt = compose_system_prompt(
-                    identity_prompt=ctx.identity_prompt or None,
-                    focus_prompt=ctx.node_spec.system_prompt,
-                    narrative=ctx.narrative or None,
-                    accounts_prompt=ctx.accounts_prompt or None,
-                    skills_catalog_prompt=ctx.skills_catalog_prompt or None,
-                    protocols_prompt=ctx.protocols_prompt or None,
-                    execution_preamble=_exec_preamble,
-                    node_type_preamble=_node_type_preamble,
-                )
+                _current_prompt = build_system_prompt_for_node_context(ctx)
                 if conversation.system_prompt != _current_prompt:
                     conversation.update_system_prompt(_current_prompt)
                     logger.info("Refreshed system prompt for restored conversation")
@@ -429,40 +403,17 @@ class EventLoopNode(NodeProtocol):
                 _restored_tool_fingerprints = []
 
                 # Fresh conversation: either isolated mode or first node in continuous mode.
-                from framework.graph.prompt_composer import (
-                    EXECUTION_SCOPE_PREAMBLE,
-                    _with_datetime,
-                )
+                from framework.graph.prompting import build_system_prompt_for_node_context
 
-                system_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
-                # Prepend execution-scope preamble for worker nodes so the
-                # LLM knows it is one step in a pipeline and should not try
-                # to perform work that belongs to other nodes.
-                if (
-                    not ctx.is_subagent_mode
-                    and ctx.node_spec.node_type in ("event_loop", "gcu")
-                    and ctx.node_spec.output_keys
-                ):
-                    system_prompt = f"{EXECUTION_SCOPE_PREAMBLE}\n\n{system_prompt}"
-                # Prepend GCU browser best-practices prompt for gcu nodes
-                if ctx.node_spec.node_type == "gcu":
-                    from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
+                system_prompt = build_system_prompt_for_node_context(ctx)
 
-                    system_prompt = f"{GCU_BROWSER_SYSTEM_PROMPT}\n\n{system_prompt}"
-                # Append connected accounts info if available
-                if ctx.accounts_prompt:
-                    system_prompt = f"{system_prompt}\n\n{ctx.accounts_prompt}"
-
-                # Append skill catalog and operational protocols
                 if ctx.skills_catalog_prompt:
-                    system_prompt = f"{system_prompt}\n\n{ctx.skills_catalog_prompt}"
                     logger.info(
                         "[%s] Injected skills catalog (%d chars)",
                         node_id,
                         len(ctx.skills_catalog_prompt),
                     )
                 if ctx.protocols_prompt:
-                    system_prompt = f"{system_prompt}\n\n{ctx.protocols_prompt}"
                     logger.info(
                         "[%s] Injected operational protocols (%d chars)",
                         node_id,
@@ -643,9 +594,9 @@ class EventLoopNode(NodeProtocol):
 
             # 6b3. Dynamic prompt refresh (phase switching)
             if ctx.dynamic_prompt_provider is not None:
-                from framework.graph.prompt_composer import _with_datetime
+                from framework.graph.prompting import stamp_prompt_datetime
 
-                _new_prompt = _with_datetime(ctx.dynamic_prompt_provider())
+                _new_prompt = stamp_prompt_datetime(ctx.dynamic_prompt_provider())
                 if _new_prompt != conversation.system_prompt:
                     conversation.update_system_prompt(_new_prompt)
                     logger.info("[%s] Dynamic prompt updated (phase switch)", node_id)

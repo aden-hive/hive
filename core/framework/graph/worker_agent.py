@@ -194,8 +194,12 @@ class WorkerAgent:
 
         self._received_activations.append(activation)
 
-        # Update fan-out trackers from this activation's tags
+        # Update fan-out trackers from this activation's tags.
+        # Skip tags where this worker IS the via_branch — those tags exist
+        # for downstream convergence tracking, not for gating this worker.
         for tag in activation.fan_out_tags:
+            if tag.via_branch == self.node_spec.id:
+                continue
             if tag.fan_out_id not in self._active_fan_outs:
                 self._active_fan_outs[tag.fan_out_id] = FanOutTracker(
                     fan_out_id=tag.fan_out_id,
@@ -323,6 +327,9 @@ class WorkerAgent:
                     conversation=result.conversation,
                     activations=activations,
                 )
+                if gc.is_continuous and completion.conversation is not None:
+                    gc.continuous_conversation = completion.conversation
+                    await self._apply_continuous_transition(completion.activations)
                 await self._publish_completion(completion)
             else:
                 # Evaluate outgoing edges even on failure (ON_FAILURE edges)
@@ -458,6 +465,10 @@ class WorkerAgent:
                     for e in traversable
                     if e.condition != EdgeCondition.CONDITIONAL or e.priority == max_prio
                 ]
+
+        # When parallel execution is disabled, follow first match only (sequential)
+        if not gc.enable_parallel_execution and len(traversable) > 1:
+            traversable = traversable[:1]
 
         # Build activations
         is_fan_out = len(traversable) > 1
@@ -639,11 +650,6 @@ class WorkerAgent:
             conversation=completion.conversation,
         )
 
-        # Update continuous mode state
-        if gc.is_continuous and completion.conversation is not None:
-            gc.continuous_conversation = completion.conversation
-            self._apply_continuous_transition()
-
     async def _publish_failure(self, error: str) -> None:
         """Publish WORKER_FAILED event."""
         gc = self._gc
@@ -660,24 +666,17 @@ class WorkerAgent:
             execution_id=gc.execution_id,
         )
 
-    def _apply_continuous_transition(self) -> None:
+    async def _apply_continuous_transition(self, activations: list[Activation]) -> None:
         """Apply continuous mode conversation threading for the next node.
 
-        Uses existing prompt_composer functions for onion-model system
-        prompt composition, transition markers, and phase-boundary compaction.
+        This prepares the inherited conversation before the completion event
+        is published so downstream workers receive a fully updated thread.
         """
         gc = self._gc
         if not gc.is_continuous or not gc.continuous_conversation:
             return
 
-        # Find the next node from outgoing edges (best guess from current state)
-        # The actual next node is determined at activation time, but for continuous
-        # mode prompt composition we need it now.
-        next_node_id = None
-        for edge in self.outgoing_edges:
-            if edge.condition in (EdgeCondition.ALWAYS, EdgeCondition.ON_SUCCESS):
-                next_node_id = edge.target
-                break
+        next_node_id = next((activation.target_id for activation in activations), None)
         if not next_node_id:
             return
 
@@ -685,53 +684,89 @@ class WorkerAgent:
         if not next_spec or next_spec.node_type != "event_loop":
             return
 
-        from framework.graph.prompt_composer import (
-            EXECUTION_SCOPE_PREAMBLE,
-            build_accounts_prompt,
+        from framework.graph.prompting import (
+            TransitionSpec,
             build_narrative,
-            build_transition_marker,
-            compose_system_prompt,
+            build_system_prompt_for_node_context,
+            build_transition_message,
         )
 
-        # Layer 2: narrative
         narrative = build_narrative(gc.buffer, gc.path, gc.graph)
-
-        # Per-node accounts prompt
-        _node_accounts = gc.accounts_prompt or None
-        if gc.accounts_data and gc.tool_provider_map:
-            _node_accounts = (
-                build_accounts_prompt(
-                    gc.accounts_data,
-                    gc.tool_provider_map,
-                    node_tool_names=next_spec.tools,
-                )
-                or None
-            )
-
-        # Compose system prompt (Layer 1 + 2 + 3 + accounts)
-        _focus = next_spec.system_prompt
-        if next_spec.output_keys and _focus:
-            _focus = f"{EXECUTION_SCOPE_PREAMBLE}\n\n{_focus}"
-        new_system = compose_system_prompt(
-            identity_prompt=getattr(gc.graph, "identity_prompt", None),
-            focus_prompt=_focus,
+        next_ctx = build_node_context_from_graph_context(
+            gc,
+            node_spec=next_spec,
+            pause_event=self._pause_requested,
+            inherited_conversation=gc.continuous_conversation,
             narrative=narrative,
-            accounts_prompt=_node_accounts,
         )
-        gc.continuous_conversation.update_system_prompt(new_system)
+        gc.continuous_conversation.update_system_prompt(
+            build_system_prompt_for_node_context(next_ctx)
+        )
+        gc.continuous_conversation.set_current_phase(next_spec.id)
 
-        # Insert transition marker
-        data_dir = str(gc.storage_path / "data") if gc.storage_path else None
-        marker = build_transition_marker(
-            previous_node=self.node_spec,
-            next_node=next_spec,
-            buffer=gc.buffer,
-            cumulative_tool_names=sorted(gc.cumulative_tool_names),
-            data_dir=data_dir,
+        buffer_items, data_files = self._prepare_transition_payload()
+        marker = build_transition_message(
+            TransitionSpec(
+                previous_name=self.node_spec.name,
+                previous_description=self.node_spec.description,
+                next_name=next_spec.name,
+                next_description=next_spec.description,
+                next_output_keys=tuple(next_spec.output_keys or ()),
+                buffer_items=buffer_items,
+                cumulative_tool_names=tuple(sorted(gc.cumulative_tool_names)),
+                data_files=tuple(data_files),
+            )
         )
-        # We can't await here (sync method), so schedule it
-        # The continuous conversation threading will be done properly in the
-        # GraphExecutor's event handler where we have async context.
+        await gc.continuous_conversation.add_user_message(
+            marker,
+            is_transition_marker=True,
+        )
+
+    def _prepare_transition_payload(self) -> tuple[dict[str, str], list[str]]:
+        """Build transition marker data and spill oversized values when possible."""
+        import json
+        from pathlib import Path
+
+        gc = self._gc
+        data_dir = Path(gc.storage_path / "data") if gc.storage_path else None
+        buffer_items: dict[str, str] = {}
+
+        for key, value in gc.buffer.read_all().items():
+            if value is None:
+                continue
+            val_str = str(value)
+            if len(val_str) > 300 and data_dir is not None:
+                data_dir.mkdir(parents=True, exist_ok=True)
+                ext = ".json" if isinstance(value, (dict, list)) else ".txt"
+                filename = f"output_{key}{ext}"
+                file_path = data_dir / filename
+                try:
+                    write_content = (
+                        json.dumps(value, indent=2, ensure_ascii=False)
+                        if isinstance(value, (dict, list))
+                        else str(value)
+                    )
+                    file_path.write_text(write_content, encoding="utf-8")
+                    file_size = file_path.stat().st_size
+                    buffer_items[key] = (
+                        f"[Saved to '{filename}' ({file_size:,} bytes). "
+                        f"Use load_data(filename='{filename}') to access.]"
+                    )
+                    continue
+                except Exception:
+                    pass
+
+            buffer_items[key] = val_str[:300] + "..." if len(val_str) > 300 else val_str
+
+        data_files: list[str] = []
+        if data_dir is not None and data_dir.exists():
+            data_files = [
+                f"{entry.name} ({entry.stat().st_size:,} bytes)"
+                for entry in sorted(data_dir.iterdir())
+                if entry.is_file()
+            ]
+
+        return buffer_items, data_files
 
     # ------------------------------------------------------------------
     # Utility

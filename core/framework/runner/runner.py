@@ -1697,7 +1697,7 @@ class AgentRunner:
             accounts_data = adapter.get_all_account_info()
             tool_provider_map = adapter.get_tool_provider_map()
             if accounts_data:
-                from framework.graph.prompt_composer import build_accounts_prompt
+                from framework.graph.prompting import build_accounts_prompt
 
                 accounts_prompt = build_accounts_prompt(accounts_data, tool_provider_map)
         except Exception:

@@ -39,6 +39,7 @@ class GraphContext:
     node_registry: dict[str, NodeProtocol] = field(default_factory=dict)
     node_spec_registry: dict[str, NodeSpec] = field(default_factory=dict)
     parallel_config: Any = None  # ParallelExecutionConfig | None
+    enable_parallel_execution: bool = True
     is_continuous: bool = False
     continuous_conversation: Any = None
     cumulative_tools: list[Any] = field(default_factory=list)
@@ -99,7 +100,7 @@ def build_node_accounts_prompt(
 
     resolved = accounts_prompt
     if accounts_data and tool_provider_map:
-        from framework.graph.prompt_composer import build_accounts_prompt
+        from framework.graph.prompting import build_accounts_prompt
 
         filtered = build_accounts_prompt(
             accounts_data,
