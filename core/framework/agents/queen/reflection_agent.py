@@ -120,6 +120,19 @@ _REFLECTION_TOOLS: list[Tool] = [
 ]
 
 
+def _safe_memory_path(filename: str, memory_dir: Path) -> Path:
+    """Resolve *filename* inside *memory_dir*, raising if it escapes."""
+    if not filename or filename.strip() != filename:
+        raise ValueError(f"Invalid filename: {filename!r}")
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise ValueError(f"Invalid filename: path components not allowed: {filename!r}")
+    candidate = (memory_dir / filename).resolve()
+    root = memory_dir.resolve()
+    if not candidate.is_relative_to(root):
+        raise ValueError(f"Path escapes memory directory: {filename!r}")
+    return candidate
+
+
 def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
     """Execute a reflection tool synchronously.  Returns the result string."""
     if name == "list_memory_files":
@@ -131,7 +144,10 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
 
     if name == "read_memory_file":
         filename = args.get("filename", "")
-        path = memory_dir / filename
+        try:
+            path = _safe_memory_path(filename, memory_dir)
+        except ValueError as exc:
+            return f"ERROR: {exc}"
         if not path.exists() or not path.is_file():
             return f"ERROR: File not found: {filename}"
         try:

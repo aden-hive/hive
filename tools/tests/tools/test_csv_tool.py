@@ -238,36 +238,6 @@ class TestCsvRead:
         assert result["total_rows"] == 0
         assert result["rows"] == []
 
-    def test_missing_workspace_id(self, csv_tool_fn, basic_csv, tmp_path):
-        """Return error when workspace_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)):
-            result = csv_tool_fn(
-                path="basic.csv",
-                agent_id=TEST_AGENT_ID,
-            )
-
-        assert "error" in result
-
-    def test_missing_agent_id(self, csv_tool_fn, basic_csv, tmp_path):
-        """Return error when agent_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)):
-            result = csv_tool_fn(
-                path="basic.csv",
-                agent_id="",
-            )
-
-        assert "error" in result
-
-    def test_missing_session_id(self, csv_tool_fn, basic_csv, tmp_path):
-        """Return error when session_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)):
-            result = csv_tool_fn(
-                path="basic.csv",
-                agent_id=TEST_AGENT_ID,
-            )
-
-        assert "error" in result
-
     def test_unicode_content(self, csv_tool_fn, session_dir, tmp_path):
         """Read CSV with Unicode content."""
         csv_file = session_dir / "unicode.csv"

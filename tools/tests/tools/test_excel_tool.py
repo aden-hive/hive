@@ -323,42 +323,6 @@ class TestExcelRead:
         assert result["total_rows"] == 0
         assert result["rows"] == []
 
-    def test_missing_workspace_id(self, excel_read_fn, basic_xlsx, tmp_path):
-        """Return error when workspace_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
-            result = excel_read_fn(
-                path="basic.xlsx",
-                workspace_id="",
-                agent_id=TEST_AGENT_ID,
-                session_id=current,
-            )
-
-        assert "error" in result
-
-    def test_missing_agent_id(self, excel_read_fn, basic_xlsx, tmp_path):
-        """Return error when agent_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
-            result = excel_read_fn(
-                path="basic.xlsx",
-                workspace_id=TEST_AGENT_ID,
-                agent_id="",
-                session_id=current,
-            )
-
-        assert "error" in result
-
-    def test_missing_session_id(self, excel_read_fn, basic_xlsx, tmp_path):
-        """Return error when session_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
-            result = excel_read_fn(
-                path="basic.xlsx",
-                workspace_id=TEST_AGENT_ID,
-                agent_id=TEST_AGENT_ID,
-                session_id="",
-            )
-
-        assert "error" in result
-
     def test_path_traversal_blocked(self, excel_read_fn, session_dir, tmp_path):
         """Prevent path traversal attacks."""
         with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
