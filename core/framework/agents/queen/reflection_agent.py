@@ -164,7 +164,10 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
         if len(content.encode("utf-8")) > MAX_FILE_SIZE_BYTES:
             return f"ERROR: Content exceeds {MAX_FILE_SIZE_BYTES} byte limit."
         # Enforce file cap (only for new files).
-        path = memory_dir / filename
+        try:
+            path = _safe_memory_path(filename, memory_dir)
+        except ValueError as exc:
+            return f"ERROR: {exc}"
         if not path.exists():
             existing = list(memory_dir.glob("*.md"))
             if len(existing) >= MAX_FILES:
@@ -176,7 +179,10 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
 
     if name == "delete_memory_file":
         filename = args.get("filename", "")
-        path = memory_dir / filename
+        try:
+            path = _safe_memory_path(filename, memory_dir)
+        except ValueError as exc:
+            return f"ERROR: {exc}"
         if not path.exists():
             return f"ERROR: File not found: {filename}"
         path.unlink()
@@ -199,11 +205,14 @@ async def _reflection_loop(
     user_msg: str,
     memory_dir: Path,
     max_turns: int = _MAX_TURNS,
-) -> None:
+) -> bool:
     """Run a mini tool-use loop: LLM → tool calls → repeat.
 
     Hard cap of *max_turns* iterations.  Prompt nudges the LLM toward a
     2-turn pattern (batch reads in turn 1, batch writes in turn 2).
+
+    Returns ``True`` if the loop completed without LLM errors, ``False``
+    if an LLM call failed (cursor should not advance).
     """
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_msg}]
     logger.debug("reflect: starting loop (max %d turns)", max_turns)
@@ -218,7 +227,7 @@ async def _reflection_loop(
             )
         except Exception:
             logger.warning("reflect: LLM call failed", exc_info=True)
-            break
+            return False
 
         # Build assistant message.
         tool_calls_raw: list[dict[str, Any]] = []
@@ -258,6 +267,8 @@ async def _reflection_loop(
                 "tool_call_id": tc["id"],
                 "content": result,
             })
+
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -372,11 +383,14 @@ async def run_short_reflection(
         f"Timestamp: {datetime.now().isoformat(timespec='minutes')}"
     )
 
-    await _reflection_loop(llm, _SHORT_REFLECT_SYSTEM, user_msg, mem_dir)
+    success = await _reflection_loop(llm, _SHORT_REFLECT_SYSTEM, user_msg, mem_dir)
 
     # Advance cursor only on success.
-    write_cursor(max_seq)
-    logger.debug("reflect: short reflection done, cursor → %d", max_seq)
+    if success:
+        write_cursor(max_seq)
+        logger.debug("reflect: short reflection done, cursor → %d", max_seq)
+    else:
+        logger.warning("reflect: short reflection failed, cursor NOT advanced (stays at %d)", cursor_seq)
 
 
 async def run_long_reflection(
@@ -416,6 +430,7 @@ async def subscribe_reflection_triggers(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
+    phase_state: Any = None,
 ) -> list[str]:
     """Subscribe to queen turn events and return subscription IDs.
 
@@ -451,6 +466,15 @@ async def subscribe_reflection_triggers(
             except Exception:
                 logger.warning("reflect: reflection failed", exc_info=True)
                 _write_error("short/long reflection")
+
+            # Update recall cache after reflection completes, guaranteeing
+            # recall sees the current turn's extracted memories.
+            if phase_state is not None:
+                try:
+                    from framework.agents.queen.recall_selector import update_recall_cache
+                    await update_recall_cache(session_dir, llm, phase_state)
+                except Exception:
+                    logger.debug("recall: cache update failed", exc_info=True)
 
     async def _on_compaction(event: Any) -> None:
         if getattr(event, "stream_id", None) != "queen":

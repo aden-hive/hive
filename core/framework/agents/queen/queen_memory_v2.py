@@ -284,8 +284,13 @@ def read_messages_since_cursor(
             new_files.append((seq, f))
 
     # Compaction fallback: cursor evicted → return everything visible.
+    # Only trigger when cursor_seq is beyond the max seq of existing files,
+    # meaning files were compacted away.  If cursor_seq <= max_all_seq there
+    # is simply nothing new (already up-to-date) — returning empty is correct.
     if not new_files and all_files:
-        new_files = all_files
+        max_all_seq = max(seq for seq, _ in all_files)
+        if cursor_seq > max_all_seq:
+            new_files = all_files
 
     if not new_files:
         return [], cursor_seq

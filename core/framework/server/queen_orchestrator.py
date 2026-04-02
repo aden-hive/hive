@@ -366,28 +366,15 @@ async def create_queen(
             session_manager._subscribe_worker_handoffs(session, executor)
 
             # ---- Reflection + recall memory subscriptions ----------------
-            from framework.agents.queen.recall_selector import update_recall_cache
             from framework.agents.queen.reflection_agent import subscribe_reflection_triggers
 
             _reflection_subs = await subscribe_reflection_triggers(
                 session.event_bus, queen_dir, session.llm,
-            )
-
-            async def _on_turn_complete_recall(event):
-                if getattr(event, "stream_id", None) != "queen":
-                    return
-                try:
-                    await update_recall_cache(queen_dir, session.llm, phase_state)
-                except Exception:
-                    logger.debug("recall: cache update failed", exc_info=True)
-
-            _recall_sub = session.event_bus.subscribe(
-                event_types=[EventType.LLM_TURN_COMPLETE],
-                handler=_on_turn_complete_recall,
+                phase_state=phase_state,
             )
 
             # Store sub IDs on session for teardown.
-            session.memory_reflection_subs = _reflection_subs + [_recall_sub]
+            session.memory_reflection_subs = _reflection_subs
 
             logger.info(
                 "Queen starting in %s phase with %d tools: %s",
