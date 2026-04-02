@@ -277,7 +277,7 @@ def test_write_progress_uses_atomic_write_and_updates_state(tmp_path, monkeypatc
     executor._write_progress(
         current_node="node-b",
         path=["node-a", "node-b"],
-        memory=memory,
+        buffer=memory,
         node_visit_counts={"node-a": 1, "node-b": 1},
     )
 
@@ -287,9 +287,9 @@ def test_write_progress_uses_atomic_write_and_updates_state(tmp_path, monkeypatc
     assert state["progress"]["current_node"] == "node-b"
     assert state["progress"]["path"] == ["node-a", "node-b"]
     assert state["progress"]["node_visit_counts"] == {"node-a": 1, "node-b": 1}
+    assert state["data_buffer"] == {"foo": "bar"}
     assert state["progress"]["steps_executed"] == 2
-    assert state["memory"] == {"foo": "bar"}
-    assert state["memory_keys"] == ["foo"]
+    assert state["buffer_keys"] == ["foo"]
     assert "updated_at" in state["timestamps"]
 
 
@@ -309,7 +309,7 @@ def test_write_progress_logs_warning_on_atomic_write_failure(tmp_path, monkeypat
         executor._write_progress(
             current_node="node-b",
             path=["node-a", "node-b"],
-            memory=memory,
+            buffer=memory,
             node_visit_counts={"node-a": 1, "node-b": 1},
         )
 

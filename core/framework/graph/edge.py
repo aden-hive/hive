@@ -108,7 +108,7 @@ class EdgeSpec(BaseModel):
         self,
         source_success: bool,
         source_output: dict[str, Any],
-        memory: dict[str, Any],
+        buffer_data: dict[str, Any],
         llm: Any | None = None,
         goal: Any | None = None,
         source_node_name: str | None = None,
@@ -120,7 +120,7 @@ class EdgeSpec(BaseModel):
         Args:
             source_success: Whether the source node succeeded
             source_output: Output from the source node
-            memory: Current shared memory state
+            buffer_data: Current data buffer state
             llm: LLM provider for LLM_DECIDE edges
             goal: Goal object for LLM_DECIDE edges
             source_node_name: Name of source node (for LLM context)
@@ -139,7 +139,7 @@ class EdgeSpec(BaseModel):
             return not source_success
 
         if self.condition == EdgeCondition.CONDITIONAL:
-            return self._evaluate_condition(source_output, memory)
+            return self._evaluate_condition(source_output, buffer_data)
 
         if self.condition == EdgeCondition.LLM_DECIDE:
             if llm is None or goal is None:
@@ -150,7 +150,7 @@ class EdgeSpec(BaseModel):
                 goal=goal,
                 source_success=source_success,
                 source_output=source_output,
-                memory=memory,
+                buffer_data=buffer_data,
                 source_node_name=source_node_name,
                 target_node_name=target_node_name,
             )
@@ -160,7 +160,7 @@ class EdgeSpec(BaseModel):
     def _evaluate_condition(
         self,
         output: dict[str, Any],
-        memory: dict[str, Any],
+        buffer_data: dict[str, Any],
     ) -> bool:
         """Evaluate a conditional expression."""
 
@@ -168,14 +168,14 @@ class EdgeSpec(BaseModel):
             return True
 
         # Build evaluation context
-        # Include memory keys directly for easier access in conditions
+        # Include buffer keys directly for easier access in conditions
         context = {
             "output": output,
-            "memory": memory,
+            "buffer": buffer_data,
             "result": output.get("result"),
             "true": True,  # Allow lowercase true/false in conditions
             "false": False,
-            **memory,  # Unpack memory keys directly into context
+            **buffer_data,  # Unpack buffer keys directly into context
         }
 
         try:
@@ -186,7 +186,7 @@ class EdgeSpec(BaseModel):
             expr_vars = {
                 k: repr(context[k])
                 for k in context
-                if k not in ("output", "memory", "result", "true", "false")
+                if k not in ("output", "buffer", "result", "true", "false")
                 and k in self.condition_expr
             }
             logger.info(
@@ -209,7 +209,7 @@ class EdgeSpec(BaseModel):
         goal: Any,
         source_success: bool,
         source_output: dict[str, Any],
-        memory: dict[str, Any],
+        buffer_data: dict[str, Any],
         source_node_name: str | None,
         target_node_name: str | None,
     ) -> bool:
@@ -234,8 +234,8 @@ class EdgeSpec(BaseModel):
 Should we proceed to: {target_node_name or self.target}?
 Edge description: {self.description or "No description"}
 
-**Context from memory**:
-{json.dumps({k: str(v)[:100] for k, v in list(memory.items())[:5]}, indent=2)}
+**Context from data buffer**:
+{json.dumps({k: str(v)[:100] for k, v in list(buffer_data.items())[:5]}, indent=2)}
 
 Evaluate whether proceeding to this next node is the right step toward achieving the goal.
 Consider:
@@ -276,14 +276,14 @@ Respond with ONLY a JSON object:
     def map_inputs(
         self,
         source_output: dict[str, Any],
-        memory: dict[str, Any],
+        buffer_data: dict[str, Any],
     ) -> dict[str, Any]:
         """
         Map source outputs to target inputs.
 
         Args:
             source_output: Output from source node
-            memory: Current shared memory
+            buffer_data: Current data buffer
 
         Returns:
             Input dict for target node
@@ -294,11 +294,11 @@ Respond with ONLY a JSON object:
 
         result = {}
         for target_key, source_key in self.input_mapping.items():
-            # Try source output first, then memory
+            # Try source output first, then buffer
             if source_key in source_output:
                 result[target_key] = source_output[source_key]
-            elif source_key in memory:
-                result[target_key] = memory[source_key]
+            elif source_key in buffer_data:
+                result[target_key] = buffer_data[source_key]
 
         return result
 
@@ -403,9 +403,9 @@ class GraphSpec(BaseModel):
     )
     edges: list[EdgeSpec] = Field(default_factory=list, description="All edge specifications")
 
-    # Shared memory keys
-    memory_keys: list[str] = Field(
-        default_factory=list, description="Keys available in shared memory"
+    # Data buffer keys
+    buffer_keys: list[str] = Field(
+        default_factory=list, description="Keys available in data buffer"
     )
 
     # Default LLM settings

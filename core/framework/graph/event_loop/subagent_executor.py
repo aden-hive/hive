@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from framework.graph.conversation import ConversationStore
 from framework.graph.event_loop.judge_pipeline import SubagentJudge
 from framework.graph.event_loop.types import LoopConfig, OutputAccumulator
-from framework.graph.node import NodeContext, SharedMemory
+from framework.graph.node import DataBuffer, NodeContext
 from framework.llm.provider import ToolResult, ToolUse
 from framework.runtime.event_bus import EventBus
 
@@ -93,7 +93,7 @@ async def execute_subagent(
     subagent_spec = ctx.node_registry[agent_id]
 
     # 2. Create read-only memory snapshot
-    parent_data = ctx.memory.read_all()
+    parent_data = ctx.buffer.read_all()
 
     # Merge in-flight outputs from the parent's accumulator.
     if accumulator:
@@ -101,12 +101,12 @@ async def execute_subagent(
             if key not in parent_data:
                 parent_data[key] = value
 
-    subagent_memory = SharedMemory()
+    subagent_buffer = DataBuffer()
     for key, value in parent_data.items():
-        subagent_memory.write(key, value, validate=False)
+        subagent_buffer.write(key, value, validate=False)
 
     read_keys = set(parent_data.keys()) | set(subagent_spec.input_keys or [])
-    scoped_memory = subagent_memory.with_permissions(
+    scoped_buffer = subagent_buffer.with_permissions(
         read_keys=list(read_keys),
         write_keys=[],  # Read-only!
     )
@@ -218,7 +218,7 @@ async def execute_subagent(
         runtime=ctx.runtime,
         node_id=sa_node_id,
         node_spec=subagent_spec,
-        memory=scoped_memory,
+        buffer=scoped_buffer,
         input_data={"task": task, **parent_data},
         llm=ctx.llm,
         available_tools=subagent_tools,

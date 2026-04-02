@@ -228,7 +228,7 @@ AgentRuntime.__init__(...) (line 118)
   ├─ Initialize SessionStore for unified sessions [line 182]
   │
   ├─ Initialize shared components:
-  │  ├─ SharedStateManager [line 185]
+  │  ├─ SharedBufferManager [line 185]
   │  ├─ EventBus (or use shared one) [line 186]
   │  └─ OutcomeAggregator [line 187]
   │
@@ -411,8 +411,8 @@ await _run_execution(ctx) (line 538)
   │
   ├─ Mark status as "running" [line 559]
   │
-  ├─ Create execution-scoped memory [line 572-576]
-  │  └─ self._state_manager.create_memory(execution_id, stream_id, isolation)
+  ├─ Create execution-scoped buffer [line 572-576]
+  │  └─ self._state_manager.create_buffer(execution_id, stream_id, isolation)
   │
   ├─ Start runtime adapter [line 579-586]
   │  └─ runtime_adapter.start_run(goal_id, goal_description, input_data)
@@ -480,7 +480,7 @@ await executor.execute(graph, goal, input_data, session_state, checkpoint_config
   │
   ├─ Validate tool availability [line 320-332]
   │
-  ├─ Initialize SharedMemory for session [line 335]
+  ├─ Initialize DataBuffer for session [line 335]
   │
   ├─ Restore session state if resuming [line 353-369]
   │  └─ Load memory from previous session
@@ -576,7 +576,7 @@ Shared Component: LLM Provider
 
 Memory Flow:
   ├─ Each execution has ExecutionContext with input_data
-  ├─ SharedMemory created per execution (line 572-576 in execution_stream.py)
+  ├─ DataBuffer created per execution (line 572-576 in execution_stream.py)
   ├─ Session state restored if resuming (line 354-369 in executor.py)
   ├─ Each node reads from memory via input_keys
   ├─ Each node writes to memory via output_keys

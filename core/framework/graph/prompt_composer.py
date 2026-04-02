@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
-    from framework.graph.node import NodeSpec, SharedMemory
+    from framework.graph.node import NodeSpec, DataBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -211,17 +211,17 @@ def compose_system_prompt(
 
 
 def build_narrative(
-    memory: SharedMemory,
+    buffer: DataBuffer,
     execution_path: list[str],
     graph: GraphSpec,
 ) -> str:
     """Build Layer 2 (narrative) from structured state.
 
-    Deterministic — no LLM call. Reads SharedMemory and execution path
+    Deterministic — no LLM call. Reads data buffer and execution path
     to describe what has happened so far. Cheap and fast.
 
     Args:
-        memory: Current shared memory state.
+        buffer: Current data buffer state.
         execution_path: List of node IDs visited so far.
         graph: Graph spec (for node names/descriptions).
 
@@ -241,11 +241,11 @@ def build_narrative(
                 phase_descriptions.append(f"- {node_id}")
         parts.append("Phases completed:\n" + "\n".join(phase_descriptions))
 
-    # Describe key memory values (skip very long values)
-    all_memory = memory.read_all()
-    if all_memory:
+    # Describe key buffer values (skip very long values)
+    all_buffer = buffer.read_all()
+    if all_buffer:
         memory_lines: list[str] = []
-        for key, value in all_memory.items():
+        for key, value in all_buffer.items():
             if value is None:
                 continue
             val_str = str(value)
@@ -261,7 +261,7 @@ def build_narrative(
 def build_transition_marker(
     previous_node: NodeSpec,
     next_node: NodeSpec,
-    memory: SharedMemory,
+    buffer: DataBuffer,
     cumulative_tool_names: list[str],
     data_dir: Path | str | None = None,
 ) -> str:
@@ -274,7 +274,7 @@ def build_transition_marker(
     Args:
         previous_node: NodeSpec of the phase just completed.
         next_node: NodeSpec of the phase about to start.
-        memory: Current shared memory state.
+        buffer: Current data buffer state.
         cumulative_tool_names: All tools available (cumulative set).
         data_dir: Path to spillover data directory.
 
@@ -290,13 +290,13 @@ def build_transition_marker(
     sections.append(f"\nCompleted: {previous_node.name}")
     sections.append(f"  {previous_node.description}")
 
-    # Outputs in memory — use file references for large values so the
+    # Outputs in buffer — use file references for large values so the
     # next node loads full data from disk instead of seeing truncated
     # inline previews that look deceptively complete.
-    all_memory = memory.read_all()
-    if all_memory:
+    all_buffer = buffer.read_all()
+    if all_buffer:
         memory_lines: list[str] = []
-        for key, value in all_memory.items():
+        for key, value in all_buffer.items():
             if value is None:
                 continue
             val_str = str(value)

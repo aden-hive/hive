@@ -29,7 +29,7 @@ from framework.graph.node import (
     NodeProtocol,
     NodeResult,
     NodeSpec,
-    SharedMemory,
+    DataBuffer,
 )
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
@@ -266,13 +266,13 @@ def make_ctx(
         client_facing=client_facing,
     )
 
-    memory = SharedMemory()
+    buffer = DataBuffer()
 
     return NodeContext(
         runtime=runtime,
         node_id=node_id,
         node_spec=spec,
-        memory=memory,
+        buffer=buffer,
         input_data=input_data or {},
         llm=llm,
         available_tools=available_tools or [],
@@ -1001,14 +1001,14 @@ async def test_mixed_node_graph(runtime):
     class LoadLeadsNode(NodeProtocol):
         async def execute(self, ctx: NodeContext) -> NodeResult:
             leads = ["lead_A", "lead_B", "lead_C"]
-            ctx.memory.write("leads", leads)
+            ctx.buffer.write("leads", leads)
             return NodeResult(success=True, output={"leads": leads})
 
     class FormatOutputNode(NodeProtocol):
         async def execute(self, ctx: NodeContext) -> NodeResult:
-            summary = ctx.input_data.get("summary", ctx.memory.read("summary") or "no summary")
+            summary = ctx.input_data.get("summary", ctx.buffer.read("summary") or "no summary")
             report = f"Report: {summary}"
-            ctx.memory.write("report", report)
+            ctx.buffer.write("report", report)
             return NodeResult(success=True, output={"report": report})
 
     # Event loop: process leads, produce summary

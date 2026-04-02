@@ -33,7 +33,7 @@ Single-entry agents get a `"default"` entry point automatically. There is no sep
 | `ExecutionStream` | `runtime/execution_stream.py` | Per-entry-point execution queue, session persistence |
 | `GraphExecutor` | `graph/executor.py` | Node traversal, tool dispatch, checkpointing |
 | `EventBus` | `runtime/event_bus.py` | Pub/sub for execution events (streaming, I/O) |
-| `SharedStateManager` | `runtime/shared_state.py` | Cross-stream state with isolation levels |
+| `SharedBufferManager` | `runtime/shared_state.py` | Cross-stream state with isolation levels |
 | `OutcomeAggregator` | `runtime/outcome_aggregator.py` | Goal progress tracking across streams |
 | `SessionStore` | `storage/session_store.py` | Session state persistence (`sessions/{id}/state.json`) |
 
@@ -108,7 +108,7 @@ runtime.unsubscribe_from_events(sub_id)
 # Inspection
 runtime.is_running           # bool
 runtime.event_bus            # EventBus
-runtime.state_manager        # SharedStateManager
+runtime.state_manager        # SharedBufferManager
 runtime.get_stats()          # Runtime statistics
 ```
 

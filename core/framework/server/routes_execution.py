@@ -270,7 +270,7 @@ async def handle_resume(request: web.Request) -> web.Response:
         paused_at = progress.get("paused_at") or progress.get("resume_from")
         resume_session_state = {
             "resume_session_id": worker_session_id,
-            "memory": state.get("memory", {}),
+            "data_buffer": state.get("data_buffer", state.get("memory", {})),
             "execution_path": progress.get("path", []),
             "node_visit_counts": progress.get("node_visit_counts", {}),
         }

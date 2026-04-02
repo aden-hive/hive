@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.runtime.event_bus import EventBus
-from framework.runtime.shared_state import IsolationLevel, SharedStateManager
+from framework.runtime.shared_state import IsolationLevel, SharedBufferManager
 from framework.runtime.stream_runtime import StreamRuntime, StreamRuntimeAdapter
 
 if TYPE_CHECKING:
@@ -170,7 +170,7 @@ class ExecutionStream:
         entry_spec: EntryPointSpec,
         graph: "GraphSpec",
         goal: "Goal",
-        state_manager: SharedStateManager,
+        state_manager: SharedBufferManager,
         storage: "ConcurrentStorage",
         outcome_aggregator: "OutcomeAggregator",
         event_bus: "EventBus | None" = None,
@@ -639,7 +639,7 @@ class ExecutionStream:
                 self._write_run_event(execution_id, ctx.run_id, "run_started")
 
                 # Create execution-scoped memory
-                self._state_manager.create_memory(
+                self._state_manager.create_buffer(
                     execution_id=execution_id,
                     stream_id=self.stream_id,
                     isolation=ctx.isolation_level,
@@ -1074,7 +1074,7 @@ class ExecutionStream:
                         updated_at=now,
                     ),
                     progress=progress,
-                    memory=ss.get("memory", {}),
+                    memory=ss.get("data_buffer", ss.get("memory", {})),
                     input_data=ctx.input_data,
                 )
 

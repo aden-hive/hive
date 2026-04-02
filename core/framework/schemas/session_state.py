@@ -243,7 +243,7 @@ class SessionState(BaseModel):
                 error=result.error,
                 output=result.output,
             ),
-            memory=result.session_state.get("memory", {}) if result.session_state else {},
+            memory=result.session_state.get("data_buffer", result.session_state.get("memory", {})) if result.session_state else {},
             input_data=input_data or {},
         )
 
@@ -303,7 +303,7 @@ class SessionState(BaseModel):
         return {
             "paused_at": resume_from,
             "resume_from": resume_from,
-            "memory": self.memory,
+            "data_buffer": self.memory,
             "execution_path": self.progress.path,
             "node_visit_counts": self.progress.node_visit_counts,
         }

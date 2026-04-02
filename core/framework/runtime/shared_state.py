@@ -46,7 +46,7 @@ class StateChange:
     timestamp: float = field(default_factory=time.time)
 
 
-class SharedStateManager:
+class SharedBufferManager:
     """
     Manages shared state across concurrent executions.
 
@@ -61,18 +61,18 @@ class SharedStateManager:
     - SYNCHRONIZED: Like SHARED but with write locks
 
     Example:
-        manager = SharedStateManager()
+        manager = SharedBufferManager()
 
-        # Create memory for an execution
-        memory = manager.create_memory(
+        # Create buffer for an execution
+        buf = manager.create_buffer(
             execution_id="exec_123",
             stream_id="webhook",
             isolation=IsolationLevel.SHARED,
         )
 
-        # Read/write through the memory
-        await memory.write("customer_id", "cust_456", scope=StateScope.STREAM)
-        value = await memory.read("customer_id")
+        # Read/write through the buffer
+        await buf.write("customer_id", "cust_456", scope=StateScope.STREAM)
+        value = await buf.read("customer_id")
     """
 
     def __init__(self):
@@ -93,14 +93,14 @@ class SharedStateManager:
         # Version tracking
         self._version = 0
 
-    def create_memory(
+    def create_buffer(
         self,
         execution_id: str,
         stream_id: str,
         isolation: IsolationLevel,
-    ) -> "StreamMemory":
+    ) -> "StreamBuffer":
         """
-        Create a memory instance for an execution.
+        Create a buffer instance for an execution.
 
         Args:
             execution_id: Unique execution identifier
@@ -108,7 +108,7 @@ class SharedStateManager:
             isolation: Isolation level for this execution
 
         Returns:
-            StreamMemory instance for reading/writing state
+            StreamBuffer instance for reading/writing state
         """
         # Initialize execution state
         if execution_id not in self._execution_state:
@@ -119,7 +119,7 @@ class SharedStateManager:
             self._stream_state[stream_id] = {}
             self._stream_locks[stream_id] = asyncio.Lock()
 
-        return StreamMemory(
+        return StreamBuffer(
             manager=self,
             execution_id=execution_id,
             stream_id=stream_id,
@@ -343,17 +343,17 @@ class SharedStateManager:
         return self._change_history[-limit:]
 
 
-class StreamMemory:
+class StreamBuffer:
     """
-    Memory interface for a single execution.
+    Buffer interface for a single execution.
 
     Provides scoped access to shared state with proper isolation.
-    Compatible with the existing SharedMemory interface where possible.
+    Compatible with the existing DataBuffer interface where possible.
     """
 
     def __init__(
         self,
-        manager: SharedStateManager,
+        manager: SharedBufferManager,
         execution_id: str,
         stream_id: str,
         isolation: IsolationLevel,
@@ -371,13 +371,13 @@ class StreamMemory:
         self,
         read_keys: list[str],
         write_keys: list[str],
-    ) -> "StreamMemory":
+    ) -> "StreamBuffer":
         """
         Create a scoped view with read/write permissions.
 
-        Compatible with existing SharedMemory.with_permissions().
+        Compatible with existing DataBuffer.with_permissions().
         """
-        scoped = StreamMemory(
+        scoped = StreamBuffer(
             manager=self._manager,
             execution_id=self._execution_id,
             stream_id=self._stream_id,
@@ -434,7 +434,7 @@ class StreamMemory:
 
         return all_state
 
-    # === SYNC API (for backward compatibility with SharedMemory) ===
+    # === SYNC API (for backward compatibility with DataBuffer) ===
 
     def read_sync(self, key: str) -> Any:
         """

@@ -3,7 +3,7 @@ Graph Executor - Runs agent graphs.
 
 The executor:
 1. Takes a GraphSpec and Goal
-2. Initializes shared memory
+2. Initializes data buffer
 3. Executes nodes following edges
 4. Records all decisions to Runtime
 5. Returns the final result
@@ -24,7 +24,7 @@ from framework.graph.node import (
     NodeProtocol,
     NodeResult,
     NodeSpec,
-    SharedMemory,
+    DataBuffer,
 )
 from framework.graph.validator import OutputValidator
 from framework.llm.provider import LLMProvider, Tool, ToolUse
@@ -104,8 +104,8 @@ class ParallelExecutionConfig:
     # "wait_all" waits for all and reports all failures
     on_branch_failure: str = "fail_all"
 
-    # Memory conflict handling when branches write same key
-    memory_conflict_strategy: str = "last_wins"  # "last_wins", "first_wins", "error"
+    # Buffer conflict handling when branches write same key
+    buffer_conflict_strategy: str = "last_wins"  # "last_wins", "first_wins", "error"
 
     # Timeout per branch in seconds
     branch_timeout_seconds: float = 300.0
@@ -240,7 +240,7 @@ class GraphExecutor:
         self,
         current_node: str,
         path: list[str],
-        memory: Any,
+        buffer: Any,
         node_visit_counts: dict[str, int],
     ) -> None:
         """Update state.json with live progress at node transitions.
@@ -275,11 +275,11 @@ class GraphExecutor:
             timestamps = state_data.setdefault("timestamps", {})
             timestamps["updated_at"] = datetime.now().isoformat()
 
-            # Persist full memory so state.json is sufficient for resume
+            # Persist full buffer so state.json is sufficient for resume
             # even if the process dies before the final write.
-            memory_snapshot = memory.read_all()
-            state_data["memory"] = memory_snapshot
-            state_data["memory_keys"] = list(memory_snapshot.keys())
+            buffer_snapshot = buffer.read_all()
+            state_data["data_buffer"] = buffer_snapshot
+            state_data["buffer_keys"] = list(buffer_snapshot.keys())
 
             with atomic_write(state_path, encoding="utf-8") as f:
                 _json.dump(state_data, f, indent=2)
@@ -473,7 +473,7 @@ class GraphExecutor:
             graph: The graph specification
             goal: The goal driving execution
             input_data: Initial input data
-            session_state: Optional session state to resume from (with paused_at, memory, etc.)
+            session_state: Optional session state to resume from (with paused_at, data_buffer, etc.)
             validate_graph: If False, skip graph validation (for test graphs that
                 intentionally break rules)
 
@@ -507,7 +507,7 @@ class GraphExecutor:
             )
 
         # Initialize execution state
-        memory = SharedMemory()
+        buffer = DataBuffer()
 
         # Continuous conversation mode state
         is_continuous = getattr(graph, "conversation_mode", "isolated") == "continuous"
@@ -526,31 +526,31 @@ class GraphExecutor:
             self.logger.info("✓ Checkpointing enabled")
 
         # Restore session state if provided
-        if session_state and "memory" in session_state:
-            memory_data = session_state["memory"]
+        if session_state and ("data_buffer" in session_state or "memory" in session_state):
+            buffer_data = session_state.get("data_buffer", session_state.get("memory"))
             # [RESTORED] Type safety check
-            if not isinstance(memory_data, dict):
+            if not isinstance(buffer_data, dict):
                 self.logger.warning(
-                    f"⚠️ Invalid memory data type in session state: "
-                    f"{type(memory_data).__name__}, expected dict"
+                    f"⚠️ Invalid data buffer type in session state: "
+                    f"{type(buffer_data).__name__}, expected dict"
                 )
             else:
-                # Restore memory from previous session.
+                # Restore buffer from previous session.
                 # Skip validation — this data was already validated when
                 # originally written, and research text triggers false
                 # positives on the code-indicator heuristic.
-                for key, value in memory_data.items():
-                    memory.write(key, value, validate=False)
-                self.logger.info(f"📥 Restored session state with {len(memory_data)} memory keys")
+                for key, value in buffer_data.items():
+                    buffer.write(key, value, validate=False)
+                self.logger.info(f"📥 Restored session state with {len(buffer_data)} buffer keys")
 
-        # Write new input data to memory (each key individually).
-        # Skip when resuming from a paused session — restored memory already
+        # Write new input data to buffer (each key individually).
+        # Skip when resuming from a paused session — restored buffer already
         # contains all state including the original input, and re-writing
         # input_data would overwrite intermediate results with stale values.
         _is_resuming = bool(session_state and session_state.get("paused_at"))
         if input_data and not _is_resuming:
             for key, value in input_data.items():
-                memory.write(key, value)
+                buffer.write(key, value)
 
         # Detect event-triggered execution (timer/webhook) — no interactive user.
         _event_triggered = bool(input_data and isinstance(input_data.get("event"), dict))
@@ -596,9 +596,9 @@ class GraphExecutor:
                         f"(node: {checkpoint.current_node})"
                     )
 
-                    # Restore memory from checkpoint
-                    for key, value in checkpoint.shared_memory.items():
-                        memory.write(key, value, validate=False)
+                    # Restore buffer from checkpoint
+                    for key, value in checkpoint.data_buffer.items():
+                        buffer.write(key, value, validate=False)
 
                     # Start from checkpoint's next node or current node
                     current_node_id = (
@@ -609,7 +609,7 @@ class GraphExecutor:
                     path.extend(checkpoint.execution_path)
 
                     self.logger.info(
-                        f"📥 Restored memory with {len(checkpoint.shared_memory)} keys, "
+                        f"📥 Restored buffer with {len(checkpoint.data_buffer)} keys, "
                         f"resuming at node: {current_node_id}"
                     )
                 else:
@@ -671,7 +671,7 @@ class GraphExecutor:
         # Fresh shared-session execution: clear stale cursor so the entry
         # node doesn't restore a filled OutputAccumulator from the previous
         # webhook run (which would cause the judge to accept immediately).
-        # The conversation history is preserved (continuous memory).
+        # The conversation history is preserved (continuous buffer).
         # Exclude cold restores — those need to continue the conversation
         # naturally without a "start fresh" marker.
         _is_fresh_shared = bool(
@@ -785,9 +785,9 @@ class GraphExecutor:
                         )
 
                     # Create session state for pause
-                    saved_memory = memory.read_all()
+                    saved_buffer = buffer.read_all()
                     pause_session_state: dict[str, Any] = {
-                        "memory": saved_memory,  # Include memory for resume
+                        "data_buffer": saved_buffer,  # Include buffer for resume
                         "execution_path": list(path),
                         "node_visit_counts": dict(node_visit_counts),
                     }
@@ -798,7 +798,7 @@ class GraphExecutor:
                             checkpoint_type="pause",
                             current_node=current_node_id,
                             execution_path=path,
-                            memory=memory,
+                            buffer=buffer,
                             next_node=current_node_id,
                             is_clean=True,
                         )
@@ -811,7 +811,7 @@ class GraphExecutor:
                     # Return with paused status
                     return ExecutionResult(
                         success=False,
-                        output=saved_memory,
+                        output=saved_buffer,
                         path=path,
                         paused_at=current_node_id,
                         error="Execution paused by user request",
@@ -836,15 +836,15 @@ class GraphExecutor:
                         f"   ⊘ Node '{node_spec.name}' visit limit reached "
                         f"({node_visit_counts[current_node_id]}/{max_visits}), skipping"
                     )
-                    # Skip execution — follow outgoing edges using current memory
-                    skip_result = NodeResult(success=True, output=memory.read_all())
+                    # Skip execution — follow outgoing edges using current buffer
+                    skip_result = NodeResult(success=True, output=buffer.read_all())
                     next_node = await self._follow_edges(
                         graph=graph,
                         goal=goal,
                         current_node_id=current_node_id,
                         current_node_spec=node_spec,
                         result=skip_result,
-                        memory=memory,
+                        buffer=buffer,
                     )
                     if next_node is None:
                         self.logger.info("   → No more edges after visit limit, ending")
@@ -856,15 +856,15 @@ class GraphExecutor:
 
                 # Clear stale nullable outputs from previous visits.
                 # When a node is re-visited (e.g. review → process-batch → review),
-                # nullable outputs from the PREVIOUS visit linger in shared memory.
+                # nullable outputs from the PREVIOUS visit linger in the data buffer.
                 # This causes stale edge conditions to fire (e.g. "feedback is not None"
                 # from visit 1 triggers even when visit 2 sets "final_summary" instead).
                 # Clearing them ensures only the CURRENT visit's outputs affect routing.
                 if node_visit_counts.get(current_node_id, 0) > 1:
                     nullable_keys = getattr(node_spec, "nullable_output_keys", None) or []
                     for key in nullable_keys:
-                        if memory.read(key) is not None:
-                            memory.write(key, None, validate=False)
+                        if buffer.read(key) is not None:
+                            buffer.write(key, None, validate=False)
                             self.logger.info(
                                 f"   🧹 Cleared stale nullable output '{key}' from previous visit"
                             )
@@ -899,12 +899,12 @@ class GraphExecutor:
                 if _is_resuming and path:
                     from framework.graph.prompt_composer import build_narrative
 
-                    _resume_narrative = build_narrative(memory, path, graph)
+                    _resume_narrative = build_narrative(buffer, path, graph)
 
                 # Build context for node
                 ctx = self._build_context(
                     node_spec=node_spec,
-                    memory=memory,
+                    buffer=buffer,
                     goal=goal,
                     input_data=input_data or {},
                     max_tokens=graph.max_tokens,
@@ -921,9 +921,9 @@ class GraphExecutor:
 
                 # Log actual input data being read
                 if node_spec.input_keys:
-                    self.logger.info("   Reading from memory:")
+                    self.logger.info("   Reading from data buffer:")
                     for key in node_spec.input_keys:
-                        value = memory.read(key)
+                        value = buffer.read(key)
                         if value is not None:
                             # Truncate long values for readability
                             value_str = str(value)
@@ -953,7 +953,7 @@ class GraphExecutor:
                         checkpoint_type="node_start",
                         current_node=node_spec.id,
                         execution_path=list(path),
-                        memory=memory,
+                        buffer=buffer,
                         is_clean=(sum(node_retry_counts.values()) == 0),
                     )
 
@@ -1061,21 +1061,21 @@ class GraphExecutor:
                     summary = result.to_summary(node_spec)
                     self.logger.info(f"   📝 Summary: {summary}")
 
-                    # Log what was written to memory (detailed view)
+                    # Log what was written to buffer (detailed view)
                     if result.output:
-                        self.logger.info("   Written to memory:")
+                        self.logger.info("   Written to data buffer:")
                         for key, value in result.output.items():
                             value_str = str(value)
                             if len(value_str) > 200:
                                 value_str = value_str[:200] + "..."
                             self.logger.info(f"      {key}: {value_str}")
 
-                    # Write node outputs to memory BEFORE edge evaluation
+                    # Write node outputs to buffer BEFORE edge evaluation
                     # This enables direct key access in conditional expressions (e.g., "score > 80")
                     # Without this, conditional edges can only use output['key'] syntax
                     if result.output:
                         for key, value in result.output.items():
-                            memory.write(key, value, validate=False)
+                            buffer.write(key, value, validate=False)
                 else:
                     self.logger.error(f"   ✗ Failed: {result.error}")
 
@@ -1147,7 +1147,7 @@ class GraphExecutor:
                             current_node_id=current_node_id,
                             current_node_spec=node_spec,
                             result=result,  # result.success=False triggers ON_FAILURE
-                            memory=memory,
+                            buffer=buffer,
                         )
 
                         if next_node:
@@ -1166,7 +1166,7 @@ class GraphExecutor:
                             )
                             self.runtime.end_run(
                                 success=False,
-                                output_data=memory.read_all(),
+                                output_data=buffer.read_all(),
                                 narrative=(
                                     f"Failed at {node_spec.name} after "
                                     f"{max_retries} retries: {result.error}"
@@ -1185,10 +1185,10 @@ class GraphExecutor:
                                     execution_quality="failed",
                                 )
 
-                            # Save memory for potential resume
-                            saved_memory = memory.read_all()
+                            # Save buffer for potential resume
+                            saved_buffer = buffer.read_all()
                             failure_session_state = {
-                                "memory": saved_memory,
+                                "data_buffer": saved_buffer,
                                 "execution_path": list(path),
                                 "node_visit_counts": dict(node_visit_counts),
                                 "resume_from": current_node_id,
@@ -1200,7 +1200,7 @@ class GraphExecutor:
                                     f"Node '{node_spec.name}' failed after "
                                     f"{max_retries} attempts: {result.error}"
                                 ),
-                                output=saved_memory,
+                                output=saved_buffer,
                                 steps_executed=steps,
                                 total_tokens=total_tokens,
                                 total_latency_ms=total_latency,
@@ -1228,11 +1228,11 @@ class GraphExecutor:
                             execution_id=self._execution_id,
                         )
 
-                    saved_memory = memory.read_all()
+                    saved_buffer = buffer.read_all()
                     session_state_out = {
                         "paused_at": node_spec.id,
                         "resume_from": f"{node_spec.id}_resume",  # Resume key
-                        "memory": saved_memory,
+                        "data_buffer": saved_buffer,
                         "execution_path": list(path),
                         "node_visit_counts": dict(node_visit_counts),
                         "next_node": None,  # Will resume from entry point
@@ -1240,7 +1240,7 @@ class GraphExecutor:
 
                     self.runtime.end_run(
                         success=True,
-                        output_data=saved_memory,
+                        output_data=saved_buffer,
                         narrative=f"Paused at {node_spec.name} after {steps} steps",
                     )
 
@@ -1259,7 +1259,7 @@ class GraphExecutor:
 
                     return ExecutionResult(
                         success=True,
-                        output=saved_memory,
+                        output=saved_buffer,
                         steps_executed=steps,
                         total_tokens=total_tokens,
                         total_latency_ms=total_latency,
@@ -1295,7 +1295,7 @@ class GraphExecutor:
                         )
 
                     current_node_id = result.next_node
-                    self._write_progress(current_node_id, path, memory, node_visit_counts)
+                    self._write_progress(current_node_id, path, buffer, node_visit_counts)
                 else:
                     # Get all traversable edges for fan-out detection
                     traversable_edges = await self._get_all_traversable_edges(
@@ -1304,7 +1304,7 @@ class GraphExecutor:
                         current_node_id=current_node_id,
                         current_node_spec=node_spec,
                         result=result,
-                        memory=memory,
+                        buffer=buffer,
                     )
 
                     if not traversable_edges:
@@ -1339,7 +1339,7 @@ class GraphExecutor:
                             graph=graph,
                             goal=goal,
                             edges=traversable_edges,
-                            memory=memory,
+                            buffer=buffer,
                             source_result=result,
                             source_node_spec=node_spec,
                             path=path,
@@ -1353,7 +1353,7 @@ class GraphExecutor:
                         if fan_in_node:
                             self.logger.info(f"   ⑃ Fan-in: converging at {fan_in_node}")
                             current_node_id = fan_in_node
-                            self._write_progress(current_node_id, path, memory, node_visit_counts)
+                            self._write_progress(current_node_id, path, buffer, node_visit_counts)
                         else:
                             # No convergence point - branches are terminal
                             self.logger.info("   → Parallel branches completed (no convergence)")
@@ -1366,7 +1366,7 @@ class GraphExecutor:
                             current_node_id=current_node_id,
                             current_node_spec=node_spec,
                             result=result,
-                            memory=memory,
+                            buffer=buffer,
                         )
                         if next_node is None:
                             self.logger.info("   → No more edges, ending execution")
@@ -1393,7 +1393,7 @@ class GraphExecutor:
                                 checkpoint_type="node_complete",
                                 current_node=node_spec.id,
                                 execution_path=list(path),
-                                memory=memory,
+                                buffer=buffer,
                                 next_node=next_node,
                                 is_clean=(sum(node_retry_counts.values()) == 0),
                             )
@@ -1418,7 +1418,7 @@ class GraphExecutor:
                         current_node_id = next_node
 
                 # Write progress snapshot at node transition
-                self._write_progress(current_node_id, path, memory, node_visit_counts)
+                self._write_progress(current_node_id, path, buffer, node_visit_counts)
 
                 # Continuous mode: thread conversation forward with transition marker
                 if is_continuous and result.conversation is not None:
@@ -1436,7 +1436,7 @@ class GraphExecutor:
                         )
 
                         # Build Layer 2 (narrative) from current state
-                        narrative = build_narrative(memory, path, graph)
+                        narrative = build_narrative(buffer, path, graph)
 
                         # Build per-node accounts prompt for the next node
                         _node_accounts = self.accounts_prompt or None
@@ -1469,7 +1469,7 @@ class GraphExecutor:
                         marker = build_transition_marker(
                             previous_node=node_spec,
                             next_node=next_spec,
-                            memory=memory,
+                            buffer=buffer,
                             cumulative_tool_names=sorted(cumulative_tool_names),
                             data_dir=data_dir,
                         )
@@ -1558,7 +1558,7 @@ class GraphExecutor:
                 input_data = result.output
 
             # Collect output
-            output = memory.read_all()
+            output = buffer.read_all()
 
             self.logger.info("\n✓ Execution complete!")
             self.logger.info(f"   Steps: {steps}")
@@ -1608,7 +1608,7 @@ class GraphExecutor:
                 execution_quality=exec_quality,
                 node_visit_counts=dict(node_visit_counts),
                 session_state={
-                    "memory": output,  # output IS memory.read_all()
+                    "data_buffer": output,  # output IS buffer.read_all()
                     "execution_path": list(path),
                     "node_visit_counts": dict(node_visit_counts),
                 },
@@ -1619,9 +1619,9 @@ class GraphExecutor:
             self.logger.info("⏸ Execution cancelled - saving state for resume")
 
             # Flush WIP accumulator outputs from the interrupted node's
-            # cursor.json into SharedMemory so they survive resume.  The
+            # cursor.json into DataBuffer so they survive resume.  The
             # accumulator writes to cursor.json on every set() call, but
-            # only writes to SharedMemory when the judge ACCEPTs.  Without
+            # only writes to DataBuffer when the judge ACCEPTs.  Without
             # this, edge conditions checking these keys see None on resume.
             if current_node_id and self._storage_path:
                 try:
@@ -1633,10 +1633,10 @@ class GraphExecutor:
                         wip_outputs = cursor_data.get("outputs", {})
                         for key, value in wip_outputs.items():
                             if value is not None:
-                                memory.write(key, value, validate=False)
+                                buffer.write(key, value, validate=False)
                         if wip_outputs:
                             self.logger.info(
-                                "Flushed %d WIP accumulator outputs to memory: %s",
+                                "Flushed %d WIP accumulator outputs to buffer: %s",
                                 len(wip_outputs),
                                 list(wip_outputs.keys()),
                             )
@@ -1646,10 +1646,10 @@ class GraphExecutor:
                         exc_info=True,
                     )
 
-            # Save memory and state for resume
-            saved_memory = memory.read_all()
+            # Save buffer and state for resume
+            saved_buffer = buffer.read_all()
             session_state_out: dict[str, Any] = {
-                "memory": saved_memory,
+                "data_buffer": saved_buffer,
                 "execution_path": list(path),
                 "node_visit_counts": dict(node_visit_counts),
             }
@@ -1671,7 +1671,7 @@ class GraphExecutor:
             return ExecutionResult(
                 success=False,
                 error="Execution cancelled",
-                output=saved_memory,
+                output=saved_buffer,
                 steps_executed=steps,
                 total_tokens=total_tokens,
                 total_latency_ms=total_latency,
@@ -1733,17 +1733,17 @@ class GraphExecutor:
                         cursor_data = _json.loads(cursor_path.read_text(encoding="utf-8"))
                         for key, value in cursor_data.get("outputs", {}).items():
                             if value is not None:
-                                memory.write(key, value, validate=False)
+                                buffer.write(key, value, validate=False)
                 except Exception:
                     self.logger.debug(
                         "Could not flush accumulator outputs from cursor",
                         exc_info=True,
                     )
 
-            # Save memory and state for potential resume
-            saved_memory = memory.read_all()
+            # Save buffer and state for potential resume
+            saved_buffer = buffer.read_all()
             session_state_out: dict[str, Any] = {
-                "memory": saved_memory,
+                "data_buffer": saved_buffer,
                 "execution_path": list(path),
                 "node_visit_counts": dict(node_visit_counts),
                 "resume_from": current_node_id,
@@ -1774,7 +1774,7 @@ class GraphExecutor:
             return ExecutionResult(
                 success=False,
                 error=str(e),
-                output=saved_memory,
+                output=saved_buffer,
                 steps_executed=steps,
                 path=path,
                 total_retries=total_retries_count,
@@ -1795,7 +1795,7 @@ class GraphExecutor:
     def _build_context(
         self,
         node_spec: NodeSpec,
-        memory: SharedMemory,
+        buffer: DataBuffer,
         goal: Goal,
         input_data: dict[str, Any],
         max_tokens: int = 4096,
@@ -1819,7 +1819,7 @@ class GraphExecutor:
             if node_spec.tools:
                 available_tools = [t for t in self.tools if t.name in node_spec.tools]
 
-        # Create scoped memory view.
+        # Create scoped buffer view.
         # When permissions are restricted (non-empty key lists), auto-include
         # _-prefixed keys used by default skill protocols so agents can read/write
         # operational state (e.g. _working_notes, _batch_ledger) regardless of
@@ -1831,9 +1831,9 @@ class GraphExecutor:
         # Empty means "allow all" — adding keys would accidentally
         # activate the permission check and block legitimate reads/writes.
         if read_keys or write_keys:
-            from framework.skills.defaults import SHARED_MEMORY_KEYS as _skill_keys
+            from framework.skills.defaults import DATA_BUFFER_KEYS as _skill_keys
 
-            existing_underscore = [k for k in memory._data if k.startswith("_")]
+            existing_underscore = [k for k in buffer._data if k.startswith("_")]
             extra_keys = set(_skill_keys) | set(existing_underscore)
             # Only inject into read_keys when it was already non-empty — an empty
             # read_keys means "allow all reads" and injecting skill keys would
@@ -1844,7 +1844,7 @@ class GraphExecutor:
                 if write_keys and k not in write_keys:
                     write_keys.append(k)
 
-        scoped_memory = memory.with_permissions(
+        scoped_buffer = buffer.with_permissions(
             read_keys=read_keys,
             write_keys=write_keys,
         )
@@ -1866,7 +1866,7 @@ class GraphExecutor:
             runtime=self.runtime,
             node_id=node_spec.id,
             node_spec=node_spec,
-            memory=scoped_memory,
+            buffer=scoped_buffer,
             input_data=input_data,
             llm=self.llm,
             available_tools=available_tools,
@@ -1990,7 +1990,7 @@ class GraphExecutor:
         current_node_id: str,
         current_node_spec: Any,
         result: NodeResult,
-        memory: SharedMemory,
+        buffer: DataBuffer,
     ) -> str | None:
         """Determine the next node by following edges."""
         edges = graph.get_outgoing_edges(current_node_id)
@@ -2001,16 +2001,16 @@ class GraphExecutor:
             if await edge.should_traverse(
                 source_success=result.success,
                 source_output=result.output,
-                memory=memory.read_all(),
+                buffer_data=buffer.read_all(),
                 llm=self.llm,
                 goal=goal,
                 source_node_name=current_node_spec.name if current_node_spec else current_node_id,
                 target_node_name=target_node_spec.name if target_node_spec else edge.target,
             ):
                 # Map inputs (skip validation for processed LLM output)
-                mapped = edge.map_inputs(result.output, memory.read_all())
+                mapped = edge.map_inputs(result.output, buffer.read_all())
                 for key, value in mapped.items():
-                    memory.write(key, value, validate=False)
+                    buffer.write(key, value, validate=False)
 
                 return edge.target
 
@@ -2023,7 +2023,7 @@ class GraphExecutor:
         current_node_id: str,
         current_node_spec: Any,
         result: NodeResult,
-        memory: SharedMemory,
+        buffer: DataBuffer,
     ) -> list[EdgeSpec]:
         """
         Get ALL edges that should be traversed (for fan-out detection).
@@ -2039,7 +2039,7 @@ class GraphExecutor:
             if await edge.should_traverse(
                 source_success=result.success,
                 source_output=result.output,
-                memory=memory.read_all(),
+                buffer_data=buffer.read_all(),
                 llm=self.llm,
                 goal=goal,
                 source_node_name=current_node_spec.name if current_node_spec else current_node_id,
@@ -2103,7 +2103,7 @@ class GraphExecutor:
         graph: GraphSpec,
         goal: Goal,
         edges: list[EdgeSpec],
-        memory: SharedMemory,
+        buffer: DataBuffer,
         source_result: NodeResult,
         source_node_spec: Any,
         path: list[str],
@@ -2116,7 +2116,7 @@ class GraphExecutor:
             graph: The graph specification
             goal: The execution goal
             edges: List of edges to follow in parallel
-            memory: Shared memory instance
+            buffer: DataBuffer instance
             source_result: Result from the source node
             source_node_spec: Spec of the source node
             path: Execution path list to update
@@ -2135,7 +2135,7 @@ class GraphExecutor:
                 edge=edge,
             )
 
-        # Track which branch wrote which key for memory conflict detection
+        # Track which branch wrote which key for buffer conflict detection
         fanout_written_keys: dict[str, str] = {}  # key -> branch_id that wrote it
         fanout_keys_lock = asyncio.Lock()
 
@@ -2173,9 +2173,9 @@ class GraphExecutor:
 
             try:
                 # Map inputs via edge
-                mapped = branch.edge.map_inputs(source_result.output, memory.read_all())
+                mapped = branch.edge.map_inputs(source_result.output, buffer.read_all())
                 for key, value in mapped.items():
-                    await memory.write_async(key, value)
+                    await buffer.write_async(key, value)
 
                 # Execute with retries
                 last_result = None
@@ -2185,7 +2185,7 @@ class GraphExecutor:
                     # Build context for this branch
                     ctx = self._build_context(
                         node_spec,
-                        memory,
+                        buffer,
                         goal,
                         mapped,
                         graph.max_tokens,
@@ -2230,15 +2230,15 @@ class GraphExecutor:
                         )
 
                     if result.success:
-                        # Write outputs to shared memory with conflict detection
-                        conflict_strategy = self._parallel_config.memory_conflict_strategy
+                        # Write outputs to shared buffer with conflict detection
+                        conflict_strategy = self._parallel_config.buffer_conflict_strategy
                         for key, value in result.output.items():
                             async with fanout_keys_lock:
                                 prior_branch = fanout_written_keys.get(key)
                                 if prior_branch and prior_branch != branch.branch_id:
                                     if conflict_strategy == "error":
                                         raise RuntimeError(
-                                            f"Memory conflict: key '{key}' already written "
+                                            f"Buffer conflict: key '{key}' already written "
                                             f"by branch '{prior_branch}', "
                                             f"conflicting write from '{branch.branch_id}'"
                                         )
@@ -2255,7 +2255,7 @@ class GraphExecutor:
                                             f"(last_wins: {prior_branch} -> {branch.branch_id})"
                                         )
                                 fanout_written_keys[key] = branch.branch_id
-                            await memory.write_async(key, value)
+                            await buffer.write_async(key, value)
 
                         branch.result = result
                         branch.status = "completed"
@@ -2378,7 +2378,7 @@ class GraphExecutor:
         checkpoint_type: str,
         current_node: str,
         execution_path: list[str],
-        memory: SharedMemory,
+        buffer: DataBuffer,
         next_node: str | None = None,
         is_clean: bool = True,
     ) -> Checkpoint:
@@ -2389,7 +2389,7 @@ class GraphExecutor:
             checkpoint_type: Type of checkpoint (node_start, node_complete)
             current_node: Current node ID
             execution_path: Nodes executed so far
-            memory: SharedMemory instance
+            buffer: DataBuffer instance
             next_node: Next node to execute (for node_complete checkpoints)
             is_clean: Whether execution was clean up to this point
 
@@ -2402,7 +2402,7 @@ class GraphExecutor:
             session_id=self._storage_path.name if self._storage_path else "unknown",
             current_node=current_node,
             execution_path=execution_path,
-            shared_memory=memory.read_all(),
+            data_buffer=buffer.read_all(),
             next_node=next_node,
             is_clean=is_clean,
         )

@@ -2659,11 +2659,11 @@ def register_queen_lifecycle_tools(
             return "No active execution found."
 
         exec_id = exec_ids[0]
-        memory = runtime.state_manager.create_memory(exec_id, stream_id, IsolationLevel.SHARED)
-        state = await memory.read_all()
+        buf = runtime.state_manager.create_buffer(exec_id, stream_id, IsolationLevel.SHARED)
+        state = await buf.read_all()
 
         if not state:
-            lines.append("Worker's shared memory is empty.")
+            lines.append("Worker's shared buffer is empty.")
         else:
             lines.append(f"Worker's shared memory ({len(state)} keys):")
             for key, value in state.items():

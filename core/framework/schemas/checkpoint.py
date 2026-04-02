@@ -33,7 +33,7 @@ class Checkpoint(BaseModel):
     execution_path: list[str] = Field(default_factory=list)  # Nodes executed so far
 
     # State snapshots
-    shared_memory: dict[str, Any] = Field(default_factory=dict)  # Full SharedMemory._data
+    data_buffer: dict[str, Any] = Field(default_factory=dict)  # Full DataBuffer._data
     accumulated_outputs: dict[str, Any] = Field(default_factory=dict)  # Outputs accumulated so far
 
     # Execution metrics (for resuming quality tracking)
@@ -52,7 +52,7 @@ class Checkpoint(BaseModel):
         session_id: str,
         current_node: str,
         execution_path: list[str],
-        shared_memory: dict[str, Any],
+        data_buffer: dict[str, Any],
         next_node: str | None = None,
         accumulated_outputs: dict[str, Any] | None = None,
         metrics_snapshot: dict[str, Any] | None = None,
@@ -67,7 +67,7 @@ class Checkpoint(BaseModel):
             session_id: Session this checkpoint belongs to
             current_node: Node ID at checkpoint time
             execution_path: List of node IDs executed so far
-            shared_memory: Full memory state snapshot
+            data_buffer: Full data buffer state snapshot
             next_node: Next node to execute (for node_complete checkpoints)
             accumulated_outputs: Outputs accumulated so far
             metrics_snapshot: Execution metrics at checkpoint time
@@ -91,7 +91,7 @@ class Checkpoint(BaseModel):
             current_node=current_node,
             next_node=next_node,
             execution_path=execution_path,
-            shared_memory=shared_memory,
+            data_buffer=data_buffer,
             accumulated_outputs=accumulated_outputs or {},
             metrics_snapshot=metrics_snapshot or {},
             is_clean=is_clean,

@@ -22,7 +22,7 @@ from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.runtime_log_store import RuntimeLogStore
-from framework.runtime.shared_state import SharedStateManager
+from framework.runtime.shared_state import SharedBufferManager
 from framework.storage.concurrent import ConcurrentStorage
 from framework.storage.session_store import SessionStore
 
@@ -229,7 +229,7 @@ class AgentRuntime:
         self._session_store = SessionStore(storage_path_obj)
 
         # Initialize shared components
-        self._state_manager = SharedStateManager()
+        self._state_manager = SharedBufferManager()
         self._event_bus = event_bus or EventBus(max_history=self._config.max_history)
         self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
 
@@ -1505,7 +1505,7 @@ class AgentRuntime:
                 try:
                     if state_path.exists():
                         data = _json.loads(state_path.read_text(encoding="utf-8"))
-                        full_memory = data.get("memory", {})
+                        full_memory = data.get("data_buffer", data.get("memory", {}))
                         if not full_memory:
                             continue
                         # Filter to only input keys so stale outputs
@@ -1517,7 +1517,7 @@ class AgentRuntime:
                         if memory:
                             return {
                                 "resume_session_id": exec_id,
-                                "memory": memory,
+                                "data_buffer": memory,
                             }
                 except Exception:
                     logger.debug(
@@ -1781,7 +1781,7 @@ class AgentRuntime:
     # === PROPERTIES ===
 
     @property
-    def state_manager(self) -> SharedStateManager:
+    def state_manager(self) -> SharedBufferManager:
         """Access the shared state manager."""
         return self._state_manager
 

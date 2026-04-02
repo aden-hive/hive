@@ -551,7 +551,7 @@ def build_emergency_summary(
     # 2. Inputs the node received
     input_lines = []
     for key in spec.input_keys:
-        value = ctx.input_data.get(key) or ctx.memory.read(key)
+        value = ctx.input_data.get(key) or ctx.buffer.read(key)
         if value is not None:
             # Truncate long values but keep them recognisable
             v_str = str(value)

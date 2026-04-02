@@ -29,7 +29,7 @@ from framework.llm.stream_events import (
 from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
-from framework.runtime.shared_state import SharedStateManager
+from framework.runtime.shared_state import SharedBufferManager
 from framework.storage.concurrent import ConcurrentStorage
 
 # ---------------------------------------------------------------------------
@@ -268,7 +268,7 @@ async def test_escalation_e2e_through_execution_stream(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, bus),
         event_bus=bus,
@@ -479,7 +479,7 @@ async def test_escalation_cleanup_after_completion(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, bus),
         event_bus=bus,
@@ -649,7 +649,7 @@ async def test_mark_complete_e2e_through_execution_stream(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, bus),
         event_bus=bus,

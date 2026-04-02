@@ -225,7 +225,7 @@ def _write_sample_session(base: Path, session_id: str):
         "started_at": "2026-02-20T12:00:00",
         "completed_at": None,
         "input_data": {"user_request": "test input"},
-        "memory": {"key1": "value1"},
+        "data_buffer": {"key1": "value1"},
         "progress": {
             "current_node": "node_b",
             "paused_at": "node_b",

@@ -1617,9 +1617,9 @@ class EventLoopNode(NodeProtocol):
                     continue
 
                 # Exit point 5: Judge ACCEPT — log step + log_node_complete
-                # Write outputs to shared memory
+                # Write outputs to data buffer
                 for key, value in accumulator.to_dict().items():
-                    ctx.memory.write(key, value, validate=False)
+                    ctx.buffer.write(key, value, validate=False)
 
                 await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
@@ -2857,11 +2857,11 @@ class EventLoopNode(NodeProtocol):
         return extract_tool_call_history(conversation.messages, max_entries=max_entries)
 
     def _build_initial_message(self, ctx: NodeContext) -> str:
-        """Build the initial user message from input data and memory.
+        """Build the initial user message from input data and buffer.
 
         Includes ALL input_data (not just declared input_keys) so that
         upstream handoff data flows through regardless of key naming.
-        Declared input_keys are also checked in shared memory as fallback.
+        Declared input_keys are also checked in data buffer as fallback.
         """
         parts = []
         seen: set[str] = set()
@@ -2870,10 +2870,10 @@ class EventLoopNode(NodeProtocol):
             if value is not None:
                 parts.append(f"{key}: {value}")
                 seen.add(key)
-        # Fallback: check memory for declared input_keys not already covered
+        # Fallback: check data buffer for declared input_keys not already covered
         for key in ctx.node_spec.input_keys:
             if key not in seen:
-                value = ctx.memory.read(key)
+                value = ctx.buffer.read(key)
                 if value is not None:
                     parts.append(f"{key}: {value}")
         if ctx.goal_context:
@@ -3460,17 +3460,17 @@ class EventLoopNode(NodeProtocol):
 
         The subagent:
         - Gets a fresh conversation with just the task
-        - Has read-only access to the parent's readable memory
+        - Has read-only access to the parent's readable data buffer
         - Cannot delegate to its own subagents (prevents recursion)
         - Returns its output in structured JSON format
 
         Args:
-            ctx: Parent node's context (for memory, tools, LLM access).
+            ctx: Parent node's context (for data buffer, tools, LLM access).
             agent_id: The node ID of the subagent to invoke.
             task: The task description to give the subagent.
             accumulator: Parent's OutputAccumulator — provides outputs that
                 have been set via ``set_output`` but not yet written to
-                shared memory (which only happens after the node completes).
+                data buffer (which only happens after the node completes).
 
         Returns:
             ToolResult with structured JSON output containing:

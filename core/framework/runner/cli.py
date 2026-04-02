@@ -278,7 +278,7 @@ def _load_resume_state(
             return None
         return {
             "resume_session_id": session_id,
-            "memory": cp_data.get("shared_memory", {}),
+            "data_buffer": cp_data.get("data_buffer", cp_data.get("shared_memory", {})),
             "paused_at": cp_data.get("next_node") or cp_data.get("current_node"),
             "execution_path": cp_data.get("execution_path", []),
             "node_visit_counts": {},
@@ -296,7 +296,7 @@ def _load_resume_state(
         paused_at = progress.get("paused_at") or progress.get("resume_from")
         return {
             "resume_session_id": session_id,
-            "memory": state_data.get("memory", {}),
+            "data_buffer": state_data.get("data_buffer", state_data.get("memory", {})),
             "paused_at": paused_at,
             "execution_path": progress.get("path", []),
             "node_visit_counts": progress.get("node_visit_counts", {}),

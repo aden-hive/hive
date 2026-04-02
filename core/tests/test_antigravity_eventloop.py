@@ -20,7 +20,7 @@ logging.getLogger("framework.llm.litellm").setLevel(logging.DEBUG)
 
 from framework.config import RuntimeConfig  # noqa: E402
 from framework.graph.event_loop_node import EventLoopNode, LoopConfig  # noqa: E402
-from framework.graph.node import NodeContext, NodeResult, NodeSpec, SharedMemory  # noqa: E402
+from framework.graph.node import NodeContext, NodeResult, NodeSpec, DataBuffer  # noqa: E402
 from framework.llm.litellm import LiteLLMProvider  # noqa: E402
 
 
@@ -68,13 +68,13 @@ def make_context(
     runtime.record_outcome = MagicMock()
     runtime.end_run = MagicMock()
 
-    memory = SharedMemory()
+    buffer = DataBuffer()
 
     return NodeContext(
         runtime=runtime,
         node_id=node_id,
         node_spec=spec,
-        memory=memory,
+        buffer=buffer,
         input_data={},
         llm=llm,
         available_tools=[],

@@ -228,7 +228,7 @@ async def check_pause(
     pause_requested = ctx.input_data.get("pause_requested", False)
     if not pause_requested:
         try:
-            pause_requested = ctx.memory.read("pause_requested") or False
+            pause_requested = ctx.buffer.read("pause_requested") or False
         except (PermissionError, KeyError):
             pause_requested = False
     if pause_requested:

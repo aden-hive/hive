@@ -59,7 +59,7 @@ flowchart TB
     subgraph Infra [Infra]
         TR["Tool Registry"]
         WTM["Write through Conversation Memory<br/>(Logs/RAM/Harddrive)"]
-        SM["Shared Memory<br/>(State/Harddrive)"]
+        SM["Data Buffer<br/>(State/Harddrive)"]
         EB["Event Bus<br/>(RAM)"]
         CS["Credential Store<br/>(Harddrive/Cloud)"]
 
@@ -132,7 +132,7 @@ flowchart TB
     CB -->|"Modify Worker Bee"| WorkerBees
 
     %% =========================================
-    %% SHARED MEMORY & LOGS ACCESS
+    %% DATA BUFFER & LOGS ACCESS
     %% =========================================
 
     %% Worker Bees Access
@@ -152,11 +152,11 @@ flowchart TB
 | Subsystem               | Role        | Description                                                                                                                                                                                                                                                  |
 | ----------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Event Loop Node**     | Entry point | Listens for external events (schedulers, webhooks, SSE), triggers the event loop, and delegates to sub-agents. Its conversation mirrors the Worker Bees conversation for context continuity.                                                                 |
-| **Worker Bees**         | Execution   | A graph of nodes that execute the actual work. Each node in the graph can become the Active Node. Workers maintain their own conversation and system prompt, and read/write to shared memory.                                                                |
+| **Worker Bees**         | Execution   | A graph of nodes that execute the actual work. Each node in the graph can become the Active Node. Workers maintain their own conversation and system prompt, and read/write to the data buffer.                                                                |
 | **Judge**               | Evaluation  | Runs as an **isolated graph** alongside the worker on a 2-minute timer. Reads worker session logs via `get_worker_health_summary` and accumulates observations in a continuous conversation (its own memory) to assess worker health trends. Criteria and principles align with Worker/Queen system prompts at design-time. |
-| **Queen Bee**           | Oversight   | The orchestration layer. Subscribes to Active Node events via the Event Bus and has read/write access to shared memory and credentials. Users can talk directly to the Queen Bee.                               |
+| **Queen Bee**           | Oversight   | The orchestration layer. Subscribes to Active Node events via the Event Bus and has read/write access to the data buffer and credentials. Users can talk directly to the Queen Bee.                               |
 | **Sub-Agent Framework** | Delegation  | Enables parent nodes to delegate tasks to specialized sub-agents via `delegate_to_sub_agent`. Sub-agents run as independent EventLoopNodes with read-only memory snapshots, their own conversation, and a `SubagentJudge`. They report progress via `report_to_parent` and can escalate to users via `wait_for_response`. Multiple delegations execute in parallel. Nested delegation is prevented. |
-| **Infra**               | Services    | Shared infrastructure: Tool Registry (assigned to Event Loop Nodes and Sub-Agents), Write-through Conversation Memory (logs across RAM and disk), Shared Memory (state on disk), Event Bus (pub/sub in RAM), and Credential Store (encrypted on disk or cloud). |
+| **Infra**               | Services    | Shared infrastructure: Tool Registry (assigned to Event Loop Nodes and Sub-Agents), Write-through Conversation Memory (logs across RAM and disk), Data Buffer (state on disk), Event Bus (pub/sub in RAM), and Credential Store (encrypted on disk or cloud). |
 
 ### Data Flow Patterns
 
@@ -363,7 +363,7 @@ flowchart TB
     %% =========================================
     %% SHARED MEMORY
     %% =========================================
-    subgraph SharedMem [Shared Memory]
+    subgraph SharedMem [Data Buffer]
         ExecState["Execution State<br/>(private)"]
         StreamState["Stream State<br/>(shared within stream)"]
         GlobalState["Global State<br/>(shared across all)"]
@@ -376,7 +376,7 @@ flowchart TB
     %% =========================================
     subgraph PromptOnion [System Prompt — 3-Layer Onion]
         Layer1["Layer 1 — Identity<br/>(static, never changes)"]
-        Layer2["Layer 2 — Narrative<br/>(auto-built from<br/>SharedMemory +<br/>execution path)"]
+        Layer2["Layer 2 — Narrative<br/>(auto-built from<br/>DataBuffer +<br/>execution path)"]
         Layer3["Layer 3 — Focus<br/>(current node's<br/>system_prompt)"]
     end
 
@@ -410,11 +410,11 @@ flowchart TB
 
 **2. Judge feedback becomes conversation memory.** When the judge issues a RETRY verdict with feedback, that feedback is injected as a `[Judge feedback]: ...` user message into the conversation. On the next LLM turn, the agent sees its prior attempt, the judge's critique, and can adjust. This is the core reflexion mechanism — in-context learning without model retraining.
 
-**3. The three-layer prompt onion refreshes each turn.** Layer 1 (identity) is static. Layer 2 (narrative) is rebuilt deterministically from `SharedMemory.read_all()` and the execution path — listing completed phases and current state values. Layer 3 (focus) is the current node's `system_prompt`. At phase transitions in continuous mode, Layer 3 swaps while Layers 1-2 and the full conversation history carry forward.
+**3. The three-layer prompt onion refreshes each turn.** Layer 1 (identity) is static. Layer 2 (narrative) is rebuilt deterministically from `DataBuffer.read_all()` and the execution path — listing completed phases and current state values. Layer 3 (focus) is the current node's `system_prompt`. At phase transitions in continuous mode, Layer 3 swaps while Layers 1-2 and the full conversation history carry forward.
 
 **4. Phase transitions inject structured reflection.** When execution moves between nodes, a transition marker is inserted into the conversation containing: what phase completed, all outputs in memory, available data files, available tools, and an explicit reflection prompt: *"Before proceeding, briefly reflect: what went well in the previous phase? Are there any gaps or surprises worth noting?"* This engineered metacognition surfaces issues before they compound.
 
-**5. Shared memory connects phases.** On ACCEPT, the accumulator's outputs are written to `SharedMemory`. The narrative layer reads these values to describe progress. In continuous mode, subsequent nodes see both the conversation history (what was discussed) and the structured memory (what was decided). In isolated mode, a `ContextHandoff` summarizes the prior node's conversation for the next node's input.
+**5. Data buffer connects phases.** On ACCEPT, the accumulator's outputs are written to `DataBuffer`. The narrative layer reads these values to describe progress. In continuous mode, subsequent nodes see both the conversation history (what was discussed) and the structured memory (what was decided). In isolated mode, a `ContextHandoff` summarizes the prior node's conversation for the next node's input.
 
 ### The Judge Evaluation Pipeline
 
@@ -773,8 +773,8 @@ The system architecture (see diagram above) maps onto four logical layers. The *
 │  ┌─────────────────────────────────────────────────────────────┐    │
 │  │              EXECUTION LAYER (Worker Bees)                    │    │
 │  │  ┌──────────┐    ┌──────────┐    ┌──────────┐               │    │
-│  │  │  Graph   │───►│  Active  │───►│  Shared  │               │    │
-│  │  │ Executor │    │   Node   │    │  Memory  │               │    │
+│  │  │  Graph   │───►│  Active  │───►│   Data   │               │    │
+│  │  │ Executor │    │   Node   │    │  Buffer  │               │    │
 │  │  └──────────┘    └──────────┘    └──────────┘               │    │
 │  │  Event Loop Node delegates │ to Sub-Agents (parallel)         │    │
 │  │  Sub-Agents: read-only memory │ SubagentJudge │ report_to_parent│    │
@@ -1057,8 +1057,8 @@ class SignalWeights:
 | **Rule Generation**           | Research               | Transforming human decisions into deterministic rules (closing the loop)     |
 | **HybridJudge**               | Engineering            | Implementation of triangulation with priority-ordered evaluation             |
 | **Reflexion Loop**            | Engineering            | Worker-Judge architecture with RETRY/REPLAN/ESCALATE                         |
-| **Memory Reflection**         | Engineering            | 3-layer prompt onion, judge feedback injection, shared memory                |
-| **Graph Execution**           | Engineering            | Node composition, shared memory, edge traversal, sub-agent delegation        |
+| **Memory Reflection**         | Engineering            | 3-layer prompt onion, judge feedback injection, data buffer                |
+| **Graph Execution**           | Engineering            | Node composition, data buffer, edge traversal, sub-agent delegation        |
 | **HITL Protocol**             | Engineering            | Pause/resume, approval workflows, escalation handling                        |
 
 ---
@@ -1075,7 +1075,7 @@ The Hive Agent Framework addresses the fundamental reliability crisis in agentic
 
 4. **The Foundation**: Goal-driven architecture ensures we're optimizing for user intent, not metric gaming. The reflexion loop between Worker Bees and Judge enables learning from failure without expensive search.
 
-5. **The Memory System**: Agents reflect through three mechanisms — the conversation history (carrying judge feedback as injected user messages), the three-layer prompt onion (identity → narrative → focus, rebuilt each turn from shared memory), and structured phase transition markers with explicit reflection prompts at node boundaries.
+5. **The Memory System**: Agents reflect through three mechanisms — the conversation history (carrying judge feedback as injected user messages), the three-layer prompt onion (identity → narrative → focus, rebuilt each turn from the data buffer), and structured phase transition markers with explicit reflection prompts at node boundaries.
 
 6. **The Learning Path**: Human escalations aren't just fallbacks—they're training signals. Confidence calibration tunes thresholds automatically. Rule generation transforms repeated human decisions into deterministic automation.
 
