@@ -476,13 +476,6 @@ async def execute_tool(
     return result
 
 
-def next_spill_filename(tool_name: str, counter: int) -> str:
-    """Return a short, monotonic filename for a tool result spill."""
-    # Shorten common tool name prefixes to save tokens
-    short = tool_name.removeprefix("tool_").removeprefix("mcp_")
-    return f"{short}_{counter}.txt"
-
-
 def restore_spill_counter(spillover_dir: str | None) -> int:
     """Scan spillover_dir for existing spill files and return the max counter.
 

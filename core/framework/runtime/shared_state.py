@@ -1,10 +1,10 @@
 """
-Shared State Manager - Manages state across concurrent executions.
+Shared Buffer Manager - Manages state across concurrent executions.
 
 Provides different isolation levels:
-- ISOLATED: Each execution has its own memory copy
-- SHARED: All executions read/write same memory (eventual consistency)
-- SYNCHRONIZED: Shared memory with write locks (strong consistency)
+- ISOLATED: Each execution has its own state copy
+- SHARED: All executions read/write same state (eventual consistency)
+- SYNCHRONIZED: Shared state with write locks (strong consistency)
 """
 
 import asyncio
