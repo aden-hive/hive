@@ -551,21 +551,16 @@ class GraphSpec(BaseModel):
                     continue
                 errors.append(f"Node '{node.id}' is unreachable from entry")
 
-        # Client-facing fan-out validation
-        fan_outs = self.detect_fan_out_nodes()
-        for source_id, targets in fan_outs.items():
-            client_facing_targets = [
-                t
-                for t in targets
-                if self.get_node(t) and getattr(self.get_node(t), "client_facing", False)
-            ]
-            if len(client_facing_targets) > 1:
-                errors.append(
-                    f"Fan-out from '{source_id}' has multiple client-facing nodes: "
-                    f"{client_facing_targets}. Only one branch may be client-facing."
+        for node in self.nodes:
+            if getattr(node, "client_facing", False) and getattr(node, "id", "") != "queen":
+                warnings.append(
+                    f"Node '{node.id}' sets deprecated client_facing=True. "
+                    "Only the queen talks directly to users now; migrate this node "
+                    "to queen-mediated escalation."
                 )
 
         # Output key overlap on parallel event_loop nodes
+        fan_outs = self.detect_fan_out_nodes()
         for source_id, targets in fan_outs.items():
             event_loop_targets = [
                 t

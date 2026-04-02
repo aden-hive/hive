@@ -350,8 +350,8 @@ interface AgentBackendState {
   pendingOptions: string[] | null;
   /** Multiple questions from ask_user_multiple */
   pendingQuestions: { id: string; prompt: string; options?: string[] }[] | null;
-  /** Whether the pending question came from queen or worker */
-  pendingQuestionSource: "queen" | "worker" | null;
+  /** Whether the pending question came from the queen interaction flow */
+  pendingQuestionSource: "queen" | null;
   /** Per-node context window usage (from context_usage_updated events) */
   contextUsage: Record<string, { usagePct: number; messageCount: number; estimatedTokens: number; maxTokens: number }>;
   /** Whether the queen's LLM supports image content — false disables the attach button */
@@ -1771,27 +1771,8 @@ export default function Workspace() {
               : null;
             if (isQueen) {
               const prompt = (event.data?.prompt as string) || "";
-              const isAutoBlock = !prompt && !options && !questions;
-              // Queen auto-block (empty prompt, no options) should not
-              // overwrite a pending worker question — the worker's
-              // QuestionWidget must stay visible.  Use the updater form
-              // to read the latest state and avoid stale-closure races
-              // when worker and queen events arrive in the same batch.
               setAgentStates(prev => {
                 const cur = prev[agentType] || defaultAgentState();
-                const workerQuestionActive = cur.pendingQuestionSource === "worker";
-                if (isAutoBlock && workerQuestionActive) {
-                  return {
-                    ...prev, [agentType]: {
-                      ...cur,
-                      awaitingInput: true,
-                      isTyping: false,
-                      isStreaming: false,
-                      queenIsTyping: false,
-                      queenBuilding: false,
-                    }
-                  };
-                }
                 return {
                   ...prev, [agentType]: {
                     ...cur,
@@ -1808,37 +1789,11 @@ export default function Workspace() {
                 };
               });
             } else {
-              // Worker input request.
-              // If the prompt is non-empty (explicit ask_user), create a visible
-              // message bubble.  For auto-block (empty prompt), the worker's text
-              // was already streamed via client_output_delta — just activate the
-              // reply box below the last worker message.
-              const eid = event.execution_id ?? "";
-              const prompt = (event.data?.prompt as string) || "";
-              if (prompt) {
-                const workerInputMsg: ChatMessage = {
-                  id: `worker-input-${eid}-${event.node_id || Date.now()}`,
-                  agent: displayName || event.node_id || "Worker",
-                  agentColor: "",
-                  content: prompt,
-                  timestamp: "",
-                  type: "worker_input_request",
-                  role: "worker",
-                  thread: agentType,
-                  createdAt: eventCreatedAt,
-                };
-                console.log('[CLIENT_INPUT_REQ] creating worker_input_request msg:', workerInputMsg.id, 'content:', prompt.slice(0, 80));
-                upsertChatMessage(agentType, workerInputMsg);
-              }
-              updateAgentState(agentType, {
-                awaitingInput: true,
-                isTyping: false,
-                isStreaming: false,
-                queenIsTyping: false,
-                pendingQuestion: prompt || null,
-                pendingOptions: options,
-                pendingQuestionSource: "worker",
-              });
+              console.warn(
+                "[CLIENT_INPUT_REQ] ignoring non-queen client_input_requested event",
+                streamId,
+                event.node_id,
+              );
             }
           }
           if (event.type === "execution_paused") {
@@ -2604,96 +2559,6 @@ export default function Workspace() {
       };
     });
 
-  const buildWorkerReplyForQueen = useCallback((answer: string) => {
-    const state = agentStates[activeWorker];
-    const question = (state?.pendingQuestion || "").trim();
-    const options = state?.pendingOptions;
-    const lastWorkerMessage = [...(activeSession?.messages || [])]
-      .reverse()
-      .find(msg => msg.role === "worker" && msg.type !== "tool_status" && msg.type !== "run_divider" && msg.content.trim());
-    const workerContext = !question ? (lastWorkerMessage?.content || "").trim() : "";
-
-    if (question && options?.length) {
-      return [
-        `[Worker asked: ${JSON.stringify(question)} | Options: ${options.map(opt => JSON.stringify(opt)).join(", ")}]`,
-        `User answered: ${JSON.stringify(answer)}`,
-        "If a worker is blocked waiting, relay this answer with inject_message().",
-      ].join("\n");
-    }
-
-    if (question) {
-      return [
-        `[Worker asked: ${JSON.stringify(question)}]`,
-        `User answered: ${JSON.stringify(answer)}`,
-        "If a worker is blocked waiting, relay this answer with inject_message().",
-      ].join("\n");
-    }
-
-    if (workerContext) {
-      return [
-        "[Worker is awaiting input]",
-        `Worker context: ${JSON.stringify(workerContext.slice(0, 600))}`,
-        `User answered: ${JSON.stringify(answer)}`,
-        "If a worker is blocked waiting, relay this answer with inject_message().",
-      ].join("\n");
-    }
-
-    return [
-      "[Worker is awaiting input]",
-      `User answered: ${JSON.stringify(answer)}`,
-      "If a worker is blocked waiting, relay this answer with inject_message().",
-    ].join("\n");
-  }, [activeSession?.messages, activeWorker, agentStates]);
-
-  const sendWorkerReplyViaQueen = useCallback((text: string, thread: string) => {
-    if (!activeSession) return;
-    const state = agentStates[activeWorker];
-    if (!state?.sessionId || !state?.ready) return;
-
-    const userMsg: ChatMessage = {
-      id: makeId(), agent: "You", agentColor: "",
-      content: text, timestamp: "", type: "user", thread, createdAt: Date.now(),
-    };
-    setSessionsByAgent(prev => ({
-      ...prev,
-      [activeWorker]: prev[activeWorker].map(s =>
-        s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg] } : s
-      ),
-    }));
-
-    updateAgentState(activeWorker, {
-      awaitingInput: false,
-      workerInputMessageId: null,
-      isTyping: true,
-      queenIsTyping: true,
-      pendingQuestion: null,
-      pendingOptions: null,
-      pendingQuestions: null,
-      pendingQuestionSource: null,
-    });
-
-    executionApi.chat(
-      state.sessionId,
-      buildWorkerReplyForQueen(text),
-      undefined,
-      text,
-    ).catch((err: unknown) => {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      const errorChatMsg: ChatMessage = {
-        id: makeId(), agent: "System", agentColor: "",
-        content: `Failed to send message: ${errMsg}`,
-        timestamp: "", type: "system", thread, createdAt: Date.now(),
-      };
-      setSessionsByAgent(prev => ({
-        ...prev,
-        [activeWorker]: prev[activeWorker].map(s =>
-          s.id === activeSession.id ? { ...s, messages: [...s.messages, errorChatMsg] } : s
-        ),
-      }));
-      updateAgentState(activeWorker, { isTyping: false, isStreaming: false, queenIsTyping: false });
-    });
-  }, [activeSession, activeWorker, agentStates, buildWorkerReplyForQueen, updateAgentState]);
-
   // --- handleSend ---
   const handleSend = useCallback((text: string, thread: string, images?: import("@/components/ChatPanel").ImageContent[]) => {
     if (!activeSession) return;
@@ -2715,13 +2580,6 @@ export default function Workspace() {
           s.id === activeSession.id ? { ...s, messages: [...s.messages, userMsg, promptMsg] } : s
         ),
       }));
-      return;
-    }
-
-    // If a worker is awaiting free-text input, route the user's answer through
-    // the queen so she can decide how to relay it back into the graph.
-    if (agentStates[activeWorker]?.awaitingInput && agentStates[activeWorker]?.pendingQuestionSource === "worker" && !agentStates[activeWorker]?.pendingOptions) {
-      sendWorkerReplyViaQueen(text, thread);
       return;
     }
 
@@ -2774,18 +2632,7 @@ export default function Workspace() {
       }));
       updateAgentState(activeWorker, { isTyping: false, isStreaming: false });
     }
-  }, [activeWorker, activeSession, agentStates, sendWorkerReplyViaQueen, updateAgentState]);
-
-  // --- handleWorkerReply: send worker-directed answers through the queen ---
-  const handleWorkerReply = useCallback((text: string) => {
-    sendWorkerReplyViaQueen(text, activeWorker);
-  }, [activeWorker, sendWorkerReplyViaQueen]);
-
-  // --- handleWorkerQuestionAnswer: route all worker answers through the queen ---
-  const handleWorkerQuestionAnswer = useCallback((answer: string, isOther: boolean) => {
-    void isOther;
-    handleWorkerReply(answer);
-  }, [handleWorkerReply]);
+  }, [activeWorker, activeSession, agentStates, updateAgentState]);
 
   // --- handleQueenQuestionAnswer: submit queen's own question answer via /chat ---
   // The queen asked the question herself, so she already has context — just send the raw answer.
@@ -2808,11 +2655,9 @@ export default function Workspace() {
   }, [activeWorker, handleSend, updateAgentState]);
 
   // --- handleQuestionDismiss: user closed the question widget without answering ---
-  // Worker dismissals still go through the queen so she can unblock the graph.
   const handleQuestionDismiss = useCallback(() => {
     const state = agentStates[activeWorker];
     if (!state?.sessionId) return;
-    const source = state.pendingQuestionSource;
     const question = state.pendingQuestion || "";
 
     // Clear UI state immediately
@@ -2824,22 +2669,8 @@ export default function Workspace() {
       awaitingInput: false,
     });
 
-    // Let the queen decide how to relay the dismissal to the blocked worker.
     const dismissMsg = `[User dismissed the question: "${question}"]`;
-    if (source === "worker") {
-      executionApi.chat(
-        state.sessionId,
-        [
-          question ? `[Worker asked: ${JSON.stringify(question)}]` : "[Worker is awaiting input]",
-          "User dismissed the question.",
-          "If a worker is blocked waiting, relay this dismissal with inject_message() so it can continue or clean up.",
-        ].join("\n"),
-        undefined,
-        "",
-      ).catch(() => { });
-    } else {
-      executionApi.chat(state.sessionId, dismissMsg).catch(() => { });
-    }
+    executionApi.chat(state.sessionId, dismissMsg).catch(() => { });
   }, [agentStates, activeWorker, updateAgentState]);
 
   const handleLoadAgent = useCallback(async (agentPath: string) => {
@@ -3211,11 +3042,7 @@ export default function Workspace() {
                 pendingQuestion={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestion : null}
                 pendingOptions={activeAgentState?.awaitingInput ? activeAgentState.pendingOptions : null}
                 pendingQuestions={activeAgentState?.awaitingInput ? activeAgentState.pendingQuestions : null}
-                onQuestionSubmit={
-                  activeAgentState?.pendingQuestionSource === "queen"
-                    ? handleQueenQuestionAnswer
-                    : handleWorkerQuestionAnswer
-                }
+                onQuestionSubmit={handleQueenQuestionAnswer}
                 onMultiQuestionSubmit={handleMultiQuestionAnswer}
                 onQuestionDismiss={handleQuestionDismiss}
                 contextUsage={activeAgentState?.contextUsage}

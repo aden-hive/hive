@@ -78,8 +78,7 @@ export function sseEventToChatMessage(
     }
 
     case "client_input_requested":
-      // Handled explicitly in handleSSEEvent (workspace.tsx) so it can
-      // create a worker_input_request message and set awaitingInput state.
+      // Handled explicitly in handleSSEEvent (workspace.tsx) for queen input widgets.
       return null;
 
     case "client_input_received": {

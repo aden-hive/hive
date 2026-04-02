@@ -193,7 +193,10 @@ class NodeSpec(BaseModel):
     # Client-facing behavior
     client_facing: bool = Field(
         default=False,
-        description="If True, this node streams output to the end user and can request input.",
+        description=(
+            "Deprecated compatibility field. The queen is intrinsically interactive; "
+            "non-queen nodes should escalate to the queen instead of talking to users directly."
+        ),
     )
 
     # Phase completion criteria for conversation-aware judge (Level 2)
@@ -217,6 +220,32 @@ class NodeSpec(BaseModel):
     )
 
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
+
+    def is_queen_node(self) -> bool:
+        """Return True when this spec is the queen conversational node."""
+        return self.id == "queen"
+
+    def supports_direct_user_io(self) -> bool:
+        """Return True when this node may talk to the user directly."""
+        return self.is_queen_node()
+
+
+def deprecated_client_facing_warning(node_spec: NodeSpec) -> str | None:
+    """Return a deprecation warning for legacy non-queen client_facing nodes."""
+    if node_spec.client_facing and not node_spec.is_queen_node():
+        return (
+            f"Node '{node_spec.id}' sets deprecated client_facing=True. "
+            "Non-queen direct human I/O is no longer supported; route worker "
+            "questions and approvals through queen escalation instead."
+        )
+    return None
+
+
+def warn_if_deprecated_client_facing(node_spec: NodeSpec) -> None:
+    """Log a compatibility warning once the node is loaded for execution."""
+    warning = deprecated_client_facing_warning(node_spec)
+    if warning:
+        logger.warning(warning)
 
 
 class DataBufferWriteError(Exception):
@@ -533,6 +562,21 @@ class NodeContext:
     # the returned dict into node_loop_iteration event data.  Used by
     # the queen to record the current phase per iteration.
     iteration_metadata_provider: Any = None  # Callable[[], dict] | None
+
+    @property
+    def is_queen_stream(self) -> bool:
+        """Return True when this context belongs to the queen conversation."""
+        return self.stream_id == "queen" or self.node_spec.is_queen_node()
+
+    @property
+    def emits_client_io(self) -> bool:
+        """Return True when text should be published to user-facing streams."""
+        return self.is_queen_stream
+
+    @property
+    def supports_direct_user_io(self) -> bool:
+        """Return True when the node may directly request user input."""
+        return self.is_queen_stream and not self.event_triggered
 
 
 @dataclass

@@ -1205,7 +1205,6 @@ queen_node = NodeSpec(
         "worker agent lifecycle."
     ),
     node_type="event_loop",
-    client_facing=True,
     max_node_visits=0,
     input_keys=["greeting"],
     output_keys=[],  # Queen should never have this

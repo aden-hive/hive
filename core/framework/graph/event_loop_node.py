@@ -231,7 +231,7 @@ class EventLoopNode(NodeProtocol):
     1. Try to restore from durable state (crash recovery)
     2. If no prior state, init from NodeSpec.system_prompt + input_keys
     3. Loop: drain injection queue -> stream LLM -> execute tools
-       -> if client_facing: block for user input (see below)
+       -> if queen-interactive: block for user input (see below)
        -> judge evaluates (acceptance criteria)
        (each add_* and set_output writes through to store immediately)
     4. Publish events to EventBus at each stage
@@ -239,7 +239,7 @@ class EventLoopNode(NodeProtocol):
     6. Terminate when judge returns ACCEPT, shutdown signaled, or max iterations
     7. Build output dict from OutputAccumulator
 
-    Client-facing blocking (``client_facing=True``):
+    Queen interaction blocking:
 
     - **Text-only turns** (no real tool calls, no set_output)
       automatically block for user input.  If the LLM is talking to the
@@ -273,7 +273,7 @@ class EventLoopNode(NodeProtocol):
             asyncio.Queue()
         )
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
-        # Client-facing input blocking state
+        # Queen input blocking state
         self._input_ready = asyncio.Event()
         self._awaiting_input = False
         self._shutdown = False
@@ -321,7 +321,7 @@ class EventLoopNode(NodeProtocol):
         # Verdict counters for runtime logging
         _accept_count = _retry_count = _escalate_count = _continue_count = 0
 
-        # Client-facing auto-block grace: consecutive text-only turns without
+        # Queen auto-block grace: consecutive text-only turns without
         # any real tool call or set_output.  Resets on progress.
         _cf_text_only_streak = 0
 
@@ -525,7 +525,7 @@ class EventLoopNode(NodeProtocol):
         set_output_tool = self._build_set_output_tool(ctx.node_spec.output_keys)
         if set_output_tool:
             tools.append(set_output_tool)
-        if ctx.node_spec.client_facing and not ctx.event_triggered:
+        if ctx.supports_direct_user_io:
             tools.append(self._build_ask_user_tool())
             if stream_id == "queen":
                 tools.append(self._build_ask_user_multiple_tool())
@@ -561,11 +561,11 @@ class EventLoopNode(NodeProtocol):
             tools.append(self._build_report_to_parent_tool())
 
         logger.info(
-            "[%s] Tools available (%d): %s | client_facing=%s | judge=%s",
+            "[%s] Tools available (%d): %s | direct_user_io=%s | judge=%s",
             node_id,
             len(tools),
             [t.name for t in tools],
-            ctx.node_spec.client_facing,
+            ctx.supports_direct_user_io,
             type(self._judge).__name__ if self._judge else "None",
         )
 
@@ -823,10 +823,10 @@ class EventLoopNode(NodeProtocol):
                         continue  # retry same iteration
 
                     # Non-transient or retries exhausted.
-                    # For client-facing nodes, surface the error and wait
+                    # For queen turns, surface the error and wait
                     # for user input instead of killing the loop.  The user
                     # can retry or adjust the request.
-                    if ctx.node_spec.client_facing:
+                    if ctx.supports_direct_user_io:
                         error_msg = f"LLM call failed: {e}"
                         _guardrail_phrase = (
                             "no endpoints available matching your guardrail restrictions "
@@ -862,7 +862,7 @@ class EventLoopNode(NodeProtocol):
                         _llm_turn_failed_waiting_input = True
                         break  # exit retry loop, continue outer iteration
 
-                    # Non-client-facing: crash as before
+                    # Non-interactive nodes: crash as before
                     import traceback
 
                     iter_latency_ms = int((time.time() - iter_start) * 1000)
@@ -906,11 +906,11 @@ class EventLoopNode(NodeProtocol):
 
             if _turn_cancelled:
                 logger.info("[%s] iter=%d: turn cancelled by user", node_id, iteration)
-                if ctx.node_spec.client_facing and not ctx.event_triggered:
+                if ctx.supports_direct_user_io:
                     await self._await_user_input(ctx, prompt="")
                 continue  # back to top of for-iteration loop
 
-            # Client-facing non-transient LLM failures wait for user input and then
+            # Queen non-transient LLM failures wait for user input and then
             # continue the outer loop without touching per-turn token vars.
             if _llm_turn_failed_waiting_input:
                 continue
@@ -1145,7 +1145,7 @@ class EventLoopNode(NodeProtocol):
                         "Try a different approach or different arguments."
                     )
                     if (
-                        ctx.node_spec.client_facing
+                        not ctx.supports_direct_user_io
                         and not ctx.event_triggered
                         and stream_id not in ("queen", "judge")
                         and self._event_bus is not None
@@ -1162,7 +1162,7 @@ class EventLoopNode(NodeProtocol):
                         )
                         recent_tool_fingerprints.clear()
                         recent_responses.clear()
-                    elif ctx.node_spec.client_facing and not ctx.event_triggered:
+                    elif ctx.supports_direct_user_io:
                         await conversation.add_user_message(warning_msg)
                         await self._await_user_input(ctx, prompt=doom_desc)
                         recent_tool_fingerprints.clear()
@@ -1184,13 +1184,13 @@ class EventLoopNode(NodeProtocol):
                 recent_tool_fingerprints=recent_tool_fingerprints,
             )
 
-            # 6h'. Client-facing input blocking
+            # 6h'. Queen input blocking
             #
             # Two triggers:
             # (a) Explicit ask_user() — blocks, then skips judge (6i).
             #     The LLM intentionally asked a question; judging before the
             #     user answers would inject confusing "missing outputs"
-            #     feedback.  Works for all client-facing nodes.
+            #     feedback. Works for the queen's interactive turns.
             # (b) Auto-block (queen only) — a text-only turn (no real
             #     tools, no set_output) from the queen node.  Blocks for
             #     the user's response, then falls through to judge so
@@ -1203,7 +1203,7 @@ class EventLoopNode(NodeProtocol):
             _cf_block = False
             _cf_auto = False
             _cf_prompt = ""
-            if ctx.node_spec.client_facing and not ctx.event_triggered:
+            if ctx.supports_direct_user_io:
                 if user_input_requested:
                     _cf_block = True
                     _cf_prompt = ask_user_prompt
@@ -1276,7 +1276,7 @@ class EventLoopNode(NodeProtocol):
                             node_type="event_loop",
                             step_index=iteration,
                             verdict="CONTINUE",
-                            verdict_feedback="Shutdown signaled (client-facing)",
+                            verdict_feedback="Shutdown signaled (queen interaction)",
                             tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
                             input_tokens=turn_tokens.get("input", 0),
@@ -1382,9 +1382,9 @@ class EventLoopNode(NodeProtocol):
 
                 recent_responses.clear()
 
-                # -- Judge-skip decision after client-facing blocking --
+                # -- Judge-skip decision after queen blocking --
                 #
-                # Explicit ask_user: skip judge while the agent is
+                # Explicit ask_user: skip judge while the queen is
                 # still gathering information from the user.  BUT if
                 # all required outputs have already been set, don't
                 # skip -- fall through to the judge so it can accept.
@@ -1840,7 +1840,7 @@ class EventLoopNode(NodeProtocol):
         Called in two situations:
         - The LLM explicitly calls ask_user().
         - Auto-block: any text-only turn (no real tools, no set_output)
-          from a client-facing node — ensures the user sees and responds
+          from the queen node — ensures the user sees and responds
           before the judge runs.
 
         Args:
@@ -2249,7 +2249,7 @@ class EventLoopNode(NodeProtocol):
                     # text as a chat message so the user can see it.  When
                     # options are present the QuestionWidget shows the
                     # question, but without options nothing renders it.
-                    if ask_user_options is None and ask_user_prompt and ctx.node_spec.client_facing:
+                    if ask_user_options is None and ask_user_prompt and ctx.emits_client_io:
                         await self._publish_text_delta(
                             stream_id,
                             node_id,

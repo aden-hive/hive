@@ -202,8 +202,12 @@ class WorkerAgent:
         self._has_been_activated = False
 
         # Pause support
-        self._pause_event: asyncio.Event = asyncio.Event()
-        self._pause_event.set()  # Not paused by default
+        # _run_gate controls whether worker execution may proceed.
+        # _pause_requested mirrors the pause-request semantics expected by
+        # EventLoopNode, where is_set() means "pause requested".
+        self._run_gate: asyncio.Event = asyncio.Event()
+        self._run_gate.set()  # Not paused by default
+        self._pause_requested: asyncio.Event = asyncio.Event()
 
         # Validator
         self._validator = OutputValidator()
@@ -287,96 +291,105 @@ class WorkerAgent:
         """Main execution loop: run node, handle retries, publish result."""
         gc = self._gc
         node_spec = self.node_spec
+        try:
+            # Write all mapped inputs from received activations to buffer
+            for activation in self._received_activations:
+                for key, value in activation.mapped_inputs.items():
+                    gc.buffer.write(key, value, validate=False)
 
-        # Write all mapped inputs from received activations to buffer
-        for activation in self._received_activations:
-            for key, value in activation.mapped_inputs.items():
-                gc.buffer.write(key, value, validate=False)
+            # Increment visit count (always, even if skipped)
+            async with gc._visits_lock:
+                visit_count = gc.node_visit_counts.get(node_spec.id, 0) + 1
+                gc.node_visit_counts[node_spec.id] = visit_count
 
-        # Increment visit count (always, even if skipped)
-        async with gc._visits_lock:
-            visit_count = gc.node_visit_counts.get(node_spec.id, 0) + 1
-            gc.node_visit_counts[node_spec.id] = visit_count
+            # Check max_node_visits — skip execution but still propagate edges
+            if node_spec.max_node_visits > 0 and visit_count > node_spec.max_node_visits:
+                logger.info(
+                    "Worker %s: visit %d exceeds max_node_visits=%d, skipping",
+                    node_spec.id, visit_count, node_spec.max_node_visits,
+                )
+                # Build a synthetic success result from current buffer state
+                existing_output: dict[str, Any] = {}
+                for key in node_spec.output_keys:
+                    val = gc.buffer.read(key)
+                    if val is not None:
+                        existing_output[key] = val
 
-        # Check max_node_visits — skip execution but still propagate edges
-        if node_spec.max_node_visits > 0 and visit_count > node_spec.max_node_visits:
-            logger.info(
-                "Worker %s: visit %d exceeds max_node_visits=%d, skipping",
-                node_spec.id, visit_count, node_spec.max_node_visits,
-            )
-            # Build a synthetic success result from current buffer state
-            existing_output: dict[str, Any] = {}
-            for key in node_spec.output_keys:
-                val = gc.buffer.read(key)
-                if val is not None:
-                    existing_output[key] = val
+                result = NodeResult(success=True, output=existing_output)
 
-            result = NodeResult(success=True, output=existing_output)
+                # Evaluate outgoing edges so the cycle continues
+                activations = await self._evaluate_outgoing_edges(result)
 
-            # Evaluate outgoing edges so the cycle continues
-            activations = await self._evaluate_outgoing_edges(result)
+                self.lifecycle = WorkerLifecycle.COMPLETED
+                self._last_result = result
+                self._last_activations = activations
+                return
 
-            self.lifecycle = WorkerLifecycle.COMPLETED
-            self._last_result = result
-            self._last_activations = activations
-            return
+            # Clear stale nullable outputs on re-visit
+            if visit_count > 1:
+                nullable_keys = getattr(node_spec, "nullable_output_keys", None) or []
+                for key in nullable_keys:
+                    if gc.buffer.read(key) is not None:
+                        gc.buffer.write(key, None, validate=False)
 
-        # Clear stale nullable outputs on re-visit
-        if visit_count > 1:
-            nullable_keys = getattr(node_spec, "nullable_output_keys", None) or []
-            for key in nullable_keys:
-                if gc.buffer.read(key) is not None:
-                    gc.buffer.write(key, None, validate=False)
+            # Continuous mode: accumulate tools and output keys
+            if gc.is_continuous and node_spec.tools:
+                for t in gc.tools:
+                    if t.name in node_spec.tools and t.name not in gc.cumulative_tool_names:
+                        gc.cumulative_tools.append(t)
+                        gc.cumulative_tool_names.add(t.name)
+            if gc.is_continuous and node_spec.output_keys:
+                for k in node_spec.output_keys:
+                    if k not in gc.cumulative_output_keys:
+                        gc.cumulative_output_keys.append(k)
 
-        # Continuous mode: accumulate tools and output keys
-        if gc.is_continuous and node_spec.tools:
-            for t in gc.tools:
-                if t.name in node_spec.tools and t.name not in gc.cumulative_tool_names:
-                    gc.cumulative_tools.append(t)
-                    gc.cumulative_tool_names.add(t.name)
-        if gc.is_continuous and node_spec.output_keys:
-            for k in node_spec.output_keys:
-                if k not in gc.cumulative_output_keys:
-                    gc.cumulative_output_keys.append(k)
+            # Append to execution path
+            async with gc._path_lock:
+                gc.path.append(node_spec.id)
 
-        # Append to execution path
-        async with gc._path_lock:
-            gc.path.append(node_spec.id)
+            # Get node implementation
+            node_impl = self._get_node_implementation()
 
-        # Get node implementation
-        node_impl = self._get_node_implementation()
+            # Build context
+            ctx = self._build_node_context()
 
-        # Build context
-        ctx = self._build_node_context()
+            # Execute with retry
+            result = await self._execute_with_retries(node_impl, ctx)
 
-        # Execute with retry
-        result = await self._execute_with_retries(node_impl, ctx)
+            # Handle result
+            if result.success:
+                # Validate and write outputs
+                self._write_outputs(result)
 
-        # Handle result
-        if result.success:
-            # Validate and write outputs
-            self._write_outputs(result)
+                # Evaluate outgoing edges
+                activations = await self._evaluate_outgoing_edges(result)
 
-            # Evaluate outgoing edges
-            activations = await self._evaluate_outgoing_edges(result)
-
-            # Publish completion
-            self.lifecycle = WorkerLifecycle.COMPLETED
-            self._last_result = result
-            self._last_activations = activations
-            completion = WorkerCompletion(
-                worker_id=node_spec.id,
-                success=True,
-                output=result.output,
-                tokens_used=result.tokens_used,
-                latency_ms=result.latency_ms,
-                conversation=result.conversation,
-                activations=activations,
-            )
-            await self._publish_completion(completion)
-        else:
+                # Publish completion
+                self.lifecycle = WorkerLifecycle.COMPLETED
+                self._last_result = result
+                self._last_activations = activations
+                completion = WorkerCompletion(
+                    worker_id=node_spec.id,
+                    success=True,
+                    output=result.output,
+                    tokens_used=result.tokens_used,
+                    latency_ms=result.latency_ms,
+                    conversation=result.conversation,
+                    activations=activations,
+                )
+                await self._publish_completion(completion)
+            else:
+                self.lifecycle = WorkerLifecycle.FAILED
+                self._last_result = result
+                self._last_activations = []
+                await self._publish_failure(result.error or "Unknown error")
+        except Exception as exc:
+            error = str(exc) or type(exc).__name__
+            logger.exception("Worker %s crashed during execution", node_spec.id)
             self.lifecycle = WorkerLifecycle.FAILED
-            await self._publish_failure(result.error or "Unknown error")
+            self._last_result = NodeResult(success=False, error=error)
+            self._last_activations = []
+            await self._publish_failure(error)
 
     async def _execute_with_retries(
         self, node_impl: NodeProtocol, ctx: NodeContext
@@ -387,7 +400,7 @@ class WorkerAgent:
 
         for attempt in range(max_retries + 1):
             # Check pause
-            await self._pause_event.wait()
+            await self._run_gate.wait()
 
             ctx.attempt = attempt + 1
             start = time.monotonic()
@@ -568,6 +581,7 @@ class WorkerAgent:
         if self.node_spec.node_type in ("event_loop", "gcu"):
             from framework.graph.event_loop_node import EventLoopNode
             from framework.graph.event_loop.types import LoopConfig
+            from framework.graph.node import warn_if_deprecated_client_facing
 
             conv_store = None
             if gc.storage_path:
@@ -577,7 +591,8 @@ class WorkerAgent:
 
             spillover = str(gc.storage_path / "data") if gc.storage_path else None
             lc = gc.loop_config
-            default_max_iter = 100 if self.node_spec.client_facing else 50
+            warn_if_deprecated_client_facing(self.node_spec)
+            default_max_iter = 100 if self.node_spec.supports_direct_user_io() else 50
 
             node = EventLoopNode(
                 event_bus=gc.event_bus,
@@ -671,7 +686,7 @@ class WorkerAgent:
             goal=gc.goal,
             max_tokens=gc.graph.max_tokens,
             runtime_logger=gc.runtime_logger,
-            pause_event=self._pause_event,
+            pause_event=self._pause_requested,
             continuous_mode=gc.is_continuous,
             inherited_conversation=inherited_conversation,
             cumulative_output_keys=list(gc.cumulative_output_keys) if gc.is_continuous else [],
@@ -836,10 +851,12 @@ class WorkerAgent:
     # ------------------------------------------------------------------
 
     def pause(self) -> None:
-        self._pause_event.clear()
+        self._pause_requested.set()
+        self._run_gate.clear()
 
     def resume(self) -> None:
-        self._pause_event.set()
+        self._pause_requested.clear()
+        self._run_gate.set()
 
     @property
     def is_terminal(self) -> bool:

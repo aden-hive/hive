@@ -111,6 +111,7 @@ export interface NodeSpec {
   routes: Record<string, string>;
   max_retries: number;
   max_node_visits: number;
+  /** Deprecated compatibility field; the queen is interactive by identity now. */
   client_facing: boolean;
   success_criteria: string | null;
   system_prompt: string;

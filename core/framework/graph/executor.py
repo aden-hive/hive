@@ -823,7 +823,7 @@ class GraphExecutor:
         "llm_tool_use": "event_loop",
         "llm_generate": "event_loop",
         "router": "event_loop",  # Unused theoretical infrastructure
-        "human_input": "event_loop",  # Use client_facing=True instead
+        "human_input": "event_loop",  # Use queen interaction / escalation instead
     }
 
     def _get_node_implementation(
@@ -874,8 +874,12 @@ class GraphExecutor:
             if self._storage_path:
                 spillover = str(self._storage_path / "data")
 
+            from framework.graph.node import warn_if_deprecated_client_facing
+
+            warn_if_deprecated_client_facing(node_spec)
+
             lc = self._loop_config
-            default_max_iter = 100 if node_spec.client_facing else 50
+            default_max_iter = 100 if node_spec.supports_direct_user_io() else 50
             node = EventLoopNode(
                 event_bus=self._event_bus,
                 judge=None,  # implicit judge: accept when output_keys are filled
@@ -892,7 +896,7 @@ class GraphExecutor:
                 tool_executor=self.tool_executor,
                 conversation_store=conv_store,
             )
-            # Cache so inject_event() is reachable for client-facing input
+            # Cache so inject_event() is reachable for queen interaction and escalation routing
             self.node_registry[node_spec.id] = node
             return node
 
@@ -1409,6 +1413,7 @@ class GraphExecutor:
         failed_workers: dict[str, str] = {}  # worker_id -> error
         all_completions: dict[str, WorkerCompletion] = {}
         completion_event = asyncio.Event()
+        execution_error: str | None = None
 
         # Total metrics
         total_tokens = 0
@@ -1451,16 +1456,36 @@ class GraphExecutor:
             return activations
 
         def _check_graph_done() -> bool:
-            """Check if all terminal workers have completed or failed."""
+            """Check whether active graph work has reached a terminal state."""
             if not terminal_worker_ids:
                 # No terminals: check if all workers are done
                 return all(
                     w.lifecycle in (WorkerLifecycle.COMPLETED, WorkerLifecycle.FAILED)
                     for w in workers.values()
                 )
-            for tid in terminal_worker_ids:
-                if tid not in completed_terminals and tid not in failed_workers:
-                    return False
+            if any(w.lifecycle == WorkerLifecycle.RUNNING for w in workers.values()):
+                return False
+            return any(
+                tid in completed_terminals or tid in failed_workers
+                for tid in terminal_worker_ids
+            )
+
+        def _mark_quiescent_terminal_failure() -> bool:
+            nonlocal execution_error
+            if execution_error is not None or not terminal_worker_ids:
+                return False
+            if any(w.lifecycle == WorkerLifecycle.RUNNING for w in workers.values()):
+                return False
+            if any(
+                tid in completed_terminals or tid in failed_workers
+                for tid in terminal_worker_ids
+            ):
+                return False
+            execution_error = (
+                "Worker execution ended before terminal nodes completed: "
+                f"{sorted(terminal_worker_ids)}"
+            )
+            self.logger.error(execution_error)
             return True
 
         def _route_activation(
@@ -1550,16 +1575,13 @@ class GraphExecutor:
             # Route activations to target workers
             for activation in activations:
                 _route_activation(
-                    activation, workers, pending_tasks,
-                    has_event_subscription=False,
+                    activation, workers, {},
+                    has_event_subscription=True,
                 )
 
             # Track terminal completion
             if worker_id in terminal_worker_ids:
                 completed_terminals.add(worker_id)
-
-            # Update visit counts
-            gc.node_visit_counts[worker_id] = gc.node_visit_counts.get(worker_id, 0) + 1
 
             # Write progress
             self._write_progress(
@@ -1569,7 +1591,7 @@ class GraphExecutor:
                 node_visit_counts=gc.node_visit_counts,
             )
 
-            if _check_graph_done():
+            if _check_graph_done() or _mark_quiescent_terminal_failure():
                 completion_event.set()
 
         async def _on_worker_failed(event: AgentEvent) -> None:
@@ -1583,7 +1605,7 @@ class GraphExecutor:
             if worker_id in terminal_worker_ids:
                 completed_terminals.add(worker_id)
 
-            if _check_graph_done():
+            if _check_graph_done() or _mark_quiescent_terminal_failure():
                 completion_event.set()
 
         # Subscribe to events (only if event bus has subscribe capability)
@@ -1621,26 +1643,61 @@ class GraphExecutor:
                             break
                         await asyncio.sleep(0.1)
             else:
-                # No event bus: poll worker tasks directly and route completions inline
-                pending_tasks: dict[str, asyncio.Task] = {}
-                for wid, w in workers.items():
-                    if w._task is not None:
-                        pending_tasks[wid] = w._task
+                # No event bus: wait on worker tasks directly and route completions inline.
+                pending_tasks: dict[str, asyncio.Task] = {
+                    wid: w._task
+                    for wid, w in workers.items()
+                    if w._task is not None
+                }
+                while True:
+                    if _check_graph_done():
+                        break
 
-                max_polls = graph.max_steps * 100
-                for poll_idx in range(max_polls):
-                    await asyncio.sleep(0.01)
+                    if not pending_tasks:
+                        unresolved_terminals = sorted(
+                            tid
+                            for tid in terminal_worker_ids
+                            if tid not in completed_terminals and tid not in failed_workers
+                        )
+                        if unresolved_terminals:
+                            execution_error = (
+                                "Worker execution ended before terminal nodes completed: "
+                                f"{unresolved_terminals}"
+                            )
+                        else:
+                            execution_error = (
+                                "Worker execution ended before all workers reached "
+                                "a terminal lifecycle state"
+                            )
+                        self.logger.error(execution_error)
+                        break
 
-                    newly_done: list[str] = []
-                    for wid, task in list(pending_tasks.items()):
-                        if task.done():
-                            newly_done.append(wid)
+                    task_to_worker = {task: wid for wid, task in pending_tasks.items()}
+                    done, _pending = await asyncio.wait(
+                        set(task_to_worker.keys()),
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
 
-                    for wid in newly_done:
-                        task = pending_tasks.pop(wid)
+                    for task in done:
+                        wid = task_to_worker[task]
+                        pending_tasks.pop(wid, None)
                         worker = workers[wid]
 
-                        if worker.lifecycle == WorkerLifecycle.COMPLETED:
+                        if task.cancelled():
+                            error = "Worker task was cancelled unexpectedly"
+                            failed_workers[wid] = error
+                            self.logger.error(f"  ✗ Worker failed: {wid} - {error}")
+                            if wid in terminal_worker_ids:
+                                completed_terminals.add(wid)
+                            continue
+
+                        task_error = None
+                        try:
+                            task_error = task.exception()
+                        except Exception as exc:
+                            task_error = exc
+
+                        if worker.lifecycle == WorkerLifecycle.COMPLETED and task_error is None:
                             # Read result directly from the worker
                             last_result = worker._last_result
                             outgoing_activations = worker._last_activations
@@ -1702,32 +1759,33 @@ class GraphExecutor:
                             if wid in terminal_worker_ids:
                                 completed_terminals.add(wid)
 
-                            gc.node_visit_counts[wid] = gc.node_visit_counts.get(wid, 0) + 1
-
                             self._write_progress(
                                 current_node=wid,
                                 path=gc.path,
                                 buffer=buffer,
                                 node_visit_counts=gc.node_visit_counts,
                             )
+                            continue
 
-                        elif worker.lifecycle == WorkerLifecycle.FAILED:
+                        if worker.lifecycle == WorkerLifecycle.FAILED:
                             error = "Worker failed"
-                            try:
-                                exc = task.exception()
-                                if exc:
-                                    error = str(exc)
-                            except Exception:
-                                pass
-                            failed_workers[wid] = error
-                            self.logger.error(f"  ✗ Worker failed: {wid} - {error}")
-                            if wid in terminal_worker_ids:
-                                completed_terminals.add(wid)
+                            last_result = worker._last_result
+                            if last_result and last_result.error:
+                                error = last_result.error
+                            elif task_error is not None:
+                                error = str(task_error)
+                        elif task_error is not None:
+                            error = str(task_error)
+                        else:
+                            error = (
+                                "Worker task completed without publishing a completion "
+                                f"(lifecycle={worker.lifecycle})"
+                            )
 
-                    if _check_graph_done():
-                        break
-                else:
-                    self.logger.warning("Worker polling exceeded safety bound")
+                        failed_workers[wid] = error
+                        self.logger.error(f"  ✗ Worker failed: {wid} - {error}")
+                        if wid in terminal_worker_ids:
+                            completed_terminals.add(wid)
 
             # Assemble result
             terminal_output: dict[str, Any] = {}
@@ -1741,7 +1799,7 @@ class GraphExecutor:
                     terminal_output = all_completions[last_id].output
 
             # Quality assessment
-            has_failures = bool(failed_workers)
+            has_failures = bool(failed_workers) or execution_error is not None
             exec_quality = "failed" if has_failures else "clean"
 
             saved_buffer = buffer.read_all()
@@ -1770,9 +1828,15 @@ class GraphExecutor:
                 success=success,
                 output=terminal_output or saved_buffer,
                 error=(
-                    "; ".join(f"{k}: {v}" for k, v in failed_workers.items())
-                    if failed_workers
-                    else None
+                    "; ".join(
+                        part
+                        for part in [
+                            *[f"{k}: {v}" for k, v in failed_workers.items()],
+                            execution_error,
+                        ]
+                        if part
+                    )
+                    or None
                 ),
                 steps_executed=len(gc.path),
                 total_tokens=total_tokens,

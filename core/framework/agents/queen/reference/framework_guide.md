@@ -76,7 +76,7 @@ goal = Goal(
 | output_keys | list[str] | required | Memory keys this node writes via set_output |
 | system_prompt | str | "" | LLM instructions |
 | tools | list[str] | [] | Tool names from MCP servers |
-| client_facing | bool | False | If True, streams to user and blocks for input |
+| client_facing | bool | False | Deprecated compatibility field. Queen interactivity is implicit; workers should escalate instead |
 | nullable_output_keys | list[str] | [] | Keys that may remain unset |
 | max_node_visits | int | 0 | 0=unlimited (default); >1 for one-shot feedback loops |
 | max_retries | int | 3 | Retries on failure |
@@ -132,13 +132,14 @@ downstream node only sees the serialized summary string.
 
 **Typical agent structure (2 nodes):**
 ```
-process (autonomous) ←→ review (client-facing)
+process (autonomous) ←→ review (queen-mediated)
 ```
 The queen owns intake — she gathers requirements from the user, then
 passes structured input via `run_agent_with_input(task)`. When building
 the agent, design the entry node's `input_keys` to match what the queen
 will provide at run time. Worker agents should NOT have a client-facing
-intake node. Client-facing nodes are for mid-execution review/approval only.
+intake node. Mid-execution review/approval should happen through queen
+escalation rather than direct worker HITL.
 
 For simpler agents, just 1 autonomous node:
 ```

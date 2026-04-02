@@ -304,9 +304,120 @@ async def _smoke_test_provider_async(provider: dict, timeout_seconds: float = 25
                     "worker execution completed but did not produce result='OK'"
                 )
 
-    await asyncio.wait_for(_run_plain_completion(), timeout=timeout_seconds)
-    await asyncio.wait_for(_run_tool_completion(), timeout=timeout_seconds)
-    await asyncio.wait_for(_run_worker_execution(), timeout=timeout_seconds)
+    async def _run_branch_execution() -> None:
+        with TemporaryDirectory(prefix="dummy-branch-smoke-") as tmpdir:
+            tmp_path = Path(tmpdir)
+            runtime = Runtime(storage_path=tmp_path / "runtime")
+            executor = GraphExecutor(
+                runtime=runtime,
+                llm=llm,
+                storage_path=tmp_path / "session",
+                loop_config={"max_iterations": 4},
+            )
+            graph = GraphSpec(
+                id="dummy-branch-smoke",
+                goal_id="dummy-branch-smoke-goal",
+                entry_node="classify",
+                entry_points={"start": "classify"},
+                terminal_nodes=["positive", "negative"],
+                nodes=[
+                    NodeSpec(
+                        id="classify",
+                        name="Branch Classifier",
+                        description="Routes to the positive or negative handler",
+                        node_type="event_loop",
+                        input_keys=["route"],
+                        output_keys=["label"],
+                        system_prompt=(
+                            "Read the 'route' input. "
+                            "If it is exactly 'positive', call set_output with "
+                            "key='label' and value='positive'. "
+                            "Otherwise call set_output with key='label' and value='negative'. "
+                            "Do not use plain text as the final answer."
+                        ),
+                    ),
+                    NodeSpec(
+                        id="positive",
+                        name="Positive Branch",
+                        description="Positive terminal branch",
+                        node_type="event_loop",
+                        output_keys=["result"],
+                        system_prompt=(
+                            "Call set_output with key='result' and value='BRANCH_OK'. "
+                            "Do not use plain text as the final answer."
+                        ),
+                    ),
+                    NodeSpec(
+                        id="negative",
+                        name="Negative Branch",
+                        description="Negative terminal branch",
+                        node_type="event_loop",
+                        output_keys=["result"],
+                        system_prompt=(
+                            "Call set_output with key='result' and value='UNEXPECTED_NEGATIVE'. "
+                            "Do not use plain text as the final answer."
+                        ),
+                    ),
+                ],
+                edges=[
+                    {
+                        "id": "classify-to-positive",
+                        "source": "classify",
+                        "target": "positive",
+                        "condition": "conditional",
+                        "condition_expr": "output.get('label') == 'positive'",
+                        "priority": 1,
+                    },
+                    {
+                        "id": "classify-to-negative",
+                        "source": "classify",
+                        "target": "negative",
+                        "condition": "conditional",
+                        "condition_expr": "output.get('label') == 'negative'",
+                        "priority": 0,
+                    },
+                ],
+                memory_keys=["route", "label", "result"],
+                conversation_mode="continuous",
+            )
+            goal = Goal(
+                id="dummy-branch-smoke-goal",
+                name="Dummy Branch Smoke",
+                description="Verify conditional worker routing reaches the expected terminal.",
+            )
+            result = await executor.execute(
+                graph,
+                goal,
+                {"route": "positive"},
+                validate_graph=False,
+            )
+            if not result.success:
+                raise RuntimeError(result.error or "branch execution smoke failed")
+            if result.path != ["classify", "positive"]:
+                raise RuntimeError(
+                    "branch execution did not reach the expected terminal path: "
+                    f"{result.path}"
+                )
+            if result.output.get("result") != "BRANCH_OK":
+                raise RuntimeError(
+                    "branch execution completed but did not produce result='BRANCH_OK'"
+                )
+
+    current_step = "plain completion"
+
+    try:
+        await asyncio.wait_for(_run_plain_completion(), timeout=timeout_seconds)
+        current_step = "tool calling"
+        await asyncio.wait_for(_run_tool_completion(), timeout=timeout_seconds)
+        current_step = "single-node worker execution"
+        await asyncio.wait_for(_run_worker_execution(), timeout=timeout_seconds)
+        current_step = "branch worker execution"
+        await asyncio.wait_for(_run_branch_execution(), timeout=timeout_seconds)
+    except TimeoutError as exc:
+        raise RuntimeError(
+            f"provider smoke test timed out during {current_step} "
+            f"after {timeout_seconds:.0f}s"
+        ) from exc
 
 
 def smoke_test_provider(provider: dict, timeout_seconds: float = 25.0) -> None:

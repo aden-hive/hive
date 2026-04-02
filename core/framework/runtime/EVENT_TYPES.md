@@ -198,7 +198,7 @@ A tool call has finished executing.
 
 ## Client I/O
 
-These events are emitted only by nodes with `client_facing=True`. They drive the TUI's chat interface.
+These events are emitted by the queen's interactive turns. They drive the TUI's chat interface.
 
 ### `client_output_delta`
 
@@ -209,7 +209,7 @@ Incremental text output meant for the human operator.
 | `content`  | `str` | New text chunk (delta)       |
 | `snapshot` | `str` | Full accumulated text so far |
 
-**Emitted by:** `EventLoopNode._publish_text_delta()` when `client_facing=True`
+**Emitted by:** `EventLoopNode._publish_text_delta()` for queen/user-facing output
 
 ---
 

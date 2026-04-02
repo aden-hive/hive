@@ -8,7 +8,7 @@ import logging
 
 import pytest
 
-from framework.graph.edge import GraphSpec
+from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
 from framework.graph.node import NodeResult, NodeSpec
@@ -85,7 +85,7 @@ async def test_executor_single_node_success():
         description="simple test",
     )
 
-    result = await executor.execute(graph=graph, goal=goal)
+    result = await executor.execute(graph=graph, goal=goal, validate_graph=False)
 
     assert result.success is True
     assert result.path == ["n1"]
@@ -141,7 +141,7 @@ async def test_executor_single_node_failure():
         description="failure test",
     )
 
-    result = await executor.execute(graph=graph, goal=goal)
+    result = await executor.execute(graph=graph, goal=goal, validate_graph=False)
 
     assert result.success is False
     assert result.error is not None
@@ -257,6 +257,57 @@ async def test_executor_no_events_without_event_bus():
     result = await executor.execute(graph=graph, goal=goal)
 
     assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_executor_fails_when_terminal_worker_is_never_reached():
+    """No-event-bus worker execution should fail clearly when no terminal completes."""
+    runtime = DummyRuntime()
+
+    graph = GraphSpec(
+        id="graph-missing-terminal",
+        goal_id="g-missing-terminal",
+        nodes=[
+            NodeSpec(
+                id="start",
+                name="start",
+                description="entry node",
+                node_type="event_loop",
+                output_keys=["result"],
+            ),
+            NodeSpec(
+                id="done",
+                name="done",
+                description="unreached terminal",
+                node_type="event_loop",
+                output_keys=["result"],
+            ),
+        ],
+        edges=[
+            EdgeSpec(
+                id="start-to-done",
+                source="start",
+                target="done",
+                condition=EdgeCondition.CONDITIONAL,
+                condition_expr="output.get('missing') == 'never'",
+            )
+        ],
+        entry_node="start",
+        terminal_nodes=["done"],
+    )
+
+    executor = GraphExecutor(
+        runtime=runtime,
+        node_registry={"start": SuccessNode(), "done": SuccessNode()},
+    )
+
+    goal = Goal(id="g-missing-terminal", name="missing-terminal", description="test")
+    result = await executor.execute(graph=graph, goal=goal)
+
+    assert result.success is False
+    assert result.path == ["start"]
+    assert result.error is not None
+    assert "terminal nodes completed" in result.error
 
 
 def test_write_progress_uses_atomic_write_and_updates_state(tmp_path, monkeypatch):

@@ -94,12 +94,12 @@ class EventType(StrEnum):
     TOOL_CALL_STARTED = "tool_call_started"
     TOOL_CALL_COMPLETED = "tool_call_completed"
 
-    # Client I/O (client_facing=True nodes only)
+    # Queen/user interaction events
     CLIENT_OUTPUT_DELTA = "client_output_delta"
     CLIENT_INPUT_REQUESTED = "client_input_requested"
     CLIENT_INPUT_RECEIVED = "client_input_received"
 
-    # Internal node observability (client_facing=False nodes)
+    # Internal node observability
     NODE_INTERNAL_OUTPUT = "node_internal_output"
     NODE_INPUT_BLOCKED = "node_input_blocked"
     NODE_STALLED = "node_stalled"
@@ -879,7 +879,7 @@ class EventBus:
         iteration: int | None = None,
         inner_turn: int = 0,
     ) -> None:
-        """Emit client output delta event (client_facing=True nodes)."""
+        """Emit user-facing output delta for interactive queen turns."""
         data: dict = {"content": content, "snapshot": snapshot, "inner_turn": inner_turn}
         if iteration is not None:
             data["iteration"] = iteration
@@ -902,7 +902,7 @@ class EventBus:
         options: list[str] | None = None,
         questions: list[dict] | None = None,
     ) -> None:
-        """Emit client input requested event (client_facing=True nodes).
+        """Emit a user-input request for interactive queen turns.
 
         Args:
             options: Optional predefined choices for the user (1-3 items).
@@ -936,7 +936,7 @@ class EventBus:
         content: str,
         execution_id: str | None = None,
     ) -> None:
-        """Emit node internal output event (client_facing=False nodes)."""
+        """Emit node internal output for non-user-facing execution."""
         await self.publish(
             AgentEvent(
                 type=EventType.NODE_INTERNAL_OUTPUT,

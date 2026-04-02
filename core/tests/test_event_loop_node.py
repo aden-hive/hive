@@ -434,15 +434,14 @@ class TestEventBusLifecycle:
 
     @pytest.mark.asyncio
     @pytest.mark.skip(reason="Hangs in non-interactive shells (client-facing blocks on stdin)")
-    async def test_client_facing_uses_client_output_delta(self, runtime, buffer):
-        """client_facing=True should emit CLIENT_OUTPUT_DELTA instead of LLM_TEXT_DELTA."""
+    async def test_queen_stream_uses_client_output_delta(self, runtime, buffer):
+        """Queen streams should emit CLIENT_OUTPUT_DELTA instead of LLM_TEXT_DELTA."""
         spec = NodeSpec(
             id="ui_node",
             name="UI Node",
             description="Streams to user",
             node_type="event_loop",
             output_keys=[],
-            client_facing=True,
         )
         llm = MockStreamingLLM(scenarios=[text_scenario("visible to user")])
         bus = EventBus()
@@ -453,7 +452,7 @@ class TestEventBusLifecycle:
             handler=lambda e: received_types.append(e.type),
         )
 
-        ctx = build_ctx(runtime, spec, buffer, llm)
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
 
         # Text-only on client_facing no longer blocks (no ask_user), so
@@ -469,8 +468,8 @@ class TestEventBusLifecycle:
 # ===========================================================================
 
 
-class TestClientFacingBlocking:
-    """Tests for native client_facing input blocking in EventLoopNode."""
+class TestQueenInteractionBlocking:
+    """Tests for queen-native input blocking in EventLoopNode."""
 
     @pytest.fixture
     def client_spec(self):
@@ -480,7 +479,6 @@ class TestClientFacingBlocking:
             description="chat node",
             node_type="event_loop",
             output_keys=[],
-            client_facing=True,
         )
 
     @pytest.mark.asyncio
@@ -494,7 +492,7 @@ class TestClientFacingBlocking:
         )
         bus = EventBus()
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
-        ctx = build_ctx(runtime, client_spec, buffer, llm)
+        ctx = build_ctx(runtime, client_spec, buffer, llm, stream_id="queen")
 
         # Should complete without blocking — no ask_user called, no output_keys required
         result = await node.execute(ctx)
@@ -522,13 +520,15 @@ class TestClientFacingBlocking:
         )
         bus = EventBus()
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
-        ctx = build_ctx(runtime, client_spec, buffer, llm)
+        ctx = build_ctx(runtime, client_spec, buffer, llm, stream_id="queen")
 
-        async def user_responds():
+        async def user_responds_then_shutdown():
             await asyncio.sleep(0.05)
             await node.inject_event("I need help")
+            await asyncio.sleep(0.1)
+            node.signal_shutdown()
 
-        user_task = asyncio.create_task(user_responds())
+        user_task = asyncio.create_task(user_responds_then_shutdown())
         result = await node.execute(ctx)
         await user_task
 
@@ -538,15 +538,14 @@ class TestClientFacingBlocking:
         assert result.output["answer"] == "help provided"
 
     @pytest.mark.asyncio
-    async def test_client_facing_does_not_block_on_tools(self, runtime, buffer):
-        """client_facing + tool calls (no ask_user) should NOT block."""
+    async def test_queen_does_not_block_on_tools(self, runtime, buffer):
+        """Queen tool calls (without ask_user) should NOT block."""
         spec = NodeSpec(
             id="chat",
             name="Chat",
             description="chat node",
             node_type="event_loop",
             output_keys=["result"],
-            client_facing=True,
         )
         # Scenario 1: LLM calls set_output
         # Scenario 2: LLM produces text — implicit judge ACCEPTs (output key set)
@@ -558,10 +557,15 @@ class TestClientFacingBlocking:
             ]
         )
         node = EventLoopNode(config=LoopConfig(max_iterations=5))
-        ctx = build_ctx(runtime, spec, buffer, llm)
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
 
-        # Should complete without blocking — no ask_user called
+        async def shutdown_after_presentation():
+            await asyncio.sleep(0.05)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(shutdown_after_presentation())
         result = await node.execute(ctx)
+        await task
 
         assert result.success is True
         assert result.output["result"] == "done"
@@ -598,7 +602,7 @@ class TestClientFacingBlocking:
         )
         bus = EventBus()
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=10))
-        ctx = build_ctx(runtime, client_spec, buffer, llm)
+        ctx = build_ctx(runtime, client_spec, buffer, llm, stream_id="queen")
 
         async def shutdown_after_delay():
             await asyncio.sleep(0.05)
@@ -634,7 +638,7 @@ class TestClientFacingBlocking:
         )
 
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
-        ctx = build_ctx(runtime, client_spec, buffer, llm)
+        ctx = build_ctx(runtime, client_spec, buffer, llm, stream_id="queen")
 
         async def shutdown():
             await asyncio.sleep(0.05)
@@ -649,7 +653,7 @@ class TestClientFacingBlocking:
 
     @pytest.mark.asyncio
     @pytest.mark.skip(reason="Hangs in non-interactive shells (client-facing blocks on stdin)")
-    async def test_ask_user_with_real_tools(self, runtime, buffer):
+    async def test_queen_ask_user_with_real_tools(self, runtime, buffer):
         """ask_user alongside real tool calls still triggers blocking."""
         spec = NodeSpec(
             id="chat",
@@ -657,7 +661,6 @@ class TestClientFacingBlocking:
             description="chat node",
             node_type="event_loop",
             output_keys=[],
-            client_facing=True,
         )
         # LLM calls a real tool AND ask_user in the same turn
         llm = MockStreamingLLM(
@@ -683,7 +686,12 @@ class TestClientFacingBlocking:
             config=LoopConfig(max_iterations=5),
         )
         ctx = build_ctx(
-            runtime, spec, buffer, llm, tools=[Tool(name="search", description="", parameters={})]
+            runtime,
+            spec,
+            buffer,
+            llm,
+            tools=[Tool(name="search", description="", parameters={})],
+            stream_id="queen",
         )
 
         async def unblock():
@@ -698,18 +706,21 @@ class TestClientFacingBlocking:
         assert llm._call_index >= 2
 
     @pytest.mark.asyncio
-    async def test_ask_user_not_available_non_client_facing(self, runtime, buffer):
-        """ask_user tool should NOT be injected for non-client-facing nodes."""
+    async def test_ask_user_not_available_for_workers_even_with_legacy_client_facing(
+        self, runtime, buffer
+    ):
+        """Workers should not receive ask_user even if legacy client_facing=True is set."""
         spec = NodeSpec(
             id="internal",
             name="Internal",
             description="internal node",
             node_type="event_loop",
             output_keys=[],
+            client_facing=True,
         )
         llm = MockStreamingLLM(scenarios=[text_scenario("thinking...")])
         node = EventLoopNode(config=LoopConfig(max_iterations=2))
-        ctx = build_ctx(runtime, spec, buffer, llm)
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="worker")
 
         await node.execute(ctx)
 
@@ -718,6 +729,8 @@ class TestClientFacingBlocking:
         for call in llm.stream_calls:
             tool_names = [t.name for t in (call["tools"] or [])]
             assert "ask_user" not in tool_names
+            assert "ask_user_multiple" not in tool_names
+            assert "escalate" in tool_names
 
     @pytest.mark.asyncio
     async def test_escalate_available_for_worker_stream(self, runtime, buffer):
@@ -753,7 +766,13 @@ class TestClientFacingBlocking:
         node = EventLoopNode(config=LoopConfig(max_iterations=2))
         ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
 
+        async def shutdown_after_turn():
+            await asyncio.sleep(0.05)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(shutdown_after_turn())
         await node.execute(ctx)
+        await task
 
         assert llm._call_index >= 1
         tool_names = [t.name for t in (llm.stream_calls[0]["tools"] or [])]
@@ -919,7 +938,7 @@ class TestEscalate:
 
 
 class TestClientFacingExpectingWork:
-    """Tests for _cf_expecting_work state machine in client-facing nodes."""
+    """Tests for _cf_expecting_work state machine in queen interactive turns."""
 
     @pytest.mark.asyncio
     async def test_text_after_user_input_goes_to_judge(self, runtime, buffer):
@@ -934,7 +953,6 @@ class TestClientFacingExpectingWork:
             description="review findings",
             node_type="event_loop",
             output_keys=["decision"],
-            client_facing=True,
         )
         llm = MockStreamingLLM(
             scenarios=[
@@ -956,13 +974,15 @@ class TestClientFacingExpectingWork:
             ]
         )
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
-        ctx = build_ctx(runtime, spec, buffer, llm)
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
 
-        async def user_responds():
+        async def user_responds_then_shutdown():
             await asyncio.sleep(0.05)
             await node.inject_event("Generate the report")
+            await asyncio.sleep(0.1)
+            node.signal_shutdown()
 
-        task = asyncio.create_task(user_responds())
+        task = asyncio.create_task(user_responds_then_shutdown())
         result = await node.execute(ctx)
         await task
 
@@ -984,7 +1004,6 @@ class TestClientFacingExpectingWork:
             description="orchestrator",
             node_type="event_loop",
             output_keys=[],
-            client_facing=True,
         )
         llm = MockStreamingLLM(
             scenarios=[
@@ -1000,7 +1019,7 @@ class TestClientFacingExpectingWork:
             ]
         )
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
-        ctx = build_ctx(runtime, spec, buffer, llm)
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
 
         async def user_then_shutdown():
             await asyncio.sleep(0.05)
@@ -1032,7 +1051,6 @@ class TestClientFacingExpectingWork:
             description="generate report",
             node_type="event_loop",
             output_keys=["status"],
-            client_facing=True,
         )
 
         def my_executor(tool_use: ToolUse) -> ToolResult:
@@ -1074,6 +1092,7 @@ class TestClientFacingExpectingWork:
             buffer,
             llm,
             tools=[Tool(name="save_data", description="save", parameters={})],
+            stream_id="queen",
         )
 
         async def interactions():
@@ -1083,6 +1102,8 @@ class TestClientFacingExpectingWork:
             # Inject second user response.
             await asyncio.sleep(0.2)
             await node.inject_event("Looks good")
+            await asyncio.sleep(0.1)
+            node.signal_shutdown()
 
         task = asyncio.create_task(interactions())
         result = await node.execute(ctx)
@@ -1104,7 +1125,6 @@ class TestClientFacingExpectingWork:
             description="generate report",
             node_type="event_loop",
             output_keys=["status"],
-            client_facing=True,
         )
 
         def my_executor(tool_use: ToolUse) -> ToolResult:
@@ -1146,13 +1166,16 @@ class TestClientFacingExpectingWork:
             buffer,
             llm,
             tools=[Tool(name="save_data", description="save", parameters={})],
+            stream_id="queen",
         )
 
-        async def user_responds():
+        async def user_responds_then_shutdown():
             await asyncio.sleep(0.05)
             await node.inject_event("Yes")
+            await asyncio.sleep(0.15)
+            node.signal_shutdown()
 
-        task = asyncio.create_task(user_responds())
+        task = asyncio.create_task(user_responds_then_shutdown())
         result = await node.execute(ctx)
         await task
 
@@ -1546,18 +1569,17 @@ class TestTransientErrorRetry:
         assert llm._call_index == 1  # only tried once
 
     @pytest.mark.asyncio
-    async def test_client_facing_non_transient_error_does_not_crash(
+    async def test_queen_non_transient_error_does_not_crash(
         self, runtime, node_spec, buffer
     ):
-        """Client-facing non-transient errors should wait for input, not crash on token vars."""
+        """Queen non-transient errors should wait for input, not crash on token vars."""
         node_spec.output_keys = []
-        node_spec.client_facing = True
         llm = ErrorThenSuccessLLM(
             error=ValueError("bad request: blocked by policy"),
             fail_count=100,  # always fails
             success_scenario=text_scenario("unreachable"),
         )
-        ctx = build_ctx(runtime, node_spec, buffer, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm, stream_id="queen")
         node = EventLoopNode(
             config=LoopConfig(
                 max_iterations=1,
@@ -2011,19 +2033,18 @@ class TestToolDoomLoopIntegration:
         assert "search" in doom_events[0].data["description"]
 
     @pytest.mark.asyncio
-    async def test_client_facing_worker_doom_loop_escalates_to_queen(
+    async def test_worker_doom_loop_escalates_to_queen(
         self,
         runtime,
         buffer,
     ):
-        """Client-facing worker doom loops should escalate instead of blocking for user input."""
+        """Worker doom loops should escalate instead of blocking for user input."""
         spec = NodeSpec(
             id="worker",
             name="Worker",
             description="worker node",
             node_type="event_loop",
             output_keys=[],
-            client_facing=True,
         )
         judge = AsyncMock(spec=JudgeProtocol)
         eval_count = 0

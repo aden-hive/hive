@@ -1966,15 +1966,15 @@ class AgentRunner:
         if not self._agent_runtime.is_running:
             await self._agent_runtime.start()
 
-        # Set up stdin-based I/O for client-facing nodes in headless mode.
-        # When a client_facing EventLoopNode calls ask_user(), it emits
+        # Set up stdin-based I/O for the queen in headless mode.
+        # When the queen calls ask_user(), it emits
         # CLIENT_INPUT_REQUESTED on the event bus and blocks.  We subscribe
         # a handler that prints the prompt and reads from stdin, then injects
         # the user's response back into the node to unblock it.
-        has_client_facing = any(n.client_facing for n in self.graph.nodes)
+        has_queen = any(n.is_queen_node() for n in self.graph.nodes)
         sub_ids: list[str] = []
 
-        if has_client_facing and sys.stdin.isatty():
+        if has_queen and sys.stdin.isatty():
             from framework.runtime.event_bus import EventType
 
             runtime = self._agent_runtime

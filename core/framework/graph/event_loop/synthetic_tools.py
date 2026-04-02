@@ -18,7 +18,7 @@ from framework.llm.provider import Tool, ToolResult
 def build_ask_user_tool() -> Tool:
     """Build the synthetic ask_user tool for explicit user-input requests.
 
-    Client-facing nodes call ask_user() when they need to pause and wait
+    The queen calls ask_user() when it needs to pause and wait
     for user input.  Text-only turns WITHOUT ask_user flow through without
     blocking, allowing progress updates and summaries to stream freely.
     """
