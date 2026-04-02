@@ -841,6 +841,15 @@ class NodeConversation:
         freeform_lines: list[str] = []
         collapsed_msgs: list[Message] = []
 
+        # Collect all tool_use IDs present in old messages so we can detect
+        # orphaned tool results whose parent assistant message was already
+        # compacted away (API invariant protection).
+        old_tc_ids: set[str] = set()
+        for msg in old_messages:
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    old_tc_ids.add(tc.get("id", ""))
+
         if aggressive:
             # Aggressive: only keep set_output tool pairs and error results.
             # Everything else is collapsed into a tool-call history summary.
@@ -862,9 +871,17 @@ class NodeConversation:
                 else:
                     collapsible_tc_ids |= tc_ids
 
+            # Skill content and transition markers are always protected
+            for msg in old_messages:
+                if msg.role == "tool" and msg.is_skill_content and msg.tool_use_id:
+                    protected_tc_ids.add(msg.tool_use_id)
+
             # Second pass: classify all messages
             for msg in old_messages:
-                if msg.role == "tool":
+                if msg.is_transition_marker:
+                    # Transition markers are always kept (phase boundaries)
+                    kept_structural.append(msg)
+                elif msg.role == "tool":
                     tc_id = msg.tool_use_id or ""
                     if tc_id in protected_tc_ids:
                         kept_structural.append(msg)
@@ -873,6 +890,12 @@ class NodeConversation:
                         kept_structural.append(msg)
                         # Protect the parent assistant message too
                         protected_tc_ids.add(tc_id)
+                    elif msg.is_skill_content:
+                        kept_structural.append(msg)
+                    elif tc_id and tc_id not in old_tc_ids:
+                        # Orphaned tool result — parent tool_use not in old msgs.
+                        # Keep it to maintain API invariants.
+                        kept_structural.append(msg)
                     else:
                         collapsed_msgs.append(msg)
                 elif msg.role == "assistant" and msg.tool_calls:
@@ -903,7 +926,10 @@ class NodeConversation:
         else:
             # Standard mode: keep all tool call pairs as structural
             for msg in old_messages:
-                if msg.role == "tool":
+                if msg.is_transition_marker:
+                    # Transition markers are always kept (phase boundaries)
+                    kept_structural.append(msg)
+                elif msg.role == "tool":
                     kept_structural.append(msg)
                 elif msg.role == "assistant" and msg.tool_calls:
                     compact_tcs = _compact_tool_calls(msg.tool_calls)
