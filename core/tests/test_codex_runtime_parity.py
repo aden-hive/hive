@@ -10,17 +10,20 @@ from unittest.mock import MagicMock
 import pytest
 
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
-from framework.graph.executor import GraphExecutor
 from framework.graph.event_loop_node import EventLoopNode, LoopConfig
+from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
 from framework.graph.node import NodeContext, NodeSpec, SharedMemory
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
-from framework.runner.tool_registry import ToolRegistry
 from framework.llm.stream_events import FinishEvent, TextDeltaEvent, ToolCallEvent
+from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.core import Runtime
 from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.server.queen_orchestrator import _client_input_counts_as_planning_ask
-from framework.tools.queen_lifecycle_tools import QueenPhaseState, register_queen_lifecycle_tools
+from framework.tools.queen_lifecycle_tools import (
+    QueenPhaseState,
+    register_queen_lifecycle_tools,
+)
 
 
 class MockStreamingLLM(LLMProvider):
@@ -77,7 +80,9 @@ def multi_tool_call_scenario(*calls: tuple[str, dict[str, Any], str]) -> list:
         ToolCallEvent(tool_use_id=tool_use_id, tool_name=tool_name, tool_input=tool_input)
         for tool_name, tool_input, tool_use_id in calls
     ]
-    events.append(FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"))
+    events.append(
+        FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock")
+    )
     return events
 
 
@@ -427,12 +432,18 @@ async def test_codex_style_worker_graph_uses_tool_once_and_hands_off(runtime):
                 ("exa_search", {"query": "AI news past week", "num_results": 3}, "search_1"),
                 (
                     "set_output",
-                    {"key": "articles_data", "value": json.dumps({"items": ["story-1", "story-2"]})},
+                    {
+                        "key": "articles_data",
+                        "value": json.dumps({"items": ["story-1", "story-2"]}),
+                    },
                     "articles_1",
                 ),
                 (
                     "set_output",
-                    {"key": "articles_data", "value": json.dumps({"items": ["story-1", "story-2"]})},
+                    {
+                        "key": "articles_data",
+                        "value": json.dumps({"items": ["story-1", "story-2"]}),
+                    },
                     "articles_2",
                 ),
             ),
@@ -473,8 +484,18 @@ async def test_codex_style_worker_graph_uses_tool_once_and_hands_off(runtime):
             ),
         ],
         edges=[
-            EdgeSpec(id="e1", source="intake", target="research", condition=EdgeCondition.ON_SUCCESS),
-            EdgeSpec(id="e2", source="research", target="compile", condition=EdgeCondition.ON_SUCCESS),
+            EdgeSpec(
+                id="e1",
+                source="intake",
+                target="research",
+                condition=EdgeCondition.ON_SUCCESS,
+            ),
+            EdgeSpec(
+                id="e2",
+                source="research",
+                target="compile",
+                condition=EdgeCondition.ON_SUCCESS,
+            ),
         ],
         terminal_nodes=["compile"],
         conversation_mode="continuous",
