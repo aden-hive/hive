@@ -986,6 +986,7 @@ class EventLoopNode(NodeProtocol):
                         await conversation.add_assistant_message(
                             f"[Error: {error_msg}. Please try again.]"
                         )
+                        _llm_turn_failed_waiting_input = True
                         await self._await_user_input(ctx, prompt="")
                         break
 
@@ -1005,15 +1006,13 @@ class EventLoopNode(NodeProtocol):
                                 execution_id=execution_id,
                                 error="Model rate limit reached",
                             )
-                        _llm_turn_failed_waiting_input = True
-                        break  # exit retry loop, continue outer iteration
-
                     # Logging and metrics MUST run before raising
                     import traceback
 
                     iter_latency_ms = int((time.time() - iter_start) * 1000)
                     latency_ms = int((time.time() - start_time) * 1000)
-                    error_msg = f"LLM call failed: {e}"
+                    if not isinstance(e, RateLimitError):
+                        error_msg = f"LLM call failed: {e}"
                     stack_trace = traceback.format_exc()
 
                     if ctx.runtime_logger:
