@@ -330,7 +330,11 @@ def register_tools(
             return token
 
         if not add_labels and not remove_labels:
-            return {"error": "At least one of add_labels or remove_labels is required"}
+            return {
+                "error": "At least one of add_labels or remove_labels is required. "
+                f"Received add_labels={add_labels!r}, remove_labels={remove_labels!r}. "
+                "Pass label IDs like add_labels=[\"STARRED\"] or remove_labels=[\"INBOX\"]."
+            }
 
         body: dict[str, list[str]] = {}
         if add_labels:
@@ -387,7 +391,11 @@ def register_tools(
             return token
 
         if not add_labels and not remove_labels:
-            return {"error": "At least one of add_labels or remove_labels is required"}
+            return {
+                "error": "At least one of add_labels or remove_labels is required. "
+                f"Received add_labels={add_labels!r}, remove_labels={remove_labels!r}. "
+                "Pass label IDs like add_labels=[\"STARRED\"] or remove_labels=[\"INBOX\"]."
+            }
 
         body: dict = {"ids": message_ids}
         if add_labels:
