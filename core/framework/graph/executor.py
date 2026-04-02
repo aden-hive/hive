@@ -1773,7 +1773,13 @@ class GraphExecutor:
             if terminal_worker_ids and completed_terminals >= terminal_worker_ids:
                 terminal_failures = terminal_worker_ids & set(failed_workers.keys())
                 has_failures = bool(terminal_failures) or execution_error is not None
-            exec_quality = "failed" if has_failures else "clean"
+            has_retries = bool(gc.nodes_with_retries)
+            if has_failures:
+                exec_quality = "failed"
+            elif has_retries:
+                exec_quality = "degraded"
+            else:
+                exec_quality = "clean"
 
             saved_buffer = buffer.read_all()
             session_state_out = {
@@ -1816,10 +1822,10 @@ class GraphExecutor:
                 total_latency_ms=total_latency,
                 path=gc.path,
                 session_state=session_state_out,
-                total_retries=0,
-                nodes_with_failures=list(failed_workers.keys()),
-                retry_details={},
-                had_partial_failures=has_failures,
+                total_retries=sum(gc.retry_counts.values()),
+                nodes_with_failures=list(set(failed_workers.keys()) | gc.nodes_with_retries),
+                retry_details=dict(gc.retry_counts),
+                had_partial_failures=has_failures or has_retries,
                 execution_quality=exec_quality,
                 node_visit_counts=dict(gc.node_visit_counts),
             )

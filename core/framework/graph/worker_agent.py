@@ -361,7 +361,8 @@ class WorkerAgent:
         else:
             max_retries = self.retry_state.max_retries
 
-        for attempt in range(max(1, max_retries)):
+        total_attempts = max(1, max_retries)
+        for attempt in range(total_attempts):
             # Check pause
             await self._run_gate.wait()
 
@@ -376,7 +377,9 @@ class WorkerAgent:
                     return result
 
                 # Failure
-                if attempt + 1 < max(1, max_retries):
+                if attempt + 1 < total_attempts:
+                    gc.retry_counts[self.node_spec.id] = gc.retry_counts.get(self.node_spec.id, 0) + 1
+                    gc.nodes_with_retries.add(self.node_spec.id)
                     delay = 1.0 * (2**attempt)
                     logger.warning(
                         "Worker %s failed (attempt %d/%d), retrying in %.1fs: %s",
@@ -404,7 +407,9 @@ class WorkerAgent:
                     )
 
             except Exception as exc:
-                if attempt < max(1, max_retries) - 1:
+                if attempt + 1 < total_attempts:
+                    gc.retry_counts[self.node_spec.id] = gc.retry_counts.get(self.node_spec.id, 0) + 1
+                    gc.nodes_with_retries.add(self.node_spec.id)
                     delay = 1.0 * (2**attempt)
                     logger.warning(
                         "Worker %s raised %s (attempt %d/%d), retrying in %.1fs",
@@ -532,10 +537,48 @@ class WorkerAgent:
             if errors:
                 logger.warning("Worker %s output validation warnings: %s", node_spec.id, errors)
 
-        # Write all output keys to buffer
-        for key in node_spec.output_keys:
+        # Determine if this worker is a fan-out branch
+        is_fanout_branch = any(
+            tag.via_branch == node_spec.id for tag in self._inherited_fan_out_tags
+        )
+
+        # Collect keys to write: declared output_keys + any extra output items
+        # (for fan-out branches, all output items need conflict checking)
+        keys_to_write: set[str] = set(node_spec.output_keys)
+        if is_fanout_branch:
+            keys_to_write |= set(result.output.keys())
+
+        # Write all keys to buffer
+        for key in keys_to_write:
             value = result.output.get(key)
             if value is not None:
+                if is_fanout_branch:
+                    conflict_strategy = (
+                        getattr(gc.parallel_config, "buffer_conflict_strategy", "last_wins")
+                        if gc.parallel_config
+                        else "last_wins"
+                    )
+                    prior_worker = gc._fanout_written_keys.get(key)
+                    if prior_worker and prior_worker != node_spec.id:
+                        if conflict_strategy == "error":
+                            raise RuntimeError(
+                                f"Buffer write failed (conflict): key '{key}' already written "
+                                f"by worker '{prior_worker}', "
+                                f"conflicting write from '{node_spec.id}'"
+                            )
+                        elif conflict_strategy == "first_wins":
+                            logger.debug(
+                                "Skipping write to '%s' (first_wins: already set by %s)",
+                                key, prior_worker,
+                            )
+                            continue
+                        else:
+                            # last_wins: log and overwrite
+                            logger.debug(
+                                "Key '%s' overwritten (last_wins: %s -> %s)",
+                                key, prior_worker, node_spec.id,
+                            )
+                    gc._fanout_written_keys[key] = node_spec.id
                 gc.buffer.write(key, value, validate=False)
 
     # ------------------------------------------------------------------

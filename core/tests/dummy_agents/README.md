@@ -36,7 +36,7 @@ uv run python tests/dummy_agents/run_all.py --verbose
 | parallel_merge | 4 | Fan-out/fan-in, failure strategies |
 | retry | 4 | Retry mechanics, exhaustion, ON_FAILURE edges |
 | feedback_loop | 3 | Feedback cycles, max_node_visits |
-| worker | 4 | Real MCP tools (example_tool, get_current_time, save_data/load_data) |
+| worker | 5 | Real MCP tools plus a two-worker artifact round-trip smoke test |
 
 ## Notes
 
