@@ -331,7 +331,7 @@ def _make_codex_provider():
     if not api_key or not api_base:
         return None
     return LiteLLMProvider(
-        model="openai/gpt-5.3-codex",
+        model="openai/gpt-5.4",
         api_key=api_key,
         api_base=api_base,
         **extra_kwargs,
