@@ -32,11 +32,20 @@ LLM_COMPACT_CHAR_LIMIT: int = 240_000
 LLM_COMPACT_MAX_DEPTH: int = 10
 
 # Microcompaction: tools whose results can be safely cleared
-COMPACTABLE_TOOLS: frozenset[str] = frozenset({
-    "read_file", "run_command", "web_search", "web_fetch",
-    "grep_search", "glob_search", "write_file", "edit_file",
-    "browser_screenshot", "list_directory",
-})
+COMPACTABLE_TOOLS: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "run_command",
+        "web_search",
+        "web_fetch",
+        "grep_search",
+        "glob_search",
+        "write_file",
+        "edit_file",
+        "browser_screenshot",
+        "list_directory",
+    }
+)
 
 # Keep at most this many compactable tool results; clear older ones
 MICROCOMPACT_KEEP_RECENT: int = 8
@@ -51,7 +60,11 @@ _failure_counts: dict[int, int] = {}
 _last_compact_times: dict[int, float] = {}
 
 
-def microcompact(conversation: NodeConversation, *, keep_recent: int = MICROCOMPACT_KEEP_RECENT) -> int:
+def microcompact(
+    conversation: NodeConversation,
+    *,
+    keep_recent: int = MICROCOMPACT_KEEP_RECENT,
+) -> int:
     """Clear old compactable tool results by count, keeping only the most recent.
 
     This is the cheapest possible compaction — no LLM call, no structural
@@ -67,7 +80,7 @@ def microcompact(conversation: NodeConversation, *, keep_recent: int = MICROCOMP
         msg = messages[i]
         if msg.role != "tool" or msg.is_error or msg.is_skill_content:
             continue
-        if msg.content.startswith("[Pruned tool result") or msg.content.startswith("[Old tool result"):
+        if msg.content.startswith(("[Pruned tool result", "[Old tool result")):
             continue
         if len(msg.content) < 100:
             continue
@@ -191,7 +204,10 @@ async def compact(
     if not conversation.needs_compaction():
         _record_success(conv_id, now)
         await log_compaction(
-            ctx, conversation, ratio_before, event_bus,
+            ctx,
+            conversation,
+            ratio_before,
+            event_bus,
             pre_inventory=pre_inventory,
         )
         return
@@ -212,7 +228,10 @@ async def compact(
     if not conversation.needs_compaction():
         _record_success(conv_id, now)
         await log_compaction(
-            ctx, conversation, ratio_before, event_bus,
+            ctx,
+            conversation,
+            ratio_before,
+            event_bus,
             pre_inventory=pre_inventory,
         )
         return
@@ -228,7 +247,10 @@ async def compact(
     if not conversation.needs_compaction():
         _record_success(conv_id, now)
         await log_compaction(
-            ctx, conversation, ratio_before, event_bus,
+            ctx,
+            conversation,
+            ratio_before,
+            event_bus,
             pre_inventory=pre_inventory,
         )
         return
@@ -260,7 +282,10 @@ async def compact(
     if not conversation.needs_compaction():
         _record_success(conv_id, now)
         await log_compaction(
-            ctx, conversation, ratio_before, event_bus,
+            ctx,
+            conversation,
+            ratio_before,
+            event_bus,
             pre_inventory=pre_inventory,
         )
         return
@@ -278,7 +303,10 @@ async def compact(
     )
     _record_success(conv_id, now)
     await log_compaction(
-        ctx, conversation, ratio_before, event_bus,
+        ctx,
+        conversation,
+        ratio_before,
+        event_bus,
         pre_inventory=pre_inventory,
     )
 
@@ -305,17 +333,19 @@ def strip_images_from_messages(messages: list[Message]) -> list[Message]:
             n_images = len(msg.image_content)
             marker = " ".join("[image]" for _ in range(n_images))
             content = f"{msg.content}\n{marker}" if msg.content else marker
-            stripped.append(Message(
-                seq=msg.seq,
-                role=msg.role,
-                content=content,
-                tool_use_id=msg.tool_use_id,
-                tool_calls=msg.tool_calls,
-                is_error=msg.is_error,
-                phase_id=msg.phase_id,
-                is_transition_marker=msg.is_transition_marker,
-                image_content=None,  # stripped
-            ))
+            stripped.append(
+                Message(
+                    seq=msg.seq,
+                    role=msg.role,
+                    content=content,
+                    tool_use_id=msg.tool_use_id,
+                    tool_calls=msg.tool_calls,
+                    is_error=msg.is_error,
+                    phase_id=msg.phase_id,
+                    is_transition_marker=msg.is_transition_marker,
+                    image_content=None,  # stripped
+                )
+            )
         else:
             stripped.append(msg)
     return stripped
