@@ -97,8 +97,8 @@ class ThinkingTagFilter:
                     # Check if the tail of buf is a prefix of the close tag.
                     tail_len = min(len(close) - 1, n - i)
                     for tl in range(tail_len, 0, -1):
-                        if close.startswith(buf[n - tl:]):
-                            self._pending = buf[n - tl:]
+                        if close.startswith(buf[n - tl :]):
+                            self._pending = buf[n - tl :]
                             i = n
                             break
                     else:

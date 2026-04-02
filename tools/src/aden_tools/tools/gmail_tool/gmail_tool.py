@@ -333,7 +333,7 @@ def register_tools(
             return {
                 "error": "At least one of add_labels or remove_labels is required. "
                 f"Received add_labels={add_labels!r}, remove_labels={remove_labels!r}. "
-                "Pass label IDs like add_labels=[\"STARRED\"] or remove_labels=[\"INBOX\"]."
+                'Pass label IDs like add_labels=["STARRED"] or remove_labels=["INBOX"].'
             }
 
         body: dict[str, list[str]] = {}
@@ -394,7 +394,7 @@ def register_tools(
             return {
                 "error": "At least one of add_labels or remove_labels is required. "
                 f"Received add_labels={add_labels!r}, remove_labels={remove_labels!r}. "
-                "Pass label IDs like add_labels=[\"STARRED\"] or remove_labels=[\"INBOX\"]."
+                'Pass label IDs like add_labels=["STARRED"] or remove_labels=["INBOX"].'
             }
 
         body: dict = {"ids": message_ids}

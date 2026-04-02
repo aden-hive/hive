@@ -1945,8 +1945,7 @@ class LiteLLMProvider(LLMProvider):
                 # yield what we have instead of discarding it.
                 if (accumulated_text or tool_calls_acc) and tail_events:
                     _is_finish_reason_err = (
-                        "finish_reason" in str(e)
-                        and "validation error" in str(e).lower()
+                        "finish_reason" in str(e) and "validation error" in str(e).lower()
                     )
                     if _is_finish_reason_err:
                         logger.warning(
