@@ -302,64 +302,6 @@ Respond with ONLY a JSON object:
 
         return result
 
-
-class AsyncEntryPointSpec(BaseModel):
-    """
-    Specification for an asynchronous entry point.
-
-    Used with AgentRuntime for multi-entry-point agents that handle
-    concurrent execution streams (e.g., webhook + API handlers).
-
-    Example:
-        AsyncEntryPointSpec(
-            id="webhook",
-            name="Zendesk Webhook Handler",
-            entry_node="process-webhook",
-            trigger_type="webhook",
-            isolation_level="shared",
-        )
-    """
-
-    id: str = Field(description="Unique identifier for this entry point")
-    name: str = Field(description="Human-readable name")
-    entry_node: str = Field(
-        default="",
-        description="Deprecated: Node ID to start execution from. "
-        "Triggers are graph-level; worker always enters at GraphSpec.entry_node.",
-    )
-    trigger_type: str = Field(
-        default="manual",
-        description="How this entry point is triggered: webhook, api, timer, event, manual",
-    )
-    trigger_config: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Trigger-specific configuration (e.g., webhook URL, timer interval)",
-    )
-    task: str = Field(
-        default="",
-        description="Worker task string when this trigger fires autonomously",
-    )
-    isolation_level: str = Field(
-        default="shared", description="State isolation: isolated, shared, or synchronized"
-    )
-    priority: int = Field(default=0, description="Execution priority (higher = more priority)")
-    max_concurrent: int = Field(
-        default=10, description="Maximum concurrent executions for this entry point"
-    )
-    max_resurrections: int = Field(
-        default=3,
-        description="Auto-restart on non-fatal failure (0 to disable)",
-    )
-
-    model_config = {"extra": "allow"}
-
-    def get_isolation_level(self):
-        """Convert string isolation level to enum (duck-type with EntryPointSpec)."""
-        from framework.runtime.execution_stream import IsolationLevel
-
-        return IsolationLevel(self.isolation_level)
-
-
 class GraphSpec(BaseModel):
     """
     Complete specification of an agent graph.
