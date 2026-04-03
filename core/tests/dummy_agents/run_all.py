@@ -140,6 +140,39 @@ def detect_available() -> list[dict]:
     return available
 
 
+def _load_from_hive_config() -> dict | None:
+    """Try to load LLM provider from ~/.hive/configuration.json.
+
+    Returns a provider dict matching the format expected by
+    set_llm_selection(), or None if config is missing/incomplete.
+    """
+    try:
+        from framework.config import (
+            get_api_base,
+            get_api_key,
+            get_llm_extra_kwargs,
+            get_preferred_model,
+        )
+    except ImportError:
+        return None
+
+    model = get_preferred_model()
+    api_key = get_api_key()
+    if not model or not api_key:
+        return None
+
+    extra_kwargs = get_llm_extra_kwargs()
+    return {
+        "name": f"Hive config ({model})",
+        "model": model,
+        "display_model": model,
+        "api_key": api_key,
+        "api_base": get_api_base(),
+        "extra_headers": extra_kwargs.get("extra_headers"),
+        "source": "hive_config",
+    }
+
+
 def prompt_provider_selection() -> dict:
     """Interactive prompt to select an LLM provider. Returns the chosen provider dict."""
     available = detect_available()
@@ -599,13 +632,22 @@ def print_table(agents: dict[str, dict], total_time: float, verbose: bool = Fals
 
 def main() -> int:
     verbose = "--verbose" in sys.argv or "-v" in sys.argv
+    interactive = "--interactive" in sys.argv
 
     print("\n  ╔═══════════════════════════════════════╗")
     print("  ║   Level 2: Dummy Agent Tests (E2E)    ║")
     print("  ╚═══════════════════════════════════════╝")
 
-    # Step 1: detect credentials and let user pick
-    provider = prompt_provider_selection()
+    # Step 1: prefer ~/.hive/configuration.json unless --interactive
+    provider = None
+    if not interactive:
+        provider = _load_from_hive_config()
+        if provider:
+            print(f"\n  Using hive config: {provider['display_model']}")
+
+    # Fall back to interactive selection
+    if provider is None:
+        provider = prompt_provider_selection()
     smoke_test_provider(provider)
 
     # Step 2: inject selection into conftest module state

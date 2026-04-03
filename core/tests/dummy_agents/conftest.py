@@ -43,18 +43,55 @@ def set_llm_selection(
 # ── collection hook: skip entire directory when not configured ───────
 
 
+def _try_auto_configure_from_hive_config() -> bool:
+    """Try to load LLM provider from ~/.hive/configuration.json.
+
+    Returns True if successfully configured, False otherwise.
+    """
+    try:
+        from framework.config import (
+            get_api_base,
+            get_api_key,
+            get_llm_extra_kwargs,
+            get_preferred_model,
+        )
+
+        model = get_preferred_model()
+        api_key = get_api_key()
+        if not model or not api_key:
+            return False
+
+        extra_kwargs = get_llm_extra_kwargs()
+        set_llm_selection(
+            model=model,
+            api_key=api_key,
+            api_base=get_api_base(),
+            extra_headers=extra_kwargs.get("extra_headers"),
+        )
+        return True
+    except Exception:
+        return False
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip all dummy_agents tests when no LLM is configured.
 
-    This prevents these tests from running in regular CI. They only run
-    when launched via run_all.py (which calls set_llm_selection first).
+    Resolution order:
+    1. Already configured via run_all.py (set_llm_selection called)
+    2. Auto-configure from ~/.hive/configuration.json
+    3. Skip tests
     """
     if _selected_model is not None:
-        return  # LLM configured, run normally
+        return  # LLM configured via run_all.py, run normally
+
+    # Try auto-configure from hive config
+    if _try_auto_configure_from_hive_config():
+        return  # Config found, run tests
 
     skip = pytest.mark.skip(
         reason="Dummy agent tests require a real LLM. "
-        "Run via: cd core && uv run python tests/dummy_agents/run_all.py"
+        "Configure ~/.hive/configuration.json or "
+        "run via: cd core && uv run python tests/dummy_agents/run_all.py"
     )
     for item in items:
         if "dummy_agents" in str(item.fspath):
@@ -123,6 +160,8 @@ def make_executor(
     loop_config: dict | None = None,
     tool_registry=None,
     storage_path: Path | None = None,
+    event_bus=None,
+    stream_id: str = "",
 ) -> GraphExecutor:
     """Factory that creates a GraphExecutor with a real LLM."""
     tools = []
@@ -140,6 +179,8 @@ def make_executor(
         parallel_config=parallel_config,
         loop_config=loop_config or {"max_iterations": 10},
         storage_path=storage_path,
+        event_bus=event_bus,
+        stream_id=stream_id,
     )
 
     original_execute = executor.execute
