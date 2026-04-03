@@ -6,6 +6,7 @@ import {
   Cpu,
   Check,
   Loader2,
+  Mic,
   Paperclip,
   X,
 } from "lucide-react";
@@ -24,6 +25,7 @@ export interface ContextUsageEntry {
 import MarkdownContent from "@/components/MarkdownContent";
 import QuestionWidget from "@/components/QuestionWidget";
 import MultiQuestionWidget from "@/components/MultiQuestionWidget";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 import ParallelSubagentBubble, {
   type SubagentGroup,
 } from "@/components/ParallelSubagentBubble";
@@ -488,6 +490,26 @@ export default function ChatPanel({
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
+  // Voice input integration
+  const handleVoiceResult = (transcript: string) => {
+    setInput(transcript);
+    // Automatically submit after setting the value
+    setTimeout(() => {
+      if (transcript.trim()) {
+        onSend(transcript.trim(), activeThread);
+        setInput("");
+        if (textareaRef.current) textareaRef.current.style.height = "auto";
+      }
+    }, 100);
+  };
+
+  const { isListening, isSupported, startListening, stopListening } = useVoiceInput({
+    onResult: handleVoiceResult,
+    onError: (error) => {
+      console.error("Voice input error:", error);
+    },
+  });
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
@@ -505,7 +527,6 @@ export default function ChatPanel({
     // Reset so the same file can be re-selected
     e.target.value = "";
   };
-
   return (
     <div className="flex flex-col h-full min-w-0">
       {/* Compact sub-header */}
@@ -769,6 +790,21 @@ export default function ChatPanel({
               disabled={disabled}
               className="flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto"
             />
+            {isSupported && !isBusy && (
+              <button
+                type="button"
+                onClick={isListening ? stopListening : startListening}
+                disabled={disabled}
+                className={`p-2 rounded-lg transition-all ${
+                  isListening
+                    ? "bg-primary text-primary-foreground animate-pulse"
+                    : "bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground disabled:opacity-30"
+                }`}
+                title={isListening ? "Listening..." : "Voice input"}
+              >
+                <Mic className="w-4 h-4" />
+              </button>
+            )}
             {isBusy && onCancel ? (
               <button
                 type="button"

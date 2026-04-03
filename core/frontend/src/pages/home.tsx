@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot, Radar, Reply, DollarSign, MapPin, Calendar, UserPlus, Twitter } from "lucide-react";
+import { Crown, Mail, Briefcase, Shield, Search, Newspaper, ArrowRight, Hexagon, Send, Bot, Radar, Reply, DollarSign, MapPin, Calendar, UserPlus, Twitter, Mic } from "lucide-react";
 import TopBar from "@/components/TopBar";
 import type { LucideIcon } from "lucide-react";
 import { agentsApi } from "@/api/agents";
 import type { DiscoverEntry } from "@/api/types";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 
 // --- Icon and color maps (backend can't serve icons) ---
 
@@ -59,6 +60,9 @@ export default function Home() {
   const [agents, setAgents] = useState<DiscoverEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const voiceErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceResultTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch agents on mount so data is ready when user toggles
   useEffect(() => {
@@ -77,6 +81,18 @@ export default function Home() {
       });
   }, []);
 
+  // Clean up voice error timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (voiceErrorTimeoutRef.current) {
+        clearTimeout(voiceErrorTimeoutRef.current);
+      }
+      if (voiceResultTimeoutRef.current) {
+        clearTimeout(voiceResultTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleSelect = (agentPath: string) => {
     navigate(`/workspace?agent=${encodeURIComponent(agentPath)}`);
   };
@@ -91,6 +107,40 @@ export default function Home() {
       navigate(`/workspace?agent=new-agent&prompt=${encodeURIComponent(inputValue.trim())}`);
     }
   };
+
+  // Voice input integration
+  const handleVoiceResult = useCallback((transcript: string) => {
+    setInputValue(transcript);
+    // Clear any pending navigation timeout
+    if (voiceResultTimeoutRef.current) {
+      clearTimeout(voiceResultTimeoutRef.current);
+    }
+    // Brief delay to let UI reflect final transcript before navigating
+    voiceResultTimeoutRef.current = setTimeout(() => {
+      navigate(`/workspace?agent=new-agent&prompt=${encodeURIComponent(transcript.trim())}`);
+    }, 100);
+  }, [navigate]);
+
+  const handleVoiceError = useCallback((error: string) => {
+    console.error("Voice input error:", error);
+    setVoiceError(error);
+    // Clear any pending error timeout
+    if (voiceErrorTimeoutRef.current) {
+      clearTimeout(voiceErrorTimeoutRef.current);
+    }
+    // Auto-clear after 4 seconds
+    voiceErrorTimeoutRef.current = setTimeout(() => setVoiceError(null), 4000);
+  }, []);
+
+  const { isListening, isSupported, startListening, stopListening } = useVoiceInput({
+    onResult: handleVoiceResult,
+    onError: handleVoiceError,
+  });
+
+  // Debug: log when isListening changes
+  useEffect(() => {
+    console.log("Home page - isListening changed to:", isListening);
+  }, [isListening]);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -117,6 +167,18 @@ export default function Home() {
             </p>
           </div>
 
+          {/* Voice error message */}
+          {voiceError && (
+            <div
+              role="alert"
+              aria-live="assertive"
+              aria-atomic="true"
+              className="text-xs text-destructive text-center mb-4 px-2 py-2 bg-destructive/10 rounded-lg"
+            >
+              {voiceError}
+            </div>
+          )}
+
           {/* Chat input */}
           <form onSubmit={handleSubmit} className="mb-6">
             <div className="relative border border-border/60 rounded-xl bg-card/50 hover:border-primary/30 focus-within:border-primary/40 transition-colors shadow-sm">
@@ -137,9 +199,25 @@ export default function Home() {
                   }
                 }}
                 placeholder="Describe a task for the hive..."
-                className="w-full bg-transparent px-5 py-4 pr-12 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none rounded-xl resize-none overflow-y-auto"
+                className="w-full bg-transparent px-5 py-4 pr-20 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none rounded-xl resize-none overflow-y-auto"
               />
-              <div className="absolute right-3 bottom-2.5">
+              <div className="absolute right-3 bottom-2.5 flex items-center gap-1.5">
+                {isSupported && (
+                  <button
+                    type="button"
+                    onClick={isListening ? stopListening : startListening}
+                    aria-label={isListening ? "Stop voice input" : "Start voice input"}
+                    aria-pressed={isListening}
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+                      isListening
+                        ? "bg-primary text-primary-foreground animate-pulse"
+                        : "bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground"
+                    }`}
+                    title={isListening ? "Listening..." : "Voice input"}
+                  >
+                    <Mic className="w-3.5 h-3.5" />
+                  </button>
+                )}
                 <button
                   type="submit"
                   disabled={!inputValue.trim()}
