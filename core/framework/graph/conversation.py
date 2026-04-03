@@ -923,9 +923,12 @@ class NodeConversation:
         conv_filename = f"conversation_{next_n}.md"
 
         if freeform_lines:
+            from framework.utils.io import atomic_write
+
             header = f"## Compacted conversation (messages 1-{split})\n\n"
             conv_text = header + "\n\n".join(freeform_lines)
-            (spill_path / conv_filename).write_text(conv_text, encoding="utf-8")
+            with atomic_write(spill_path / conv_filename) as f:
+                f.write(conv_text)
         else:
             # Nothing to save — skip file creation
             conv_filename = ""

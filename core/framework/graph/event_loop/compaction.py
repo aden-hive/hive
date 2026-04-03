@@ -454,7 +454,10 @@ def write_compaction_debug_log(
     lines.append("")
 
     try:
-        log_path.write_text("\n".join(lines), encoding="utf-8")
+        from framework.utils.io import atomic_write
+
+        with atomic_write(log_path) as f:
+            f.write("\n".join(lines))
         logger.debug("Compaction debug log written to %s", log_path)
     except OSError:
         logger.debug("Failed to write compaction debug log to %s", log_path)

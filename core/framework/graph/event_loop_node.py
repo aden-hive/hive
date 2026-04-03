@@ -482,13 +482,16 @@ class EventLoopNode(NodeProtocol):
                 if self._config.spillover_dir:
                     _adapt_path = Path(self._config.spillover_dir) / "adapt.md"
                     if not _adapt_path.exists():
+                        from framework.utils.io import atomic_write
+
                         _adapt_path.parent.mkdir(parents=True, exist_ok=True)
                         seed = (
                             f"## Identity\n{ctx.accounts_prompt}\n"
                             if ctx.accounts_prompt
                             else "# Session Working Memory\n"
                         )
-                        _adapt_path.write_text(seed, encoding="utf-8")
+                        with atomic_write(_adapt_path) as f:
+                            f.write(seed)
                     if _adapt_path.exists():
                         _adapt_text = _adapt_path.read_text(encoding="utf-8").strip()
                         if _adapt_text:

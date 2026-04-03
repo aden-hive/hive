@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from framework.graph.conversation import ConversationStore
+from framework.utils.io import atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +147,8 @@ class OutputAccumulator:
             if isinstance(value, (dict, list))
             else str(value)
         )
-        (spill_path / filename).write_text(write_content, encoding="utf-8")
+        with atomic_write(spill_path / filename, mode="w", encoding="utf-8") as f:
+            f.write(write_content)
         file_size = (spill_path / filename).stat().st_size
         logger.info(
             "set_output value auto-spilled: key=%s, %d chars -> %s (%d bytes)",

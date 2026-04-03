@@ -311,12 +311,15 @@ def build_transition_marker(
                 ext = ".json" if isinstance(value, (dict, list)) else ".txt"
                 filename = f"output_{key}{ext}"
                 try:
+                    from framework.utils.io import atomic_write
+
                     write_content = (
                         _json.dumps(value, indent=2, ensure_ascii=False)
                         if isinstance(value, (dict, list))
                         else str(value)
                     )
-                    (data_path / filename).write_text(write_content, encoding="utf-8")
+                    with atomic_write(data_path / filename) as f:
+                        f.write(write_content)
                     file_size = (data_path / filename).stat().st_size
                     val_str = (
                         f"[Saved to '{filename}' ({file_size:,} bytes). "

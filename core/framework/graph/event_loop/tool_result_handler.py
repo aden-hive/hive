@@ -17,6 +17,7 @@ from typing import Any
 
 from framework.llm.provider import ToolResult, ToolUse
 from framework.llm.stream_events import ToolCallEvent
+from framework.utils.io import atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -294,7 +295,8 @@ def truncate_tool_result(
         except (json.JSONDecodeError, TypeError, ValueError):
             pass  # Not JSON — write as-is
 
-        (spill_path / filename).write_text(write_content, encoding="utf-8")
+        with atomic_write(spill_path / filename) as f:
+            f.write(write_content)
 
         if limit > 0 and len(result.content) > limit:
             # Large result: build a small, metadata-rich preview so the
@@ -514,7 +516,8 @@ def record_learning(key: str, value: Any, spillover_dir: str | None) -> None:
         else:
             content += entry
 
-        adapt_path.write_text(content, encoding="utf-8")
+        with atomic_write(adapt_path) as f:
+            f.write(content)
     except Exception as e:
         logger.warning("Failed to record learning for key=%s: %s", key, e)
 
