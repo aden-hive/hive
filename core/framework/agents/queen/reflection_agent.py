@@ -38,11 +38,8 @@ from framework.agents.queen.queen_memory_v2 import (
     build_diary_document,
     diary_filename,
     format_memory_manifest,
-    read_cursor,
-    read_messages_since_cursor,
+    read_conversation_parts,
     scan_memory_files,
-    worker_colony_cursor_file,
-    write_cursor,
 )
 from framework.llm.provider import LLMResponse, Tool
 
@@ -370,24 +367,20 @@ async def run_short_reflection(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
-    *,
-    cursor_file: Path | None = None,
 ) -> None:
-    """Run a short reflection: extract learnings from new messages."""
+    """Run a short reflection: extract learnings from conversation."""
     mem_dir = memory_dir or MEMORY_DIR
 
-    cursor_seq = read_cursor(cursor_file)
-    messages, max_seq = read_messages_since_cursor(session_dir, cursor_seq)
-
+    messages = await read_conversation_parts(session_dir)
     if not messages:
-        logger.debug("reflect: short — no new messages since cursor %d", cursor_seq)
+        logger.debug("reflect: short — no conversation parts")
         return
 
-    logger.debug("reflect: short — %d new messages (cursor %d → %d)", len(messages), cursor_seq, max_seq)
+    logger.debug("reflect: short — %d conversation parts", len(messages))
 
-    # Build a readable transcript of the new messages.
+    # Build a readable transcript from recent messages.
     transcript_lines: list[str] = []
-    for msg in messages:
+    for msg in messages[-50:]:
         role = msg.get("role", "")
         content = str(msg.get("content", "")).strip()
         if role == "tool":
@@ -395,31 +388,22 @@ async def run_short_reflection(
         if not content:
             continue
         label = "user" if role == "user" else "assistant"
-        # Truncate very long messages.
         if len(content) > 800:
             content = content[:800] + "…"
         transcript_lines.append(f"[{label}]: {content}")
 
     if not transcript_lines:
-        # Only tool results in the new messages — still advance cursor.
-        write_cursor(max_seq, cursor_file)
         return
 
     transcript = "\n".join(transcript_lines)
     user_msg = (
-        f"## Recent conversation (messages {cursor_seq + 1}–{max_seq})\n\n"
+        f"## Recent conversation ({len(messages)} messages total)\n\n"
         f"{transcript}\n\n"
         f"Timestamp: {datetime.now().isoformat(timespec='minutes')}"
     )
 
-    success = await _reflection_loop(llm, _SHORT_REFLECT_SYSTEM, user_msg, mem_dir)
-
-    # Advance cursor only on success.
-    if success:
-        write_cursor(max_seq, cursor_file)
-        logger.debug("reflect: short reflection done, cursor → %d", max_seq)
-    else:
-        logger.warning("reflect: short reflection failed, cursor NOT advanced (stays at %d)", cursor_seq)
+    await _reflection_loop(llm, _SHORT_REFLECT_SYSTEM, user_msg, mem_dir)
+    logger.debug("reflect: short reflection done")
 
 
 async def run_long_reflection(
@@ -469,7 +453,7 @@ async def run_diary_update(
             pass
 
     # Read all conversation messages for context.
-    messages, _ = read_messages_since_cursor(session_dir, 0)
+    messages = await read_conversation_parts(session_dir)
     transcript_lines: list[str] = []
     for msg in messages[-40:]:
         role = msg.get("role", "")
@@ -530,7 +514,6 @@ async def subscribe_reflection_triggers(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
-    cursor_file: Path | None = None,
     phase_state: Any = None,
 ) -> list[str]:
     """Subscribe to queen turn events and return subscription IDs.
@@ -560,20 +543,10 @@ async def subscribe_reflection_triggers(
                 _short_count += 1
                 logger.debug("reflect: turn complete — short count %d/%d", _short_count, _LONG_REFLECT_INTERVAL)
                 if _short_count % _LONG_REFLECT_INTERVAL == 0:
-                    await run_short_reflection(
-                        session_dir,
-                        llm,
-                        mem_dir,
-                        cursor_file=cursor_file,
-                    )
+                    await run_short_reflection(session_dir, llm, mem_dir)
                     await run_long_reflection(llm, mem_dir)
                 else:
-                    await run_short_reflection(
-                        session_dir,
-                        llm,
-                        mem_dir,
-                        cursor_file=cursor_file,
-                    )
+                    await run_short_reflection(session_dir, llm, mem_dir)
             except Exception:
                 logger.warning("reflect: reflection failed", exc_info=True)
                 _write_error("short/long reflection")
@@ -686,17 +659,11 @@ async def subscribe_worker_memory_triggers(
         if execution_id is None:
             return
         session_dir = worker_sessions_dir / execution_id
-        cursor_file = worker_colony_cursor_file(session_dir)
 
         async with _lock:
             try:
                 _short_counts[execution_id] = _short_counts.get(execution_id, 0) + 1
-                await run_short_reflection(
-                    session_dir,
-                    llm,
-                    colony_memory_dir,
-                    cursor_file=cursor_file,
-                )
+                await run_short_reflection(session_dir, llm, colony_memory_dir)
                 if _short_counts[execution_id] % _LONG_REFLECT_INTERVAL == 0:
                     await run_long_reflection(llm, colony_memory_dir)
                 await _update_cache(execution_id)

@@ -180,7 +180,6 @@ async def create_queen(
         colony_memory_dir,
         global_memory_dir,
         init_memory_dir,
-        queen_colony_cursor_file,
     )
 
     colony_dir = colony_memory_dir(session.id)
@@ -385,7 +384,6 @@ async def create_queen(
                 queen_dir,
                 session.llm,
                 memory_dir=colony_dir,
-                cursor_file=queen_colony_cursor_file(queen_dir),
                 phase_state=phase_state,
             )
 
