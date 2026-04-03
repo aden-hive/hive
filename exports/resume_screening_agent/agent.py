@@ -1,5 +1,6 @@
-"""Agent graph construction for Deep Research Agent."""
+"""Agent graph construction for Resume Screening Agent."""
 
+from __future__ import annotations
 from pathlib import Path
 
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
@@ -28,35 +29,35 @@ goal = Goal(
     "and provide a short evaluation of the candidate profile."
     ),
     success_criteria=[
-        SuccessCriterion(
-            id="source-diversity",
-            description="Use multiple diverse, authoritative sources",
-            metric="source_count",
-            target=">=5",
-            weight=0.25,
-        ),
-        SuccessCriterion(
-            id="citation-coverage",
-            description="Every factual claim in the report cites its source",
-            metric="citation_coverage",
-            target="100%",
-            weight=0.25,
-        ),
-        SuccessCriterion(
-            id="user-satisfaction",
-            description="User reviews findings before report generation",
-            metric="user_approval",
-            target="true",
-            weight=0.25,
-        ),
-        SuccessCriterion(
-            id="report-completeness",
-            description="Final report answers the original research questions",
-            metric="question_coverage",
-            target="90%",
-            weight=0.25,
-        ),
-    ],
+    SuccessCriterion(
+        id="skills-extraction",
+        description="Extract key skills from resume",
+        metric="skills_extraction_accuracy",
+        target=">=80%",
+        weight=0.25,
+    ),
+    SuccessCriterion(
+        id="experience-coverage",
+        description="Capture candidate experience years and roles",
+        metric="experience_years_coverage",
+        target=">=80%",
+        weight=0.25,
+    ),
+    SuccessCriterion(
+        id="education-verification",
+        description="Extract and verify education details",
+        metric="education_verification_rate",
+        target=">=90%",
+        weight=0.25,
+    ),
+    SuccessCriterion(
+        id="user-approval",
+        description="User approves screening result",
+        metric="user_approval",
+        target="true",
+        weight=0.25,
+    ),
+],
     constraints=[
         Constraint(
             id="no-hallucination",
@@ -281,11 +282,11 @@ class ResumeScreeningAgent:
             raise RuntimeError("Agent not started. Call start() first.")
 
         return await self._agent_runtime.trigger_and_wait(
-            entry_point_id=entry_point,
-            input_data=input_data or {},
-            session_state=session_state,
-        )
-
+    entry_point_id=entry_point,
+    input_data=input_data or {},
+    session_state=session_state,
+    timeout=timeout,
+)
     async def run(
         self, context: dict, mock_mode=False, session_state=None
     ) -> ExecutionResult:
