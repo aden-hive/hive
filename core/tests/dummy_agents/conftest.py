@@ -7,6 +7,7 @@ Run via: cd core && uv run python tests/dummy_agents/run_all.py
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -202,3 +203,130 @@ def make_executor(
 
     executor.execute = execute_with_timeout  # type: ignore[method-assign]
     return executor
+
+
+# ── Artifact capture: raw output written to disk for every test ──────
+
+ARTIFACTS_DIR = Path("/tmp/hive_test_artifacts")
+
+
+class TestArtifact:
+    """Collects raw output + expected behavior for a single test.
+
+    Usage in tests:
+        def test_foo(artifact, ...):
+            result = await executor.execute(...)
+            artifact.record(result, expected="path == ['a','b'], output['x'] == 'hello'")
+    """
+
+    def __init__(self, test_id: str):
+        self.test_id = test_id
+        self._data: dict = {"test_id": test_id, "raw_output": None, "expected": "", "checks": []}
+
+    def record(self, result, *, expected: str = ""):
+        """Record an ExecutionResult with expected behavior description."""
+        self._data["expected"] = expected
+        if result is None:
+            self._data["raw_output"] = None
+            return
+        self._data["raw_output"] = {
+            "success": getattr(result, "success", None),
+            "output": _safe_serialize(getattr(result, "output", {})),
+            "error": getattr(result, "error", None),
+            "path": getattr(result, "path", []),
+            "steps_executed": getattr(result, "steps_executed", 0),
+            "total_tokens": getattr(result, "total_tokens", 0),
+            "total_latency_ms": getattr(result, "total_latency_ms", 0),
+            "execution_quality": getattr(result, "execution_quality", ""),
+            "total_retries": getattr(result, "total_retries", 0),
+            "node_visit_counts": getattr(result, "node_visit_counts", {}),
+            "nodes_with_failures": getattr(result, "nodes_with_failures", []),
+            "session_state_buffer": _safe_serialize(
+                (getattr(result, "session_state", {}) or {}).get("data_buffer", {})
+            ),
+        }
+
+    def record_value(self, key: str, value, *, expected: str = ""):
+        """Record an arbitrary key-value (for non-ExecutionResult tests)."""
+        self._data.setdefault("values", {})[key] = _safe_serialize(value)
+        if expected:
+            self._data["expected"] = expected
+
+    def check(self, description: str, passed: bool, actual: str = "", expected_val: str = ""):
+        """Record an individual assertion check."""
+        self._data["checks"].append({
+            "description": description,
+            "passed": passed,
+            "actual": actual,
+            "expected": expected_val,
+        })
+
+    def save(self):
+        """Write artifact to disk."""
+        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+        safe_name = self.test_id.replace("::", "__").replace("/", "_")
+        path = ARTIFACTS_DIR / f"{safe_name}.json"
+        with open(path, "w") as f:
+            json.dump(self._data, f, indent=2, default=str)
+
+
+def _safe_serialize(obj):
+    """Convert to JSON-safe types."""
+    if obj is None:
+        return None
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): _safe_serialize(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_safe_serialize(v) for v in obj]
+    return str(obj)[:500]
+
+
+@pytest.fixture
+def artifact(request):
+    """Fixture that captures raw test output to disk.
+
+    Every test gets an artifact recorder. Call artifact.record(result)
+    and artifact.check("description", passed, actual, expected) to
+    capture data. Saved automatically on teardown.
+    """
+    test_id = request.node.nodeid
+    art = TestArtifact(test_id)
+    yield art
+    art.save()
+
+
+# Autouse hook: for tests that DON'T use the artifact fixture,
+# create a minimal artifact from pass/fail status.
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    rep = outcome.get_result()
+    if rep.when == "call":
+        item._test_report = rep
+
+
+def pytest_runtest_teardown(item, nextitem):
+    """Auto-save a minimal artifact for tests that didn't use the fixture."""
+    report = getattr(item, "_test_report", None)
+    if report is None:
+        return
+    # Check if the test already used the artifact fixture
+    if "artifact" in item.fixturenames:
+        return  # Already handled by fixture teardown
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = item.nodeid.replace("::", "__").replace("/", "_")
+    path = ARTIFACTS_DIR / f"{safe_name}.json"
+    data = {
+        "test_id": item.nodeid,
+        "raw_output": None,
+        "expected": "",
+        "checks": [],
+        "auto_captured": True,
+        "status": "PASS" if report.passed else ("FAIL" if report.failed else "SKIP"),
+    }
+    if report.failed and report.longreprtext:
+        data["failure_text"] = report.longreprtext[:5000]
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2, default=str)

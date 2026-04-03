@@ -16,7 +16,7 @@ from .conftest import make_executor
 
 
 @pytest.mark.asyncio
-async def test_escalation_worker_calls_escalate(runtime, goal, llm_provider, tmp_path):
+async def test_escalation_worker_calls_escalate(runtime, goal, llm_provider, tmp_path, artifact):
     """Worker LLM should call the escalate tool when instructed.
 
     After calling escalate, the worker blocks waiting for queen input.
@@ -40,8 +40,9 @@ async def test_escalation_worker_calls_escalate(runtime, goal, llm_provider, tmp
                 node_type="event_loop",
                 output_keys=["result"],
                 system_prompt=(
-                    "You MUST immediately call the escalate tool with "
-                    "reason='need human approval for deployment'. "
+                    "You MUST immediately call the escalate tool "
+                    "with reason='need human approval for "
+                    "deployment'. "
                     "Do not call set_output. Do not write text."
                 ),
             ),
@@ -74,17 +75,34 @@ async def test_escalation_worker_calls_escalate(runtime, goal, llm_provider, tmp
     # Worker will block after escalate. Short timeout is fine.
     try:
         await _asyncio.wait_for(
-            executor.execute(graph, goal, {}, validate_graph=False),
+            executor.execute(
+                graph,
+                goal,
+                {},
+                validate_graph=False,
+            ),
             timeout=30,
         )
     except (TimeoutError, _asyncio.TimeoutError):
         pass  # Expected: worker hangs waiting for queen
 
+    artifact.record_value(
+        "escalation_count",
+        len(escalations),
+        expected=">=1 ESCALATION_REQUESTED event emitted",
+    )
+
+    artifact.check(
+        "escalation event emitted",
+        len(escalations) >= 1,
+        actual=str(len(escalations)),
+        expected_val=">=1",
+    )
     assert len(escalations) >= 1, "No ESCALATION_REQUESTED event emitted"
 
 
 @pytest.mark.asyncio
-async def test_escalation_node_terminates(runtime, goal, llm_provider, tmp_path):
+async def test_escalation_node_terminates(runtime, goal, llm_provider, tmp_path, artifact):
     """Worker that escalates should still terminate (not hang forever)."""
     graph = GraphSpec(
         id="escalate-terminate",
@@ -100,8 +118,10 @@ async def test_escalation_node_terminates(runtime, goal, llm_provider, tmp_path)
                 node_type="event_loop",
                 output_keys=["result"],
                 system_prompt=(
-                    "Call the escalate tool with reason='blocked on credentials'. "
-                    "Then call set_output with key='result' and value='escalated'."
+                    "Call the escalate tool with "
+                    "reason='blocked on credentials'. "
+                    "Then call set_output with key='result' "
+                    "and value='escalated'."
                 ),
             ),
         ],
@@ -115,6 +135,21 @@ async def test_escalation_node_terminates(runtime, goal, llm_provider, tmp_path)
         loop_config={"max_iterations": 5},
         storage_path=tmp_path / "session",
     )
-    # Should terminate within timeout (make_executor wraps with asyncio.wait_for)
-    result = await executor.execute(graph, goal, {}, validate_graph=False)
+    result = await executor.execute(
+        graph,
+        goal,
+        {},
+        validate_graph=False,
+    )
+    artifact.record(
+        result,
+        expected="steps_executed=1 (terminates, does not hang)",
+    )
+
+    artifact.check(
+        "steps_executed is 1",
+        result.steps_executed == 1,
+        actual=str(result.steps_executed),
+        expected_val="1",
+    )
     assert result.steps_executed == 1
