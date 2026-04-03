@@ -162,9 +162,9 @@ async def error_middleware(request: web.Request, handler):
     except web.HTTPException:
         raise  # Let aiohttp handle its own HTTP exceptions
     except Exception as e:
-        logger.exception(f"Unhandled error: {e}")
+        logger.exception(f"Unhandled error handling {request.method} {request.path}: {e}")
         return web.json_response(
-            {"error": str(e), "type": type(e).__name__},
+            {"error": "Internal server error"},
             status=500,
         )
 
