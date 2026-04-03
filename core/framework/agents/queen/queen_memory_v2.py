@@ -17,6 +17,7 @@ import re
 import shutil
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-MEMORY_TYPES: tuple[str, ...] = ("goal", "environment", "technique", "reference")
+MEMORY_TYPES: tuple[str, ...] = ("goal", "environment", "technique", "reference", "diary")
 GLOBAL_MEMORY_CATEGORIES: tuple[str, ...] = ("profile", "preference", "environment", "feedback")
 
 _HIVE_QUEEN_DIR = Path.home() / ".hive" / "queen"
@@ -248,6 +249,22 @@ def build_memory_document(
         f"type: {mem_type.strip()}\n"
         f"---\n\n"
         f"{body.strip()}\n"
+    )
+
+
+def diary_filename(d: date | None = None) -> str:
+    """Return the diary memory filename for date *d* (default: today)."""
+    d = d or date.today()
+    return f"MEMORY-{d.strftime('%Y-%m-%d')}.md"
+
+
+def build_diary_document(*, date_str: str, body: str) -> str:
+    """Build a diary memory file with frontmatter."""
+    return build_memory_document(
+        name=f"diary-{date_str}",
+        description=f"Daily session narrative for {date_str}",
+        mem_type="diary",
+        body=body,
     )
 
 
@@ -520,7 +537,7 @@ def migrate_legacy_memories(memory_dir: Path | None = None) -> None:
                 d,
                 filename=slug,
                 name=f"legacy-diary-{date_part}",
-                mem_type="reference",
+                mem_type="diary",
                 description=f"Migrated diary entry from {date_part}",
                 body=content,
             )

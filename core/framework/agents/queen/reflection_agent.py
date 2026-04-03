@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,8 @@ from framework.agents.queen.queen_memory_v2 import (
     MEMORY_DIR,
     MEMORY_FRONTMATTER_EXAMPLE,
     MEMORY_TYPES,
+    build_diary_document,
+    diary_filename,
     format_memory_manifest,
     read_cursor,
     read_messages_since_cursor,
@@ -332,6 +335,29 @@ Rules:
 - Remove memories that are no longer relevant or are superseded.
 - Keep the total collection lean and high-signal.
 - Do NOT invent new information — only reorganise what exists.
+- Do NOT delete or merge MEMORY-*.md diary files. These are daily narratives
+  managed by a separate process. You may read them for context but should not
+  modify them.
+"""
+
+_DIARY_SYSTEM = """\
+You maintain a daily diary entry for an AI colony session. You receive:
+(1) Today's existing diary content (may be empty if this is the first entry).
+(2) A transcript of recent conversation messages.
+
+Write a cohesive 3-8 sentence narrative about what happened in this session today.
+Cover: what the user asked for, what was accomplished, key decisions or obstacles,
+and current status.
+
+Rules:
+- If an existing diary is provided, rewrite it as a unified narrative incorporating
+  the new developments. Merge and deduplicate — do not simply append.
+- Keep the total narrative under 3000 characters.
+- Focus on the story arc of the day, not individual tool calls or code details.
+- If the recent messages contain nothing substantive (greetings, routine
+  confirmations), return the existing diary text unchanged.
+- Output only the diary prose. No headings, no timestamps, no code fences, no
+  frontmatter.
 """
 
 
@@ -420,6 +446,77 @@ async def run_long_reflection(
     logger.debug("reflect: long reflection done (%d files)", len(files))
 
 
+async def run_diary_update(
+    session_dir: Path,
+    llm: Any,
+    memory_dir: Path | None = None,
+) -> None:
+    """Update today's diary file with a narrative of recent activity."""
+    mem_dir = memory_dir or MEMORY_DIR
+
+    fname = diary_filename()
+    diary_path = mem_dir / fname
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    # Read existing diary body (strip frontmatter).
+    existing_body = ""
+    if diary_path.exists():
+        try:
+            raw = diary_path.read_text(encoding="utf-8")
+            m = re.match(r"^---\s*\n.*?\n---\s*\n?", raw, re.DOTALL)
+            existing_body = raw[m.end() :].strip() if m else raw.strip()
+        except OSError:
+            pass
+
+    # Read all conversation messages for context.
+    messages, _ = read_messages_since_cursor(session_dir, 0)
+    transcript_lines: list[str] = []
+    for msg in messages[-40:]:
+        role = msg.get("role", "")
+        content = str(msg.get("content", "")).strip()
+        if role == "tool" or not content:
+            continue
+        label = "user" if role == "user" else "assistant"
+        if len(content) > 600:
+            content = content[:600] + "..."
+        transcript_lines.append(f"[{label}]: {content}")
+
+    if not transcript_lines:
+        return
+
+    transcript = "\n".join(transcript_lines)
+    user_msg = (
+        f"## Today's Diary So Far\n\n"
+        f"{existing_body or '(no entries yet)'}\n\n"
+        f"## Recent Conversation\n\n"
+        f"{transcript}\n\n"
+        f"Date: {today_str}"
+    )
+
+    try:
+        from framework.agents.queen.config import default_config
+
+        resp = await llm.acomplete(
+            messages=[{"role": "user", "content": user_msg}],
+            system=_DIARY_SYSTEM,
+            max_tokens=min(default_config.max_tokens, 1024),
+        )
+        new_body = (resp.content or "").strip()
+        if not new_body:
+            return
+
+        doc = build_diary_document(date_str=today_str, body=new_body)
+        if len(doc.encode("utf-8")) > MAX_FILE_SIZE_BYTES:
+            new_body = new_body[:2800]
+            doc = build_diary_document(date_str=today_str, body=new_body)
+
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        diary_path.write_text(doc, encoding="utf-8")
+        logger.debug("diary: updated %s (%d chars)", fname, len(doc))
+    except Exception:
+        logger.warning("diary: update failed", exc_info=True)
+
+
 # ---------------------------------------------------------------------------
 # Event-bus integration
 # ---------------------------------------------------------------------------
@@ -480,6 +577,12 @@ async def subscribe_reflection_triggers(
             except Exception:
                 logger.warning("reflect: reflection failed", exc_info=True)
                 _write_error("short/long reflection")
+
+            # Update daily diary after reflection.
+            try:
+                await run_diary_update(session_dir, llm, mem_dir)
+            except Exception:
+                logger.warning("reflect: diary update failed", exc_info=True)
 
             # Update recall cache after reflection completes, guaranteeing
             # recall sees the current turn's extracted memories.
