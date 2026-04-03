@@ -776,7 +776,7 @@ Implement an interactive, drag-and-drop canvas (using libraries like React Flow)
 ### TUI to GUI Upgrade
 Port the existing Terminal User Interface (TUI) into a rich web application, allowing users to interact directly with the Queen Bee / Coding Agent via a browser chat interface.
 
-> **Note:** The TUI (`hive tui` / `tui/app.py`) is deprecated and no longer maintained (see AGENTS.md). The items below reflect legacy work completed before deprecation. New development should target the browser-based GUI (`hive open`).
+> **Note:** The legacy TUI (`tui/app.py`) is deprecated and no longer maintained (see AGENTS.md). The items below reflect legacy work completed before deprecation. New development should target the browser-based GUI (`hive open`).
 
 - [x] ~~**TUI Foundation**~~ *(deprecated)*
     - [x] ~~Terminal chat interface (tui/app.py)~~

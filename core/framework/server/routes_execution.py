@@ -8,10 +8,22 @@ from typing import Any
 from aiohttp import web
 
 from framework.credentials.validation import validate_agent_credentials
+from framework.graph.conversation import LEGACY_RUN_ID
 from framework.server.app import resolve_session, safe_path_segment, sessions_dir
 from framework.server.routes_sessions import _credential_error_response
 
 logger = logging.getLogger(__name__)
+
+
+def _load_checkpoint_run_id(cp_path) -> str | None:
+    try:
+        checkpoint = json.loads(cp_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    run_id = checkpoint.get("run_id")
+    if isinstance(run_id, str) and run_id:
+        return run_id
+    return LEGACY_RUN_ID
 
 
 async def handle_trigger(request: web.Request) -> web.Response:
@@ -23,8 +35,8 @@ async def handle_trigger(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
     # Validate credentials before running — deferred from load time to avoid
     # showing the modal before the user clicks Run.  Runs in executor because
@@ -59,7 +71,7 @@ async def handle_trigger(request: web.Request) -> web.Response:
     if "resume_session_id" not in session_state:
         session_state["resume_session_id"] = session.id
 
-    execution_id = await session.worker_runtime.trigger(
+    execution_id = await session.graph_runtime.trigger(
         entry_point_id,
         input_data,
         session_state=session_state,
@@ -87,8 +99,8 @@ async def handle_inject(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
     body = await request.json()
     node_id = body.get("node_id")
@@ -98,15 +110,16 @@ async def handle_inject(request: web.Request) -> web.Response:
     if not node_id:
         return web.json_response({"error": "node_id is required"}, status=400)
 
-    delivered = await session.worker_runtime.inject_input(node_id, content, graph_id=graph_id)
+    delivered = await session.graph_runtime.inject_input(node_id, content, graph_id=graph_id)
     return web.json_response({"delivered": delivered})
 
 
 async def handle_chat(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/chat — send a message to the queen.
 
-    The input box is permanently connected to the queen agent.
-    Worker input is handled separately via /worker-input.
+    The input box is permanently connected to the queen agent, including
+    replies to worker-originated questions. The queen decides whether to
+    relay the user's answer back into the worker via inject_message().
 
     Body: {"message": "hello", "images": [{"type": "image_url", "image_url": {"url": "data:..."}}]}
 
@@ -115,20 +128,52 @@ async def handle_chat(request: web.Request) -> web.Response:
     """
     session, err = resolve_session(request)
     if err:
+        logger.debug("[handle_chat] Session resolution failed: %s", err)
         return err
 
     body = await request.json()
     message = body.get("message", "")
+    display_message = body.get("display_message")
     image_content = body.get("images") or None  # list[dict] | None
+
+    logger.debug("[handle_chat] session_id=%s, message_len=%d, has_images=%s", 
+                 session.id, len(message), bool(image_content))
+    logger.debug("[handle_chat] session.queen_executor=%s", session.queen_executor)
 
     if not message and not image_content:
         return web.json_response({"error": "message is required"}, status=400)
 
     queen_executor = session.queen_executor
     if queen_executor is not None:
+        logger.debug("[handle_chat] Queen executor exists, looking for 'queen' node...")
+        logger.debug("[handle_chat] node_registry type=%s, id=%s", type(queen_executor.node_registry), id(queen_executor.node_registry))
+        logger.debug("[handle_chat] node_registry keys: %s", list(queen_executor.node_registry.keys()))
         node = queen_executor.node_registry.get("queen")
+        logger.debug("[handle_chat] node=%s, node_type=%s", node, type(node).__name__ if node else None)
+        logger.debug("[handle_chat] has_inject_event=%s", hasattr(node, "inject_event") if node else False)
+        
+        # Race condition: executor exists but node not created yet (still initializing)
+        if node is None and session.queen_task is not None and not session.queen_task.done():
+            logger.warning("[handle_chat] Queen executor exists but node not ready yet (initializing). Waiting...")
+            # Wait a short time for initialization to progress
+            import asyncio
+            for _ in range(50):  # Max 5 seconds
+                await asyncio.sleep(0.1)
+                node = queen_executor.node_registry.get("queen")
+                if node is not None:
+                    logger.debug("[handle_chat] Node appeared after waiting")
+                    break
+            else:
+                logger.error("[handle_chat] Node still not available after 5s wait")
+        
         if node is not None and hasattr(node, "inject_event"):
-            await node.inject_event(message, is_client_input=True, image_content=image_content)
+            try:
+                logger.debug("[handle_chat] Calling node.inject_event()...")
+                await node.inject_event(message, is_client_input=True, image_content=image_content)
+                logger.debug("[handle_chat] inject_event() completed successfully")
+            except Exception as e:
+                logger.exception("[handle_chat] inject_event() failed: %s", e)
+                raise
             # Publish to EventBus so the session event log captures user messages
             from framework.runtime.event_bus import AgentEvent, EventType
 
@@ -139,7 +184,9 @@ async def handle_chat(request: web.Request) -> web.Response:
                     node_id="queen",
                     execution_id=session.id,
                     data={
-                        "content": message,
+                        # Allow the UI to display a user-friendly echo while
+                        # the queen receives a richer relay wrapper.
+                        "content": display_message if display_message is not None else message,
                         "image_count": len(image_content) if image_content else 0,
                     },
                 )
@@ -150,11 +197,30 @@ async def handle_chat(request: web.Request) -> web.Response:
                     "delivered": True,
                 }
             )
+        else:
+            if node is None:
+                logger.error("[handle_chat] CRITICAL: Queen node is None! node_registry has %d keys: %s, queen_task=%s, queen_task_done=%s", 
+                             len(queen_executor.node_registry), list(queen_executor.node_registry.keys()),
+                             session.queen_task, session.queen_task.done() if session.queen_task else None)
+            else:
+                logger.error("[handle_chat] CRITICAL: Queen node exists but missing inject_event! node_attrs=%s", 
+                             [a for a in dir(node) if not a.startswith('_')])
 
     # Queen is dead — try to revive her
+    logger.warning(
+        "[handle_chat] Queen is dead for session '%s', reviving on /chat request", session.id
+    )
     manager: Any = request.app["manager"]
     try:
-        await manager.revive_queen(session, initial_prompt=message)
+        logger.debug("[handle_chat] Calling manager.revive_queen()...")
+        await manager.revive_queen(session)
+        logger.debug("[handle_chat] revive_queen() completed successfully")
+        # Inject the user's message into the revived queen's queue so the
+        # event loop drains it and clears any restored pending_input_state.
+        _revived_executor = session.queen_executor
+        _revived_node = _revived_executor.node_registry.get("queen") if _revived_executor else None
+        if _revived_node is not None and hasattr(_revived_node, "inject_event"):
+            await _revived_node.inject_event(message, is_client_input=True, image_content=image_content)
         return web.json_response(
             {
                 "status": "queen_revived",
@@ -162,7 +228,7 @@ async def handle_chat(request: web.Request) -> web.Response:
             }
         )
     except Exception as e:
-        logger.error("Failed to revive queen: %s", e)
+        logger.exception("[handle_chat] Failed to revive queen: %s", e)
         return web.json_response({"error": "Queen not available"}, status=503)
 
 
@@ -193,6 +259,10 @@ async def handle_queen_context(request: web.Request) -> web.Response:
             return web.json_response({"status": "queued", "delivered": True})
 
     # Queen is dead — try to revive her
+    logger.warning(
+        "Queen is dead for session '%s', reviving on /queen-context request",
+        session.id,
+    )
     manager: Any = request.app["manager"]
     try:
         await manager.revive_queen(session)
@@ -209,56 +279,16 @@ async def handle_queen_context(request: web.Request) -> web.Response:
     return web.json_response({"error": "Queen not available"}, status=503)
 
 
-async def handle_worker_input(request: web.Request) -> web.Response:
-    """POST /api/sessions/{session_id}/worker-input — send input to waiting worker node.
-
-    Auto-discovers the worker node currently awaiting input and injects the message.
-    Returns 404 if no worker node is awaiting input.
-
-    Body: {"message": "..."}
-    """
-    session, err = resolve_session(request)
-    if err:
-        return err
-
-    body = await request.json()
-    message = body.get("message", "")
-
-    if not message:
-        return web.json_response({"error": "message is required"}, status=400)
-
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded"}, status=503)
-
-    node_id, graph_id = session.worker_runtime.find_awaiting_node()
-    if not node_id:
-        return web.json_response({"error": "No worker node awaiting input"}, status=404)
-
-    delivered = await session.worker_runtime.inject_input(
-        node_id,
-        message,
-        graph_id=graph_id,
-        is_client_input=True,
-    )
-    return web.json_response(
-        {
-            "status": "injected",
-            "node_id": node_id,
-            "delivered": delivered,
-        }
-    )
-
-
 async def handle_goal_progress(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/goal-progress — evaluate goal progress."""
     session, err = resolve_session(request)
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
-    progress = await session.worker_runtime.get_goal_progress()
+    progress = await session.graph_runtime.get_goal_progress()
     return web.json_response(progress, dumps=lambda obj: json.dumps(obj, default=str))
 
 
@@ -271,8 +301,8 @@ async def handle_resume(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
     body = await request.json()
     worker_session_id = body.get("session_id")
@@ -296,30 +326,29 @@ async def handle_resume(request: web.Request) -> web.Response:
     except (json.JSONDecodeError, OSError) as e:
         return web.json_response({"error": f"Failed to read session: {e}"}, status=500)
 
-    if checkpoint_id:
-        resume_session_state = {
-            "resume_session_id": worker_session_id,
-            "resume_from_checkpoint": checkpoint_id,
-        }
-    else:
-        progress = state.get("progress", {})
-        paused_at = progress.get("paused_at") or progress.get("resume_from")
-        resume_session_state = {
-            "resume_session_id": worker_session_id,
-            "memory": state.get("memory", {}),
-            "execution_path": progress.get("path", []),
-            "node_visit_counts": progress.get("node_visit_counts", {}),
-        }
-        if paused_at:
-            resume_session_state["paused_at"] = paused_at
+    if not checkpoint_id:
+        return web.json_response(
+            {"error": "checkpoint_id is required; non-checkpoint resume is no longer supported"},
+            status=400,
+        )
 
-    entry_points = session.worker_runtime.get_entry_points()
+    cp_path = session_dir / "checkpoints" / f"{checkpoint_id}.json"
+    if not cp_path.exists():
+        return web.json_response({"error": "Checkpoint not found"}, status=404)
+
+    resume_session_state = {
+        "resume_session_id": worker_session_id,
+        "resume_from_checkpoint": checkpoint_id,
+        "run_id": _load_checkpoint_run_id(cp_path),
+    }
+
+    entry_points = session.graph_runtime.get_entry_points()
     if not entry_points:
         return web.json_response({"error": "No entry points available"}, status=400)
 
     input_data = state.get("input_data", {})
 
-    execution_id = await session.worker_runtime.trigger(
+    execution_id = await session.graph_runtime.trigger(
         entry_points[0].id,
         input_data=input_data,
         session_state=resume_session_state,
@@ -337,7 +366,7 @@ async def handle_resume(request: web.Request) -> web.Response:
 async def handle_pause(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/pause — pause the worker (queen stays alive).
 
-    Mirrors the queen's stop_worker() tool: cancels all active worker
+    Mirrors the queen's stop_graph() tool: cancels all active worker
     executions, pauses timers so nothing auto-restarts, but does NOT
     touch the queen so she can observe and react to the pause.
     """
@@ -345,10 +374,10 @@ async def handle_pause(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
-    runtime = session.worker_runtime
+    runtime = session.graph_runtime
     cancelled = []
 
     for graph_id in runtime.list_graphs():
@@ -397,8 +426,8 @@ async def handle_stop(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
     body = await request.json()
     execution_id = body.get("execution_id")
@@ -406,8 +435,8 @@ async def handle_stop(request: web.Request) -> web.Response:
     if not execution_id:
         return web.json_response({"error": "execution_id is required"}, status=400)
 
-    for graph_id in session.worker_runtime.list_graphs():
-        reg = session.worker_runtime.get_graph_registration(graph_id)
+    for graph_id in session.graph_runtime.list_graphs():
+        reg = session.graph_runtime.get_graph_registration(graph_id)
         if reg is None:
             continue
         for _ep_id, stream in reg.streams.items():
@@ -452,8 +481,8 @@ async def handle_replay(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
-        return web.json_response({"error": "No worker loaded in this session"}, status=503)
+    if not session.graph_runtime:
+        return web.json_response({"error": "No graph loaded in this session"}, status=503)
 
     body = await request.json()
     worker_session_id = body.get("session_id")
@@ -471,16 +500,17 @@ async def handle_replay(request: web.Request) -> web.Response:
     if not cp_path.exists():
         return web.json_response({"error": "Checkpoint not found"}, status=404)
 
-    entry_points = session.worker_runtime.get_entry_points()
+    entry_points = session.graph_runtime.get_entry_points()
     if not entry_points:
         return web.json_response({"error": "No entry points available"}, status=400)
 
     replay_session_state = {
         "resume_session_id": worker_session_id,
         "resume_from_checkpoint": checkpoint_id,
+        "run_id": _load_checkpoint_run_id(cp_path),
     }
 
-    execution_id = await session.worker_runtime.trigger(
+    execution_id = await session.graph_runtime.trigger(
         entry_points[0].id,
         input_data={},
         session_state=replay_session_state,
@@ -517,7 +547,6 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/sessions/{session_id}/inject", handle_inject)
     app.router.add_post("/api/sessions/{session_id}/chat", handle_chat)
     app.router.add_post("/api/sessions/{session_id}/queen-context", handle_queen_context)
-    app.router.add_post("/api/sessions/{session_id}/worker-input", handle_worker_input)
     app.router.add_post("/api/sessions/{session_id}/pause", handle_pause)
     app.router.add_post("/api/sessions/{session_id}/resume", handle_resume)
     app.router.add_post("/api/sessions/{session_id}/stop", handle_stop)

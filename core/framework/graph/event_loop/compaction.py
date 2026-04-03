@@ -776,7 +776,7 @@ def build_emergency_summary(
     # 2. Inputs the node received
     input_lines = []
     for key in spec.input_keys:
-        value = ctx.input_data.get(key) or ctx.memory.read(key)
+        value = ctx.input_data.get(key) or ctx.buffer.read(key)
         if value is not None:
             # Truncate long values but keep them recognisable
             v_str = str(value)
@@ -805,8 +805,6 @@ def build_emergency_summary(
 
     # 5. Spillover files — list actual files so the LLM can load
     # them immediately instead of having to call list_data_files first.
-    # Inline adapt.md (agent memory) directly — it contains user rules
-    # and identity preferences that must survive emergency compaction.
     spillover_dir = config.spillover_dir if config else None
     if spillover_dir:
         try:
@@ -814,16 +812,7 @@ def build_emergency_summary(
 
             data_dir = Path(spillover_dir)
             if data_dir.is_dir():
-                # Inline adapt.md content directly
-                adapt_path = data_dir / "adapt.md"
-                if adapt_path.is_file():
-                    adapt_text = adapt_path.read_text(encoding="utf-8").strip()
-                    if adapt_text:
-                        parts.append(f"AGENT MEMORY (adapt.md):\n{adapt_text}")
-
-                all_files = sorted(
-                    f.name for f in data_dir.iterdir() if f.is_file() and f.name != "adapt.md"
-                )
+                all_files = sorted(f.name for f in data_dir.iterdir() if f.is_file())
                 # Separate conversation history files from regular data files
                 conv_files = [f for f in all_files if re.match(r"conversation_\d+\.md$", f)]
                 data_files = [f for f in all_files if f not in conv_files]

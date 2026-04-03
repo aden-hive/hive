@@ -9,7 +9,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from framework.graph.conversation import ConversationStore
+from framework.graph.conversation import (
+    ConversationStore,
+    get_run_cursor,
+    update_run_cursor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +125,7 @@ class OutputAccumulator:
     store: ConversationStore | None = None
     spillover_dir: str | None = None
     max_value_chars: int = 0
+    run_id: str | None = None
 
     async def set(self, key: str, value: Any) -> None:
         """Set a key-value pair, auto-spilling large values to files."""
@@ -179,12 +184,14 @@ class OutputAccumulator:
         return all(key in self.values and self.values[key] is not None for key in required)
 
     @classmethod
-    async def restore(cls, store: ConversationStore) -> OutputAccumulator:
+    async def restore(
+        cls,
+        store: ConversationStore,
+        run_id: str | None = None,
+    ) -> OutputAccumulator:
         cursor = await store.read_cursor()
-        values = {}
-        if cursor and "outputs" in cursor:
-            values = cursor["outputs"]
-        return cls(values=values, store=store)
+        values = cursor.get("outputs", {}) if cursor else {}
+        return cls(values=values, store=store, run_id=run_id)
 
 
 __all__ = [

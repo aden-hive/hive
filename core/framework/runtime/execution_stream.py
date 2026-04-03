@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult, GraphExecutor
 from framework.runtime.event_bus import EventBus
-from framework.runtime.shared_state import IsolationLevel, SharedStateManager
+from framework.runtime.shared_state import IsolationLevel, SharedBufferManager
 from framework.runtime.stream_runtime import StreamRuntime, StreamRuntimeAdapter
 
 if TYPE_CHECKING:
@@ -170,7 +170,7 @@ class ExecutionStream:
         entry_spec: EntryPointSpec,
         graph: "GraphSpec",
         goal: "Goal",
-        state_manager: SharedStateManager,
+        state_manager: SharedBufferManager,
         storage: "ConcurrentStorage",
         outcome_aggregator: "OutcomeAggregator",
         event_bus: "EventBus | None" = None,
@@ -191,6 +191,11 @@ class ExecutionStream:
         skill_dirs: list[str] | None = None,
         context_warn_ratio: float | None = None,
         batch_init_nudge: str | None = None,
+        dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = None,
+        colony_memory_dir: Any = None,
+        colony_worker_sessions_dir: Any = None,
+        colony_recall_cache: dict[str, str] | None = None,
+        colony_reflect_llm: Any = None,
     ):
         """
         Initialize execution stream.
@@ -245,6 +250,11 @@ class ExecutionStream:
         self._skill_dirs: list[str] = skill_dirs or []
         self._context_warn_ratio: float | None = context_warn_ratio
         self._batch_init_nudge: str | None = batch_init_nudge
+        self._dynamic_memory_provider_factory = dynamic_memory_provider_factory
+        self._colony_memory_dir = colony_memory_dir
+        self._colony_worker_sessions_dir = colony_worker_sessions_dir
+        self._colony_recall_cache = colony_recall_cache
+        self._colony_reflect_llm = colony_reflect_llm
 
         _es_logger = logging.getLogger(__name__)
         if protocols_prompt:
@@ -357,7 +367,7 @@ class ExecutionStream:
 
         Each entry is ``{"node_id": ..., "execution_id": ...}``.
         The currently executing node is placed first so that
-        ``inject_worker_message`` targets the active node, not a stale one.
+        ``inject_message`` targets the active node, not a stale one.
         """
         injectable: list[dict[str, str]] = []
         current_first: list[dict[str, str]] = []
@@ -550,6 +560,14 @@ class ExecutionStream:
             correlation_id = execution_id
 
         # Create execution context
+        effective_run_id = None
+        if session_state:
+            existing_run_id = session_state.get("run_id")
+            if isinstance(existing_run_id, str) and existing_run_id:
+                effective_run_id = existing_run_id
+        if effective_run_id is None:
+            effective_run_id = run_id
+
         ctx = ExecutionContext(
             id=execution_id,
             correlation_id=correlation_id,
@@ -558,7 +576,7 @@ class ExecutionStream:
             input_data=input_data,
             isolation_level=self.entry_spec.get_isolation_level(),
             session_state=session_state,
-            run_id=run_id,
+            run_id=effective_run_id,
         )
 
         async with self._lock:
@@ -639,7 +657,7 @@ class ExecutionStream:
                 self._write_run_event(execution_id, ctx.run_id, "run_started")
 
                 # Create execution-scoped memory
-                self._state_manager.create_memory(
+                self._state_manager.create_buffer(
                     execution_id=execution_id,
                     stream_id=self.stream_id,
                     isolation=ctx.isolation_level,
@@ -700,6 +718,7 @@ class ExecutionStream:
                         event_bus=self._scoped_event_bus,
                         stream_id=self.stream_id,
                         execution_id=execution_id,
+                        run_id=ctx.run_id or "",
                         storage_path=exec_storage,
                         runtime_logger=runtime_logger,
                         loop_config=self.graph.loop_config,
@@ -711,6 +730,15 @@ class ExecutionStream:
                         skill_dirs=self._skill_dirs,
                         context_warn_ratio=self._context_warn_ratio,
                         batch_init_nudge=self._batch_init_nudge,
+                        dynamic_memory_provider=(
+                            self._dynamic_memory_provider_factory(execution_id)
+                            if self._dynamic_memory_provider_factory is not None
+                            else None
+                        ),
+                        colony_memory_dir=self._colony_memory_dir,
+                        colony_worker_sessions_dir=self._colony_worker_sessions_dir,
+                        colony_recall_cache=self._colony_recall_cache,
+                        colony_reflect_llm=self._colony_reflect_llm,
                     )
                     # Track executor so inject_input() can reach EventLoopNode instances
                     self._active_executors[execution_id] = executor
@@ -1044,6 +1072,7 @@ class ExecutionStream:
                     agent_id=self.graph.id,
                     entry_point=self.entry_spec.id,
                 )
+                state.current_run_id = ctx.run_id
             else:
                 # Create initial state — when resuming, preserve the previous
                 # execution's progress so crashes don't lose track of state.
@@ -1074,8 +1103,9 @@ class ExecutionStream:
                         updated_at=now,
                     ),
                     progress=progress,
-                    memory=ss.get("memory", {}),
+                    data_buffer=ss.get("data_buffer", ss.get("memory", {})),
                     input_data=ctx.input_data,
+                    current_run_id=ctx.run_id,
                 )
 
             # Handle error case

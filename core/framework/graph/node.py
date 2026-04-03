@@ -2,7 +2,7 @@
 Node Protocol - The building block of agent graphs.
 
 A Node is a unit of work that:
-1. Receives context (goal, shared memory, input)
+1. Receives context (goal, shared buffer, input)
 2. Makes decisions (using LLM, tools, or logic)
 3. Produces results (output, state changes)
 4. Records everything to the Runtime
@@ -28,62 +28,6 @@ from framework.llm.provider import LLMProvider, Tool
 from framework.runtime.core import Runtime
 
 logger = logging.getLogger(__name__)
-
-
-def _fix_unescaped_newlines_in_json(json_str: str) -> str:
-    """Fix unescaped newlines inside JSON string values.
-
-    LLMs sometimes output actual newlines inside JSON strings instead of \\n.
-    This function fixes that by properly escaping newlines within string values.
-    """
-    result = []
-    in_string = False
-    escape_next = False
-    i = 0
-
-    while i < len(json_str):
-        char = json_str[i]
-
-        if escape_next:
-            result.append(char)
-            escape_next = False
-            i += 1
-            continue
-
-        if char == "\\" and in_string:
-            escape_next = True
-            result.append(char)
-            i += 1
-            continue
-
-        if char == '"' and not escape_next:
-            in_string = not in_string
-            result.append(char)
-            i += 1
-            continue
-
-        # Fix unescaped newlines inside strings
-        if in_string and char == "\n":
-            result.append("\\n")
-            i += 1
-            continue
-
-        # Fix unescaped carriage returns inside strings
-        if in_string and char == "\r":
-            result.append("\\r")
-            i += 1
-            continue
-
-        # Fix unescaped tabs inside strings
-        if in_string and char == "\t":
-            result.append("\\t")
-            i += 1
-            continue
-
-        result.append(char)
-        i += 1
-
-    return "".join(result)
 
 
 def find_json_object(text: str) -> str | None:
@@ -171,10 +115,10 @@ class NodeSpec(BaseModel):
 
     # Data flow
     input_keys: list[str] = Field(
-        default_factory=list, description="Keys this node reads from shared memory or input"
+        default_factory=list, description="Keys this node reads from the shared buffer or input"
     )
     output_keys: list[str] = Field(
-        default_factory=list, description="Keys this node writes to shared memory or output"
+        default_factory=list, description="Keys this node writes to the shared buffer or output"
     )
     nullable_output_keys: list[str] = Field(
         default_factory=list,
@@ -249,7 +193,10 @@ class NodeSpec(BaseModel):
     # Client-facing behavior
     client_facing: bool = Field(
         default=False,
-        description="If True, this node streams output to the end user and can request input.",
+        description=(
+            "Deprecated compatibility field. The queen is intrinsically interactive; "
+            "non-queen nodes should escalate to the queen instead of talking to users directly."
+        ),
     )
 
     # Phase completion criteria for conversation-aware judge (Level 2)
@@ -285,20 +232,46 @@ class NodeSpec(BaseModel):
 
     model_config = {"extra": "allow", "arbitrary_types_allowed": True}
 
+    def is_queen_node(self) -> bool:
+        """Return True when this spec is the queen conversational node."""
+        return self.id == "queen"
 
-class MemoryWriteError(Exception):
-    """Raised when an invalid value is written to memory."""
+    def supports_direct_user_io(self) -> bool:
+        """Return True when this node may talk to the user directly."""
+        return self.is_queen_node()
+
+
+def deprecated_client_facing_warning(node_spec: NodeSpec) -> str | None:
+    """Return a deprecation warning for legacy non-queen client_facing nodes."""
+    if node_spec.client_facing and not node_spec.is_queen_node():
+        return (
+            f"Node '{node_spec.id}' sets deprecated client_facing=True. "
+            "Non-queen direct human I/O is no longer supported; route worker "
+            "questions and approvals through queen escalation instead."
+        )
+    return None
+
+
+def warn_if_deprecated_client_facing(node_spec: NodeSpec) -> None:
+    """Log a compatibility warning once the node is loaded for execution."""
+    warning = deprecated_client_facing_warning(node_spec)
+    if warning:
+        logger.warning(warning)
+
+
+class DataBufferWriteError(Exception):
+    """Raised when an invalid value is written to the data buffer."""
 
     pass
 
 
 @dataclass
-class SharedMemory:
+class DataBuffer:
     """
-    Shared state between nodes in a graph execution.
+    Shared data buffer between nodes in a graph execution.
 
-    Nodes read and write to shared memory using typed keys.
-    The memory is scoped to a single run.
+    Nodes read and write to the data buffer using typed keys.
+    The buffer is scoped to a single run.
 
     For parallel execution, use write_async() which provides per-key locking
     to prevent race conditions when multiple nodes write concurrently.
@@ -317,23 +290,23 @@ class SharedMemory:
             self._lock = asyncio.Lock()
 
     def read(self, key: str) -> Any:
-        """Read a value from shared memory."""
+        """Read a value from the data buffer."""
         if self._allowed_read and key not in self._allowed_read:
             raise PermissionError(f"Node not allowed to read key: {key}")
         return self._data.get(key)
 
     def write(self, key: str, value: Any, validate: bool = True) -> None:
         """
-        Write a value to shared memory.
+        Write a value to the data buffer.
 
         Args:
-            key: The memory key to write to
+            key: The buffer key to write to
             value: The value to write
             validate: If True, check for suspicious content (default True)
 
         Raises:
             PermissionError: If node doesn't have write permission
-            MemoryWriteError: If value appears to be hallucinated content
+            DataBufferWriteError: If value appears to be hallucinated content
         """
         if self._allowed_write and key not in self._allowed_write:
             raise PermissionError(f"Node not allowed to write key: {key}")
@@ -347,7 +320,7 @@ class SharedMemory:
                         f"⚠ Suspicious write to key '{key}': appears to be code "
                         f"({len(value)} chars). Consider using validate=False if intended."
                     )
-                    raise MemoryWriteError(
+                    raise DataBufferWriteError(
                         f"Rejected suspicious content for key '{key}': "
                         f"appears to be hallucinated code ({len(value)} chars). "
                         "If this is intentional, use validate=False."
@@ -363,13 +336,13 @@ class SharedMemory:
         parallel execution. Each key has its own lock to minimize contention.
 
         Args:
-            key: The memory key to write to
+            key: The buffer key to write to
             value: The value to write
             validate: If True, check for suspicious content (default True)
 
         Raises:
             PermissionError: If node doesn't have write permission
-            MemoryWriteError: If value appears to be hallucinated content
+            DataBufferWriteError: If value appears to be hallucinated content
         """
         # Check permissions first (no lock needed)
         if self._allowed_write and key not in self._allowed_write:
@@ -390,7 +363,7 @@ class SharedMemory:
                             f"⚠ Suspicious write to key '{key}': appears to be code "
                             f"({len(value)} chars). Consider using validate=False if intended."
                         )
-                        raise MemoryWriteError(
+                        raise DataBufferWriteError(
                             f"Rejected suspicious content for key '{key}': "
                             f"appears to be hallucinated code ({len(value)} chars). "
                             "If this is intentional, use validate=False."
@@ -468,13 +441,13 @@ class SharedMemory:
         self,
         read_keys: list[str],
         write_keys: list[str],
-    ) -> "SharedMemory":
+    ) -> "DataBuffer":
         """Create a view with restricted permissions for a specific node.
 
         The scoped view shares the same underlying data and locks,
         enabling thread-safe parallel execution across scoped views.
         """
-        return SharedMemory(
+        return DataBuffer(
             _data=self._data,
             _allowed_read=set(read_keys) if read_keys else set(),
             _allowed_write=set(write_keys) if write_keys else set(),
@@ -490,7 +463,7 @@ class NodeContext:
 
     This is passed to every node and provides:
     - Access to the runtime (for decision logging)
-    - Access to shared memory (for state)
+    - Access to the data buffer (for state)
     - Access to LLM (for generation)
     - Access to tools (for actions)
     - The goal context (for guidance)
@@ -504,7 +477,7 @@ class NodeContext:
     node_spec: NodeSpec
 
     # State
-    memory: SharedMemory
+    buffer: DataBuffer
     input_data: dict[str, Any] = field(default_factory=dict)
 
     # LLM access (if applicable)
@@ -540,12 +513,25 @@ class NodeContext:
     # rebuilding the full system prompt when restoring from conversation store.
     identity_prompt: str = ""
     narrative: str = ""
+    # Static memory block injected into the system prompt.
+    memory_prompt: str = ""
 
     # Event-triggered execution (no interactive user attached)
     event_triggered: bool = False
 
     # Execution ID (from StreamRuntimeAdapter)
     execution_id: str = ""
+    run_id: str = ""
+
+    @property
+    def effective_run_id(self) -> str | None:
+        """Normalized run_id: returns run_id if truthy, otherwise None.
+
+        The field defaults to ``""``; callers should use this property
+        instead of ``self.run_id or None`` to avoid silently falling
+        back to session-scoped storage.
+        """
+        return self.run_id or None
 
     # Stream identity — the ExecutionStream this node runs within.
     # Falls back to node_id when not set (legacy / standalone executor).
@@ -575,6 +561,9 @@ class NodeContext:
     # the queen to switch between phase-specific prompts (building /
     # staging / running) without restarting the conversation.
     dynamic_prompt_provider: Any = None  # Callable[[], str] | None
+    # Dynamic memory provider — when set, EventLoopNode rebuilds the
+    # system prompt with the latest memory block each iteration.
+    dynamic_memory_provider: Any = None  # Callable[[], str] | None
 
     # Skill system prompts — injected by the skill discovery pipeline
     skills_catalog_prompt: str = ""  # Available skills XML catalog
@@ -592,6 +581,21 @@ class NodeContext:
 
     # Structured thinking tags — propagated from NodeSpec.thinking_tags.
     thinking_tags: list[str] | None = None
+
+    @property
+    def is_queen_stream(self) -> bool:
+        """Return True when this context belongs to the queen conversation."""
+        return self.stream_id == "queen" or self.node_spec.is_queen_node()
+
+    @property
+    def emits_client_io(self) -> bool:
+        """Return True when text should be published to user-facing streams."""
+        return self.is_queen_stream
+
+    @property
+    def supports_direct_user_io(self) -> bool:
+        """Return True when the node may directly request user input."""
+        return self.is_queen_stream and not self.event_triggered
 
 
 @dataclass
@@ -700,6 +704,6 @@ class NodeProtocol(ABC):
         """
         errors = []
         for key in ctx.node_spec.input_keys:
-            if key not in ctx.input_data and ctx.memory.read(key) is None:
+            if key not in ctx.input_data and ctx.buffer.read(key) is None:
                 errors.append(f"Missing required input: {key}")
         return errors

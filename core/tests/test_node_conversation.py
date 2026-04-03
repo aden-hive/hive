@@ -7,7 +7,13 @@ from typing import Any
 
 import pytest
 
-from framework.graph.conversation import Message, NodeConversation, extract_tool_call_history
+from framework.graph.conversation import (
+    LEGACY_RUN_ID,
+    Message,
+    NodeConversation,
+    extract_tool_call_history,
+    is_legacy_run_id,
+)
 from framework.storage.conversation_store import FileConversationStore
 
 # ---------------------------------------------------------------------------
@@ -41,7 +47,7 @@ class MockConversationStore:
     async def read_cursor(self) -> dict[str, Any] | None:
         return self._cursor
 
-    async def delete_parts_before(self, seq: int) -> None:
+    async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         self._parts = {k: v for k, v in self._parts.items() if k >= seq}
 
     async def close(self) -> None:
@@ -470,6 +476,38 @@ class TestPersistence:
         assert restored.message_count == 2
         assert restored.next_seq == 2
         assert restored.messages[0].content == "u1"
+
+    @pytest.mark.asyncio
+    async def test_restore_ignores_run_id_and_loads_all_parts(self):
+        store = MockConversationStore()
+        await store.write_meta({"system_prompt": "hello"})
+        await store.write_part(0, {"seq": 0, "role": "user", "content": "legacy"})
+        await store.write_part(1, {"seq": 1, "role": "user", "content": "run-a", "run_id": "run-a"})
+        await store.write_part(
+            2,
+            {"seq": 2, "role": "assistant", "content": "run-b", "run_id": "run-b"},
+        )
+        await store.write_cursor({"next_seq": 3})
+
+        restored = await NodeConversation.restore(store, run_id="run-a")
+        assert restored is not None
+        assert [m.content for m in restored.messages] == ["legacy", "run-a", "run-b"]
+        assert restored.next_seq == 3
+
+    @pytest.mark.asyncio
+    async def test_clear_deletes_all_parts(self):
+        store = MockConversationStore()
+        conv_a = NodeConversation(system_prompt="hello", store=store, run_id="run-a")
+        conv_b = NodeConversation(system_prompt="hello", store=store, run_id="run-b")
+
+        await conv_a.add_user_message("a1")
+        await conv_b.add_user_message("b1")
+
+        await conv_a.clear()
+
+        restored = await NodeConversation.restore(store)
+        assert restored is not None
+        assert [m.content for m in restored.messages] == []
 
     @pytest.mark.asyncio
     async def test_restore_preserves_tool_messages(self):

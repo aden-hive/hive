@@ -335,8 +335,8 @@ async def test_negative_case_condition_false():
 
     result = await executor.execute(graph, goal, {})
 
-    # Verify condition correctly evaluated to False
-    assert result.success, "Execution should succeed"
+    # Verify condition correctly evaluated to False — terminal never reached
+    assert not result.success, "Execution should fail when terminal is unreachable"
     assert "high_score_handler" not in result.path, (
         f"high_score_handler should NOT be in path. "
         f"Condition 'score > 80' should be False (score=30). "

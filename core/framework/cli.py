@@ -6,7 +6,6 @@ Usage:
     hive info exports/my-agent
     hive validate exports/my-agent
     hive list exports/
-    hive dispatch exports/ --input '{"key": "value"}'
     hive shell exports/my-agent
 
 Testing commands:
@@ -79,7 +78,7 @@ def main():
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Register runner commands (run, info, validate, list, dispatch, shell)
+    # Register runner commands (run, info, validate, list, shell)
     from framework.runner.cli import register_commands
 
     register_commands(subparsers)

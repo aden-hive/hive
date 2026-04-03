@@ -94,12 +94,12 @@ class EventType(StrEnum):
     TOOL_CALL_STARTED = "tool_call_started"
     TOOL_CALL_COMPLETED = "tool_call_completed"
 
-    # Client I/O (client_facing=True nodes only)
+    # Queen/user interaction events
     CLIENT_OUTPUT_DELTA = "client_output_delta"
     CLIENT_INPUT_REQUESTED = "client_input_requested"
     CLIENT_INPUT_RECEIVED = "client_input_received"
 
-    # Internal node observability (client_facing=False nodes)
+    # Internal node observability
     NODE_INTERNAL_OUTPUT = "node_internal_output"
     NODE_INPUT_BLOCKED = "node_input_blocked"
     NODE_STALLED = "node_stalled"
@@ -115,6 +115,10 @@ class EventType(StrEnum):
     NODE_RETRY = "node_retry"
     EDGE_TRAVERSED = "edge_traversed"
 
+    # Worker agent lifecycle (event-driven graph execution)
+    WORKER_COMPLETED = "worker_completed"
+    WORKER_FAILED = "worker_failed"
+
     # Context management
     CONTEXT_COMPACTED = "context_compacted"
     CONTEXT_USAGE_UPDATED = "context_usage_updated"
@@ -128,15 +132,11 @@ class EventType(StrEnum):
     # Escalation (agent requests handoff to queen)
     ESCALATION_REQUESTED = "escalation_requested"
 
-    # Worker health monitoring
-    WORKER_ESCALATION_TICKET = "worker_escalation_ticket"
-    QUEEN_INTERVENTION_REQUESTED = "queen_intervention_requested"
-
     # Execution resurrection (auto-restart on non-fatal failure)
     EXECUTION_RESURRECTED = "execution_resurrected"
 
-    # Worker lifecycle (session manager → frontend)
-    WORKER_LOADED = "worker_loaded"
+    # Graph lifecycle (session manager → frontend)
+    WORKER_GRAPH_LOADED = "worker_graph_loaded"
     CREDENTIALS_REQUIRED = "credentials_required"
 
     # Draft graph (planning phase — lightweight graph preview)
@@ -879,7 +879,7 @@ class EventBus:
         iteration: int | None = None,
         inner_turn: int = 0,
     ) -> None:
-        """Emit client output delta event (client_facing=True nodes)."""
+        """Emit user-facing output delta for interactive queen turns."""
         data: dict = {"content": content, "snapshot": snapshot, "inner_turn": inner_turn}
         if iteration is not None:
             data["iteration"] = iteration
@@ -902,7 +902,7 @@ class EventBus:
         options: list[str] | None = None,
         questions: list[dict] | None = None,
     ) -> None:
-        """Emit client input requested event (client_facing=True nodes).
+        """Emit a user-input request for interactive queen turns.
 
         Args:
             options: Optional predefined choices for the user (1-3 items).
@@ -936,7 +936,7 @@ class EventBus:
         content: str,
         execution_id: str | None = None,
     ) -> None:
-        """Emit node internal output event (client_facing=False nodes)."""
+        """Emit node internal output for non-user-facing execution."""
         await self.publish(
             AgentEvent(
                 type=EventType.NODE_INTERNAL_OUTPUT,
@@ -1094,6 +1094,54 @@ class EventBus:
             )
         )
 
+    async def emit_worker_completed(
+        self,
+        stream_id: str,
+        node_id: str,
+        worker_id: str,
+        success: bool,
+        output: dict[str, Any],
+        activations: list[dict[str, Any]] | None = None,
+        execution_id: str | None = None,
+        **extra_data: Any,
+    ) -> None:
+        """Emit worker completed event with outgoing activations."""
+        data: dict[str, Any] = {
+            "worker_id": worker_id,
+            "success": success,
+            "output": output,
+            "activations": activations or [],
+            **extra_data,
+        }
+        await self.publish(
+            AgentEvent(
+                type=EventType.WORKER_COMPLETED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data=data,
+            )
+        )
+
+    async def emit_worker_failed(
+        self,
+        stream_id: str,
+        node_id: str,
+        worker_id: str,
+        error: str,
+        execution_id: str | None = None,
+    ) -> None:
+        """Emit worker failed event."""
+        await self.publish(
+            AgentEvent(
+                type=EventType.WORKER_FAILED,
+                stream_id=stream_id,
+                node_id=node_id,
+                execution_id=execution_id,
+                data={"worker_id": worker_id, "error": error},
+            )
+        )
+
     async def emit_execution_paused(
         self,
         stream_id: str,
@@ -1169,52 +1217,6 @@ class EventBus:
                 node_id=node_id,
                 execution_id=execution_id,
                 data={"reason": reason, "context": context},
-            )
-        )
-
-    async def emit_worker_escalation_ticket(
-        self,
-        stream_id: str,
-        node_id: str,
-        ticket: dict,
-        execution_id: str | None = None,
-    ) -> None:
-        """Emitted when worker shows a degradation pattern."""
-        await self.publish(
-            AgentEvent(
-                type=EventType.WORKER_ESCALATION_TICKET,
-                stream_id=stream_id,
-                node_id=node_id,
-                execution_id=execution_id,
-                data={"ticket": ticket},
-            )
-        )
-
-    async def emit_queen_intervention_requested(
-        self,
-        stream_id: str,
-        node_id: str,
-        ticket_id: str,
-        analysis: str,
-        severity: str,
-        queen_graph_id: str,
-        queen_stream_id: str,
-        execution_id: str | None = None,
-    ) -> None:
-        """Emitted by queen when she decides the operator should be involved."""
-        await self.publish(
-            AgentEvent(
-                type=EventType.QUEEN_INTERVENTION_REQUESTED,
-                stream_id=stream_id,
-                node_id=node_id,
-                execution_id=execution_id,
-                data={
-                    "ticket_id": ticket_id,
-                    "analysis": analysis,
-                    "severity": severity,
-                    "queen_graph_id": queen_graph_id,
-                    "queen_stream_id": queen_stream_id,
-                },
             )
         )
 

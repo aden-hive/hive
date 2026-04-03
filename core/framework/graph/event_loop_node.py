@@ -19,7 +19,6 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from framework.graph.conversation import ConversationStore, NodeConversation
@@ -80,7 +79,6 @@ from framework.graph.event_loop.tool_result_handler import (
     execute_tool,
     extract_json_metadata,
     is_transient_error,
-    record_learning,
     restore_spill_counter,
     truncate_tool_result,
 )
@@ -183,7 +181,7 @@ class _EscalationReceiver:
     def __init__(self) -> None:
         self._event = asyncio.Event()
         self._response: str | None = None
-        self._awaiting_input = True  # So inject_worker_message() can prefer us
+        self._awaiting_input = True  # So inject_message() can prefer us
 
     async def inject_event(
         self,
@@ -233,7 +231,7 @@ class EventLoopNode(NodeProtocol):
     1. Try to restore from durable state (crash recovery)
     2. If no prior state, init from NodeSpec.system_prompt + input_keys
     3. Loop: drain injection queue -> stream LLM -> execute tools
-       -> if client_facing: block for user input (see below)
+       -> if queen-interactive: block for user input (see below)
        -> judge evaluates (acceptance criteria)
        (each add_* and set_output writes through to store immediately)
     4. Publish events to EventBus at each stage
@@ -241,7 +239,7 @@ class EventLoopNode(NodeProtocol):
     6. Terminate when judge returns ACCEPT, shutdown signaled, or max iterations
     7. Build output dict from OutputAccumulator
 
-    Client-facing blocking (``client_facing=True``):
+    Queen interaction blocking:
 
     - **Text-only turns** (no real tool calls, no set_output)
       automatically block for user input.  If the LLM is talking to the
@@ -275,7 +273,7 @@ class EventLoopNode(NodeProtocol):
             asyncio.Queue()
         )
         self._trigger_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
-        # Client-facing input blocking state
+        # Queen input blocking state
         self._input_ready = asyncio.Event()
         self._awaiting_input = False
         self._shutdown = False
@@ -308,6 +306,7 @@ class EventLoopNode(NodeProtocol):
 
     async def execute(self, ctx: NodeContext) -> NodeResult:
         """Run the event loop."""
+        logger.debug("[EventLoopNode.execute] Starting execution for node=%s, stream=%s", ctx.node_id, ctx.stream_id)
         start_time = time.time()
         total_input_tokens = 0
         total_output_tokens = 0
@@ -316,6 +315,7 @@ class EventLoopNode(NodeProtocol):
         execution_id = ctx.execution_id or ""
         # Store skill dirs for AS-9 file-read interception in _execute_tool
         self._skill_dirs: list[str] = ctx.skill_dirs
+        logger.debug("[EventLoopNode.execute] node_id=%s, execution_id=%s, max_iterations=%d", node_id, execution_id, self._config.max_iterations)
 
         # DS-13: context preservation warning state
         _context_warn_sent = False
@@ -323,7 +323,7 @@ class EventLoopNode(NodeProtocol):
         # Verdict counters for runtime logging
         _accept_count = _retry_count = _escalate_count = _continue_count = 0
 
-        # Client-facing auto-block grace: consecutive text-only turns without
+        # Queen auto-block grace: consecutive text-only turns without
         # any real tool call or set_output.  Resets on progress.
         _cf_text_only_streak = 0
 
@@ -369,10 +369,12 @@ class EventLoopNode(NodeProtocol):
                 store=self._conversation_store,
                 spillover_dir=self._config.spillover_dir,
                 max_value_chars=self._config.max_output_value_chars,
+                run_id=ctx.effective_run_id,
             )
             start_iteration = 0
             _restored_recent_responses: list[str] = []
             _restored_tool_fingerprints: list[list[tuple[str, str]]] = []
+            _restored_pending_input = None
         else:
             # Try crash-recovery restore from store, then fall back to fresh.
             restored = await self._restore(ctx)
@@ -382,46 +384,28 @@ class EventLoopNode(NodeProtocol):
                 start_iteration = restored.start_iteration
                 _restored_recent_responses = restored.recent_responses
                 _restored_tool_fingerprints = restored.recent_tool_fingerprints
+                _restored_pending_input = restored.pending_input
 
                 # Refresh the system prompt with full composition including
                 # execution preamble and node-type preamble.  The stored
                 # prompt may be stale after code changes or when runtime-
                 # injected context (e.g. worker identity) has changed.
-                from framework.graph.prompt_composer import (
-                    EXECUTION_SCOPE_PREAMBLE,
-                    compose_system_prompt,
-                )
+                from framework.graph.prompting import build_system_prompt_for_node_context
 
-                _exec_preamble = None
-                if (
-                    not ctx.is_subagent_mode
-                    and ctx.node_spec.node_type in ("event_loop", "gcu")
-                    and ctx.node_spec.output_keys
-                ):
-                    _exec_preamble = EXECUTION_SCOPE_PREAMBLE
-
-                _node_type_preamble = None
-                if ctx.node_spec.node_type == "gcu":
-                    from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
-
-                    _node_type_preamble = GCU_BROWSER_SYSTEM_PROMPT
-
-                _current_prompt = compose_system_prompt(
-                    identity_prompt=ctx.identity_prompt or None,
-                    focus_prompt=ctx.node_spec.system_prompt,
-                    narrative=ctx.narrative or None,
-                    accounts_prompt=ctx.accounts_prompt or None,
-                    skills_catalog_prompt=ctx.skills_catalog_prompt or None,
-                    protocols_prompt=ctx.protocols_prompt or None,
-                    execution_preamble=_exec_preamble,
-                    node_type_preamble=_node_type_preamble,
-                )
+                _current_prompt = build_system_prompt_for_node_context(ctx)
                 if conversation.system_prompt != _current_prompt:
                     conversation.update_system_prompt(_current_prompt)
                     logger.info("Refreshed system prompt for restored conversation")
+
+                # Refresh other meta fields that may differ across runs
+                conversation._max_context_tokens = self._config.max_context_tokens
+                if ctx.node_spec.output_keys:
+                    conversation._output_keys = ctx.node_spec.output_keys
+                conversation._meta_persisted = False  # Force re-persist with updated values
             else:
                 _restored_recent_responses = []
                 _restored_tool_fingerprints = []
+                _restored_pending_input = None
 
                 # Clear any stale conversation parts before starting fresh.
                 # This ensures a clean slate even if the store directory is reused.
@@ -429,40 +413,17 @@ class EventLoopNode(NodeProtocol):
                     await self._conversation_store.clear()
 
                 # Fresh conversation: either isolated mode or first node in continuous mode.
-                from framework.graph.prompt_composer import (
-                    EXECUTION_SCOPE_PREAMBLE,
-                    _with_datetime,
-                )
+                from framework.graph.prompting import build_system_prompt_for_node_context
 
-                system_prompt = _with_datetime(ctx.node_spec.system_prompt or "")
-                # Prepend execution-scope preamble for worker nodes so the
-                # LLM knows it is one step in a pipeline and should not try
-                # to perform work that belongs to other nodes.
-                if (
-                    not ctx.is_subagent_mode
-                    and ctx.node_spec.node_type in ("event_loop", "gcu")
-                    and ctx.node_spec.output_keys
-                ):
-                    system_prompt = f"{EXECUTION_SCOPE_PREAMBLE}\n\n{system_prompt}"
-                # Prepend GCU browser best-practices prompt for gcu nodes
-                if ctx.node_spec.node_type == "gcu":
-                    from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
+                system_prompt = build_system_prompt_for_node_context(ctx)
 
-                    system_prompt = f"{GCU_BROWSER_SYSTEM_PROMPT}\n\n{system_prompt}"
-                # Append connected accounts info if available
-                if ctx.accounts_prompt:
-                    system_prompt = f"{system_prompt}\n\n{ctx.accounts_prompt}"
-
-                # Append skill catalog and operational protocols
                 if ctx.skills_catalog_prompt:
-                    system_prompt = f"{system_prompt}\n\n{ctx.skills_catalog_prompt}"
                     logger.info(
                         "[%s] Injected skills catalog (%d chars)",
                         node_id,
                         len(ctx.skills_catalog_prompt),
                     )
                 if ctx.protocols_prompt:
-                    system_prompt = f"{system_prompt}\n\n{ctx.protocols_prompt}"
                     logger.info(
                         "[%s] Injected operational protocols (%d chars)",
                         node_id,
@@ -482,43 +443,12 @@ class EventLoopNode(NodeProtocol):
                         system_prompt = f"{system_prompt}\n\n{ctx.default_skill_batch_nudge}"
                         logger.info("[%s] DS-12: batch scenario detected, nudge injected", node_id)
 
-                # Inject agent working memory (adapt.md).
-                # If it doesn't exist yet, seed it with available context.
-                if self._config.spillover_dir:
-                    _adapt_path = Path(self._config.spillover_dir) / "adapt.md"
-                    if not _adapt_path.exists():
-                        _adapt_path.parent.mkdir(parents=True, exist_ok=True)
-                        seed = (
-                            f"## Identity\n{ctx.accounts_prompt}\n"
-                            if ctx.accounts_prompt
-                            else "# Session Working Memory\n"
-                        )
-                        _adapt_path.write_text(seed, encoding="utf-8")
-                    if _adapt_path.exists():
-                        _adapt_text = _adapt_path.read_text(encoding="utf-8").strip()
-                        if _adapt_text:
-                            system_prompt = (
-                                f"{system_prompt}\n\n"
-                                "--- Session Working Memory ---\n"
-                                f"{_adapt_text}\n"
-                                "--- End Session Working Memory ---\n\n"
-                                "Maintain your session working memory by calling "
-                                'save_data("adapt.md", ...) or edit_data("adapt.md", ...)'
-                                " as you work.\n"
-                                "This is session-scoped scratch space. "
-                                "IMMEDIATELY save: account/identity rules, "
-                                "behavioral constraints, and preferences specific to "
-                                "this session. Also record current task state, "
-                                "decisions, and working notes. "
-                                "For lasting knowledge about the user, use "
-                                "update_queen_memory() and append_queen_journal() instead."
-                            )
-
                 conversation = NodeConversation(
                     system_prompt=system_prompt,
                     max_context_tokens=self._config.max_context_tokens,
                     output_keys=ctx.node_spec.output_keys or None,
                     store=self._conversation_store,
+                    run_id=ctx.effective_run_id,
                 )
                 # Stamp phase for first node in continuous mode
                 if _is_continuous:
@@ -527,6 +457,7 @@ class EventLoopNode(NodeProtocol):
                     store=self._conversation_store,
                     spillover_dir=self._config.spillover_dir,
                     max_value_chars=self._config.max_output_value_chars,
+                    run_id=ctx.effective_run_id,
                 )
                 start_iteration = 0
 
@@ -555,7 +486,7 @@ class EventLoopNode(NodeProtocol):
         set_output_tool = self._build_set_output_tool(ctx.node_spec.output_keys)
         if set_output_tool:
             tools.append(set_output_tool)
-        if ctx.node_spec.client_facing and not ctx.event_triggered:
+        if ctx.supports_direct_user_io:
             tools.append(self._build_ask_user_tool())
             if stream_id == "queen":
                 tools.append(self._build_ask_user_multiple_tool())
@@ -591,11 +522,11 @@ class EventLoopNode(NodeProtocol):
             tools.append(self._build_report_to_parent_tool())
 
         logger.info(
-            "[%s] Tools available (%d): %s | client_facing=%s | judge=%s",
+            "[%s] Tools available (%d): %s | direct_user_io=%s | judge=%s",
             node_id,
             len(tools),
             [t.name for t in tools],
-            ctx.node_spec.client_facing,
+            ctx.supports_direct_user_io,
             type(self._judge).__name__ if self._judge else "None",
         )
 
@@ -617,11 +548,14 @@ class EventLoopNode(NodeProtocol):
         # 5. Stall / doom loop detection state (restored from cursor if resuming)
         recent_responses: list[str] = _restored_recent_responses
         recent_tool_fingerprints: list[list[tuple[str, str]]] = _restored_tool_fingerprints
+        pending_input_state: dict[str, Any] | None = _restored_pending_input
         _consecutive_empty_turns: int = 0
 
         # 6. Main loop
+        logger.debug("[EventLoopNode.execute] Entering main loop, start_iteration=%d", start_iteration)
         for iteration in range(start_iteration, self._config.max_iterations):
             iter_start = time.time()
+            logger.debug("[EventLoopNode.execute] iteration=%d starting", iteration)
 
             # 6a. Check pause (no current-iteration data yet — only log_node_complete needed)
             if await self._check_pause(ctx, conversation, iteration):
@@ -652,9 +586,72 @@ class EventLoopNode(NodeProtocol):
                 )
 
             # 6b. Drain injection queue
-            await self._drain_injection_queue(conversation, ctx)
+            logger.debug("[EventLoopNode.execute] iteration=%d: draining injection queue...", iteration)
+            drained_injections = await self._drain_injection_queue(conversation, ctx)
+            logger.debug("[EventLoopNode.execute] iteration=%d: drained %d injections", iteration, drained_injections)
             # 6b1. Drain trigger queue (framework-level signals)
-            await self._drain_trigger_queue(conversation)
+            drained_triggers = await self._drain_trigger_queue(conversation)
+            logger.debug("[EventLoopNode.execute] iteration=%d: drained %d triggers", iteration, drained_triggers)
+
+            # Resume blocked ask_user/auto-block waits durably across restarts.
+            # If the node was parked for input and no new message has been
+            # injected yet, re-enter the wait instead of continuing the last
+            # assistant turn with a synthetic prompt.
+            if pending_input_state is not None:
+                if drained_injections > 0 or drained_triggers > 0:
+                    pending_input_state = None
+                    await self._write_cursor(
+                        ctx,
+                        conversation,
+                        accumulator,
+                        iteration,
+                        recent_responses=recent_responses,
+                        recent_tool_fingerprints=recent_tool_fingerprints,
+                        pending_input=None,
+                    )
+                else:
+                    logger.info(
+                        "[%s] iter=%d: restored pending input wait (emit_client_request=%s)",
+                        node_id,
+                        iteration,
+                        pending_input_state.get("emit_client_request", True),
+                    )
+                    got_input = await self._await_user_input(
+                        ctx,
+                        prompt=str(pending_input_state.get("prompt", "")),
+                        options=pending_input_state.get("options"),
+                        questions=pending_input_state.get("questions"),
+                        emit_client_request=bool(
+                            pending_input_state.get("emit_client_request", True)
+                        ),
+                    )
+                    logger.info(
+                        "[%s] iter=%d: restored wait unblocked, got_input=%s",
+                        node_id,
+                        iteration,
+                        got_input,
+                    )
+                    if not got_input:
+                        await self._publish_loop_completed(
+                            stream_id, node_id, iteration + 1, execution_id
+                        )
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        return NodeResult(
+                            success=True,
+                            output=accumulator.to_dict(),
+                            tokens_used=total_input_tokens + total_output_tokens,
+                            latency_ms=latency_ms,
+                            conversation=conversation if _is_continuous else None,
+                        )
+                    if self._injection_queue.empty() and self._trigger_queue.empty():
+                        logger.info(
+                            "[%s] iter=%d: pending-input wait woke without queued input; re-waiting",
+                            node_id,
+                            iteration,
+                        )
+                        continue
+                    pending_input_state = None
+                    continue
 
             # 6b2. Dynamic tool refresh (mode switching)
             if ctx.dynamic_tools_provider is not None:
@@ -671,14 +668,19 @@ class EventLoopNode(NodeProtocol):
                 tools.extend(ctx.dynamic_tools_provider())
                 tools.extend(synthetic)
 
-            # 6b3. Dynamic prompt refresh (phase switching)
-            if ctx.dynamic_prompt_provider is not None:
-                from framework.graph.prompt_composer import _with_datetime
+            # 6b3. Dynamic prompt refresh (phase switching / memory refresh)
+            if ctx.dynamic_prompt_provider is not None or ctx.dynamic_memory_provider is not None:
+                if ctx.dynamic_prompt_provider is not None:
+                    from framework.graph.prompting import stamp_prompt_datetime
 
-                _new_prompt = _with_datetime(ctx.dynamic_prompt_provider())
+                    _new_prompt = stamp_prompt_datetime(ctx.dynamic_prompt_provider())
+                else:
+                    from framework.graph.prompting import build_system_prompt_for_node_context
+
+                    _new_prompt = build_system_prompt_for_node_context(ctx)
                 if _new_prompt != conversation.system_prompt:
                     conversation.update_system_prompt(_new_prompt)
-                    logger.info("[%s] Dynamic prompt updated (phase switch)", node_id)
+                    logger.info("[%s] Dynamic prompt updated", node_id)
 
             # 6c. Publish iteration event (with per-iteration metadata when available)
             _iter_meta = None
@@ -715,12 +717,14 @@ class EventLoopNode(NodeProtocol):
                 iteration,
                 len(conversation.messages),
             )
+            logger.debug("[EventLoopNode.execute] iteration=%d: entering _run_single_turn loop", iteration)
             _stream_retry_count = 0
             _turn_cancelled = False
             _llm_turn_failed_waiting_input = False
             _turn_t0 = time.monotonic()
             while True:
                 try:
+                    logger.debug("[EventLoopNode.execute] iteration=%d: calling _run_single_turn (retry=%d)", iteration, _stream_retry_count)
                     (
                         assistant_text,
                         real_tool_results,
@@ -737,7 +741,7 @@ class EventLoopNode(NodeProtocol):
                     ) = await self._run_single_turn(
                         ctx, conversation, tools, iteration, accumulator
                     )
-                    _turn_ms = int((time.monotonic() - _turn_t0) * 1000)
+                    logger.debug("[EventLoopNode.execute] iteration=%d: _run_single_turn completed successfully", iteration)
                     logger.info(
                         "[%s] iter=%d: LLM done (%dms) — text=%d chars, real_tools=%d, "
                         "outputs_set=%s, tokens=%s, accumulator=%s",
@@ -802,10 +806,12 @@ class EventLoopNode(NodeProtocol):
                     break  # success — exit retry loop
 
                 except TurnCancelled:
+                    logger.debug("[EventLoopNode.execute] iteration=%d: TurnCancelled", iteration)
                     _turn_cancelled = True
                     break
 
                 except Exception as e:
+                    logger.debug("[EventLoopNode.execute] iteration=%d: Exception in _run_single_turn: %s (%s)", iteration, type(e).__name__, str(e)[:200])
                     # Retry transient errors with exponential backoff
                     if (
                         self._is_transient_error(e)
@@ -856,10 +862,10 @@ class EventLoopNode(NodeProtocol):
                         continue  # retry same iteration
 
                     # Non-transient or retries exhausted.
-                    # For client-facing nodes, surface the error and wait
+                    # For queen turns, surface the error and wait
                     # for user input instead of killing the loop.  The user
                     # can retry or adjust the request.
-                    if ctx.node_spec.client_facing:
+                    if ctx.supports_direct_user_io:
                         error_msg = f"LLM call failed: {e}"
                         _guardrail_phrase = (
                             "no endpoints available matching your guardrail restrictions "
@@ -895,7 +901,7 @@ class EventLoopNode(NodeProtocol):
                         _llm_turn_failed_waiting_input = True
                         break  # exit retry loop, continue outer iteration
 
-                    # Non-client-facing: crash as before
+                    # Non-interactive nodes: crash as before
                     import traceback
 
                     iter_latency_ms = int((time.time() - iter_start) * 1000)
@@ -939,11 +945,11 @@ class EventLoopNode(NodeProtocol):
 
             if _turn_cancelled:
                 logger.info("[%s] iter=%d: turn cancelled by user", node_id, iteration)
-                if ctx.node_spec.client_facing and not ctx.event_triggered:
+                if ctx.supports_direct_user_io:
                     await self._await_user_input(ctx, prompt="")
                 continue  # back to top of for-iteration loop
 
-            # Client-facing non-transient LLM failures wait for user input and then
+            # Queen non-transient LLM failures wait for user input and then
             # continue the outer loop without touching per-turn token vars.
             if _llm_turn_failed_waiting_input:
                 continue
@@ -1178,7 +1184,7 @@ class EventLoopNode(NodeProtocol):
                         "Try a different approach or different arguments."
                     )
                     if (
-                        ctx.node_spec.client_facing
+                        not ctx.supports_direct_user_io
                         and not ctx.event_triggered
                         and stream_id not in ("queen", "judge")
                         and self._event_bus is not None
@@ -1195,7 +1201,7 @@ class EventLoopNode(NodeProtocol):
                         )
                         recent_tool_fingerprints.clear()
                         recent_responses.clear()
-                    elif ctx.node_spec.client_facing and not ctx.event_triggered:
+                    elif ctx.supports_direct_user_io:
                         await conversation.add_user_message(warning_msg)
                         await self._await_user_input(ctx, prompt=doom_desc)
                         recent_tool_fingerprints.clear()
@@ -1215,15 +1221,16 @@ class EventLoopNode(NodeProtocol):
                 iteration,
                 recent_responses=recent_responses,
                 recent_tool_fingerprints=recent_tool_fingerprints,
+                pending_input=None,
             )
 
-            # 6h'. Client-facing input blocking
+            # 6h'. Queen input blocking
             #
             # Two triggers:
             # (a) Explicit ask_user() — blocks, then skips judge (6i).
             #     The LLM intentionally asked a question; judging before the
             #     user answers would inject confusing "missing outputs"
-            #     feedback.  Works for all client-facing nodes.
+            #     feedback. Works for the queen's interactive turns.
             # (b) Auto-block (queen only) — a text-only turn (no real
             #     tools, no set_output) from the queen node.  Blocks for
             #     the user's response, then falls through to judge so
@@ -1236,7 +1243,7 @@ class EventLoopNode(NodeProtocol):
             _cf_block = False
             _cf_auto = False
             _cf_prompt = ""
-            if ctx.node_spec.client_facing and not ctx.event_triggered:
+            if ctx.supports_direct_user_io:
                 if user_input_requested:
                     _cf_block = True
                     _cf_prompt = ask_user_prompt
@@ -1309,7 +1316,7 @@ class EventLoopNode(NodeProtocol):
                             node_type="event_loop",
                             step_index=iteration,
                             verdict="CONTINUE",
-                            verdict_feedback="Shutdown signaled (client-facing)",
+                            verdict_feedback="Shutdown signaled (queen interaction)",
                             tool_calls=logged_tool_calls,
                             llm_text=assistant_text,
                             input_tokens=turn_tokens.get("input", 0),
@@ -1349,6 +1356,21 @@ class EventLoopNode(NodeProtocol):
                 # Check for multi-question batch from ask_user_multiple
                 multi_qs = getattr(self, "_pending_multi_questions", None)
                 self._pending_multi_questions = None
+                pending_input_state = {
+                    "prompt": _cf_prompt,
+                    "options": ask_user_options,
+                    "questions": multi_qs,
+                    "emit_client_request": True,
+                }
+                await self._write_cursor(
+                    ctx,
+                    conversation,
+                    accumulator,
+                    iteration,
+                    recent_responses=recent_responses,
+                    recent_tool_fingerprints=recent_tool_fingerprints,
+                    pending_input=pending_input_state,
+                )
                 got_input = await self._await_user_input(
                     ctx,
                     prompt=_cf_prompt,
@@ -1413,11 +1435,21 @@ class EventLoopNode(NodeProtocol):
                         conversation=conversation if _is_continuous else None,
                     )
 
+                if self._injection_queue.empty() and self._trigger_queue.empty():
+                    logger.info(
+                        "[%s] iter=%d: input wait woke without queued input; continuing to wait",
+                        node_id,
+                        iteration,
+                    )
+                    continue
+
+                pending_input_state = None
+
                 recent_responses.clear()
 
-                # -- Judge-skip decision after client-facing blocking --
+                # -- Judge-skip decision after queen blocking --
                 #
-                # Explicit ask_user: skip judge while the agent is
+                # Explicit ask_user: skip judge while the queen is
                 # still gathering information from the user.  BUT if
                 # all required outputs have already been set, don't
                 # skip -- fall through to the judge so it can accept.
@@ -1496,6 +1528,21 @@ class EventLoopNode(NodeProtocol):
                     )
 
                 logger.info("[%s] iter=%d: waiting for queen input...", node_id, iteration)
+                pending_input_state = {
+                    "prompt": "",
+                    "options": None,
+                    "questions": None,
+                    "emit_client_request": False,
+                }
+                await self._write_cursor(
+                    ctx,
+                    conversation,
+                    accumulator,
+                    iteration,
+                    recent_responses=recent_responses,
+                    recent_tool_fingerprints=recent_tool_fingerprints,
+                    pending_input=pending_input_state,
+                )
                 got_input = await self._await_user_input(ctx, prompt="", emit_client_request=False)
                 logger.info(
                     "[%s] iter=%d: queen wait unblocked, got_input=%s",
@@ -1554,6 +1601,16 @@ class EventLoopNode(NodeProtocol):
                         latency_ms=latency_ms,
                         conversation=conversation if _is_continuous else None,
                     )
+
+                if self._injection_queue.empty() and self._trigger_queue.empty():
+                    logger.info(
+                        "[%s] iter=%d: queen-input wait woke without queued guidance; re-waiting",
+                        node_id,
+                        iteration,
+                    )
+                    continue
+
+                pending_input_state = None
 
                 recent_responses.clear()
                 _cf_text_only_streak = 0
@@ -1659,9 +1716,9 @@ class EventLoopNode(NodeProtocol):
                     continue
 
                 # Exit point 5: Judge ACCEPT — log step + log_node_complete
-                # Write outputs to shared memory
+                # Write outputs to data buffer
                 for key, value in accumulator.to_dict().items():
-                    ctx.memory.write(key, value, validate=False)
+                    ctx.buffer.write(key, value, validate=False)
 
                 await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
@@ -1826,8 +1883,25 @@ class EventLoopNode(NodeProtocol):
                 message formatting in _drain_injection_queue, not wake behavior.
             image_content: Optional list of OpenAI-style image blocks to attach.
         """
-        await self._injection_queue.put((content, is_client_input, image_content))
-        self._input_ready.set()
+        logger.debug(
+            "[EventLoopNode.inject_event] content_len=%d, is_client_input=%s, has_images=%s, queue_size_before=%d",
+            len(content) if content else 0,
+            is_client_input,
+            bool(image_content),
+            self._injection_queue.qsize() if hasattr(self._injection_queue, 'qsize') else -1,
+        )
+        try:
+            await self._injection_queue.put((content, is_client_input, image_content))
+            logger.debug("[EventLoopNode.inject_event] Message queued successfully")
+        except Exception as e:
+            logger.exception("[EventLoopNode.inject_event] Failed to queue message: %s", e)
+            raise
+        try:
+            self._input_ready.set()
+            logger.debug("[EventLoopNode.inject_event] _input_ready.set() called")
+        except Exception as e:
+            logger.exception("[EventLoopNode.inject_event] Failed to set _input_ready: %s", e)
+            raise
 
     async def inject_trigger(self, trigger: TriggerEvent) -> None:
         """Inject a framework-level trigger into the running queen loop.
@@ -1873,7 +1947,7 @@ class EventLoopNode(NodeProtocol):
         Called in two situations:
         - The LLM explicitly calls ask_user().
         - Auto-block: any text-only turn (no real tools, no set_output)
-          from a client-facing node — ensures the user sees and responds
+          from the queen node — ensures the user sees and responds
           before the judge runs.
 
         Args:
@@ -1884,7 +1958,7 @@ class EventLoopNode(NodeProtocol):
                 Each dict has id, prompt, and optional options.
             emit_client_request: When False, wait silently without publishing
                 CLIENT_INPUT_REQUESTED. Used for worker waits where input is
-                expected from the queen via inject_worker_message().
+                expected from the queen via inject_message().
 
         Returns True if input arrived, False if shutdown was signaled.
         """
@@ -1986,6 +2060,7 @@ class EventLoopNode(NodeProtocol):
         # to "".  Without this, all calls share the same message ID on the
         # frontend and the second call's text silently replaces the first.
         inner_turn = 0
+        logger.debug("[_run_single_turn] node_id=%s, tools_count=%d, execution_id=%s", node_id, len(tools), execution_id)
 
         # Inner tool loop: stream may produce tool calls requiring re-invocation
         while True:
@@ -2019,6 +2094,8 @@ class EventLoopNode(NodeProtocol):
             accumulated_text = ""
             tool_calls: list[ToolCallEvent] = []
             _stream_error: StreamErrorEvent | None = None
+
+            logger.debug("[_run_single_turn] inner_turn=%d: Starting LLM stream with %d messages, %d tools", inner_turn, len(messages), len(tools))
 
             # Stream LLM response in a child task so cancel_current_turn()
             # can kill it instantly without terminating the queen's main loop.
@@ -2105,9 +2182,12 @@ class EventLoopNode(NodeProtocol):
 
             _llm_stream_t0 = time.monotonic()
             self._stream_task = asyncio.create_task(_do_stream())
+            logger.debug("[_run_single_turn] inner_turn=%d: Stream task created, waiting...", inner_turn)
             try:
                 await self._stream_task
+                logger.debug("[_run_single_turn] inner_turn=%d: Stream task completed normally", inner_turn)
             except asyncio.CancelledError:
+                logger.debug("[_run_single_turn] inner_turn=%d: Stream task cancelled", inner_turn)
                 if accumulated_text:
                     await conversation.add_assistant_message(content=accumulated_text)
                 # Distinguish cancel_current_turn() (cancels the child
@@ -2120,6 +2200,9 @@ class EventLoopNode(NodeProtocol):
                 if task and task.cancelling() > 0:
                     raise
                 raise TurnCancelled() from None
+            except Exception as e:
+                logger.exception("[_run_single_turn] inner_turn=%d: Stream task failed: %s", inner_turn, e)
+                raise
             finally:
                 self._stream_task = None
             _llm_stream_ms = int((time.monotonic() - _llm_stream_t0) * 1000)
@@ -2265,7 +2348,6 @@ class EventLoopNode(NodeProtocol):
                                 ),
                                 is_error=False,
                             )
-                        self._record_learning(key, stored)
                         outputs_set_this_turn.append(key)
                         await self._publish_output_key_set(stream_id, node_id, key, execution_id)
                     logged_tool_calls.append(
@@ -2325,7 +2407,7 @@ class EventLoopNode(NodeProtocol):
                     # text as a chat message so the user can see it.  When
                     # options are present the QuestionWidget shows the
                     # question, but without options nothing renders it.
-                    if ask_user_options is None and ask_user_prompt and ctx.node_spec.client_facing:
+                    if ask_user_options is None and ask_user_prompt and ctx.emits_client_io:
                         await self._publish_text_delta(
                             stream_id,
                             node_id,
@@ -3019,11 +3101,11 @@ class EventLoopNode(NodeProtocol):
         return extract_tool_call_history(conversation.messages, max_entries=max_entries)
 
     def _build_initial_message(self, ctx: NodeContext) -> str:
-        """Build the initial user message from input data and memory.
+        """Build the initial user message from input data and buffer.
 
         Includes ALL input_data (not just declared input_keys) so that
         upstream handoff data flows through regardless of key naming.
-        Declared input_keys are also checked in shared memory as fallback.
+        Declared input_keys are also checked in data buffer as fallback.
         """
         parts = []
         seen: set[str] = set()
@@ -3032,10 +3114,10 @@ class EventLoopNode(NodeProtocol):
             if value is not None:
                 parts.append(f"{key}: {value}")
                 seen.add(key)
-        # Fallback: check memory for declared input_keys not already covered
+        # Fallback: check data buffer for declared input_keys not already covered
         for key in ctx.node_spec.input_keys:
             if key not in seen:
-                value = ctx.memory.read(key)
+                value = ctx.buffer.read(key)
                 if value is not None:
                     parts.append(f"{key}: {value}")
         if ctx.goal_context:
@@ -3104,20 +3186,6 @@ class EventLoopNode(NodeProtocol):
             tc=tc,
             timeout=self._config.tool_call_timeout_seconds,
             skill_dirs=getattr(self, "_skill_dirs", []),
-        )
-
-    def _record_learning(self, key: str, value: Any) -> None:
-        """Append a set_output value to adapt.md as a learning entry.
-
-        Called at set_output time — the moment knowledge is produced — so that
-        adapt.md accumulates the agent's outputs across the session.  Since
-        adapt.md is injected into the system prompt, these persist through
-        any compaction.
-        """
-        return record_learning(
-            key=key,
-            value=value,
-            spillover_dir=self._config.spillover_dir,
         )
 
     def _next_spill_filename(self, tool_name: str) -> str:
@@ -3314,6 +3382,7 @@ class EventLoopNode(NodeProtocol):
         *,
         recent_responses: list[str] | None = None,
         recent_tool_fingerprints: list[list[tuple[str, str]]] | None = None,
+        pending_input: dict[str, Any] | None = None,
     ) -> None:
         """Write checkpoint cursor for crash recovery.
 
@@ -3328,6 +3397,7 @@ class EventLoopNode(NodeProtocol):
             iteration=iteration,
             recent_responses=recent_responses,
             recent_tool_fingerprints=recent_tool_fingerprints,
+            pending_input=pending_input,
         )
 
     async def _drain_injection_queue(self, conversation: NodeConversation, ctx: NodeContext) -> int:
@@ -3643,17 +3713,17 @@ class EventLoopNode(NodeProtocol):
 
         The subagent:
         - Gets a fresh conversation with just the task
-        - Has read-only access to the parent's readable memory
+        - Has read-only access to the parent's readable data buffer
         - Cannot delegate to its own subagents (prevents recursion)
         - Returns its output in structured JSON format
 
         Args:
-            ctx: Parent node's context (for memory, tools, LLM access).
+            ctx: Parent node's context (for data buffer, tools, LLM access).
             agent_id: The node ID of the subagent to invoke.
             task: The task description to give the subagent.
             accumulator: Parent's OutputAccumulator — provides outputs that
                 have been set via ``set_output`` but not yet written to
-                shared memory (which only happens after the node completes).
+                data buffer (which only happens after the node completes).
 
         Returns:
             ToolResult with structured JSON output containing:

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from framework.config import get_hive_config, get_max_context_tokens, get_preferred_model
 from framework.credentials.validation import (
@@ -29,10 +29,6 @@ from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, cr
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.tools.flowchart_utils import generate_fallback_flowchart
-
-if TYPE_CHECKING:
-    from framework.runner.protocol import AgentMessage, CapabilityResponse
-
 
 logger = logging.getLogger(__name__)
 
@@ -854,17 +850,6 @@ def get_antigravity_token() -> str | None:
     return access_token
 
 
-def _is_antigravity_proxy_available() -> bool:
-    """Return True if antigravity-auth serve is running on localhost:8069."""
-    import socket
-
-    try:
-        with socket.create_connection(("localhost", 8069), timeout=0.5):
-            return True
-    except (OSError, TimeoutError):
-        return False
-
-
 @dataclass
 class AgentInfo:
     """Information about an exported agent."""
@@ -1370,18 +1355,6 @@ class AgentRunner:
             # It's a function, auto-generate Tool
             self._tool_registry.register_function(tool_or_func, name=name)
 
-    def register_tools_from_module(self, module_path: Path) -> int:
-        """
-        Auto-discover and register tools from a Python module.
-
-        Args:
-            module_path: Path to tools.py file
-
-        Returns:
-            Number of tools discovered
-        """
-        return self._tool_registry.discover_from_module(module_path)
-
     def register_mcp_server(
         self,
         name: str,
@@ -1493,16 +1466,11 @@ class AgentRunner:
 
         configure_logging(level="INFO", format="auto")
 
-        # Set up session context for tools (workspace_id, agent_id, session_id)
-        workspace_id = "default"  # Could be derived from storage path
+        # Set up session context for tools (agent_id)
         agent_id = self.graph.id or "unknown"
-        # Use "current" as a stable session_id for persistent memory
-        session_id = "current"
 
         self._tool_registry.set_session_context(
-            workspace_id=workspace_id,
             agent_id=agent_id,
-            session_id=session_id,
         )
 
         # Create LLM provider
@@ -1729,7 +1697,7 @@ class AgentRunner:
             accounts_data = adapter.get_all_account_info()
             tool_provider_map = adapter.get_tool_provider_map()
             if accounts_data:
-                from framework.graph.prompt_composer import build_accounts_prompt
+                from framework.graph.prompting import build_accounts_prompt
 
                 accounts_prompt = build_accounts_prompt(accounts_data, tool_provider_map)
         except Exception:
@@ -1998,15 +1966,15 @@ class AgentRunner:
         if not self._agent_runtime.is_running:
             await self._agent_runtime.start()
 
-        # Set up stdin-based I/O for client-facing nodes in headless mode.
-        # When a client_facing EventLoopNode calls ask_user(), it emits
+        # Set up stdin-based I/O for the queen in headless mode.
+        # When the queen calls ask_user(), it emits
         # CLIENT_INPUT_REQUESTED on the event bus and blocks.  We subscribe
         # a handler that prints the prompt and reads from stdin, then injects
         # the user's response back into the node to unblock it.
-        has_client_facing = any(n.client_facing for n in self.graph.nodes)
+        has_queen = any(n.is_queen_node() for n in self.graph.nodes)
         sub_ids: list[str] = []
 
-        if has_client_facing and sys.stdin.isatty():
+        if has_queen and sys.stdin.isatty():
             from framework.runtime.event_bus import EventType
 
             runtime = self._agent_runtime
@@ -2123,18 +2091,6 @@ class AgentRunner:
             input_data=input_data,
             correlation_id=correlation_id,
         )
-
-    async def get_goal_progress(self) -> dict[str, Any]:
-        """
-        Get goal progress across all execution streams.
-
-        Returns:
-            Dict with overall_progress, criteria_status, constraint_violations, etc.
-        """
-        if self._agent_runtime is None:
-            self._setup()
-
-        return await self._agent_runtime.get_goal_progress()
 
     def get_entry_points(self) -> list[EntryPointSpec]:
         """
@@ -2293,247 +2249,6 @@ class AgentRunner:
             missing_tools=missing_tools,
             missing_credentials=missing_credentials,
         )
-
-    async def can_handle(
-        self, request: dict, llm: LLMProvider | None = None
-    ) -> "CapabilityResponse":
-        """
-        Ask the agent if it can handle this request.
-
-        Uses LLM to evaluate the request against the agent's goal and capabilities.
-
-        Args:
-            request: The request to evaluate
-            llm: LLM provider to use (uses self._llm if not provided)
-
-        Returns:
-            CapabilityResponse with level, confidence, and reasoning
-        """
-        from framework.runner.protocol import CapabilityLevel, CapabilityResponse
-
-        # Use provided LLM or set up our own
-        eval_llm = llm
-        if eval_llm is None:
-            if self._llm is None:
-                self._setup()
-            eval_llm = self._llm
-
-        # If still no LLM (mock mode), do keyword matching
-        if eval_llm is None:
-            return self._keyword_capability_check(request)
-
-        # Build context about this agent
-        info = self.info()
-        agent_context = f"""Agent: {info.name}
-Goal: {info.goal_name}
-Description: {info.goal_description}
-
-What this agent does:
-{info.description}
-
-Nodes in the workflow:
-{chr(10).join(f"- {n['name']}: {n['description']}" for n in info.nodes[:5])}
-{"..." if len(info.nodes) > 5 else ""}
-"""
-
-        # Ask LLM to evaluate
-        prompt = f"""You are evaluating whether an agent can handle a request.
-
-{agent_context}
-
-Request to evaluate:
-{json.dumps(request, indent=2)}
-
-Evaluate how well this agent can handle this request. Consider:
-1. Does the request match what this agent is designed to do?
-2. Does the agent have the required capabilities?
-3. How confident are you in this assessment?
-
-Respond with JSON only:
-{{
-    "level": "best_fit" | "can_handle" | "uncertain" | "cannot_handle",
-    "confidence": 0.0 to 1.0,
-    "reasoning": "Brief explanation",
-    "estimated_steps": number or null
-}}"""
-
-        try:
-            response = await eval_llm.acomplete(
-                messages=[{"role": "user", "content": prompt}],
-                system="You are a capability evaluator. Respond with JSON only.",
-                max_tokens=256,
-            )
-
-            # Parse response
-            import re
-
-            json_match = re.search(r"\{[^{}]*\}", response.content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                level_map = {
-                    "best_fit": CapabilityLevel.BEST_FIT,
-                    "can_handle": CapabilityLevel.CAN_HANDLE,
-                    "uncertain": CapabilityLevel.UNCERTAIN,
-                    "cannot_handle": CapabilityLevel.CANNOT_HANDLE,
-                }
-                return CapabilityResponse(
-                    agent_name=info.name,
-                    level=level_map.get(data.get("level", "uncertain"), CapabilityLevel.UNCERTAIN),
-                    confidence=float(data.get("confidence", 0.5)),
-                    reasoning=data.get("reasoning", ""),
-                    estimated_steps=data.get("estimated_steps"),
-                )
-        except Exception:
-            # Fall back to keyword matching on error
-            pass
-
-        return self._keyword_capability_check(request)
-
-    def _keyword_capability_check(self, request: dict) -> "CapabilityResponse":
-        """Simple keyword-based capability check (fallback when no LLM)."""
-        from framework.runner.protocol import CapabilityLevel, CapabilityResponse
-
-        info = self.info()
-        request_str = json.dumps(request).lower()
-        description_lower = info.description.lower()
-        goal_lower = info.goal_description.lower()
-
-        # Check for keyword matches
-        matches = 0
-        keywords = request_str.split()
-        for keyword in keywords:
-            if len(keyword) > 3:  # Skip short words
-                if keyword in description_lower or keyword in goal_lower:
-                    matches += 1
-
-        # Determine level based on matches
-        match_ratio = matches / max(len(keywords), 1)
-        if match_ratio > 0.3:
-            level = CapabilityLevel.CAN_HANDLE
-            confidence = min(0.7, match_ratio + 0.3)
-        elif match_ratio > 0.1:
-            level = CapabilityLevel.UNCERTAIN
-            confidence = 0.4
-        else:
-            level = CapabilityLevel.CANNOT_HANDLE
-            confidence = 0.6
-
-        return CapabilityResponse(
-            agent_name=info.name,
-            level=level,
-            confidence=confidence,
-            reasoning=f"Keyword match ratio: {match_ratio:.2f}",
-            estimated_steps=info.node_count if level != CapabilityLevel.CANNOT_HANDLE else None,
-        )
-
-    async def receive_message(self, message: "AgentMessage") -> "AgentMessage":
-        """
-        Handle a message from the orchestrator or another agent.
-
-        Args:
-            message: The incoming message
-
-        Returns:
-            Response message
-        """
-        from framework.runner.protocol import MessageType
-
-        info = self.info()
-
-        # Handle capability check
-        if message.type == MessageType.CAPABILITY_CHECK:
-            capability = await self.can_handle(message.content)
-            return message.reply(
-                from_agent=info.name,
-                content={
-                    "level": capability.level.value,
-                    "confidence": capability.confidence,
-                    "reasoning": capability.reasoning,
-                    "estimated_steps": capability.estimated_steps,
-                },
-                type=MessageType.CAPABILITY_RESPONSE,
-            )
-
-        # Handle request - run the agent
-        if message.type == MessageType.REQUEST:
-            result = await self.run(message.content)
-            return message.reply(
-                from_agent=info.name,
-                content={
-                    "success": result.success,
-                    "output": result.output,
-                    "path": result.path,
-                    "error": result.error,
-                },
-                type=MessageType.RESPONSE,
-            )
-
-        # Handle handoff - another agent is passing work
-        if message.type == MessageType.HANDOFF:
-            # Extract context from handoff and run
-            context = message.content.get("context", {})
-            context["_handoff_from"] = message.from_agent
-            context["_handoff_reason"] = message.content.get("reason", "")
-            result = await self.run(context)
-            return message.reply(
-                from_agent=info.name,
-                content={
-                    "success": result.success,
-                    "output": result.output,
-                    "handoff_handled": True,
-                },
-                type=MessageType.RESPONSE,
-            )
-
-        # Unknown message type
-        return message.reply(
-            from_agent=info.name,
-            content={"error": f"Unknown message type: {message.type}"},
-            type=MessageType.RESPONSE,
-        )
-
-    @classmethod
-    async def setup_as_secondary(
-        cls,
-        agent_path: str | Path,
-        runtime: AgentRuntime,
-        graph_id: str | None = None,
-    ) -> str:
-        """Load an agent and register it as a secondary graph on *runtime*.
-
-        Uses :meth:`AgentRunner.load` to parse the agent, then calls
-        :meth:`AgentRuntime.add_graph` with the extracted graph, goal,
-        and entry points.
-
-        Args:
-            agent_path: Path to the agent directory
-            runtime: The running AgentRuntime to attach to
-            graph_id: Optional graph identifier (defaults to directory name)
-
-        Returns:
-            The graph_id used for registration
-        """
-        agent_path = Path(agent_path)
-        runner = cls.load(agent_path)
-        gid = graph_id or agent_path.name
-
-        # Build entry points
-        entry_points: dict[str, EntryPointSpec] = {}
-        if runner.graph.entry_node:
-            entry_points["default"] = EntryPointSpec(
-                id="default",
-                name="Default",
-                entry_node=runner.graph.entry_node,
-                trigger_type="manual",
-                isolation_level="shared",
-            )
-        await runtime.add_graph(
-            graph_id=gid,
-            graph=runner.graph,
-            goal=runner.goal,
-            entry_points=entry_points,
-        )
-        return gid
 
     def cleanup(self) -> None:
         """Clean up resources (synchronous)."""

@@ -606,7 +606,7 @@ async def test_memory_conflict_last_wins(runtime, goal):
     """last_wins should allow both branches to write the same key without error."""
     # Use distinct output_keys in spec (to pass graph validation) but have
     # the node impl write a shared key at runtime — this is the scenario
-    # memory_conflict_strategy is designed to handle.
+    # buffer_conflict_strategy is designed to handle.
     b1 = NodeSpec(
         id="b1", name="B1", description="b1", node_type="event_loop", output_keys=["b1_out"]
     )
@@ -616,7 +616,7 @@ async def test_memory_conflict_last_wins(runtime, goal):
 
     graph = _make_fanout_graph([b1, b2])
 
-    config = ParallelExecutionConfig(memory_conflict_strategy="last_wins")
+    config = ParallelExecutionConfig(buffer_conflict_strategy="last_wins")
     executor = GraphExecutor(
         runtime=runtime, enable_parallel_execution=True, parallel_config=config
     )
@@ -647,7 +647,7 @@ async def test_memory_conflict_first_wins(runtime, goal):
 
     graph = _make_fanout_graph([b1, b2])
 
-    config = ParallelExecutionConfig(memory_conflict_strategy="first_wins")
+    config = ParallelExecutionConfig(buffer_conflict_strategy="first_wins")
     executor = GraphExecutor(
         runtime=runtime, enable_parallel_execution=True, parallel_config=config
     )
@@ -675,7 +675,7 @@ async def test_memory_conflict_error_raises(runtime, goal):
 
     graph = _make_fanout_graph([b1, b2])
 
-    config = ParallelExecutionConfig(memory_conflict_strategy="error")
+    config = ParallelExecutionConfig(buffer_conflict_strategy="error")
     executor = GraphExecutor(
         runtime=runtime, enable_parallel_execution=True, parallel_config=config
     )

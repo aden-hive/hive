@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 
+
 class FileConversationStore:
     """File-per-part ConversationStore.
 
@@ -95,7 +96,7 @@ class FileConversationStore:
     async def read_cursor(self) -> dict[str, Any] | None:
         return await self._run(self._read_json, self._base / "cursor.json")
 
-    async def delete_parts_before(self, seq: int) -> None:
+    async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         def _delete() -> None:
             if not self._parts_dir.exists():
                 return

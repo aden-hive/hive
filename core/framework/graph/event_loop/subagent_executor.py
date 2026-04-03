@@ -1,8 +1,7 @@
 """Subagent execution for the event loop.
 
 Handles the full subagent lifecycle: validation, context setup, tool filtering,
-conversation store derivation, execution, and cleanup.  Also includes the
-_EscalationReceiver helper used for subagent → queen escalation routing.
+conversation store derivation, execution, and cleanup.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from framework.graph.conversation import ConversationStore
 from framework.graph.event_loop.judge_pipeline import SubagentJudge
 from framework.graph.event_loop.types import LoopConfig, OutputAccumulator
-from framework.graph.node import NodeContext, SharedMemory
+from framework.graph.node import DataBuffer, NodeContext
 from framework.llm.provider import ToolResult, ToolUse
 from framework.runtime.event_bus import EventBus
 
@@ -28,39 +27,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class EscalationReceiver:
-    """Temporary receiver registered in node_registry for subagent escalation routing.
-
-    When a subagent calls ``report_to_parent(wait_for_response=True)``, the callback
-    creates one of these, registers it under a unique escalation ID in the executor's
-    ``node_registry``, and awaits ``wait()``.  The TUI / runner calls
-    ``inject_input(escalation_id, content)`` which the ``ExecutionStream`` routes here
-    via ``inject_event()`` — matching the same ``hasattr(node, "inject_event")`` check
-    used for regular ``EventLoopNode`` instances.
-    """
-
-    def __init__(self) -> None:
-        self._event = asyncio.Event()
-        self._response: str | None = None
-        self._awaiting_input = True  # So inject_worker_message() can prefer us
-
-    async def inject_event(
-        self,
-        content: str,
-        *,
-        is_client_input: bool = False,
-        image_content: list[dict[str, Any]] | None = None,
-    ) -> None:
-        """Called by ExecutionStream.inject_input() when the user responds."""
-        self._response = content
-        self._event.set()
-
-    async def wait(self) -> str | None:
-        """Block until inject_event() delivers the user's response."""
-        await self._event.wait()
-        return self._response
-
-
 async def execute_subagent(
     ctx: NodeContext,
     agent_id: str,
@@ -68,7 +34,7 @@ async def execute_subagent(
     *,
     config: LoopConfig,
     event_loop_node_cls: type[EventLoopNode],
-    escalation_receiver_cls: type[EscalationReceiver],
+    escalation_receiver_cls: Callable[[], Any],
     accumulator: OutputAccumulator | None = None,
     event_bus: EventBus | None = None,
     tool_executor: Callable[[ToolUse], ToolResult | Awaitable[ToolResult]] | None = None,
@@ -127,7 +93,7 @@ async def execute_subagent(
     subagent_spec = ctx.node_registry[agent_id]
 
     # 2. Create read-only memory snapshot
-    parent_data = ctx.memory.read_all()
+    parent_data = ctx.buffer.read_all()
 
     # Merge in-flight outputs from the parent's accumulator.
     if accumulator:
@@ -135,12 +101,12 @@ async def execute_subagent(
             if key not in parent_data:
                 parent_data[key] = value
 
-    subagent_memory = SharedMemory()
+    subagent_buffer = DataBuffer()
     for key, value in parent_data.items():
-        subagent_memory.write(key, value, validate=False)
+        subagent_buffer.write(key, value, validate=False)
 
     read_keys = set(parent_data.keys()) | set(subagent_spec.input_keys or [])
-    scoped_memory = subagent_memory.with_permissions(
+    scoped_buffer = subagent_buffer.with_permissions(
         read_keys=list(read_keys),
         write_keys=[],  # Read-only!
     )
@@ -252,7 +218,7 @@ async def execute_subagent(
         runtime=ctx.runtime,
         node_id=sa_node_id,
         node_spec=subagent_spec,
-        memory=scoped_memory,
+        buffer=scoped_buffer,
         input_data={"task": task, **parent_data},
         llm=ctx.llm,
         available_tools=subagent_tools,
