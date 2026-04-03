@@ -17,6 +17,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _client_input_counts_as_planning_ask(event: Any) -> bool:
+    """Return True when a queen input request should satisfy planning ask rounds."""
+    data = getattr(event, "data", None) or {}
+    if data.get("prompt") or data.get("questions") or data.get("options"):
+        return True
+    if not data.get("auto_blocked"):
+        return False
+    return bool(data.get("assistant_text_requires_input"))
+
+
 async def create_queen(
     session: Session,
     session_manager: Any,
@@ -115,14 +125,7 @@ async def create_queen(
     async def _track_planning_asks(event: AgentEvent) -> None:
         if phase_state.phase != "planning":
             return
-        # Only count explicit ask_user / ask_user_multiple calls, not
-        # auto-block (text-only turns emit CLIENT_INPUT_REQUESTED with
-        # an empty prompt and no options/questions).
-        data = event.data or {}
-        has_prompt = bool(data.get("prompt"))
-        has_questions = bool(data.get("questions"))
-        has_options = bool(data.get("options"))
-        if has_prompt or has_questions or has_options:
+        if _client_input_counts_as_planning_ask(event):
             phase_state.planning_ask_rounds += 1
 
     session.event_bus.subscribe(

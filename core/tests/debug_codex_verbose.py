@@ -33,7 +33,7 @@ async def main():
         return
 
     provider = LiteLLMProvider(
-        model="openai/gpt-5.3-codex",
+        model="openai/gpt-5.4",
         api_key=api_key,
         api_base=api_base,
         **extra_kwargs,

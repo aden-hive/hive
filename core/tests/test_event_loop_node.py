@@ -1710,8 +1710,8 @@ class TestTransientErrorRetry:
         assert result.output.get("result") == "done"
         # call 0: recoverable error → ConnectionError raised → outer retry
         # call 1: set_output tool call succeeds
-        # call 2: inner tool loop re-invokes LLM after tool result → text "done"
-        assert call_index == 3
+        # The node now auto-completes immediately after required outputs are set.
+        assert call_index == 2
 
 
 class TestIsTransientError:

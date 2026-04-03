@@ -361,6 +361,77 @@ async def test_event_loop_node_in_graph(runtime):
 
 
 @pytest.mark.asyncio
+async def test_set_output_completion_advances_to_next_node(runtime):
+    """A worker node that only calls set_output should hand off immediately."""
+    llm = ScriptableMockLLMProvider(
+        [
+            StreamScript(
+                tool_calls=[
+                    {
+                        "name": "set_output",
+                        "id": "tc_brief",
+                        "input": {"key": "brief", "value": "the brief"},
+                    }
+                ],
+            ),
+            StreamScript(
+                tool_calls=[
+                    {
+                        "name": "set_output",
+                        "id": "tc_report",
+                        "input": {"key": "report", "value": "the report"},
+                    }
+                ],
+            ),
+        ]
+    )
+
+    brief_spec = NodeSpec(
+        id="briefer",
+        name="Briefer",
+        description="Collect the brief",
+        node_type="event_loop",
+        output_keys=["brief"],
+    )
+    report_spec = NodeSpec(
+        id="reporter",
+        name="Reporter",
+        description="Write the report",
+        node_type="event_loop",
+        output_keys=["report"],
+    )
+
+    graph = GraphSpec(
+        id="handoff_graph",
+        goal_id="test_goal",
+        name="Handoff Graph",
+        entry_node="briefer",
+        nodes=[brief_spec, report_spec],
+        edges=[
+            EdgeSpec(
+                id="e_brief_to_report",
+                source="briefer",
+                target="reporter",
+                condition=EdgeCondition.ON_SUCCESS,
+            )
+        ],
+        terminal_nodes=["reporter"],
+    )
+    goal = Goal(id="test_goal", name="Handoff Test", description="test set_output handoff")
+
+    executor = GraphExecutor(runtime=runtime, llm=llm)
+    executor.register_node("briefer", EventLoopNode(config=LoopConfig(max_iterations=2)))
+    executor.register_node("reporter", EventLoopNode(config=LoopConfig(max_iterations=2)))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert result.success
+    assert result.output["brief"] == "the brief"
+    assert result.output["report"] == "the report"
+    assert llm._call_index == 2
+
+
+@pytest.mark.asyncio
 async def test_event_loop_with_event_bus():
     """Lifecycle events are published correctly to EventBus."""
     recorded: list[AgentEvent] = []

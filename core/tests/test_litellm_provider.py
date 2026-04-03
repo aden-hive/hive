@@ -100,6 +100,33 @@ class TestLiteLLMProviderInit:
             provider = LiteLLMProvider(model="ollama/llama3")
             assert provider.model == "ollama_chat/llama3"
 
+    def test_init_codex_backend_normalizes_chat_mode_models_to_responses(self):
+        """Codex backend should force newer OpenAI models onto the Responses bridge."""
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.4",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex",
+        )
+        assert provider.model == "openai/responses/gpt-5.4"
+
+    def test_init_codex_backend_keeps_existing_responses_models(self):
+        """Codex backend should preserve models LiteLLM already knows are responses-mode."""
+        provider = LiteLLMProvider(
+            model="openai/gpt-5.3-codex",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex",
+        )
+        assert provider.model == "openai/gpt-5.3-codex"
+
+    def test_init_codex_backend_does_not_rewrite_non_openai_models(self):
+        """Codex normalization should stay scoped to OpenAI-style model ids."""
+        provider = LiteLLMProvider(
+            model="anthropic/claude-3-haiku-20240307",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex",
+        )
+        assert provider.model == "anthropic/claude-3-haiku-20240307"
+
 
 class TestLiteLLMProviderComplete:
     """Test LiteLLMProvider.complete() method."""
@@ -749,7 +776,7 @@ class TestOpenRouterToolCompatFallback:
         )
         tools = [
             Tool(
-                name="web_search",
+                name="exa_search",
                 description="Search the web",
                 parameters={
                     "properties": {
@@ -765,7 +792,7 @@ class TestOpenRouterToolCompatFallback:
         compat_response.choices = [MagicMock()]
         compat_response.choices[0].message.content = (
             '{"assistant_response":"","tool_calls":['
-            '{"name":"web_search","arguments":'
+            '{"name":"exa_search","arguments":'
             '{"query":"Python 3.13 release notes","num_results":3}}'
             "]}"
         )
@@ -797,7 +824,7 @@ class TestOpenRouterToolCompatFallback:
 
         tool_calls = [event for event in events if isinstance(event, ToolCallEvent)]
         assert len(tool_calls) == 1
-        assert tool_calls[0].tool_name == "web_search"
+        assert tool_calls[0].tool_name == "exa_search"
         assert tool_calls[0].tool_input == {
             "query": "Python 3.13 release notes",
             "num_results": 3,
@@ -997,7 +1024,7 @@ class TestOpenRouterToolCompatFallback:
         )
         tools = [
             Tool(
-                name="web_search",
+                name="exa_search",
                 description="Search the web",
                 parameters={"properties": {"query": {"type": "string"}}, "required": ["query"]},
             )

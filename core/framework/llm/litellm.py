@@ -179,6 +179,44 @@ def _ensure_ollama_chat_prefix(model: str) -> str:
     return model
 
 
+def _normalize_codex_backend_model(model: str) -> str:
+    """Force Codex backend models onto LiteLLM's Responses API bridge when needed.
+
+    The ChatGPT Codex subscription backend is a Responses API endpoint. Some newer
+    OpenAI model ids can still be tagged as chat-mode in LiteLLM's model registry,
+    which causes LiteLLM to route them through chat completions unless we add the
+    explicit ``openai/responses/`` prefix. Preserve already-responses models and
+    leave non-OpenAI provider prefixes untouched.
+    """
+    model_lower = model.lower()
+    if model_lower.startswith("openai/responses/"):
+        return model
+
+    if "/" in model and not (
+        model_lower.startswith("openai/") or model_lower.startswith("responses/")
+    ):
+        return model
+
+    bare_model = model
+    if model_lower.startswith("openai/"):
+        bare_model = model[len("openai/") :]
+    bare_lower = bare_model.lower()
+    if bare_lower.startswith("responses/"):
+        bare_model = bare_model[len("responses/") :]
+        bare_lower = bare_model.lower()
+
+    registry_entry = litellm.model_cost.get(bare_model) if litellm is not None else None
+    if registry_entry and registry_entry.get("litellm_provider") not in (None, "openai"):
+        return model
+
+    if registry_entry and registry_entry.get("mode") == "responses":
+        if model_lower.startswith("responses/"):
+            return f"openai/{model}"
+        return model
+
+    return f"openai/responses/{bare_model}"
+
+
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
@@ -551,6 +589,8 @@ class LiteLLMProvider(LLMProvider):
         self._codex_backend = bool(
             self.api_base and "chatgpt.com/backend-api/codex" in self.api_base
         )
+        if self._codex_backend:
+            self.model = _normalize_codex_backend_model(self.model)
         # Antigravity routes through a local OpenAI-compatible proxy — no patches needed.
         self._antigravity = bool(self.api_base and "localhost:8069" in self.api_base)
 
@@ -560,10 +600,10 @@ class LiteLLMProvider(LLMProvider):
             )
 
         # Note: The Codex ChatGPT backend is a Responses API endpoint at
-        # chatgpt.com/backend-api/codex/responses.  LiteLLM's model registry
-        # correctly marks codex models with mode="responses", so we do NOT
-        # override the mode.  The responses_api_bridge in litellm handles
-        # converting Chat Completions requests to Responses API format.
+        # chatgpt.com/backend-api/codex/responses. Older Codex model ids are
+        # already marked mode="responses" in LiteLLM, but newer OpenAI ids
+        # like gpt-5.4 may still be tagged as chat-mode. Normalize Codex calls
+        # to openai/responses/... so LiteLLM uses the Responses API bridge.
 
     @staticmethod
     def _default_api_base_for_model(model: str) -> str | None:

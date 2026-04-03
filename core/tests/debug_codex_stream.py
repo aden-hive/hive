@@ -33,7 +33,7 @@ async def test_codex_stream():
     print(f"extra_kwargs keys: {list(extra_kwargs.keys())}")
     print(f"extra_headers: {list(extra_kwargs.get('extra_headers', {}).keys())}")
 
-    model = "openai/gpt-5.3-codex"
+    model = "openai/gpt-5.4"
 
     # Create the provider
     provider = LiteLLMProvider(

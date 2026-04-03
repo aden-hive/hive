@@ -164,6 +164,78 @@ def _is_context_too_large_error(exc: BaseException) -> bool:
     return bool(_CONTEXT_TOO_LARGE_RE.search(str(exc)))
 
 
+_ASSISTANT_INPUT_PATTERNS = (
+    re.compile(r"\?\s*$"),
+    re.compile(r"(?:^|[\n.!?]\s*)(?:let me know|tell me|share)\b", re.I),
+    re.compile(
+        r"(?:^|[\n.!?]\s*)(?:please\s+|kindly\s+)?(?:confirm|approve|choose|pick)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b("
+        r"what would you like|what should (?:i|we)|which option|which one|"
+        r"would you like|do you want|can you|could you|are you okay with"
+        r")\b",
+        re.I,
+    ),
+    re.compile(r"\bready to proceed\b", re.I),
+)
+_QUESTION_WIDGET_FALLBACK = "Choose an option below."
+
+
+def _assistant_text_requires_input(text: str) -> bool:
+    """Return True when assistant text clearly invites a user reply."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return any(pattern.search(stripped) for pattern in _ASSISTANT_INPUT_PATTERNS)
+
+
+def _split_prompt_for_question_widget(
+    prompt: str,
+    *,
+    stream_id: str,
+    has_structured_choices: bool,
+) -> tuple[str | None, str]:
+    """Split a long queen ask_user prompt into display text plus a widget question."""
+    stripped = prompt.strip()
+    if stream_id != "queen" or not has_structured_choices or not stripped:
+        return None, stripped
+
+    if len(stripped) <= 180 and "\n" not in stripped:
+        return None, stripped
+
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", stripped) if part.strip()]
+    if len(paragraphs) >= 2:
+        tail = paragraphs[-1]
+        body = "\n\n".join(paragraphs[:-1]).strip()
+        if body and (_assistant_text_requires_input(tail) or tail.endswith("?")):
+            return body, tail
+
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    if len(lines) >= 2:
+        tail = lines[-1]
+        body = "\n".join(lines[:-1]).strip()
+        if body and (_assistant_text_requires_input(tail) or tail.endswith("?")):
+            return body, tail
+
+    last_q = stripped.rfind("?")
+    if last_q != -1 and last_q >= len(stripped) - 220:
+        split_idx = max(
+            stripped.rfind("\n", 0, last_q),
+            stripped.rfind(". ", 0, last_q),
+            stripped.rfind("! ", 0, last_q),
+        )
+        if split_idx != -1:
+            start = split_idx + (2 if stripped[split_idx : split_idx + 2] in {". ", "! "} else 1)
+            body = stripped[:start].strip()
+            tail = stripped[start:].strip()
+            if body and tail:
+                return body, tail
+
+    return stripped, _QUESTION_WIDGET_FALLBACK
+
+
 # ---------------------------------------------------------------------------
 # Escalation receiver (temporary routing target for subagent → user input)
 # ---------------------------------------------------------------------------
@@ -940,10 +1012,76 @@ class EventLoopNode(NodeProtocol):
             if _llm_turn_failed_waiting_input:
                 continue
 
-            # 6e'. Feed actual API token count back for accurate estimation
+            # Feed actual API token count back for accurate estimation even
+            # on auto-complete exits that return before the judge path.
             turn_input = turn_tokens.get("input", 0)
             if turn_input > 0:
                 conversation.update_token_count(turn_input)
+
+            if self._should_auto_complete_after_outputs(
+                ctx=ctx,
+                accumulator=accumulator,
+                outputs_set=outputs_set,
+                logged_tool_calls=logged_tool_calls,
+                user_input_requested=user_input_requested,
+                queen_input_requested=queen_input_requested,
+                reported_to_parent=reported_to_parent,
+            ):
+                logger.info(
+                    "[%s] iter=%d: required outputs satisfied via set_output - auto-completing",
+                    node_id,
+                    iteration,
+                )
+                for key, value in accumulator.to_dict().items():
+                    ctx.memory.write(key, value, validate=False)
+                await self._write_cursor(
+                    ctx,
+                    conversation,
+                    accumulator,
+                    iteration,
+                    recent_responses=recent_responses,
+                    recent_tool_fingerprints=recent_tool_fingerprints,
+                )
+                await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
+                latency_ms = int((time.time() - start_time) * 1000)
+                _accept_count += 1
+                if ctx.runtime_logger:
+                    iter_latency_ms = int((time.time() - iter_start) * 1000)
+                    ctx.runtime_logger.log_step(
+                        node_id=node_id,
+                        node_type="event_loop",
+                        step_index=iteration,
+                        verdict="ACCEPT",
+                        verdict_feedback="Required outputs satisfied via set_output.",
+                        tool_calls=logged_tool_calls,
+                        llm_text=assistant_text,
+                        input_tokens=turn_tokens.get("input", 0),
+                        output_tokens=turn_tokens.get("output", 0),
+                        latency_ms=iter_latency_ms,
+                    )
+                    ctx.runtime_logger.log_node_complete(
+                        node_id=node_id,
+                        node_name=ctx.node_spec.name,
+                        node_type="event_loop",
+                        success=True,
+                        total_steps=iteration + 1,
+                        tokens_used=total_input_tokens + total_output_tokens,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        latency_ms=latency_ms,
+                        exit_status="success",
+                        accept_count=_accept_count,
+                        retry_count=_retry_count,
+                        escalate_count=_escalate_count,
+                        continue_count=_continue_count,
+                    )
+                return NodeResult(
+                    success=True,
+                    output=accumulator.to_dict(),
+                    tokens_used=total_input_tokens + total_output_tokens,
+                    latency_ms=latency_ms,
+                    conversation=conversation if _is_continuous else None,
+                )
 
             # 6e''. Post-turn compaction check (catches tool-result bloat).
             # Skip if pre-turn already compacted this iteration — two compactions
@@ -1346,6 +1484,10 @@ class EventLoopNode(NodeProtocol):
                     prompt=_cf_prompt,
                     options=ask_user_options,
                     questions=multi_qs,
+                    auto_blocked=_cf_auto,
+                    assistant_text_requires_input=bool(
+                        _cf_auto and _assistant_text_requires_input(assistant_text)
+                    ),
                 )
                 # Emit deferred tool_call_completed for ask_user / ask_user_multiple
                 deferred = getattr(self, "_deferred_tool_complete", None)
@@ -1859,6 +2001,8 @@ class EventLoopNode(NodeProtocol):
         options: list[str] | None = None,
         questions: list[dict] | None = None,
         emit_client_request: bool = True,
+        auto_blocked: bool = False,
+        assistant_text_requires_input: bool = False,
     ) -> bool:
         """Block until user input arrives or shutdown is signaled.
 
@@ -1899,6 +2043,8 @@ class EventLoopNode(NodeProtocol):
                 execution_id=ctx.execution_id or "",
                 options=options,
                 questions=questions,
+                auto_blocked=auto_blocked,
+                assistant_text_requires_input=assistant_text_requires_input,
             )
 
         self._awaiting_input = True
@@ -2197,6 +2343,29 @@ class EventLoopNode(NodeProtocol):
                             except (json.JSONDecodeError, TypeError):
                                 pass
                         key = tc.tool_input.get("key", "")
+                        if accumulator.get(key) == value:
+                            result = ToolResult(
+                                tool_use_id=tc.tool_use_id,
+                                content=(
+                                    f"Output '{key}' is already set to the same value. "
+                                    "Do not repeat identical set_output calls."
+                                ),
+                                is_error=True,
+                            )
+                            logged_tool_calls.append(
+                                {
+                                    "tool_use_id": tc.tool_use_id,
+                                    "tool_name": "set_output",
+                                    "tool_input": tc.tool_input,
+                                    "content": result.content,
+                                    "is_error": result.is_error,
+                                    "is_duplicate_set_output": True,
+                                    "start_timestamp": _tc_ts,
+                                    "duration_s": round(time.time() - _tc_start, 3),
+                                }
+                            )
+                            results_by_id[tc.tool_use_id] = result
+                            continue
 
                         # Auto-spill happens inside accumulator.set()
                         # — it fires on every code path (fresh, resume,
@@ -2271,16 +2440,28 @@ class EventLoopNode(NodeProtocol):
 
                     user_input_requested = True
 
-                    # Free-form ask_user (no options): stream the question
-                    # text as a chat message so the user can see it.  When
-                    # options are present the QuestionWidget shows the
-                    # question, but without options nothing renders it.
-                    if ask_user_options is None and ask_user_prompt and ctx.node_spec.client_facing:
+                    display_prompt: str | None = None
+                    if ask_user_prompt and ctx.node_spec.client_facing:
+                        if ask_user_options is None:
+                            display_prompt = ask_user_prompt
+                        else:
+                            display_prompt, ask_user_prompt = _split_prompt_for_question_widget(
+                                ask_user_prompt,
+                                stream_id=stream_id,
+                                has_structured_choices=True,
+                            )
+
+                    if display_prompt:
+                        snapshot = (
+                            f"{accumulated_text}{display_prompt}"
+                            if accumulated_text
+                            else display_prompt
+                        )
                         await self._publish_text_delta(
                             stream_id,
                             node_id,
-                            content=ask_user_prompt,
-                            snapshot=ask_user_prompt,
+                            content=display_prompt,
+                            snapshot=snapshot,
                             ctx=ctx,
                             execution_id=execution_id,
                             iteration=iteration,
@@ -2804,6 +2985,30 @@ class EventLoopNode(NodeProtocol):
                     reported_to_parent,
                 )
 
+            if self._should_auto_complete_after_outputs(
+                ctx=ctx,
+                accumulator=accumulator,
+                outputs_set=outputs_set_this_turn,
+                logged_tool_calls=logged_tool_calls,
+                user_input_requested=user_input_requested,
+                queen_input_requested=queen_input_requested,
+                reported_to_parent=reported_to_parent,
+            ):
+                return (
+                    final_text,
+                    real_tool_results,
+                    outputs_set_this_turn,
+                    token_counts,
+                    logged_tool_calls,
+                    user_input_requested,
+                    ask_user_prompt,
+                    ask_user_options,
+                    queen_input_requested,
+                    final_system_prompt,
+                    final_messages,
+                    reported_to_parent,
+                )
+
             # Tool calls processed -- loop back to stream with updated conversation
             inner_turn += 1
 
@@ -2846,6 +3051,43 @@ class EventLoopNode(NodeProtocol):
     ) -> ToolResult:
         """Handle set_output tool call. Delegates to synthetic_tools module."""
         return handle_set_output(tool_input, output_keys)
+
+    def _should_auto_complete_after_outputs(
+        self,
+        *,
+        ctx: NodeContext,
+        accumulator: OutputAccumulator,
+        outputs_set: list[str],
+        logged_tool_calls: list[dict[str, Any]],
+        user_input_requested: bool,
+        queen_input_requested: bool,
+        reported_to_parent: bool,
+    ) -> bool:
+        """Return True when a simple worker turn can finish immediately after set_output."""
+        if not outputs_set:
+            return False
+        if ctx.node_spec.client_facing or ctx.is_subagent_mode:
+            return False
+        if self._judge is not None or ctx.node_spec.success_criteria:
+            return False
+        if user_input_requested or queen_input_requested or reported_to_parent:
+            return False
+        if not ctx.node_spec.output_keys:
+            return False
+
+        missing = self._get_missing_output_keys(
+            accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+        )
+        if missing:
+            return False
+
+        return not any(
+            tc.get("is_error")
+            and (
+                tc.get("tool_name") != "set_output" or not tc.get("is_duplicate_set_output", False)
+            )
+            for tc in logged_tool_calls
+        )
 
     # -------------------------------------------------------------------
     # Judge evaluation
