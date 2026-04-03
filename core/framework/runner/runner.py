@@ -2044,6 +2044,26 @@ class AgentRunner:
                 )
             )
 
+        elif has_client_facing and not sys.stdin.isatty():
+            from framework.runtime.event_bus import EventType
+            runtime = self._agent_runtime
+
+            async def _handle_headless_input(event):
+                node_id = event.node_id
+                if input_data:
+                    import json
+                    await runtime.inject_input(node_id, json.dumps(input_data))
+                else:
+                    print(
+                        "\n[Error] Agent requires interactive input but was run in headless mode.\n"
+                        "Please provide complete input data via --input-file or use interactive mode.",
+                        file=sys.stderr
+                    )
+                    import os
+                    os._exit(1)
+
+            sub_ids.append(runtime.subscribe_to_events(
+                event_types=[EventType.CLIENT_INPUT_REQUESTED], handler=_handle_headless_input))
         # Determine entry point
         if entry_point_id is None:
             # Use first entry point or "default" if no entry points defined
