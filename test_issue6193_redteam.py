@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import asyncio
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
@@ -10,8 +13,9 @@ from framework.runner.runner import AgentRunner
 from framework.graph.edge import GraphSpec
 from framework.graph.goal import Goal
 from framework.runtime.event_bus import EventType
+from framework.graph.executor import ExecutionResult
 
-async def test_fail_fast_when_no_input():
+async def test_fail_fast_when_no_input() -> bool:
     """Verify headless execution fails when no input_data provided."""
     print("[TEST 1] Fail-fast behavior when no input_data...")
     
@@ -66,7 +70,7 @@ async def test_fail_fast_when_no_input():
         print(f"  [FAIL] Expected failure result, got: {result}")
         return False
 
-async def test_injects_json_when_input_exists():
+async def test_injects_json_when_input_exists() -> bool:
     """Verify headless execution injects input_data correctly."""
     print("[TEST 2] JSON injection when input_data exists...")
     
@@ -121,13 +125,16 @@ async def test_injects_json_when_input_exists():
             await runner.run(input_data=input_data)
     
     if mock_runtime.inject_input.called:
+        mock_runtime.inject_input.assert_called_once_with(
+            "test-node", json.dumps(input_data),
+        )
         print("  [PASS] Input handler was registered and inject_input called!")
         return True
     else:
         print("  [FAIL] Input handler not registered or inject_input not called")
         return False
 
-async def main():
+async def main() -> None:
     print("=" * 60)
     print("RED TEAM: Issue #6193 Fix Verification")
     print("=" * 60)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import sys
 from pathlib import Path
@@ -10,9 +12,9 @@ from framework.runner.runner import AgentRunner
 from framework.graph.edge import GraphSpec
 from framework.graph.goal import Goal
 from framework.runtime.event_bus import EventType
+from framework.graph.executor import ExecutionResult
 
-# Mock Agent for testing
-async def run_agent(input_data):
+def make_test_agent() -> tuple[MagicMock, MagicMock, MagicMock]:
     graph = MagicMock(spec=GraphSpec)
     graph.description = "Test Graph"
     graph.id = "test-agent"
@@ -28,13 +30,17 @@ async def run_agent(input_data):
     goal.description = "Test Goal Description"
     goal.id = "test-goal"
     
+    mock_runtime = MagicMock()
+    mock_runtime.start = AsyncMock()
+    mock_runtime.get_entry_points = MagicMock(return_value=[])
+    
+    return graph, goal, mock_runtime
+
+async def run_agent(input_data: dict) -> "ExecutionResult":
+    graph, goal, mock_runtime = make_test_agent()
+    
     with patch("framework.runner.runner.run_preload_validation"):
         runner = AgentRunner(Path("."), graph, goal, interactive=False, skip_credential_validation=True)
-    
-        # Mock runtime
-        mock_runtime = MagicMock()
-        mock_runtime.start = AsyncMock()
-        mock_runtime.get_entry_points = MagicMock(return_value=[])
         
         # Track subscriptions
         input_handlers = []
@@ -56,7 +62,7 @@ async def run_agent(input_data):
         with patch("sys.stdin.isatty", return_value=False):
             return await runner.run(input_data=input_data)
 
-async def test_cicd_simulation():
+async def test_cicd_simulation() -> bool:
     print("\n[STRESS 5] CI/CD Pipeline simulation (result check)...")
     result = await run_agent(input_data={})
     
@@ -65,7 +71,7 @@ async def test_cicd_simulation():
         return True
     return False
 
-async def test_user_error_message():
+async def test_user_error_message() -> bool:
     print("\n[USER 1] Error message readability...")
     result = await run_agent(input_data={})
     
@@ -82,10 +88,11 @@ async def test_user_error_message():
     all_pass = True
     for check, desc in checks:
         print(f"  {'[PASS]' if check else '[FAIL]'} {desc}")
-        if not check: all_pass = False
+        if not check:
+            all_pass = False
     return all_pass
 
-async def main():
+async def main() -> None:
     print("=" * 70)
     print("STRESS TESTS + USER PERSPECTIVE TESTS: Issue #6193")
     print("=" * 70)
