@@ -372,6 +372,7 @@ class EventLoopNode(NodeProtocol):
             start_iteration = 0
             _restored_recent_responses: list[str] = []
             _restored_tool_fingerprints: list[list[tuple[str, str]]] = []
+            _restored_pending_input = None
         else:
             # Try crash-recovery restore from store, then fall back to fresh.
             restored = await self._restore(ctx)

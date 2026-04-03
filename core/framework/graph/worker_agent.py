@@ -113,10 +113,10 @@ class WorkerAgent:
     """First-class autonomous worker for one node in the graph.
 
     Lifecycle:
-        PENDING  – waiting for activations
-        RUNNING  – executing the node
-        COMPLETED – finished successfully, activations published
-        FAILED   – failed after retries exhausted
+        PENDING - waiting for activations
+        RUNNING - executing the node
+        COMPLETED- finished successfully, activations published
+        FAILED  - failed after retries exhausted
     """
 
     def __init__(
