@@ -36,6 +36,7 @@ class RestoredState:
     start_iteration: int
     recent_responses: list[str]
     recent_tool_fingerprints: list[list[tuple[str, str]]]
+    pending_input: dict[str, Any] | None
 
 
 async def restore(
@@ -81,6 +82,9 @@ async def restore(
         [tuple(pair) for pair in fps]  # type: ignore[misc]
         for fps in raw_fps
     ]
+    pending_input = run_cursor.get("pending_input") if run_cursor else None
+    if not isinstance(pending_input, dict):
+        pending_input = None
 
     logger.info(
         f"Restored event loop: iteration={start_iteration}, "
@@ -95,6 +99,7 @@ async def restore(
         start_iteration=start_iteration,
         recent_responses=recent_responses,
         recent_tool_fingerprints=recent_tool_fingerprints,
+        pending_input=pending_input,
     )
 
 
@@ -107,6 +112,7 @@ async def write_cursor(
     *,
     recent_responses: list[str] | None = None,
     recent_tool_fingerprints: list[list[tuple[str, str]]] | None = None,
+    pending_input: dict[str, Any] | None = None,
 ) -> None:
     """Write checkpoint cursor for crash recovery.
 
@@ -128,6 +134,9 @@ async def write_cursor(
             run_cursor["recent_tool_fingerprints"] = [
                 [list(pair) for pair in fps] for fps in recent_tool_fingerprints
             ]
+        # Persist blocked-input state so restored runs re-block instead of
+        # manufacturing a synthetic continuation turn.
+        run_cursor["pending_input"] = pending_input
         await conversation_store.write_cursor(update_run_cursor(cursor, ctx.effective_run_id, run_cursor))
 
 

@@ -1,4 +1,4 @@
-"""Recall selector — pre-turn memory selection for the queen.
+"""Recall selector — pre-turn memory selection for queen and worker memory.
 
 Before each conversation turn the system:
   1. Scans the memory directory for ``.md`` files (cap: 200).
@@ -87,6 +87,8 @@ async def select_memories(
     llm: Any,
     memory_dir: Path | None = None,
     active_tools: list[str] | None = None,
+    *,
+    max_results: int = 5,
 ) -> list[str]:
     """Select up to 5 relevant memory filenames for *query*.
 
@@ -118,7 +120,7 @@ async def select_memories(
         selected = data.get("selected_memories", [])
         # Validate: only return filenames that actually exist.
         valid_names = {f.filename for f in files}
-        result = [s for s in selected if s in valid_names][:5]
+        result = [s for s in selected if s in valid_names][:max_results]
         logger.debug("recall: selected %d memories: %s", len(result), result)
         return result
     except Exception:
@@ -129,6 +131,8 @@ async def select_memories(
 def format_recall_injection(
     filenames: list[str],
     memory_dir: Path | None = None,
+    *,
+    heading: str = "Selected Memories",
 ) -> str:
     """Read selected memory files and format for system prompt injection.
 
@@ -164,7 +168,7 @@ def format_recall_injection(
 
     body = "\n\n---\n\n".join(blocks)
     logger.debug("recall: injecting %d memory blocks into context", len(blocks))
-    return f"--- Selected Memories ---\n\n{body}\n\n--- End Selected Memories ---"
+    return f"--- {heading} ---\n\n{body}\n\n--- End {heading} ---"
 
 
 # ---------------------------------------------------------------------------
@@ -175,8 +179,12 @@ def format_recall_injection(
 async def update_recall_cache(
     session_dir: Path,
     llm: Any,
-    phase_state: Any,
+    phase_state: Any | None = None,
     memory_dir: Path | None = None,
+    *,
+    cache_setter: Any = None,
+    heading: str = "Selected Memories",
+    active_tools: list[str] | None = None,
 ) -> None:
     """Update the recall cache on *phase_state* for the next turn.
 
@@ -193,9 +201,17 @@ async def update_recall_cache(
     logger.debug("recall: updating cache for query: %.80s", query)
 
     try:
-        selected = await select_memories(query, llm, mem_dir)
-        injection = format_recall_injection(selected, mem_dir)
-        phase_state._cached_recall_block = injection
+        selected = await select_memories(
+            query,
+            llm,
+            mem_dir,
+            active_tools=active_tools,
+        )
+        injection = format_recall_injection(selected, mem_dir, heading=heading)
+        if cache_setter is not None:
+            cache_setter(injection)
+        elif phase_state is not None:
+            phase_state._cached_recall_block = injection
     except Exception:
         logger.debug("recall: cache update failed", exc_info=True)
 

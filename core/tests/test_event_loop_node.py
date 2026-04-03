@@ -1327,6 +1327,83 @@ class TestCrashRecovery:
         # Should have the restored output
         assert result.output.get("result") == "partial_value"
 
+    @pytest.mark.asyncio
+    async def test_restore_reblocks_pending_user_input_instead_of_continuing(
+        self, tmp_path, runtime, buffer
+    ):
+        """A restored queen wait should re-emit the question, not self-continue."""
+        store = FileConversationStore(tmp_path / "conv")
+        conv = NodeConversation(
+            system_prompt="You are a test assistant.",
+            output_keys=[],
+            store=store,
+        )
+        conv.set_current_phase("queen")
+        await conv.add_user_message("Session started.")
+        await conv.add_assistant_message(
+            "",
+            tool_calls=[
+                {
+                    "id": "ask_1",
+                    "type": "function",
+                    "function": {
+                        "name": "ask_user",
+                        "arguments": '{"question":"What city?","options":["Seattle","Chicago"]}',
+                    },
+                }
+            ],
+        )
+        await conv.add_tool_result("ask_1", "Waiting for user input...")
+        await conv.add_assistant_message("What city should I target?")
+        await store.write_cursor(
+            {
+                "iteration": 4,
+                "next_seq": conv.next_seq,
+                "pending_input": {
+                    "prompt": "What city?",
+                    "options": ["Seattle", "Chicago"],
+                    "questions": None,
+                    "emit_client_request": True,
+                },
+            }
+        )
+
+        spec = NodeSpec(
+            id="queen",
+            name="Queen",
+            description="interactive queen",
+            node_type="event_loop",
+            output_keys=[],
+        )
+        llm = MockStreamingLLM(scenarios=[text_scenario("This should not run.")])
+        bus = EventBus()
+        input_events = []
+
+        async def capture(event):
+            input_events.append(event)
+
+        bus.subscribe(event_types=[EventType.CLIENT_INPUT_REQUESTED], handler=capture)
+
+        node = EventLoopNode(
+            event_bus=bus,
+            conversation_store=store,
+            config=LoopConfig(max_iterations=10),
+        )
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
+
+        async def shutdown_after_prompt():
+            await asyncio.sleep(0.05)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(shutdown_after_prompt())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert llm._call_index == 0
+        assert len(input_events) == 1
+        assert input_events[0].data["prompt"] == "What city?"
+
 
 # ===========================================================================
 # External event injection

@@ -5,15 +5,20 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from framework.agents.queen import queen_memory_v2 as qm
+from framework.agents.queen.reflection_agent import subscribe_worker_memory_triggers
 from framework.agents.queen.recall_selector import (
     format_recall_injection,
     select_memories,
 )
+from framework.graph.prompting import build_system_prompt_for_node_context
+from framework.runtime.event_bus import AgentEvent, EventBus, EventType
+from framework.tools.queen_lifecycle_tools import QueenPhaseState
 
 # ---------------------------------------------------------------------------
 # parse_frontmatter
@@ -52,6 +57,8 @@ def test_parse_memory_type_valid():
     assert qm.parse_memory_type("environment") == "environment"
     assert qm.parse_memory_type("technique") == "technique"
     assert qm.parse_memory_type("reference") == "reference"
+    assert qm.parse_memory_type("profile") == "profile"
+    assert qm.parse_memory_type("feedback") == "feedback"
 
 
 def test_parse_memory_type_case_insensitive():
@@ -285,6 +292,12 @@ def test_format_recall_injection_empty():
     assert format_recall_injection([]) == ""
 
 
+def test_format_recall_injection_custom_heading(tmp_path: Path):
+    (tmp_path / "a.md").write_text("---\nname: a\n---\nbody of a")
+    result = format_recall_injection(["a.md"], memory_dir=tmp_path, heading="Colony Memories")
+    assert "Colony Memories" in result
+
+
 # ---------------------------------------------------------------------------
 # reflection_agent
 # ---------------------------------------------------------------------------
@@ -331,7 +344,12 @@ async def test_short_reflection(tmp_path: Path):
     ]
 
     session_dir = tmp_path / "session"
-    await run_short_reflection(session_dir, llm, memory_dir=mem_dir)
+    await run_short_reflection(
+        session_dir,
+        llm,
+        memory_dir=mem_dir,
+        cursor_file=tmp_path / "cursor.json",
+    )
 
     # Verify the memory file was created.
     written = mem_dir / "user-likes-tests.md"
@@ -505,7 +523,184 @@ async def test_cursor_advanced_on_success(tmp_path: Path):
          mock.patch("framework.agents.queen.reflection_agent.write_cursor") as mock_write:
         await run_short_reflection(tmp_path / "session", llm, memory_dir=tmp_path / "mem")
 
-        mock_write.assert_called_once_with(2)
+    mock_write.assert_called_once_with(2, None)
+
+
+def test_init_memory_dir_migrates_shared_memories_into_colony(tmp_path: Path):
+    source = tmp_path / "legacy-shared"
+    source.mkdir()
+    (source / "shared-memory.md").write_text(
+        "---\nname: shared\ndescription: old shared memory\ntype: goal\n---\nbody",
+        encoding="utf-8",
+    )
+    target = tmp_path / "colony"
+
+    qm.migrate_shared_v2_memories(target, source_dir=source)
+
+    assert (target / "shared-memory.md").exists()
+    assert not (source / "shared-memory.md").exists()
+    assert (target / ".migrated-from-shared-memory").exists()
+
+
+def test_shared_memory_migration_marker_prevents_repeat(tmp_path: Path):
+    source = tmp_path / "legacy-shared"
+    source.mkdir()
+    target = tmp_path / "colony"
+    target.mkdir()
+    (target / ".migrated-from-shared-memory").write_text("done\n", encoding="utf-8")
+    (source / "shared-memory.md").write_text("body", encoding="utf-8")
+
+    qm.migrate_shared_v2_memories(target, source_dir=source)
+
+    assert not (target / "shared-memory.md").exists()
+    assert (source / "shared-memory.md").exists()
+
+
+def test_global_memory_is_not_populated_by_colony_migration(tmp_path: Path):
+    source = tmp_path / "legacy-shared"
+    source.mkdir()
+    (source / "shared-memory.md").write_text("body", encoding="utf-8")
+    colony = tmp_path / "colony"
+    global_dir = tmp_path / "global"
+
+    qm.migrate_shared_v2_memories(colony, source_dir=source)
+    qm.init_memory_dir(global_dir)
+
+    assert list(global_dir.glob("*.md")) == []
+
+
+def test_save_global_memory_rejects_runtime_details(tmp_path: Path):
+    with pytest.raises(ValueError):
+        qm.save_global_memory(
+            category="profile",
+            description="codebase preference",
+            content="The user wants the worker graph to use node retries.",
+            memory_dir=tmp_path,
+        )
+
+
+def test_save_global_memory_persists_frontmatter(tmp_path: Path):
+    filename, path = qm.save_global_memory(
+        category="preference",
+        description="Prefers concise updates",
+        content="The user prefers concise, direct status updates.",
+        memory_dir=tmp_path,
+    )
+
+    assert filename.endswith(".md")
+    text = path.read_text(encoding="utf-8")
+    assert "type: preference" in text
+    assert "Prefers concise updates" in text
+
+
+def test_build_system_prompt_injects_dynamic_memory():
+    ctx = SimpleNamespace(
+        identity_prompt="Identity",
+        node_spec=SimpleNamespace(system_prompt="Focus", node_type="event_loop", output_keys=["out"]),
+        narrative="Narrative",
+        accounts_prompt="",
+        skills_catalog_prompt="",
+        protocols_prompt="",
+        memory_prompt="",
+        dynamic_memory_provider=lambda: "--- Colony Memories ---\nremember this",
+        is_subagent_mode=False,
+    )
+
+    prompt = build_system_prompt_for_node_context(ctx)
+    assert "Colony Memories" in prompt
+    assert "remember this" in prompt
+
+
+def test_queen_phase_state_appends_colony_and_global_memory_blocks():
+    phase = QueenPhaseState(
+        prompt_building="base prompt",
+        _cached_colony_recall_block="--- Colony Memories ---\ncolony",
+        _cached_global_recall_block="--- Global Memories ---\nglobal",
+    )
+
+    prompt = phase.get_current_prompt()
+    assert "base prompt" in prompt
+    assert "Colony Memories" in prompt
+    assert "Global Memories" in prompt
+
+
+@pytest.mark.asyncio
+async def test_worker_colony_reflection_updates_shared_memory_and_cache(tmp_path: Path):
+    worker_sessions_dir = tmp_path / "worker-sessions"
+    execution_id = "exec-1"
+    session_dir = worker_sessions_dir / execution_id / "conversations" / "parts"
+    session_dir.mkdir(parents=True)
+    (session_dir / "0000000000.json").write_text(
+        json.dumps({"role": "user", "content": "Please remember I like terse summaries."}),
+        encoding="utf-8",
+    )
+    (session_dir / "0000000001.json").write_text(
+        json.dumps({"role": "assistant", "content": "I'll keep that in mind."}),
+        encoding="utf-8",
+    )
+
+    colony_dir = tmp_path / "colony"
+    colony_dir.mkdir()
+    recall_cache: dict[str, str] = {}
+    bus = EventBus()
+
+    llm = AsyncMock()
+    llm.acomplete.side_effect = [
+        MagicMock(
+            content="",
+            raw_response={
+                "tool_calls": [
+                    {
+                        "id": "tc_1",
+                        "name": "write_memory_file",
+                        "input": {
+                            "filename": "user-prefers-terse-summaries.md",
+                            "content": (
+                                "---\n"
+                                "name: user-prefers-terse-summaries\n"
+                                "description: Prefers terse summaries\n"
+                                "type: preference\n"
+                                "---\n\n"
+                                "The user prefers terse summaries."
+                            ),
+                        },
+                    }
+                ]
+            },
+        ),
+        MagicMock(content="done", raw_response={}),
+        MagicMock(content=json.dumps({"selected_memories": ["user-prefers-terse-summaries.md"]})),
+    ]
+
+    subs = await subscribe_worker_memory_triggers(
+        bus,
+        llm,
+        worker_sessions_dir=worker_sessions_dir,
+        colony_memory_dir=colony_dir,
+        recall_cache=recall_cache,
+    )
+    try:
+        await bus.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_STARTED,
+                stream_id="default",
+                execution_id=execution_id,
+            )
+        )
+        await bus.publish(
+            AgentEvent(
+                type=EventType.LLM_TURN_COMPLETE,
+                stream_id="default",
+                execution_id=execution_id,
+            )
+        )
+    finally:
+        for sub_id in subs:
+            bus.unsubscribe(sub_id)
+
+    assert (colony_dir / "user-prefers-terse-summaries.md").exists()
+    assert "Colony Memories" in recall_cache[execution_id]
+    assert "terse summaries" in recall_cache[execution_id]
 
 
 # ---------------------------------------------------------------------------

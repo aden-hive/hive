@@ -1,4 +1,4 @@
-"""Queen memory v2 — file-per-memory architecture.
+"""Shared memory helpers for queen/worker recall and reflection.
 
 Each memory is an individual ``.md`` file in ``~/.hive/queen/memories/``
 with optional YAML frontmatter (name, type, description).  Frontmatter
@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,8 +27,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 MEMORY_TYPES: tuple[str, ...] = ("goal", "environment", "technique", "reference")
+GLOBAL_MEMORY_CATEGORIES: tuple[str, ...] = ("profile", "preference", "environment", "feedback")
 
 _HIVE_QUEEN_DIR = Path.home() / ".hive" / "queen"
+# Legacy shared v2 root.  Colony memory now lives under queen sessions.
 MEMORY_DIR: Path = _HIVE_QUEEN_DIR / "memories"
 CURSOR_FILE: Path = MEMORY_DIR / ".cursor.json"
 
@@ -36,6 +39,12 @@ MAX_FILE_SIZE_BYTES: int = 4096  # 4 KB hard limit per memory file
 
 # How many lines of a memory file to read for header scanning.
 _HEADER_LINE_LIMIT: int = 30
+_MIGRATION_MARKER = ".migrated-from-shared-memory"
+_GLOBAL_MEMORY_CODE_PATTERN = re.compile(
+    r"(/Users/|~/.hive|\.py\b|\.ts\b|\.tsx\b|\.js\b|"
+    r"\b(graph|node|runtime|session|execution|worker|queen|subagent|checkpoint|flowchart)\b)",
+    re.IGNORECASE,
+)
 
 # Frontmatter example provided to the reflection agent via prompt.
 MEMORY_FRONTMATTER_EXAMPLE: list[str] = [
@@ -56,6 +65,31 @@ MEMORY_FRONTMATTER_EXAMPLE: list[str] = [
     ),
     "```",
 ]
+
+
+def colony_memory_dir(colony_id: str) -> Path:
+    """Return the colony memory directory for a queen session."""
+    return _HIVE_QUEEN_DIR / "session" / colony_id / "memory" / "colony"
+
+
+def global_memory_dir() -> Path:
+    """Return the queen-global memory directory."""
+    return _HIVE_QUEEN_DIR / "global_memory"
+
+
+def queen_colony_cursor_file(session_dir: Path) -> Path:
+    """Return the queen colony cursor file for a session."""
+    return session_dir / "memory" / "cursors" / "queen-colony.cursor.json"
+
+
+def queen_global_cursor_file(session_dir: Path) -> Path:
+    """Return the queen global cursor file for a session."""
+    return session_dir / "memory" / "cursors" / "queen-global.cursor.json"
+
+
+def worker_colony_cursor_file(worker_session_dir: Path) -> Path:
+    """Return the worker colony cursor file for one top-level execution."""
+    return worker_session_dir / "memory" / "worker-colony.cursor.json"
 
 
 # ---------------------------------------------------------------------------
@@ -90,11 +124,20 @@ def parse_frontmatter(text: str) -> dict[str, str]:
 
 
 def parse_memory_type(raw: str | None) -> str | None:
-    """Validate *raw* against ``MEMORY_TYPES``.  Falls back to ``None``."""
+    """Validate *raw* against supported memory categories."""
     if raw is None:
         return None
     normalized = raw.strip().lower()
-    return normalized if normalized in MEMORY_TYPES else None
+    allowed = set(MEMORY_TYPES) | set(GLOBAL_MEMORY_CATEGORIES)
+    return normalized if normalized in allowed else None
+
+
+def parse_global_memory_category(raw: str | None) -> str | None:
+    """Validate *raw* against ``GLOBAL_MEMORY_CATEGORIES``."""
+    if raw is None:
+        return None
+    normalized = raw.strip().lower()
+    return normalized if normalized in GLOBAL_MEMORY_CATEGORIES else None
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +209,106 @@ def scan_memory_files(memory_dir: Path | None = None) -> list[MemoryFile]:
     )
 
     return [MemoryFile.from_path(f) for f in md_files[:MAX_FILES]]
+
+
+def slugify_memory_name(raw: str) -> str:
+    """Create a filesystem-safe slug for a memory filename."""
+    slug = re.sub(r"[^a-z0-9]+", "-", raw.strip().lower()).strip("-")
+    return slug or "memory"
+
+
+def allocate_memory_filename(
+    memory_dir: Path,
+    name: str,
+    *,
+    suffix: str = ".md",
+) -> str:
+    """Allocate a unique filename in *memory_dir* based on *name*."""
+    base = slugify_memory_name(name)
+    candidate = f"{base}{suffix}"
+    counter = 2
+    while (memory_dir / candidate).exists():
+        candidate = f"{base}-{counter}{suffix}"
+        counter += 1
+    return candidate
+
+
+def build_memory_document(
+    *,
+    name: str,
+    description: str,
+    mem_type: str,
+    body: str,
+) -> str:
+    """Build one memory file with frontmatter and body."""
+    return (
+        f"---\n"
+        f"name: {name.strip()}\n"
+        f"description: {description.strip()}\n"
+        f"type: {mem_type.strip()}\n"
+        f"---\n\n"
+        f"{body.strip()}\n"
+    )
+
+
+def validate_global_memory_payload(
+    *,
+    category: str,
+    description: str,
+    content: str,
+) -> str:
+    """Validate a queen-global memory save request."""
+    parsed = parse_global_memory_category(category)
+    if parsed is None:
+        raise ValueError(
+            "Invalid global memory category. Use one of: "
+            + ", ".join(GLOBAL_MEMORY_CATEGORIES)
+        )
+    if not description.strip():
+        raise ValueError("Global memory description cannot be empty.")
+    if not content.strip():
+        raise ValueError("Global memory content cannot be empty.")
+
+    probe = f"{description}\n{content}"
+    if _GLOBAL_MEMORY_CODE_PATTERN.search(probe):
+        raise ValueError(
+            "Global memory is only for durable user profile, preferences, "
+            "environment, or feedback — not task/code/runtime details."
+        )
+    return parsed
+
+
+def save_global_memory(
+    *,
+    category: str,
+    description: str,
+    content: str,
+    name: str | None = None,
+    memory_dir: Path | None = None,
+) -> tuple[str, Path]:
+    """Persist one queen-global memory entry."""
+    parsed = validate_global_memory_payload(
+        category=category,
+        description=description,
+        content=content,
+    )
+    target_dir = memory_dir or global_memory_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    memory_name = (name or description).strip()
+    filename = allocate_memory_filename(target_dir, memory_name)
+    doc = build_memory_document(
+        name=memory_name,
+        description=description,
+        mem_type=parsed,
+        body=content,
+    )
+    if len(doc.encode("utf-8")) > MAX_FILE_SIZE_BYTES:
+        raise ValueError(
+            f"Global memory entry exceeds the {MAX_FILE_SIZE_BYTES} byte limit."
+        )
+    path = target_dir / filename
+    path.write_text(doc, encoding="utf-8")
+    return filename, path
 
 
 # ---------------------------------------------------------------------------
@@ -314,12 +457,23 @@ def read_messages_since_cursor(
 # ---------------------------------------------------------------------------
 
 
-def init_memory_dir(memory_dir: Path | None = None) -> None:
-    """Create the memory directory if missing.  Migrates legacy files on first run."""
+def init_memory_dir(
+    memory_dir: Path | None = None,
+    *,
+    migrate_legacy: bool = False,
+) -> None:
+    """Create the memory directory if missing.
+
+    When ``migrate_legacy`` is true, migrate both v1 memory files and the
+    previous shared v2 queen memory store into this directory.
+    """
     d = memory_dir or MEMORY_DIR
     first_run = not d.exists()
     d.mkdir(parents=True, exist_ok=True)
-    if first_run:
+    if migrate_legacy:
+        migrate_legacy_memories(d)
+        migrate_shared_v2_memories(d)
+    elif first_run and d == MEMORY_DIR:
         migrate_legacy_memories(d)
 
 
@@ -377,6 +531,65 @@ def migrate_legacy_memories(memory_dir: Path | None = None) -> None:
 
     if migrated_any:
         logger.info("queen_memory_v2: migrated legacy memory files to %s", d)
+
+
+def migrate_shared_v2_memories(
+    memory_dir: Path | None = None,
+    *,
+    source_dir: Path | None = None,
+) -> None:
+    """Move shared queen v2 memory files into a colony directory once."""
+    d = memory_dir or MEMORY_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    src = source_dir or MEMORY_DIR
+    if d.resolve() == src.resolve():
+        return
+
+    marker = d / _MIGRATION_MARKER
+    if marker.exists():
+        return
+
+    if not src.is_dir():
+        return
+
+    md_files = sorted(
+        f for f in src.glob("*.md")
+        if f.is_file() and not f.name.startswith(".")
+    )
+    if not md_files:
+        marker.write_text("no shared memories found\n", encoding="utf-8")
+        return
+
+    archive = src / ".legacy_colony_migration"
+    archive.mkdir(parents=True, exist_ok=True)
+    migrated_any = False
+
+    for src_file in md_files:
+        target = d / src_file.name
+        if not target.exists():
+            try:
+                shutil.copy2(src_file, target)
+                migrated_any = True
+            except OSError:
+                logger.debug("shared memory migration copy failed for %s", src_file, exc_info=True)
+                continue
+
+        archived = archive / src_file.name
+        counter = 2
+        while archived.exists():
+            archived = archive / f"{src_file.stem}-{counter}{src_file.suffix}"
+            counter += 1
+        try:
+            src_file.rename(archived)
+        except OSError:
+            logger.debug("shared memory migration archive failed for %s", src_file, exc_info=True)
+
+    if migrated_any:
+        logger.info("queen_memory_v2: migrated shared queen memories to %s", d)
+    marker.write_text(
+        f"migrated_at={int(time.time())}\nsource={src}\n",
+        encoding="utf-8",
+    )
 
 
 def _write_migration_file(

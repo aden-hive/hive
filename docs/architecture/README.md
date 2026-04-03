@@ -406,15 +406,15 @@ flowchart TB
 
 ### How It Works
 
-**1. Outputs are persisted via the accumulator.** When the LLM calls `set_output(key, value)`, the `OutputAccumulator` stores the value in memory and writes through to the `ConversationStore` cursor (for crash recovery).
+**1. Outputs are persisted via the accumulator.** When the LLM calls `set_output(key, value)`, the `OutputAccumulator` stores the value in the data buffer and writes through to the `ConversationStore` cursor (for crash recovery).
 
 **2. Judge feedback becomes conversation memory.** When the judge issues a RETRY verdict with feedback, that feedback is injected as a `[Judge feedback]: ...` user message into the conversation. On the next LLM turn, the agent sees its prior attempt, the judge's critique, and can adjust. This is the core reflexion mechanism — in-context learning without model retraining.
 
 **3. The three-layer prompt onion refreshes each turn.** Layer 1 (identity) is static. Layer 2 (narrative) is rebuilt deterministically from `DataBuffer.read_all()` and the execution path — listing completed phases and current state values. Layer 3 (focus) is the current node's `system_prompt`. At phase transitions in continuous mode, Layer 3 swaps while Layers 1-2 and the full conversation history carry forward.
 
-**4. Phase transitions inject structured reflection.** When execution moves between nodes, a transition marker is inserted into the conversation containing: what phase completed, all outputs in memory, available data files, available tools, and an explicit reflection prompt: *"Before proceeding, briefly reflect: what went well in the previous phase? Are there any gaps or surprises worth noting?"* This engineered metacognition surfaces issues before they compound.
+**4. Phase transitions inject structured reflection.** When execution moves between nodes, a transition marker is inserted into the conversation containing: what phase completed, all outputs in the data buffer, available data files, available tools, and an explicit reflection prompt: *"Before proceeding, briefly reflect: what went well in the previous phase? Are there any gaps or surprises worth noting?"* This engineered metacognition surfaces issues before they compound.
 
-**5. Data buffer connects phases.** On ACCEPT, the accumulator's outputs are written to `DataBuffer`. The narrative layer reads these values to describe progress. In continuous mode, subsequent nodes see both the conversation history (what was discussed) and the structured memory (what was decided). In isolated mode, a `ContextHandoff` summarizes the prior node's conversation for the next node's input.
+**5. Data buffer connects phases.** On ACCEPT, the accumulator's outputs are written to `DataBuffer`. The narrative layer reads these values to describe progress. In continuous mode, subsequent nodes see both the conversation history (what was discussed) and the structured buffer state (what was decided). In isolated mode, a `ContextHandoff` summarizes the prior node's conversation for the next node's input.
 
 ### The Judge Evaluation Pipeline
 

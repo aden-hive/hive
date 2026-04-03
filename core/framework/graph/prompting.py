@@ -37,6 +37,7 @@ class NodePromptSpec:
     accounts_prompt: str = ""
     skills_catalog_prompt: str = ""
     protocols_prompt: str = ""
+    memory_prompt: str = ""
     node_type: str = "event_loop"
     output_keys: tuple[str, ...] = ()
     is_subagent_mode: bool = False
@@ -138,8 +139,18 @@ def build_prompt_spec_from_node_context(
     *,
     focus_prompt: str | None = None,
     narrative: str | None = None,
+    memory_prompt: str | None = None,
 ) -> NodePromptSpec:
     """Convert a NodeContext-like object into structured prompt inputs."""
+    resolved_memory_prompt = memory_prompt
+    if resolved_memory_prompt is None:
+        resolved_memory_prompt = getattr(ctx, "memory_prompt", "") or ""
+        dynamic_memory_provider = getattr(ctx, "dynamic_memory_provider", None)
+        if dynamic_memory_provider is not None:
+            try:
+                resolved_memory_prompt = dynamic_memory_provider() or ""
+            except Exception:
+                resolved_memory_prompt = getattr(ctx, "memory_prompt", "") or ""
     return NodePromptSpec(
         identity_prompt=ctx.identity_prompt or "",
         focus_prompt=focus_prompt if focus_prompt is not None else (ctx.node_spec.system_prompt or ""),
@@ -147,6 +158,7 @@ def build_prompt_spec_from_node_context(
         accounts_prompt=ctx.accounts_prompt or "",
         skills_catalog_prompt=ctx.skills_catalog_prompt or "",
         protocols_prompt=ctx.protocols_prompt or "",
+        memory_prompt=resolved_memory_prompt,
         node_type=ctx.node_spec.node_type,
         output_keys=tuple(ctx.node_spec.output_keys or ()),
         is_subagent_mode=bool(getattr(ctx, "is_subagent_mode", False)),
@@ -168,6 +180,13 @@ def build_system_prompt(spec: NodePromptSpec) -> str:
 
     if spec.protocols_prompt:
         parts.append(f"\n{spec.protocols_prompt}")
+
+    if spec.memory_prompt:
+        parts.append(
+            "\nRelevant recalled memories may appear below. Treat them as "
+            "point-in-time guidance and verify stale details against current context."
+        )
+        parts.append(f"\n{spec.memory_prompt}")
 
     if spec.narrative:
         parts.append(f"\n--- Context (what has happened so far) ---\n{spec.narrative}")
@@ -195,12 +214,14 @@ def build_system_prompt_for_node_context(
     *,
     focus_prompt: str | None = None,
     narrative: str | None = None,
+    memory_prompt: str | None = None,
 ) -> str:
     """Build a canonical system prompt from a NodeContext-like object."""
     spec = build_prompt_spec_from_node_context(
         ctx,
         focus_prompt=focus_prompt,
         narrative=narrative,
+        memory_prompt=memory_prompt,
     )
     return build_system_prompt(spec)
 

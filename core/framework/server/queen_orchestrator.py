@@ -176,9 +176,18 @@ async def create_queen(
     phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
 
     # ---- Cross-session memory ----------------------------------------
-    from framework.agents.queen.queen_memory_v2 import init_memory_dir
+    from framework.agents.queen.queen_memory_v2 import (
+        colony_memory_dir,
+        global_memory_dir,
+        init_memory_dir,
+        queen_colony_cursor_file,
+    )
 
-    init_memory_dir()
+    colony_dir = colony_memory_dir(session.id)
+    global_dir = global_memory_dir()
+    init_memory_dir(colony_dir, migrate_legacy=True)
+    init_memory_dir(global_dir)
+    phase_state.global_memory_dir = global_dir
 
     # ---- Compose phase-specific prompts ------------------------------
     _orig_node = _queen_graph.nodes[0]
@@ -367,7 +376,11 @@ async def create_queen(
             from framework.agents.queen.reflection_agent import subscribe_reflection_triggers
 
             _reflection_subs = await subscribe_reflection_triggers(
-                session.event_bus, queen_dir, session.llm,
+                session.event_bus,
+                queen_dir,
+                session.llm,
+                memory_dir=colony_dir,
+                cursor_file=queen_colony_cursor_file(queen_dir),
                 phase_state=phase_state,
             )
 

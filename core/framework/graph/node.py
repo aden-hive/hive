@@ -2,7 +2,7 @@
 Node Protocol - The building block of agent graphs.
 
 A Node is a unit of work that:
-1. Receives context (goal, shared memory, input)
+1. Receives context (goal, shared buffer, input)
 2. Makes decisions (using LLM, tools, or logic)
 3. Produces results (output, state changes)
 4. Records everything to the Runtime
@@ -115,10 +115,10 @@ class NodeSpec(BaseModel):
 
     # Data flow
     input_keys: list[str] = Field(
-        default_factory=list, description="Keys this node reads from shared memory or input"
+        default_factory=list, description="Keys this node reads from the shared buffer or input"
     )
     output_keys: list[str] = Field(
-        default_factory=list, description="Keys this node writes to shared memory or output"
+        default_factory=list, description="Keys this node writes to the shared buffer or output"
     )
     nullable_output_keys: list[str] = Field(
         default_factory=list,
@@ -502,6 +502,8 @@ class NodeContext:
     # rebuilding the full system prompt when restoring from conversation store.
     identity_prompt: str = ""
     narrative: str = ""
+    # Static memory block injected into the system prompt.
+    memory_prompt: str = ""
 
     # Event-triggered execution (no interactive user attached)
     event_triggered: bool = False
@@ -548,6 +550,9 @@ class NodeContext:
     # the queen to switch between phase-specific prompts (building /
     # staging / running) without restarting the conversation.
     dynamic_prompt_provider: Any = None  # Callable[[], str] | None
+    # Dynamic memory provider — when set, EventLoopNode rebuilds the
+    # system prompt with the latest memory block each iteration.
+    dynamic_memory_provider: Any = None  # Callable[[], str] | None
 
     # Skill system prompts — injected by the skill discovery pipeline
     skills_catalog_prompt: str = ""  # Available skills XML catalog

@@ -356,11 +356,11 @@ Not currently emitted — reserved for future use when `NodeConversation` compac
 
 ### `state_changed`
 
-A shared memory key has been modified.
+A shared buffer key has been modified.
 
 | Data Field  | Type  | Description                        |
 | ----------- | ----- | ---------------------------------- |
-| `key`       | `str` | Memory key that changed            |
+| `key`       | `str` | Buffer key that changed            |
 | `old_value` | `Any` | Previous value                     |
 | `new_value` | `Any` | New value                          |
 | `scope`     | `str` | Scope of the change                |

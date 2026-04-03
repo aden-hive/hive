@@ -110,7 +110,7 @@ This prevents premature set_output before user interaction.
 **Hard limit: 3-6 nodes for most agents.** Never exceed 6 unless the user
 explicitly requests a complex multi-phase pipeline.
 
-Each node boundary serializes outputs to shared memory and **destroys** all
+Each node boundary serializes outputs to the shared buffer and **destroys** all
 in-context information: tool call results, intermediate reasoning, conversation
 history. A research node that searches, fetches, and analyzes in ONE node keeps
 all source material in its conversation context. Split across 3 nodes, each
@@ -173,7 +173,7 @@ Use `conversation_mode="continuous"` to preserve context across transitions.
 ### set_output
 - Synthetic tool injected by framework
 - Call separately from real tool calls (separate turn)
-- `set_output("key", "value")` stores to shared memory
+- `set_output("key", "value")` stores to the shared buffer
 
 ## Edge Conditions
 
@@ -247,7 +247,7 @@ For large data that exceeds context:
 Multiple ON_SUCCESS edges from same source → parallel execution via asyncio.gather().
 - Parallel nodes must have disjoint output_keys
 - Only one branch may have client_facing nodes
-- Fan-in node gets all outputs in shared memory
+- Fan-in node gets all outputs in the shared buffer
 
 ## Judge System
 

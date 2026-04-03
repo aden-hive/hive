@@ -191,6 +191,7 @@ class ExecutionStream:
         skill_dirs: list[str] | None = None,
         context_warn_ratio: float | None = None,
         batch_init_nudge: str | None = None,
+        dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = None,
     ):
         """
         Initialize execution stream.
@@ -245,6 +246,7 @@ class ExecutionStream:
         self._skill_dirs: list[str] = skill_dirs or []
         self._context_warn_ratio: float | None = context_warn_ratio
         self._batch_init_nudge: str | None = batch_init_nudge
+        self._dynamic_memory_provider_factory = dynamic_memory_provider_factory
 
         _es_logger = logging.getLogger(__name__)
         if protocols_prompt:
@@ -720,6 +722,11 @@ class ExecutionStream:
                         skill_dirs=self._skill_dirs,
                         context_warn_ratio=self._context_warn_ratio,
                         batch_init_nudge=self._batch_init_nudge,
+                        dynamic_memory_provider=(
+                            self._dynamic_memory_provider_factory(execution_id)
+                            if self._dynamic_memory_provider_factory is not None
+                            else None
+                        ),
                     )
                     # Track executor so inject_input() can reach EventLoopNode instances
                     self._active_executors[execution_id] = executor
@@ -1084,7 +1091,7 @@ class ExecutionStream:
                         updated_at=now,
                     ),
                     progress=progress,
-                    memory=ss.get("data_buffer", ss.get("memory", {})),
+                    data_buffer=ss.get("data_buffer", ss.get("memory", {})),
                     input_data=ctx.input_data,
                     current_run_id=ctx.run_id,
                 )

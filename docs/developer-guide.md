@@ -90,7 +90,6 @@ hive/                                    # Repository root
 │   │   ├── graph/                       # GraphExecutor - executes node graphs
 │   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, OpenRouter, Hive, etc.)
 │   │   ├── mcp/                         # MCP server integration
-│   │   ├── monitoring/                  # Runtime monitoring
 │   │   ├── observability/               # Structured logging - human-readable and machine-parseable tracing
 │   │   ├── runner/                      # AgentRunner - loads and runs agents
 │   │   ├── runtime/                     # Runtime environment

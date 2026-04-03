@@ -84,6 +84,7 @@ _QUEEN_PLANNING_TOOLS = [
     "initialize_and_build_agent",
     # Load existing agent (after user confirms)
     "load_built_agent",
+    "save_global_memory",
 ]
 
 # Building phase: full coding + agent construction tools.
@@ -94,6 +95,7 @@ _QUEEN_BUILDING_TOOLS = (
         "list_credentials",
         "replan_agent",
         "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
+        "save_global_memory",
     ]
 )
 
@@ -115,6 +117,7 @@ _QUEEN_STAGING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
+    "save_global_memory",
 ]
 
 # Running phase: worker is executing — monitor and control.
@@ -138,6 +141,7 @@ _QUEEN_RUNNING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
+    "save_global_memory",
 ]
 
 
@@ -605,6 +609,8 @@ to fix the currently loaded agent (no draft required).
 - load_built_agent(agent_path) — Load an existing agent and switch to STAGING \
 phase. Only use this when the user explicitly asks to work with an existing agent \
 (e.g. "load my_agent", "run the research agent"). Confirm with the user first.
+- save_global_memory(category, description, content, name?) — Save durable \
+cross-queen memory about the user only (profile, preferences, environment, feedback)
 
 ## Workflow summary
 1. Understand requirements → discover tools → design graph
@@ -636,6 +642,8 @@ updated flowchart immediately. Use this when you make structural changes \
 restored (with decision/browser nodes intact) so you can edit it. Use \
 when the user wants to change integrations, swap tools, rethink the \
 flow, or discuss any design changes before you build them.
+- save_global_memory(category, description, content, name?) — Save durable \
+cross-queen memory about the user only
 
 When you finish building an agent, call load_built_agent(path) to stage it.
 """
@@ -654,6 +662,8 @@ first (DEFAULT for most modification requests)
 - set_trigger(trigger_id, trigger_type?, trigger_config?) — Activate a trigger (timer)
 - remove_trigger(trigger_id) — Deactivate a trigger
 - list_triggers() — List all triggers and their active/inactive status
+- save_global_memory(category, description, content, name?) — Save durable \
+cross-queen memory about the user only
 
 You do NOT have write tools. To modify the agent, prefer \
 stop_graph_and_plan() unless the user gave a specific instruction.
@@ -679,6 +689,8 @@ To just stop without modifying, call stop_graph().
 - set_trigger(trigger_id, trigger_type?, trigger_config?) — Activate a trigger (timer)
 - remove_trigger(trigger_id) — Deactivate a trigger
 - list_triggers() — List all triggers and their active/inactive status
+- save_global_memory(category, description, content, name?) — Save durable \
+cross-queen memory about the user only
 
 You do NOT have write tools or agent construction tools. \
 If you need to modify the agent, call stop_graph_and_edit() to switch back \
@@ -836,21 +848,28 @@ diagnosis mode — you already have a built agent, you just need to fix it.
 """
 
 _queen_memory_instructions = """
-## Your Cross-Session Memory
+## Your Memory
 
-Relevant memories from past sessions may appear in context under \
-"--- Selected Memories ---".  These are automatically selected based on the \
-user's current query.  If you know this person from past sessions, pick up \
-where you left off — reference what you built together, what they care about, \
-how things went.
+Relevant colony memories from this queen session may appear in context under \
+"--- Colony Memories ---".  Relevant global user memories may appear under \
+"--- Global Memories ---".
+
+Colony memories are shared with the worker for this queen session. Use them \
+for continuity about what this user is trying to do, what has worked, and \
+what the colony has learned together.
+
+Global memories are shared across queens and are only for durable knowledge \
+about the user: who they are, their preferences, their environment, and \
+their feedback.
 
 Memories older than 1 day include a staleness warning. Treat these as \
-point-in-time observations — verify against current code before asserting \
+point-in-time observations — verify current details before asserting them \
 as fact.
 
-You do NOT need to manually save or recall memories.  A background \
-reflection agent automatically extracts learnings from each conversation \
-turn and organises them into persistent memory files.
+You do NOT need to manually save or recall colony memories. A background \
+reflection agent automatically extracts colony learnings from each \
+conversation turn. Use `save_global_memory` only when you learn something \
+durable about the user that should help future queens.
 """
 
 _queen_behavior_always = _queen_behavior_always + _queen_memory_instructions

@@ -381,6 +381,7 @@ class EventLoopNode(NodeProtocol):
                 start_iteration = restored.start_iteration
                 _restored_recent_responses = restored.recent_responses
                 _restored_tool_fingerprints = restored.recent_tool_fingerprints
+                _restored_pending_input = restored.pending_input
 
                 # Refresh the system prompt with full composition including
                 # execution preamble and node-type preamble.  The stored
@@ -401,6 +402,7 @@ class EventLoopNode(NodeProtocol):
             else:
                 _restored_recent_responses = []
                 _restored_tool_fingerprints = []
+                _restored_pending_input = None
 
                 # Fresh conversation: either isolated mode or first node in continuous mode.
                 from framework.graph.prompting import build_system_prompt_for_node_context
@@ -538,6 +540,7 @@ class EventLoopNode(NodeProtocol):
         # 5. Stall / doom loop detection state (restored from cursor if resuming)
         recent_responses: list[str] = _restored_recent_responses
         recent_tool_fingerprints: list[list[tuple[str, str]]] = _restored_tool_fingerprints
+        pending_input_state: dict[str, Any] | None = _restored_pending_input
         _consecutive_empty_turns: int = 0
 
         # 6. Main loop
@@ -573,9 +576,69 @@ class EventLoopNode(NodeProtocol):
                 )
 
             # 6b. Drain injection queue
-            await self._drain_injection_queue(conversation, ctx)
+            drained_injections = await self._drain_injection_queue(conversation, ctx)
             # 6b1. Drain trigger queue (framework-level signals)
-            await self._drain_trigger_queue(conversation)
+            drained_triggers = await self._drain_trigger_queue(conversation)
+
+            # Resume blocked ask_user/auto-block waits durably across restarts.
+            # If the node was parked for input and no new message has been
+            # injected yet, re-enter the wait instead of continuing the last
+            # assistant turn with a synthetic prompt.
+            if pending_input_state is not None:
+                if drained_injections > 0 or drained_triggers > 0:
+                    pending_input_state = None
+                    await self._write_cursor(
+                        ctx,
+                        conversation,
+                        accumulator,
+                        iteration,
+                        recent_responses=recent_responses,
+                        recent_tool_fingerprints=recent_tool_fingerprints,
+                        pending_input=None,
+                    )
+                else:
+                    logger.info(
+                        "[%s] iter=%d: restored pending input wait (emit_client_request=%s)",
+                        node_id,
+                        iteration,
+                        pending_input_state.get("emit_client_request", True),
+                    )
+                    got_input = await self._await_user_input(
+                        ctx,
+                        prompt=str(pending_input_state.get("prompt", "")),
+                        options=pending_input_state.get("options"),
+                        questions=pending_input_state.get("questions"),
+                        emit_client_request=bool(
+                            pending_input_state.get("emit_client_request", True)
+                        ),
+                    )
+                    logger.info(
+                        "[%s] iter=%d: restored wait unblocked, got_input=%s",
+                        node_id,
+                        iteration,
+                        got_input,
+                    )
+                    if not got_input:
+                        await self._publish_loop_completed(
+                            stream_id, node_id, iteration + 1, execution_id
+                        )
+                        latency_ms = int((time.time() - start_time) * 1000)
+                        return NodeResult(
+                            success=True,
+                            output=accumulator.to_dict(),
+                            tokens_used=total_input_tokens + total_output_tokens,
+                            latency_ms=latency_ms,
+                            conversation=conversation if _is_continuous else None,
+                        )
+                    if self._injection_queue.empty() and self._trigger_queue.empty():
+                        logger.info(
+                            "[%s] iter=%d: pending-input wait woke without queued input; re-waiting",
+                            node_id,
+                            iteration,
+                        )
+                        continue
+                    pending_input_state = None
+                    continue
 
             # 6b2. Dynamic tool refresh (mode switching)
             if ctx.dynamic_tools_provider is not None:
@@ -592,14 +655,19 @@ class EventLoopNode(NodeProtocol):
                 tools.extend(ctx.dynamic_tools_provider())
                 tools.extend(synthetic)
 
-            # 6b3. Dynamic prompt refresh (phase switching)
-            if ctx.dynamic_prompt_provider is not None:
-                from framework.graph.prompting import stamp_prompt_datetime
+            # 6b3. Dynamic prompt refresh (phase switching / memory refresh)
+            if ctx.dynamic_prompt_provider is not None or ctx.dynamic_memory_provider is not None:
+                if ctx.dynamic_prompt_provider is not None:
+                    from framework.graph.prompting import stamp_prompt_datetime
 
-                _new_prompt = stamp_prompt_datetime(ctx.dynamic_prompt_provider())
+                    _new_prompt = stamp_prompt_datetime(ctx.dynamic_prompt_provider())
+                else:
+                    from framework.graph.prompting import build_system_prompt_for_node_context
+
+                    _new_prompt = build_system_prompt_for_node_context(ctx)
                 if _new_prompt != conversation.system_prompt:
                     conversation.update_system_prompt(_new_prompt)
-                    logger.info("[%s] Dynamic prompt updated (phase switch)", node_id)
+                    logger.info("[%s] Dynamic prompt updated", node_id)
 
             # 6c. Publish iteration event (with per-iteration metadata when available)
             _iter_meta = None
@@ -1133,6 +1201,7 @@ class EventLoopNode(NodeProtocol):
                 iteration,
                 recent_responses=recent_responses,
                 recent_tool_fingerprints=recent_tool_fingerprints,
+                pending_input=None,
             )
 
             # 6h'. Queen input blocking
@@ -1267,6 +1336,21 @@ class EventLoopNode(NodeProtocol):
                 # Check for multi-question batch from ask_user_multiple
                 multi_qs = getattr(self, "_pending_multi_questions", None)
                 self._pending_multi_questions = None
+                pending_input_state = {
+                    "prompt": _cf_prompt,
+                    "options": ask_user_options,
+                    "questions": multi_qs,
+                    "emit_client_request": True,
+                }
+                await self._write_cursor(
+                    ctx,
+                    conversation,
+                    accumulator,
+                    iteration,
+                    recent_responses=recent_responses,
+                    recent_tool_fingerprints=recent_tool_fingerprints,
+                    pending_input=pending_input_state,
+                )
                 got_input = await self._await_user_input(
                     ctx,
                     prompt=_cf_prompt,
@@ -1330,6 +1414,16 @@ class EventLoopNode(NodeProtocol):
                         latency_ms=latency_ms,
                         conversation=conversation if _is_continuous else None,
                     )
+
+                if self._injection_queue.empty() and self._trigger_queue.empty():
+                    logger.info(
+                        "[%s] iter=%d: input wait woke without queued input; continuing to wait",
+                        node_id,
+                        iteration,
+                    )
+                    continue
+
+                pending_input_state = None
 
                 recent_responses.clear()
 
@@ -1414,6 +1508,21 @@ class EventLoopNode(NodeProtocol):
                     )
 
                 logger.info("[%s] iter=%d: waiting for queen input...", node_id, iteration)
+                pending_input_state = {
+                    "prompt": "",
+                    "options": None,
+                    "questions": None,
+                    "emit_client_request": False,
+                }
+                await self._write_cursor(
+                    ctx,
+                    conversation,
+                    accumulator,
+                    iteration,
+                    recent_responses=recent_responses,
+                    recent_tool_fingerprints=recent_tool_fingerprints,
+                    pending_input=pending_input_state,
+                )
                 got_input = await self._await_user_input(ctx, prompt="", emit_client_request=False)
                 logger.info(
                     "[%s] iter=%d: queen wait unblocked, got_input=%s",
@@ -1472,6 +1581,16 @@ class EventLoopNode(NodeProtocol):
                         latency_ms=latency_ms,
                         conversation=conversation if _is_continuous else None,
                     )
+
+                if self._injection_queue.empty() and self._trigger_queue.empty():
+                    logger.info(
+                        "[%s] iter=%d: queen-input wait woke without queued guidance; re-waiting",
+                        node_id,
+                        iteration,
+                    )
+                    continue
+
+                pending_input_state = None
 
                 recent_responses.clear()
                 _cf_text_only_streak = 0
@@ -3098,6 +3217,7 @@ class EventLoopNode(NodeProtocol):
         *,
         recent_responses: list[str] | None = None,
         recent_tool_fingerprints: list[list[tuple[str, str]]] | None = None,
+        pending_input: dict[str, Any] | None = None,
     ) -> None:
         """Write checkpoint cursor for crash recovery.
 
@@ -3112,6 +3232,7 @@ class EventLoopNode(NodeProtocol):
             iteration=iteration,
             recent_responses=recent_responses,
             recent_tool_fingerprints=recent_tool_fingerprints,
+            pending_input=pending_input,
         )
 
     async def _drain_injection_queue(self, conversation: NodeConversation, ctx: NodeContext) -> int:

@@ -8,7 +8,7 @@ metadata:
 
 ## Operational Protocol: Structured Note-Taking
 
-Maintain structured working notes in shared memory key `_working_notes`.
+Maintain structured working notes in shared buffer key `_working_notes`.
 Update at these checkpoints:
 
 - After completing each discrete subtask or batch item

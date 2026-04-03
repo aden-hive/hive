@@ -123,6 +123,9 @@ class QueenPhaseState:
 
     # Cached recall block — populated async by recall_selector after each turn.
     _cached_recall_block: str = ""
+    _cached_colony_recall_block: str = ""
+    _cached_global_recall_block: str = ""
+    global_memory_dir: Path | None = None
 
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
@@ -145,14 +148,16 @@ class QueenPhaseState:
         else:
             base = self.prompt_building
 
-        memory = self._cached_recall_block
         parts = [base]
         if self.skills_catalog_prompt:
             parts.append(self.skills_catalog_prompt)
         if self.protocols_prompt:
             parts.append(self.protocols_prompt)
-        if memory:
-            parts.append(memory)
+        colony_memory = self._cached_colony_recall_block or self._cached_recall_block
+        if colony_memory:
+            parts.append(colony_memory)
+        if self._cached_global_recall_block:
+            parts.append(self._cached_global_recall_block)
         return "\n\n".join(parts)
 
     async def _emit_phase_event(self) -> None:
@@ -2002,12 +2007,12 @@ def register_queen_lifecycle_tools(
                             "input_keys": {
                                 "type": "array",
                                 "items": {"type": "string"},
-                                "description": "Expected input memory keys (hints)",
+                                "description": "Expected input buffer keys (hints)",
                             },
                             "output_keys": {
                                 "type": "array",
                                 "items": {"type": "string"},
-                                "description": "Expected output memory keys (hints)",
+                                "description": "Expected output buffer keys (hints)",
                             },
                             "success_criteria": {
                                 "type": "string",
@@ -2642,16 +2647,16 @@ def register_queen_lifecycle_tools(
         return "\n".join(lines)
 
     async def _format_memory(runtime: AgentRuntime) -> str:
-        """Format the worker's shared memory snapshot and recent changes."""
+        """Format the worker's shared buffer snapshot and recent changes."""
         from framework.runtime.shared_state import IsolationLevel
 
         lines = []
         active_streams = runtime.get_active_streams()
 
         if not active_streams:
-            return "Worker has no active executions. No memory to inspect."
+            return "Worker has no active executions. No buffer state to inspect."
 
-        # Read memory from the first active execution
+        # Read buffer state from the first active execution
         stream_info = active_streams[0]
         exec_ids = stream_info.get("active_execution_ids", [])
         stream_id = stream_info.get("stream_id", "")
@@ -2665,7 +2670,7 @@ def register_queen_lifecycle_tools(
         if not state:
             lines.append("Worker's shared buffer is empty.")
         else:
-            lines.append(f"Worker's shared memory ({len(state)} keys):")
+            lines.append(f"Worker's shared buffer ({len(state)} keys):")
             for key, value in state.items():
                 lines.append(f"  {key}: {_preview_value(value)}")
 
@@ -3133,7 +3138,7 @@ def register_queen_lifecycle_tools(
             "- diary: persistent run digests from past executions — read this first "
             "before digging into live runtime logs\n"
             "- activity: current node, transitions, latest LLM output\n"
-            "- memory: worker's accumulated knowledge and state\n"
+            "- memory: worker's accumulated buffer state\n"
             "- tools: running and recent tool calls\n"
             "- issues: retries, stalls, constraint violations\n"
             "- progress: goal criteria, token consumption\n"
@@ -4007,6 +4012,89 @@ def register_queen_lifecycle_tools(
     )
     registry.register(
         "remove_trigger", _remove_trigger_tool, lambda inputs: remove_trigger(**inputs)
+    )
+    tools_registered += 1
+
+    # --- save_global_memory --------------------------------------------------
+
+    async def save_global_memory_entry(
+        category: str,
+        description: str,
+        content: str,
+        name: str | None = None,
+    ) -> str:
+        """Persist a queen-global memory entry about the user."""
+        from framework.agents.queen.queen_memory_v2 import (
+            global_memory_dir as _global_memory_dir,
+            init_memory_dir as _init_memory_dir,
+            save_global_memory as _save_global_memory,
+        )
+
+        target_dir = (
+            phase_state.global_memory_dir
+            if phase_state is not None and phase_state.global_memory_dir is not None
+            else _global_memory_dir()
+        )
+        _init_memory_dir(target_dir)
+
+        try:
+            filename, path = _save_global_memory(
+                category=category,
+                description=description,
+                content=content,
+                name=name,
+                memory_dir=target_dir,
+            )
+            return json.dumps(
+                {
+                    "status": "saved",
+                    "filename": filename,
+                    "path": str(path),
+                    "category": category,
+                }
+            )
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+
+    _save_global_memory_tool = Tool(
+        name="save_global_memory",
+        description=(
+            "Save durable global memory about the user. "
+            "Only use for user profile, preferences, environment, or feedback."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["profile", "preference", "environment", "feedback"],
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Specific one-line description for future recall selection.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Durable user-centric memory content.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Optional short memory title.",
+                },
+            },
+            "required": ["category", "description", "content"],
+            "additionalProperties": False,
+        },
+    )
+    registry.register(
+        "save_global_memory",
+        _save_global_memory_tool,
+        lambda inputs: save_global_memory_entry(
+            inputs["category"],
+            inputs["description"],
+            inputs["content"],
+            inputs.get("name"),
+        ),
     )
     tools_registered += 1
 

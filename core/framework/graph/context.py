@@ -55,6 +55,7 @@ class GraphContext:
     batch_init_nudge: str | None = None
     dynamic_tools_provider: Any = None
     dynamic_prompt_provider: Any = None
+    dynamic_memory_provider: Any = None
     iteration_metadata_provider: Any = None
     loop_config: dict[str, Any] = field(default_factory=dict)
     path: list[str] = field(default_factory=list)
@@ -178,12 +179,14 @@ def build_node_context(
     shared_node_registry: dict[str, NodeProtocol] | None = None,
     dynamic_tools_provider: Any = None,
     dynamic_prompt_provider: Any = None,
+    dynamic_memory_provider: Any = None,
     iteration_metadata_provider: Any = None,
     skills_catalog_prompt: str = "",
     protocols_prompt: str = "",
     skill_dirs: list[str] | None = None,
     default_skill_warn_ratio: float | None = None,
     default_skill_batch_nudge: str | None = None,
+    memory_prompt: str = "",
 ) -> NodeContext:
     """Build a canonical `NodeContext` for graph execution."""
 
@@ -227,6 +230,7 @@ def build_node_context(
         accounts_prompt=node_accounts_prompt,
         identity_prompt=identity_prompt,
         narrative=narrative,
+        memory_prompt=memory_prompt,
         execution_id=execution_id,
         run_id=run_id,
         stream_id=stream_id,
@@ -235,6 +239,7 @@ def build_node_context(
         shared_node_registry=shared_node_registry or {},
         dynamic_tools_provider=dynamic_tools_provider,
         dynamic_prompt_provider=dynamic_prompt_provider,
+        dynamic_memory_provider=dynamic_memory_provider,
         iteration_metadata_provider=iteration_metadata_provider,
         skills_catalog_prompt=skills_catalog_prompt,
         protocols_prompt=protocols_prompt,
@@ -306,6 +311,7 @@ def build_node_context_from_graph_context(
         shared_node_registry=gc.node_registry,
         dynamic_tools_provider=gc.dynamic_tools_provider,
         dynamic_prompt_provider=gc.dynamic_prompt_provider,
+        dynamic_memory_provider=gc.dynamic_memory_provider,
         iteration_metadata_provider=gc.iteration_metadata_provider,
         skills_catalog_prompt=gc.skills_catalog_prompt,
         protocols_prompt=gc.protocols_prompt,

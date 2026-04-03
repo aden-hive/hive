@@ -47,6 +47,10 @@ class Session:
     worker_handoff_sub: str | None = None
     # Memory reflection + recall subscriptions
     memory_reflection_subs: list = field(default_factory=list)  # list[str]
+    # Worker colony memory subscriptions
+    worker_memory_subs: list = field(default_factory=list)  # list[str]
+    # Per-execution colony recall cache for worker prompts
+    worker_colony_recall_blocks: dict[str, str] = field(default_factory=dict)
     # Worker run digest subscription (fires on EXECUTION_COMPLETED / EXECUTION_FAILED)
     worker_digest_sub: str | None = None
     # Trigger definitions loaded from agent's triggers.json (available but inactive)
@@ -294,17 +298,10 @@ class SessionManager:
         try:
             # Blocking I/O — load in executor
             loop = asyncio.get_running_loop()
-
-            # Prioritize: explicit model arg > worker-specific model > session default
-            from framework.config import (
-                get_preferred_worker_model,
-                get_worker_api_base,
-                get_worker_api_key,
-                get_worker_llm_extra_kwargs,
-            )
-
-            worker_model = get_preferred_worker_model()
-            resolved_model = model or worker_model or self._model
+            # By default, workers share the session's LLM with the queen so
+            # execution and memory reflection/recall stay on the same model.
+            session_model = getattr(session.llm, "model", None)
+            resolved_model = model or session_model or self._model
             runner = await loop.run_in_executor(
                 None,
                 lambda: AgentRunner.load(
@@ -316,29 +313,8 @@ class SessionManager:
                 ),
             )
 
-            # If a worker-specific model is configured, build an LLM provider
-            # with the correct worker credentials so _setup() doesn't fall back
-            # to the queen's llm config (which may be a different provider).
-            if worker_model and not model:
-                from framework.config import get_hive_config
-
-                worker_llm_cfg = get_hive_config().get("worker_llm", {})
-                if worker_llm_cfg.get("use_antigravity_subscription"):
-                    from framework.llm.antigravity import AntigravityProvider
-
-                    runner._llm = AntigravityProvider(model=resolved_model)
-                else:
-                    from framework.llm.litellm import LiteLLMProvider
-
-                    worker_api_key = get_worker_api_key()
-                    worker_api_base = get_worker_api_base()
-                    worker_extra = get_worker_llm_extra_kwargs()
-                    runner._llm = LiteLLMProvider(
-                        model=resolved_model,
-                        api_key=worker_api_key,
-                        api_base=worker_api_base,
-                        **worker_extra,
-                    )
+            if model is None:
+                runner._llm = session.llm
 
             # Setup with session's event bus
             if runner._agent_runtime is None:
@@ -348,6 +324,16 @@ class SessionManager:
                 )
 
             runtime = runner._agent_runtime
+
+            if runtime is not None:
+                runtime._dynamic_memory_provider_factory = (
+                    lambda execution_id, session=session: (
+                        lambda execution_id=execution_id, session=session: session.worker_colony_recall_blocks.get(
+                            execution_id,
+                            "",
+                        )
+                    )
+                )
 
             # Load triggers from the agent's triggers.json definition file.
             from framework.tools.queen_lifecycle_tools import _read_agent_triggers_json
@@ -384,8 +370,19 @@ class SessionManager:
             session.graph_runtime = runtime
             session.worker_info = info
 
-            # Subscribe to execution completion for per-run digest generation
+            # Subscribe to execution completion for per-run digest generation.
+            # Colony memory is additive; worker loading should still succeed if
+            # that optional subscription path hits an import/runtime issue while
+            # restoring an older session.
             self._subscribe_worker_digest(session)
+            try:
+                await self._subscribe_worker_colony_memory(session)
+            except Exception:
+                logger.warning(
+                    "Worker colony memory subscription failed for '%s'; continuing without it",
+                    resolved_graph_id,
+                    exc_info=True,
+                )
 
             async with self._lock:
                 self._loading.discard(session.id)
@@ -631,6 +628,14 @@ class SessionManager:
                 pass
             session.worker_digest_sub = None
 
+        for sub_id in session.worker_memory_subs:
+            try:
+                session.event_bus.unsubscribe(sub_id)
+            except Exception:
+                pass
+        session.worker_memory_subs.clear()
+        session.worker_colony_recall_blocks.clear()
+
         graph_id = session.graph_id
         session.graph_id = None
         session.worker_path = None
@@ -675,6 +680,14 @@ class SessionManager:
                 pass
             session.worker_digest_sub = None
 
+        for sub_id in session.worker_memory_subs:
+            try:
+                session.event_bus.unsubscribe(sub_id)
+            except Exception:
+                pass
+        session.worker_memory_subs.clear()
+        session.worker_colony_recall_blocks.clear()
+
         # Stop queen and memory reflection/recall subscriptions
         for sub_id in session.memory_reflection_subs:
             try:
@@ -717,10 +730,11 @@ class SessionManager:
         if _llm is not None:
             import asyncio
 
+            from framework.agents.queen.queen_memory_v2 import colony_memory_dir
             from framework.agents.queen.reflection_agent import run_long_reflection
 
             asyncio.create_task(
-                run_long_reflection(_llm),
+                run_long_reflection(_llm, memory_dir=colony_memory_dir(_storage_id)),
                 name=f"queen-memory-long-reflection-{session_id}",
             )
 
@@ -886,6 +900,48 @@ class SessionManager:
                 _ET.EXECUTION_PAUSED,
             ],
             handler=_on_worker_event,
+        )
+
+    async def _subscribe_worker_colony_memory(self, session: Session) -> None:
+        """Subscribe shared colony reflection/recall for top-level worker runs."""
+        for sub_id in session.worker_memory_subs:
+            try:
+                session.event_bus.unsubscribe(sub_id)
+            except Exception:
+                pass
+        session.worker_memory_subs.clear()
+        session.worker_colony_recall_blocks.clear()
+
+        runtime = session.graph_runtime
+        if runtime is None:
+            return
+
+        worker_sessions_dir = getattr(runtime, "_session_store", None)
+        worker_sessions_dir = getattr(worker_sessions_dir, "sessions_dir", None)
+        if worker_sessions_dir is None:
+            return
+
+        from framework.agents.queen.queen_memory_v2 import colony_memory_dir, init_memory_dir
+        from framework.agents.queen.reflection_agent import subscribe_worker_memory_triggers
+
+        colony_dir = colony_memory_dir(session.id)
+        init_memory_dir(colony_dir, migrate_legacy=True)
+
+        runtime._dynamic_memory_provider_factory = (
+            lambda execution_id, session=session: (
+                lambda execution_id=execution_id, session=session: session.worker_colony_recall_blocks.get(
+                    execution_id,
+                    "",
+                )
+            )
+        )
+
+        session.worker_memory_subs = await subscribe_worker_memory_triggers(
+            session.event_bus,
+            session.llm,
+            worker_sessions_dir=worker_sessions_dir,
+            colony_memory_dir=colony_dir,
+            recall_cache=session.worker_colony_recall_blocks,
         )
 
     def _subscribe_worker_handoffs(self, session: Session, executor: Any) -> None:

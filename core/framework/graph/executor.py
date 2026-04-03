@@ -153,6 +153,7 @@ class GraphExecutor:
         tool_provider_map: dict[str, str] | None = None,
         dynamic_tools_provider: Callable | None = None,
         dynamic_prompt_provider: Callable | None = None,
+        dynamic_memory_provider: Callable | None = None,
         iteration_metadata_provider: Callable | None = None,
         skills_catalog_prompt: str = "",
         protocols_prompt: str = "",
@@ -184,6 +185,8 @@ class GraphExecutor:
                 tool list (for mode switching)
             dynamic_prompt_provider: Optional callback returning current
                 system prompt (for phase switching)
+            dynamic_memory_provider: Optional callback returning the current
+                memory block to inject into node prompts
             skills_catalog_prompt: Available skills catalog for system prompt
             protocols_prompt: Default skill operational protocols for system prompt
             skill_dirs: Skill base directories for Tier 3 resource access
@@ -210,6 +213,7 @@ class GraphExecutor:
         self.tool_provider_map = tool_provider_map
         self.dynamic_tools_provider = dynamic_tools_provider
         self.dynamic_prompt_provider = dynamic_prompt_provider
+        self.dynamic_memory_provider = dynamic_memory_provider
         self.iteration_metadata_provider = iteration_metadata_provider
         self.skills_catalog_prompt = skills_catalog_prompt
         self.protocols_prompt = protocols_prompt
@@ -1021,6 +1025,7 @@ class GraphExecutor:
                         shared_node_registry=self.node_registry,
                         dynamic_tools_provider=self.dynamic_tools_provider,
                         dynamic_prompt_provider=self.dynamic_prompt_provider,
+                        dynamic_memory_provider=self.dynamic_memory_provider,
                         iteration_metadata_provider=self.iteration_metadata_provider,
                         skills_catalog_prompt=self.skills_catalog_prompt,
                         protocols_prompt=self.protocols_prompt,
@@ -1305,6 +1310,7 @@ class GraphExecutor:
             batch_init_nudge=self.batch_init_nudge,
             dynamic_tools_provider=self.dynamic_tools_provider,
             dynamic_prompt_provider=self.dynamic_prompt_provider,
+            dynamic_memory_provider=self.dynamic_memory_provider,
             iteration_metadata_provider=self.iteration_metadata_provider,
             loop_config=self._loop_config,
             node_visit_counts=dict(node_visit_counts),
@@ -1600,12 +1606,13 @@ class GraphExecutor:
                                 "Worker execution ended before terminal nodes completed: "
                                 f"{unresolved_terminals}"
                             )
+                            self.logger.error(execution_error)
                         else:
                             execution_error = (
                                 "Worker execution ended before all workers reached "
                                 "a terminal lifecycle state"
                             )
-                        self.logger.error(execution_error)
+                            self.logger.error(execution_error)
                         break
 
                     task_to_worker = {task: wid for wid, task in pending_tasks.items()}
@@ -1698,21 +1705,9 @@ class GraphExecutor:
 
                             # Route activations
                             for activation in outgoing_activations:
-                                self.logger.info(
-                                    "  Routing activation: %s -> %s (pending before: %s)",
-                                    activation.source_id,
-                                    activation.target_id,
-                                    list(pending_tasks.keys()),
-                                )
                                 _route_activation(
                                     activation, workers, pending_tasks,
                                     has_event_subscription=False,
-                                )
-                                self.logger.info(
-                                    "  Routed activation: %s -> %s (pending after: %s)",
-                                    activation.source_id,
-                                    activation.target_id,
-                                    list(pending_tasks.keys()),
                                 )
 
                             if wid in terminal_worker_ids:

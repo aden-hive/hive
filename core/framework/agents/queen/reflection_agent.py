@@ -1,4 +1,4 @@
-"""Reflect agent — background memory extraction after each queen turn.
+"""Reflect agent — background memory extraction for queen and worker memory.
 
 A lightweight side agent that runs after each queen LLM turn.  It
 inspects recent conversation messages (cursor-based incremental
@@ -38,6 +38,7 @@ from framework.agents.queen.queen_memory_v2 import (
     read_cursor,
     read_messages_since_cursor,
     scan_memory_files,
+    worker_colony_cursor_file,
     write_cursor,
 )
 from framework.llm.provider import LLMResponse, Tool
@@ -343,11 +344,13 @@ async def run_short_reflection(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
+    *,
+    cursor_file: Path | None = None,
 ) -> None:
     """Run a short reflection: extract learnings from new messages."""
     mem_dir = memory_dir or MEMORY_DIR
 
-    cursor_seq = read_cursor()
+    cursor_seq = read_cursor(cursor_file)
     messages, max_seq = read_messages_since_cursor(session_dir, cursor_seq)
 
     if not messages:
@@ -373,7 +376,7 @@ async def run_short_reflection(
 
     if not transcript_lines:
         # Only tool results in the new messages — still advance cursor.
-        write_cursor(max_seq)
+        write_cursor(max_seq, cursor_file)
         return
 
     transcript = "\n".join(transcript_lines)
@@ -387,7 +390,7 @@ async def run_short_reflection(
 
     # Advance cursor only on success.
     if success:
-        write_cursor(max_seq)
+        write_cursor(max_seq, cursor_file)
         logger.debug("reflect: short reflection done, cursor → %d", max_seq)
     else:
         logger.warning("reflect: short reflection failed, cursor NOT advanced (stays at %d)", cursor_seq)
@@ -430,6 +433,7 @@ async def subscribe_reflection_triggers(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
+    cursor_file: Path | None = None,
     phase_state: Any = None,
 ) -> list[str]:
     """Subscribe to queen turn events and return subscription IDs.
@@ -459,10 +463,20 @@ async def subscribe_reflection_triggers(
                 _short_count += 1
                 logger.debug("reflect: turn complete — short count %d/%d", _short_count, _LONG_REFLECT_INTERVAL)
                 if _short_count % _LONG_REFLECT_INTERVAL == 0:
-                    await run_short_reflection(session_dir, llm, mem_dir)
+                    await run_short_reflection(
+                        session_dir,
+                        llm,
+                        mem_dir,
+                        cursor_file=cursor_file,
+                    )
                     await run_long_reflection(llm, mem_dir)
                 else:
-                    await run_short_reflection(session_dir, llm, mem_dir)
+                    await run_short_reflection(
+                        session_dir,
+                        llm,
+                        mem_dir,
+                        cursor_file=cursor_file,
+                    )
             except Exception:
                 logger.warning("reflect: reflection failed", exc_info=True)
                 _write_error("short/long reflection")
@@ -472,7 +486,25 @@ async def subscribe_reflection_triggers(
             if phase_state is not None:
                 try:
                     from framework.agents.queen.recall_selector import update_recall_cache
-                    await update_recall_cache(session_dir, llm, phase_state)
+                    await update_recall_cache(
+                        session_dir,
+                        llm,
+                        cache_setter=lambda block: (
+                            setattr(phase_state, "_cached_colony_recall_block", block),
+                            setattr(phase_state, "_cached_recall_block", block),
+                        ),
+                        memory_dir=mem_dir,
+                        heading="Colony Memories",
+                    )
+                    await update_recall_cache(
+                        session_dir,
+                        llm,
+                        cache_setter=lambda block: setattr(
+                            phase_state, "_cached_global_recall_block", block
+                        ),
+                        memory_dir=getattr(phase_state, "global_memory_dir", None),
+                        heading="Global Memories",
+                    )
                 except Exception:
                     logger.debug("recall: cache update failed", exc_info=True)
 
@@ -505,6 +537,126 @@ async def subscribe_reflection_triggers(
     sub_ids.append(sub2)
 
     return sub_ids
+
+
+async def subscribe_worker_memory_triggers(
+    event_bus: Any,
+    llm: Any,
+    *,
+    worker_sessions_dir: Path,
+    colony_memory_dir: Path,
+    recall_cache: dict[str, str],
+) -> list[str]:
+    """Subscribe shared colony memory reflection/recall for top-level worker runs."""
+    from framework.agents.queen.recall_selector import update_recall_cache
+    from framework.runtime.event_bus import EventType
+
+    _lock = asyncio.Lock()
+    _short_counts: dict[str, int] = {}
+
+    def _is_worker_event(event: Any) -> bool:
+        return bool(
+            getattr(event, "execution_id", None)
+            and getattr(event, "stream_id", None) not in ("queen", "judge")
+        )
+
+    async def _update_cache(execution_id: str) -> None:
+        session_dir = worker_sessions_dir / execution_id
+        await update_recall_cache(
+            session_dir,
+            llm,
+            memory_dir=colony_memory_dir,
+            cache_setter=lambda block, execution_id=execution_id: recall_cache.__setitem__(
+                execution_id, block
+            ),
+            heading="Colony Memories",
+        )
+
+    async def _on_turn_complete(event: Any) -> None:
+        if not _is_worker_event(event):
+            return
+        if _lock.locked():
+            logger.debug("reflect: worker colony reflection skipped — lock busy")
+            return
+
+        execution_id = event.execution_id
+        if execution_id is None:
+            return
+        session_dir = worker_sessions_dir / execution_id
+        cursor_file = worker_colony_cursor_file(session_dir)
+
+        async with _lock:
+            try:
+                _short_counts[execution_id] = _short_counts.get(execution_id, 0) + 1
+                await run_short_reflection(
+                    session_dir,
+                    llm,
+                    colony_memory_dir,
+                    cursor_file=cursor_file,
+                )
+                if _short_counts[execution_id] % _LONG_REFLECT_INTERVAL == 0:
+                    await run_long_reflection(llm, colony_memory_dir)
+                await _update_cache(execution_id)
+            except Exception:
+                logger.warning("reflect: worker colony reflection failed", exc_info=True)
+                _write_error("worker colony reflection")
+
+    async def _on_compaction(event: Any) -> None:
+        if not _is_worker_event(event):
+            return
+        if _lock.locked():
+            return
+        execution_id = event.execution_id
+        if execution_id is None:
+            return
+        async with _lock:
+            try:
+                await run_long_reflection(llm, colony_memory_dir)
+                await _update_cache(execution_id)
+            except Exception:
+                logger.warning("reflect: worker compaction reflection failed", exc_info=True)
+                _write_error("worker compaction reflection")
+
+    async def _on_execution_started(event: Any) -> None:
+        if not _is_worker_event(event):
+            return
+        if event.execution_id is not None:
+            recall_cache[event.execution_id] = ""
+
+    async def _on_execution_terminal(event: Any) -> None:
+        if not _is_worker_event(event):
+            return
+        execution_id = event.execution_id
+        if execution_id is None:
+            return
+        async with _lock:
+            try:
+                await run_long_reflection(llm, colony_memory_dir)
+            except Exception:
+                logger.warning("reflect: worker final reflection failed", exc_info=True)
+                _write_error("worker final reflection")
+            finally:
+                recall_cache.pop(execution_id, None)
+                _short_counts.pop(execution_id, None)
+
+    return [
+        event_bus.subscribe(
+            event_types=[EventType.EXECUTION_STARTED],
+            handler=_on_execution_started,
+        ),
+        event_bus.subscribe(
+            event_types=[EventType.LLM_TURN_COMPLETE],
+            handler=_on_turn_complete,
+        ),
+        event_bus.subscribe(
+            event_types=[EventType.CONTEXT_COMPACTED],
+            handler=_on_compaction,
+        ),
+        event_bus.subscribe(
+            event_types=[EventType.EXECUTION_COMPLETED, EventType.EXECUTION_FAILED],
+            handler=_on_execution_terminal,
+        ),
+    ]
 
 
 def _write_error(context: str) -> None:

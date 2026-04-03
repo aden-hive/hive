@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import AliasChoices, BaseModel, Field, computed_field
 
 if TYPE_CHECKING:
     from framework.graph.executor import ExecutionResult
@@ -119,8 +119,11 @@ class SessionState(BaseModel):
     # Result
     result: SessionResult = Field(default_factory=SessionResult)
 
-    # Memory (for resumability)
-    memory: dict[str, Any] = Field(default_factory=dict)
+    # Data buffer (for resumability)
+    data_buffer: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("data_buffer", "memory"),
+    )
 
     # Metrics
     metrics: SessionMetrics = Field(default_factory=SessionMetrics)
@@ -153,6 +156,16 @@ class SessionState(BaseModel):
     worker_configured: bool = Field(default=False)
 
     model_config = {"extra": "allow"}
+
+    @property
+    def memory(self) -> dict[str, Any]:
+        """Backward-compatible alias for legacy callers."""
+        return self.data_buffer
+
+    @memory.setter
+    def memory(self, value: dict[str, Any]) -> None:
+        """Backward-compatible alias for legacy callers."""
+        self.data_buffer = value
 
     @computed_field
     @property
@@ -243,7 +256,7 @@ class SessionState(BaseModel):
                 error=result.error,
                 output=result.output,
             ),
-            memory=result.session_state.get("data_buffer", result.session_state.get("memory", {})) if result.session_state else {},
+            data_buffer=result.session_state.get("data_buffer", result.session_state.get("memory", {})) if result.session_state else {},
             input_data=input_data or {},
         )
 
@@ -307,7 +320,7 @@ class SessionState(BaseModel):
         return {
             "paused_at": resume_from,
             "resume_from": resume_from,
-            "data_buffer": self.memory,
+            "data_buffer": self.data_buffer,
             "execution_path": self.progress.path,
             "node_visit_counts": self.progress.node_visit_counts,
         }

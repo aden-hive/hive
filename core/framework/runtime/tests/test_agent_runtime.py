@@ -25,6 +25,7 @@ from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import IsolationLevel, SharedBufferManager
+from framework.schemas.session_state import SessionState, SessionTimestamps
 
 # === Test Fixtures ===
 
@@ -188,6 +189,26 @@ class TestSharedBufferManager:
         manager.cleanup_execution("exec-1")
 
         assert "exec-1" not in manager._execution_state
+
+
+class TestSessionState:
+    """Tests for session state data-buffer compatibility."""
+
+    def test_legacy_memory_alias_populates_data_buffer(self):
+        """Legacy `memory` payloads should still hydrate the session buffer."""
+        state = SessionState(
+            session_id="session-1",
+            goal_id="goal-1",
+            timestamps=SessionTimestamps(
+                started_at="2026-01-01T00:00:00",
+                updated_at="2026-01-01T00:00:00",
+            ),
+            memory={"rules": "keep starred mail"},
+        )
+
+        assert state.data_buffer == {"rules": "keep starred mail"}
+        assert state.memory == {"rules": "keep starred mail"}
+        assert state.to_session_state_dict()["data_buffer"] == {"rules": "keep starred mail"}
 
 
 # === EventBus Tests ===
