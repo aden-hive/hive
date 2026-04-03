@@ -55,7 +55,7 @@ def test_main_accepts_comma_separated_modules(monkeypatch, capsys):
 
     def fake_check_imports(modules):
         captured["modules"] = modules
-        return {name: "ok" for name in modules}
+        return dict.fromkeys(modules, "ok")
 
     monkeypatch.setattr(module, "check_imports", fake_check_imports)
     code, stdout, stderr = _run_main(
