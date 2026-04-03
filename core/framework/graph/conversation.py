@@ -125,43 +125,23 @@ class Message:
 
 
 def _normalize_cursor(cursor: dict[str, Any] | None) -> dict[str, Any]:
-    """Normalize legacy and run-scoped cursor formats into one shape."""
-    if not cursor:
-        return {}
-    if isinstance(cursor.get("runs"), dict):
-        normalized = dict(cursor)
-        normalized["runs"] = dict(cursor["runs"])
-        return normalized
-
-    normalized: dict[str, Any] = {}
-    if "next_seq" in cursor:
-        normalized["next_seq"] = cursor["next_seq"]
-
-    legacy_run = {k: v for k, v in cursor.items() if k != "next_seq"}
-    if legacy_run:
-        normalized["runs"] = {LEGACY_RUN_ID: legacy_run}
-    return normalized
+    """Normalize legacy and run-scoped cursor formats into one flat shape."""
+    return dict(cursor) if cursor else {}
 
 
 def get_cursor_next_seq(cursor: dict[str, Any] | None) -> int | None:
-    normalized = _normalize_cursor(cursor)
-    next_seq = normalized.get("next_seq")
+    next_seq = (cursor or {}).get("next_seq")
     return next_seq if isinstance(next_seq, int) else None
 
 
 def update_cursor_next_seq(cursor: dict[str, Any] | None, next_seq: int) -> dict[str, Any]:
-    updated = _normalize_cursor(cursor)
+    updated = dict(cursor or {})
     updated["next_seq"] = next_seq
     return updated
 
 
 def get_run_cursor(cursor: dict[str, Any] | None, run_id: str | None) -> dict[str, Any] | None:
-    if run_id is None:
-        return dict(cursor) if cursor else None
-    normalized = _normalize_cursor(cursor)
-    runs = normalized.get("runs", {})
-    value = runs.get(run_id)
-    return dict(value) if isinstance(value, dict) else None
+    return dict(cursor) if cursor else None
 
 
 def update_run_cursor(
@@ -169,18 +149,9 @@ def update_run_cursor(
     run_id: str | None,
     values: dict[str, Any],
 ) -> dict[str, Any]:
-    if run_id is None:
-        updated = dict(cursor or {})
-        updated.update(values)
-        return updated
-
-    normalized = _normalize_cursor(cursor)
-    runs = dict(normalized.get("runs", {}))
-    existing = dict(runs.get(run_id, {}))
-    existing.update(values)
-    runs[run_id] = existing
-    normalized["runs"] = runs
-    return normalized
+    updated = dict(cursor or {})
+    updated.update(values)
+    return updated
 
 
 def _extract_spillover_filename(content: str) -> str | None:
@@ -846,7 +817,7 @@ class NodeConversation:
         # Persist
         if self._store:
             delete_before = recent_messages[0].seq if recent_messages else self._next_seq
-            await self._store.delete_parts_before(delete_before, run_id=self._run_id)
+            await self._store.delete_parts_before(delete_before)
             await self._store.write_part(summary_msg.seq, summary_msg.to_storage_dict())
             await self._write_next_seq()
 
@@ -1048,7 +1019,7 @@ class NodeConversation:
         # rewrite only what we want to keep.
         if self._store:
             recent_boundary = recent_messages[0].seq if recent_messages else self._next_seq
-            await self._store.delete_parts_before(recent_boundary, run_id=self._run_id)
+            await self._store.delete_parts_before(recent_boundary)
             # Write the reference message
             await self._store.write_part(ref_msg.seq, ref_msg.to_storage_dict())
             # Write kept structural messages (they may have been modified)
@@ -1090,7 +1061,7 @@ class NodeConversation:
     async def clear(self) -> None:
         """Remove all messages, keep system prompt, preserve ``_next_seq``."""
         if self._store:
-            await self._store.delete_parts_before(self._next_seq, run_id=self._run_id)
+            await self._store.delete_parts_before(self._next_seq)
             await self._write_next_seq()
         self._messages.clear()
         self._last_api_input_tokens = None
@@ -1138,9 +1109,8 @@ class NodeConversation:
     async def _persist_meta(self) -> None:
         """Lazily write conversation metadata to the store (called once).
 
-        When ``self._run_id`` is set, metadata is keyed under
-        ``meta["runs"][run_id]`` so multiple runs can coexist in the same
-        session.  Legacy (no run_id) sessions write flat for backward compat.
+        When ``self._run_id`` is set, metadata is written flat for backward
+        compatibility (run-scoped isolation has been reverted).
         """
         if self._store is None:
             return
@@ -1150,21 +1120,15 @@ class NodeConversation:
             "compaction_threshold": self._compaction_threshold,
             "output_keys": self._output_keys,
         }
-        if self._run_id:
-            existing = await self._store.read_meta() or {}
-            runs = dict(existing.get("runs", {}))
-            runs[self._run_id] = run_meta
-            existing["runs"] = runs
-            await self._store.write_meta(existing)
-        else:
-            await self._store.write_meta(run_meta)
+        await self._store.write_meta(run_meta)
         self._meta_persisted = True
 
     async def _write_next_seq(self) -> None:
         if self._store is None:
             return
-        cursor = await self._store.read_cursor()
-        await self._store.write_cursor(update_cursor_next_seq(cursor, self._next_seq))
+        cursor = await self._store.read_cursor() or {}
+        cursor["next_seq"] = self._next_seq
+        await self._store.write_cursor(cursor)
 
     # --- Restore -----------------------------------------------------------
 
@@ -1191,12 +1155,6 @@ class NodeConversation:
         if meta is None:
             return None
 
-        # Extract run-scoped metadata when available
-        if run_id and isinstance(meta.get("runs"), dict):
-            run_meta = meta["runs"].get(run_id)
-            if run_meta is not None:
-                meta = run_meta
-
         conv = cls(
             system_prompt=meta.get("system_prompt", ""),
             max_context_tokens=meta.get("max_context_tokens", 32000),
@@ -1208,11 +1166,6 @@ class NodeConversation:
         conv._meta_persisted = True
 
         parts = await store.read_parts()
-        if run_id is not None:
-            if is_legacy_run_id(run_id):
-                parts = [p for p in parts if is_legacy_run_id(p.get("run_id"))]
-            else:
-                parts = [p for p in parts if p.get("run_id") == run_id]
         if phase_id:
             parts = [p for p in parts if p.get("phase_id") == phase_id]
         conv._messages = [Message.from_storage_dict(p) for p in parts]

@@ -1299,7 +1299,7 @@ class GraphExecutor:
             run_id=self._run_id,
             storage_path=self._storage_path,
             runtime_logger=self.runtime_logger,
-            node_registry=dict(self.node_registry),
+            node_registry=self.node_registry,
             node_spec_registry={node.id: node for node in graph.nodes},
             parallel_config=self._parallel_config,
             enable_parallel_execution=self.enable_parallel_execution,

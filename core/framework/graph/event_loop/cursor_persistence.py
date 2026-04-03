@@ -14,12 +14,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from framework.graph.conversation import (
-    ConversationStore,
-    NodeConversation,
-    get_run_cursor,
-    update_run_cursor,
-)
+from framework.graph.conversation import ConversationStore, NodeConversation
 from framework.graph.event_loop.types import LoopConfig, OutputAccumulator, TriggerEvent
 from framework.graph.node import NodeContext
 from framework.llm.capabilities import supports_image_tool_results
@@ -71,18 +66,17 @@ async def restore(
     accumulator.spillover_dir = config.spillover_dir
     accumulator.max_value_chars = config.max_output_value_chars
 
-    cursor = await conversation_store.read_cursor()
-    run_cursor = get_run_cursor(cursor, ctx.effective_run_id)
-    start_iteration = run_cursor.get("iteration", 0) + 1 if run_cursor else 0
+    cursor = await conversation_store.read_cursor() or {}
+    start_iteration = cursor.get("iteration", 0) + 1
 
     # Restore stall/doom-loop detection state
-    recent_responses: list[str] = run_cursor.get("recent_responses", []) if run_cursor else []
-    raw_fps = run_cursor.get("recent_tool_fingerprints", []) if run_cursor else []
+    recent_responses: list[str] = cursor.get("recent_responses", [])
+    raw_fps = cursor.get("recent_tool_fingerprints", [])
     recent_tool_fingerprints: list[list[tuple[str, str]]] = [
         [tuple(pair) for pair in fps]  # type: ignore[misc]
         for fps in raw_fps
     ]
-    pending_input = run_cursor.get("pending_input") if run_cursor else None
+    pending_input = cursor.get("pending_input")
     if not isinstance(pending_input, dict):
         pending_input = None
 
@@ -120,24 +114,26 @@ async def write_cursor(
     detection state so that resume picks up exactly where execution stopped.
     """
     if conversation_store:
-        cursor = await conversation_store.read_cursor()
-        run_cursor = {
-            "iteration": iteration,
-            "node_id": ctx.node_id,
-            "outputs": accumulator.to_dict(),
-        }
+        cursor = await conversation_store.read_cursor() or {}
+        cursor.update(
+            {
+                "iteration": iteration,
+                "node_id": ctx.node_id,
+                "outputs": accumulator.to_dict(),
+            }
+        )
         # Persist stall/doom-loop detection state for reliable resume
         if recent_responses is not None:
-            run_cursor["recent_responses"] = recent_responses
+            cursor["recent_responses"] = recent_responses
         if recent_tool_fingerprints is not None:
             # Convert list[list[tuple]] → list[list[list]] for JSON
-            run_cursor["recent_tool_fingerprints"] = [
+            cursor["recent_tool_fingerprints"] = [
                 [list(pair) for pair in fps] for fps in recent_tool_fingerprints
             ]
         # Persist blocked-input state so restored runs re-block instead of
         # manufacturing a synthetic continuation turn.
-        run_cursor["pending_input"] = pending_input
-        await conversation_store.write_cursor(update_run_cursor(cursor, ctx.effective_run_id, run_cursor))
+        cursor["pending_input"] = pending_input
+        await conversation_store.write_cursor(cursor)
 
 
 async def drain_injection_queue(

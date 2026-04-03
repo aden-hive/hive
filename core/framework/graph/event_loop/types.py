@@ -127,11 +127,11 @@ class OutputAccumulator:
         value = self._auto_spill(key, value)
         self.values[key] = value
         if self.store:
-            cursor = await self.store.read_cursor()
-            run_cursor = get_run_cursor(cursor, self.run_id) or {}
-            outputs = run_cursor.get("outputs", {})
+            cursor = await self.store.read_cursor() or {}
+            outputs = cursor.get("outputs", {})
             outputs[key] = value
-            await self.store.write_cursor(update_run_cursor(cursor, self.run_id, {"outputs": outputs}))
+            cursor["outputs"] = outputs
+            await self.store.write_cursor(cursor)
 
     def _auto_spill(self, key: str, value: Any) -> Any:
         """Save large values to a file and return a reference string."""
@@ -182,12 +182,7 @@ class OutputAccumulator:
         run_id: str | None = None,
     ) -> OutputAccumulator:
         cursor = await store.read_cursor()
-        run_cursor = get_run_cursor(cursor, run_id)
-        values = {}
-        if run_cursor and "outputs" in run_cursor:
-            values = run_cursor["outputs"]
-        elif run_id is None and cursor and "outputs" in cursor:
-            values = cursor["outputs"]
+        values = cursor.get("outputs", {}) if cursor else {}
         return cls(values=values, store=store, run_id=run_id)
 
 
