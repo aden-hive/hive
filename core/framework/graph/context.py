@@ -67,6 +67,12 @@ class GraphContext:
     # Retry tracking: worker_id → retry_count (for execution quality assessment)
     retry_counts: dict[str, int] = field(default_factory=dict)
     nodes_with_retries: set[str] = field(default_factory=set)
+    # Colony memory reflection at node handoff
+    colony_memory_dir: Any = None  # Path | None
+    worker_sessions_dir: Any = None  # Path | None
+    colony_recall_cache: dict[str, str] = field(default_factory=dict)
+    colony_reflect_llm: Any = None  # LLMProvider for reflection
+    _colony_reflect_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 def build_scoped_buffer(buffer: DataBuffer, node_spec: NodeSpec) -> DataBuffer:

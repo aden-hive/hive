@@ -623,69 +623,22 @@ async def subscribe_worker_memory_triggers(
     colony_memory_dir: Path,
     recall_cache: dict[str, str],
 ) -> list[str]:
-    """Subscribe shared colony memory reflection/recall for top-level worker runs."""
-    from framework.agents.queen.recall_selector import update_recall_cache
+    """Subscribe colony memory lifecycle events for worker runs.
+
+    Short reflection is now handled synchronously at node handoff in
+    ``WorkerAgent._reflect_colony_memory()``.  This function only manages:
+    - Recall cache initialisation on execution start
+    - Final long reflection + cleanup on execution end
+    """
     from framework.runtime.event_bus import EventType
 
-    _lock = asyncio.Lock()
-    _short_counts: dict[str, int] = {}
+    _terminal_lock = asyncio.Lock()
 
     def _is_worker_event(event: Any) -> bool:
         return bool(
             getattr(event, "execution_id", None)
             and getattr(event, "stream_id", None) not in ("queen", "judge")
         )
-
-    async def _update_cache(execution_id: str) -> None:
-        session_dir = worker_sessions_dir / execution_id
-        await update_recall_cache(
-            session_dir,
-            llm,
-            memory_dir=colony_memory_dir,
-            cache_setter=lambda block, execution_id=execution_id: recall_cache.__setitem__(
-                execution_id, block
-            ),
-            heading="Colony Memories",
-        )
-
-    async def _on_turn_complete(event: Any) -> None:
-        if not _is_worker_event(event):
-            return
-        if _lock.locked():
-            logger.debug("reflect: worker colony reflection skipped — lock busy")
-            return
-
-        execution_id = event.execution_id
-        if execution_id is None:
-            return
-        session_dir = worker_sessions_dir / execution_id
-
-        async with _lock:
-            try:
-                _short_counts[execution_id] = _short_counts.get(execution_id, 0) + 1
-                await run_short_reflection(session_dir, llm, colony_memory_dir)
-                if _short_counts[execution_id] % _LONG_REFLECT_INTERVAL == 0:
-                    await run_long_reflection(llm, colony_memory_dir)
-                await _update_cache(execution_id)
-            except Exception:
-                logger.warning("reflect: worker colony reflection failed", exc_info=True)
-                _write_error("worker colony reflection")
-
-    async def _on_compaction(event: Any) -> None:
-        if not _is_worker_event(event):
-            return
-        if _lock.locked():
-            return
-        execution_id = event.execution_id
-        if execution_id is None:
-            return
-        async with _lock:
-            try:
-                await run_long_reflection(llm, colony_memory_dir)
-                await _update_cache(execution_id)
-            except Exception:
-                logger.warning("reflect: worker compaction reflection failed", exc_info=True)
-                _write_error("worker compaction reflection")
 
     async def _on_execution_started(event: Any) -> None:
         if not _is_worker_event(event):
@@ -699,7 +652,7 @@ async def subscribe_worker_memory_triggers(
         execution_id = event.execution_id
         if execution_id is None:
             return
-        async with _lock:
+        async with _terminal_lock:
             try:
                 await run_long_reflection(llm, colony_memory_dir)
             except Exception:
@@ -707,20 +660,11 @@ async def subscribe_worker_memory_triggers(
                 _write_error("worker final reflection")
             finally:
                 recall_cache.pop(execution_id, None)
-                _short_counts.pop(execution_id, None)
 
     return [
         event_bus.subscribe(
             event_types=[EventType.EXECUTION_STARTED],
             handler=_on_execution_started,
-        ),
-        event_bus.subscribe(
-            event_types=[EventType.LLM_TURN_COMPLETE],
-            handler=_on_turn_complete,
-        ),
-        event_bus.subscribe(
-            event_types=[EventType.CONTEXT_COMPACTED],
-            handler=_on_compaction,
         ),
         event_bus.subscribe(
             event_types=[EventType.EXECUTION_COMPLETED, EventType.EXECUTION_FAILED],

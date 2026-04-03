@@ -160,6 +160,10 @@ class GraphExecutor:
         skill_dirs: list[str] | None = None,
         context_warn_ratio: float | None = None,
         batch_init_nudge: str | None = None,
+        colony_memory_dir: Any = None,
+        colony_worker_sessions_dir: Any = None,
+        colony_recall_cache: dict[str, str] | None = None,
+        colony_reflect_llm: Any = None,
     ):
         """
         Initialize the executor.
@@ -221,6 +225,10 @@ class GraphExecutor:
         self.skill_dirs: list[str] = skill_dirs or []
         self.context_warn_ratio: float | None = context_warn_ratio
         self.batch_init_nudge: str | None = batch_init_nudge
+        self.colony_memory_dir = colony_memory_dir
+        self.colony_worker_sessions_dir = colony_worker_sessions_dir
+        self.colony_recall_cache = colony_recall_cache or {}
+        self.colony_reflect_llm = colony_reflect_llm
 
         if protocols_prompt:
             self.logger.info(
@@ -1318,6 +1326,10 @@ class GraphExecutor:
             iteration_metadata_provider=self.iteration_metadata_provider,
             loop_config=self._loop_config,
             node_visit_counts=dict(node_visit_counts),
+            colony_memory_dir=self.colony_memory_dir,
+            worker_sessions_dir=self.colony_worker_sessions_dir,
+            colony_recall_cache=self.colony_recall_cache,
+            colony_reflect_llm=self.colony_reflect_llm,
         )
 
         # Create one WorkerAgent per node

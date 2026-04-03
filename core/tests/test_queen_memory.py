@@ -540,7 +540,13 @@ def test_queen_phase_state_appends_colony_and_global_memory_blocks():
 
 
 @pytest.mark.asyncio
-async def test_worker_colony_reflection_updates_shared_memory_and_cache(tmp_path: Path):
+async def test_worker_colony_reflection_at_handoff(tmp_path: Path):
+    """Colony reflection runs via WorkerAgent._reflect_colony_memory at node handoff."""
+    import asyncio
+
+    from framework.graph.context import GraphContext
+    from framework.graph.worker_agent import WorkerAgent
+
     worker_sessions_dir = tmp_path / "worker-sessions"
     execution_id = "exec-1"
     session_dir = worker_sessions_dir / execution_id / "conversations" / "parts"
@@ -556,11 +562,11 @@ async def test_worker_colony_reflection_updates_shared_memory_and_cache(tmp_path
 
     colony_dir = tmp_path / "colony"
     colony_dir.mkdir()
-    recall_cache: dict[str, str] = {}
-    bus = EventBus()
+    recall_cache: dict[str, str] = {execution_id: ""}
 
-    llm = AsyncMock()
-    llm.acomplete.side_effect = [
+    reflect_llm = AsyncMock()
+    reflect_llm.acomplete.side_effect = [
+        # Short reflection: write a memory file
         MagicMock(
             content="",
             raw_response={
@@ -583,38 +589,64 @@ async def test_worker_colony_reflection_updates_shared_memory_and_cache(tmp_path
                 ]
             },
         ),
+        # Short reflection done
         MagicMock(content="done", raw_response={}),
+        # Recall selector picks the new memory
         MagicMock(content=json.dumps({"selected_memories": ["user-prefers-terse-summaries.md"]})),
     ]
 
-    subs = await subscribe_worker_memory_triggers(
-        bus,
-        llm,
-        worker_sessions_dir=worker_sessions_dir,
-        colony_memory_dir=colony_dir,
-        recall_cache=recall_cache,
-    )
-    try:
-        await bus.publish(
-            AgentEvent(
-                type=EventType.EXECUTION_STARTED,
-                stream_id="default",
-                execution_id=execution_id,
-            )
-        )
-        await bus.publish(
-            AgentEvent(
-                type=EventType.LLM_TURN_COMPLETE,
-                stream_id="default",
-                execution_id=execution_id,
-            )
-        )
-    finally:
-        for sub_id in subs:
-            bus.unsubscribe(sub_id)
+    # Build a minimal GraphContext with colony memory fields
+    gc = MagicMock(spec=GraphContext)
+    gc.colony_memory_dir = colony_dir
+    gc.worker_sessions_dir = worker_sessions_dir
+    gc.colony_recall_cache = recall_cache
+    gc.colony_reflect_llm = reflect_llm
+    gc.execution_id = execution_id
+    gc._colony_reflect_lock = asyncio.Lock()
+
+    node_spec = SimpleNamespace(id="test-node")
+    worker = WorkerAgent.__new__(WorkerAgent)
+    worker._gc = gc
+    worker.node_spec = node_spec
+
+    await worker._reflect_colony_memory()
 
     assert (colony_dir / "user-prefers-terse-summaries.md").exists()
     assert "Colony Memories" in recall_cache[execution_id]
     assert "terse summaries" in recall_cache[execution_id]
+
+
+@pytest.mark.asyncio
+async def test_subscribe_worker_triggers_only_lifecycle_events(tmp_path: Path):
+    """After simplification, worker triggers only subscribe to start and terminal events."""
+    colony_dir = tmp_path / "colony"
+    colony_dir.mkdir()
+    recall_cache: dict[str, str] = {}
+    bus = EventBus()
+    llm = AsyncMock()
+
+    subs = await subscribe_worker_memory_triggers(
+        bus,
+        llm,
+        worker_sessions_dir=tmp_path / "sessions",
+        colony_memory_dir=colony_dir,
+        recall_cache=recall_cache,
+    )
+    try:
+        # Should have exactly 2 subscriptions (start + terminal)
+        assert len(subs) == 2
+
+        # EXECUTION_STARTED initialises cache
+        await bus.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_STARTED,
+                stream_id="default",
+                execution_id="exec-1",
+            )
+        )
+        assert recall_cache.get("exec-1") == ""
+    finally:
+        for sub_id in subs:
+            bus.unsubscribe(sub_id)
 
 

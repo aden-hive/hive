@@ -789,6 +789,12 @@ class SessionManager:
             )
         )
 
+        # Colony memory config for reflection-at-handoff
+        runtime._colony_memory_dir = colony_dir
+        runtime._colony_worker_sessions_dir = worker_sessions_dir
+        runtime._colony_recall_cache = session.worker_colony_recall_blocks
+        runtime._colony_reflect_llm = session.llm
+
         session.worker_memory_subs = await subscribe_worker_memory_triggers(
             session.event_bus,
             session.llm,
