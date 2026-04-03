@@ -213,18 +213,26 @@ ARTIFACTS_DIR = Path("/tmp/hive_test_artifacts")
 class TestArtifact:
     """Collects raw output + expected behavior for a single test.
 
+    Captures TWO kinds of data:
+    1. Checks: individual assertion results (expected vs actual)
+    2. Framework raw output: the real conversation, state, tool calls
+       written by the executor to storage_path — copied verbatim,
+       not curated.
+
     Usage in tests:
         def test_foo(artifact, ...):
             result = await executor.execute(...)
-            artifact.record(result, expected="path == ['a','b'], output['x'] == 'hello'")
+            artifact.record(result, expected="...", storage_path=tmp_path/"session")
     """
 
     def __init__(self, test_id: str):
         self.test_id = test_id
+        self._safe_name = test_id.replace("::", "__").replace("/", "_")
+        self._dir = ARTIFACTS_DIR / self._safe_name
         self._data: dict = {"test_id": test_id, "raw_output": None, "expected": "", "checks": []}
 
-    def record(self, result, *, expected: str = ""):
-        """Record an ExecutionResult with expected behavior description."""
+    def record(self, result, *, expected: str = "", storage_path=None):
+        """Record an ExecutionResult and copy real framework files."""
         self._data["expected"] = expected
         if result is None:
             self._data["raw_output"] = None
@@ -245,6 +253,23 @@ class TestArtifact:
                 (getattr(result, "session_state", {}) or {}).get("data_buffer", {})
             ),
         }
+        # Copy real framework output files (conversations, state, runs)
+        if storage_path is not None:
+            self._copy_framework_files(Path(storage_path))
+
+    def _copy_framework_files(self, storage_path: Path):
+        """Copy real framework output to persistent artifact directory."""
+        import shutil
+
+        raw_dir = self._dir / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        if storage_path.exists():
+            for src in storage_path.rglob("*"):
+                if src.is_file() and src.suffix in (".json", ".jsonl", ".txt"):
+                    rel = src.relative_to(storage_path)
+                    dst = raw_dir / rel
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dst)
 
     def record_value(self, key: str, value, *, expected: str = ""):
         """Record an arbitrary key-value (for non-ExecutionResult tests)."""
@@ -263,9 +288,8 @@ class TestArtifact:
 
     def save(self):
         """Write artifact to disk."""
-        ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-        safe_name = self.test_id.replace("::", "__").replace("/", "_")
-        path = ARTIFACTS_DIR / f"{safe_name}.json"
+        self._dir.mkdir(parents=True, exist_ok=True)
+        path = self._dir / "artifact.json"
         with open(path, "w") as f:
             json.dump(self._data, f, indent=2, default=str)
 
@@ -284,16 +308,22 @@ def _safe_serialize(obj):
 
 
 @pytest.fixture
-def artifact(request):
+def artifact(request, tmp_path):
     """Fixture that captures raw test output to disk.
 
     Every test gets an artifact recorder. Call artifact.record(result)
     and artifact.check("description", passed, actual, expected) to
     capture data. Saved automatically on teardown.
+
+    On teardown, copies ALL framework output files (conversations, state,
+    tool logs) from tmp_path to the persistent artifact directory. This
+    captures the REAL raw output — not curated summaries.
     """
     test_id = request.node.nodeid
     art = TestArtifact(test_id)
     yield art
+    # Copy all framework files from the test's tmp_path
+    art._copy_framework_files(tmp_path)
     art.save()
 
 
@@ -315,9 +345,9 @@ def pytest_runtest_teardown(item, nextitem):
     # Check if the test already used the artifact fixture
     if "artifact" in item.fixturenames:
         return  # Already handled by fixture teardown
-    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = item.nodeid.replace("::", "__").replace("/", "_")
-    path = ARTIFACTS_DIR / f"{safe_name}.json"
+    out_dir = ARTIFACTS_DIR / safe_name
+    out_dir.mkdir(parents=True, exist_ok=True)
     data = {
         "test_id": item.nodeid,
         "raw_output": None,
@@ -328,5 +358,5 @@ def pytest_runtest_teardown(item, nextitem):
     }
     if report.failed and report.longreprtext:
         data["failure_text"] = report.longreprtext[:5000]
-    with open(path, "w") as f:
+    with open(out_dir / "artifact.json", "w") as f:
         json.dump(data, f, indent=2, default=str)

@@ -109,7 +109,7 @@ async def test_concurrent_phase_switches_no_crash(llm_provider, tmp_path, artifa
         )
         await asyncio.sleep(0.3)
 
-        valid_phases = ("planning", "building", "staging", "running")
+        valid_phases = ("planning", "building", "staging", "running", "incubating")
 
         artifact.record_value(
             "final_phase",
@@ -122,7 +122,7 @@ async def test_concurrent_phase_switches_no_crash(llm_provider, tmp_path, artifa
             "phase is valid",
             ps.phase in valid_phases,
             actual=repr(ps.phase),
-            expected_val="one of planning/building/staging/running",
+            expected_val="one of planning/building/staging/running/incubating",
         )
         assert ps.phase in valid_phases, f"Phase corrupted: {ps.phase}"
 
@@ -270,13 +270,13 @@ async def test_worker_done_ignored_in_non_running_phase(llm_provider, tmp_path, 
         assert ps.phase == "planning", f"Phase should still be planning, got: {ps.phase}"
 
         artifact.check(
-            "no auto-switch to staging",
+            "no auto-switch to incubating",
             "staging" not in phase_changes,
             actual=str(phase_changes),
             expected_val="does not contain 'staging'",
         )
         assert "staging" not in phase_changes, (
-            "Should not auto-switch to staging from planning phase"
+            "Should not auto-switch to incubating from planning phase"
         )
     finally:
         await _shutdown(session, task)
@@ -288,51 +288,72 @@ async def test_worker_done_ignored_in_non_running_phase(llm_provider, tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_invalid_transition_planning_to_running(llm_provider, tmp_path, artifact):
-    """planning -> running should succeed (no guard).
-
-    This confirms BUG #10: the state machine allows any transition.
-    """
+async def test_running_to_building_blocked(llm_provider, tmp_path, artifact):
+    """RUNNING -> BUILDING must be blocked (must go through incubating)."""
     session, task = await _start_queen_session(llm_provider, tmp_path)
     try:
         ps = session.phase_state
-
-        artifact.check(
-            "initial phase is planning",
-            ps.phase == "planning",
-            actual=repr(ps.phase),
-            expected_val="'planning'",
-        )
-        assert ps.phase == "planning"
-
         await ps.switch_to_running(source="test")
+        assert ps.phase == "running"
+
+        await ps.switch_to_building(source="test")
 
         artifact.record_value(
-            "phase_after_invalid_transition",
+            "phase_after_blocked_transition",
             ps.phase,
-            expected="'running' (no guard, transition allowed)",
+            expected="'running' (blocked, must go through incubating)",
         )
-
         artifact.check(
-            "phase is running",
+            "phase still running",
             ps.phase == "running",
             actual=repr(ps.phase),
             expected_val="'running'",
         )
-        assert ps.phase == "running", "switch_to_running should succeed from planning"
+        assert ps.phase == "running", (
+            f"running->building should be BLOCKED, got: {ps.phase}"
+        )
     finally:
         await _shutdown(session, task)
 
 
 @pytest.mark.asyncio
-async def test_invalid_transition_running_to_building(llm_provider, tmp_path, artifact):
-    """running -> building should succeed (no guard).
-
-    In production this could leave a running worker orphaned.
-    """
+async def test_running_to_planning_blocked(llm_provider, tmp_path, artifact):
+    """RUNNING -> PLANNING must be blocked (must go through incubating)."""
     session, task = await _start_queen_session(llm_provider, tmp_path)
     try:
         ps = session.phase_state
+        await ps.switch_to_running(source="test")
+        assert ps.phase == "running"
+
+        await ps.switch_to_planning(source="test")
+
+        artifact.record_value(
+            "phase_after_blocked_transition",
+            ps.phase,
+            expected="'running' (blocked, must go through incubating)",
+        )
+        artifact.check(
+            "phase still running",
+            ps.phase == "running",
+            actual=repr(ps.phase),
+            expected_val="'running'",
+        )
+        assert ps.phase == "running", (
+            f"running->planning should be BLOCKED, got: {ps.phase}"
+        )
+    finally:
+        await _shutdown(session, task)
+
+
+@pytest.mark.asyncio
+async def test_incubating_to_running_allowed(llm_provider, tmp_path, artifact):
+    """INCUBATING -> RUNNING must be allowed (re-run)."""
+    session, task = await _start_queen_session(llm_provider, tmp_path)
+    try:
+        ps = session.phase_state
+        await ps.switch_to_incubating(source="test")
+        assert ps.phase == "incubating"
+
         await ps.switch_to_running(source="test")
 
         artifact.check(
@@ -342,14 +363,20 @@ async def test_invalid_transition_running_to_building(llm_provider, tmp_path, ar
             expected_val="'running'",
         )
         assert ps.phase == "running"
+    finally:
+        await _shutdown(session, task)
+
+
+@pytest.mark.asyncio
+async def test_incubating_to_building_allowed(llm_provider, tmp_path, artifact):
+    """INCUBATING -> BUILDING must be allowed (escalate to rebuild)."""
+    session, task = await _start_queen_session(llm_provider, tmp_path)
+    try:
+        ps = session.phase_state
+        await ps.switch_to_incubating(source="test")
+        assert ps.phase == "incubating"
 
         await ps.switch_to_building(source="test")
-
-        artifact.record_value(
-            "phase_after_invalid_transition",
-            ps.phase,
-            expected="'building' (no guard)",
-        )
 
         artifact.check(
             "phase is building",
@@ -358,6 +385,28 @@ async def test_invalid_transition_running_to_building(llm_provider, tmp_path, ar
             expected_val="'building'",
         )
         assert ps.phase == "building"
+    finally:
+        await _shutdown(session, task)
+
+
+@pytest.mark.asyncio
+async def test_incubating_to_planning_allowed(llm_provider, tmp_path, artifact):
+    """INCUBATING -> PLANNING must be allowed (escalate to replan)."""
+    session, task = await _start_queen_session(llm_provider, tmp_path)
+    try:
+        ps = session.phase_state
+        await ps.switch_to_incubating(source="test")
+        assert ps.phase == "incubating"
+
+        await ps.switch_to_planning(source="test")
+
+        artifact.check(
+            "phase is planning",
+            ps.phase == "planning",
+            actual=repr(ps.phase),
+            expected_val="'planning'",
+        )
+        assert ps.phase == "planning"
     finally:
         await _shutdown(session, task)
 
@@ -473,11 +522,13 @@ async def test_rapid_phase_cycling_final_state(llm_provider, tmp_path, artifact)
     try:
         ps = session.phase_state
 
-        # Cycle 3 times
+        # Cycle 3 times through all 5 phases:
+        # planning → building → staging → running → incubating → planning
         for _ in range(3):
             await ps.switch_to_building(source="test")
             await ps.switch_to_staging(source="test")
             await ps.switch_to_running(source="test")
+            await ps.switch_to_incubating(source="test")
             await ps.switch_to_planning(source="test")
 
         await asyncio.sleep(0.3)
@@ -498,14 +549,14 @@ async def test_rapid_phase_cycling_final_state(llm_provider, tmp_path, artifact)
         )
         assert ps.phase == "planning", f"Expected planning, got: {ps.phase}"
 
-        # Should have 12 phase change events (4 per cycle x 3)
+        # Should have 15 phase change events (5 per cycle x 3)
         artifact.check(
-            "12 phase events",
-            len(all_events) == 12,
+            "15 phase events",
+            len(all_events) == 15,
             actual=str(len(all_events)),
-            expected_val="12",
+            expected_val="15",
         )
-        assert len(all_events) == 12, f"Expected 12 events, got {len(all_events)}: {all_events}"
+        assert len(all_events) == 15, f"Expected 15 events, got {len(all_events)}: {all_events}"
 
         # Tools and prompt should match planning phase
         prompt = ps.get_current_prompt()
@@ -534,13 +585,7 @@ async def test_tool_sets_are_disjoint_across_phases(llm_provider, tmp_path, arti
         ps = session.phase_state
 
         phase_tools = {}
-        for phase in ("planning", "building", "staging", "running"):
-            getattr(
-                ps,
-                f"switch_to_{phase}",
-                ps.switch_to_planning,
-            )
-            # Use direct assignment for simplicity
+        for phase in ("planning", "building", "staging", "running", "incubating"):
             ps.phase = phase
             tools = {t.name for t in ps.get_current_tools()}
             phase_tools[phase] = tools
@@ -585,8 +630,8 @@ async def test_tool_sets_are_disjoint_across_phases(llm_provider, tmp_path, arti
 
 
 @pytest.mark.asyncio
-async def test_worker_completion_triggers_auto_staging(llm_provider, tmp_path, artifact):
-    """EXECUTION_COMPLETED in running phase must auto-switch to staging."""
+async def test_worker_completion_triggers_auto_incubating(llm_provider, tmp_path, artifact):
+    """EXECUTION_COMPLETED in running phase must auto-switch to incubating."""
     session, task = await _start_queen_session(llm_provider, tmp_path)
     phase_changes = []
 
@@ -623,28 +668,28 @@ async def test_worker_completion_triggers_auto_staging(llm_provider, tmp_path, a
 
         artifact.check(
             "auto-switched to staging",
-            ps.phase == "staging",
+            ps.phase == "incubating",
             actual=repr(ps.phase),
             expected_val="'staging'",
         )
-        assert ps.phase == "staging", f"Expected auto-switch to staging, got: {ps.phase}"
+        assert ps.phase == "incubating", f"Expected auto-switch to incubating, got: {ps.phase}"
 
         artifact.check(
-            "staging event emitted",
-            "staging" in phase_changes,
+            "incubating event emitted",
+            "incubating" in phase_changes,
             actual=str(phase_changes),
-            expected_val="contains 'staging'",
+            expected_val="contains 'incubating'",
         )
-        assert "staging" in phase_changes, (
-            f"QUEEN_PHASE_CHANGED(staging) not emitted. Events: {phase_changes}"
+        assert "incubating" in phase_changes, (
+            f"QUEEN_PHASE_CHANGED(incubating) not emitted. Events: {phase_changes}"
         )
     finally:
         await _shutdown(session, task)
 
 
 @pytest.mark.asyncio
-async def test_worker_failure_triggers_auto_staging(llm_provider, tmp_path, artifact):
-    """EXECUTION_FAILED in running phase must auto-switch to staging."""
+async def test_worker_failure_triggers_auto_incubating(llm_provider, tmp_path, artifact):
+    """EXECUTION_FAILED in running phase must auto-switch to incubating."""
     session, task = await _start_queen_session(llm_provider, tmp_path)
     try:
         ps = session.phase_state
@@ -669,10 +714,10 @@ async def test_worker_failure_triggers_auto_staging(llm_provider, tmp_path, arti
 
         artifact.check(
             "auto-switched to staging on failure",
-            ps.phase == "staging",
+            ps.phase == "incubating",
             actual=repr(ps.phase),
             expected_val="'staging'",
         )
-        assert ps.phase == "staging", f"Expected auto-switch to staging on failure, got: {ps.phase}"
+        assert ps.phase == "incubating", f"Expected auto-switch to incubating on failure, got: {ps.phase}"
     finally:
         await _shutdown(session, task)

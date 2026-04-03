@@ -121,6 +121,8 @@ _QUEEN_STAGING_TOOLS = [
 ]
 
 # Running phase: worker is executing — monitor and control.
+# Note: stop_graph_and_edit / stop_graph_and_plan are NOT available here.
+# The queen must go through INCUBATING first before dropping to building/planning.
 _QUEEN_RUNNING_TOOLS = [
     # Read-only coding (for inspecting logs, files)
     "read_file",
@@ -131,11 +133,35 @@ _QUEEN_RUNNING_TOOLS = [
     "list_credentials",
     # Worker lifecycle
     "stop_graph",
-    "stop_graph_and_edit",
-    "stop_graph_and_plan",
     "get_graph_status",
     "run_agent_with_input",
     "inject_message",
+    # Monitoring
+    "get_worker_health_summary",
+    "set_trigger",
+    "remove_trigger",
+    "list_triggers",
+    "save_global_memory",
+]
+
+# Incubating phase: worker done, still loaded — tweak config and re-run.
+# Has inject_message for live adjustments. stop_graph_and_edit/plan available
+# here (not in running) to escalate when a deeper change is needed.
+_QUEEN_INCUBATING_TOOLS = [
+    # Read-only (inspect)
+    "read_file",
+    "list_directory",
+    "search_files",
+    "run_command",
+    # Credentials
+    "list_credentials",
+    "get_graph_status",
+    # Re-run or tweak
+    "run_agent_with_input",
+    "inject_message",
+    # Escalate to building/planning (kills worker)
+    "stop_graph_and_edit",
+    "stop_graph_and_plan",
     # Monitoring
     "get_worker_health_summary",
     "set_trigger",
@@ -565,6 +591,14 @@ escalations when the agent gets stuck, and care deeply about outcomes. When the 
 agent finishes, you report results clearly and help the user decide what to do next.
 """
 
+_queen_identity_incubating = """\
+You are a Solution Engineer in INCUBATING mode. \
+"Queen" is your internal alias. The worker has finished executing and is still loaded. \
+You can tweak configuration, inject messages, and re-run with different input \
+without rebuilding. If a deeper change is needed (code edits, new tools), \
+escalate to BUILDING via stop_graph_and_edit or to PLANNING via stop_graph_and_plan.
+"""
+
 # -- Phase-specific tool docs --
 
 _queen_tools_planning = """
@@ -696,6 +730,36 @@ You do NOT have write tools or agent construction tools. \
 If you need to modify the agent, call stop_graph_and_edit() to switch back \
 to BUILDING phase. To stop the worker and ask the user what to do next, call \
 stop_graph() to return to STAGING phase.
+"""
+
+_queen_tools_incubating = """
+# Tools (INCUBATING phase)
+
+The worker has finished executing and is still loaded. You can tweak and re-run:
+- Read-only: read_file, list_directory, search_files, run_command
+- get_graph_status(focus?) — Brief status of the loaded agent
+- inject_message(content) — Send a config tweak or prompt adjustment to the worker
+- run_agent_with_input(task) — Re-run the worker with new input
+- get_worker_health_summary() — Review last run's health data
+
+To escalate when a deeper change is needed (code edits, new tools, redesign):
+- stop_graph_and_edit() — Kill the worker and switch to BUILDING phase
+- stop_graph_and_plan() — Kill the worker and switch to PLANNING phase
+
+You do NOT have write/edit file tools. If you need to modify code, \
+call stop_graph_and_edit() to switch to BUILDING phase.
+"""
+
+_queen_behavior_incubating = """
+## Incubating — tweak and re-run
+
+The worker finished. Review the results and decide:
+1. **Re-run** with different input: call run_agent_with_input(task)
+2. **Inject adjustments**: use inject_message to tweak prompts or config
+3. **Escalate**: if the agent needs code changes, call stop_graph_and_edit()
+
+Do NOT suggest rebuilding unless the user explicitly asks. Default to re-running.
+Report the last run's results to the user and ask what they want to do next.
 """
 
 # -- Behavior shared across all phases --
@@ -1235,6 +1299,7 @@ queen_node = NodeSpec(
             + _QUEEN_BUILDING_TOOLS
             + _QUEEN_STAGING_TOOLS
             + _QUEEN_RUNNING_TOOLS
+            + _QUEEN_INCUBATING_TOOLS
         )
     ),
     system_prompt=(
@@ -1249,7 +1314,13 @@ queen_node = NodeSpec(
 )
 
 ALL_QUEEN_TOOLS = sorted(
-    set(_QUEEN_PLANNING_TOOLS + _QUEEN_BUILDING_TOOLS + _QUEEN_STAGING_TOOLS + _QUEEN_RUNNING_TOOLS)
+    set(
+        _QUEEN_PLANNING_TOOLS
+        + _QUEEN_BUILDING_TOOLS
+        + _QUEEN_STAGING_TOOLS
+        + _QUEEN_RUNNING_TOOLS
+        + _QUEEN_INCUBATING_TOOLS
+    )
 )
 
 __all__ = [
@@ -1259,19 +1330,23 @@ __all__ = [
     "_QUEEN_BUILDING_TOOLS",
     "_QUEEN_STAGING_TOOLS",
     "_QUEEN_RUNNING_TOOLS",
+    "_QUEEN_INCUBATING_TOOLS",
     # Phase-specific prompt segments (used by session_manager for dynamic prompts)
     "_queen_identity_planning",
     "_queen_identity_building",
     "_queen_identity_staging",
     "_queen_identity_running",
+    "_queen_identity_incubating",
     "_queen_tools_planning",
     "_queen_tools_building",
     "_queen_tools_staging",
     "_queen_tools_running",
+    "_queen_tools_incubating",
     "_queen_behavior_always",
     "_queen_behavior_building",
     "_queen_behavior_staging",
     "_queen_behavior_running",
+    "_queen_behavior_incubating",
     "_queen_phase_7",
     "_queen_style",
     "_shared_building_knowledge",

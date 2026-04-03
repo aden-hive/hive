@@ -402,23 +402,24 @@ async def test_queen_emits_phase_change_events(llm_provider, tmp_path, artifact)
         await ps.switch_to_running(source="test")
         assert await capture.wait_for_phase("running", timeout=5)
 
-        # running -> planning
+        # running -> incubating
+        await ps.switch_to_incubating(source="test")
+        assert await capture.wait_for_phase("incubating", timeout=5)
+
+        # incubating -> planning
         await ps.switch_to_planning(source="test")
         assert await capture.wait_for_phase("planning", timeout=5)
 
-        artifact.record_value(
-            "phases", capture.phases, expected="['building', 'staging', 'running', 'planning']"
-        )
+        expected_seq = ["building", "staging", "running", "incubating", "planning"]
+        artifact.record_value("phases", capture.phases, expected=str(expected_seq))
 
         artifact.check(
             "phase sequence matches",
-            capture.phases == ["building", "staging", "running", "planning"],
+            capture.phases == expected_seq,
             actual=str(capture.phases),
-            expected_val="['building', 'staging', 'running', 'planning']",
+            expected_val=str(expected_seq),
         )
-        assert capture.phases == ["building", "staging", "running", "planning"], (
-            f"Phase sequence was: {capture.phases}"
-        )
+        assert capture.phases == expected_seq, f"Phase sequence was: {capture.phases}"
     finally:
         await _shutdown_queen(session, task)
 
@@ -663,7 +664,12 @@ async def test_queen_full_phase_cycle_with_events(llm_provider, tmp_path, artifa
         assert ps.phase == "running"
         running_tools = {t.name for t in ps.get_current_tools()}
 
-        # -> back to planning
+        # -> incubating
+        await ps.switch_to_incubating(source="test")
+        assert ps.phase == "incubating"
+        incubating_tools = {t.name for t in ps.get_current_tools()}
+
+        # -> back to planning (from incubating, allowed)
         await ps.switch_to_planning(source="test")
         artifact.check(
             "phase is planning again",
@@ -684,26 +690,23 @@ async def test_queen_full_phase_cycle_with_events(llm_provider, tmp_path, artifa
 
         # Verify events
         await asyncio.sleep(0.3)
-        artifact.record_value(
-            "phase_events",
-            capture.phases,
-            expected="['building', 'staging', 'running', 'planning']",
-        )
+        expected_seq = ["building", "staging", "running", "incubating", "planning"]
+        artifact.record_value("phase_events", capture.phases, expected=str(expected_seq))
 
         artifact.check(
             "phase event sequence",
-            capture.phases == ["building", "staging", "running", "planning"],
+            capture.phases == expected_seq,
             actual=str(capture.phases),
-            expected_val="['building', 'staging', 'running', 'planning']",
+            expected_val=str(expected_seq),
         )
-        assert capture.phases == ["building", "staging", "running", "planning"]
+        assert capture.phases == expected_seq
 
-        # Verify all 4 phase tool sets are distinct
-        all_sets = [planning_tools, building_tools, staging_tools, running_tools]
+        # Verify all 5 phase tool sets are distinct
+        all_sets = [planning_tools, building_tools, staging_tools, running_tools, incubating_tools]
+        phase_names = ["planning", "building", "staging", "running", "incubating"]
         for i, a in enumerate(all_sets):
             for j, b in enumerate(all_sets):
                 if i != j:
-                    phase_names = ["planning", "building", "staging", "running"]
                     artifact.check(
                         f"{phase_names[i]} != {phase_names[j]} tools",
                         a != b,
