@@ -1581,13 +1581,7 @@ class GraphExecutor:
             # Wait for completion — two strategies depending on event bus availability
             if has_event_subscription and sub_completed is not None:
                 # Event-driven: wait for completion events
-                if terminal_worker_ids:
-                    await completion_event.wait()
-                else:
-                    for _ in range(graph.max_steps * 10):
-                        if _check_graph_done():
-                            break
-                        await asyncio.sleep(0.1)
+                await completion_event.wait()
             else:
                 # No event bus: wait on worker tasks directly and route completions inline.
                 pending_tasks: dict[str, asyncio.Task] = {
