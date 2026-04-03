@@ -2046,21 +2046,35 @@ class AgentRunner:
 
         elif has_client_facing and not sys.stdin.isatty():
             from framework.runtime.event_bus import EventType
+
             runtime = self._agent_runtime
+            _headless_input_consumed = False
+            _headless_error: str | None = None
 
             async def _handle_headless_input(event):
+                nonlocal _headless_input_consumed, _headless_error
+                if _headless_input_consumed:
+                    return
+                
                 node_id = event.node_id
                 if input_data:
                     import json
-                    await runtime.inject_input(node_id, json.dumps(input_data))
-                else:
-                    print(
-                        "\n[Error] Agent requires interactive input but was run in headless mode.\n"
-                        "Please provide complete input data via --input-file or use interactive mode.",
-                        file=sys.stderr
+                    delivered = await runtime.inject_input(
+                        node_id, json.dumps(input_data),
                     )
-                    import os
-                    os._exit(1)
+                    if not delivered:
+                        _headless_error = (
+                            f"Headless execution failed: node '{node_id}' not found. "
+                            f"Agent requires interactive input but was run in headless mode. "
+                            f"Provide input via --input-file or use interactive mode."
+                        )
+                        return
+                    _headless_input_consumed = True
+                else:
+                    _headless_error = (
+                        "Agent requires interactive input but was run in headless mode. "
+                        "Provide input via --input-file or use interactive mode."
+                    )
 
             sub_ids.append(runtime.subscribe_to_events(
                 event_types=[EventType.CLIENT_INPUT_REQUESTED], handler=_handle_headless_input))
@@ -2080,6 +2094,10 @@ class AgentRunner:
                 input_data=input_data,
                 session_state=session_state,
             )
+            
+            # Check for headless input errors
+            if _headless_error:
+                return ExecutionResult(success=False, error=_headless_error)
 
             # Return result or create error result
             if result is not None:

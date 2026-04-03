@@ -1,81 +1,82 @@
 import asyncio
 import sys
-import os
-import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
+# Add core to path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "core"))
 
-print("=" * 70)
-print("STRESS TESTS + USER PERSPECTIVE TESTS: Issue #6193")
-print("=" * 70)
+from framework.runner.runner import AgentRunner
+from framework.graph.edge import GraphSpec
+from framework.graph.goal import Goal
+from framework.runtime.event_bus import EventType
 
-async def stress_multiple_nodes():
-    print("\n[STRESS 1] Multiple client_facing nodes with partial input_data...")
-    nodes = ["intake", "processor", "output"]
-    input_data = {"processor": "data.csv"}
-    injected = []
-    def mock_inject(node_id, content):
-        injected.append({"node": node_id, "content": content})
-    for node_id in nodes:
-        if node_id in input_data:
-            mock_inject(node_id, json.dumps(input_data[node_id]))
-        else:
-            print(f"  -> Node '{node_id}' has no input, would exit(1)")
-    if len(injected) == 1 and injected[0]["node"] == "processor":
-        print("  [PASS] Only matching node received data")
+# Mock Agent for testing
+async def run_agent(input_data):
+    graph = MagicMock(spec=GraphSpec)
+    graph.description = "Test Graph"
+    graph.id = "test-agent"
+    graph.nodes = [MagicMock(client_facing=True)]
+    graph.edges = []
+    graph.entry_node = "test-node"
+    graph.terminal_nodes = []
+    
+    goal = MagicMock(spec=Goal)
+    goal.success_criteria = []
+    goal.constraints = []
+    goal.name = "Test Goal"
+    goal.description = "Test Goal Description"
+    goal.id = "test-goal"
+    
+    with patch("framework.runner.runner.run_preload_validation"):
+        runner = AgentRunner(Path("."), graph, goal, interactive=False, skip_credential_validation=True)
+    
+        # Mock runtime
+        mock_runtime = MagicMock()
+        mock_runtime.start = AsyncMock()
+        mock_runtime.get_entry_points = MagicMock(return_value=[])
+        
+        # Track subscriptions
+        input_handlers = []
+        def subscribe(event_types, handler):
+            if EventType.CLIENT_INPUT_REQUESTED in event_types:
+                input_handlers.append(handler)
+            return "sub1"
+        mock_runtime.subscribe_to_events = subscribe
+        
+        # Mock trigger_and_wait to simulate input request
+        async def trigger_and_wait(*args, **kwargs):
+            for handler in input_handlers:
+                await handler(MagicMock(node_id="test-node"))
+            return MagicMock()
+        mock_runtime.trigger_and_wait = trigger_and_wait
+        
+        runner._agent_runtime = mock_runtime
+        
+        with patch("sys.stdin.isatty", return_value=False):
+            return await runner.run(input_data=input_data)
+
+async def test_cicd_simulation():
+    print("\n[STRESS 5] CI/CD Pipeline simulation (result check)...")
+    result = await run_agent(input_data={})
+    
+    if not result.success and "headless mode" in result.error:
+        print("  [PASS] CI pipeline would get failure result")
         return True
     return False
 
-async def stress_malformed_data():
-    print("\n[STRESS 2] Malformed input_data (circular reference)...")
-    try:
-        circular = {"a": None}
-        circular["a"] = circular
-        json.dumps(circular)
-        return False
-    except (TypeError, ValueError) as e:
-        print(f"  [PASS] Correctly caught malformed data: {type(e).__name__}")
-        return True
-
-async def stress_empty_node_id():
-    print("\n[STRESS 3] Empty string node_id handling...")
-    input_data = {"": "some_data", "intake": "file.csv"}
-    if "" in input_data and "intake" in input_data:
-        print("  [PASS] Empty string handled as valid key but real nodes preferred")
-        return True
-    return False
-
-async def stress_rapid_injects():
-    print("\n[STRESS 4] Rapid successive inject_input calls...")
-    calls = []
-    async def mock_inject(node_id, content):
-        calls.append({"node": node_id, "content": content})
-    nodes = ["node1", "node2", "node3", "node4", "node5"]
-    input_data = {n: f"data_{i}" for i, n in enumerate(nodes)}
-    tasks = [mock_inject(n, json.dumps(input_data[n])) for n in nodes]
-    for t in tasks:
-        await t
-    if len(calls) == 5:
-        print("  [PASS] All 5 rapid injections succeeded")
-        return True
-    return False
-
-async def user_error_message():
+async def test_user_error_message():
     print("\n[USER 1] Error message readability...")
-    import io
-    from contextlib import redirect_stderr
-    stderr_capture = io.StringIO()
-    error_msg = "\n[Error] Agent requires interactive input but was run in headless mode.\nPlease provide complete input data via --input-file or use interactive mode."
-    with redirect_stderr(stderr_capture):
-        print(error_msg, file=sys.stderr)
-    output = stderr_capture.getvalue()
+    result = await run_agent(input_data={})
+    
+    output = result.error
+    # We expect the error to be set by _handle_headless_input
+    # The error message should be: "Agent requires interactive input but was run in headless mode. Provide input via --input-file or use interactive mode."
+    
     checks = [
-        ("[Error]" in output, "Has [Error] prefix"),
         ("interactive input" in output, "Mentions interactive input"),
         ("headless mode" in output, "Mentions headless mode"),
-        ("--input-file" in output, "Mentions correct flag"),
+        ("Provide input" in output, "Suggests providing input"),
         ("interactive mode" in output, "Suggests alternative"),
     ]
     all_pass = True
@@ -84,49 +85,16 @@ async def user_error_message():
         if not check: all_pass = False
     return all_pass
 
-async def stress_cicd_simulation():
-    print("\n[STRESS 5] CI/CD Pipeline simulation (exit code check)...")
-    exit_called = False
-    exit_code = None
-    def mock_exit(code):
-        nonlocal exit_called, exit_code
-        exit_called = True
-        exit_code = code
-    with patch("os._exit", mock_exit):
-        input_data = {}
-        if not input_data:
-            mock_exit(1)
-    if exit_called and exit_code == 1:
-        print("  [PASS] CI pipeline would get exit code 1 (failure)")
-        return True
-    return False
-
-async def stress_partial_data():
-    print("\n[STRESS 6] Partial input_data with some nodes satisfied...")
-    input_data = {"intake": "/tmp/data.csv"}
-    injected = []
-    def mock_inject(node_id, content):
-        injected.append(node_id)
-    for node_id in ["intake", "validator", "output"]:
-        if node_id in input_data:
-            mock_inject(node_id, json.dumps(input_data[node_id]))
-        else:
-            print(f"  -> Node '{node_id}' would trigger exit (no data)")
-    if "intake" in injected and "validator" not in injected:
-        print("  [PASS] Partial data handled correctly")
-        return True
-    return False
-
 async def main():
+    print("=" * 70)
+    print("STRESS TESTS + USER PERSPECTIVE TESTS: Issue #6193")
+    print("=" * 70)
+    
     results = [
-        await stress_multiple_nodes(),
-        await stress_malformed_data(),
-        await stress_empty_node_id(),
-        await stress_rapid_injects(),
-        await user_error_message(),
-        await stress_cicd_simulation(),
-        await stress_partial_data()
+        await test_cicd_simulation(),
+        await test_user_error_message()
     ]
+    
     print("\n" + "=" * 70)
     passed = sum(1 for r in results if r)
     print(f"RESULTS: {passed}/{len(results)} tests passed")
