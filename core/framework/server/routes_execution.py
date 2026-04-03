@@ -168,6 +168,9 @@ async def handle_chat(request: web.Request) -> web.Response:
             )
 
     # Queen is dead — try to revive her
+    logger.warning(
+        "Queen is dead for session '%s', reviving on /chat request", session.id
+    )
     manager: Any = request.app["manager"]
     try:
         await manager.revive_queen(session, initial_prompt=message)
@@ -209,6 +212,10 @@ async def handle_queen_context(request: web.Request) -> web.Response:
             return web.json_response({"status": "queued", "delivered": True})
 
     # Queen is dead — try to revive her
+    logger.warning(
+        "Queen is dead for session '%s', reviving on /queen-context request",
+        session.id,
+    )
     manager: Any = request.app["manager"]
     try:
         await manager.revive_queen(session)

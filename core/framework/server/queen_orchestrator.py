@@ -409,6 +409,7 @@ async def create_queen(
         except Exception:
             logger.error("Queen conversation crashed", exc_info=True)
         finally:
+            logger.warning("Queen loop exiting — clearing queen_executor for session '%s'", session.id)
             session.queen_executor = None
 
     return asyncio.create_task(_queen_loop())

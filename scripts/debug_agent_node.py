@@ -12,8 +12,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,41 @@ from framework.graph.edge import GraphSpec
 from framework.runtime.agent_runtime import create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runner.runner import AgentRunner
+
+
+def _configure_event_debug_logging(storage_path: Path) -> None:
+    """Redirect optional event debug logs into this run's writable storage.
+
+    Some environments enable HIVE_DEBUG_EVENTS=1 globally, which normally
+    writes under ~/.hive/event_logs. For this script we want all artifacts to
+    stay inside the chosen debug storage directory so sandboxed runs work.
+    """
+    raw = os.environ.get("HIVE_DEBUG_EVENTS", "").strip()
+    if not raw:
+        return
+
+    log_dir = storage_path / "event_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["HIVE_DEBUG_EVENTS"] = str(log_dir)
+
+    import framework.runtime.event_bus as event_bus
+
+    event_bus._DEBUG_EVENTS_RAW = str(log_dir)
+    event_bus._DEBUG_EVENTS_ENABLED = True
+    event_bus._event_log_file = None
+    event_bus._event_log_ready = False
+
+
+def _configure_llm_debug_logging(storage_path: Path) -> None:
+    """Keep optional LLM turn logs inside this run's storage directory."""
+    llm_log_dir = storage_path / "llm_logs"
+    llm_log_dir.mkdir(parents=True, exist_ok=True)
+
+    import framework.runtime.llm_debug_logger as llm_debug_logger
+
+    llm_debug_logger._LLM_DEBUG_DIR = llm_log_dir
+    llm_debug_logger._log_file = None
+    llm_debug_logger._log_ready = False
 
 
 def _resolve_agent_path(raw_path: str) -> Path:
@@ -58,6 +95,25 @@ def _resolve_agent_path(raw_path: str) -> Path:
         f"Could not find an exported agent at '{candidate}'. Expected a directory "
         "containing agent.py, agent.py itself, or nodes/__init__.py."
     )
+
+
+@contextmanager
+def _maybe_skip_mcp_registry(skip: bool):
+    """Temporarily disable registry-selected MCP server loading for local debug."""
+    if not skip:
+        yield
+        return
+
+    original = AgentRunner._load_registry_mcp_servers
+
+    def _skip_registry(self, agent_path: Path) -> None:
+        self._tool_registry.set_mcp_registry_agent_path(None)
+
+    AgentRunner._load_registry_mcp_servers = _skip_registry
+    try:
+        yield
+    finally:
+        AgentRunner._load_registry_mcp_servers = original
 
 
 def _parse_args() -> argparse.Namespace:
@@ -94,6 +150,12 @@ def _parse_args() -> argparse.Namespace:
         help="Optional storage directory for the debug run. Defaults to a temp directory.",
     )
     parser.add_argument(
+        "--timeout",
+        type=float,
+        default=60.0,
+        help="Seconds to wait for the node run. Use 0 or a negative number to disable.",
+    )
+    parser.add_argument(
         "--mock",
         action="store_true",
         help="Use mock LLM responses instead of a real model.",
@@ -102,6 +164,11 @@ def _parse_args() -> argparse.Namespace:
         "--skip-credential-validation",
         action="store_true",
         help="Skip load-time credential validation.",
+    )
+    parser.add_argument(
+        "--skip-mcp-registry",
+        action="store_true",
+        help="Skip registry-selected MCP server loading for offline/local debug runs.",
     )
     return parser.parse_args()
 
@@ -196,12 +263,13 @@ async def _run_debug_node(
     args: argparse.Namespace,
 ) -> tuple[int, AgentRunner | None, tempfile.TemporaryDirectory[str] | None]:
     agent_path = _resolve_agent_path(args.agent_path)
-    runner = AgentRunner.load(
-        agent_path,
-        mock_mode=args.mock,
-        interactive=False,
-        skip_credential_validation=args.skip_credential_validation,
-    )
+    with _maybe_skip_mcp_registry(args.skip_mcp_registry):
+        runner = AgentRunner.load(
+            agent_path,
+            mock_mode=args.mock,
+            interactive=False,
+            skip_credential_validation=args.skip_credential_validation,
+        )
 
     temp_dir: tempfile.TemporaryDirectory[str] | None = None
     runtime = None
@@ -220,6 +288,9 @@ async def _run_debug_node(
         else:
             temp_dir = tempfile.TemporaryDirectory(prefix=f"hive-node-debug-{node_id}-")
             storage_path = Path(temp_dir.name)
+
+        _configure_event_debug_logging(storage_path)
+        _configure_llm_debug_logging(storage_path)
 
         graph = _build_debug_graph(runner, node_id)
         runtime = create_agent_runtime(
@@ -243,7 +314,8 @@ async def _run_debug_node(
         )
 
         await runtime.start()
-        result = await runtime.trigger_and_wait("default", input_data)
+        timeout = args.timeout if args.timeout and args.timeout > 0 else None
+        result = await runtime.trigger_and_wait("default", input_data, timeout=timeout)
 
         print(
             json.dumps(
@@ -253,7 +325,15 @@ async def _run_debug_node(
                     "storage_path": str(storage_path),
                     "success": result.success if result is not None else False,
                     "output": result.output if result is not None else {},
-                    "error": result.error if result is not None else "Execution did not complete",
+                    "error": (
+                        result.error
+                        if result is not None
+                        else (
+                            f"Execution timed out after {timeout:.1f}s"
+                            if timeout is not None
+                            else "Execution did not complete"
+                        )
+                    ),
                     "path": result.path if result is not None else [],
                     "steps_executed": result.steps_executed if result is not None else 0,
                 },
