@@ -151,8 +151,9 @@ class OutputAccumulator:
             if isinstance(value, (dict, list))
             else str(value)
         )
-        (spill_path / filename).write_text(write_content, encoding="utf-8")
-        file_size = (spill_path / filename).stat().st_size
+        file_path = spill_path / filename
+        file_path.write_text(write_content, encoding="utf-8")
+        file_size = file_path.stat().st_size
         logger.info(
             "set_output value auto-spilled: key=%s, %d chars -> %s (%d bytes)",
             key,
@@ -160,9 +161,11 @@ class OutputAccumulator:
             filename,
             file_size,
         )
+        # Use absolute path so parent agents can find files from subagents
+        abs_path = str(file_path.resolve())
         return (
-            f"[Saved to '{filename}' ({file_size:,} bytes). "
-            f"Use load_data(filename='{filename}') "
+            f"[Saved to '{abs_path}' ({file_size:,} bytes). "
+            f"Use read_file(path='{abs_path}') "
             f"to access full data.]"
         )
 

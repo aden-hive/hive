@@ -10,10 +10,11 @@ const HIVE_WS_URL = "ws://127.0.0.1:9229/bridge";
 
 let ws = null;
 let reconnectAttempts = 0;
+const MAX_RECONNECT_DELAY = 10000; // Max 10 seconds between attempts
 
 function connect() {
-  // Don't try to reconnect too fast
-  const delay = Math.min(reconnectAttempts * 1000, 5000);
+  // Exponential backoff with cap
+  const delay = Math.min(reconnectAttempts * 1000, MAX_RECONNECT_DELAY);
 
   if (reconnectAttempts > 0) {
     console.log(`[Beeline] Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1})...`);
@@ -34,18 +35,21 @@ function connect() {
       };
 
       ws.onclose = (event) => {
-        console.log(`[Beeline] WebSocket closed: code=${event.code}`);
+        console.log(`[Beeline] WebSocket closed: code=${event.code}, reason=${event.reason}`);
         chrome.runtime.sendMessage({ _beeline: true, type: "ws_close" });
         reconnectAttempts++;
+        // Reconnect after delay
         setTimeout(connect, 2000);
       };
 
-      ws.onerror = (error) => {
-        console.error("[Beeline] WebSocket error:", error);
-        ws.close();
+      ws.onerror = () => {
+        // Don't log the full error object - it's usually just an Event
+        // The actual error will be reflected in onclose
+        console.warn(`[Beeline] WebSocket connection failed (server may not be running)`);
+        // Don't close here - let onclose handle cleanup
       };
     } catch (error) {
-      console.error("[Beeline] Failed to create WebSocket:", error);
+      console.error("[Beeline] Failed to create WebSocket:", error.message);
       reconnectAttempts++;
       setTimeout(connect, 2000);
     }
@@ -58,9 +62,11 @@ chrome.runtime.onMessage.addListener((msg) => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(msg.data);
     } else {
-      console.warn("[Beeline] Cannot send - WebSocket not connected");
+      console.warn("[Beeline] Cannot send - WebSocket not connected (state: %s)",
+        ws ? ws.readyState : "null");
     }
   }
 });
 
+// Start connection
 connect();
