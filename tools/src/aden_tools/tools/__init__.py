@@ -133,6 +133,7 @@ from .twilio_tool import register_tools as register_twilio
 from .twitter_tool import register_tools as register_twitter
 from .vercel_tool import register_tools as register_vercel
 from .vision_tool import register_tools as register_vision
+from .wandb_tool import register_tools as register_wandb
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
 from .wikipedia_tool import register_tools as register_wikipedia
@@ -300,6 +301,7 @@ def _register_unverified(
     register_zendesk(mcp, credentials=credentials)
     register_zoho_crm(mcp, credentials=credentials)
     register_zoom(mcp, credentials=credentials)
+    register_wandb(mcp, credentials=credentials)
     register_freshdesk(mcp, credentials=credentials)
 
 
