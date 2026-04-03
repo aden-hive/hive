@@ -9,13 +9,14 @@ See: https://docs.litellm.ai/docs/providers
 
 import ast
 import asyncio
+import concurrent.futures
 import hashlib
 import json
 import logging
 import os
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -705,8 +706,8 @@ class LiteLLMProvider(LLMProvider):
         # Codex ChatGPT backend requires streaming — delegate to the unified
         # async streaming path which properly handles tool calls.
         if self._codex_backend:
-            return asyncio.run(
-                self.acomplete(
+            return self._run_coro_from_sync(
+                lambda: self.acomplete(
                     messages=messages,
                     system=system,
                     tools=tools,
@@ -782,6 +783,25 @@ class LiteLLMProvider(LLMProvider):
             stop_reason=response.choices[0].finish_reason or "",
             raw_response=response,
         )
+
+    @staticmethod
+    def _run_coro_from_sync(coro_factory: Callable[[], Any]) -> Any:
+        """Run a coroutine from sync code, even when an event loop is active.
+
+        ``asyncio.run()`` raises when called from a thread with an active loop
+        (notebooks, async frameworks). In that case, offload coroutine execution
+        to a worker thread with its own event loop.
+        """
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro_factory())
+
+        def _run_in_worker() -> Any:
+            return asyncio.run(coro_factory())
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(_run_in_worker).result()
 
     # ------------------------------------------------------------------
     # Async variants — non-blocking on the event loop

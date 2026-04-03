@@ -104,6 +104,37 @@ class TestLiteLLMProviderInit:
 class TestLiteLLMProviderComplete:
     """Test LiteLLMProvider.complete() method."""
 
+    def test_complete_codex_backend_in_sync_context(self):
+        """Codex path should work from normal sync callers."""
+        provider = LiteLLMProvider(
+            model="gpt-4o-mini",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex",
+        )
+        expected = LLMResponse(content="codex ok", model="codex-test")
+
+        with patch.object(provider, "acomplete", new=AsyncMock(return_value=expected)) as mock_ac:
+            result = provider.complete(messages=[{"role": "user", "content": "Hello"}])
+
+        assert result == expected
+        mock_ac.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_complete_codex_backend_in_running_event_loop(self):
+        """Codex path should not crash when complete() is called from async code."""
+        provider = LiteLLMProvider(
+            model="gpt-4o-mini",
+            api_key="test-key",
+            api_base="https://chatgpt.com/backend-api/codex",
+        )
+        expected = LLMResponse(content="codex async ok", model="codex-test")
+
+        with patch.object(provider, "acomplete", new=AsyncMock(return_value=expected)) as mock_ac:
+            result = provider.complete(messages=[{"role": "user", "content": "Hello"}])
+
+        assert result == expected
+        mock_ac.assert_awaited_once()
+
     @patch("litellm.completion")
     def test_complete_basic(self, mock_completion):
         """Test basic completion call."""
