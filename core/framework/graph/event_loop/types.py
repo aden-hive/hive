@@ -79,6 +79,8 @@ class LoopConfig:
 
     # Client-facing auto-block grace period.
     cf_grace_turns: int = 1
+    # Worker auto-escalation: text-only turns before escalating to queen.
+    worker_escalation_grace_turns: int = 1
     tool_doom_loop_enabled: bool = True
 
     # Per-tool-call timeout.

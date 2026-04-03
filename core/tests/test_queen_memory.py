@@ -324,6 +324,7 @@ async def test_short_reflection(tmp_path: Path):
         session_dir,
         llm,
         memory_dir=mem_dir,
+        caller="queen",
     )
 
     # Verify the memory file was created.
@@ -379,7 +380,7 @@ async def test_long_reflection(tmp_path: Path):
         MagicMock(content="Housekeeping complete.", raw_response={}),
     ]
 
-    await run_long_reflection(llm, memory_dir=mem_dir)
+    await run_long_reflection(llm, memory_dir=mem_dir, caller="queen")
 
     # dup-b should be deleted, dup-a should be updated.
     assert not (mem_dir / "dup-b.md").exists()

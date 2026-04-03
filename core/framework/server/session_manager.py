@@ -716,7 +716,7 @@ class SessionManager:
             from framework.agents.queen.reflection_agent import run_long_reflection
 
             asyncio.create_task(
-                run_long_reflection(_llm, memory_dir=colony_memory_dir(_storage_id)),
+                run_long_reflection(_llm, memory_dir=colony_memory_dir(_storage_id), caller="queen"),
                 name=f"queen-memory-long-reflection-{session_id}",
             )
 
