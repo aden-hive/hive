@@ -62,6 +62,12 @@ async def restore(
     if conversation is None:
         return None
 
+    # If run_id filtering removed all messages, this is an intentional
+    # restart (new run), not a crash recovery.  Return None so the caller
+    # falls through to the fresh-conversation path.
+    if conversation.message_count == 0:
+        return None
+
     accumulator = await OutputAccumulator.restore(conversation_store, run_id=ctx.effective_run_id)
     accumulator.spillover_dir = config.spillover_dir
     accumulator.max_value_chars = config.max_output_value_chars

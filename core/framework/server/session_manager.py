@@ -51,8 +51,6 @@ class Session:
     worker_memory_subs: list = field(default_factory=list)  # list[str]
     # Per-execution colony recall cache for worker prompts
     worker_colony_recall_blocks: dict[str, str] = field(default_factory=dict)
-    # Worker run digest subscription (fires on EXECUTION_COMPLETED / EXECUTION_FAILED)
-    worker_digest_sub: str | None = None
     # Trigger definitions loaded from agent's triggers.json (available but inactive)
     available_triggers: dict[str, TriggerDefinition] = field(default_factory=dict)
     # Active trigger tracking (IDs currently firing + their asyncio tasks)
@@ -370,11 +368,9 @@ class SessionManager:
             session.graph_runtime = runtime
             session.worker_info = info
 
-            # Subscribe to execution completion for per-run digest generation.
             # Colony memory is additive; worker loading should still succeed if
             # that optional subscription path hits an import/runtime issue while
             # restoring an older session.
-            self._subscribe_worker_digest(session)
             try:
                 await self._subscribe_worker_colony_memory(session)
             except Exception:
@@ -621,13 +617,6 @@ class SessionManager:
             await self._emit_trigger_events(session, "removed", session.available_triggers)
             session.available_triggers.clear()
 
-        if session.worker_digest_sub is not None:
-            try:
-                session.event_bus.unsubscribe(session.worker_digest_sub)
-            except Exception:
-                pass
-            session.worker_digest_sub = None
-
         for sub_id in session.worker_memory_subs:
             try:
                 session.event_bus.unsubscribe(sub_id)
@@ -672,13 +661,6 @@ class SessionManager:
             except Exception:
                 pass
             session.worker_handoff_sub = None
-
-        if session.worker_digest_sub is not None:
-            try:
-                session.event_bus.unsubscribe(session.worker_digest_sub)
-            except Exception:
-                pass
-            session.worker_digest_sub = None
 
         for sub_id in session.worker_memory_subs:
             try:
@@ -773,135 +755,6 @@ class SessionManager:
         else:
             logger.warning("Worker handoff received but queen node not ready")
 
-    def _subscribe_worker_digest(self, session: Session) -> None:
-        """Subscribe to worker events to write per-run digests.
-
-        Three triggers:
-        - NODE_LOOP_ITERATION: write a mid-run snapshot, throttled to at most
-          once every _DIGEST_COOLDOWN seconds per execution.
-        - TOOL_CALL_COMPLETED for delegate_to_sub_agent: same throttled snapshot.
-          Orchestrator nodes often run all subagent calls in a single LLM turn,
-          so NODE_LOOP_ITERATION only fires once at the end.  Subagent
-          completions provide intermediate checkpoints.
-        - EXECUTION_COMPLETED / EXECUTION_FAILED: always write the final digest,
-          bypassing the cooldown.
-        """
-        import time as _time
-
-        from framework.runtime.event_bus import EventType as _ET
-
-        _DIGEST_COOLDOWN = 300.0  # seconds between mid-run snapshots
-
-        if session.worker_digest_sub is not None:
-            try:
-                session.event_bus.unsubscribe(session.worker_digest_sub)
-            except Exception:
-                pass
-            session.worker_digest_sub = None
-
-        agent_name = session.worker_path.name if session.worker_path else None
-        if not agent_name:
-            return
-
-        _agent_name = agent_name
-        _llm = session.llm
-        _bus = session.event_bus
-        # per-execution_id monotonic timestamp of last mid-run digest
-        _last_digest: dict[str, float] = {}
-
-        def _resolve_run_id(exec_id: str) -> str | None:
-            """Look up the run_id for a given execution_id via EXECUTION_STARTED history."""
-            for e in _bus.get_history(event_type=_ET.EXECUTION_STARTED, limit=200):
-                if e.execution_id == exec_id and getattr(e, "run_id", None):
-                    return e.run_id
-            return None
-
-        async def _inject_digest_to_queen(run_id: str) -> None:
-            """Read the written digest and push it into the queen's conversation."""
-            from framework.agents.worker_memory import digest_path
-
-            try:
-                content = digest_path(_agent_name, run_id).read_text(encoding="utf-8").strip()
-            except OSError:
-                return
-            if not content:
-                return
-            executor = session.queen_executor
-            if executor is None:
-                return
-            node = executor.node_registry.get("queen")
-            if node is None or not hasattr(node, "inject_event"):
-                return
-            await node.inject_event(f"[WORKER_DIGEST]\n{content}")
-
-        async def _consolidate_and_notify(run_id: str, outcome_event: Any) -> None:
-            """Write the digest then push it to the queen."""
-            from framework.agents.worker_memory import consolidate_worker_run
-
-            await consolidate_worker_run(_agent_name, run_id, outcome_event, _bus, _llm)
-            await _inject_digest_to_queen(run_id)
-
-        async def _on_worker_event(event: Any) -> None:
-            if event.stream_id == "queen":
-                return
-
-            exec_id = event.execution_id
-
-            if event.type == _ET.EXECUTION_STARTED:
-                # New run on this execution_id — start the cooldown timer so
-                # mid-run snapshots don't fire immediately at session start.
-                # The first snapshot will happen after _DIGEST_COOLDOWN seconds.
-                if exec_id:
-                    _last_digest[exec_id] = _time.monotonic()
-
-            elif event.type in (
-                _ET.EXECUTION_COMPLETED,
-                _ET.EXECUTION_FAILED,
-                _ET.EXECUTION_PAUSED,
-            ):
-                # Final digest — always fire, ignore cooldown.
-                # EXECUTION_PAUSED covers cancellation (queen re-triggering the
-                # worker cancels the previous execution, emitting paused).
-                run_id = getattr(event, "run_id", None) or _resolve_run_id(exec_id)
-                if run_id:
-                    asyncio.create_task(
-                        _consolidate_and_notify(run_id, event),
-                        name=f"worker-digest-final-{run_id}",
-                    )
-
-            elif event.type in (_ET.NODE_LOOP_ITERATION, _ET.TOOL_CALL_COMPLETED):
-                # Mid-run snapshot — respect 300 s cooldown per execution.
-                # TOOL_CALL_COMPLETED is only interesting for subagent calls;
-                # regular tool completions are too frequent and too cheap.
-                if event.type == _ET.TOOL_CALL_COMPLETED:
-                    tool_name = (event.data or {}).get("tool_name", "")
-                    if tool_name != "delegate_to_sub_agent":
-                        return
-                if not exec_id:
-                    return
-                now = _time.monotonic()
-                if now - _last_digest.get(exec_id, 0.0) < _DIGEST_COOLDOWN:
-                    return
-                run_id = _resolve_run_id(exec_id)
-                if run_id:
-                    _last_digest[exec_id] = now
-                    asyncio.create_task(
-                        _consolidate_and_notify(run_id, None),
-                        name=f"worker-digest-{run_id}",
-                    )
-
-        session.worker_digest_sub = session.event_bus.subscribe(
-            event_types=[
-                _ET.EXECUTION_STARTED,
-                _ET.NODE_LOOP_ITERATION,
-                _ET.TOOL_CALL_COMPLETED,
-                _ET.EXECUTION_COMPLETED,
-                _ET.EXECUTION_FAILED,
-                _ET.EXECUTION_PAUSED,
-            ],
-            handler=_on_worker_event,
-        )
-
     async def _subscribe_worker_colony_memory(self, session: Session) -> None:
         """Subscribe shared colony reflection/recall for top-level worker runs."""
         for sub_id in session.worker_memory_subs:
@@ -935,6 +788,12 @@ class SessionManager:
                 )
             )
         )
+
+        # Colony memory config for reflection-at-handoff
+        runtime._colony_memory_dir = colony_dir
+        runtime._colony_worker_sessions_dir = worker_sessions_dir
+        runtime._colony_recall_cache = session.worker_colony_recall_blocks
+        runtime._colony_reflect_llm = session.llm
 
         session.worker_memory_subs = await subscribe_worker_memory_triggers(
             session.event_bus,
@@ -1226,7 +1085,7 @@ class SessionManager:
                 )
             )
 
-    async def revive_queen(self, session: Session, initial_prompt: str | None = None) -> None:
+    async def revive_queen(self, session: Session) -> None:
         """Revive a dead queen executor on an existing session.
 
         Restarts the queen with the same session context (worker profile, tools, etc.).
@@ -1246,7 +1105,7 @@ class SessionManager:
         # Start queen with existing session context
         logger.debug("[revive_queen] Calling _start_queen...")
         await self._start_queen(
-            session, worker_identity=worker_identity, initial_prompt=initial_prompt
+            session, worker_identity=worker_identity
         )
 
         logger.info("Queen revived for session '%s', new queen_executor=%s", session.id, session.queen_executor)

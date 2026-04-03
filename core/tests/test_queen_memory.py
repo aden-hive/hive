@@ -182,29 +182,12 @@ def test_memory_freshness_text_old():
 
 
 # ---------------------------------------------------------------------------
-# Cursor
+# read_conversation_parts
 # ---------------------------------------------------------------------------
 
 
-def test_cursor_read_write(tmp_path: Path):
-    cursor_file = tmp_path / ".cursor.json"
-    assert qm.read_cursor(cursor_file) == 0
-    qm.write_cursor(42, cursor_file)
-    assert qm.read_cursor(cursor_file) == 42
-
-
-def test_cursor_read_corrupted(tmp_path: Path):
-    cursor_file = tmp_path / ".cursor.json"
-    cursor_file.write_text("not json", encoding="utf-8")
-    assert qm.read_cursor(cursor_file) == 0
-
-
-# ---------------------------------------------------------------------------
-# read_messages_since_cursor
-# ---------------------------------------------------------------------------
-
-
-def test_read_messages_since_cursor(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_read_conversation_parts(tmp_path: Path):
     parts_dir = tmp_path / "conversations" / "parts"
     parts_dir.mkdir(parents=True)
     for i in range(5):
@@ -212,23 +195,16 @@ def test_read_messages_since_cursor(tmp_path: Path):
             json.dumps({"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"})
         )
 
-    msgs, max_seq = qm.read_messages_since_cursor(tmp_path, 2)
-    assert max_seq == 4
-    assert len(msgs) == 2  # seq 3 and 4
+    msgs = await qm.read_conversation_parts(tmp_path)
+    assert len(msgs) == 5
+    assert msgs[0]["content"] == "msg 0"
+    assert msgs[4]["content"] == "msg 4"
 
 
-def test_read_messages_since_cursor_compaction_fallback(tmp_path: Path):
-    """When cursor is ahead of all files (evicted), return everything."""
-    parts_dir = tmp_path / "conversations" / "parts"
-    parts_dir.mkdir(parents=True)
-    for i in range(3):
-        (parts_dir / f"{i:010d}.json").write_text(
-            json.dumps({"role": "user", "content": f"msg {i}"})
-        )
-
-    msgs, max_seq = qm.read_messages_since_cursor(tmp_path, 999)
-    assert len(msgs) == 3  # Fallback: returns all
-    assert max_seq == 999  # Cursor stays (will be overwritten by caller)
+@pytest.mark.asyncio
+async def test_read_conversation_parts_empty(tmp_path: Path):
+    msgs = await qm.read_conversation_parts(tmp_path)
+    assert msgs == []
 
 
 # ---------------------------------------------------------------------------
@@ -348,19 +324,12 @@ async def test_short_reflection(tmp_path: Path):
         session_dir,
         llm,
         memory_dir=mem_dir,
-        cursor_file=tmp_path / "cursor.json",
     )
 
     # Verify the memory file was created.
     written = mem_dir / "user-likes-tests.md"
     assert written.exists()
     assert "user-likes-tests" in written.read_text()
-
-    # Verify cursor was advanced.
-    cursor_file = qm.MEMORY_DIR / ".cursor.json"
-    # We passed a custom memory_dir, but cursor uses the default path.
-    # The function uses read_cursor()/write_cursor() with default CURSOR_FILE.
-    # Just verify the LLM was called.
     assert llm.acomplete.call_count == 2
 
 
@@ -472,60 +441,6 @@ def test_safe_path_accepted(tmp_path: Path):
     assert "Deleted" in result
 
 
-# ---------------------------------------------------------------------------
-# Bug 2: Failed reflections do not advance cursor
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_cursor_not_advanced_on_llm_failure(tmp_path: Path):
-    from framework.agents.queen.reflection_agent import run_short_reflection
-
-    parts_dir = tmp_path / "session" / "conversations" / "parts"
-    parts_dir.mkdir(parents=True)
-    for i in range(3):
-        (parts_dir / f"{i:010d}.json").write_text(
-            json.dumps({"role": "user", "content": f"message {i}"})
-        )
-
-    cursor_file = tmp_path / ".cursor.json"
-    qm.write_cursor(0, cursor_file)
-
-    llm = AsyncMock()
-    llm.acomplete.side_effect = RuntimeError("LLM down")
-
-    # Patch read_cursor/write_cursor to use our temp cursor file.
-    import unittest.mock as mock
-    with mock.patch("framework.agents.queen.reflection_agent.read_cursor", return_value=0), \
-         mock.patch("framework.agents.queen.reflection_agent.write_cursor") as mock_write:
-        await run_short_reflection(tmp_path / "session", llm, memory_dir=tmp_path / "mem")
-
-        # write_cursor should NOT have been called since the LLM failed.
-        mock_write.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_cursor_advanced_on_success(tmp_path: Path):
-    from framework.agents.queen.reflection_agent import run_short_reflection
-
-    parts_dir = tmp_path / "session" / "conversations" / "parts"
-    parts_dir.mkdir(parents=True)
-    for i in range(3):
-        (parts_dir / f"{i:010d}.json").write_text(
-            json.dumps({"role": "user", "content": f"message {i}"})
-        )
-
-    llm = AsyncMock()
-    llm.acomplete.return_value = MagicMock(content="Nothing to remember.", raw_response={})
-
-    import unittest.mock as mock
-    with mock.patch("framework.agents.queen.reflection_agent.read_cursor", return_value=0), \
-         mock.patch("framework.agents.queen.reflection_agent.write_cursor") as mock_write:
-        await run_short_reflection(tmp_path / "session", llm, memory_dir=tmp_path / "mem")
-
-    mock_write.assert_called_once_with(2, None)
-
-
 def test_init_memory_dir_migrates_shared_memories_into_colony(tmp_path: Path):
     source = tmp_path / "legacy-shared"
     source.mkdir()
@@ -625,7 +540,13 @@ def test_queen_phase_state_appends_colony_and_global_memory_blocks():
 
 
 @pytest.mark.asyncio
-async def test_worker_colony_reflection_updates_shared_memory_and_cache(tmp_path: Path):
+async def test_worker_colony_reflection_at_handoff(tmp_path: Path):
+    """Colony reflection runs via WorkerAgent._reflect_colony_memory at node handoff."""
+    import asyncio
+
+    from framework.graph.context import GraphContext
+    from framework.graph.worker_agent import WorkerAgent
+
     worker_sessions_dir = tmp_path / "worker-sessions"
     execution_id = "exec-1"
     session_dir = worker_sessions_dir / execution_id / "conversations" / "parts"
@@ -641,11 +562,11 @@ async def test_worker_colony_reflection_updates_shared_memory_and_cache(tmp_path
 
     colony_dir = tmp_path / "colony"
     colony_dir.mkdir()
-    recall_cache: dict[str, str] = {}
-    bus = EventBus()
+    recall_cache: dict[str, str] = {execution_id: ""}
 
-    llm = AsyncMock()
-    llm.acomplete.side_effect = [
+    reflect_llm = AsyncMock()
+    reflect_llm.acomplete.side_effect = [
+        # Short reflection: write a memory file
         MagicMock(
             content="",
             raw_response={
@@ -668,84 +589,64 @@ async def test_worker_colony_reflection_updates_shared_memory_and_cache(tmp_path
                 ]
             },
         ),
+        # Short reflection done
         MagicMock(content="done", raw_response={}),
+        # Recall selector picks the new memory
         MagicMock(content=json.dumps({"selected_memories": ["user-prefers-terse-summaries.md"]})),
     ]
 
-    subs = await subscribe_worker_memory_triggers(
-        bus,
-        llm,
-        worker_sessions_dir=worker_sessions_dir,
-        colony_memory_dir=colony_dir,
-        recall_cache=recall_cache,
-    )
-    try:
-        await bus.publish(
-            AgentEvent(
-                type=EventType.EXECUTION_STARTED,
-                stream_id="default",
-                execution_id=execution_id,
-            )
-        )
-        await bus.publish(
-            AgentEvent(
-                type=EventType.LLM_TURN_COMPLETE,
-                stream_id="default",
-                execution_id=execution_id,
-            )
-        )
-    finally:
-        for sub_id in subs:
-            bus.unsubscribe(sub_id)
+    # Build a minimal GraphContext with colony memory fields
+    gc = MagicMock(spec=GraphContext)
+    gc.colony_memory_dir = colony_dir
+    gc.worker_sessions_dir = worker_sessions_dir
+    gc.colony_recall_cache = recall_cache
+    gc.colony_reflect_llm = reflect_llm
+    gc.execution_id = execution_id
+    gc._colony_reflect_lock = asyncio.Lock()
+
+    node_spec = SimpleNamespace(id="test-node")
+    worker = WorkerAgent.__new__(WorkerAgent)
+    worker._gc = gc
+    worker.node_spec = node_spec
+
+    await worker._reflect_colony_memory()
 
     assert (colony_dir / "user-prefers-terse-summaries.md").exists()
     assert "Colony Memories" in recall_cache[execution_id]
     assert "terse summaries" in recall_cache[execution_id]
 
 
-# ---------------------------------------------------------------------------
-# Bug 3: Compaction fallback only when cursor > max_all_seq
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_subscribe_worker_triggers_only_lifecycle_events(tmp_path: Path):
+    """After simplification, worker triggers only subscribe to start and terminal events."""
+    colony_dir = tmp_path / "colony"
+    colony_dir.mkdir()
+    recall_cache: dict[str, str] = {}
+    bus = EventBus()
+    llm = AsyncMock()
 
+    subs = await subscribe_worker_memory_triggers(
+        bus,
+        llm,
+        worker_sessions_dir=tmp_path / "sessions",
+        colony_memory_dir=colony_dir,
+        recall_cache=recall_cache,
+    )
+    try:
+        # Should have exactly 2 subscriptions (start + terminal)
+        assert len(subs) == 2
 
-def test_compaction_fallback_when_cursor_evicted(tmp_path: Path):
-    """When cursor_seq > max file seq, fallback triggers (compaction happened)."""
-    parts_dir = tmp_path / "conversations" / "parts"
-    parts_dir.mkdir(parents=True)
-    for i in range(3):
-        (parts_dir / f"{i:010d}.json").write_text(
-            json.dumps({"role": "user", "content": f"msg {i}"})
+        # EXECUTION_STARTED initialises cache
+        await bus.publish(
+            AgentEvent(
+                type=EventType.EXECUTION_STARTED,
+                stream_id="default",
+                execution_id="exec-1",
+            )
         )
-
-    # Cursor is at 999, but max file seq is 2 → compation evicted files.
-    msgs, max_seq = qm.read_messages_since_cursor(tmp_path, 999)
-    assert len(msgs) == 3
-
-
-def test_no_compaction_fallback_when_up_to_date(tmp_path: Path):
-    """When cursor_seq == max file seq, should return empty (not all files)."""
-    parts_dir = tmp_path / "conversations" / "parts"
-    parts_dir.mkdir(parents=True)
-    for i in range(3):
-        (parts_dir / f"{i:010d}.json").write_text(
-            json.dumps({"role": "user", "content": f"msg {i}"})
-        )
-
-    # Cursor is at 2 (max seq) → already up-to-date, should return nothing.
-    msgs, max_seq = qm.read_messages_since_cursor(tmp_path, 2)
-    assert len(msgs) == 0
+        assert recall_cache.get("exec-1") == ""
+    finally:
+        for sub_id in subs:
+            bus.unsubscribe(sub_id)
 
 
-def test_no_compaction_fallback_when_behind(tmp_path: Path):
-    """When cursor_seq < max file seq but no new_files, shouldn't happen normally.
-    But verify: cursor_seq=0 with files at 0,1,2 should return 1,2 (seq > 0)."""
-    parts_dir = tmp_path / "conversations" / "parts"
-    parts_dir.mkdir(parents=True)
-    for i in range(3):
-        (parts_dir / f"{i:010d}.json").write_text(
-            json.dumps({"role": "user", "content": f"msg {i}"})
-        )
-
-    msgs, max_seq = qm.read_messages_since_cursor(tmp_path, 0)
-    assert len(msgs) == 2  # seq 1 and 2
-    assert max_seq == 2

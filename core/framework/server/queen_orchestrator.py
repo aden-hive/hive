@@ -186,7 +186,6 @@ async def create_queen(
         colony_memory_dir,
         global_memory_dir,
         init_memory_dir,
-        queen_colony_cursor_file,
     )
 
     colony_dir = colony_memory_dir(session.id)
@@ -334,6 +333,8 @@ async def create_queen(
                 dynamic_prompt_provider=phase_state.get_current_prompt,
                 iteration_metadata_provider=lambda: {"phase": phase_state.phase},
                 skill_dirs=_queen_skill_dirs,
+                protocols_prompt=phase_state.protocols_prompt,
+                skills_catalog_prompt=phase_state.skills_catalog_prompt,
             )
             session.queen_executor = executor
             logger.debug("[_queen_loop] GraphExecutor created and stored in session.queen_executor")
@@ -401,7 +402,6 @@ async def create_queen(
                 queen_dir,
                 session.llm,
                 memory_dir=colony_dir,
-                cursor_file=queen_colony_cursor_file(queen_dir),
                 phase_state=phase_state,
             )
 

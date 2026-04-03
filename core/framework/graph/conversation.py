@@ -1147,6 +1147,9 @@ class NodeConversation:
                 Used in isolated mode so a node only sees its own
                 messages in the shared flat store.  In continuous mode
                 pass ``None`` to load all parts.
+            run_id: If set, only load parts matching this run_id.
+                Ensures intentional restarts (new run_id) start fresh
+                while crash recovery (same run_id) resumes correctly.
 
         Returns ``None`` if the store contains no metadata (i.e. the
         conversation was never persisted).
@@ -1168,6 +1171,10 @@ class NodeConversation:
         parts = await store.read_parts()
         if phase_id:
             parts = [p for p in parts if p.get("phase_id") == phase_id]
+        # Filter by run_id so intentional restarts (new run_id) start fresh
+        # while crash recovery (same run_id) loads prior parts.
+        if run_id and not is_legacy_run_id(run_id):
+            parts = [p for p in parts if p.get("run_id") == run_id]
         conv._messages = [Message.from_storage_dict(p) for p in parts]
 
         cursor = await store.read_cursor()

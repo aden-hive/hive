@@ -213,8 +213,14 @@ async def handle_chat(request: web.Request) -> web.Response:
     manager: Any = request.app["manager"]
     try:
         logger.debug("[handle_chat] Calling manager.revive_queen()...")
-        await manager.revive_queen(session, initial_prompt=message)
+        await manager.revive_queen(session)
         logger.debug("[handle_chat] revive_queen() completed successfully")
+        # Inject the user's message into the revived queen's queue so the
+        # event loop drains it and clears any restored pending_input_state.
+        _revived_executor = session.queen_executor
+        _revived_node = _revived_executor.node_registry.get("queen") if _revived_executor else None
+        if _revived_node is not None and hasattr(_revived_node, "inject_event"):
+            await _revived_node.inject_event(message, is_client_input=True, image_content=image_content)
         return web.json_response(
             {
                 "status": "queen_revived",

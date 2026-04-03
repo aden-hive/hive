@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -34,12 +35,11 @@ from framework.agents.queen.queen_memory_v2 import (
     MEMORY_DIR,
     MEMORY_FRONTMATTER_EXAMPLE,
     MEMORY_TYPES,
+    build_diary_document,
+    diary_filename,
     format_memory_manifest,
-    read_cursor,
-    read_messages_since_cursor,
+    read_conversation_parts,
     scan_memory_files,
-    worker_colony_cursor_file,
-    write_cursor,
 )
 from framework.llm.provider import LLMResponse, Tool
 
@@ -332,6 +332,29 @@ Rules:
 - Remove memories that are no longer relevant or are superseded.
 - Keep the total collection lean and high-signal.
 - Do NOT invent new information — only reorganise what exists.
+- Do NOT delete or merge MEMORY-*.md diary files. These are daily narratives
+  managed by a separate process. You may read them for context but should not
+  modify them.
+"""
+
+_DIARY_SYSTEM = """\
+You maintain a daily diary entry for an AI colony session. You receive:
+(1) Today's existing diary content (may be empty if this is the first entry).
+(2) A transcript of recent conversation messages.
+
+Write a cohesive 3-8 sentence narrative about what happened in this session today.
+Cover: what the user asked for, what was accomplished, key decisions or obstacles,
+and current status.
+
+Rules:
+- If an existing diary is provided, rewrite it as a unified narrative incorporating
+  the new developments. Merge and deduplicate — do not simply append.
+- Keep the total narrative under 3000 characters.
+- Focus on the story arc of the day, not individual tool calls or code details.
+- If the recent messages contain nothing substantive (greetings, routine
+  confirmations), return the existing diary text unchanged.
+- Output only the diary prose. No headings, no timestamps, no code fences, no
+  frontmatter.
 """
 
 
@@ -344,24 +367,20 @@ async def run_short_reflection(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
-    *,
-    cursor_file: Path | None = None,
 ) -> None:
-    """Run a short reflection: extract learnings from new messages."""
+    """Run a short reflection: extract learnings from conversation."""
     mem_dir = memory_dir or MEMORY_DIR
 
-    cursor_seq = read_cursor(cursor_file)
-    messages, max_seq = read_messages_since_cursor(session_dir, cursor_seq)
-
+    messages = await read_conversation_parts(session_dir)
     if not messages:
-        logger.debug("reflect: short — no new messages since cursor %d", cursor_seq)
+        logger.debug("reflect: short — no conversation parts")
         return
 
-    logger.debug("reflect: short — %d new messages (cursor %d → %d)", len(messages), cursor_seq, max_seq)
+    logger.debug("reflect: short — %d conversation parts", len(messages))
 
-    # Build a readable transcript of the new messages.
+    # Build a readable transcript from recent messages.
     transcript_lines: list[str] = []
-    for msg in messages:
+    for msg in messages[-50:]:
         role = msg.get("role", "")
         content = str(msg.get("content", "")).strip()
         if role == "tool":
@@ -369,31 +388,22 @@ async def run_short_reflection(
         if not content:
             continue
         label = "user" if role == "user" else "assistant"
-        # Truncate very long messages.
         if len(content) > 800:
             content = content[:800] + "…"
         transcript_lines.append(f"[{label}]: {content}")
 
     if not transcript_lines:
-        # Only tool results in the new messages — still advance cursor.
-        write_cursor(max_seq, cursor_file)
         return
 
     transcript = "\n".join(transcript_lines)
     user_msg = (
-        f"## Recent conversation (messages {cursor_seq + 1}–{max_seq})\n\n"
+        f"## Recent conversation ({len(messages)} messages total)\n\n"
         f"{transcript}\n\n"
         f"Timestamp: {datetime.now().isoformat(timespec='minutes')}"
     )
 
-    success = await _reflection_loop(llm, _SHORT_REFLECT_SYSTEM, user_msg, mem_dir)
-
-    # Advance cursor only on success.
-    if success:
-        write_cursor(max_seq, cursor_file)
-        logger.debug("reflect: short reflection done, cursor → %d", max_seq)
-    else:
-        logger.warning("reflect: short reflection failed, cursor NOT advanced (stays at %d)", cursor_seq)
+    await _reflection_loop(llm, _SHORT_REFLECT_SYSTEM, user_msg, mem_dir)
+    logger.debug("reflect: short reflection done")
 
 
 async def run_long_reflection(
@@ -420,6 +430,77 @@ async def run_long_reflection(
     logger.debug("reflect: long reflection done (%d files)", len(files))
 
 
+async def run_diary_update(
+    session_dir: Path,
+    llm: Any,
+    memory_dir: Path | None = None,
+) -> None:
+    """Update today's diary file with a narrative of recent activity."""
+    mem_dir = memory_dir or MEMORY_DIR
+
+    fname = diary_filename()
+    diary_path = mem_dir / fname
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    # Read existing diary body (strip frontmatter).
+    existing_body = ""
+    if diary_path.exists():
+        try:
+            raw = diary_path.read_text(encoding="utf-8")
+            m = re.match(r"^---\s*\n.*?\n---\s*\n?", raw, re.DOTALL)
+            existing_body = raw[m.end() :].strip() if m else raw.strip()
+        except OSError:
+            pass
+
+    # Read all conversation messages for context.
+    messages = await read_conversation_parts(session_dir)
+    transcript_lines: list[str] = []
+    for msg in messages[-40:]:
+        role = msg.get("role", "")
+        content = str(msg.get("content", "")).strip()
+        if role == "tool" or not content:
+            continue
+        label = "user" if role == "user" else "assistant"
+        if len(content) > 600:
+            content = content[:600] + "..."
+        transcript_lines.append(f"[{label}]: {content}")
+
+    if not transcript_lines:
+        return
+
+    transcript = "\n".join(transcript_lines)
+    user_msg = (
+        f"## Today's Diary So Far\n\n"
+        f"{existing_body or '(no entries yet)'}\n\n"
+        f"## Recent Conversation\n\n"
+        f"{transcript}\n\n"
+        f"Date: {today_str}"
+    )
+
+    try:
+        from framework.agents.queen.config import default_config
+
+        resp = await llm.acomplete(
+            messages=[{"role": "user", "content": user_msg}],
+            system=_DIARY_SYSTEM,
+            max_tokens=min(default_config.max_tokens, 1024),
+        )
+        new_body = (resp.content or "").strip()
+        if not new_body:
+            return
+
+        doc = build_diary_document(date_str=today_str, body=new_body)
+        if len(doc.encode("utf-8")) > MAX_FILE_SIZE_BYTES:
+            new_body = new_body[:2800]
+            doc = build_diary_document(date_str=today_str, body=new_body)
+
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        diary_path.write_text(doc, encoding="utf-8")
+        logger.debug("diary: updated %s (%d chars)", fname, len(doc))
+    except Exception:
+        logger.warning("diary: update failed", exc_info=True)
+
+
 # ---------------------------------------------------------------------------
 # Event-bus integration
 # ---------------------------------------------------------------------------
@@ -433,7 +514,6 @@ async def subscribe_reflection_triggers(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
-    cursor_file: Path | None = None,
     phase_state: Any = None,
 ) -> list[str]:
     """Subscribe to queen turn events and return subscription IDs.
@@ -463,23 +543,19 @@ async def subscribe_reflection_triggers(
                 _short_count += 1
                 logger.debug("reflect: turn complete — short count %d/%d", _short_count, _LONG_REFLECT_INTERVAL)
                 if _short_count % _LONG_REFLECT_INTERVAL == 0:
-                    await run_short_reflection(
-                        session_dir,
-                        llm,
-                        mem_dir,
-                        cursor_file=cursor_file,
-                    )
+                    await run_short_reflection(session_dir, llm, mem_dir)
                     await run_long_reflection(llm, mem_dir)
                 else:
-                    await run_short_reflection(
-                        session_dir,
-                        llm,
-                        mem_dir,
-                        cursor_file=cursor_file,
-                    )
+                    await run_short_reflection(session_dir, llm, mem_dir)
             except Exception:
                 logger.warning("reflect: reflection failed", exc_info=True)
                 _write_error("short/long reflection")
+
+            # Update daily diary after reflection.
+            try:
+                await run_diary_update(session_dir, llm, mem_dir)
+            except Exception:
+                logger.warning("reflect: diary update failed", exc_info=True)
 
             # Update recall cache after reflection completes, guaranteeing
             # recall sees the current turn's extracted memories.
@@ -547,75 +623,22 @@ async def subscribe_worker_memory_triggers(
     colony_memory_dir: Path,
     recall_cache: dict[str, str],
 ) -> list[str]:
-    """Subscribe shared colony memory reflection/recall for top-level worker runs."""
-    from framework.agents.queen.recall_selector import update_recall_cache
+    """Subscribe colony memory lifecycle events for worker runs.
+
+    Short reflection is now handled synchronously at node handoff in
+    ``WorkerAgent._reflect_colony_memory()``.  This function only manages:
+    - Recall cache initialisation on execution start
+    - Final long reflection + cleanup on execution end
+    """
     from framework.runtime.event_bus import EventType
 
-    _lock = asyncio.Lock()
-    _short_counts: dict[str, int] = {}
+    _terminal_lock = asyncio.Lock()
 
     def _is_worker_event(event: Any) -> bool:
         return bool(
             getattr(event, "execution_id", None)
             and getattr(event, "stream_id", None) not in ("queen", "judge")
         )
-
-    async def _update_cache(execution_id: str) -> None:
-        session_dir = worker_sessions_dir / execution_id
-        await update_recall_cache(
-            session_dir,
-            llm,
-            memory_dir=colony_memory_dir,
-            cache_setter=lambda block, execution_id=execution_id: recall_cache.__setitem__(
-                execution_id, block
-            ),
-            heading="Colony Memories",
-        )
-
-    async def _on_turn_complete(event: Any) -> None:
-        if not _is_worker_event(event):
-            return
-        if _lock.locked():
-            logger.debug("reflect: worker colony reflection skipped — lock busy")
-            return
-
-        execution_id = event.execution_id
-        if execution_id is None:
-            return
-        session_dir = worker_sessions_dir / execution_id
-        cursor_file = worker_colony_cursor_file(session_dir)
-
-        async with _lock:
-            try:
-                _short_counts[execution_id] = _short_counts.get(execution_id, 0) + 1
-                await run_short_reflection(
-                    session_dir,
-                    llm,
-                    colony_memory_dir,
-                    cursor_file=cursor_file,
-                )
-                if _short_counts[execution_id] % _LONG_REFLECT_INTERVAL == 0:
-                    await run_long_reflection(llm, colony_memory_dir)
-                await _update_cache(execution_id)
-            except Exception:
-                logger.warning("reflect: worker colony reflection failed", exc_info=True)
-                _write_error("worker colony reflection")
-
-    async def _on_compaction(event: Any) -> None:
-        if not _is_worker_event(event):
-            return
-        if _lock.locked():
-            return
-        execution_id = event.execution_id
-        if execution_id is None:
-            return
-        async with _lock:
-            try:
-                await run_long_reflection(llm, colony_memory_dir)
-                await _update_cache(execution_id)
-            except Exception:
-                logger.warning("reflect: worker compaction reflection failed", exc_info=True)
-                _write_error("worker compaction reflection")
 
     async def _on_execution_started(event: Any) -> None:
         if not _is_worker_event(event):
@@ -629,7 +652,7 @@ async def subscribe_worker_memory_triggers(
         execution_id = event.execution_id
         if execution_id is None:
             return
-        async with _lock:
+        async with _terminal_lock:
             try:
                 await run_long_reflection(llm, colony_memory_dir)
             except Exception:
@@ -637,20 +660,11 @@ async def subscribe_worker_memory_triggers(
                 _write_error("worker final reflection")
             finally:
                 recall_cache.pop(execution_id, None)
-                _short_counts.pop(execution_id, None)
 
     return [
         event_bus.subscribe(
             event_types=[EventType.EXECUTION_STARTED],
             handler=_on_execution_started,
-        ),
-        event_bus.subscribe(
-            event_types=[EventType.LLM_TURN_COMPLETE],
-            handler=_on_turn_complete,
-        ),
-        event_bus.subscribe(
-            event_types=[EventType.CONTEXT_COMPACTED],
-            handler=_on_compaction,
         ),
         event_bus.subscribe(
             event_types=[EventType.EXECUTION_COMPLETED, EventType.EXECUTION_FAILED],

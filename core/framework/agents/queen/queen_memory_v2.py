@@ -17,6 +17,7 @@ import re
 import shutil
 import time
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -26,13 +27,12 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-MEMORY_TYPES: tuple[str, ...] = ("goal", "environment", "technique", "reference")
+MEMORY_TYPES: tuple[str, ...] = ("goal", "environment", "technique", "reference", "diary")
 GLOBAL_MEMORY_CATEGORIES: tuple[str, ...] = ("profile", "preference", "environment", "feedback")
 
 _HIVE_QUEEN_DIR = Path.home() / ".hive" / "queen"
 # Legacy shared v2 root.  Colony memory now lives under queen sessions.
 MEMORY_DIR: Path = _HIVE_QUEEN_DIR / "memories"
-CURSOR_FILE: Path = MEMORY_DIR / ".cursor.json"
 
 MAX_FILES: int = 200
 MAX_FILE_SIZE_BYTES: int = 4096  # 4 KB hard limit per memory file
@@ -75,21 +75,6 @@ def colony_memory_dir(colony_id: str) -> Path:
 def global_memory_dir() -> Path:
     """Return the queen-global memory directory."""
     return _HIVE_QUEEN_DIR / "global_memory"
-
-
-def queen_colony_cursor_file(session_dir: Path) -> Path:
-    """Return the queen colony cursor file for a session."""
-    return session_dir / "memory" / "cursors" / "queen-colony.cursor.json"
-
-
-def queen_global_cursor_file(session_dir: Path) -> Path:
-    """Return the queen global cursor file for a session."""
-    return session_dir / "memory" / "cursors" / "queen-global.cursor.json"
-
-
-def worker_colony_cursor_file(worker_session_dir: Path) -> Path:
-    """Return the worker colony cursor file for one top-level execution."""
-    return worker_session_dir / "memory" / "worker-colony.cursor.json"
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +236,22 @@ def build_memory_document(
     )
 
 
+def diary_filename(d: date | None = None) -> str:
+    """Return the diary memory filename for date *d* (default: today)."""
+    d = d or date.today()
+    return f"MEMORY-{d.strftime('%Y-%m-%d')}.md"
+
+
+def build_diary_document(*, date_str: str, body: str) -> str:
+    """Build a diary memory file with frontmatter."""
+    return build_memory_document(
+        name=f"diary-{date_str}",
+        description=f"Daily session narrative for {date_str}",
+        mem_type="diary",
+        body=body,
+    )
+
+
 def validate_global_memory_payload(
     *,
     category: str,
@@ -371,85 +372,15 @@ def memory_freshness_text(mtime: float) -> str:
 # ---------------------------------------------------------------------------
 
 
-def read_cursor(cursor_file: Path | None = None) -> int:
-    """Read ``lastMemoryMessageSeq`` from the cursor file.  Returns 0 if missing."""
-    p = cursor_file or CURSOR_FILE
-    if not p.exists():
-        return 0
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return int(data.get("lastMemoryMessageSeq", 0))
-    except (json.JSONDecodeError, TypeError, ValueError, OSError):
-        return 0
+async def read_conversation_parts(session_dir: Path) -> list[dict[str, Any]]:
+    """Read all conversation parts for a session using FileConversationStore.
 
-
-def write_cursor(seq: int, cursor_file: Path | None = None) -> None:
-    """Persist the cursor seq number.  Creates parent dirs if needed."""
-    p = cursor_file or CURSOR_FILE
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(
-        json.dumps({"lastMemoryMessageSeq": seq}),
-        encoding="utf-8",
-    )
-
-
-def read_messages_since_cursor(
-    session_dir: Path,
-    cursor_seq: int,
-) -> tuple[list[dict[str, Any]], int]:
-    """Read conversation parts added since *cursor_seq*.
-
-    Returns ``(messages, max_seq)``.  Each message is the raw JSON dict
-    from the part file.
-
-    **Compaction fallback**: if no files have ``seq > cursor_seq`` (the
-    cursor was evicted by compaction), all existing parts are returned so
-    that the reflection agent can still process visible messages.
+    Returns a list of raw message dicts in sequence order.
     """
-    parts_dir = session_dir / "conversations" / "parts"
-    if not parts_dir.is_dir():
-        return [], cursor_seq
+    from framework.storage.conversation_store import FileConversationStore
 
-    part_files = sorted(parts_dir.glob("*.json"))
-    if not part_files:
-        return [], cursor_seq
-
-    # Determine which files are new (seq > cursor_seq).
-    new_files: list[tuple[int, Path]] = []
-    all_files: list[tuple[int, Path]] = []
-    for f in part_files:
-        try:
-            seq = int(f.stem)
-        except ValueError:
-            continue
-        all_files.append((seq, f))
-        if seq > cursor_seq:
-            new_files.append((seq, f))
-
-    # Compaction fallback: cursor evicted → return everything visible.
-    # Only trigger when cursor_seq is beyond the max seq of existing files,
-    # meaning files were compacted away.  If cursor_seq <= max_all_seq there
-    # is simply nothing new (already up-to-date) — returning empty is correct.
-    if not new_files and all_files:
-        max_all_seq = max(seq for seq, _ in all_files)
-        if cursor_seq > max_all_seq:
-            new_files = all_files
-
-    if not new_files:
-        return [], cursor_seq
-
-    messages: list[dict[str, Any]] = []
-    max_seq = cursor_seq
-    for seq, f in new_files:
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-            messages.append(data)
-            if seq > max_seq:
-                max_seq = seq
-        except (json.JSONDecodeError, OSError):
-            continue
-
-    return messages, max_seq
+    store = FileConversationStore(session_dir / "conversations")
+    return await store.read_parts()
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +451,7 @@ def migrate_legacy_memories(memory_dir: Path | None = None) -> None:
                 d,
                 filename=slug,
                 name=f"legacy-diary-{date_part}",
-                mem_type="reference",
+                mem_type="diary",
                 description=f"Migrated diary entry from {date_part}",
                 body=content,
             )
