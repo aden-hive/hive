@@ -135,6 +135,7 @@ from .vercel_tool import register_tools as register_vercel
 from .vision_tool import register_tools as register_vision
 from .web_scrape_tool import register_tools as register_web_scrape
 from .web_search_tool import register_tools as register_web_search
+from .whatsapp_tool import register_tools as register_whatsapp
 from .wikipedia_tool import register_tools as register_wikipedia
 from .yahoo_finance_tool import register_tools as register_yahoo_finance
 from .youtube_tool import register_tools as register_youtube
@@ -296,6 +297,7 @@ def _register_unverified(
     register_twilio(mcp, credentials=credentials)
     register_twitter(mcp, credentials=credentials)
     register_vercel(mcp, credentials=credentials)
+    register_whatsapp(mcp, credentials=credentials)
     register_youtube(mcp, credentials=credentials)
     register_zendesk(mcp, credentials=credentials)
     register_zoho_crm(mcp, credentials=credentials)
