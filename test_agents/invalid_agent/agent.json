@@ -1,0 +1,8 @@
+﻿{
+  ""name"": ""Invalid Agent"",
+  ""description"": ""An agent with missing nodes for validation testing"",
+  ""version"": ""1.0.0"",
+  ""entry_node"": ""nonexistent_node"",
+  ""nodes"": [],
+  ""tools"": []
+}

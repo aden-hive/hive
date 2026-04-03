@@ -439,6 +439,25 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 
+    # Validate credentials before execution (fail-fast)
+    validation = runner.validate()
+    if not validation.valid or validation.missing_tools:
+        print("Agent has errors:")
+        for error in validation.errors:
+            print(f"  ERROR: {error}")
+        if validation.missing_tools:
+            print("  ERROR: Missing tool implementations:")
+            for tool in validation.missing_tools:
+                print(f"    - {tool}")
+            print("  To fix: Create tools.py in the agent folder or register tools programmatically")
+        runner.cleanup()
+        return 1
+    
+    if validation.warnings:
+        print("\nWarnings:")
+        for warning in validation.warnings:
+            print(f"  WARNING: {warning}")
+
     # Prompt before starting (allows credential updates)
     if sys.stdin.isatty() and not args.quiet:
         runner = _prompt_before_start(args.agent_path, runner, args.model)
