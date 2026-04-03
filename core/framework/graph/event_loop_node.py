@@ -326,6 +326,9 @@ class EventLoopNode(NodeProtocol):
         # Queen auto-block grace: consecutive text-only turns without
         # any real tool call or set_output.  Resets on progress.
         _cf_text_only_streak = 0
+        # Worker auto-escalation: consecutive text-only turns.
+        # After grace, auto-escalate to queen for guidance.
+        _worker_text_only_streak = 0
 
         # 1. Guard: LLM required
         if ctx.llm is None:
@@ -962,6 +965,7 @@ class EventLoopNode(NodeProtocol):
             # Reset auto-block grace streak when real work happens
             if real_tool_results or outputs_set:
                 _cf_text_only_streak = 0
+                _worker_text_only_streak = 0
 
             # 6e'''. Empty response guard — if the LLM returned nothing
             # (no text, no real tools, no set_output) and all required
@@ -1216,6 +1220,66 @@ class EventLoopNode(NodeProtocol):
                 recent_tool_fingerprints=recent_tool_fingerprints,
                 pending_input=None,
             )
+
+            # 6h. Worker auto-escalation on text-only turns
+            #
+            # Workers that produce text without tool calls or set_output
+            # get a grace period to plan/think, then auto-escalate to the
+            # queen so the worker doesn't spin uselessly.  Sets
+            # queen_input_requested so the existing 6h'' block handles
+            # blocking and resumption.
+            _is_worker = (
+                stream_id not in ("queen", "judge")
+                and not ctx.is_subagent_mode
+                and not ctx.supports_direct_user_io
+                and self._event_bus is not None
+            )
+            _worker_no_tool_turn = (
+                not real_tool_results
+                and not outputs_set
+                and not reported_to_parent
+                and not queen_input_requested
+                and not user_input_requested
+            )
+            if _is_worker and _worker_no_tool_turn:
+                _worker_text_only_streak += 1
+                if _worker_text_only_streak <= self._config.worker_escalation_grace_turns:
+                    _continue_count += 1
+                    if ctx.runtime_logger:
+                        iter_latency_ms = int((time.time() - iter_start) * 1000)
+                        ctx.runtime_logger.log_step(
+                            node_id=node_id,
+                            node_type="event_loop",
+                            step_index=iteration,
+                            verdict="CONTINUE",
+                            verdict_feedback=(
+                                "Worker auto-escalation grace"
+                                f" ({_worker_text_only_streak}"
+                                f"/{self._config.worker_escalation_grace_turns})"
+                            ),
+                            tool_calls=logged_tool_calls,
+                            llm_text=assistant_text,
+                            input_tokens=turn_tokens.get("input", 0),
+                            output_tokens=turn_tokens.get("output", 0),
+                            latency_ms=iter_latency_ms,
+                        )
+                    continue
+                # Grace exhausted — auto-escalate to queen
+                logger.info(
+                    "[%s] iter=%d: worker text-only streak %d > grace %d, auto-escalating",
+                    node_id,
+                    iteration,
+                    _worker_text_only_streak,
+                    self._config.worker_escalation_grace_turns,
+                )
+                await self._event_bus.emit_escalation_requested(
+                    stream_id=stream_id,
+                    node_id=node_id,
+                    reason="Worker produced text-only turns without progress; auto-escalating",
+                    context=assistant_text[:2000] if assistant_text else "",
+                    execution_id=execution_id,
+                )
+                queen_input_requested = True
 
             # 6h'. Queen input blocking
             #
@@ -1607,6 +1671,7 @@ class EventLoopNode(NodeProtocol):
 
                 recent_responses.clear()
                 _cf_text_only_streak = 0
+                _worker_text_only_streak = 0
                 _continue_count += 1
                 self._log_skip_judge(
                     ctx,
