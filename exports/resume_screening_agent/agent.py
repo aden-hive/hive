@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from pathlib import Path
+from typing import Optional, Dict, Any
 
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.edge import GraphSpec
@@ -148,25 +149,19 @@ edges = [
 entry_node = "intake"
 entry_points = {"start": "intake"}
 pause_nodes = []
-terminal_nodes = []
+terminal_nodes = ["report"]
 
 
 class ResumeScreeningAgent:
-    """
-    Deep Research Agent — 4-node pipeline with user checkpoints.
+    """Resume Screening Agent.
 
-    Flow: intake -> research -> review -> report
-                      ^           |
-                      +-- feedback loop (if user wants more)
+This agent processes resumes and extracts structured candidate information
+including skills, experience, and education. The agent workflow includes
+intake -> research -> review -> report stages and produces a structured
+candidate evaluation report.
+"""
 
-    Uses AgentRuntime for proper session management:
-    - Session-scoped storage (sessions/{session_id}/)
-    - Checkpointing for resume capability
-    - Runtime logging
-    - Data folder for save_data/load_data
-    """
-
-    def __init__(self, config=None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         self.config = config or default_config
         self.goal = goal
         self.nodes = nodes
@@ -264,7 +259,7 @@ class ResumeScreeningAgent:
         if not self._agent_runtime.is_running:
             await self._agent_runtime.start()
 
-    async def stop(self) -> None:
+    async def start(self) -> None:
         """Stop the agent runtime and clean up."""
         if self._agent_runtime and self._agent_runtime.is_running:
             await self._agent_runtime.stop()
@@ -288,8 +283,11 @@ class ResumeScreeningAgent:
     timeout=timeout,
 )
     async def run(
-        self, context: dict, mock_mode=False, session_state=None
-    ) -> ExecutionResult:
+    self,
+    context: Dict[str, Any],
+    mock_mode: bool = False,
+    session_state: Optional[Dict[str, Any]] = None,
+) -> ExecutionResult:
         """Run the agent (convenience method for single execution)."""
         await self.start(mock_mode=mock_mode)
         try:
@@ -300,7 +298,7 @@ class ResumeScreeningAgent:
         finally:
             await self.stop()
 
-    def info(self):
+    def info(self) -> Dict[str, Any]:
         """Get agent information."""
         return {
             "name": metadata.name,
@@ -319,7 +317,7 @@ class ResumeScreeningAgent:
             "client_facing_nodes": [n.id for n in self.nodes if n.client_facing],
         }
 
-    def validate(self):
+    def validate(self) -> bool:
         """Validate agent structure."""
         errors = []
         warnings = []
