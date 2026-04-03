@@ -390,4 +390,3 @@ def test_main_request_error_redacts_api_key(check_llm_key_module, monkeypatch, c
     assert payload["message"].startswith("Connection failed: ")
     assert "***" in payload["message"]
     assert "super-secret-key" not in payload["message"]
-
