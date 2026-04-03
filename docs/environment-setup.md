@@ -109,11 +109,13 @@ MCP tools are also available in Cursor. To enable:
 ### 2. Build an Agent
 
 **Claude Code:**
+
 ```
 Use the coder-tools initialize_and_build_agent tool to scaffold a new agent
 ```
 
 **Codex CLI:**
+
 ```
 Start Codex in the repo root and use the configured MCP tools
 ```
@@ -372,8 +374,8 @@ claude> test workflow
 ### 5. Run Agent
 
 ```bash
-# Interactive dashboard
-hive tui
+# Launch the web dashboard
+hive open
 
 # Or run directly
 hive run exports/your_agent_name --input '{"task": "..."}'
@@ -405,14 +407,14 @@ cd core && uv run python tests/dummy_agents/run_all.py --verbose
 
 ### What's Covered
 
-| Agent          | Tests | Coverage                                          |
-| -------------- | ----- | ------------------------------------------------- |
-| echo           | 2     | Single-node lifecycle, basic `set_output`          |
-| pipeline       | 4     | Multi-node traversal, `input_mapping`, conversation modes |
-| branch         | 3     | Conditional edges, LLM-driven routing              |
-| parallel_merge | 4     | Fan-out/fan-in, failure strategies                  |
-| retry          | 4     | Retry mechanics, exhaustion, `ON_FAILURE` edges     |
-| feedback_loop  | 3     | Feedback cycles, `max_node_visits`                  |
+| Agent          | Tests | Coverage                                                                     |
+| -------------- | ----- | ---------------------------------------------------------------------------- |
+| echo           | 2     | Single-node lifecycle, basic `set_output`                                    |
+| pipeline       | 4     | Multi-node traversal, `input_mapping`, conversation modes                    |
+| branch         | 3     | Conditional edges, LLM-driven routing                                        |
+| parallel_merge | 4     | Fan-out/fan-in, failure strategies                                           |
+| retry          | 4     | Retry mechanics, exhaustion, `ON_FAILURE` edges                              |
+| feedback_loop  | 3     | Feedback cycles, `max_node_visits`                                           |
 | worker         | 4     | Real MCP tools (`example_tool`, `get_current_time`, `save_data`/`load_data`) |
 
 Typical runtime is 1–3 minutes depending on provider latency.
