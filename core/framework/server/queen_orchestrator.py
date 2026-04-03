@@ -320,6 +320,8 @@ async def create_queen(
                 dynamic_prompt_provider=phase_state.get_current_prompt,
                 iteration_metadata_provider=lambda: {"phase": phase_state.phase},
                 skill_dirs=_queen_skill_dirs,
+                protocols_prompt=phase_state.protocols_prompt,
+                skills_catalog_prompt=phase_state.skills_catalog_prompt,
             )
             session.queen_executor = executor
             logger.debug("[_queen_loop] GraphExecutor created and stored in session.queen_executor")

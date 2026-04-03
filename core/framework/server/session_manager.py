@@ -1226,7 +1226,7 @@ class SessionManager:
                 )
             )
 
-    async def revive_queen(self, session: Session, initial_prompt: str | None = None) -> None:
+    async def revive_queen(self, session: Session) -> None:
         """Revive a dead queen executor on an existing session.
 
         Restarts the queen with the same session context (worker profile, tools, etc.).
@@ -1246,7 +1246,7 @@ class SessionManager:
         # Start queen with existing session context
         logger.debug("[revive_queen] Calling _start_queen...")
         await self._start_queen(
-            session, worker_identity=worker_identity, initial_prompt=initial_prompt
+            session, worker_identity=worker_identity
         )
 
         logger.info("Queen revived for session '%s', new queen_executor=%s", session.id, session.queen_executor)
