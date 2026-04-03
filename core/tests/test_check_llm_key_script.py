@@ -1,11 +1,16 @@
+from __future__ import annotations
+
 import importlib.util
 import json
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import pytest
 
 
-def _load_check_llm_key_module():
+@pytest.fixture(scope="session")
+def check_llm_key_module() -> ModuleType:
     module_path = Path(__file__).resolve().parents[2] / "scripts" / "check_llm_key.py"
     spec = importlib.util.spec_from_file_location("check_llm_key_script", module_path)
     module = importlib.util.module_from_spec(spec)
@@ -15,45 +20,65 @@ def _load_check_llm_key_module():
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int, payload=None, text: str = ""):
+    def __init__(
+        self,
+        status_code: int,
+        payload: Any | None = None,
+        text: str = "",
+    ) -> None:
         self.status_code = status_code
         self._payload = payload
         self.text = text
 
-    def json(self):
+    def json(self) -> Any:
         if self._payload is None:
             raise ValueError("no json payload")
         return self._payload
 
 
 def _patch_client(
-    monkeypatch,
-    module,
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
     *,
     status_code: int,
-    payload=None,
+    payload: Any | None = None,
     text: str = "",
-):
-    calls = {}
+) -> dict[str, Any]:
+    calls: dict[str, Any] = {}
 
     class FakeClient:
-        def __init__(self, timeout):
+        def __init__(self, timeout: float) -> None:
             calls["timeout"] = timeout
 
-        def __enter__(self):
+        def __enter__(self) -> FakeClient:
             return self
 
-        def __exit__(self, exc_type, exc, tb):
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            tb: Any,
+        ) -> bool:
             return False
 
-        def get(self, endpoint, headers=None, params=None):
+        def get(
+            self,
+            endpoint: str,
+            headers: dict[str, str] | None = None,
+            params: dict[str, str] | None = None,
+        ) -> _FakeResponse:
             calls["method"] = "get"
             calls["endpoint"] = endpoint
             calls["headers"] = headers
             calls["params"] = params
             return _FakeResponse(status_code, payload=payload, text=text)
 
-        def post(self, endpoint, headers=None, json=None):
+        def post(
+            self,
+            endpoint: str,
+            headers: dict[str, str] | None = None,
+            json: dict[str, Any] | None = None,
+        ) -> _FakeResponse:
             calls["method"] = "post"
             calls["endpoint"] = endpoint
             calls["headers"] = headers
@@ -64,7 +89,12 @@ def _patch_client(
     return calls
 
 
-def _run_main(module, monkeypatch, capsys, argv):
+def _run_main(
+    module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+) -> tuple[int | None, dict[str, Any]]:
     monkeypatch.setattr(module.sys, "argv", ["check_llm_key.py", *argv])
     with pytest.raises(SystemExit) as exc:
         module.main()
@@ -82,8 +112,8 @@ def _run_main(module, monkeypatch, capsys, argv):
         (500, {"valid": False, "message": "OpenAI API returned status 500"}),
     ],
 )
-def test_check_openai_compatible_statuses(monkeypatch, status_code, expected):
-    module = _load_check_llm_key_module()
+def test_check_openai_compatible_statuses(check_llm_key_module, monkeypatch, status_code, expected):
+    module = check_llm_key_module
     calls = _patch_client(monkeypatch, module, status_code=status_code)
 
     result = module.check_openai_compatible(
@@ -109,8 +139,8 @@ def test_check_openai_compatible_statuses(monkeypatch, status_code, expected):
         (500, {"valid": False, "message": "Unexpected status 500"}),
     ],
 )
-def test_check_anthropic_statuses(monkeypatch, status_code, expected):
-    module = _load_check_llm_key_module()
+def test_check_anthropic_statuses(check_llm_key_module, monkeypatch, status_code, expected):
+    module = check_llm_key_module
     calls = _patch_client(monkeypatch, module, status_code=status_code)
 
     result = module.check_anthropic("test-key")
@@ -132,8 +162,8 @@ def test_check_anthropic_statuses(monkeypatch, status_code, expected):
         (500, {"valid": False, "message": "Gemini API returned status 500"}),
     ],
 )
-def test_check_gemini_statuses(monkeypatch, status_code, expected):
-    module = _load_check_llm_key_module()
+def test_check_gemini_statuses(check_llm_key_module, monkeypatch, status_code, expected):
+    module = check_llm_key_module
     calls = _patch_client(monkeypatch, module, status_code=status_code)
 
     result = module.check_gemini("test-key")
@@ -156,8 +186,8 @@ def test_check_gemini_statuses(monkeypatch, status_code, expected):
         (500, {"valid": False, "message": "MiniMax API returned status 500"}),
     ],
 )
-def test_check_minimax_statuses(monkeypatch, status_code, expected):
-    module = _load_check_llm_key_module()
+def test_check_minimax_statuses(check_llm_key_module, monkeypatch, status_code, expected):
+    module = check_llm_key_module
     calls = _patch_client(monkeypatch, module, status_code=status_code)
 
     result = module.check_minimax("test-key")
@@ -179,8 +209,13 @@ def test_check_minimax_statuses(monkeypatch, status_code, expected):
         (500, {"valid": False, "message": "Kimi API returned status 500"}),
     ],
 )
-def test_check_anthropic_compatible_statuses(monkeypatch, status_code, expected):
-    module = _load_check_llm_key_module()
+def test_check_anthropic_compatible_statuses(
+    check_llm_key_module,
+    monkeypatch,
+    status_code,
+    expected,
+):
+    module = check_llm_key_module
     calls = _patch_client(monkeypatch, module, status_code=status_code)
 
     result = module.check_anthropic_compatible(
@@ -195,8 +230,8 @@ def test_check_anthropic_compatible_statuses(monkeypatch, status_code, expected)
     assert calls["headers"]["x-api-key"] == "test-key"
 
 
-def test_check_openrouter_unexpected_status(monkeypatch):
-    module = _load_check_llm_key_module()
+def test_check_openrouter_unexpected_status(check_llm_key_module, monkeypatch):
+    module = check_llm_key_module
     calls = _patch_client(monkeypatch, module, status_code=500)
 
     result = module.check_openrouter("test-key", api_base="https://router.example/v1/")
@@ -208,8 +243,8 @@ def test_check_openrouter_unexpected_status(monkeypatch):
     assert calls["endpoint"] == "https://router.example/v1/models"
 
 
-def test_main_usage_when_args_missing(monkeypatch, capsys):
-    module = _load_check_llm_key_module()
+def test_main_usage_when_args_missing(check_llm_key_module, monkeypatch, capsys):
+    module = check_llm_key_module
     code, payload = _run_main(module, monkeypatch, capsys, [])
 
     assert code == 2
@@ -217,8 +252,8 @@ def test_main_usage_when_args_missing(monkeypatch, capsys):
     assert "Usage: check_llm_key.py" in payload["message"]
 
 
-def test_main_routes_openrouter_model_branch(monkeypatch, capsys):
-    module = _load_check_llm_key_module()
+def test_main_routes_openrouter_model_branch(check_llm_key_module, monkeypatch, capsys):
+    module = check_llm_key_module
     calls = {}
 
     def fake_openrouter_model(api_key, model, api_base):
@@ -244,8 +279,8 @@ def test_main_routes_openrouter_model_branch(monkeypatch, capsys):
     }
 
 
-def test_main_routes_kimi_custom_api_base(monkeypatch, capsys):
-    module = _load_check_llm_key_module()
+def test_main_routes_kimi_custom_api_base(check_llm_key_module, monkeypatch, capsys):
+    module = check_llm_key_module
     calls = {}
 
     def fake_anthropic_compatible(api_key, endpoint, name):
@@ -271,8 +306,8 @@ def test_main_routes_kimi_custom_api_base(monkeypatch, capsys):
     }
 
 
-def test_main_routes_custom_api_base_for_zai(monkeypatch, capsys):
-    module = _load_check_llm_key_module()
+def test_main_routes_custom_api_base_for_zai(check_llm_key_module, monkeypatch, capsys):
+    module = check_llm_key_module
     calls = {}
 
     def fake_openai_compatible(api_key, endpoint, name):
@@ -298,8 +333,8 @@ def test_main_routes_custom_api_base_for_zai(monkeypatch, capsys):
     }
 
 
-def test_main_unknown_provider_exits_zero(monkeypatch, capsys):
-    module = _load_check_llm_key_module()
+def test_main_unknown_provider_exits_zero(check_llm_key_module, monkeypatch, capsys):
+    module = check_llm_key_module
     code, payload = _run_main(module, monkeypatch, capsys, ["unknown-provider", "test-key"])
 
     assert code == 0
@@ -309,8 +344,12 @@ def test_main_unknown_provider_exits_zero(monkeypatch, capsys):
     }
 
 
-def test_main_returns_exit_one_for_invalid_provider_result(monkeypatch, capsys):
-    module = _load_check_llm_key_module()
+def test_main_returns_exit_one_for_invalid_provider_result(
+    check_llm_key_module,
+    monkeypatch,
+    capsys,
+):
+    module = check_llm_key_module
     monkeypatch.setitem(
         module.PROVIDERS,
         "openai",
@@ -323,8 +362,8 @@ def test_main_returns_exit_one_for_invalid_provider_result(monkeypatch, capsys):
     assert payload == {"valid": False, "message": "bad key"}
 
 
-def test_main_timeout_exception_exits_two(monkeypatch, capsys):
-    module = _load_check_llm_key_module()
+def test_main_timeout_exception_exits_two(check_llm_key_module, monkeypatch, capsys):
+    module = check_llm_key_module
 
     def raise_timeout(_key):
         raise module.httpx.TimeoutException("timed out")
@@ -336,8 +375,8 @@ def test_main_timeout_exception_exits_two(monkeypatch, capsys):
     assert payload == {"valid": None, "message": "Request timed out"}
 
 
-def test_main_request_error_redacts_api_key(monkeypatch, capsys):
-    module = _load_check_llm_key_module()
+def test_main_request_error_redacts_api_key(check_llm_key_module, monkeypatch, capsys):
+    module = check_llm_key_module
 
     def raise_request_error(api_key):
         request = module.httpx.Request("GET", "https://example.test/models")
@@ -351,3 +390,4 @@ def test_main_request_error_redacts_api_key(monkeypatch, capsys):
     assert payload["message"].startswith("Connection failed: ")
     assert "***" in payload["message"]
     assert "super-secret-key" not in payload["message"]
+
