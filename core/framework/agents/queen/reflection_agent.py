@@ -38,6 +38,7 @@ from framework.agents.queen.queen_memory_v2 import (
     build_diary_document,
     diary_filename,
     format_memory_manifest,
+    parse_frontmatter,
     read_conversation_parts,
     scan_memory_files,
 )
@@ -134,7 +135,29 @@ def _safe_memory_path(filename: str, memory_dir: Path) -> Path:
     return candidate
 
 
-def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
+# Memory types that workers are NOT allowed to write.
+_WORKER_BLOCKED_TYPES: frozenset[str] = frozenset(
+    {"environment", "technique", "reference", "diary", "goal"}
+)
+
+
+def _inject_last_modified_by(content: str, caller: str) -> str:
+    """Inject or update ``last_modified_by`` in frontmatter."""
+    m = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
+    if not m:
+        return content
+    fm_body = m.group(1)
+    # Remove existing last_modified_by line if present.
+    fm_lines = [
+        ln for ln in fm_body.splitlines()
+        if not ln.strip().lower().startswith("last_modified_by")
+    ]
+    fm_lines.append(f"last_modified_by: {caller}")
+    new_fm = "\n".join(fm_lines)
+    return f"---\n{new_fm}\n---{content[m.end():]}"
+
+
+def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path, caller: str) -> str:
     """Execute a reflection tool synchronously.  Returns the result string."""
     if name == "list_memory_files":
         files = scan_memory_files(memory_dir)
@@ -161,6 +184,16 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
         content = args.get("content", "")
         if not filename.endswith(".md"):
             return "ERROR: Filename must end with .md"
+        # Enforce caller-based type restrictions.
+        fm = parse_frontmatter(content)
+        mem_type = (fm.get("type") or "").strip().lower()
+        if caller == "worker" and mem_type in _WORKER_BLOCKED_TYPES:
+            return (
+                f"ERROR: Workers cannot write memory type '{mem_type}'. "
+                f"Blocked types for workers: {', '.join(sorted(_WORKER_BLOCKED_TYPES))}."
+            )
+        # Inject last_modified_by into frontmatter.
+        content = _inject_last_modified_by(content, caller)
         # Enforce file size limit.
         if len(content.encode("utf-8")) > MAX_FILE_SIZE_BYTES:
             return f"ERROR: Content exceeds {MAX_FILE_SIZE_BYTES} byte limit."
@@ -175,7 +208,7 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
                 return f"ERROR: File cap reached ({MAX_FILES}).  Delete a file first."
         memory_dir.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        logger.debug("reflect: tool write_memory_file → %s (%d chars)", filename, len(content))
+        logger.debug("reflect: tool write_memory_file [%s] → %s (%d chars)", caller, filename, len(content))
         return f"Wrote {filename} ({len(content)} chars)."
 
     if name == "delete_memory_file":
@@ -187,7 +220,7 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
         if not path.exists():
             return f"ERROR: File not found: {filename}"
         path.unlink()
-        logger.debug("reflect: tool delete_memory_file → %s", filename)
+        logger.debug("reflect: tool delete_memory_file [%s] → %s", caller, filename)
         return f"Deleted {filename}."
 
     return f"ERROR: Unknown tool: {name}"
@@ -205,18 +238,23 @@ async def _reflection_loop(
     system: str,
     user_msg: str,
     memory_dir: Path,
+    caller: str,
     max_turns: int = _MAX_TURNS,
-) -> bool:
+) -> tuple[bool, list[str], str]:
     """Run a mini tool-use loop: LLM → tool calls → repeat.
 
     Hard cap of *max_turns* iterations.  Prompt nudges the LLM toward a
     2-turn pattern (batch reads in turn 1, batch writes in turn 2).
 
-    Returns ``True`` if the loop completed without LLM errors, ``False``
-    if an LLM call failed (cursor should not advance).
+    Returns a tuple of (success, changed_files, last_text) where *success*
+    is ``True`` if the loop completed without LLM errors, *changed_files*
+    lists filenames that were written or deleted, and *last_text* is the
+    final assistant text (useful as a skip-reason when no files changed).
     """
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_msg}]
-    logger.debug("reflect: starting loop (max %d turns)", max_turns)
+    changed_files: list[str] = []
+    last_text: str = ""
+    logger.debug("reflect: starting loop (caller=%s, max %d turns)", caller, max_turns)
 
     for _turn in range(max_turns):
         try:
@@ -228,16 +266,17 @@ async def _reflection_loop(
             )
         except Exception:
             logger.warning("reflect: LLM call failed", exc_info=True)
-            return False
+            return False, changed_files, last_text
 
         # Build assistant message.
         tool_calls_raw: list[dict[str, Any]] = []
         if resp.raw_response and isinstance(resp.raw_response, dict):
             tool_calls_raw = resp.raw_response.get("tool_calls", [])
 
+        last_text = resp.content or ""
         assistant_msg: dict[str, Any] = {
             "role": "assistant",
-            "content": resp.content or "",
+            "content": last_text,
         }
         if tool_calls_raw:
             # Convert to OpenAI format for the conversation.
@@ -262,14 +301,19 @@ async def _reflection_loop(
         # Execute each tool call and append results.
         logger.debug("reflect: turn %d — executing %d tool call(s): %s", _turn + 1, len(tool_calls_raw), [tc["name"] for tc in tool_calls_raw])
         for tc in tool_calls_raw:
-            result = _execute_tool(tc["name"], tc.get("input", {}), memory_dir)
+            result = _execute_tool(tc["name"], tc.get("input", {}), memory_dir, caller)
+            # Track files that were written or deleted.
+            if tc["name"] in ("write_memory_file", "delete_memory_file"):
+                fname = tc.get("input", {}).get("filename", "")
+                if fname and not result.startswith("ERROR"):
+                    changed_files.append(fname)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
                 "content": result,
             })
 
-    return True
+    return True, changed_files, last_text
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +348,7 @@ Rules:
 - If an existing memory already covers the learning, UPDATE it rather than
   creating a duplicate.
 - If there is nothing worth remembering from these messages, do nothing
-  (just respond with a short note — no tool calls needed).
+  (respond with a brief reason why nothing was saved — no tool calls needed).
 - File names should be kebab-case slugs ending in .md.
 - Include a specific, search-friendly description in the frontmatter.
 - Do NOT exceed {MAX_FILE_SIZE_BYTES} bytes per file or {MAX_FILES} total files.
@@ -367,16 +411,18 @@ async def run_short_reflection(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
+    *,
+    caller: str,
 ) -> None:
     """Run a short reflection: extract learnings from conversation."""
     mem_dir = memory_dir or MEMORY_DIR
 
     messages = await read_conversation_parts(session_dir)
     if not messages:
-        logger.debug("reflect: short — no conversation parts")
+        logger.debug("reflect: short [%s] — no conversation parts", caller)
         return
 
-    logger.debug("reflect: short — %d conversation parts", len(messages))
+    logger.debug("reflect: short [%s] — %d conversation parts", caller, len(messages))
 
     # Build a readable transcript from recent messages.
     transcript_lines: list[str] = []
@@ -402,23 +448,30 @@ async def run_short_reflection(
         f"Timestamp: {datetime.now().isoformat(timespec='minutes')}"
     )
 
-    await _reflection_loop(llm, _SHORT_REFLECT_SYSTEM, user_msg, mem_dir)
-    logger.debug("reflect: short reflection done")
+    _, changed, reason = await _reflection_loop(
+        llm, _SHORT_REFLECT_SYSTEM, user_msg, mem_dir, caller=caller,
+    )
+    if changed:
+        logger.debug("reflect: short reflection done [%s], changed files: %s", caller, changed)
+    else:
+        logger.debug("reflect: short reflection done [%s], no changes — %s", caller, reason or "no reason given")
 
 
 async def run_long_reflection(
     llm: Any,
     memory_dir: Path | None = None,
+    *,
+    caller: str,
 ) -> None:
     """Run a long reflection: organise and deduplicate all memories."""
     mem_dir = memory_dir or MEMORY_DIR
     files = scan_memory_files(mem_dir)
 
     if not files:
-        logger.debug("reflect: long — no memory files to organise")
+        logger.debug("reflect: long [%s] — no memory files to organise", caller)
         return
 
-    logger.debug("reflect: long — organising %d memory files", len(files))
+    logger.debug("reflect: long [%s] — organising %d memory files", caller, len(files))
     manifest = format_memory_manifest(files)
     user_msg = (
         f"## Current memory manifest ({len(files)} files)\n\n"
@@ -426,8 +479,13 @@ async def run_long_reflection(
         f"Timestamp: {datetime.now().isoformat(timespec='minutes')}"
     )
 
-    await _reflection_loop(llm, _LONG_REFLECT_SYSTEM, user_msg, mem_dir)
-    logger.debug("reflect: long reflection done (%d files)", len(files))
+    _, changed, reason = await _reflection_loop(
+        llm, _LONG_REFLECT_SYSTEM, user_msg, mem_dir, caller=caller,
+    )
+    if changed:
+        logger.debug("reflect: long reflection done [%s] (%d files), changed files: %s", caller, len(files), changed)
+    else:
+        logger.debug("reflect: long reflection done [%s] (%d files), no changes — %s", caller, len(files), reason or "no reason given")
 
 
 async def run_diary_update(
@@ -543,10 +601,10 @@ async def subscribe_reflection_triggers(
                 _short_count += 1
                 logger.debug("reflect: turn complete — short count %d/%d", _short_count, _LONG_REFLECT_INTERVAL)
                 if _short_count % _LONG_REFLECT_INTERVAL == 0:
-                    await run_short_reflection(session_dir, llm, mem_dir)
-                    await run_long_reflection(llm, mem_dir)
+                    await run_short_reflection(session_dir, llm, mem_dir, caller="queen")
+                    await run_long_reflection(llm, mem_dir, caller="queen")
                 else:
-                    await run_short_reflection(session_dir, llm, mem_dir)
+                    await run_short_reflection(session_dir, llm, mem_dir, caller="queen")
             except Exception:
                 logger.warning("reflect: reflection failed", exc_info=True)
                 _write_error("short/long reflection")
@@ -593,7 +651,7 @@ async def subscribe_reflection_triggers(
 
         async with _lock:
             try:
-                await run_long_reflection(llm, mem_dir)
+                await run_long_reflection(llm, mem_dir, caller="queen")
             except Exception:
                 logger.warning("reflect: compaction-triggered reflection failed", exc_info=True)
                 _write_error("compaction reflection")
@@ -654,7 +712,7 @@ async def subscribe_worker_memory_triggers(
             return
         async with _terminal_lock:
             try:
-                await run_long_reflection(llm, colony_memory_dir)
+                await run_long_reflection(llm, colony_memory_dir, caller="worker")
             except Exception:
                 logger.warning("reflect: worker final reflection failed", exc_info=True)
                 _write_error("worker final reflection")

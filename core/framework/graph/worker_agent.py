@@ -676,7 +676,8 @@ class WorkerAgent:
                 from framework.agents.queen.reflection_agent import run_short_reflection
 
                 await run_short_reflection(
-                    session_dir, gc.colony_reflect_llm, gc.colony_memory_dir
+                    session_dir, gc.colony_reflect_llm, gc.colony_memory_dir,
+                    caller="worker",
                 )
             except Exception:
                 logger.warning(
