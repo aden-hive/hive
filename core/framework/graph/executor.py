@@ -1360,6 +1360,7 @@ class GraphExecutor:
                             source_node_spec=node_spec,
                             path=path,
                             node_registry=node_registry,
+                            node_latencies=node_latencies,
                         )
 
                         total_tokens += branch_tokens
@@ -2145,6 +2146,7 @@ class GraphExecutor:
         source_node_spec: Any,
         path: list[str],
         node_registry: dict[str, NodeSpec] | None = None,
+        node_latencies: dict[str, int] | None = None,
     ) -> tuple[dict[str, NodeResult], int, int]:
         """
         Execute multiple branches in parallel using asyncio.gather.
@@ -2380,6 +2382,11 @@ class GraphExecutor:
                 else:
                     total_tokens += node_result.tokens_used
                     total_latency += node_result.latency_ms
+                    if node_latencies is not None:
+                        node_latencies[returned_branch.node_id] = (
+                            node_latencies.get(returned_branch.node_id, 0)
+                            + node_result.latency_ms
+                        )
                     branch_results[returned_branch.branch_id] = node_result
 
         # Handle failures based on config
