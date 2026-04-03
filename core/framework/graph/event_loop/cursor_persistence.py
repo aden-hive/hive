@@ -151,6 +151,7 @@ async def drain_injection_queue(
 ) -> int:
     """Drain all pending injected events as user messages. Returns count."""
     count = 0
+    logger.debug("[drain_injection_queue] Starting to drain queue, initial queue size: %s", queue.qsize() if hasattr(queue, 'qsize') else 'unknown')
     while not queue.empty():
         try:
             content, is_client_input, image_content = queue.get_nowait()

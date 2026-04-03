@@ -974,6 +974,8 @@ class SessionManager:
         """
         from framework.server.queen_orchestrator import create_queen
 
+        logger.debug("[_start_queen] Starting for session %s, current queen_executor=%s", session.id, session.queen_executor)
+
         hive_home = Path.home() / ".hive"
 
         # Determine which session directory to use for queen storage.
@@ -1057,6 +1059,7 @@ class SessionManager:
             pass
         session.event_bus.set_session_log(events_path, iteration_offset=iteration_offset)
 
+        logger.debug("[_start_queen] Calling create_queen...")
         session.queen_task = await create_queen(
             session=session,
             session_manager=self,
@@ -1064,6 +1067,7 @@ class SessionManager:
             queen_dir=queen_dir,
             initial_prompt=initial_prompt,
         )
+        logger.debug("[_start_queen] create_queen returned, queen_task=%s, queen_executor=%s", session.queen_task, session.queen_executor)
 
         # Auto-load worker on cold restore — the queen's conversation expects
         # the agent to be loaded, but the new session has no worker.
@@ -1229,19 +1233,23 @@ class SessionManager:
         """
         from framework.tools.queen_lifecycle_tools import build_worker_profile
 
+        logger.debug("[revive_queen] Starting revival for session '%s', current queen_executor=%s", session.id, session.queen_executor)
+
         # Build worker identity if worker is loaded
         worker_identity = (
             build_worker_profile(session.graph_runtime, agent_path=session.worker_path)
             if session.graph_runtime
             else None
         )
+        logger.debug("[revive_queen] worker_identity=%s", "present" if worker_identity else "None")
 
         # Start queen with existing session context
+        logger.debug("[revive_queen] Calling _start_queen...")
         await self._start_queen(
             session, worker_identity=worker_identity, initial_prompt=initial_prompt
         )
 
-        logger.info("Queen revived for session '%s'", session.id)
+        logger.info("Queen revived for session '%s', new queen_executor=%s", session.id, session.queen_executor)
 
     # ------------------------------------------------------------------
     # Lookups

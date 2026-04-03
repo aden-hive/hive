@@ -201,6 +201,7 @@ class GraphExecutor:
         self.approval_callback = approval_callback
         self.validator = OutputValidator()
         self.logger = logging.getLogger(__name__)
+        self.logger.debug("[GraphExecutor.__init__] Created with stream_id=%s, execution_id=%s, initial node_registry keys: %s", stream_id, execution_id, list(self.node_registry.keys()))
         self._event_bus = event_bus
         self._stream_id = stream_id
         self._execution_id = execution_id or getattr(runtime, "execution_id", "")
@@ -730,7 +731,9 @@ class GraphExecutor:
         """Get or create a node implementation."""
         # Check registry first
         if node_spec.id in self.node_registry:
+            logger.debug("[GraphExecutor._get_node_implementation] Found node '%s' in registry", node_spec.id)
             return self.node_registry[node_spec.id]
+        logger.debug("[GraphExecutor._get_node_implementation] Node '%s' not in registry (keys: %s), creating new", node_spec.id, list(self.node_registry.keys()))
 
         # Reject removed node types with migration guidance
         if node_spec.node_type in self.REMOVED_NODE_TYPES:
@@ -796,6 +799,7 @@ class GraphExecutor:
             )
             # Cache so inject_event() is reachable for queen interaction and escalation routing
             self.node_registry[node_spec.id] = node
+            logger.debug("[GraphExecutor._get_node_implementation] Cached node '%s' in node_registry, registry now has keys: %s", node_spec.id, list(self.node_registry.keys()))
             return node
 
         # Should never reach here due to validation above

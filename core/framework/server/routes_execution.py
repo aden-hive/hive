@@ -128,6 +128,7 @@ async def handle_chat(request: web.Request) -> web.Response:
     """
     session, err = resolve_session(request)
     if err:
+        logger.debug("[handle_chat] Session resolution failed: %s", err)
         return err
 
     body = await request.json()
@@ -135,14 +136,44 @@ async def handle_chat(request: web.Request) -> web.Response:
     display_message = body.get("display_message")
     image_content = body.get("images") or None  # list[dict] | None
 
+    logger.debug("[handle_chat] session_id=%s, message_len=%d, has_images=%s", 
+                 session.id, len(message), bool(image_content))
+    logger.debug("[handle_chat] session.queen_executor=%s", session.queen_executor)
+
     if not message and not image_content:
         return web.json_response({"error": "message is required"}, status=400)
 
     queen_executor = session.queen_executor
     if queen_executor is not None:
+        logger.debug("[handle_chat] Queen executor exists, looking for 'queen' node...")
+        logger.debug("[handle_chat] node_registry type=%s, id=%s", type(queen_executor.node_registry), id(queen_executor.node_registry))
+        logger.debug("[handle_chat] node_registry keys: %s", list(queen_executor.node_registry.keys()))
         node = queen_executor.node_registry.get("queen")
+        logger.debug("[handle_chat] node=%s, node_type=%s", node, type(node).__name__ if node else None)
+        logger.debug("[handle_chat] has_inject_event=%s", hasattr(node, "inject_event") if node else False)
+        
+        # Race condition: executor exists but node not created yet (still initializing)
+        if node is None and session.queen_task is not None and not session.queen_task.done():
+            logger.warning("[handle_chat] Queen executor exists but node not ready yet (initializing). Waiting...")
+            # Wait a short time for initialization to progress
+            import asyncio
+            for _ in range(50):  # Max 5 seconds
+                await asyncio.sleep(0.1)
+                node = queen_executor.node_registry.get("queen")
+                if node is not None:
+                    logger.debug("[handle_chat] Node appeared after waiting")
+                    break
+            else:
+                logger.error("[handle_chat] Node still not available after 5s wait")
+        
         if node is not None and hasattr(node, "inject_event"):
-            await node.inject_event(message, is_client_input=True, image_content=image_content)
+            try:
+                logger.debug("[handle_chat] Calling node.inject_event()...")
+                await node.inject_event(message, is_client_input=True, image_content=image_content)
+                logger.debug("[handle_chat] inject_event() completed successfully")
+            except Exception as e:
+                logger.exception("[handle_chat] inject_event() failed: %s", e)
+                raise
             # Publish to EventBus so the session event log captures user messages
             from framework.runtime.event_bus import AgentEvent, EventType
 
@@ -166,14 +197,24 @@ async def handle_chat(request: web.Request) -> web.Response:
                     "delivered": True,
                 }
             )
+        else:
+            if node is None:
+                logger.error("[handle_chat] CRITICAL: Queen node is None! node_registry has %d keys: %s, queen_task=%s, queen_task_done=%s", 
+                             len(queen_executor.node_registry), list(queen_executor.node_registry.keys()),
+                             session.queen_task, session.queen_task.done() if session.queen_task else None)
+            else:
+                logger.error("[handle_chat] CRITICAL: Queen node exists but missing inject_event! node_attrs=%s", 
+                             [a for a in dir(node) if not a.startswith('_')])
 
     # Queen is dead — try to revive her
     logger.warning(
-        "Queen is dead for session '%s', reviving on /chat request", session.id
+        "[handle_chat] Queen is dead for session '%s', reviving on /chat request", session.id
     )
     manager: Any = request.app["manager"]
     try:
+        logger.debug("[handle_chat] Calling manager.revive_queen()...")
         await manager.revive_queen(session, initial_prompt=message)
+        logger.debug("[handle_chat] revive_queen() completed successfully")
         return web.json_response(
             {
                 "status": "queen_revived",
@@ -181,7 +222,7 @@ async def handle_chat(request: web.Request) -> web.Response:
             }
         )
     except Exception as e:
-        logger.error("Failed to revive queen: %s", e)
+        logger.exception("[handle_chat] Failed to revive queen: %s", e)
         return web.json_response({"error": "Queen not available"}, status=503)
 
 
