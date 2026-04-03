@@ -106,12 +106,15 @@ async def test_spa_navigation():
         </html>
         """
 
-        data_url = f"data:text/html;base64,{base64.b64encode(spa_html.encode()).decode()}"
+        # Write to file and use file:// URL (data: URLs don't work well with extension)
+        test_file = Path("/tmp/spa_test.html")
+        test_file.write_text(spa_html.strip())
+        file_url = f"file://{test_file}"
 
         # Test 1: wait_until="load" - may fire before content ready
         print("\n--- Test 1: wait_until='load' ---")
         start = time.perf_counter()
-        await bridge.navigate(tab_id, data_url, wait_until="load")
+        await bridge.navigate(tab_id, file_url, wait_until="load")
         elapsed = time.perf_counter() - start
         print(f"Navigation completed in {elapsed:.3f}s")
 
@@ -159,7 +162,7 @@ async def test_spa_navigation():
 
         # Test 3: wait_until="networkidle"
         print("\n--- Test 3: wait_until='networkidle' ---")
-        await bridge.navigate(tab_id, data_url, wait_until="networkidle", timeout_ms=10000)
+        await bridge.navigate(tab_id, file_url, wait_until="networkidle", timeout_ms=10000)
 
         # Check content immediately
         content_networkidle = await bridge.evaluate(

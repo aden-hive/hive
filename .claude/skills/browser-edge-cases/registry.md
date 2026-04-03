@@ -14,9 +14,9 @@ Curated list of known browser automation edge cases with symptoms, causes, and f
 | **Symptom** | `browser_scroll()` returns `{ok: true}` but page doesn't move |
 | **Root Cause** | Content is in a nested scrollable div (`overflow: scroll`), not the main window |
 | **Detection** | `document.querySelectorAll('*')` with `overflow: scroll/auto` has large candidates |
-| **Fix** | Find largest scrollable container, dispatch mouse wheel at its center coordinates |
-| **Code** | `bridge.py:808-981` - smart scroll with container detection |
-| **Verified** | 2026-04-02 |
+| **Fix** | JavaScript finds largest scrollable container, uses `container.scrollBy()` |
+| **Code** | `bridge.py:808-891` - smart scroll with container detection |
+| **Verified** | 2026-04-03 ✓ |
 
 ### #2: Twitter/X Lazy Loading
 
@@ -80,7 +80,7 @@ Curated list of known browser automation edge cases with symptoms, causes, and f
 | **Detection** | `element.shadowRoot !== null` on parent elements |
 | **Fix** | Use piercing selector (`host >>> target`) or traverse shadow roots |
 | **Code** | See SKILL.md P6 pattern |
-| **Verified** | - |
+| **Verified** | 2026-04-03 ✓ |
 
 ---
 
@@ -96,7 +96,7 @@ Curated list of known browser automation edge cases with symptoms, causes, and f
 | **Detection** | `element.contentEditable === 'true'` |
 | **Fix** | Focus via JavaScript, use `execCommand('insertText')` or `Input.dispatchKeyEvent` |
 | **Code** | `bridge.py:616-694` - contentEditable handling |
-| **Verified** | - |
+| **Verified** | 2026-04-03 ✓ |
 
 ### #8: Autocomplete Field Clearing
 
@@ -108,7 +108,7 @@ Curated list of known browser automation edge cases with symptoms, causes, and f
 | **Detection** | Field has autocomplete listeners or dropdown appears |
 | **Fix** | Add `delay_ms=50` between keystrokes |
 | **Code** | `bridge.py:type()` - delay_ms parameter |
-| **Verified** | - |
+| **Verified** | 2026-04-03 ✓ |
 
 ### #9: Custom Date Pickers
 
@@ -134,9 +134,9 @@ Curated list of known browser automation edge cases with symptoms, causes, and f
 | **Symptom** | `browser_snapshot()` hangs forever |
 | **Root Cause** | 10k+ DOM nodes, accessibility tree has 50k+ nodes |
 | **Detection** | `document.querySelectorAll('*').length > 5000` |
-| **Fix** | Add timeout (10s default), truncate tree at 2000 nodes |
-| **Code** | `bridge.py:1005-1050` - timeout_s param, max_nodes limit |
-| **Verified** | 2026-04-02 |
+| **Fix** | Add `timeout_s` param with `asyncio.timeout()`, proper error handling |
+| **Code** | `bridge.py:1041-1028` - snapshot with timeout protection |
+| **Verified** | 2026-04-03 ✓ (0.08s on LinkedIn) |
 
 ### #11: SPA Hydration Delay
 
@@ -192,6 +192,34 @@ Curated list of known browser automation edge cases with symptoms, causes, and f
 
 ---
 
+## Screenshot Issues
+
+### #15: Selector Screenshot Not Implemented
+
+| Attribute | Value |
+|-----------|-------|
+| **Site** | Any site |
+| **Symptom** | `browser_screenshot(selector="h1")` takes full viewport instead of element |
+| **Root Cause** | `selector` param existed in signature but was silently ignored in both `bridge.py` and `inspection.py` |
+| **Detection** | Screenshot with selector same byte size as screenshot without selector |
+| **Fix** | Use CDP `Runtime.evaluate` to call `getBoundingClientRect()` on the element, pass result as `clip` to `Page.captureScreenshot` |
+| **Code** | `bridge.py:1315-1344` - selector clip logic; `inspection.py:94-96` - pass selector to bridge |
+| **Verified** | 2026-04-03 ✓ (JS rect query returns correct viewport coords; requires server restart) |
+
+### #16: Stale Browser Context (Group ID Mismatch)
+
+| Attribute | Value |
+|-----------|-------|
+| **Site** | Any |
+| **Symptom** | `browser_open()` returns `"No group with id: XXXXXXX"` even though `browser_status` shows `running: true` |
+| **Root Cause** | In-memory `_contexts` dict has a stale `groupId` from a Chrome tab group that was closed outside the tool (e.g. user closed the tab group) |
+| **Detection** | `browser_status` returns `running: true` but `browser_open` fails with "No group with id" |
+| **Fix** | Call `browser_stop()` to clear stale context from `_contexts`, then `browser_start()` again |
+| **Code** | `tools/lifecycle.py:144-160` - `already_running` check uses cached dict without validating against Chrome |
+| **Verified** | 2026-04-03 ✓ |
+
+---
+
 ## How to Add New Edge Cases
 
 1. **Reproduce** the issue with minimal test case
@@ -227,6 +255,7 @@ Curated list of known browser automation edge cases with symptoms, causes, and f
 | Input Issues | 3 |
 | Snapshot Issues | 3 |
 | Navigation Issues | 2 |
-| **Total** | **14** |
+| Screenshot Issues | 2 |
+| **Total** | **16** |
 
-Last updated: 2026-04-02
+Last updated: 2026-04-03

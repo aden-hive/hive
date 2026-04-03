@@ -154,8 +154,11 @@ async def test_autocomplete():
         </html>
         """
 
-        data_url = f"data:text/html;base64,{base64.b64encode(test_html.encode()).decode()}"
-        await bridge.navigate(tab_id, data_url, wait_until="load")
+        # Write to file and use file:// URL (data: URLs don't work well with extension)
+        test_file = Path("/tmp/autocomplete_test.html")
+        test_file.write_text(test_html.strip())
+        file_url = f"file://{test_file}"
+        await bridge.navigate(tab_id, file_url, wait_until="load")
         print("✓ Page loaded")
 
         # Screenshot
@@ -165,7 +168,7 @@ async def test_autocomplete():
         # Test 1: Fast typing (no delay) - may fail
         print("\n--- Test 1: Fast typing (delay_ms=0) ---")
         await bridge.click(tab_id, "#search")
-        await bridge.type(tab_id, "#search", "Ger", clear_first=True, delay_ms=0)
+        await bridge.type_text(tab_id, "#search", "Ger", clear_first=True, delay_ms=0)
         await asyncio.sleep(0.5)
 
         fast_result = await bridge.evaluate(
@@ -185,7 +188,7 @@ async def test_autocomplete():
         # Test 2: Slow typing (with delay) - should work
         print("\n--- Test 2: Slow typing (delay_ms=100) ---")
         await bridge.click(tab_id, "#search")
-        await bridge.type(tab_id, "#search", "United", clear_first=True, delay_ms=100)
+        await bridge.type_text(tab_id, "#search", "United", clear_first=True, delay_ms=100)
         await asyncio.sleep(0.5)
 
         slow_result = await bridge.evaluate(

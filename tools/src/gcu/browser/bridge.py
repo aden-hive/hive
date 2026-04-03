@@ -41,6 +41,10 @@ BRIDGE_PORT = 9229
 # CDP wait_until values
 VALID_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
 
+# Last interaction highlight per tab_id: {x, y, w, h, label, kind}
+# kind: "rect" (element) or "point" (coordinate)
+_interaction_highlights: dict[int, dict] = {}
+
 
 def _get_active_profile() -> str:
     """Get the current active profile from context variable."""
@@ -301,7 +305,9 @@ class BeelineBridge:
                     "Runtime.evaluate",
                     {"expression": "document.readyState", "returnByValue": True},
                 )
-                ready_state = eval_result.get("result", {}).get("result", {}).get("value", "")
+                ready_state = (
+                    (eval_result or {}).get("result", {}).get("result", {}).get("value", "")
+                )
 
                 if wait_until == "domcontentloaded" and ready_state in ("interactive", "complete"):
                     break
@@ -333,8 +339,8 @@ class BeelineBridge:
         return {
             "ok": True,
             "tabId": tab_id,
-            "url": url_result.get("result", {}).get("result", {}).get("value", ""),
-            "title": title_result.get("result", {}).get("result", {}).get("value", ""),
+            "url": (url_result or {}).get("result", {}).get("result", {}).get("value", ""),
+            "title": (title_result or {}).get("result", {}).get("result", {}).get("value", ""),
         }
 
     async def go_back(self, tab_id: int) -> dict:
@@ -352,7 +358,7 @@ class BeelineBridge:
         return {
             "ok": True,
             "action": "back",
-            "url": result.get("result", {}).get("result", {}).get("value", ""),
+            "url": (result or {}).get("result", {}).get("result", {}).get("value", ""),
         }
 
     async def go_forward(self, tab_id: int) -> dict:
@@ -369,7 +375,7 @@ class BeelineBridge:
         return {
             "ok": True,
             "action": "forward",
-            "url": result.get("result", {}).get("result", {}).get("value", ""),
+            "url": (result or {}).get("result", {}).get("result", {}).get("value", ""),
         }
 
     async def reload(self, tab_id: int) -> dict:
@@ -386,7 +392,7 @@ class BeelineBridge:
         return {
             "ok": True,
             "action": "reload",
-            "url": result.get("result", {}).get("result", {}).get("value", ""),
+            "url": (result or {}).get("result", {}).get("result", {}).get("value", ""),
         }
 
     # ── Interaction ────────────────────────────────────────────────────────────
@@ -451,7 +457,7 @@ class BeelineBridge:
             })();
         """
         viewport_result = await self.evaluate(tab_id, viewport_script)
-        viewport = viewport_result.get("result", {}).get("value", {})
+        viewport = (viewport_result or {}).get("result") or {}
         viewport_width = viewport.get("width", 1920)
         viewport_height = viewport.get("height", 1080)
 
@@ -487,10 +493,13 @@ class BeelineBridge:
 
         try:
             result = await self.evaluate(tab_id, click_script)
-            value = result.get("result", {}).get("value")
+            value = (result or {}).get("result")
 
             if isinstance(value, dict) and "error" not in value:
-                # JavaScript click succeeded
+                # JavaScript click succeeded — highlight element
+                rx = value.get("x", 0) - value.get("width", 0) / 2
+                ry = value.get("y", 0) - value.get("height", 0) / 2
+                await self.highlight_rect(tab_id, rx, ry, value.get("width", 0), value.get("height", 0), label=selector)
                 return {
                     "ok": True,
                     "action": "click",
@@ -522,7 +531,7 @@ class BeelineBridge:
             }})();
         """
         bounds_result = await self.evaluate(tab_id, bounds_script)
-        bounds_value = bounds_result.get("result", {}).get("value")
+        bounds_value = (bounds_result or {}).get("result")
 
         if not bounds_value:
             return {"ok": False, "error": f"Could not get element bounds: {selector}"}
@@ -587,6 +596,9 @@ class BeelineBridge:
             except asyncio.TimeoutError:
                 pass  # Continue even if timeout
 
+            w = bounds_value.get("width", 0)
+            h = bounds_value.get("height", 0)
+            await self.highlight_rect(tab_id, x - w / 2, y - h / 2, w, h, label=selector)
             return {"ok": True, "action": "click", "selector": selector, "x": x, "y": y, "method": "cdp"}
 
         except Exception as e:
@@ -595,6 +607,7 @@ class BeelineBridge:
     async def click_coordinate(self, tab_id: int, x: float, y: float, button: str = "left") -> dict:
         """Click at specific coordinates."""
         await self.cdp_attach(tab_id)
+        await self._try_enable_domain(tab_id, "DOM")
         await self._try_enable_domain(tab_id, "Input")
 
         button_map = {"left": "left", "right": "right", "middle": "middle"}
@@ -611,6 +624,7 @@ class BeelineBridge:
             {"type": "mouseReleased", "x": x, "y": y, "button": cdp_button, "clickCount": 1},
         )
 
+        await self.highlight_point(tab_id, x, y, label=f"click ({x},{y})")
         return {"ok": True, "action": "click_coordinate", "x": x, "y": y}
 
     async def type_text(
@@ -657,14 +671,14 @@ class BeelineBridge:
         """
 
         focus_result = await self.evaluate(tab_id, focus_script)
-        success = focus_result.get("result", {}).get("value", False)
+        success = (focus_result or {}).get("result", False)
 
         if not success:
             # Element not found - wait and retry
             deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
             while asyncio.get_event_loop().time() < deadline:
                 result = await self.evaluate(tab_id, focus_script)
-                if result.get("result", {}).get("value", False):
+                if result and (result or {}).get("result", False):
                     success = True
                     break
                 await asyncio.sleep(0.1)
@@ -691,6 +705,15 @@ class BeelineBridge:
             if delay_ms > 0:
                 await asyncio.sleep(delay_ms / 1000)
 
+        # Highlight the element that was typed into
+        rect_result = await self.evaluate(
+            tab_id,
+            f"(function(){{const el=document.querySelector({json.dumps(selector)});if(!el)return null;"
+            f"const r=el.getBoundingClientRect();return{{x:r.left,y:r.top,w:r.width,h:r.height}};}})()",
+        )
+        rect = (rect_result or {}).get("result")
+        if rect:
+            await self.highlight_rect(tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label=selector)
         return {"ok": True, "action": "type", "selector": selector, "length": len(text)}
 
     async def press_key(self, tab_id: int, key: str, selector: str | None = None) -> dict:
@@ -745,8 +768,44 @@ class BeelineBridge:
 
         return {"ok": True, "action": "press", "key": key}
 
+    # Shared JS snippet: shadow-piercing querySelector via ">>>" separator
+    _SHADOW_QUERY_JS = """
+        function _shadowQuery(sel) {
+            const parts = sel.split('>>>').map(s => s.trim());
+            let node = document;
+            for (const part of parts) {
+                if (!node) return null;
+                node = (node.shadowRoot || node).querySelector(part);
+            }
+            return node;
+        }
+    """
+
+    async def shadow_query(self, tab_id: int, selector: str) -> dict:
+        """querySelector that pierces shadow roots using '>>>' separator.
+
+        Returns CSS-pixel getBoundingClientRect of the matched element.
+        Example: '#interop-outlet >>> #ember37 >>> p'
+        """
+        await self.cdp_attach(tab_id)
+        script = (
+            f"{self._SHADOW_QUERY_JS}"
+            f"(function(){{"
+            f"const el=_shadowQuery({json.dumps(selector)});"
+            f"if(!el)return null;"
+            f"const r=el.getBoundingClientRect();"
+            f"return{{found:true,tag:el.tagName,x:r.left,y:r.top,w:r.width,h:r.height,"
+            f"cx:r.left+r.width/2,cy:r.top+r.height/2}};"
+            f"}})()"
+        )
+        result = await self.evaluate(tab_id, script)
+        rect = (result or {}).get("result")
+        if not rect:
+            return {"ok": False, "error": f"Element not found: {selector}"}
+        return {"ok": True, "selector": selector, "rect": rect}
+
     async def hover(self, tab_id: int, selector: str, timeout_ms: int = 30000) -> dict:
-        """Hover over an element.
+        """Hover over an element. Supports '>>>' shadow-piercing selectors.
 
         Uses JavaScript for bounds (more reliable than CDP getBoxModel).
         """
@@ -756,14 +815,17 @@ class BeelineBridge:
         await self._try_enable_domain(tab_id, "Runtime")
 
         # Use JavaScript to scroll into view and get bounds
+        # Supports ">>>" shadow-piercing selectors
+        if ">>>" in selector:
+            query_fn = f"{self._SHADOW_QUERY_JS} _shadowQuery({json.dumps(selector)})"
+        else:
+            query_fn = f"document.querySelector({json.dumps(selector)})"
+
         hover_script = f"""
             (function() {{
-                const el = document.querySelector({json.dumps(selector)});
+                const el = {query_fn};
                 if (!el) return null;
-
-                // Scroll into view
                 el.scrollIntoView({{ block: 'center' }});
-
                 const rect = el.getBoundingClientRect();
                 return {{
                     x: rect.x + rect.width / 2,
@@ -780,7 +842,7 @@ class BeelineBridge:
 
         while asyncio.get_event_loop().time() < deadline:
             result = await self.evaluate(tab_id, hover_script)
-            bounds_value = result.get("result", {}).get("value")
+            bounds_value = (result or {}).get("result")
             if bounds_value:
                 break
             await asyncio.sleep(0.1)
@@ -803,18 +865,138 @@ class BeelineBridge:
             {"type": "mouseMoved", "x": x, "y": y},
         )
 
+        w = bounds_value.get("width", 0)
+        h = bounds_value.get("height", 0)
+        await self.highlight_rect(tab_id, x - w / 2, y - h / 2, w, h, label=selector)
         return {"ok": True, "action": "hover", "selector": selector, "x": x, "y": y}
+
+    async def hover_coordinate(self, tab_id: int, x: float, y: float) -> dict:
+        """Hover at CSS pixel coordinates.
+
+        Works for overlay/virtual-rendered content where CSS selectors fail.
+        Dispatches a mouseMoved event at (x, y) without needing a DOM element.
+        """
+        await self.cdp_attach(tab_id)
+        await self._try_enable_domain(tab_id, "DOM")
+        await self._try_enable_domain(tab_id, "Input")
+        await self._cdp(
+            tab_id,
+            "Input.dispatchMouseEvent",
+            {"type": "mouseMoved", "x": x, "y": y, "buttons": 0},
+        )
+        await self.highlight_point(tab_id, x, y, label=f"hover ({x},{y})")
+        return {"ok": True, "action": "hover_coordinate", "x": x, "y": y}
+
+    async def press_key_at(self, tab_id: int, x: float, y: float, key: str) -> dict:
+        """Move mouse to (x, y) then dispatch a key event.
+
+        Useful for overlays where browser_press misses because document.activeElement
+        is in the regular DOM while the focused element is in virtual/overlay rendering.
+        Moving the mouse first routes the key event through the browser's native
+        hit-testing rather than the DOM focus chain.
+        """
+        await self.cdp_attach(tab_id)
+        await self._try_enable_domain(tab_id, "DOM")
+        await self._try_enable_domain(tab_id, "Input")
+
+        # Move mouse into position so the browser's native focus follows
+        await self._cdp(
+            tab_id,
+            "Input.dispatchMouseEvent",
+            {"type": "mouseMoved", "x": x, "y": y, "buttons": 0},
+        )
+
+        key_map = {
+            "Enter": ("\r", "Enter"),
+            "Tab": ("\t", "Tab"),
+            "Escape": ("\x1b", "Escape"),
+            "Backspace": ("\b", "Backspace"),
+            "Delete": ("\x7f", "Delete"),
+            "ArrowUp": ("", "ArrowUp"),
+            "ArrowDown": ("", "ArrowDown"),
+            "ArrowLeft": ("", "ArrowLeft"),
+            "ArrowRight": ("", "ArrowRight"),
+            "Home": ("", "Home"),
+            "End": ("", "End"),
+            "Space": (" ", " "),
+            " ": (" ", " "),
+        }
+        text, key_name = key_map.get(key, (key, key))
+
+        await self._cdp(
+            tab_id,
+            "Input.dispatchKeyEvent",
+            {"type": "keyDown", "key": key_name, "text": text or None},
+        )
+        await self._cdp(
+            tab_id,
+            "Input.dispatchKeyEvent",
+            {"type": "keyUp", "key": key_name, "text": text or None},
+        )
+
+        await self.highlight_point(tab_id, x, y, label=f"{key} ({x},{y})")
+        return {"ok": True, "action": "press_at", "x": x, "y": y, "key": key}
+
+    async def highlight_rect(
+        self,
+        tab_id: int,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        label: str = "",
+        color: dict | None = None,
+    ) -> None:
+        """Draw a CDP Overlay highlight box in the live browser window.
+
+        Visible in the next screenshot. Automatically cleared on the next
+        interaction or by calling clear_highlight().
+        """
+        await self.cdp_attach(tab_id)
+        await self._try_enable_domain(tab_id, "Overlay")
+        fill = color or {"r": 59, "g": 130, "b": 246, "a": 0.35}  # blue-500 @ 35%
+        outline = {"r": fill["r"], "g": fill["g"], "b": fill["b"], "a": 1.0}
+        await self._cdp(
+            tab_id,
+            "Overlay.highlightRect",
+            {
+                "x": int(x),
+                "y": int(y),
+                "width": max(1, int(w)),
+                "height": max(1, int(h)),
+                "color": fill,
+                "outlineColor": outline,
+            },
+        )
+        _interaction_highlights[tab_id] = {
+            "x": x, "y": y, "w": w, "h": h, "label": label, "kind": "rect",
+        }
+
+    async def highlight_point(self, tab_id: int, x: float, y: float, label: str = "") -> None:
+        """Highlight a coordinate as a small crosshair box in the browser."""
+        r = 12  # half-size of the crosshair box in CSS px
+        await self.highlight_rect(
+            tab_id, x - r, y - r, r * 2, r * 2, label=label,
+            color={"r": 239, "g": 68, "b": 68, "a": 0.45},  # red-500 @ 45%
+        )
+        _interaction_highlights[tab_id] = {
+            "x": x, "y": y, "w": 0, "h": 0, "label": label, "kind": "point",
+        }
+
+    async def clear_highlight(self, tab_id: int) -> None:
+        """Remove the CDP Overlay highlight from the browser."""
+        try:
+            await self._cdp(tab_id, "Overlay.hideHighlight")
+        except Exception:
+            pass
+        _interaction_highlights.pop(tab_id, None)
 
     async def scroll(self, tab_id: int, direction: str = "down", amount: int = 500) -> dict:
         """Scroll the page.
 
-        Uses multiple methods for robustness:
-        1. Find and scroll the largest scrollable container (handles SPAs like LinkedIn)
-        2. Fallback to window scroll
-        3. Fallback to mouse wheel events via CDP
+        Uses JavaScript to find and scroll the appropriate container.
+        Handles SPAs like LinkedIn where content is in a nested scrollable div.
         """
-        await self.cdp_attach(tab_id)
-
         delta_x = 0
         delta_y = 0
         if direction == "down":
@@ -826,156 +1008,70 @@ class BeelineBridge:
         elif direction == "left":
             delta_x = -amount
 
-        # Method 1: Find and scroll the largest scrollable container
-        # This handles SPAs like LinkedIn where content is in a nested scrollable div
-        smart_scroll_script = f"""
-            (function() {{
-                // Find the largest scrollable container
-                function findScrollableContainer() {{
-                    const candidates = [];
+        # JavaScript scroll that finds the largest scrollable container
+        # NOTE: Do NOT wrap in IIFE - evaluate() already wraps scripts
+        scroll_script = f"""
+            // Find the largest scrollable container
+            const candidates = [];
+            const allElements = document.querySelectorAll('*');
 
-                    // Check all elements with overflow scroll/auto
-                    const allElements = document.querySelectorAll('*');
-                    for (const el of allElements) {{
-                        const style = getComputedStyle(el);
-                        const overflow = style.overflow + style.overflowY;
+            for (const el of allElements) {{
+                const style = getComputedStyle(el);
+                const overflow = style.overflow + style.overflowY;
 
-                        if (overflow.includes('scroll') || overflow.includes('auto')) {{
-                            const rect = el.getBoundingClientRect();
-                            // Must be visible and reasonably large
-                            if (rect.width > 100 && rect.height > 100 &&
-                                el.scrollHeight > el.clientHeight + 100) {{
-                                candidates.push({{
-                                    el: el,
-                                    area: rect.width * rect.height,
-                                    scrollable: el.scrollHeight - el.clientHeight
-                                }});
-                            }}
-                        }}
+                if (overflow.includes('scroll') || overflow.includes('auto')) {{
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width > 100 && rect.height > 100 &&
+                        el.scrollHeight > el.clientHeight + 100) {{
+                        candidates.push({{el: el, area: rect.width * rect.height}});
                     }}
-
-                    // Sort by area (largest first) and return best candidate
-                    candidates.sort((a, b) => b.area - a.area);
-                    return candidates.length > 0 ? candidates[0].el : null;
                 }}
+            }}
 
-                const container = findScrollableContainer();
+            candidates.sort((a, b) => b.area - a.area);
+            const container = candidates.length > 0 ? candidates[0].el : null;
 
-                if (container) {{
-                    container.scrollBy({{
-                        top: {delta_y},
-                        left: {delta_x},
-                        behavior: 'smooth'
-                    }});
-                    return {{
-                        method: 'container-smooth',
-                        success: true,
-                        containerTag: container.tagName,
-                        containerClass: container.className.substring(0, 50)
-                    }};
-                }}
+            if (container) {{
+                container.scrollBy({{ top: {delta_y}, left: {delta_x}, behavior: 'smooth' }});
+                return {{
+                    success: true,
+                    method: 'container',
+                    tag: container.tagName,
+                    scrolled: true
+                }};
+            }}
 
-                // Fallback to window scroll
-                if ('scrollBehavior' in document.documentElement.style) {{
-                    window.scrollBy({{
-                        top: {delta_y},
-                        left: {delta_x},
-                        behavior: 'smooth'
-                    }});
-                    return {{ method: 'window-smooth', success: true }};
-                }}
-
-                window.scrollBy({delta_x}, {delta_y});
-                return {{ method: 'window-instant', success: true }};
-            }})();
+            // Fallback to window scroll
+            window.scrollBy({{ top: {delta_y}, left: {delta_x}, behavior: 'smooth' }});
+            return {{
+                success: true,
+                method: 'window',
+                tag: 'WINDOW',
+                scrolled: true
+            }};
         """
 
         try:
-            result = await self.evaluate(tab_id, smart_scroll_script)
-            value = result.get("result", {})
-            if value and value.get("success"):
+            result = await asyncio.wait_for(
+                self.evaluate(tab_id, scroll_script),
+                timeout=5.0
+            )
+            value = (result or {}).get("result") or {}
+
+            if value.get("success"):
                 return {
                     "ok": True,
                     "action": "scroll",
                     "direction": direction,
                     "amount": amount,
                     "method": value.get("method", "js"),
-                    "container": value.get("containerTag", "window")
+                    "container": value.get("tag", "unknown")
                 }
-        except Exception as e:
-            logger.debug("Smart scroll script failed: %s", e)
-
-        # Method 2: Find scrollable container and use mouse wheel at its center
-        try:
-            # Find the largest scrollable container and its position
-            find_container_script = """
-                (function() {
-                    const candidates = [];
-                    const allElements = document.querySelectorAll('*');
-                    for (const el of allElements) {
-                        const style = getComputedStyle(el);
-                        const overflow = style.overflow + style.overflowY;
-                        if (overflow.includes('scroll') || overflow.includes('auto')) {
-                            const rect = el.getBoundingClientRect();
-                            if (rect.width > 100 && rect.height > 100 &&
-                                el.scrollHeight > el.clientHeight + 100) {
-                                candidates.push({
-                                    x: Math.round(rect.left + rect.width / 2),
-                                    y: Math.round(rect.top + rect.height / 2),
-                                    area: rect.width * rect.height,
-                                    tag: el.tagName
-                                });
-                            }
-                        }
-                    }
-                    candidates.sort((a, b) => b.area - a.area);
-                    return candidates.length > 0 ? candidates[0] : null;
-                })();
-            """
-            container_result = await self._cdp(
-                tab_id,
-                "Runtime.evaluate",
-                {"expression": find_container_script, "returnByValue": True},
-            )
-            container_info = container_result.get("result", {}).get("value", {})
-
-            if container_info and isinstance(container_info, dict):
-                x = container_info.get("x", 400)
-                y = container_info.get("y", 300)
             else:
-                # Fallback to viewport center
-                viewport_result = await self._cdp(
-                    tab_id,
-                    "Runtime.evaluate",
-                    {
-                        "expression": "({w: window.innerWidth, h: window.innerHeight})",
-                        "returnByValue": True,
-                    },
-                )
-                vp = viewport_result.get("result", {}).get("value", {})
-                x = vp.get("w", 800) // 2
-                y = vp.get("h", 600) // 2
+                return {"ok": False, "error": "scroll script returned failure"}
 
-            # Dispatch mouse wheel event at container center
-            await self._cdp(
-                tab_id,
-                "Input.dispatchMouseEvent",
-                {
-                    "type": "mouseWheel",
-                    "x": x,
-                    "y": y,
-                    "deltaX": -delta_x,
-                    "deltaY": -delta_y,
-                },
-            )
-            return {
-                "ok": True,
-                "action": "scroll",
-                "direction": direction,
-                "amount": amount,
-                "method": "mouseWheel",
-                "target": f"({x}, {y})"
-            }
+        except asyncio.TimeoutError:
+            return {"ok": False, "error": "scroll timed out"}
         except Exception as e:
             logger.warning("Scroll failed: %s", e)
             return {"ok": False, "error": str(e)}
@@ -1011,8 +1107,32 @@ class BeelineBridge:
         await self.cdp_attach(tab_id)
         await self._try_enable_domain(tab_id, "Runtime")
 
-        # Wrap in IIFE to allow return statements at top level
-        wrapped_script = f"(function() {{ {script} }})()"
+        stripped = script.strip()
+
+        # Already a complete IIFE — run as-is, no re-wrapping
+        is_iife = stripped.startswith("(function") and (
+            stripped.endswith("})()") or stripped.endswith("})();")
+        )
+        # Arrow-function IIFE: (() => { ... })()
+        is_arrow_iife = stripped.startswith("(()") and (
+            stripped.endswith("})()") or stripped.endswith("})();")
+            or stripped.endswith(")()") or stripped.endswith(")()")
+        )
+
+        if is_iife or is_arrow_iife:
+            # Already self-contained — just run it
+            wrapped_script = stripped
+        elif stripped.startswith("return "):
+            # Single return statement — wrap in IIFE
+            wrapped_script = f"(function() {{ {stripped} }})()"
+        elif "\n" in stripped or ";" in stripped:
+            # Multi-statement block — wrap without prepending return
+            # (caller should use explicit return if they want a value)
+            wrapped_script = f"(function() {{ {stripped} }})()"
+        else:
+            # Single expression — wrap with return to capture value
+            wrapped_script = f"(function() {{ return {stripped} }})()"
+
         result = await self._cdp(
             tab_id,
             "Runtime.evaluate",
@@ -1023,10 +1143,10 @@ class BeelineBridge:
             return {"ok": False, "error": "CDP returned no result"}
 
         if "exceptionDetails" in result:
-            return {
-                "ok": False,
-                "error": result["exceptionDetails"].get("text", "Script error"),
-            }
+            ex = result["exceptionDetails"]
+            # Extract the actual exception message from the nested structure
+            ex_value = (ex.get("exception") or {}).get("description") or ex.get("text", "Script error")
+            return {"ok": False, "error": ex_value}
 
         # The CDP response structure is {result: {type: ..., value: ...}}
         # But our bridge returns just the inner result object
@@ -1051,15 +1171,16 @@ class BeelineBridge:
             tab_id: The tab ID to snapshot
             timeout_s: Maximum time to spend building snapshot (default 10s)
         """
-        async with asyncio.timeout(timeout_s):
-            await self.cdp_attach(tab_id)
-            await self._try_enable_domain(tab_id, "Accessibility")
-            await self._try_enable_domain(tab_id, "DOM")
-            await self._try_enable_domain(tab_id, "Runtime")
+        try:
+            async with asyncio.timeout(timeout_s):
+                await self.cdp_attach(tab_id)
+                await self._try_enable_domain(tab_id, "Accessibility")
+                await self._try_enable_domain(tab_id, "DOM")
+                await self._try_enable_domain(tab_id, "Runtime")
 
-            # Try accessibility tree first
-            result = await self._cdp(tab_id, "Accessibility.getFullAXTree")
-            nodes = result.get("nodes", [])
+                # Try accessibility tree first
+                result = await self._cdp(tab_id, "Accessibility.getFullAXTree")
+                nodes = result.get("nodes", [])
 
             # Count non-ignored nodes
             visible_count = sum(1 for n in nodes if not n.get("ignored", False))
@@ -1089,7 +1210,7 @@ class BeelineBridge:
                 "Runtime.evaluate",
                 {"expression": "window.location.href", "returnByValue": True},
             )
-            url = url_result.get("result", {}).get("value", "")
+            url = (url_result or {}).get("result", {}).get("value", "")
 
             return {
                 "ok": True,
@@ -1097,6 +1218,15 @@ class BeelineBridge:
                 "url": url,
                 "tree": snapshot,
             }
+        except asyncio.TimeoutError:
+            logger.warning("Snapshot timed out after %ss", timeout_s)
+            return {"ok": False, "error": f"snapshot timed out after {timeout_s}s"}
+        except asyncio.CancelledError:
+            logger.warning("Snapshot cancelled (extension may have disconnected)")
+            return {"ok": False, "error": "snapshot cancelled - extension disconnected"}
+        except Exception as e:
+            logger.error("Snapshot failed: %s", e)
+            return {"ok": False, "error": str(e)}
 
     async def _dom_snapshot(self, tab_id: int) -> dict:
         """Fallback: build snapshot from DOM tree with visibility info."""
@@ -1196,7 +1326,7 @@ class BeelineBridge:
             "Runtime.evaluate",
             {"expression": "window.location.href", "returnByValue": True},
         )
-        url = url_result.get("result", {}).get("value", "")
+        url = (url_result or {}).get("result", {}).get("value", "")
 
         return {
             "ok": True,
@@ -1325,7 +1455,7 @@ class BeelineBridge:
                 "Runtime.evaluate",
                 {"expression": script, "returnByValue": True},
             )
-            text = result.get("result", {}).get("result", {}).get("value")
+            text = (result or {}).get("result", {}).get("result", {}).get("value")
             if text is not None:
                 return {"ok": True, "selector": selector, "text": text}
             await asyncio.sleep(0.1)
@@ -1352,7 +1482,7 @@ class BeelineBridge:
                 "Runtime.evaluate",
                 {"expression": script, "returnByValue": True},
             )
-            value = result.get("result", {}).get("result", {}).get("value")
+            value = (result or {}).get("result", {}).get("result", {}).get("value")
             if value is not None:
                 return {"ok": True, "selector": selector, "attribute": attribute, "value": value}
             await asyncio.sleep(0.1)
@@ -1360,49 +1490,106 @@ class BeelineBridge:
         return {"ok": False, "error": f"Element not found: {selector}"}
 
     async def screenshot(
-        self, tab_id: int, full_page: bool = False, selector: str | None = None
+        self, tab_id: int, full_page: bool = False, selector: str | None = None,
+        timeout_s: float = 30.0,
     ) -> dict:
         """Take a screenshot of the page or element.
 
         Returns {"ok": True, "data": base64_string, "mimeType": "image/png"}.
         """
-        await self.cdp_attach(tab_id)
-        await self._cdp(tab_id, "Page.enable")
+        try:
+            async with asyncio.timeout(timeout_s):
+                await self.cdp_attach(tab_id)
+                await self._cdp(tab_id, "Page.enable")
 
-        params: dict[str, Any] = {"format": "png"}
-        if full_page:
-            # Get layout metrics for full page
-            metrics = await self._cdp(tab_id, "Page.getLayoutMetrics")
-            content_size = metrics.get("contentSize", {})
-            params["clip"] = {
-                "x": 0,
-                "y": 0,
-                "width": content_size.get("width", 1280),
-                "height": content_size.get("height", 720),
-                "scale": 1,
-            }
+                params: dict[str, Any] = {"format": "png"}
+                if selector:
+                    # Clip to the element's bounding rect (viewport-relative)
+                    rect_result = await self._cdp(
+                        tab_id,
+                        "Runtime.evaluate",
+                        {
+                            "expression": (
+                                f"(function(){{"
+                                f"const el=document.querySelector({json.dumps(selector)});"
+                                f"if(!el)return null;"
+                                f"const r=el.getBoundingClientRect();"
+                                f"return{{x:r.left,y:r.top,width:r.width,height:r.height}};"
+                                f"}})()"
+                            ),
+                            "returnByValue": True,
+                        },
+                    )
+                    rect = (
+                        (rect_result or {}).get("result", {}).get("result", {}).get("value")
+                    )
+                    if rect and rect.get("width") and rect.get("height"):
+                        params["clip"] = {
+                            "x": rect["x"],
+                            "y": rect["y"],
+                            "width": rect["width"],
+                            "height": rect["height"],
+                            "scale": 1,
+                        }
+                    else:
+                        return {"ok": False, "error": f"Selector not found: {selector}"}
+                elif full_page:
+                    # Get layout metrics for full page
+                    metrics = await self._cdp(tab_id, "Page.getLayoutMetrics")
+                    content_size = metrics.get("contentSize", {})
+                    params["clip"] = {
+                        "x": 0,
+                        "y": 0,
+                        "width": content_size.get("width", 1280),
+                        "height": content_size.get("height", 720),
+                        "scale": 1,
+                    }
 
-        result = await self._cdp(tab_id, "Page.captureScreenshot", params)
-        data = result.get("data")
+                result = await self._cdp(tab_id, "Page.captureScreenshot", params)
+                data = result.get("data")
 
-        if not data:
-            return {"ok": False, "error": "Screenshot failed"}
+                if not data:
+                    return {"ok": False, "error": "Screenshot failed"}
 
-        # Get URL for metadata
-        url_result = await self._cdp(
-            tab_id,
-            "Runtime.evaluate",
-            {"expression": "window.location.href", "returnByValue": True},
-        )
-        url = url_result.get("result", {}).get("result", {}).get("value", "")
+                # Get URL and viewport metadata in one evaluate call
+                meta_result = await self._cdp(
+                    tab_id,
+                    "Runtime.evaluate",
+                    {
+                        "expression": (
+                            "(function(){"
+                            "return{"
+                            "url:window.location.href,"
+                            "dpr:window.devicePixelRatio,"
+                            "cssWidth:window.innerWidth,"
+                            "cssHeight:window.innerHeight"
+                            "};"
+                            "})()"
+                        ),
+                        "returnByValue": True,
+                    },
+                )
+                meta = (meta_result or {}).get("result", {}).get("result", {}).get("value") or {}
 
-        return {
-            "ok": True,
-            "tabId": tab_id,
-            "url": url,
-            "data": data,
-            "mimeType": "image/png",
-        }
+                return {
+                    "ok": True,
+                    "tabId": tab_id,
+                    "url": meta.get("url", ""),
+                    "devicePixelRatio": meta.get("dpr", 1.0),
+                    "cssWidth": meta.get("cssWidth", 0),
+                    "cssHeight": meta.get("cssHeight", 0),
+                    "data": data,
+                    "mimeType": "image/png",
+                }
+        except asyncio.TimeoutError:
+            logger.warning("Screenshot timed out after %ss", timeout_s)
+            return {"ok": False, "error": f"screenshot timed out after {timeout_s}s"}
+        except asyncio.CancelledError:
+            logger.warning("Screenshot cancelled (extension may have disconnected)")
+            return {"ok": False, "error": "screenshot cancelled - extension disconnected"}
+        except Exception as e:
+            logger.error("Screenshot failed: %s", e)
+            return {"ok": False, "error": str(e)}
 
     async def wait_for_selector(self, tab_id: int, selector: str, timeout_ms: int = 30000) -> dict:
         """Wait for an element to appear."""
@@ -1421,7 +1608,7 @@ class BeelineBridge:
                 "Runtime.evaluate",
                 {"expression": script, "returnByValue": True},
             )
-            found = result.get("result", {}).get("result", {}).get("value", False)
+            found = (result or {}).get("result", {}).get("result", {}).get("value", False)
             if found:
                 return {"ok": True, "selector": selector}
             await asyncio.sleep(0.1)
@@ -1445,7 +1632,7 @@ class BeelineBridge:
                 "Runtime.evaluate",
                 {"expression": script, "returnByValue": True},
             )
-            found = result.get("result", {}).get("result", {}).get("value", False)
+            found = (result or {}).get("result", {}).get("result", {}).get("value", False)
             if found:
                 return {"ok": True, "text": text}
             await asyncio.sleep(0.1)

@@ -80,13 +80,19 @@ async def test_contenteditable():
         </html>
         """
 
-        data_url = f"data:text/html;base64,{base64.b64encode(test_html.encode()).decode()}"
-        await bridge.navigate(tab_id, data_url, wait_until="load")
+        # Write to file and use file:// URL (data: URLs don't work well with extension)
+        test_file = Path("/tmp/contenteditable_test.html")
+        test_file.write_text(test_html.strip())
+        file_url = f"file://{test_file}"
+        await bridge.navigate(tab_id, file_url, wait_until="load")
         print("✓ Page loaded")
 
-        # Screenshot
-        screenshot = await bridge.screenshot(tab_id)
-        print(f"Screenshot: {len(screenshot.get('data', ''))} bytes")
+        # Screenshot with timeout protection
+        try:
+            screenshot = await asyncio.wait_for(bridge.screenshot(tab_id), timeout=10.0)
+            print(f"Screenshot: {len(screenshot.get('data', ''))} bytes")
+        except asyncio.TimeoutError:
+            print("Screenshot timed out (skipping)")
 
         # Detect contenteditable
         print("\n--- Detecting contenteditable elements ---")
@@ -107,7 +113,7 @@ async def test_contenteditable():
         # Test 1: Type into regular input (baseline)
         print("\n--- Test 1: Regular input ---")
         await bridge.click(tab_id, "#input1")
-        await bridge.type(tab_id, "#input1", "Hello input")
+        await bridge.type_text(tab_id, "#input1", "Hello input")
         input_result = await bridge.evaluate(
             tab_id,
             "(function() { return document.getElementById('input1').value; })()"
@@ -117,7 +123,7 @@ async def test_contenteditable():
         # Test 2: Type into contenteditable div
         print("\n--- Test 2: Contenteditable div ---")
         await bridge.click(tab_id, "#editor1")
-        await bridge.type(tab_id, "#editor1", "Hello contenteditable", clear_first=True)
+        await bridge.type_text(tab_id, "#editor1", "Hello contenteditable", clear_first=True)
         editor_result = await bridge.evaluate(
             tab_id,
             "(function() { return document.getElementById('editor1').innerText; })()"
@@ -140,9 +146,12 @@ async def test_contenteditable():
         )
         print(f"Editor2 after execCommand: {insert_result.get('result', '')}")
 
-        # Screenshot after
-        screenshot_after = await bridge.screenshot(tab_id)
-        print(f"Screenshot after: {len(screenshot_after.get('data', ''))} bytes")
+        # Screenshot after with timeout protection
+        try:
+            screenshot_after = await asyncio.wait_for(bridge.screenshot(tab_id), timeout=10.0)
+            print(f"Screenshot after: {len(screenshot_after.get('data', ''))} bytes")
+        except asyncio.TimeoutError:
+            print("Screenshot after timed out (skipping)")
 
         # Results
         print("\n--- Results ---")

@@ -71,8 +71,11 @@ async def test_shadow_dom():
         </html>
         """
 
-        data_url = f"data:text/html;base64,{base64.b64encode(test_html.encode()).decode()}"
-        await bridge.navigate(tab_id, data_url, wait_until="load")
+        # Write to file and use file:// URL (data: URLs don't work well with extension)
+        test_file = Path("/tmp/shadow_dom_test.html")
+        test_file.write_text(test_html.strip())
+        file_url = f"file://{test_file}"
+        await bridge.navigate(tab_id, file_url, wait_until="load")
         print("✓ Page loaded")
 
         # Screenshot
@@ -132,10 +135,10 @@ async def test_shadow_dom():
             tab_id,
             "(function() { return window.shadowClickCount || 0; })()"
         )
-        count = count_result.get("result", 0)
+        count = count_result.get("result") or 0
         print(f"Shadow click count: {count}")
 
-        if count > 0:
+        if count and count > 0:
             print("✓ PASS: Shadow DOM element clicked successfully")
         else:
             print("✗ FAIL: Could not click Shadow DOM element")

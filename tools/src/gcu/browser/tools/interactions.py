@@ -371,6 +371,135 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return result
 
     @mcp.tool()
+    async def browser_hover_coordinate(
+        x: float,
+        y: float,
+        tab_id: int | None = None,
+        profile: str | None = None,
+    ) -> dict:
+        """
+        Hover at CSS pixel coordinates without needing a CSS selector.
+
+        Use this instead of browser_hover when the element is in an overlay,
+        shadow DOM, or virtual-rendered component that isn't in the regular DOM.
+        Pair with browser_coords to convert screenshot image positions to CSS pixels.
+
+        Args:
+            x: CSS pixel X coordinate
+            y: CSS pixel Y coordinate
+            tab_id: Chrome tab ID (default: active tab)
+            profile: Browser profile name (default: "default")
+
+        Returns:
+            Dict with hover result
+        """
+        start = time.perf_counter()
+        params = {"x": x, "y": y, "tab_id": tab_id, "profile": profile}
+
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_hover_coordinate", params, result=result)
+            return result
+
+        ctx = _get_context(profile)
+        if not ctx:
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_hover_coordinate", params, result=result)
+            return result
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_hover_coordinate", params, result=result)
+            return result
+
+        try:
+            hover_result = await bridge.hover_coordinate(target_tab, x, y)
+            log_tool_call(
+                "browser_hover_coordinate",
+                params,
+                result=hover_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return hover_result
+        except Exception as e:
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_hover_coordinate",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
+
+    @mcp.tool()
+    async def browser_press_at(
+        x: float,
+        y: float,
+        key: str,
+        tab_id: int | None = None,
+        profile: str | None = None,
+    ) -> dict:
+        """
+        Move mouse to CSS pixel coordinates then press a key.
+
+        Use this instead of browser_press when the focused element is in an overlay
+        or virtual-rendered component. Moving the mouse first routes the key event
+        through native browser hit-testing instead of the DOM focus chain.
+        Pair with browser_coords to convert screenshot image positions to CSS pixels.
+
+        Args:
+            x: CSS pixel X coordinate to position mouse
+            y: CSS pixel Y coordinate to position mouse
+            key: Key to press (e.g. 'Enter', 'Space', 'Escape', 'ArrowDown')
+            tab_id: Chrome tab ID (default: active tab)
+            profile: Browser profile name (default: "default")
+
+        Returns:
+            Dict with press result
+        """
+        start = time.perf_counter()
+        params = {"x": x, "y": y, "key": key, "tab_id": tab_id, "profile": profile}
+
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            result = {"ok": False, "error": "Browser extension not connected"}
+            log_tool_call("browser_press_at", params, result=result)
+            return result
+
+        ctx = _get_context(profile)
+        if not ctx:
+            result = {"ok": False, "error": "Browser not started. Call browser_start first."}
+            log_tool_call("browser_press_at", params, result=result)
+            return result
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            result = {"ok": False, "error": "No active tab"}
+            log_tool_call("browser_press_at", params, result=result)
+            return result
+
+        try:
+            press_result = await bridge.press_key_at(target_tab, x, y, key)
+            log_tool_call(
+                "browser_press_at",
+                params,
+                result=press_result,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return press_result
+        except Exception as e:
+            result = {"ok": False, "error": str(e)}
+            log_tool_call(
+                "browser_press_at",
+                params,
+                error=e,
+                duration_ms=(time.perf_counter() - start) * 1000,
+            )
+            return result
+
+    @mcp.tool()
     async def browser_select(
         selector: str,
         values: list[str],
