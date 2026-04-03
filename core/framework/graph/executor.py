@@ -11,6 +11,7 @@ The executor:
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -70,6 +71,9 @@ class ExecutionResult:
 
     # Visit tracking (for feedback/callback edges)
     node_visit_counts: dict[str, int] = field(default_factory=dict)  # {node_id: visit_count}
+
+    # Per-node latency breakdown
+    node_latencies: dict[str, int] = field(default_factory=dict)  # {node_id: latency_ms}
 
     @property
     def is_clean_success(self) -> bool:
@@ -561,6 +565,7 @@ class GraphExecutor:
         total_latency = 0
         node_retry_counts: dict[str, int] = {}  # Track retries per node
         node_visit_counts: dict[str, int] = {}  # Track visits for feedback loops
+        node_latencies: dict[str, int] = {}  # Per-node latency breakdown
         _is_retry = False  # True when looping back for a retry (not a new visit)
 
         # Restore node_visit_counts from session state if available
@@ -818,6 +823,7 @@ class GraphExecutor:
                         error="Execution paused by user request",
                         session_state=pause_session_state,
                         node_visit_counts=dict(node_visit_counts),
+                        node_latencies=dict(node_latencies),
                     )
 
                 # Get current node
@@ -975,7 +981,14 @@ class GraphExecutor:
 
                 # Execute node
                 self.logger.info("   Executing...")
+                _node_start = time.perf_counter()
                 result = await node_impl.execute(ctx)
+                _node_elapsed_ms = int((time.perf_counter() - _node_start) * 1000)
+                if result.latency_ms == 0:
+                    result.latency_ms = _node_elapsed_ms
+                node_latencies[current_node_id] = (
+                    node_latencies.get(current_node_id, 0) + result.latency_ms
+                )
 
                 # GCU tab cleanup: stop the browser profile after a top-level GCU node
                 # finishes so tabs don't accumulate. Mirrors the subagent cleanup in
@@ -1212,6 +1225,7 @@ class GraphExecutor:
                                 had_partial_failures=len(nodes_failed) > 0,
                                 execution_quality="failed",
                                 node_visit_counts=dict(node_visit_counts),
+                                node_latencies=dict(node_latencies),
                                 session_state=failure_session_state,
                             )
 
@@ -1273,6 +1287,7 @@ class GraphExecutor:
                         had_partial_failures=len(nodes_failed) > 0,
                         execution_quality=exec_quality,
                         node_visit_counts=dict(node_visit_counts),
+                        node_latencies=dict(node_latencies),
                     )
 
                 # Check if this is a terminal node - if so, we're done
@@ -1626,6 +1641,7 @@ class GraphExecutor:
                 had_partial_failures=len(nodes_failed) > 0,
                 execution_quality=exec_quality,
                 node_visit_counts=dict(node_visit_counts),
+                node_latencies=dict(node_latencies),
                 session_state={
                     "memory": output,  # output IS memory.read_all()
                     "execution_path": list(path),
@@ -1703,6 +1719,7 @@ class GraphExecutor:
                 had_partial_failures=len(nodes_failed) > 0,
                 execution_quality=exec_quality,
                 node_visit_counts=dict(node_visit_counts),
+                node_latencies=dict(node_latencies),
             )
 
         except Exception as e:
@@ -1802,6 +1819,7 @@ class GraphExecutor:
                 had_partial_failures=len(nodes_failed) > 0,
                 execution_quality="failed",
                 node_visit_counts=dict(node_visit_counts),
+                node_latencies=dict(node_latencies),
                 session_state=session_state_out,
             )
 
@@ -2224,7 +2242,11 @@ class GraphExecutor:
                     self.logger.info(
                         f"      ▶ Branch {node_spec.name}: executing (attempt {attempt + 1})"
                     )
+                    _branch_start = time.perf_counter()
                     result = await node_impl.execute(ctx)
+                    _branch_elapsed_ms = int((time.perf_counter() - _branch_start) * 1000)
+                    if result.latency_ms == 0:
+                        result.latency_ms = _branch_elapsed_ms
                     last_result = result
 
                     # Ensure L2 entry for this branch node

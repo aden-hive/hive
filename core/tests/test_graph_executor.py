@@ -315,3 +315,105 @@ def test_write_progress_logs_warning_on_atomic_write_failure(tmp_path, monkeypat
 
     assert "Failed to persist progress state to" in caplog.text
     assert str(state_path) in caplog.text
+
+
+# ---- Slow node for latency measurement ----
+class SlowNode:
+    """Node that sleeps briefly to produce measurable latency."""
+
+    def validate_input(self, ctx):
+        return []
+
+    async def execute(self, ctx):
+        import asyncio
+
+        await asyncio.sleep(0.05)  # 50 ms
+        return NodeResult(
+            success=True,
+            output={"result": "slow"},
+            tokens_used=2,
+            latency_ms=0,  # left as 0 so executor fills it in
+        )
+
+
+@pytest.mark.asyncio
+async def test_executor_per_node_latency_tracking():
+    """Executor should populate per-node latency via perf_counter when node returns 0."""
+    runtime = DummyRuntime()
+
+    graph = GraphSpec(
+        id="graph-latency",
+        goal_id="g-lat",
+        nodes=[
+            NodeSpec(
+                id="n1",
+                name="slow-node",
+                description="a slow node",
+                node_type="event_loop",
+                input_keys=[],
+                output_keys=["result"],
+                max_retries=0,
+            )
+        ],
+        edges=[],
+        entry_node="n1",
+        terminal_nodes=["n1"],
+    )
+
+    executor = GraphExecutor(
+        runtime=runtime,
+        node_registry={"n1": SlowNode()},
+    )
+
+    goal = Goal(id="g-lat", name="latency-test", description="test latency tracking")
+    result = await executor.execute(graph=graph, goal=goal)
+
+    assert result.success is True
+
+    # Per-node latency should be populated and >= 50 ms
+    assert "n1" in result.node_latencies
+    assert result.node_latencies["n1"] >= 50
+
+    # Total latency should match the per-node sum
+    assert result.total_latency_ms >= 50
+    assert result.total_latency_ms == result.node_latencies["n1"]
+
+
+@pytest.mark.asyncio
+async def test_executor_preserves_node_set_latency():
+    """Executor should keep latency_ms already set by the node implementation."""
+    runtime = DummyRuntime()
+
+    graph = GraphSpec(
+        id="graph-preset",
+        goal_id="g-pre",
+        nodes=[
+            NodeSpec(
+                id="n1",
+                name="preset-node",
+                description="node with preset latency",
+                node_type="event_loop",
+                input_keys=[],
+                output_keys=["result"],
+                max_retries=0,
+            )
+        ],
+        edges=[],
+        entry_node="n1",
+        terminal_nodes=["n1"],
+    )
+
+    executor = GraphExecutor(
+        runtime=runtime,
+        node_registry={"n1": SuccessNode()},  # SuccessNode sets latency_ms=1
+    )
+
+    goal = Goal(id="g-pre", name="preset-test", description="test preset latency")
+    result = await executor.execute(graph=graph, goal=goal)
+
+    assert result.success is True
+
+    # Node already set latency_ms=1, executor should preserve it
+    assert "n1" in result.node_latencies
+    assert result.node_latencies["n1"] == 1
+    assert result.total_latency_ms == 1
