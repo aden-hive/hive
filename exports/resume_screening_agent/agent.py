@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
 from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
 from framework.graph.edge import GraphSpec
@@ -140,7 +140,7 @@ edges = [
         source="report",
         target="intake",
         condition=EdgeCondition.CONDITIONAL,
-        condition_expr="str(next_action).lower() != 'more_research'",
+        condition_expr="str(next_action).lower() == 'new_topic'",
         priority=1,
     ),
 ]
@@ -161,7 +161,7 @@ intake -> research -> review -> report stages and produces a structured
 candidate evaluation report.
 """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, config: dict[str, Any] = None) -> None:
         self.config = config or default_config
         self.goal = goal
         self.nodes = nodes
@@ -198,7 +198,6 @@ candidate evaluation report.
 
     def _setup(self, mock_mode: bool = False) -> None:
         """Set up the executor with all components."""
-        from pathlib import Path
 
         self._storage_path = Path.home() / ".hive" / "agents" / "resume_screening_agent"
         self._storage_path.mkdir(parents=True, exist_ok=True)
@@ -259,7 +258,7 @@ candidate evaluation report.
         if not self._agent_runtime.is_running:
             await self._agent_runtime.start()
 
-    async def start(self) -> None:
+    async def stop(self) -> None:
         """Stop the agent runtime and clean up."""
         if self._agent_runtime and self._agent_runtime.is_running:
             await self._agent_runtime.stop()
@@ -277,17 +276,17 @@ candidate evaluation report.
             raise RuntimeError("Agent not started. Call start() first.")
 
         return await self._agent_runtime.trigger_and_wait(
-    entry_point_id=entry_point,
-    input_data=input_data or {},
-    session_state=session_state,
-    timeout=timeout,
-)
+            entry_point_id=entry_point,
+            input_data=input_data or {},
+            session_state=session_state,
+            timeout=timeout,
+            )
     async def run(
-    self,
-    context: Dict[str, Any],
-    mock_mode: bool = False,
-    session_state: Optional[Dict[str, Any]] = None,
-) -> ExecutionResult:
+            self,
+            context: dict[str, Any],
+            mock_mode: bool = False,
+            session_state: dict[str, Any] | None = None,
+        ) -> ExecutionResult:
         """Run the agent (convenience method for single execution)."""
         await self.start(mock_mode=mock_mode)
         try:
@@ -298,7 +297,7 @@ candidate evaluation report.
         finally:
             await self.stop()
 
-    def info(self) -> Dict[str, Any]:
+    def info(self) -> dict[str, Any]:
         """Get agent information."""
         return {
             "name": metadata.name,
@@ -317,7 +316,7 @@ candidate evaluation report.
             "client_facing_nodes": [n.id for n in self.nodes if n.client_facing],
         }
 
-    def validate(self) -> bool:
+    def validate(self) -> dict[str, bool | list[str]]:
         """Validate agent structure."""
         errors = []
         warnings = []
