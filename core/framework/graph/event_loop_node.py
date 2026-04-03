@@ -742,6 +742,7 @@ class EventLoopNode(NodeProtocol):
                         ctx, conversation, tools, iteration, accumulator
                     )
                     logger.debug("[EventLoopNode.execute] iteration=%d: _run_single_turn completed successfully", iteration)
+                    _turn_ms = int((time.monotonic() - _turn_t0) * 1000)
                     logger.info(
                         "[%s] iter=%d: LLM done (%dms) — text=%d chars, real_tools=%d, "
                         "outputs_set=%s, tokens=%s, accumulator=%s",
