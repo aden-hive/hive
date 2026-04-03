@@ -303,7 +303,9 @@ async def create_queen(
     queen_runtime = Runtime(hive_home / "queen")
 
     async def _queen_loop():
+        logger.debug("[_queen_loop] Starting queen loop for session %s", session.id)
         try:
+            logger.debug("[_queen_loop] Creating GraphExecutor...")
             executor = GraphExecutor(
                 runtime=queen_runtime,
                 llm=session.llm,
@@ -320,6 +322,7 @@ async def create_queen(
                 skill_dirs=_queen_skill_dirs,
             )
             session.queen_executor = executor
+            logger.debug("[_queen_loop] GraphExecutor created and stored in session.queen_executor")
 
             # Wire inject_notification so phase switches notify the queen LLM
             async def _inject_phase_notification(content: str) -> None:
@@ -393,12 +396,14 @@ async def create_queen(
                 len(phase_state.get_current_tools()),
                 [t.name for t in phase_state.get_current_tools()],
             )
+            logger.debug("[_queen_loop] Calling executor.execute()...")
             result = await executor.execute(
                 graph=queen_graph,
                 goal=queen_goal,
                 input_data={"greeting": initial_prompt or "Session started."},
                 session_state={"resume_session_id": session.id},
             )
+            logger.debug("[_queen_loop] executor.execute() returned with success=%s", result.success)
             if result.success:
                 logger.warning("Queen executor returned (should be forever-alive)")
             else:
@@ -406,10 +411,14 @@ async def create_queen(
                     "Queen executor failed: %s",
                     result.error or "(no error message)",
                 )
-        except Exception:
-            logger.error("Queen conversation crashed", exc_info=True)
+        except asyncio.CancelledError:
+            logger.info("[_queen_loop] Queen loop cancelled (normal shutdown)")
+            raise
+        except Exception as e:
+            logger.exception("[_queen_loop] Queen conversation crashed: %s", e)
+            raise
         finally:
-            logger.warning("Queen loop exiting — clearing queen_executor for session '%s'", session.id)
+            logger.warning("[_queen_loop] Queen loop exiting — clearing queen_executor for session '%s'", session.id)
             session.queen_executor = None
 
     return asyncio.create_task(_queen_loop())

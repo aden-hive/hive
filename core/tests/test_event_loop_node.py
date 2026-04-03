@@ -1556,7 +1556,7 @@ class TestOutputAccumulator:
         assert acc.has_all_keys(["key1", "key2"]) is True
 
     @pytest.mark.asyncio
-    async def test_run_scoped_cursor_state(self, tmp_path):
+    async def test_flat_cursor_state(self, tmp_path):
         store = FileConversationStore(tmp_path / "acc_runs")
         acc_a = OutputAccumulator(store=store, run_id="run-a")
         acc_b = OutputAccumulator(store=store, run_id="run-b")
@@ -1564,11 +1564,10 @@ class TestOutputAccumulator:
         await acc_a.set("result", "alpha")
         await acc_b.set("result", "beta")
 
-        restored_a = await OutputAccumulator.restore(store, run_id="run-a")
-        restored_b = await OutputAccumulator.restore(store, run_id="run-b")
+        restored = await OutputAccumulator.restore(store)
 
-        assert restored_a.get("result") == "alpha"
-        assert restored_b.get("result") == "beta"
+        # Flat cursor: last write wins regardless of run_id
+        assert restored.get("result") == "beta"
 
 
 # ===========================================================================
