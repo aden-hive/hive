@@ -17,6 +17,12 @@ import logging
 import os
 import re
 import time
+
+try:
+    from litellm.exceptions import RateLimitError
+except ImportError:
+    class RateLimitError(Exception):
+        pass
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -849,9 +855,16 @@ class EventLoopNode(NodeProtocol):
 
                     # Non-transient or retries exhausted.
                     # For client-facing nodes, surface the error and wait
-                    # for user input instead of killing the loop.  The user
+                    # for user input instead of killing the loop. The user
                     # can retry or adjust the request.
+                    turn_tokens = {"input": 0, "output": 0}
+
                     if ctx.node_spec.client_facing:
+                        if isinstance(e, RateLimitError):
+                            error_msg = "Model rate limit reached"
+                        else:
+                            error_msg = f"LLM call failed: {str(e)}"
+
                         error_msg = f"LLM call failed: {e}"
                         _guardrail_phrase = (
                             "no endpoints available matching your guardrail restrictions "
@@ -869,30 +882,48 @@ class EventLoopNode(NodeProtocol):
                             iteration,
                             error_msg,
                         )
+
+                        if self._event_bus:
+                            # Reviewer: do NOT emit execution_failed here
+                            await self._event_bus.emit_node_retry(
+                                stream_id=stream_id,
+                                node_id=node_id,
+                                retry_count=_stream_retry_count,
+                                max_retries=self._config.max_stream_retries,
+                                error=error_msg,
+                                execution_id=execution_id,
+                            )
+
+                        await conversation.add_assistant_message(
+                            f"[Error: {error_msg}. Please try again.]"
+                        )
+                        _llm_turn_failed_waiting_input = True
+                        await self._await_user_input(ctx, prompt="")
+                        break
+
+                    # Non-client-facing path
+                    if isinstance(e, RateLimitError):
                         if self._event_bus:
                             await self._event_bus.emit_node_retry(
                                 stream_id=stream_id,
                                 node_id=node_id,
                                 retry_count=_stream_retry_count,
                                 max_retries=self._config.max_stream_retries,
-                                error=str(e)[:500],
+                                error="Model rate limit reached",
                                 execution_id=execution_id,
                             )
-                        # Inject the error as an assistant message so the
-                        # user sees it, then block for their next message.
-                        await conversation.add_assistant_message(
-                            f"[Error: {error_msg}. Please try again.]"
-                        )
-                        await self._await_user_input(ctx, prompt="")
-                        _llm_turn_failed_waiting_input = True
-                        break  # exit retry loop, continue outer iteration
-
-                    # Non-client-facing: crash as before
+                            await self._event_bus.emit_execution_failed(
+                                stream_id=stream_id,
+                                execution_id=execution_id,
+                                error="Model rate limit reached",
+                            )
+                    # Logging and metrics MUST run before raising
                     import traceback
 
                     iter_latency_ms = int((time.time() - iter_start) * 1000)
                     latency_ms = int((time.time() - start_time) * 1000)
-                    error_msg = f"LLM call failed: {e}"
+                    if not isinstance(e, RateLimitError):
+                        error_msg = f"LLM call failed: {e}"
                     stack_trace = traceback.format_exc()
 
                     if ctx.runtime_logger:
@@ -926,7 +957,6 @@ class EventLoopNode(NodeProtocol):
                             continue_count=_continue_count,
                         )
 
-                    # Re-raise to maintain existing error handling
                     raise
 
             if _turn_cancelled:
