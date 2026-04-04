@@ -234,6 +234,11 @@ class BeelineBridge:
             self._pending.pop(msg_id, None)
             log_bridge_message("send", type_, msg_id=msg_id, error="timeout")
             raise RuntimeError(f"Bridge command '{type_}' timed out") from None
+        except BaseException:
+            # CancelledError or any other exception — remove stale future so a late
+            # response from the extension doesn't try to resolve a cancelled future.
+            self._pending.pop(msg_id, None)
+            raise
 
     async def _cdp(self, tab_id: int, method: str, params: dict | None = None) -> dict:
         """Send a CDP command to a tab."""
@@ -1221,7 +1226,7 @@ class BeelineBridge:
             "result": value,
         }
 
-    async def snapshot(self, tab_id: int, timeout_s: float = 10.0) -> dict:
+    async def snapshot(self, tab_id: int, timeout_s: float = 30.0) -> dict:
         """Get an accessibility snapshot of the page.
 
         Uses a hybrid approach:
@@ -1284,8 +1289,8 @@ class BeelineBridge:
             logger.warning("Snapshot timed out after %ss", timeout_s)
             return {"ok": False, "error": f"snapshot timed out after {timeout_s}s"}
         except asyncio.CancelledError:
-            logger.warning("Snapshot cancelled (extension may have disconnected)")
-            return {"ok": False, "error": "snapshot cancelled - extension disconnected"}
+            logger.warning("Snapshot cancelled (timeout or task cancellation)")
+            return {"ok": False, "error": f"snapshot timed out or cancelled (limit: {timeout_s}s)"}
         except Exception as e:
             logger.error("Snapshot failed: %s", e)
             return {"ok": False, "error": str(e)}
@@ -1647,8 +1652,8 @@ class BeelineBridge:
             logger.warning("Screenshot timed out after %ss", timeout_s)
             return {"ok": False, "error": f"screenshot timed out after {timeout_s}s"}
         except asyncio.CancelledError:
-            logger.warning("Screenshot cancelled (extension may have disconnected)")
-            return {"ok": False, "error": "screenshot cancelled - extension disconnected"}
+            logger.warning("Screenshot cancelled (timeout or task cancellation)")
+            return {"ok": False, "error": f"screenshot timed out or cancelled (limit: {timeout_s}s)"}
         except Exception as e:
             logger.error("Screenshot failed: %s", e)
             return {"ok": False, "error": str(e)}

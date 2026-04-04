@@ -122,7 +122,7 @@ _QUEEN_STAGING_TOOLS = [
 
 # Running phase: worker is executing — monitor and control.
 # Note: stop_graph_and_edit / stop_graph_and_plan are NOT available here.
-# The queen must go through INCUBATING first before dropping to building/planning.
+# The queen must go through EDITING first before dropping to building/planning.
 _QUEEN_RUNNING_TOOLS = [
     # Read-only coding (for inspecting logs, files)
     "read_file",
@@ -144,10 +144,10 @@ _QUEEN_RUNNING_TOOLS = [
     "save_global_memory",
 ]
 
-# Incubating phase: worker done, still loaded — tweak config and re-run.
+# Editing phase: worker done, still loaded — tweak config and re-run.
 # Has inject_message for live adjustments. stop_graph_and_edit/plan available
 # here (not in running) to escalate when a deeper change is needed.
-_QUEEN_INCUBATING_TOOLS = [
+_QUEEN_EDITING_TOOLS = [
     # Read-only (inspect)
     "read_file",
     "list_directory",
@@ -601,8 +601,8 @@ Your work: monitor progress, handle escalations when the agent gets stuck, \
 and report outcomes clearly. Help the user decide what to do next.\
 """
 
-_queen_identity_incubating = """\
-You are a Solution Engineer in INCUBATING mode. \
+_queen_identity_editing = """\
+You are a Solution Engineer in EDITING mode. \
 "Queen" is your internal alias. The worker has finished executing and is still loaded. \
 You can tweak configuration, inject messages, and re-run with different input \
 without rebuilding. If a deeper change is needed (code edits, new tools), \
@@ -721,29 +721,21 @@ The worker is running. You have monitoring and lifecycle tools:
 - get_graph_status(focus?) — Brief status. Drill in: activity, memory, tools, issues, progress
 - inject_message(content) — Send a message to the running worker
 - get_worker_health_summary() — Read the latest health data
-- stop_graph() — Stop the worker and return to STAGING phase, then ask the user what to do next
-- stop_graph_and_plan() — Stop and switch to PLANNING phase to discuss changes \
-with the user first (DEFAULT for most modification requests)
-- stop_graph_and_edit() — Stop and switch to BUILDING phase for specific fixes
-
-You do NOT have write tools. To modify the agent, prefer \
-stop_graph_and_plan() unless the user gave a specific instruction. \
-To just stop without modifying, call stop_graph().
-- stop_graph_and_edit() — Stop the worker and switch back to BUILDING phase
+- stop_graph() — Stop the worker immediately (moves to EDITING phase)
+- run_agent_with_input(task) — Re-run the worker with new input
 - set_trigger(trigger_id, trigger_type?, trigger_config?) — Activate a trigger (timer)
 - remove_trigger(trigger_id) — Deactivate a trigger
 - list_triggers() — List all triggers and their active/inactive status
 - save_global_memory(category, description, content, name?) — Save durable \
 cross-queen memory about the user only
 
-You do NOT have write tools or agent construction tools. \
-If you need to modify the agent, call stop_graph_and_edit() to switch back \
-to BUILDING phase. To stop the worker and ask the user what to do next, call \
-stop_graph() to return to STAGING phase.
+You do NOT have stop_graph_and_edit or stop_graph_and_plan in this phase. \
+When the worker finishes, you will automatically move to EDITING phase \
+where you can tweak config and re-run, or escalate to building/planning.
 """
 
-_queen_tools_incubating = """
-# Tools (INCUBATING phase)
+_queen_tools_editing = """
+# Tools (EDITING phase)
 
 The worker has finished executing and is still loaded. You can tweak and re-run:
 - Read-only: read_file, list_directory, search_files, run_command
@@ -760,8 +752,8 @@ You do NOT have write/edit file tools. If you need to modify code, \
 call stop_graph_and_edit() to switch to BUILDING phase.
 """
 
-_queen_behavior_incubating = """
-## Incubating — tweak and re-run
+_queen_behavior_editing = """
+## Editing — tweak and re-run
 
 The worker finished. Review the results and decide:
 1. **Re-run** with different input: call run_agent_with_input(task)
@@ -1044,8 +1036,7 @@ prompt). It can ONLY do what its goal and tools allow.
 run_agent_with_input(task) (if in staging) or load then run (if in building)
 - Anything else → do it yourself. Do NOT reframe user requests into \
 subtasks to justify delegation.
-- Building, modifying, or configuring agents is ALWAYS your job. \
-Use stop_graph_and_edit when you need to.
+- Building, modifying, or configuring agents is ALWAYS your job.
 
 ## When the user says "run", "execute", or "start" (without specifics)
 
@@ -1069,7 +1060,8 @@ or assume what the user wants. Use ask_user to collect the task details \
 compose a structured task description from their input and call \
 run_agent_with_input(task). The worker has no intake node — it receives \
 your task and starts processing.
-- If the user wants to modify the agent, call stop_graph_and_edit().
+- If the user wants to modify the agent, wait for EDITING phase \
+(after worker finishes) where you will have stop_graph_and_edit().
 
 ## When idle (worker not running):
 - Greet the user. Mention what the worker can do in one sentence.
@@ -1097,16 +1089,15 @@ building something new.
 
 ## Fixing or Modifying the loaded worker
 
-Use stop_graph_and_plan() when:
-- The user says "modify", "improve", "fix", or "change" without specifics
-- The request is vague or open-ended ("make it better", "it's not working right")
-- You need to understand the user's intent before making changes
-- The issue requires inspecting logs, checkpoints, or past runs first
+During RUNNING phase, you cannot directly switch to building or planning. \
+When the worker finishes, you move to EDITING where you can:
+- Re-run with different input via run_agent_with_input(task)
+- Tweak config via inject_message(content)
+- Escalate to stop_graph_and_edit() or stop_graph_and_plan() if deeper changes are needed
 
-Use stop_graph_and_edit() only when:
-- The user gave a specific, concrete instruction ("add save_data to the gather node")
-- You already discussed the fix in a previous planning session
-- The change is trivial and unambiguous (rename, toggle a flag)
+During STAGING or EDITING phase:
+- Use stop_graph_and_plan() when the request is vague or needs discussion
+- Use stop_graph_and_edit() when the user gave a specific, concrete instruction
 
 ## Trigger Management
 
@@ -1221,8 +1212,10 @@ decision via inject_message() so the worker can clean up.
 
 **Errors / unexpected failures:**
 - Explain what went wrong in plain terms.
-- Ask the user: "Fix the agent and retry?" → use stop_graph_and_edit() if yes.
-- Or offer: "Diagnose the issue" → use stop_graph_and_plan() to investigate first.
+- Ask the user: "Fix the agent and retry?" → in EDITING phase, \
+use stop_graph_and_edit().
+- Or offer: "Diagnose the issue" → in EDITING phase, \
+use stop_graph_and_plan().
 - Or offer: "Retry as-is", "Skip this task", "Abort run"
 - (Skip asking if user explicitly told you to auto-retry or auto-skip errors.)
 - If the escalation had wait_for_response: inject_message() with the decision.
@@ -1242,14 +1235,12 @@ building something new.
 
 - Call get_graph_status(focus="issues") for more details when needed.
 
-## Fixing or Modifying the loaded worker
+## Fixing or Modifying the loaded worker (while running)
 
-When the user asks to fix, change, modify, or update the loaded worker \
-(e.g., "change the report node", "add a node", "delete node X"):
-
-**Default: use stop_graph_and_plan().** Most modification requests need \
-discussion first. Only use stop_graph_and_edit() when the user gave a \
-specific, unambiguous instruction or you already agreed on the fix.
+When the user asks to fix or modify the worker while it is running, \
+do NOT attempt to switch phases. Wait for the worker to finish — \
+you will move to EDITING phase automatically. From there you can \
+use stop_graph_and_edit() or stop_graph_and_plan().
 
 ## Trigger Handling
 
@@ -1355,7 +1346,7 @@ queen_node = NodeSpec(
             + _QUEEN_BUILDING_TOOLS
             + _QUEEN_STAGING_TOOLS
             + _QUEEN_RUNNING_TOOLS
-            + _QUEEN_INCUBATING_TOOLS
+            + _QUEEN_EDITING_TOOLS
         )
     ),
     system_prompt=(
@@ -1376,7 +1367,7 @@ ALL_QUEEN_TOOLS = sorted(
         + _QUEEN_BUILDING_TOOLS
         + _QUEEN_STAGING_TOOLS
         + _QUEEN_RUNNING_TOOLS
-        + _QUEEN_INCUBATING_TOOLS
+        + _QUEEN_EDITING_TOOLS
     )
 )
 
@@ -1387,24 +1378,24 @@ __all__ = [
     "_QUEEN_BUILDING_TOOLS",
     "_QUEEN_STAGING_TOOLS",
     "_QUEEN_RUNNING_TOOLS",
-    "_QUEEN_INCUBATING_TOOLS",
+    "_QUEEN_EDITING_TOOLS",
     # Character + phase-specific prompt segments (used by session_manager for dynamic prompts)
     "_queen_character_core",
     "_queen_role_planning",
     "_queen_role_building",
     "_queen_role_staging",
     "_queen_role_running",
-    "_queen_identity_incubating",
+    "_queen_identity_editing",
     "_queen_tools_planning",
     "_queen_tools_building",
     "_queen_tools_staging",
     "_queen_tools_running",
-    "_queen_tools_incubating",
+    "_queen_tools_editing",
     "_queen_behavior_always",
     "_queen_behavior_building",
     "_queen_behavior_staging",
     "_queen_behavior_running",
-    "_queen_behavior_incubating",
+    "_queen_behavior_editing",
     "_queen_phase_7",
     "_queen_style",
     "_shared_building_knowledge",

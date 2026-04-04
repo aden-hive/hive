@@ -79,22 +79,22 @@ class WorkerSessionAdapter:
 class QueenPhaseState:
     """Mutable state container for queen operating phase.
 
-    Five phases: planning → building → staging → running → incubating.
-    INCUBATING is entered after worker execution completes. The worker
+    Five phases: planning → building → staging → running → editing.
+    EDITING is entered after worker execution completes. The worker
     stays loaded — queen can tweak config and re-run without rebuilding.
     RUNNING cannot go directly to BUILDING or PLANNING; it must pass
-    through INCUBATING first.
+    through EDITING first.
 
     Shared between the dynamic_tools_provider callback and tool handlers
     that trigger phase transitions.
     """
 
-    phase: str = "building"  # "planning", "building", "staging", "running", or "incubating"
+    phase: str = "building"  # "planning", "building", "staging", "running", or "editing"
     planning_tools: list = field(default_factory=list)  # list[Tool]
     building_tools: list = field(default_factory=list)  # list[Tool]
     staging_tools: list = field(default_factory=list)  # list[Tool]
     running_tools: list = field(default_factory=list)  # list[Tool]
-    incubating_tools: list = field(default_factory=list)  # list[Tool]
+    editing_tools: list = field(default_factory=list)  # list[Tool]
     inject_notification: Any = None  # async (str) -> None
     event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
 
@@ -121,7 +121,7 @@ class QueenPhaseState:
     prompt_building: str = ""
     prompt_staging: str = ""
     prompt_running: str = ""
-    prompt_incubating: str = ""
+    prompt_editing: str = ""
 
     # Default skill operational protocols — appended to every phase prompt
     protocols_prompt: str = ""
@@ -147,8 +147,8 @@ class QueenPhaseState:
             return list(self.running_tools)
         if self.phase == "staging":
             return list(self.staging_tools)
-        if self.phase == "incubating":
-            return list(self.incubating_tools)
+        if self.phase == "editing":
+            return list(self.editing_tools)
         return list(self.building_tools)
 
     def get_current_prompt(self) -> str:
@@ -159,8 +159,8 @@ class QueenPhaseState:
             base = self.prompt_running
         elif self.phase == "staging":
             base = self.prompt_staging
-        elif self.phase == "incubating":
-            base = self.prompt_incubating
+        elif self.phase == "editing":
+            base = self.prompt_editing
         else:
             base = self.prompt_building
 
@@ -198,21 +198,21 @@ class QueenPhaseState:
                 )
             )
 
-    async def switch_to_incubating(self, source: str = "tool") -> None:
-        """Switch to incubating phase — worker stays loaded, queen can tweak and re-run.
+    async def switch_to_editing(self, source: str = "tool") -> None:
+        """Switch to editing phase — worker stays loaded, queen can tweak and re-run.
 
         Args:
             source: Who triggered the switch — "tool", "frontend", or "auto".
         """
-        if self.phase == "incubating":
+        if self.phase == "editing":
             return
-        self.phase = "incubating"
-        tool_names = [t.name for t in self.incubating_tools]
-        logger.info("Queen phase → incubating (source=%s, tools: %s)", source, tool_names)
+        self.phase = "editing"
+        tool_names = [t.name for t in self.editing_tools]
+        logger.info("Queen phase → editing (source=%s, tools: %s)", source, tool_names)
         await self._emit_phase_event()
         if self.inject_notification and source != "tool":
             await self.inject_notification(
-                "[PHASE CHANGE] Switched to INCUBATING phase. "
+                "[PHASE CHANGE] Switched to EDITING phase. "
                 "Worker is still loaded. You can tweak configuration and re-run, "
                 "or escalate to building/planning if a deeper change is needed. "
                 "Available tools: " + ", ".join(tool_names) + "."
@@ -273,7 +273,7 @@ class QueenPhaseState:
     async def switch_to_building(self, source: str = "tool") -> None:
         """Switch to building phase and notify the queen.
 
-        Blocked from RUNNING — must go through INCUBATING first.
+        Blocked from RUNNING — must go through EDITING first.
 
         Args:
             source: Who triggered the switch — "tool", "frontend", or "auto".
@@ -282,7 +282,7 @@ class QueenPhaseState:
             return
         if self.phase == "running":
             logger.warning(
-                "Queen phase: BLOCKED running → building (must go through incubating first, source=%s)",
+                "Queen phase: BLOCKED running → building (must go through editing first, source=%s)",
                 source,
             )
             return
@@ -300,7 +300,7 @@ class QueenPhaseState:
     async def switch_to_planning(self, source: str = "tool") -> None:
         """Switch to planning phase and notify the queen.
 
-        Blocked from RUNNING — must go through INCUBATING first.
+        Blocked from RUNNING — must go through EDITING first.
 
         Args:
             source: Who triggered the switch — "tool", "frontend", or "auto".
@@ -309,7 +309,7 @@ class QueenPhaseState:
             return
         if self.phase == "running":
             logger.warning(
-                "Queen phase: BLOCKED running → planning (must go through incubating first, source=%s)",
+                "Queen phase: BLOCKED running → planning (must go through editing first, source=%s)",
                 source,
             )
             return

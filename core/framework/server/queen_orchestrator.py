@@ -36,7 +36,7 @@ async def create_queen(
     )
     from framework.agents.queen.nodes import (
         _QUEEN_BUILDING_TOOLS,
-        _QUEEN_INCUBATING_TOOLS,
+        _QUEEN_EDITING_TOOLS,
         _QUEEN_PLANNING_TOOLS,
         _QUEEN_RUNNING_TOOLS,
         _QUEEN_STAGING_TOOLS,
@@ -45,12 +45,12 @@ async def create_queen(
         _planning_knowledge,
         _queen_behavior_always,
         _queen_behavior_building,
-        _queen_behavior_incubating,
+        _queen_behavior_editing,
         _queen_behavior_planning,
         _queen_behavior_running,
         _queen_behavior_staging,
         _queen_character_core,
-        _queen_identity_incubating,
+        _queen_identity_editing,
         _queen_phase_7,
         _queen_role_building,
         _queen_role_planning,
@@ -58,7 +58,7 @@ async def create_queen(
         _queen_role_staging,
         _queen_style,
         _queen_tools_building,
-        _queen_tools_incubating,
+        _queen_tools_editing,
         _queen_tools_planning,
         _queen_tools_running,
         _queen_tools_staging,
@@ -163,7 +163,7 @@ async def create_queen(
     building_names = set(_QUEEN_BUILDING_TOOLS)
     staging_names = set(_QUEEN_STAGING_TOOLS)
     running_names = set(_QUEEN_RUNNING_TOOLS)
-    incubating_names = set(_QUEEN_INCUBATING_TOOLS)
+    editing_names = set(_QUEEN_EDITING_TOOLS)
 
     registered_names = {t.name for t in queen_tools}
     missing_building = building_names - registered_names
@@ -180,7 +180,7 @@ async def create_queen(
     phase_state.building_tools = [t for t in queen_tools if t.name in building_names]
     phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
     phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
-    phase_state.incubating_tools = [t for t in queen_tools if t.name in incubating_names]
+    phase_state.editing_tools = [t for t in queen_tools if t.name in editing_names]
 
     # ---- Cross-session memory ----------------------------------------
     from framework.agents.queen.queen_memory_v2 import (
@@ -251,12 +251,12 @@ async def create_queen(
         + _queen_behavior_running
         + worker_identity
     )
-    phase_state.prompt_incubating = (
-        _queen_identity_incubating
+    phase_state.prompt_editing = (
+        _queen_identity_editing
         + _queen_style
-        + _queen_tools_incubating
+        + _queen_tools_editing
         + _queen_behavior_always
-        + _queen_behavior_incubating
+        + _queen_behavior_editing
         + worker_identity
     )
 
@@ -362,7 +362,7 @@ async def create_queen(
 
             phase_state.inject_notification = _inject_phase_notification
 
-            # Auto-switch to incubating when worker execution finishes.
+            # Auto-switch to editing when worker execution finishes.
             # The worker stays loaded — queen can tweak config and re-run.
             async def _on_worker_done(event):
                 if event.stream_id == "queen":
@@ -401,7 +401,7 @@ async def create_queen(
                     if node is not None and hasattr(node, "inject_event"):
                         await node.inject_event(notification)
 
-                    await phase_state.switch_to_incubating(source="auto")
+                    await phase_state.switch_to_editing(source="auto")
 
             session.event_bus.subscribe(
                 event_types=[EventType.EXECUTION_COMPLETED, EventType.EXECUTION_FAILED],
