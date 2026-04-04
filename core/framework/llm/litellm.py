@@ -1802,6 +1802,10 @@ class LiteLLMProvider(LLMProvider):
 
                     # --- Finish ---
                     if choice.finish_reason:
+                        # Kimi's 'pause_turn' means the model emitted tool
+                        # calls and expects results — equivalent to 'tool_calls'.
+                        if choice.finish_reason == "pause_turn":
+                            choice.finish_reason = "tool_calls" if tool_calls_acc else "stop"
                         stream_finish_reason = choice.finish_reason
                         for _idx, tc_data in sorted(tool_calls_acc.items()):
                             parsed_args = self._parse_tool_call_arguments(
@@ -2024,8 +2028,16 @@ class LiteLLMProvider(LLMProvider):
                 # tail_events before the error, the stream was successful —
                 # yield what we have instead of discarding it.
                 if (accumulated_text or tool_calls_acc) and tail_events:
+                    # LiteLLM may wrap the original ValidationError in an
+                    # APIError with a different message.  Check the full
+                    # exception chain (str(e) + str(__cause__)).
+                    _err_chain = f"{e} {e.__cause__}" if e.__cause__ else str(e)
                     _is_finish_reason_err = (
-                        "finish_reason" in str(e) and "validation error" in str(e).lower()
+                        "finish_reason" in _err_chain and "validation error" in _err_chain.lower()
+                    ) or (
+                        # Fallback: the APIError wrapper message for chunk-building failures
+                        "building chunks" in str(e).lower()
+                        and (accumulated_text or tool_calls_acc)
                     )
                     if _is_finish_reason_err:
                         logger.warning(
