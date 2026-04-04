@@ -1893,13 +1893,9 @@ else
         printf '%s' "$EXTENSION_PATH" | pbcopy 2>/dev/null && _copied=true
     fi
 
-    # Open chrome://extensions directly in Chrome — works whether Chrome is running or not
-    echo "  Opening chrome://extensions in Chrome..."
-    "$CHROME_BIN" "chrome://extensions" > /dev/null 2>&1 &
-    sleep 1
-
+    # Show instructions first, then wait for the user before opening Chrome
+    echo -e "  ${BOLD}When Chrome opens to the extensions page, you will need to:${NC}"
     echo ""
-    echo -e "  ${BOLD}In the Chrome window that just opened:${NC}"
     echo -e "  ${CYAN}1.${NC} Enable ${BOLD}Developer mode${NC}  (toggle in the top-right corner)"
     echo -e "  ${CYAN}2.${NC} Click ${BOLD}Load unpacked${NC}"
     echo -e "  ${CYAN}3.${NC} Paste this path into the folder picker:"
@@ -1911,6 +1907,32 @@ else
         echo ""
     fi
 
+    read -r -p "  Press Enter when you are ready to set up the Chrome extension... " _dummy || true
+    echo ""
+
+    # Open chrome://extensions in Chrome
+    echo "  Opening chrome://extensions in Chrome..."
+    if [[ "$OSTYPE" == darwin* ]]; then
+        # macOS: use open -a to properly handle chrome:// URLs
+        _chrome_app=""
+        if [[ "$CHROME_BIN" == *"Google Chrome"* ]]; then
+            _chrome_app="Google Chrome"
+        elif [[ "$CHROME_BIN" == *"Microsoft Edge"* ]]; then
+            _chrome_app="Microsoft Edge"
+        elif [[ "$CHROME_BIN" == *"Chromium"* ]]; then
+            _chrome_app="Chromium"
+        fi
+        if [ -n "$_chrome_app" ]; then
+            open -a "$_chrome_app" "chrome://extensions" 2>/dev/null
+        else
+            "$CHROME_BIN" "chrome://extensions" > /dev/null 2>&1 &
+        fi
+    else
+        "$CHROME_BIN" "chrome://extensions" > /dev/null 2>&1 &
+    fi
+    sleep 1
+
+    echo ""
     read -r -p "  Press Enter once you see 'Hive Browser Bridge' in the extensions list... " _dummy || true
     CHROME_LAUNCHED=true
 fi
