@@ -8,7 +8,9 @@ No Playwright required - all operations go through the Chrome extension.
 from __future__ import annotations
 
 import logging
+import os
 import time
+from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
@@ -30,8 +32,59 @@ def _resolve_profile(profile: str | None) -> str:
     return _active_profile.get()
 
 
+# Resolve extension path relative to this file: tools/browser-extension/
+_EXTENSION_PATH = (
+    Path(__file__).parent.parent.parent.parent.parent / "browser-extension"
+).resolve()
+
+
 def register_lifecycle_tools(mcp: FastMCP) -> None:
     """Register browser lifecycle management tools."""
+
+    @mcp.tool()
+    async def browser_setup() -> dict:
+        """
+        Check browser extension status and show installation instructions if needed.
+
+        Call this first if browser tools are not working. It checks whether the
+        Hive Chrome extension is installed and connected, and provides step-by-step
+        instructions to install it if not.
+
+        Returns:
+            Dict with connection status and setup instructions if needed
+        """
+        bridge = get_bridge()
+        connected = bool(bridge and bridge.is_connected)
+
+        ext_path = str(_EXTENSION_PATH)
+        ext_exists = _EXTENSION_PATH.exists()
+
+        if connected:
+            return {
+                "ok": True,
+                "connected": True,
+                "status": "Extension is connected and ready. Call browser_start to begin.",
+            }
+
+        return {
+            "ok": False,
+            "connected": False,
+            "status": "Extension not connected",
+            "instructions": {
+                "step_1": "Open Chrome and go to chrome://extensions",
+                "step_2": "Enable 'Developer mode' (toggle in the top-right corner)",
+                "step_3": "Click 'Load unpacked'",
+                "step_4": f"Select this directory: {ext_path}",
+                "step_5": "Click the extension icon in the Chrome toolbar to confirm it says 'Connected'",
+                "step_6": "Return here and call browser_start",
+            },
+            "extensionPath": ext_path,
+            "extensionPathExists": ext_exists,
+            "note": (
+                "The extension connects via WebSocket on ws://127.0.0.1:9229/beeline. "
+                "Make sure Chrome is running before loading the extension."
+            ),
+        }
 
     @mcp.tool()
     async def browser_status(profile: str | None = None) -> dict:
@@ -51,7 +104,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         if not bridge or not bridge.is_connected:
             result = {
                 "ok": False,
-                "error": "Browser extension not connected",
+                "error": "Browser extension not connected. Call browser_setup for installation instructions.",
                 "connected": False,
             }
             log_tool_call("browser_status", params, result=result)
@@ -133,7 +186,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             result = {
                 "ok": False,
                 "error": (
-                    "Browser extension not connected. Install the Beeline extension and connect it."
+                    "Browser extension not connected. Call browser_setup for installation instructions."
                 ),
             }
             log_tool_call("browser_start", params, result=result)

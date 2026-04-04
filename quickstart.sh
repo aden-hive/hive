@@ -1848,6 +1848,76 @@ fi
 echo ""
 
 # ============================================================
+# Step 4b: Load browser extension into Chrome (one-time setup)
+# ============================================================
+
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Setting up browser extension...${NC}"
+echo ""
+
+EXTENSION_PATH="$SCRIPT_DIR/tools/browser-extension"
+CHROME_BIN=""
+CHROME_LAUNCHED=false
+
+# Find Chrome binary
+for _bin in "google-chrome" "google-chrome-stable" "chromium" "chromium-browser" "microsoft-edge" "microsoft-edge-stable"; do
+    if command -v "$_bin" &> /dev/null; then
+        CHROME_BIN="$_bin"
+        break
+    fi
+done
+# macOS
+if [ -z "$CHROME_BIN" ]; then
+    for _path in \
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+        "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"; do
+        if [ -e "$_path" ]; then
+            CHROME_BIN="$_path"
+            break
+        fi
+    done
+fi
+
+if [ ! -d "$EXTENSION_PATH" ]; then
+    echo -e "${YELLOW}  Extension not found at $EXTENSION_PATH — skipping${NC}"
+elif [ -z "$CHROME_BIN" ]; then
+    echo -e "${YELLOW}  Chrome not found — skipping${NC}"
+    echo -e "${DIM}    Install Chrome, then load: $EXTENSION_PATH via chrome://extensions${NC}"
+else
+    # Copy path to clipboard (best-effort)
+    if command -v xclip &> /dev/null; then
+        printf '%s' "$EXTENSION_PATH" | xclip -selection clipboard 2>/dev/null && _copied=true
+    elif command -v xsel &> /dev/null; then
+        printf '%s' "$EXTENSION_PATH" | xsel --clipboard --input 2>/dev/null && _copied=true
+    elif command -v pbcopy &> /dev/null; then
+        printf '%s' "$EXTENSION_PATH" | pbcopy 2>/dev/null && _copied=true
+    fi
+
+    # Open chrome://extensions directly in Chrome — works whether Chrome is running or not
+    echo "  Opening chrome://extensions in Chrome..."
+    "$CHROME_BIN" "chrome://extensions" > /dev/null 2>&1 &
+    sleep 1
+
+    echo ""
+    echo -e "  ${BOLD}In the Chrome window that just opened:${NC}"
+    echo -e "  ${CYAN}1.${NC} Enable ${BOLD}Developer mode${NC}  (toggle in the top-right corner)"
+    echo -e "  ${CYAN}2.${NC} Click ${BOLD}Load unpacked${NC}"
+    echo -e "  ${CYAN}3.${NC} Paste this path into the folder picker:"
+    echo ""
+    echo -e "     ${BOLD}$EXTENSION_PATH${NC}"
+    echo ""
+    if [ "${_copied:-false}" = "true" ]; then
+        echo -e "  ${DIM}(path already copied to clipboard — just Ctrl+V in the folder picker)${NC}"
+        echo ""
+    fi
+
+    read -r -p "  Press Enter once you see 'Hive Browser Bridge' in the extensions list... " _dummy || true
+    CHROME_LAUNCHED=true
+fi
+
+echo ""
+
+# ============================================================
 # Step 5: Verify Setup
 # ============================================================
 
@@ -1899,6 +1969,17 @@ fi
 echo -n "  ⬡ frontend... "
 if [ -f "$SCRIPT_DIR/core/frontend/dist/index.html" ]; then
     echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
+echo -n "  ⬡ browser extension... "
+if [ "$CHROME_LAUNCHED" = true ]; then
+    echo -e "${GREEN}ok${NC}"
+elif [ -d "$EXTENSION_PATH" ] && [ -n "$CHROME_BIN" ]; then
+    echo -e "${GREEN}ok${NC}"
+elif [ -d "$EXTENSION_PATH" ]; then
+    echo -e "${YELLOW}-- (Chrome not found)${NC}"
 else
     echo -e "${YELLOW}--${NC}"
 fi

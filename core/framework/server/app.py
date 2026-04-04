@@ -165,6 +165,37 @@ async def handle_health(request: web.Request) -> web.Response:
     )
 
 
+async def handle_browser_status(request: web.Request) -> web.Response:
+    """GET /api/browser/status — proxy the GCU bridge status check server-side.
+
+    Checks http://127.0.0.1:9230/status so the browser never makes a
+    cross-origin request that would log ERR_CONNECTION_REFUSED in the console.
+    """
+    import asyncio
+
+    bridge_port = int(os.environ.get("HIVE_BRIDGE_PORT", "9229"))
+    status_port = bridge_port + 1
+
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection("127.0.0.1", status_port), timeout=0.5
+        )
+        writer.write(b"GET /status HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+        await writer.drain()
+        raw = await asyncio.wait_for(reader.read(512), timeout=0.5)
+        writer.close()
+        # Parse JSON body after the blank line
+        if b"\r\n\r\n" in raw:
+            body = raw.split(b"\r\n\r\n", 1)[1]
+            import json
+            data = json.loads(body)
+            return web.json_response({"bridge": True, "connected": data.get("connected", False)})
+    except Exception:
+        pass
+
+    return web.json_response({"bridge": False, "connected": False})
+
+
 def create_app(model: str | None = None) -> web.Application:
     """Create and configure the aiohttp Application.
 
@@ -210,6 +241,7 @@ def create_app(model: str | None = None) -> web.Application:
 
     # Health check
     app.router.add_get("/api/health", handle_health)
+    app.router.add_get("/api/browser/status", handle_browser_status)
 
     # Register route modules
     from framework.server.routes_credentials import register_routes as register_credential_routes
