@@ -6,7 +6,6 @@ conversation store derivation, execution, and cleanup.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
@@ -19,6 +18,7 @@ from framework.graph.event_loop.judge_pipeline import SubagentJudge
 from framework.graph.event_loop.types import LoopConfig, OutputAccumulator
 from framework.graph.node import DataBuffer, NodeContext
 from framework.llm.provider import ToolResult, ToolUse
+from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.event_bus import EventBus
 
 if TYPE_CHECKING:
@@ -274,27 +274,10 @@ async def execute_subagent(
     )
 
     # Each subagent instance gets its own unique browser profile so concurrent
-    # subagents don't share tab groups. The profile is injected into every
-    # browser_* tool call by wrapping the tool executor.
+    # subagents don't share tab groups. The profile is set as execution context
+    # so the tool registry auto-injects it into every browser_* MCP tool call.
     _gcu_profile = f"{agent_id}:{subagent_instance}"
-    _original_tool_executor = None
-
-    if tool_executor is not None:
-        _original_tool_executor = tool_executor
-
-        async def _gcu_profile_injecting_executor(
-            tool_use: ToolUse,
-        ) -> ToolResult | Awaitable[ToolResult]:
-            if tool_use.name.startswith("browser_") and "profile" not in (tool_use.input or {}):
-                from dataclasses import replace
-
-                tool_use = replace(tool_use, input={**(tool_use.input or {}), "profile": _gcu_profile})
-            result = _original_tool_executor(tool_use)
-            if asyncio.isfuture(result) or asyncio.iscoroutine(result):
-                return await result
-            return result
-
-        tool_executor = _gcu_profile_injecting_executor
+    _profile_token = ToolRegistry.set_execution_context(profile=_gcu_profile)
 
     try:
         logger.info("🚀 Starting subagent '%s' execution...", agent_id)
@@ -366,16 +349,17 @@ async def execute_subagent(
             is_error=True,
         )
     finally:
+        ToolRegistry.reset_execution_context(_profile_token)
         # Close the tab group this subagent created, if any.
-        if _original_tool_executor is not None:
-            try:
-                stop_call = ToolUse(
-                    id="__subagent_cleanup__",
-                    name="browser_stop",
-                    input={"profile": _gcu_profile},
-                )
-                result = _original_tool_executor(stop_call)
-                if asyncio.isfuture(result) or asyncio.iscoroutine(result):
-                    await result
-            except Exception:
-                pass
+        try:
+            from gcu.browser.bridge import get_bridge
+            from gcu.browser.tools.lifecycle import _contexts
+
+            bridge = get_bridge()
+            ctx_entry = _contexts.pop(_gcu_profile, None)
+            if bridge and bridge.is_connected and ctx_entry:
+                group_id = ctx_entry.get("groupId")
+                if group_id is not None:
+                    await bridge.destroy_context(group_id)
+        except Exception:
+            pass
