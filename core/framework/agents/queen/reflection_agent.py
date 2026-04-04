@@ -273,10 +273,14 @@ async def _reflection_loop(
         if resp.raw_response and isinstance(resp.raw_response, dict):
             tool_calls_raw = resp.raw_response.get("tool_calls", [])
 
-        last_text = resp.content or ""
+        # Accumulate non-empty text across turns so we don't lose a reason
+        # given alongside tool calls on an earlier turn.
+        turn_text = resp.content or ""
+        if turn_text:
+            last_text = turn_text
         assistant_msg: dict[str, Any] = {
             "role": "assistant",
-            "content": last_text,
+            "content": turn_text,
         }
         if tool_calls_raw:
             # Convert to OpenAI format for the conversation.
@@ -349,6 +353,8 @@ Rules:
   creating a duplicate.
 - If there is nothing worth remembering from these messages, do nothing
   (respond with a brief reason why nothing was saved — no tool calls needed).
+- IMPORTANT: Always end with a text message (no tool calls) summarising what
+  you did or why you skipped.  Never end on an empty response.
 - File names should be kebab-case slugs ending in .md.
 - Include a specific, search-friendly description in the frontmatter.
 - Do NOT exceed {MAX_FILE_SIZE_BYTES} bytes per file or {MAX_FILES} total files.
