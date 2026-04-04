@@ -257,6 +257,14 @@ async def _reflection_loop(
     logger.debug("reflect: starting loop (caller=%s, max %d turns)", caller, max_turns)
 
     for _turn in range(max_turns):
+        # Log what we're sending to the LLM.
+        user_content = messages[-1].get("content", "") if messages else ""
+        preview = user_content[:300] if isinstance(user_content, str) else str(user_content)[:300]
+        logger.debug(
+            "reflect: turn %d — sending %d messages to LLM, last msg role=%s, preview=%s",
+            _turn, len(messages), messages[-1].get("role", "?") if messages else "?", preview,
+        )
+
         try:
             resp: LLMResponse = await llm.acomplete(
                 messages=messages,
@@ -273,6 +281,15 @@ async def _reflection_loop(
         if resp.raw_response and isinstance(resp.raw_response, dict):
             tool_calls_raw = resp.raw_response.get("tool_calls", [])
 
+        # Log the full LLM response for debugging.
+        raw_keys = list(resp.raw_response.keys()) if isinstance(resp.raw_response, dict) else type(resp.raw_response).__name__
+        logger.debug(
+            "reflect: turn %d — LLM response: content=%r (len=%d), stop_reason=%s, "
+            "tool_calls=%d, model=%s, tokens=%d/%d, raw_keys=%s",
+            _turn, (resp.content or "")[:200], len(resp.content or ""),
+            resp.stop_reason, len(tool_calls_raw), resp.model,
+            resp.input_tokens, resp.output_tokens, raw_keys,
+        )
         # Accumulate non-empty text across turns so we don't lose a reason
         # given alongside tool calls on an earlier turn.
         turn_text = resp.content or ""
@@ -598,15 +615,31 @@ async def subscribe_reflection_triggers(
         if getattr(event, "stream_id", None) != "queen":
             return
 
+        _short_count += 1
+
+        # Decide whether to reflect: only when the LLM turn ended without
+        # tool calls (a conversational response) OR every _LONG_REFLECT_INTERVAL turns.
+        event_data = getattr(event, "data", {}) or {}
+        stop_reason = event_data.get("stop_reason", "")
+        is_tool_turn = stop_reason in ("tool_use", "tool_calls")
+        is_interval = _short_count % _LONG_REFLECT_INTERVAL == 0
+
+        if is_tool_turn and not is_interval:
+            logger.debug(
+                "reflect: skipping turn %d (stop_reason=%s, next reflect at %d)",
+                _short_count, stop_reason,
+                (_short_count // _LONG_REFLECT_INTERVAL + 1) * _LONG_REFLECT_INTERVAL,
+            )
+            return
+
         if _lock.locked():
             logger.debug("reflect: skipping — reflection already in progress")
             return
 
         async with _lock:
             try:
-                _short_count += 1
-                logger.debug("reflect: turn complete — short count %d/%d", _short_count, _LONG_REFLECT_INTERVAL)
-                if _short_count % _LONG_REFLECT_INTERVAL == 0:
+                logger.debug("reflect: turn complete — count %d/%d (stop_reason=%s)", _short_count, _LONG_REFLECT_INTERVAL, stop_reason)
+                if is_interval:
                     await run_short_reflection(session_dir, llm, mem_dir, caller="queen")
                     await run_long_reflection(llm, mem_dir, caller="queen")
                 else:
