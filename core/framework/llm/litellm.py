@@ -635,114 +635,37 @@ class LiteLLMProvider(LLMProvider):
     def _completion_with_rate_limit_retry(
         self, max_retries: int | None = None, **kwargs: Any
     ) -> Any:
-        """Call litellm.completion with retry on 429 rate limit errors and empty responses."""
-        model = kwargs.get("model", self.model)
-        retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
-        for attempt in range(retries + 1):
-            try:
-                response = litellm.completion(**kwargs)  # type: ignore[union-attr]
+        """Call litellm.completion with retry across all provider types.
 
-                # Some providers (e.g. Gemini) return 200 with empty content on
-                # rate limit / quota exhaustion instead of a proper 429.  Treat
-                # empty responses the same as a rate-limit error and retry.
-                content = response.choices[0].message.content if response.choices else None
-                has_tool_calls = bool(response.choices and response.choices[0].message.tool_calls)
-                if not content and not has_tool_calls:
-                    # If the conversation ends with an assistant message,
-                    # an empty response is expected — don't retry.
-                    messages = kwargs.get("messages", [])
-                    last_role = next(
-                        (m["role"] for m in reversed(messages) if m.get("role") != "system"),
-                        None,
-                    )
-                    if last_role == "assistant":
-                        logger.debug(
-                            "[retry] Empty response after assistant message — "
-                            "expected, not retrying."
-                        )
-                        return response
+        CRITICAL NOTE: This is a synchronous bridge to the unified async retry
+        implementation. This is designed for legacy CLI usage and pre-load validation.
+        In the core agent execution loop, developers MUST use acomplete() to ensure
+        the ThreadPoolExecutor is not blocked during provider rate-limiting events.
+        """
+        try:
+            # Check if we are already inside a running asyncio event loop
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Avoid direct asyncio.run() calls which crash when a loop exists.
+                # Bridging via threadsafe result is used as a fallback.
+                import threading
 
-                    finish_reason = (
-                        response.choices[0].finish_reason if response.choices else "unknown"
-                    )
-                    # Dump full request to file for debugging
-                    token_count, token_method = _estimate_tokens(model, messages)
-                    dump_path = _dump_failed_request(
-                        model=model,
-                        kwargs=kwargs,
-                        error_type="empty_response",
-                        attempt=attempt,
-                    )
+                if threading.current_thread() is threading.main_thread():
                     logger.warning(
-                        f"[retry] Empty response - {len(messages)} messages, "
-                        f"~{token_count} tokens ({token_method}). "
-                        f"Full request dumped to: {dump_path}"
+                        "Synchronous completion called from MAIN thread while event loop is running. "
+                        "This blocks all concurrent agent execution!"
                     )
+                return asyncio.run_coroutine_threadsafe(
+                    self._acompletion_with_rate_limit_retry(max_retries=max_retries, **kwargs),
+                    loop,
+                ).result()
+        except (RuntimeError, OSError):
+            pass
 
-                    # finish_reason=length means the model exhausted max_tokens
-                    # before producing content. Retrying with the same max_tokens
-                    # will never help — return immediately instead of looping.
-                    if finish_reason == "length":
-                        max_tok = kwargs.get("max_tokens", "unset")
-                        logger.error(
-                            f"[retry] {model} returned empty content with "
-                            f"finish_reason=length (max_tokens={max_tok}). "
-                            f"The model exhausted its token budget before "
-                            f"producing visible output. Increase max_tokens "
-                            f"or use a different model. Not retrying."
-                        )
-                        return response
-
-                    if attempt == retries:
-                        logger.error(
-                            f"[retry] GAVE UP on {model} after {retries + 1} "
-                            f"attempts — empty response "
-                            f"(finish_reason={finish_reason}, "
-                            f"choices={len(response.choices) if response.choices else 0})"
-                        )
-                        return response
-                    wait = _compute_retry_delay(attempt)
-                    logger.warning(
-                        f"[retry] {model} returned empty response "
-                        f"(finish_reason={finish_reason}, "
-                        f"choices={len(response.choices) if response.choices else 0}) — "
-                        f"likely rate limited or quota exceeded. "
-                        f"Retrying in {wait}s "
-                        f"(attempt {attempt + 1}/{retries})"
-                    )
-                    time.sleep(wait)
-                    continue
-
-                return response
-            except RateLimitError as e:
-                # Dump full request to file for debugging
-                messages = kwargs.get("messages", [])
-                token_count, token_method = _estimate_tokens(model, messages)
-                dump_path = _dump_failed_request(
-                    model=model,
-                    kwargs=kwargs,
-                    error_type="rate_limit",
-                    attempt=attempt,
-                )
-                if attempt == retries:
-                    logger.error(
-                        f"[retry] GAVE UP on {model} after {retries + 1} "
-                        f"attempts — rate limit error: {e!s}. "
-                        f"~{token_count} tokens ({token_method}). "
-                        f"Full request dumped to: {dump_path}"
-                    )
-                    raise
-                wait = _compute_retry_delay(attempt, exception=e)
-                logger.warning(
-                    f"[retry] {model} rate limited (429): {e!s}. "
-                    f"~{token_count} tokens ({token_method}). "
-                    f"Full request dumped to: {dump_path}. "
-                    f"Retrying in {wait}s "
-                    f"(attempt {attempt + 1}/{retries})"
-                )
-                time.sleep(wait)
-        # unreachable, but satisfies type checker
-        raise RuntimeError("Exhausted rate limit retries")
+        # Native caller context (e.g. CLI entry point)
+        return asyncio.run(
+            self._acompletion_with_rate_limit_retry(max_retries=max_retries, **kwargs)
+        )
 
     def complete(
         self,

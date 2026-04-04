@@ -41,7 +41,8 @@ def validate_agent_path(agent_path: str | Path) -> Path:
 
     Prevents arbitrary code execution via ``importlib.import_module`` by
     restricting agent loading to known safe directories: ``exports/``,
-    ``examples/``, and ``~/.hive/agents/``.
+    ``examples/``, and ``~/.hive/agents/``. This prevents credential
+    exfiltration by untrusted agent configurations.
 
     Returns the resolved ``Path`` on success.
 
@@ -106,6 +107,35 @@ def _is_cors_allowed(origin: str) -> bool:
         if origin == base or origin.startswith(base + ":"):
             return True
     return False
+
+
+@web.middleware
+async def auth_middleware(request: web.Request, handler):
+    """API authentication middleware for Bearer tokens.
+
+    Authorizes all /api/ requests using the HIVE_API_KEY environment variable.
+    Ensures safe default-deny behavior if the key is not configured.
+    """
+    # Allow-list for public metrics and health probes
+    public_endpoints = ("/api/health", "/api/browser/status")
+    if request.path.startswith(public_endpoints) or not request.path.startswith("/api"):
+        return await handler(request)
+
+    expected_token = os.environ.get("HIVE_API_KEY")
+    if not expected_token:
+        logger.error("HIVE_API_KEY not configured. Denying all API requests to prevent unauthorized access.")
+        return web.json_response({"error": "Server configuration error: missing HIVE_API_KEY"}, status=500)
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header != f"Bearer {expected_token}":
+        logger.warning(
+            "Unauthorized API access attempt to %s from %s",
+            request.path,
+            request.headers.get("Origin", "none"),
+        )
+        return web.json_response({"error": "Unauthorized Access (HIVE_API_KEY required)"}, status=401)
+
+    return await handler(request)
 
 
 @web.middleware
@@ -206,7 +236,7 @@ def create_app(model: str | None = None) -> web.Application:
     Returns:
         Configured aiohttp Application ready to run.
     """
-    app = web.Application(middlewares=[cors_middleware, error_middleware])
+    app = web.Application(middlewares=[auth_middleware, cors_middleware, error_middleware])
 
     # Initialize credential store (before SessionManager so it can be shared)
     from framework.credentials.store import CredentialStore
