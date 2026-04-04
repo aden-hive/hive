@@ -1349,7 +1349,6 @@ queen_node = NodeSpec(
     output_keys=[],  # Queen should never have this
     nullable_output_keys=[],  # Queen should never have this
     skip_judge=True,  # Queen is a conversational agent; suppress tool-use pressure feedback
-    thinking_tags=["situation", "monologue"],
     tools=sorted(
         set(
             _QUEEN_PLANNING_TOOLS

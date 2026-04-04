@@ -2173,17 +2173,6 @@ class EventLoopNode(NodeProtocol):
             ) -> None:
                 nonlocal accumulated_text, _stream_error
 
-                # Thinking tag filter — strips configured XML tags from
-                # client-facing output while keeping full text in conversation
-                # history.  Only created when thinking_tags is set on the node.
-                _tag_filter = None
-                if ctx.thinking_tags:
-                    from framework.graph.event_loop.thinking_tag_filter import (
-                        ThinkingTagFilter,
-                    )
-
-                    _tag_filter = ThinkingTagFilter(ctx.thinking_tags)
-
                 async for event in ctx.llm.stream(
                     messages=_msgs,
                     system=conversation.system_prompt,
@@ -2191,29 +2180,17 @@ class EventLoopNode(NodeProtocol):
                     max_tokens=ctx.max_tokens,
                 ):
                     if isinstance(event, TextDeltaEvent):
-                        # Full text (with tags) kept for conversation storage.
                         accumulated_text = event.snapshot
-
-                        if _tag_filter:
-                            visible_chunk = _tag_filter.feed(event.content)
-                            visible_snapshot = _tag_filter.visible_snapshot
-                        else:
-                            visible_chunk = event.content
-                            visible_snapshot = event.snapshot
-
-                        # Only publish if there's visible content (skip chunks
-                        # that are entirely inside thinking tags).
-                        if visible_chunk:
-                            await self._publish_text_delta(
-                                stream_id,
-                                node_id,
-                                visible_chunk,
-                                visible_snapshot,
-                                ctx,
-                                execution_id,
-                                iteration=iteration,
-                                inner_turn=inner_turn,
-                            )
+                        await self._publish_text_delta(
+                            stream_id,
+                            node_id,
+                            event.content,
+                            event.snapshot,
+                            ctx,
+                            execution_id,
+                            iteration=iteration,
+                            inner_turn=inner_turn,
+                        )
 
                     elif isinstance(event, ToolCallEvent):
                         _tc.append(event)
@@ -2230,21 +2207,6 @@ class EventLoopNode(NodeProtocol):
                             raise RuntimeError(f"Stream error: {event.error}")
                         _stream_error = event
                         logger.warning("Recoverable stream error: %s", event.error)
-
-                # Flush any pending partial tag at end of stream.
-                if _tag_filter:
-                    tail = _tag_filter.flush()
-                    if tail:
-                        await self._publish_text_delta(
-                            stream_id,
-                            node_id,
-                            tail,
-                            _tag_filter.visible_snapshot,
-                            ctx,
-                            execution_id,
-                            iteration=iteration,
-                            inner_turn=inner_turn,
-                        )
 
             _llm_stream_t0 = time.monotonic()
             self._stream_task = asyncio.create_task(_do_stream())

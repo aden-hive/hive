@@ -1,0 +1,8 @@
+{"type": "connection", "event": "connect", "ts": "2026-04-04T01:10:38.245667+00:00", "profile": "default"}
+{"type": "connection", "event": "hello", "details": {"version": "1.0"}, "ts": "2026-04-04T01:10:38.247207+00:00", "profile": "default"}
+{"type": "connection", "event": "disconnect", "ts": "2026-04-04T01:11:57.148273+00:00", "profile": "default"}
+{"type": "connection", "event": "connect", "ts": "2026-04-04T01:12:09.162378+00:00", "profile": "default"}
+{"type": "connection", "event": "hello", "details": {"version": "1.0"}, "ts": "2026-04-04T01:12:09.163899+00:00", "profile": "default"}
+{"type": "connection", "event": "disconnect", "ts": "2026-04-04T01:15:12.826042+00:00", "profile": "default"}
+{"type": "connection", "event": "connect", "ts": "2026-04-04T01:15:30.842533+00:00", "profile": "default"}
+{"type": "connection", "event": "hello", "details": {"version": "1.0"}, "ts": "2026-04-04T01:15:30.845025+00:00", "profile": "default"}
