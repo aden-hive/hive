@@ -4,7 +4,6 @@ Shared agent instructions for this workspace.
 
 ## Coding Agent Notes
 
-- 
 - When working on a GitHub Issue or PR, print the full URL at the end of the task.
 - When answering questions, respond with high-confidence answers only: verify in code; do not guess.
 - Do not update dependencies casually. Version bumps, patched dependencies, overrides, or vendored dependency changes require explicit approval.
