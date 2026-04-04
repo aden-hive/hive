@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from framework.graph import EdgeSpec, EdgeCondition, Goal
+from framework.config import RuntimeConfig
+from framework.graph import EdgeCondition, EdgeSpec, Goal
+from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.edge import GraphSpec
 from framework.graph.executor import ExecutionResult
-from framework.graph.checkpoint_config import CheckpointConfig
 from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
-from framework.config import RuntimeConfig
 
 from .config import default_config, metadata
 from .nodes import (
@@ -68,11 +68,11 @@ class ResearchAgent:
     def __init__(self, config: RuntimeConfig | None = None) -> None:
         self.config = config or default_config
         self.goal = goal
-        self.nodes = nodes
-        self.edges = edges
+        self.nodes = list(nodes)
+        self.edges = list(edges)
         self.entry_node = entry_node
-        self.entry_points = entry_points
-        self.terminal_nodes = terminal_nodes
+        self.entry_points = dict(entry_points)
+        self.terminal_nodes = list(terminal_nodes)
         self._graph: GraphSpec | None = None
         self._agent_runtime: AgentRuntime | None = None
         self._tool_registry: ToolRegistry | None = None
@@ -105,8 +105,12 @@ class ResearchAgent:
         self._tool_registry = ToolRegistry()
         
         mcp_config_path = Path(__file__).parent / "mcp_servers.json"
-        if mcp_config_path.exists():
-            self._tool_registry.load_mcp_config(mcp_config_path)
+        if not mcp_config_path.exists():
+            raise RuntimeError(f"MCP configuration not found at {mcp_config_path}")
+        self._tool_registry.load_mcp_config(mcp_config_path)
+
+        if not self._tool_registry.get_tools():
+            raise RuntimeError("Failed to load required MCP tools: no tools available.")
 
         llm = None
         if not mock_mode:
