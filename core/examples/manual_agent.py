@@ -13,7 +13,11 @@ Run with:
 """
 
 import asyncio
+import sys
+from pathlib import Path
 
+# This adds the 'core' directory to the Python path
+sys.path.append(str(Path(__file__).parent.parent))
 from framework.graph import EdgeCondition, EdgeSpec, Goal, GraphSpec, NodeSpec
 from framework.graph.executor import GraphExecutor
 from framework.graph.node import NodeContext, NodeProtocol, NodeResult
