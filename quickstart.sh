@@ -34,6 +34,22 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Hive LLM router endpoint
 HIVE_LLM_ENDPOINT="https://api.adenhq.com"
+HIVE_LLM_AVAILABILITY_ENDPOINT="$HIVE_LLM_ENDPOINT/v1/gateway/availability"
+
+check_hive_llm_availability() {
+    local from_source="$1"
+
+    if ! command -v curl >/dev/null 2>&1; then
+        return 2
+    fi
+
+    local response
+    response="$(curl -fsSL --max-time 5 "${HIVE_LLM_AVAILABILITY_ENDPOINT}?from=${from_source}" 2>/dev/null)" || return 2
+    if [ "$response" = "true" ]; then
+        return 0
+    fi
+    return 1
+}
 
 # Helper function for prompts
 prompt_yes_no() {
@@ -1194,8 +1210,23 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
     fi
 fi
 
+HIVE_LLM_AVAILABLE="unknown"
+if check_hive_llm_availability "quickstart"; then
+    HIVE_LLM_AVAILABLE="yes"
+elif [ $? -eq 1 ]; then
+    HIVE_LLM_AVAILABLE="no"
+fi
+
 # ── Show unified provider selection menu ─────────────────────
 echo -e "${BOLD}Select your default LLM provider:${NC}"
+echo ""
+if [ "$HIVE_LLM_AVAILABLE" = "yes" ]; then
+    echo -e "${GREEN}⬢${NC} Hive LLM availability check: ${DIM}available${NC}"
+elif [ "$HIVE_LLM_AVAILABLE" = "no" ]; then
+    echo -e "${YELLOW}⬢${NC} Hive LLM availability check: ${DIM}currently unavailable${NC}"
+else
+    echo -e "${YELLOW}⬢${NC} Hive LLM availability check: ${DIM}could not verify${NC}"
+fi
 echo ""
 echo -e "  ${CYAN}${BOLD}Subscription modes (no API key purchase needed):${NC}"
 
@@ -1235,10 +1266,18 @@ else
 fi
 
 # 6) Hive LLM
-if [ "$HIVE_CRED_DETECTED" = true ]; then
-    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}  ${GREEN}(credential detected)${NC}"
+if [ "$HIVE_LLM_AVAILABLE" = "yes" ]; then
+    HIVE_LLM_STATUS="${GREEN}(available)${NC}"
+elif [ "$HIVE_LLM_AVAILABLE" = "no" ]; then
+    HIVE_LLM_STATUS="${YELLOW}(unavailable)${NC}"
 else
-    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}"
+    HIVE_LLM_STATUS="${YELLOW}(status unknown)${NC}"
+fi
+
+if [ "$HIVE_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}  $HIVE_LLM_STATUS  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}  $HIVE_LLM_STATUS"
 fi
 
 # 7) Antigravity

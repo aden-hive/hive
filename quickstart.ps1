@@ -23,8 +23,22 @@ $UvHelperPath = Join-Path $ScriptDir "scripts\uv-discovery.ps1"
 
 # Hive LLM router endpoint
 $HiveLlmEndpoint = "https://api.adenhq.com"
+$HiveLlmAvailabilityEndpoint = "$HiveLlmEndpoint/v1/gateway/availability"
 
 . $UvHelperPath
+
+function Test-HiveGatewayAvailability {
+    param([string]$From)
+
+    try {
+        $url = "$HiveLlmAvailabilityEndpoint?from=$From"
+        $result = Invoke-RestMethod -Uri $url -Method Get -TimeoutSec 5 -ErrorAction Stop
+        if ($result -eq $true) { return "available" }
+        return "unavailable"
+    } catch {
+        return "unknown"
+    }
+}
 
 # ============================================================
 # Colors / helpers
@@ -1119,8 +1133,16 @@ if ($PrevSubMode -or $PrevProvider) {
     }
 }
 
+$HiveGatewayAvailability = Test-HiveGatewayAvailability -From "quickstart"
+
 # ── Show unified provider selection menu ─────────────────────
 Write-Color -Text "Select your default LLM provider:" -Color White
+Write-Host ""
+switch ($HiveGatewayAvailability) {
+    "available" { Write-Ok "Hive LLM availability check: available" }
+    "unavailable" { Write-Warn "Hive LLM availability check: currently unavailable" }
+    default { Write-Warn "Hive LLM availability check: could not verify" }
+}
 Write-Host ""
 Write-Color -Text "  Subscription modes (no API key purchase needed):" -Color Cyan
 
@@ -1164,6 +1186,11 @@ Write-Host "  " -NoNewline
 Write-Color -Text "6" -Color Cyan -NoNewline
 Write-Host ") Hive LLM                   " -NoNewline
 Write-Color -Text "(use your Hive API key)" -Color DarkGray -NoNewline
+switch ($HiveGatewayAvailability) {
+    "available" { Write-Color -Text "  (available)" -Color Green -NoNewline }
+    "unavailable" { Write-Color -Text "  (unavailable)" -Color Yellow -NoNewline }
+    default { Write-Color -Text "  (status unknown)" -Color Yellow -NoNewline }
+}
 if ($HiveCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 
 # 7) Antigravity
