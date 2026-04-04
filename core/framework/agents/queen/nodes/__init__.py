@@ -100,6 +100,7 @@ _QUEEN_BUILDING_TOOLS = (
 )
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
+# No backward transitions — staging only goes forward to running.
 _QUEEN_STAGING_TOOLS = [
     # Read-only (inspect agent files, logs)
     "read_file",
@@ -109,10 +110,8 @@ _QUEEN_STAGING_TOOLS = [
     # Agent inspection
     "list_credentials",
     "get_graph_status",
-    # Launch or go back
+    # Launch
     "run_agent_with_input",
-    "stop_graph_and_edit",
-    "stop_graph_and_plan",
     # Trigger management
     "set_trigger",
     "remove_trigger",
@@ -120,9 +119,8 @@ _QUEEN_STAGING_TOOLS = [
     "save_global_memory",
 ]
 
-# Running phase: worker is executing — monitor and control.
-# Note: stop_graph_and_edit / stop_graph_and_plan are NOT available here.
-# The queen must go through EDITING first before dropping to building/planning.
+# Running phase: worker is executing — monitor, control, or switch to editing.
+# switch_to_editing lets the queen explicitly stop and tweak without rebuilding.
 _QUEEN_RUNNING_TOOLS = [
     # Read-only coding (for inspecting logs, files)
     "read_file",
@@ -133,6 +131,7 @@ _QUEEN_RUNNING_TOOLS = [
     "list_credentials",
     # Worker lifecycle
     "stop_graph",
+    "switch_to_editing",
     "get_graph_status",
     "run_agent_with_input",
     "inject_message",
@@ -146,7 +145,7 @@ _QUEEN_RUNNING_TOOLS = [
 
 # Editing phase: worker done, still loaded — tweak config and re-run.
 # Has inject_message for live adjustments. stop_graph_and_edit/plan available
-# here (not in running) to escalate when a deeper change is needed.
+# here to escalate when a deeper change is needed.
 _QUEEN_EDITING_TOOLS = [
     # Read-only (inspect)
     "read_file",
@@ -159,9 +158,6 @@ _QUEEN_EDITING_TOOLS = [
     # Re-run or tweak
     "run_agent_with_input",
     "inject_message",
-    # Escalate to building/planning (kills worker)
-    "stop_graph_and_edit",
-    "stop_graph_and_plan",
     # Monitoring
     "get_worker_health_summary",
     "set_trigger",
@@ -698,19 +694,15 @@ _queen_tools_staging = """
 The agent is loaded and ready to run. You can inspect it and launch it:
 - Read-only: read_file, list_directory, search_files, run_command
 - list_credentials(credential_id?) — Verify credentials are configured
-- get_graph_status(focus?) — Brief status. Drill in with focus: memory, tools, issues, progress
+- get_graph_status(focus?) — Brief status
 - run_agent_with_input(task) — Start the worker and switch to RUNNING phase
-- stop_graph_and_plan() — Go to PLANNING phase to discuss changes with the user \
-first (DEFAULT for most modification requests)
-- stop_graph_and_edit() — Go to BUILDING phase for immediate, specific fixes
-- set_trigger(trigger_id, trigger_type?, trigger_config?) — Activate a trigger (timer)
-- remove_trigger(trigger_id) — Deactivate a trigger
-- list_triggers() — List all triggers and their active/inactive status
-- save_global_memory(category, description, content, name?) — Save durable \
-cross-queen memory about the user only
+- set_trigger / remove_trigger / list_triggers — Timer management
+- save_global_memory(category, description, content, name?) — Save \
+durable cross-queen memory about the user only
 
-You do NOT have write tools. To modify the agent, prefer \
-stop_graph_and_plan() unless the user gave a specific instruction.
+You do NOT have write tools or backward transition tools in staging. \
+To modify the agent, run it first — after it finishes you enter EDITING \
+phase where you can escalate to building or planning.
 """
 
 _queen_tools_running = """
@@ -718,20 +710,19 @@ _queen_tools_running = """
 
 The worker is running. You have monitoring and lifecycle tools:
 - Read-only: read_file, list_directory, search_files, run_command
-- get_graph_status(focus?) — Brief status. Drill in: activity, memory, tools, issues, progress
+- get_graph_status(focus?) — Brief status
 - inject_message(content) — Send a message to the running worker
 - get_worker_health_summary() — Read the latest health data
-- stop_graph() — Stop the worker immediately (moves to EDITING phase)
+- stop_graph() — Stop the worker immediately
+- switch_to_editing() — Stop the worker and enter EDITING phase \
+for config tweaks, re-runs, or escalation to building/planning
 - run_agent_with_input(task) — Re-run the worker with new input
-- set_trigger(trigger_id, trigger_type?, trigger_config?) — Activate a trigger (timer)
-- remove_trigger(trigger_id) — Deactivate a trigger
-- list_triggers() — List all triggers and their active/inactive status
-- save_global_memory(category, description, content, name?) — Save durable \
-cross-queen memory about the user only
+- set_trigger / remove_trigger / list_triggers — Timer management
+- save_global_memory(category, description, content, name?) — Save \
+durable cross-queen memory about the user only
 
-You do NOT have stop_graph_and_edit or stop_graph_and_plan in this phase. \
-When the worker finishes, you will automatically move to EDITING phase \
-where you can tweak config and re-run, or escalate to building/planning.
+When the worker finishes on its own, you automatically move to EDITING \
+phase. You can also call switch_to_editing() to stop early and tweak.
 """
 
 _queen_tools_editing = """
@@ -740,16 +731,14 @@ _queen_tools_editing = """
 The worker has finished executing and is still loaded. You can tweak and re-run:
 - Read-only: read_file, list_directory, search_files, run_command
 - get_graph_status(focus?) — Brief status of the loaded agent
-- inject_message(content) — Send a config tweak or prompt adjustment to the worker
+- inject_message(content) — Send a config tweak or prompt adjustment
 - run_agent_with_input(task) — Re-run the worker with new input
 - get_worker_health_summary() — Review last run's health data
+- set_trigger / remove_trigger / list_triggers — Timer management
+- save_global_memory — Save durable cross-queen memory
 
-To escalate when a deeper change is needed (code edits, new tools, redesign):
-- stop_graph_and_edit() — Kill the worker and switch to BUILDING phase
-- stop_graph_and_plan() — Kill the worker and switch to PLANNING phase
-
-You do NOT have write/edit file tools. If you need to modify code, \
-call stop_graph_and_edit() to switch to BUILDING phase.
+You do NOT have write/edit file tools or backward transition tools. \
+You can only re-run or tweak from this phase.
 """
 
 _queen_behavior_editing = """
@@ -758,9 +747,9 @@ _queen_behavior_editing = """
 The worker finished. Review the results and decide:
 1. **Re-run** with different input: call run_agent_with_input(task)
 2. **Inject adjustments**: use inject_message to tweak prompts or config
-3. **Escalate**: if the agent needs code changes, call stop_graph_and_edit()
 
-Do NOT suggest rebuilding unless the user explicitly asks. Default to re-running.
+Do NOT suggest rebuilding. You cannot go back to building or planning \
+from this phase. Default to re-running with adjusted input.
 Report the last run's results to the user and ask what they want to do next.
 """
 

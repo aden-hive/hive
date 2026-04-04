@@ -368,8 +368,8 @@ async def test_editing_to_running_allowed(llm_provider, tmp_path, artifact):
 
 
 @pytest.mark.asyncio
-async def test_editing_to_building_allowed(llm_provider, tmp_path, artifact):
-    """EDITING -> BUILDING must be allowed (escalate to rebuild)."""
+async def test_editing_to_building_blocked(llm_provider, tmp_path, artifact):
+    """EDITING -> BUILDING must be blocked."""
     session, task = await _start_queen_session(llm_provider, tmp_path)
     try:
         ps = session.phase_state
@@ -378,20 +378,25 @@ async def test_editing_to_building_allowed(llm_provider, tmp_path, artifact):
 
         await ps.switch_to_building(source="test")
 
-        artifact.check(
-            "phase is building",
-            ps.phase == "building",
-            actual=repr(ps.phase),
-            expected_val="'building'",
+        artifact.record_value(
+            "phase_after_blocked", ps.phase, expected="'editing' (blocked)"
         )
-        assert ps.phase == "building"
+        artifact.check(
+            "phase still editing",
+            ps.phase == "editing",
+            actual=repr(ps.phase),
+            expected_val="'editing'",
+        )
+        assert ps.phase == "editing", (
+            f"editing->building should be BLOCKED, got: {ps.phase}"
+        )
     finally:
         await _shutdown(session, task)
 
 
 @pytest.mark.asyncio
-async def test_editing_to_planning_allowed(llm_provider, tmp_path, artifact):
-    """EDITING -> PLANNING must be allowed (escalate to replan)."""
+async def test_editing_to_planning_blocked(llm_provider, tmp_path, artifact):
+    """EDITING -> PLANNING must be blocked."""
     session, task = await _start_queen_session(llm_provider, tmp_path)
     try:
         ps = session.phase_state
@@ -400,13 +405,18 @@ async def test_editing_to_planning_allowed(llm_provider, tmp_path, artifact):
 
         await ps.switch_to_planning(source="test")
 
-        artifact.check(
-            "phase is planning",
-            ps.phase == "planning",
-            actual=repr(ps.phase),
-            expected_val="'planning'",
+        artifact.record_value(
+            "phase_after_blocked", ps.phase, expected="'editing' (blocked)"
         )
-        assert ps.phase == "planning"
+        artifact.check(
+            "phase still editing",
+            ps.phase == "editing",
+            actual=repr(ps.phase),
+            expected_val="'editing'",
+        )
+        assert ps.phase == "editing", (
+            f"editing->planning should be BLOCKED, got: {ps.phase}"
+        )
     finally:
         await _shutdown(session, task)
 
@@ -522,41 +532,43 @@ async def test_rapid_phase_cycling_final_state(llm_provider, tmp_path, artifact)
     try:
         ps = session.phase_state
 
-        # Cycle 3 times through all 5 phases:
-        # planning → building → staging → running → editing → planning
+        # Forward path: planning → building → staging → running → editing
+        await ps.switch_to_building(source="test")
+        await ps.switch_to_staging(source="test")
+        await ps.switch_to_running(source="test")
+        await ps.switch_to_editing(source="test")
+
+        # Then cycle editing → running → editing 3 times
         for _ in range(3):
-            await ps.switch_to_building(source="test")
-            await ps.switch_to_staging(source="test")
             await ps.switch_to_running(source="test")
             await ps.switch_to_editing(source="test")
-            await ps.switch_to_planning(source="test")
 
         await asyncio.sleep(0.3)
 
         artifact.record_value(
             "final_phase",
             ps.phase,
-            expected="'planning' after 3 full cycles",
+            expected="'editing' after cycling",
         )
         artifact.record_value("event_count", len(all_events))
         artifact.record_value("all_events", all_events)
 
         artifact.check(
-            "final phase is planning",
-            ps.phase == "planning",
+            "final phase is editing",
+            ps.phase == "editing",
             actual=repr(ps.phase),
-            expected_val="'planning'",
+            expected_val="'editing'",
         )
-        assert ps.phase == "planning", f"Expected planning, got: {ps.phase}"
+        assert ps.phase == "editing", f"Expected editing, got: {ps.phase}"
 
-        # Should have 15 phase change events (5 per cycle x 3)
+        # 4 forward + 6 cycling = 10 events
         artifact.check(
-            "15 phase events",
-            len(all_events) == 15,
+            "10 phase events",
+            len(all_events) == 10,
             actual=str(len(all_events)),
-            expected_val="15",
+            expected_val="10",
         )
-        assert len(all_events) == 15, f"Expected 15 events, got {len(all_events)}: {all_events}"
+        assert len(all_events) == 10, f"Expected 10 events, got {len(all_events)}: {all_events}"
 
         # Tools and prompt should match planning phase
         prompt = ps.get_current_prompt()
