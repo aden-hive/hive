@@ -6,3 +6,4 @@
 {"type": "connection", "event": "disconnect", "ts": "2026-04-04T01:15:12.826042+00:00", "profile": "default"}
 {"type": "connection", "event": "connect", "ts": "2026-04-04T01:15:30.842533+00:00", "profile": "default"}
 {"type": "connection", "event": "hello", "details": {"version": "1.0"}, "ts": "2026-04-04T01:15:30.845025+00:00", "profile": "default"}
+{"type": "tool_call", "tool": "browser_stop", "params": {"profile": "gcu-browser-worker:3"}, "result": {"ok": true, "status": "not_running", "profile": "gcu-browser-worker:3"}, "ok": true, "duration_ms": 0.01, "ts": "2026-04-04T01:29:04.294954+00:00", "profile": "default"}
