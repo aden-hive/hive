@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Crown, X } from "lucide-react";
 import { sessionsApi } from "@/api/sessions";
 import { loadPersistedTabs, savePersistedTabs, TAB_STORAGE_KEY, type PersistedTabState } from "@/lib/tab-persistence";
+import BrowserStatusBadge from "@/components/BrowserStatusBadge";
 
 export interface TopBarTab {
   agentType: string;
@@ -129,11 +130,14 @@ export default function TopBar({ tabs: tabsProp, onTabClick, onCloseTab, canClos
         )}
       </div>
 
-      {children && (
-        <div className="flex items-center gap-1 flex-shrink-0">
-          {children}
-        </div>
-      )}
+      <div className="flex items-center gap-3 flex-shrink-0">
+        <BrowserStatusBadge />
+        {children && (
+          <div className="flex items-center gap-1">
+            {children}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

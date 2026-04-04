@@ -1275,10 +1275,51 @@ def cmd_setup_credentials(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _find_chrome_bin() -> str | None:
+    """Return the path to a Chrome/Chromium binary, or None if not found."""
+    import shutil
+
+    for candidate in (
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+        "microsoft-edge",
+        "microsoft-edge-stable",
+    ):
+        if shutil.which(candidate):
+            return candidate
+
+    mac_paths = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    ]
+    for p in mac_paths:
+        if Path(p).exists():
+            return str(p)
+
+    return None
+
+
 def _open_browser(url: str) -> None:
-    """Open URL in the default browser (best-effort, non-blocking)."""
+    """Open URL in the browser (best-effort, non-blocking)."""
     import subprocess
 
+    chrome = _find_chrome_bin()
+
+    try:
+        if chrome:
+            subprocess.Popen(
+                [chrome, url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+    except Exception:
+        pass
+
+    # Fallback: open with system default browser
     try:
         if sys.platform == "darwin":
             subprocess.Popen(

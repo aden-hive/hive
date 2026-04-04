@@ -56,12 +56,16 @@ def _get_active_profile() -> str:
         return "default"
 
 
+STATUS_PORT = BRIDGE_PORT + 1  # 9230 — plain HTTP status endpoint
+
+
 class BeelineBridge:
     """WebSocket server that accepts a single connection from the Chrome extension."""
 
     def __init__(self) -> None:
         self._ws: object | None = None  # websockets.ServerConnection
         self._server: object | None = None  # websockets.Server
+        self._status_server: object | None = None  # asyncio.Server (HTTP)
         self._pending: dict[str, asyncio.Future] = {}
         self._counter = 0
         self._cdp_attached: set[int] = set()  # Track tabs with CDP attached
@@ -71,7 +75,7 @@ class BeelineBridge:
         return self._ws is not None
 
     async def start(self, port: int = BRIDGE_PORT) -> None:
-        """Start the WebSocket server."""
+        """Start the WebSocket server and the HTTP status server."""
         try:
             import websockets
         except ImportError:
@@ -99,6 +103,20 @@ class BeelineBridge:
         except OSError as e:
             logger.warning("Beeline bridge could not start on port %d: %s", port, e)
 
+        # Start a tiny HTTP server on port+1 for status polling.
+        # websockets 16 rejects plain HTTP before process_request is called, so
+        # we need a separate server.
+        status_port = port + 1
+        try:
+            self._status_server = await asyncio.start_server(
+                self._http_status_handler,
+                "127.0.0.1",
+                status_port,
+            )
+            logger.info("Bridge status endpoint on http://127.0.0.1:%d/status", status_port)
+        except OSError as e:
+            logger.warning("Bridge status server could not start on port %d: %s", status_port, e)
+
     async def stop(self) -> None:
         if self._server:
             self._server.close()
@@ -107,6 +125,47 @@ class BeelineBridge:
             except Exception:
                 pass
             self._server = None
+        if self._status_server:
+            self._status_server.close()
+            try:
+                await self._status_server.wait_closed()
+            except Exception:
+                pass
+            self._status_server = None
+
+    async def _http_status_handler(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """Minimal asyncio TCP handler serving HTTP GET /status on the status port."""
+        try:
+            raw = await asyncio.wait_for(reader.read(512), timeout=2.0)
+            first_line = raw.split(b"\r\n", 1)[0].decode(errors="replace")
+            if first_line.startswith("GET /status"):
+                body = json.dumps({"connected": self.is_connected, "bridge": "running"}).encode()
+                response = (
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: application/json\r\n"
+                    b"Access-Control-Allow-Origin: *\r\n"
+                    b"Access-Control-Allow-Headers: *\r\n"
+                    + b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                    + b"Connection: close\r\n"
+                    b"\r\n" + body
+                )
+            elif first_line.startswith("OPTIONS "):
+                response = (
+                    b"HTTP/1.1 204 No Content\r\n"
+                    b"Access-Control-Allow-Origin: *\r\n"
+                    b"Access-Control-Allow-Headers: *\r\n"
+                    b"Content-Length: 0\r\n"
+                    b"Connection: close\r\n"
+                    b"\r\n"
+                )
+            else:
+                response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            writer.write(response)
+            await writer.drain()
+        except Exception:
+            pass
+        finally:
+            writer.close()
 
     async def _handle_connection(self, ws) -> None:
         logger.info("Chrome extension connected")
@@ -141,14 +200,16 @@ class BeelineBridge:
         except Exception:
             pass
         finally:
-            logger.info("Chrome extension disconnected")
-            log_connection_event("disconnect")
-            self._ws = None
-            # Cancel any pending requests
-            for fut in self._pending.values():
-                if not fut.done():
-                    fut.cancel()
-            self._pending.clear()
+            # Only clear self._ws if this handler still owns it.
+            if self._ws is ws:
+                logger.info("Chrome extension disconnected")
+                log_connection_event("disconnect")
+                self._ws = None
+                # Cancel any pending requests
+                for fut in self._pending.values():
+                    if not fut.done():
+                        fut.cancel()
+                self._pending.clear()
 
     async def _send(self, type_: str, **params) -> dict:
         """Send a command to the extension and wait for the result."""
