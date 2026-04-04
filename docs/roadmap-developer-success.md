@@ -130,9 +130,9 @@ Install the prerequisites like Python, then install the quickstart package.
 
 To run an existing agent:
 
-1. Run `hive run <agent_name>` or `hive tui <agent_name>`
+1. Run `hive open` to use the browser dashboard, or `hive run <agent_name>` for direct execution
 2. Hive automatically validates that your agent has all required prerequisites
-3. Type something in the TUI or trigger an event source (like receiving an email)
+3. Provide input in the dashboard or trigger an event source (like receiving an email)
 4. Your agent runs, and the outcome is recorded
 5. If something fails, you'll see where the logs are saved
 
@@ -146,7 +146,7 @@ If you find something you can't accomplish with the framework, you can contribut
 
 ## Agent Testing
 
-**Interactive testing:** Run `hive tui` to test your agent in a terminal UI.
+**Interactive testing:** Run `hive open` to test your agent in the browser UI.
 
 **Autonomous testing:** Run `hive run <agent_name> --debug` and trigger the event source. Testing scheduled events can be tricky—Hive provides developer tools to help you simulate them.
 

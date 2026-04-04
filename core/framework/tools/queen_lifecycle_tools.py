@@ -1,8 +1,8 @@
-"""Queen lifecycle tools for worker management.
+"""Queen lifecycle tools for graph management.
 
-These tools give the Queen agent control over the worker agent's lifecycle.
-They close over a session-like object that provides ``worker_runtime``,
-allowing late-binding access to the worker (which may be loaded/unloaded
+These tools give the Queen agent control over the loaded graph's lifecycle.
+They close over a session-like object that provides ``graph_runtime``,
+allowing late-binding access to the graph (which may be loaded/unloaded
 dynamically).
 
 Usage::
@@ -20,7 +20,7 @@ Usage::
     from framework.tools.queen_lifecycle_tools import WorkerSessionAdapter
 
     adapter = WorkerSessionAdapter(
-        worker_runtime=runtime,
+        graph_runtime=runtime,
         event_bus=event_bus,
         worker_path=storage_path,
     )
@@ -66,11 +66,11 @@ logger = logging.getLogger(__name__)
 class WorkerSessionAdapter:
     """Adapter for TUI compatibility.
 
-    Wraps bare worker_runtime + event_bus + storage_path into a
+    Wraps bare graph_runtime + event_bus + storage_path into a
     session-like object that queen lifecycle tools can use.
     """
 
-    worker_runtime: Any  # AgentRuntime
+    graph_runtime: Any  # AgentRuntime
     event_bus: Any  # EventBus
     worker_path: Path | None = None
 
@@ -79,16 +79,22 @@ class WorkerSessionAdapter:
 class QueenPhaseState:
     """Mutable state container for queen operating phase.
 
-    Four phases: planning → building → staging → running.
+    Five phases: planning → building → staging → running → editing.
+    EDITING is entered after worker execution completes. The worker
+    stays loaded — queen can tweak config and re-run without rebuilding.
+    RUNNING cannot go directly to BUILDING or PLANNING; it must pass
+    through EDITING first.
+
     Shared between the dynamic_tools_provider callback and tool handlers
     that trigger phase transitions.
     """
 
-    phase: str = "building"  # "planning", "building", "staging", or "running"
+    phase: str = "building"  # "planning", "building", "staging", "running", or "editing"
     planning_tools: list = field(default_factory=list)  # list[Tool]
     building_tools: list = field(default_factory=list)  # list[Tool]
     staging_tools: list = field(default_factory=list)  # list[Tool]
     running_tools: list = field(default_factory=list)  # list[Tool]
+    editing_tools: list = field(default_factory=list)  # list[Tool]
     inject_notification: Any = None  # async (str) -> None
     event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
 
@@ -115,11 +121,23 @@ class QueenPhaseState:
     prompt_building: str = ""
     prompt_staging: str = ""
     prompt_running: str = ""
+    prompt_editing: str = ""
 
     # Default skill operational protocols — appended to every phase prompt
     protocols_prompt: str = ""
     # Community skills catalog (XML) — appended after protocols
     skills_catalog_prompt: str = ""
+
+    # Persona and communication style (set once at session start by persona hook,
+    # persisted here so they survive dynamic prompt refreshes across iterations).
+    persona_prefix: str = ""  # e.g. "You are a CFO. I am a CFO with 20 years..."
+    style_directive: str = ""  # e.g. "## Communication Style: Peer\n\n..."
+
+    # Cached recall block — populated async by recall_selector after each turn.
+    _cached_recall_block: str = ""
+    _cached_colony_recall_block: str = ""
+    _cached_global_recall_block: str = ""
+    global_memory_dir: Path | None = None
 
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
@@ -129,6 +147,8 @@ class QueenPhaseState:
             return list(self.running_tools)
         if self.phase == "staging":
             return list(self.staging_tools)
+        if self.phase == "editing":
+            return list(self.editing_tools)
         return list(self.building_tools)
 
     def get_current_prompt(self) -> str:
@@ -139,19 +159,29 @@ class QueenPhaseState:
             base = self.prompt_running
         elif self.phase == "staging":
             base = self.prompt_staging
+        elif self.phase == "editing":
+            base = self.prompt_editing
         else:
             base = self.prompt_building
 
         from framework.agents.queen.queen_memory import format_for_injection
 
-        memory = format_for_injection()
-        parts = [base]
+        _memory = format_for_injection()  # noqa: F841
+        parts = []
+        if self.persona_prefix:
+            parts.append(self.persona_prefix)
+        parts.append(base)
+        if self.style_directive:
+            parts.append(self.style_directive)
         if self.skills_catalog_prompt:
             parts.append(self.skills_catalog_prompt)
         if self.protocols_prompt:
             parts.append(self.protocols_prompt)
-        if memory:
-            parts.append(memory)
+        colony_memory = self._cached_colony_recall_block or self._cached_recall_block
+        if colony_memory:
+            parts.append(colony_memory)
+        if self._cached_global_recall_block:
+            parts.append(self._cached_global_recall_block)
         return "\n\n".join(parts)
 
     async def _emit_phase_event(self) -> None:
@@ -166,6 +196,26 @@ class QueenPhaseState:
                     stream_id="queen",
                     data=data,
                 )
+            )
+
+    async def switch_to_editing(self, source: str = "tool") -> None:
+        """Switch to editing phase — worker stays loaded, queen can tweak and re-run.
+
+        Args:
+            source: Who triggered the switch — "tool", "frontend", or "auto".
+        """
+        if self.phase == "editing":
+            return
+        self.phase = "editing"
+        tool_names = [t.name for t in self.editing_tools]
+        logger.info("Queen phase → editing (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
+        if self.inject_notification and source != "tool":
+            await self.inject_notification(
+                "[PHASE CHANGE] Switched to EDITING phase. "
+                "Worker is still loaded. You can tweak configuration and re-run, "
+                "or escalate to building/planning if a deeper change is needed. "
+                "Available tools: " + ", ".join(tool_names) + "."
             )
 
     async def switch_to_running(self, source: str = "tool") -> None:
@@ -223,10 +273,19 @@ class QueenPhaseState:
     async def switch_to_building(self, source: str = "tool") -> None:
         """Switch to building phase and notify the queen.
 
+        Blocked from RUNNING and EDITING.
+
         Args:
             source: Who triggered the switch — "tool", "frontend", or "auto".
         """
         if self.phase == "building":
+            return
+        if self.phase in ("running", "editing"):
+            logger.warning(
+                "Queen phase: BLOCKED %s → building (source=%s)",
+                self.phase,
+                source,
+            )
             return
         self.phase = "building"
         tool_names = [t.name for t in self.building_tools]
@@ -242,10 +301,19 @@ class QueenPhaseState:
     async def switch_to_planning(self, source: str = "tool") -> None:
         """Switch to planning phase and notify the queen.
 
+        Blocked from RUNNING and EDITING.
+
         Args:
             source: Who triggered the switch — "tool", "frontend", or "auto".
         """
         if self.phase == "planning":
+            return
+        if self.phase in ("running", "editing"):
+            logger.warning(
+                "Queen phase: BLOCKED %s → planning (source=%s)",
+                self.phase,
+                source,
+            )
             return
         self.phase = "planning"
         tool_names = [t.name for t in self.planning_tools]
@@ -363,7 +431,7 @@ def _remove_trigger_from_agent(session: Any, trigger_id: str) -> None:
 
 async def _persist_active_triggers(session: Any, session_id: str) -> None:
     """Persist the set of active trigger IDs (and their tasks) to SessionState."""
-    runtime = getattr(session, "worker_runtime", None)
+    runtime = getattr(session, "graph_runtime", None)
     if runtime is None:
         return
     store = getattr(runtime, "_session_store", None)
@@ -418,8 +486,8 @@ async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None
                     _next_delay = float(interval_minutes) * 60 if interval_minutes else 60
                     fire_times[trigger_id] = time.monotonic() + _next_delay
 
-                # Gate on worker being loaded
-                if getattr(session, "worker_runtime", None) is None:
+                # Gate on a graph being loaded
+                if getattr(session, "graph_runtime", None) is None:
                     continue
 
                 # Fire into queen node
@@ -465,8 +533,8 @@ async def _start_trigger_webhook(session: Any, trigger_id: str, tdef: Any) -> No
             return
         if data.get("method", "").upper() not in methods:
             return
-        # Gate on worker being loaded
-        if getattr(session, "worker_runtime", None) is None:
+        # Gate on a graph being loaded
+        if getattr(session, "graph_runtime", None) is None:
             return
         executor = getattr(session, "queen_executor", None)
         if executor is None:
@@ -755,7 +823,7 @@ def register_queen_lifecycle_tools(
     session: Any = None,
     session_id: str | None = None,
     # Legacy params — used by TUI when not passing a session object
-    worker_runtime: AgentRuntime | None = None,
+    graph_runtime: AgentRuntime | None = None,
     event_bus: EventBus | None = None,
     storage_path: Path | None = None,
     # Server context — enables load_built_agent tool
@@ -767,30 +835,30 @@ def register_queen_lifecycle_tools(
     """Register queen lifecycle tools.
 
     Args:
-        session: A Session or WorkerSessionAdapter with ``worker_runtime``
-            attribute. The tools read ``session.worker_runtime`` on each
-            call, supporting late-binding (worker loaded/unloaded).
-        session_id: Shared session ID so the worker uses the same session
+        session: A Session or WorkerSessionAdapter with ``graph_runtime``
+            attribute. The tools read ``session.graph_runtime`` on each
+            call, supporting late-binding (graph loaded/unloaded).
+        session_id: Shared session ID so the graph uses the same session
             scope as the queen and judge.
-        worker_runtime: (Legacy) Direct runtime reference. If ``session``
+        graph_runtime: (Legacy) Direct runtime reference. If ``session``
             is not provided, a WorkerSessionAdapter is created from
-            worker_runtime + event_bus + storage_path.
+            graph_runtime + event_bus + storage_path.
         session_manager: (Server only) The SessionManager instance, needed
-            for ``load_built_agent`` to hot-load a worker.
+            for ``load_built_agent`` to hot-load a graph.
         manager_session_id: (Server only) The session's ID in the manager,
-            used with ``session_manager.load_worker()``.
+            used with ``session_manager.load_graph()``.
         phase_state: (Optional) Mutable phase state for building/running
             phase switching. When provided, load_built_agent switches to
-            running phase and stop_worker_and_edit switches to building phase.
+            running phase and stop_graph_and_edit switches to building phase.
 
     Returns the number of tools registered.
     """
     # Build session adapter from legacy params if needed
     if session is None:
-        if worker_runtime is None:
-            raise ValueError("Either session or worker_runtime must be provided")
+        if graph_runtime is None:
+            raise ValueError("Either session or graph_runtime must be provided")
         session = WorkerSessionAdapter(
-            worker_runtime=worker_runtime,
+            graph_runtime=graph_runtime,
             event_bus=event_bus,
             worker_path=storage_path,
         )
@@ -800,18 +868,18 @@ def register_queen_lifecycle_tools(
     tools_registered = 0
 
     def _get_runtime():
-        """Get current worker runtime from session (late-binding)."""
-        return getattr(session, "worker_runtime", None)
+        """Get current graph runtime from session (late-binding)."""
+        return getattr(session, "graph_runtime", None)
 
-    # --- start_worker ---------------------------------------------------------
+    # --- start_graph ----------------------------------------------------------
 
     # How long to wait for credential validation + MCP resync before
     # proceeding with trigger anyway.  These are pre-flight checks that
     # should not block the queen indefinitely.
     _START_PREFLIGHT_TIMEOUT = 15  # seconds
 
-    async def start_worker(task: str) -> str:
-        """Start the worker agent with a task description.
+    async def start_graph(task: str) -> str:
+        """Start the loaded graph with a task description.
 
         Triggers the worker's default entry point with the given task.
         Returns immediately — the worker runs asynchronously.
@@ -860,13 +928,13 @@ def register_queen_lifecycle_tools(
                 await asyncio.wait_for(_preflight(), timeout=_START_PREFLIGHT_TIMEOUT)
             except TimeoutError:
                 logger.warning(
-                    "start_worker preflight timed out after %ds — proceeding with trigger",
+                    "start_graph preflight timed out after %ds — proceeding with trigger",
                     _START_PREFLIGHT_TIMEOUT,
                 )
             except CredentialError:
                 raise  # handled below
 
-            # Resume timers in case they were paused by a previous stop_worker
+            # Resume timers in case they were paused by a previous stop_graph
             runtime.resume_timers()
 
             # Get session state from any prior execution for memory continuity
@@ -907,12 +975,12 @@ def register_queen_lifecycle_tools(
                 )
             return json.dumps(error_payload)
         except Exception as e:
-            return json.dumps({"error": f"Failed to start worker: {e}"})
+            return json.dumps({"error": f"Failed to start graph: {e}"})
 
     _start_tool = Tool(
-        name="start_worker",
+        name="start_graph",
         description=(
-            "Start the worker agent with a task description. The worker runs "
+            "Start the loaded graph with a task description. The graph runs "
             "autonomously in the background. Returns an execution ID for tracking."
         ),
         parameters={
@@ -920,19 +988,19 @@ def register_queen_lifecycle_tools(
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Description of the task for the worker to perform",
+                    "description": "Description of the task for the graph to perform",
                 },
             },
             "required": ["task"],
         },
     )
-    registry.register("start_worker", _start_tool, lambda inputs: start_worker(**inputs))
+    registry.register("start_graph", _start_tool, lambda inputs: start_graph(**inputs))
     tools_registered += 1
 
-    # --- stop_worker ----------------------------------------------------------
+    # --- stop_graph -----------------------------------------------------------
 
-    async def stop_worker(*, reason: str = "Stopped by queen") -> str:
-        """Cancel all active worker executions across all graphs.
+    async def stop_graph(*, reason: str = "Stopped by queen") -> str:
+        """Cancel all active graph executions across all graphs.
 
         Stops the worker immediately. Returns the IDs of cancelled executions.
         """
@@ -979,21 +1047,60 @@ def register_queen_lifecycle_tools(
         )
 
     _stop_tool = Tool(
-        name="stop_worker",
+        name="stop_graph",
         description=(
-            "Cancel the worker agent's active execution and pause its timers. "
-            "The worker stops gracefully. No parameters needed."
+            "Cancel the loaded graph's active execution and pause its timers. "
+            "The graph stops gracefully. No parameters needed."
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register("stop_worker", _stop_tool, lambda inputs: stop_worker())
+    registry.register("stop_graph", _stop_tool, lambda inputs: stop_graph())
     tools_registered += 1
 
-    # --- stop_worker_and_edit -------------------------------------------------
+    # --- switch_to_editing ----------------------------------------------------
 
-    async def stop_worker_and_edit() -> str:
-        """Stop the worker and switch to building phase for editing the agent."""
-        stop_result = await stop_worker()
+    async def switch_to_editing_tool() -> str:
+        """Stop the worker and switch to editing phase for config tweaks.
+
+        The worker stays loaded. You can re-run with different input,
+        inject config adjustments, or escalate to building/planning.
+        """
+        stop_result = await stop_graph()
+
+        if phase_state is not None:
+            await phase_state.switch_to_editing()
+            _update_meta_json(session_manager, manager_session_id, {"phase": "editing"})
+
+        result = json.loads(stop_result)
+        result["phase"] = "editing"
+        result["message"] = (
+            "Worker stopped. You are now in editing phase. "
+            "You can re-run with run_agent_with_input(task), tweak config "
+            "with inject_message, or escalate to building/planning."
+        )
+        return json.dumps(result)
+
+    _switch_editing_tool = Tool(
+        name="switch_to_editing",
+        description=(
+            "Stop the running worker and switch to editing phase. "
+            "The worker stays loaded — you can tweak config and re-run. "
+            "Use this when you want to adjust the worker without rebuilding."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "switch_to_editing",
+        _switch_editing_tool,
+        lambda inputs: switch_to_editing_tool(),
+    )
+    tools_registered += 1
+
+    # --- stop_graph_and_edit --------------------------------------------------
+
+    async def stop_graph_and_edit() -> str:
+        """Stop the loaded graph and switch to building phase for editing the agent."""
+        stop_result = await stop_graph()
 
         # Switch to building phase
         if phase_state is not None:
@@ -1003,7 +1110,7 @@ def register_queen_lifecycle_tools(
         result = json.loads(stop_result)
         result["phase"] = "building"
         result["message"] = (
-            "Worker stopped. You are now in building phase. "
+            "Graph stopped. You are now in building phase. "
             "Use your coding tools to modify the agent, then call "
             "load_built_agent(path) to stage it again."
         )
@@ -1015,24 +1122,22 @@ def register_queen_lifecycle_tools(
         return json.dumps(result)
 
     _stop_edit_tool = Tool(
-        name="stop_worker_and_edit",
+        name="stop_graph_and_edit",
         description=(
-            "Stop the running worker and switch to building phase. "
+            "Stop the running graph and switch to building phase. "
             "Use this when you need to modify the agent's code, nodes, or configuration. "
             "After editing, call load_built_agent(path) to reload and run."
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register(
-        "stop_worker_and_edit", _stop_edit_tool, lambda inputs: stop_worker_and_edit()
-    )
+    registry.register("stop_graph_and_edit", _stop_edit_tool, lambda inputs: stop_graph_and_edit())
     tools_registered += 1
 
-    # --- stop_worker_and_plan (Running/Staging → Planning) --------------------
+    # --- stop_graph_and_plan (Running/Staging → Planning) ---------------------
 
-    async def stop_worker_and_plan() -> str:
-        """Stop the worker and switch to planning phase for diagnosis."""
-        stop_result = await stop_worker()
+    async def stop_graph_and_plan() -> str:
+        """Stop the loaded graph and switch to planning phase for diagnosis."""
+        stop_result = await stop_graph()
 
         # Switch to planning phase
         if phase_state is not None:
@@ -1041,7 +1146,7 @@ def register_queen_lifecycle_tools(
         result = json.loads(stop_result)
         result["phase"] = "planning"
         result["message"] = (
-            "Worker stopped. You are now in planning phase. "
+            "Graph stopped. You are now in planning phase. "
             "Diagnose the issue using read-only tools (checkpoints, logs, sessions), "
             "discuss a fix plan with the user, then call "
             "initialize_and_build_agent() to implement the fix."
@@ -1049,17 +1154,15 @@ def register_queen_lifecycle_tools(
         return json.dumps(result)
 
     _stop_plan_tool = Tool(
-        name="stop_worker_and_plan",
+        name="stop_graph_and_plan",
         description=(
-            "Stop the worker and switch to planning phase for diagnosis. "
+            "Stop the graph and switch to planning phase for diagnosis. "
             "Use this when you need to investigate an issue before fixing it. "
             "After diagnosis, call initialize_and_build_agent() to switch to building."
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register(
-        "stop_worker_and_plan", _stop_plan_tool, lambda inputs: stop_worker_and_plan()
-    )
+    registry.register("stop_graph_and_plan", _stop_plan_tool, lambda inputs: stop_graph_and_plan())
     tools_registered += 1
 
     # --- replan_agent (Building → Planning) -----------------------------------
@@ -2001,12 +2104,12 @@ def register_queen_lifecycle_tools(
                             "input_keys": {
                                 "type": "array",
                                 "items": {"type": "string"},
-                                "description": "Expected input memory keys (hints)",
+                                "description": "Expected input buffer keys (hints)",
                             },
                             "output_keys": {
                                 "type": "array",
                                 "items": {"type": "string"},
-                                "description": "Expected output memory keys (hints)",
+                                "description": "Expected output buffer keys (hints)",
                             },
                             "success_criteria": {
                                 "type": "string",
@@ -2370,16 +2473,16 @@ def register_queen_lifecycle_tools(
             lambda inputs: initialize_and_build_agent_wrapper(inputs),
         )
 
-    # --- stop_worker (Running → Staging) -------------------------------------
+    # --- stop_graph (Running → Staging) --------------------------------------
 
-    async def stop_worker_to_staging() -> str:
-        """Stop the running worker and switch to staging phase.
+    async def stop_graph_to_staging() -> str:
+        """Stop the running graph and switch to staging phase.
 
         After stopping, ask the user whether they want to:
         1. Re-run the agent with new input → call run_agent_with_input(task)
-        2. Edit the agent code → call stop_worker_and_edit() to go to building phase
+        2. Edit the agent code → call stop_graph_and_edit() to go to building phase
         """
-        stop_result = await stop_worker()
+        stop_result = await stop_graph()
 
         # Switch to staging phase
         if phase_state is not None:
@@ -2389,53 +2492,29 @@ def register_queen_lifecycle_tools(
         result = json.loads(stop_result)
         result["phase"] = "staging"
         result["message"] = (
-            "Worker stopped. You are now in staging phase. "
+            "Graph stopped. You are now in staging phase. "
             "Ask the user: would they like to re-run with new input, "
             "or edit the agent code?"
         )
         return json.dumps(result)
 
     _stop_worker_tool = Tool(
-        name="stop_worker",
+        name="stop_graph",
         description=(
-            "Stop the running worker and switch to staging phase. "
+            "Stop the running graph and switch to staging phase. "
             "After stopping, ask the user whether they want to re-run "
             "with new input or edit the agent code."
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register("stop_worker", _stop_worker_tool, lambda inputs: stop_worker_to_staging())
+    registry.register("stop_graph", _stop_worker_tool, lambda inputs: stop_graph_to_staging())
     tools_registered += 1
 
-    # --- get_worker_status ----------------------------------------------------
+    # --- get_graph_status -----------------------------------------------------
 
     def _get_event_bus():
         """Get the session's event bus for querying history."""
         return getattr(session, "event_bus", None)
-
-    def _get_worker_name() -> str | None:
-        """Return the worker agent directory name, used for diary lookups."""
-        p = getattr(session, "worker_path", None)
-        return p.name if p else None
-
-    def _format_diary(max_runs: int) -> str:
-        """Read recent run digests from disk — no EventBus required."""
-        agent_name = _get_worker_name()
-        if not agent_name:
-            return "No worker loaded — diary unavailable."
-        from framework.agents.worker_memory import read_recent_digests
-
-        entries = read_recent_digests(agent_name, max_runs)
-        if not entries:
-            return (
-                f"No run digests for '{agent_name}' yet. "
-                "Digests are written at the end of each completed run."
-            )
-        lines = [f"Worker '{agent_name}' — {len(entries)} recent run digest(s):", ""]
-        for _run_id, content in entries:
-            lines.append(content)
-            lines.append("")
-        return "\n".join(lines).rstrip()
 
     # Tiered cooldowns: summary is free, detail has short cooldown, full keeps 30s
     _COOLDOWN_FULL = 30.0
@@ -2641,16 +2720,16 @@ def register_queen_lifecycle_tools(
         return "\n".join(lines)
 
     async def _format_memory(runtime: AgentRuntime) -> str:
-        """Format the worker's shared memory snapshot and recent changes."""
+        """Format the worker's shared buffer snapshot and recent changes."""
         from framework.runtime.shared_state import IsolationLevel
 
         lines = []
         active_streams = runtime.get_active_streams()
 
         if not active_streams:
-            return "Worker has no active executions. No memory to inspect."
+            return "Worker has no active executions. No buffer state to inspect."
 
-        # Read memory from the first active execution
+        # Read buffer state from the first active execution
         stream_info = active_streams[0]
         exec_ids = stream_info.get("active_execution_ids", [])
         stream_id = stream_info.get("stream_id", "")
@@ -2658,13 +2737,13 @@ def register_queen_lifecycle_tools(
             return "No active execution found."
 
         exec_id = exec_ids[0]
-        memory = runtime.state_manager.create_memory(exec_id, stream_id, IsolationLevel.SHARED)
-        state = await memory.read_all()
+        buf = runtime.state_manager.create_buffer(exec_id, stream_id, IsolationLevel.SHARED)
+        state = await buf.read_all()
 
         if not state:
-            lines.append("Worker's shared memory is empty.")
+            lines.append("Worker's shared buffer is empty.")
         else:
-            lines.append(f"Worker's shared memory ({len(state)} keys):")
+            lines.append(f"Worker's shared buffer ({len(state)} keys):")
             for key, value in state.items():
                 lines.append(f"  {key}: {_preview_value(value)}")
 
@@ -3024,8 +3103,8 @@ def register_queen_lifecycle_tools(
 
         return result
 
-    async def get_worker_status(focus: str | None = None, last_n: int = 20) -> str:
-        """Check on the worker with progressive disclosure.
+    async def get_graph_status(focus: str | None = None, last_n: int = 20) -> str:
+        """Check on the loaded graph with progressive disclosure.
 
         Without arguments, returns a brief prose summary. Use ``focus`` to
         drill into specifics: activity, memory, tools, issues, progress,
@@ -3039,14 +3118,14 @@ def register_queen_lifecycle_tools(
         import time as _time
 
         # --- Tiered cooldown ---
-        # diary is free (file reads only), summary is free, detail has 10s, full has 30s
+        # summary is free, detail has 10s, full keeps 30s
         now = _time.monotonic()
         if focus == "full":
             cooldown = _COOLDOWN_FULL
             tier = "full"
-        elif focus == "diary" or focus is None:
+        elif focus is None:
             cooldown = 0.0
-            tier = focus or "summary"
+            tier = "summary"
         else:
             cooldown = _COOLDOWN_DETAIL
             tier = "detail"
@@ -3064,10 +3143,6 @@ def register_queen_lifecycle_tools(
                 }
             )
         _status_last_called[tier] = now
-
-        # --- Diary: pure file reads, no runtime required ---
-        if focus == "diary":
-            return _format_diary(last_n)
 
         # --- Runtime check ---
         runtime = _get_runtime()
@@ -3118,21 +3193,19 @@ def register_queen_lifecycle_tools(
             else:
                 return (
                     f"Unknown focus '{focus}'. "
-                    "Valid options: diary, activity, memory, tools, issues, progress, full."
+                    "Valid options: activity, memory, tools, issues, progress, full."
                 )
         except Exception as exc:
-            logger.exception("get_worker_status error")
+            logger.exception("get_graph_status error")
             return f"Error retrieving status: {exc}"
 
     _status_tool = Tool(
-        name="get_worker_status",
+        name="get_graph_status",
         description=(
-            "Check on the worker. Returns a brief prose summary by default. "
+            "Check on the loaded graph. Returns a brief prose summary by default. "
             "Use 'focus' to drill into specifics:\n"
-            "- diary: persistent run digests from past executions — read this first "
-            "before digging into live runtime logs\n"
             "- activity: current node, transitions, latest LLM output\n"
-            "- memory: worker's accumulated knowledge and state\n"
+            "- memory: worker's accumulated buffer state\n"
             "- tools: running and recent tool calls\n"
             "- issues: retries, stalls, constraint violations\n"
             "- progress: goal criteria, token consumption\n"
@@ -3143,11 +3216,8 @@ def register_queen_lifecycle_tools(
             "properties": {
                 "focus": {
                     "type": "string",
-                    "enum": ["diary", "activity", "memory", "tools", "issues", "progress", "full"],
-                    "description": (
-                        "Aspect to inspect. Omit for a brief summary. "
-                        "Use 'diary' to read persistent run history before checking live logs."
-                    ),
+                    "enum": ["activity", "memory", "tools", "issues", "progress", "full"],
+                    "description": ("Aspect to inspect. Omit for a brief summary."),
                 },
                 "last_n": {
                     "type": "integer",
@@ -3159,25 +3229,25 @@ def register_queen_lifecycle_tools(
             "required": [],
         },
     )
-    registry.register("get_worker_status", _status_tool, lambda inputs: get_worker_status(**inputs))
+    registry.register("get_graph_status", _status_tool, lambda inputs: get_graph_status(**inputs))
     tools_registered += 1
 
-    # --- inject_worker_message ------------------------------------------------
+    # --- inject_message -------------------------------------------------------
 
-    async def inject_worker_message(content: str) -> str:
-        """Send a message to the running worker agent.
+    async def inject_message(content: str) -> str:
+        """Send a message to the running graph.
 
         Injects the message into the worker's active node conversation.
         Use this to relay user instructions to the worker.
         """
         runtime = _get_runtime()
         if runtime is None:
-            return json.dumps({"error": "No worker loaded in this session."})
+            return json.dumps({"error": "No graph loaded in this session."})
 
         graph_id = runtime.graph_id
         reg = runtime.get_graph_registration(graph_id)
         if reg is None:
-            return json.dumps({"error": "Worker graph not found"})
+            return json.dumps({"error": "Graph not found"})
 
         # Prefer nodes that are actively waiting (e.g. escalation receivers
         # blocked on queen guidance) over the main event-loop node.
@@ -3212,31 +3282,29 @@ def register_queen_lifecycle_tools(
 
         return json.dumps(
             {
-                "error": "No active worker node found — worker may be idle.",
+                "error": "No active graph node found — graph may be idle.",
             }
         )
 
     _inject_tool = Tool(
-        name="inject_worker_message",
+        name="inject_message",
         description=(
-            "Send a message to the running worker agent. The message is injected "
-            "into the worker's active node conversation. Use this to relay user "
-            "instructions or concerns. The worker must be running."
+            "Send a message to the running graph. The message is injected "
+            "into the graph's active node conversation. Use this to relay user "
+            "instructions or concerns. The graph must be running."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "Message content to send to the worker",
+                    "description": "Message content to send to the graph",
                 },
             },
             "required": ["content"],
         },
     )
-    registry.register(
-        "inject_worker_message", _inject_tool, lambda inputs: inject_worker_message(**inputs)
-    )
+    registry.register("inject_message", _inject_tool, lambda inputs: inject_message(**inputs))
     tools_registered += 1
 
     # --- list_credentials -----------------------------------------------------
@@ -3402,10 +3470,10 @@ def register_queen_lifecycle_tools(
             runtime = _get_runtime()
             if runtime is not None:
                 try:
-                    await session_manager.unload_worker(manager_session_id)
+                    await session_manager.unload_graph(manager_session_id)
                 except Exception as e:
-                    logger.error("Failed to unload existing worker: %s", e, exc_info=True)
-                    return json.dumps({"error": f"Failed to unload existing worker: {e}"})
+                    logger.error("Failed to unload existing graph: %s", e, exc_info=True)
+                    return json.dumps({"error": f"Failed to unload existing graph: {e}"})
 
             try:
                 resolved_path = validate_agent_path(agent_path)
@@ -3460,7 +3528,7 @@ def register_queen_lifecycle_tools(
                 )
 
             try:
-                updated_session = await session_manager.load_worker(
+                updated_session = await session_manager.load_graph(
                     manager_session_id,
                     str(resolved_path),
                 )
@@ -3477,9 +3545,9 @@ def register_queen_lifecycle_tools(
                             if missing:
                                 missing_by_node[f"{node.name} (id={node.id})"] = sorted(missing)
                     if missing_by_node:
-                        # Unload the broken worker
+                        # Unload the broken graph
                         try:
-                            await session_manager.unload_worker(manager_session_id)
+                            await session_manager.unload_graph(manager_session_id)
                         except Exception:
                             pass
                         details = "; ".join(
@@ -3548,19 +3616,19 @@ def register_queen_lifecycle_tools(
                     await phase_state.switch_to_staging()
                     _update_meta_json(session_manager, manager_session_id, {"phase": "staging"})
 
-                worker_name = info.name if info else updated_session.worker_id
+                graph_name = info.name if info else updated_session.graph_id
                 return json.dumps(
                     {
                         "status": "loaded",
                         "phase": "staging",
                         "message": (
-                            f"Successfully loaded '{worker_name}'. "
+                            f"Successfully loaded '{graph_name}'. "
                             "You are now in STAGING phase. "
-                            "Call run_agent_with_input(task) to start the worker, "
-                            "or stop_worker_and_edit() to go back to building."
+                            "Call run_agent_with_input(task) to start the graph, "
+                            "or stop_graph_and_edit() to go back to building."
                         ),
-                        "worker_id": updated_session.worker_id,
-                        "worker_name": worker_name,
+                        "graph_id": updated_session.graph_id,
+                        "graph_name": graph_name,
                         "goal": info.goal_name if info else "",
                         "node_count": info.node_count if info else 0,
                     }
@@ -4006,6 +4074,89 @@ def register_queen_lifecycle_tools(
     )
     registry.register(
         "remove_trigger", _remove_trigger_tool, lambda inputs: remove_trigger(**inputs)
+    )
+    tools_registered += 1
+
+    # --- save_global_memory --------------------------------------------------
+
+    async def save_global_memory_entry(
+        category: str,
+        description: str,
+        content: str,
+        name: str | None = None,
+    ) -> str:
+        """Persist a queen-global memory entry about the user."""
+        from framework.agents.queen.queen_memory_v2 import (
+            global_memory_dir as _global_memory_dir,
+            init_memory_dir as _init_memory_dir,
+            save_global_memory as _save_global_memory,
+        )
+
+        target_dir = (
+            phase_state.global_memory_dir
+            if phase_state is not None and phase_state.global_memory_dir is not None
+            else _global_memory_dir()
+        )
+        _init_memory_dir(target_dir)
+
+        try:
+            filename, path = _save_global_memory(
+                category=category,
+                description=description,
+                content=content,
+                name=name,
+                memory_dir=target_dir,
+            )
+            return json.dumps(
+                {
+                    "status": "saved",
+                    "filename": filename,
+                    "path": str(path),
+                    "category": category,
+                }
+            )
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)})
+
+    _save_global_memory_tool = Tool(
+        name="save_global_memory",
+        description=(
+            "Save durable global memory about the user. "
+            "Only use for user profile, preferences, environment, or feedback."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["profile", "preference", "environment", "feedback"],
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Specific one-line description for future recall selection.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Durable user-centric memory content.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Optional short memory title.",
+                },
+            },
+            "required": ["category", "description", "content"],
+            "additionalProperties": False,
+        },
+    )
+    registry.register(
+        "save_global_memory",
+        _save_global_memory_tool,
+        lambda inputs: save_global_memory_entry(
+            inputs["category"],
+            inputs["description"],
+            inputs["content"],
+            inputs.get("name"),
+        ),
     )
     tools_registered += 1
 

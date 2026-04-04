@@ -79,8 +79,8 @@ SKILL_REGISTRY: dict[str, str] = {
     "hive.task-decomposition": "task-decomposition",
 }
 
-# All shared memory keys used by default skills (for permission auto-inclusion)
-SHARED_MEMORY_KEYS: list[str] = [
+# All shared buffer keys used by default skills (for permission auto-inclusion)
+DATA_BUFFER_KEYS: list[str] = [
     # note-taking
     "_working_notes",
     "_notes_updated_at",

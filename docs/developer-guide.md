@@ -90,7 +90,6 @@ hive/                                    # Repository root
 │   │   ├── graph/                       # GraphExecutor - executes node graphs
 │   │   ├── llm/                         # LLM provider integrations (Anthropic, OpenAI, OpenRouter, Hive, etc.)
 │   │   ├── mcp/                         # MCP server integration
-│   │   ├── monitoring/                  # Runtime monitoring
 │   │   ├── observability/               # Structured logging - human-readable and machine-parseable tracing
 │   │   ├── runner/                      # AgentRunner - loads and runs agents
 │   │   ├── runtime/                     # Runtime environment
@@ -246,27 +245,87 @@ If you prefer to build agents manually:
 ### Using the `hive` CLI
 
 ```bash
-# Browse and run agents interactively (Recommended)
-hive tui
+# Open the browser dashboard (Recommended for interactive use)
+hive open
 
 # Run a specific agent
 hive run exports/my_agent --input '{"ticket_content": "My login is broken", "customer_id": "CUST-123"}'
 
-# Run with TUI dashboard
-hive run exports/my_agent --tui
+# Run with input from a file
+hive run exports/my_agent --input-file input.json
+
+# Run and write output to file
+hive run exports/my_agent -i '{...}' -o result.json
+
+# Resume a previous session
+hive run exports/my_agent --resume-session <session_id>
+
+# Resume from a specific checkpoint
+hive run exports/my_agent --resume-session <session_id> --checkpoint <checkpoint>
+
+# Use a specific LLM model
+hive run exports/my_agent --model claude-sonnet-4-20250514
 ```
 
 ### CLI Command Reference
 
 | Command                | Description                                                             |
 | ---------------------- | ----------------------------------------------------------------------- |
-| `hive tui`             | Browse agents and launch TUI dashboard                                  |
-| `hive run <path>`      | Execute an agent (`--tui`, `--model`, `--mock`, `--quiet`, `--verbose`) |
-| `hive shell [path]`    | Interactive REPL (`--multi`, `--no-approve`)                            |
+| `hive run <path>`      | Execute an agent (see flags below)                                      |
+| `hive shell [path]`    | Interactive REPL (`--no-approve`)                                       |
+| `hive serve`           | Start HTTP API server                                                   |
+| `hive open`            | Start server + open dashboard in browser                                |
 | `hive info <path>`     | Show agent details                                                      |
 | `hive validate <path>` | Validate agent structure                                                |
 | `hive list [dir]`      | List available agents                                                   |
-| `hive dispatch [dir]`  | Multi-agent orchestration                                               |
+
+### `hive run` flags
+
+| Flag                  | Description                                          |
+| --------------------- | ---------------------------------------------------- |
+| `-i, --input`         | Input context as JSON string                         |
+| `-f, --input-file`    | Input context from JSON file                         |
+| `-o, --output`        | Write results to file instead of stdout              |
+| `-m, --model`         | LLM model to use (any LiteLLM-compatible name)       |
+| `-q, --quiet`         | Only output the final result JSON (log level: ERROR) |
+| `-v, --verbose`       | Show execution logs (log level: INFO)                |
+| `--debug`             | Show all debug-level logs (log level: DEBUG)         |
+| `--resume-session`    | Resume from a specific session ID                    |
+| `--checkpoint`        | Resume from a specific checkpoint (requires --resume-session) |
+
+### `hive serve` / `hive open` flags
+
+| Flag              | Description                                        |
+| ----------------- | -------------------------------------------------- |
+| `--host`          | Host to bind (default: 127.0.0.1)                  |
+| `-p, --port`      | Port to listen on (default: 8787)                  |
+| `-a, --agent`     | Agent path to preload (repeatable)                  |
+| `-m, --model`     | LLM model for preloaded agents                      |
+| `--open`          | Open dashboard in browser after server starts (serve only) |
+| `-v, --verbose`   | Enable INFO log level                               |
+| `--debug`         | Enable DEBUG log level                              |
+
+### Log levels
+
+All commands support three verbosity tiers:
+
+```bash
+# Quiet — errors only
+hive run exports/my_agent -q -i '{...}'
+
+# Verbose — execution steps, LLM calls
+hive run -v exports/my_agent -i '{...}'
+
+# Debug — everything including internal subsystems (memory reflection, recall)
+hive run --debug exports/my_agent -i '{...}'
+```
+
+The same flags work for `hive serve` and `hive open`:
+
+```bash
+hive open --debug           # Start with full debug logging
+hive serve --debug -p 9090  # Custom port with debug logs
+```
 
 ### Using Python Directly
 

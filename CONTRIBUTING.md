@@ -603,11 +603,6 @@ from litellm import completion_cost
 cost = completion_cost(model="claude-3-5-sonnet-20241022", messages=[...])
 ```
 
-**Monitoring Dashboard** (`/core/framework/monitoring/`)
-- WebSocket-based real-time monitoring
-- Displays: active agents, tool calls, token usage, errors
-- Access at: `http://localhost:8000/monitor`
-
 ### How to Add Performance Metrics
 
 **1. Instrument your code**

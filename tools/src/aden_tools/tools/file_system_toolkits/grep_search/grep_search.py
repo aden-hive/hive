@@ -5,7 +5,7 @@ from mcp.server.fastmcp import FastMCP
 
 from aden_tools.hashline import HASHLINE_MAX_FILE_BYTES, compute_line_hash
 
-from ..security import WORKSPACES_DIR, get_secure_path
+from ..security import AGENT_SANDBOXES_DIR, get_sandboxed_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -15,25 +15,21 @@ def register_tools(mcp: FastMCP) -> None:
     def grep_search(
         path: str,
         pattern: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         recursive: bool = False,
         hashline: bool = False,
     ) -> dict:
         """
-        Search for a pattern in a file or directory within the session sandbox.
+        Search for a pattern in a file or directory within the agent sandbox.
 
         Use this when you need to find specific content or patterns in files using regex.
         Set recursive=True to search through all subdirectories.
         Set hashline=True to include anchor hashes in results for use with hashline_edit.
 
         Args:
-            path: The path to search in (file or directory, relative to session root)
+            path: The path to search in (file or directory, relative to agent sandbox)
             pattern: The regex pattern to search for
-            workspace_id: The ID of the workspace
             agent_id: The ID of the agent
-            session_id: The ID of the current session
             recursive: Whether to search recursively in directories (default: False)
             hashline: If True, include anchor field (N:hhhh) in each match (default: False)
 
@@ -48,9 +44,9 @@ def register_tools(mcp: FastMCP) -> None:
             return {"error": f"Invalid regex pattern: {e.msg}"}
 
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
-            # Use session dir root for relative path calculations
-            session_root = os.path.join(WORKSPACES_DIR, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
+            # Use agent sandbox root for relative path calculations
+            agent_root = os.path.join(AGENT_SANDBOXES_DIR, agent_id, "current")
 
             matches = []
             skipped_large_files = []
@@ -71,7 +67,7 @@ def register_tools(mcp: FastMCP) -> None:
 
             for file_path in files:
                 # Calculate relative path for display
-                display_path = os.path.relpath(file_path, session_root)
+                display_path = os.path.relpath(file_path, agent_root)
                 try:
                     if hashline:
                         # Use splitlines() for anchor consistency with

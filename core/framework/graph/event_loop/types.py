@@ -9,7 +9,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from framework.graph.conversation import ConversationStore
+from framework.graph.conversation import (
+    ConversationStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,13 +77,20 @@ class LoopConfig:
 
     # Client-facing auto-block grace period.
     cf_grace_turns: int = 1
+    # Worker auto-escalation: text-only turns before escalating to queen.
+    worker_escalation_grace_turns: int = 1
     tool_doom_loop_enabled: bool = True
 
     # Per-tool-call timeout.
     tool_call_timeout_seconds: float = 60.0
 
-    # Subagent delegation timeout.
-    subagent_timeout_seconds: float = 600.0
+    # Subagent delegation timeout (wall-clock max).
+    subagent_timeout_seconds: float = 3600.0
+
+    # Subagent inactivity timeout - only timeout if no activity for this duration.
+    # This resets whenever the subagent makes progress (tool calls, LLM responses).
+    # Set to 0 to use only the wall-clock timeout.
+    subagent_inactivity_timeout_seconds: float = 300.0
 
     # Lifecycle hooks.
     hooks: dict[str, list] | None = None
@@ -116,6 +125,7 @@ class OutputAccumulator:
     store: ConversationStore | None = None
     spillover_dir: str | None = None
     max_value_chars: int = 0
+    run_id: str | None = None
 
     async def set(self, key: str, value: Any) -> None:
         """Set a key-value pair, auto-spilling large values to files."""
@@ -146,8 +156,9 @@ class OutputAccumulator:
             if isinstance(value, (dict, list))
             else str(value)
         )
-        (spill_path / filename).write_text(write_content, encoding="utf-8")
-        file_size = (spill_path / filename).stat().st_size
+        file_path = spill_path / filename
+        file_path.write_text(write_content, encoding="utf-8")
+        file_size = file_path.stat().st_size
         logger.info(
             "set_output value auto-spilled: key=%s, %d chars -> %s (%d bytes)",
             key,
@@ -155,9 +166,11 @@ class OutputAccumulator:
             filename,
             file_size,
         )
+        # Use absolute path so parent agents can find files from subagents
+        abs_path = str(file_path.resolve())
         return (
-            f"[Saved to '{filename}' ({file_size:,} bytes). "
-            f"Use load_data(filename='{filename}') "
+            f"[Saved to '{abs_path}' ({file_size:,} bytes). "
+            f"Use read_file(path='{abs_path}') "
             f"to access full data.]"
         )
 
@@ -171,12 +184,14 @@ class OutputAccumulator:
         return all(key in self.values and self.values[key] is not None for key in required)
 
     @classmethod
-    async def restore(cls, store: ConversationStore) -> OutputAccumulator:
+    async def restore(
+        cls,
+        store: ConversationStore,
+        run_id: str | None = None,
+    ) -> OutputAccumulator:
         cursor = await store.read_cursor()
-        values = {}
-        if cursor and "outputs" in cursor:
-            values = cursor["outputs"]
-        return cls(values=values, store=store)
+        values = cursor.get("outputs", {}) if cursor else {}
+        return cls(values=values, store=store, run_id=run_id)
 
 
 __all__ = [

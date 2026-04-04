@@ -22,10 +22,10 @@ async def handle_logs(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.worker_runtime:
+    if not session.graph_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
 
-    log_store = getattr(session.worker_runtime, "_runtime_log_store", None)
+    log_store = getattr(session.graph_runtime, "_runtime_log_store", None)
     if log_store is None:
         return web.json_response({"error": "Logging not enabled for this agent"}, status=404)
 
@@ -77,10 +77,10 @@ async def handle_node_logs(request: web.Request) -> web.Response:
 
     node_id = request.match_info["node_id"]
 
-    if not session.worker_runtime:
+    if not session.graph_runtime:
         return web.json_response({"error": "No worker loaded in this session"}, status=503)
 
-    log_store = getattr(session.worker_runtime, "_runtime_log_store", None)
+    log_store = getattr(session.graph_runtime, "_runtime_log_store", None)
     if log_store is None:
         return web.json_response({"error": "Logging not enabled"}, status=404)
 

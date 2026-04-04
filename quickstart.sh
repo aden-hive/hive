@@ -273,10 +273,53 @@ fi
 
 # Check for Chrome/Edge (required for GCU browser tools)
 echo -n "  Checking for Chrome/Edge browser... "
-if uv run python -c "from gcu.browser.chrome_finder import find_chrome; assert find_chrome()" > /dev/null 2>&1; then
+# Check common browser locations
+CHROME_FOUND=false
+for browser in "google-chrome" "google-chrome-stable" "chromium" "chromium-browser" "microsoft-edge"; do
+    if command -v "$browser" &> /dev/null; then
+        CHROME_FOUND=true
+        break
+    fi
+done
+# Also check common desktop locations (for macOS/Windows)
+if [ "$CHROME_FOUND" = false ]; then
+    for path in "/Applications/Google Chrome.app" "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" "/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" "$HOME/Applications/Google Chrome.app" "$HOME/.local/share/applications/google-chrome.desktop"; do
+        if [ -e "$path" ]; then
+            CHROME_FOUND=true
+            break
+        fi
+    done
+fi
+if [ "$CHROME_FOUND" = true ]; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${YELLOW}not found — install Chrome or Edge for browser tools${NC}"
+fi
+
+# Ensure playwright is installed for web scraping tools
+echo -n "  Checking playwright installation... "
+if uv run python -c "import playwright" > /dev/null 2>&1; then
+    # Check if browser binaries are installed
+    if uv run playwright install --dry-run chromium > /dev/null 2>&1; then
+        echo -e "${GREEN}ok${NC}"
+    else
+        echo -e "${YELLOW}installing browser...${NC}"
+        uv run playwright install chromium > /dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            echo -e "  ${GREEN}✓ playwright chromium installed${NC}"
+        else
+            echo -e "  ${YELLOW}⚠ playwright browser installation failed (web scraping may not work)${NC}"
+        fi
+    fi
+else
+    echo -e "${YELLOW}not found — installing...${NC}"
+    uv pip install playwright playwright-stealth > /dev/null 2>&1
+    uv run playwright install chromium > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo -e "  ${GREEN}✓ playwright installed${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ playwright installation failed (web scraping may not work)${NC}"
+    fi
 fi
 
 cd "$SCRIPT_DIR"
@@ -1844,6 +1887,98 @@ fi
 echo ""
 
 # ============================================================
+# Step 4b: Load browser extension into Chrome (one-time setup)
+# ============================================================
+
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Setting up browser extension...${NC}"
+echo ""
+
+EXTENSION_PATH="$SCRIPT_DIR/tools/browser-extension"
+CHROME_BIN=""
+CHROME_LAUNCHED=false
+
+# Find Chrome binary
+for _bin in "google-chrome" "google-chrome-stable" "chromium" "chromium-browser" "microsoft-edge" "microsoft-edge-stable"; do
+    if command -v "$_bin" &> /dev/null; then
+        CHROME_BIN="$_bin"
+        break
+    fi
+done
+# macOS
+if [ -z "$CHROME_BIN" ]; then
+    for _path in \
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+        "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"; do
+        if [ -e "$_path" ]; then
+            CHROME_BIN="$_path"
+            break
+        fi
+    done
+fi
+
+if [ ! -d "$EXTENSION_PATH" ]; then
+    echo -e "${YELLOW}  Extension not found at $EXTENSION_PATH — skipping${NC}"
+elif [ -z "$CHROME_BIN" ]; then
+    echo -e "${YELLOW}  Chrome not found — skipping${NC}"
+    echo -e "${DIM}    Install Chrome, then load: $EXTENSION_PATH via chrome://extensions${NC}"
+else
+    # Copy path to clipboard (best-effort)
+    if command -v xclip &> /dev/null; then
+        printf '%s' "$EXTENSION_PATH" | xclip -selection clipboard 2>/dev/null && _copied=true
+    elif command -v xsel &> /dev/null; then
+        printf '%s' "$EXTENSION_PATH" | xsel --clipboard --input 2>/dev/null && _copied=true
+    elif command -v pbcopy &> /dev/null; then
+        printf '%s' "$EXTENSION_PATH" | pbcopy 2>/dev/null && _copied=true
+    fi
+
+    # Show instructions first, then wait for the user before opening Chrome
+    echo -e "  ${BOLD}When Chrome opens to the extensions page, you will need to:${NC}"
+    echo ""
+    echo -e "  ${CYAN}1.${NC} Enable ${BOLD}Developer mode${NC}  (toggle in the top-right corner)"
+    echo -e "  ${CYAN}2.${NC} Click ${BOLD}Load unpacked${NC}"
+    echo -e "  ${CYAN}3.${NC} Paste this path into the folder picker:"
+    echo ""
+    echo -e "     ${BOLD}$EXTENSION_PATH${NC}"
+    echo ""
+    if [ "${_copied:-false}" = "true" ]; then
+        echo -e "  ${DIM}(path already copied to clipboard — just Ctrl+V in the folder picker)${NC}"
+        echo ""
+    fi
+
+    read -r -p "  Press Enter when you are ready to set up the Chrome extension... " _dummy || true
+    echo ""
+
+    # Open chrome://extensions in Chrome
+    echo "  Opening chrome://extensions in Chrome..."
+    if [[ "$OSTYPE" == darwin* ]]; then
+        # macOS: use open -a to properly handle chrome:// URLs
+        _chrome_app=""
+        if [[ "$CHROME_BIN" == *"Google Chrome"* ]]; then
+            _chrome_app="Google Chrome"
+        elif [[ "$CHROME_BIN" == *"Microsoft Edge"* ]]; then
+            _chrome_app="Microsoft Edge"
+        elif [[ "$CHROME_BIN" == *"Chromium"* ]]; then
+            _chrome_app="Chromium"
+        fi
+        if [ -n "$_chrome_app" ]; then
+            open -a "$_chrome_app" "chrome://extensions" 2>/dev/null
+        else
+            "$CHROME_BIN" "chrome://extensions" > /dev/null 2>&1 &
+        fi
+    else
+        "$CHROME_BIN" "chrome://extensions" > /dev/null 2>&1 &
+    fi
+    sleep 1
+
+    echo ""
+    read -r -p "  Press Enter once you see 'Hive Browser Bridge' in the extensions list... " _dummy || true
+    CHROME_LAUNCHED=true
+fi
+
+echo ""
+
+# ============================================================
 # Step 5: Verify Setup
 # ============================================================
 
@@ -1895,6 +2030,17 @@ fi
 echo -n "  ⬡ frontend... "
 if [ -f "$SCRIPT_DIR/core/frontend/dist/index.html" ]; then
     echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
+echo -n "  ⬡ browser extension... "
+if [ "$CHROME_LAUNCHED" = true ]; then
+    echo -e "${GREEN}ok${NC}"
+elif [ -d "$EXTENSION_PATH" ] && [ -n "$CHROME_BIN" ]; then
+    echo -e "${GREEN}ok${NC}"
+elif [ -d "$EXTENSION_PATH" ]; then
+    echo -e "${YELLOW}-- (Chrome not found)${NC}"
 else
     echo -e "${YELLOW}--${NC}"
 fi

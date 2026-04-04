@@ -76,7 +76,7 @@ goal = Goal(
 | output_keys | list[str] | required | Memory keys this node writes via set_output |
 | system_prompt | str | "" | LLM instructions |
 | tools | list[str] | [] | Tool names from MCP servers |
-| client_facing | bool | False | If True, streams to user and blocks for input |
+| client_facing | bool | False | Deprecated compatibility field. Queen interactivity is implicit; workers should escalate instead |
 | nullable_output_keys | list[str] | [] | Keys that may remain unset |
 | max_node_visits | int | 0 | 0=unlimited (default); >1 for one-shot feedback loops |
 | max_retries | int | 3 | Retries on failure |
@@ -110,7 +110,7 @@ This prevents premature set_output before user interaction.
 **Hard limit: 3-6 nodes for most agents.** Never exceed 6 unless the user
 explicitly requests a complex multi-phase pipeline.
 
-Each node boundary serializes outputs to shared memory and **destroys** all
+Each node boundary serializes outputs to the shared buffer and **destroys** all
 in-context information: tool call results, intermediate reasoning, conversation
 history. A research node that searches, fetches, and analyzes in ONE node keeps
 all source material in its conversation context. Split across 3 nodes, each
@@ -132,13 +132,14 @@ downstream node only sees the serialized summary string.
 
 **Typical agent structure (2 nodes):**
 ```
-process (autonomous) ←→ review (client-facing)
+process (autonomous) ←→ review (queen-mediated)
 ```
 The queen owns intake — she gathers requirements from the user, then
 passes structured input via `run_agent_with_input(task)`. When building
 the agent, design the entry node's `input_keys` to match what the queen
 will provide at run time. Worker agents should NOT have a client-facing
-intake node. Client-facing nodes are for mid-execution review/approval only.
+intake node. Mid-execution review/approval should happen through queen
+escalation rather than direct worker HITL.
 
 For simpler agents, just 1 autonomous node:
 ```
@@ -172,7 +173,7 @@ Use `conversation_mode="continuous"` to preserve context across transitions.
 ### set_output
 - Synthetic tool injected by framework
 - Call separately from real tool calls (separate turn)
-- `set_output("key", "value")` stores to shared memory
+- `set_output("key", "value")` stores to the shared buffer
 
 ## Edge Conditions
 
@@ -246,7 +247,7 @@ For large data that exceeds context:
 Multiple ON_SUCCESS edges from same source → parallel execution via asyncio.gather().
 - Parallel nodes must have disjoint output_keys
 - Only one branch may have client_facing nodes
-- Fan-in node gets all outputs in shared memory
+- Fan-in node gets all outputs in the shared buffer
 
 ## Judge System
 

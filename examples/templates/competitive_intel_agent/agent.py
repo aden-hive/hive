@@ -318,9 +318,7 @@ class CompetitiveIntelAgent:
         """
         await self.start()
         try:
-            result = await self.trigger_and_wait(
-                "start", context, session_state=session_state
-            )
+            result = await self.trigger_and_wait("start", context, session_state=session_state)
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
             await self.stop()
@@ -370,9 +368,7 @@ class CompetitiveIntelAgent:
 
         for ep_id, node_id in self.entry_points.items():
             if node_id not in node_ids:
-                errors.append(
-                    f"Entry point '{ep_id}' references unknown node '{node_id}'"
-                )
+                errors.append(f"Entry point '{ep_id}' references unknown node '{node_id}'")
 
         return {
             "valid": len(errors) == 0,

@@ -22,7 +22,7 @@ from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.runtime_log_store import RuntimeLogStore
-from framework.runtime.shared_state import SharedStateManager
+from framework.runtime.shared_state import SharedBufferManager
 from framework.storage.concurrent import ConcurrentStorage
 from framework.storage.session_store import SessionStore
 
@@ -229,7 +229,7 @@ class AgentRuntime:
         self._session_store = SessionStore(storage_path_obj)
 
         # Initialize shared components
-        self._state_manager = SharedStateManager()
+        self._state_manager = SharedBufferManager()
         self._event_bus = event_bus or EventBus(max_history=self._config.max_history)
         self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
 
@@ -238,6 +238,14 @@ class AgentRuntime:
         self._tools = tools or []
         self._tool_executor = tool_executor
         self._accounts_prompt = accounts_prompt
+        self._dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = (
+            None
+        )
+        # Colony memory config for reflection-at-handoff (set by session_manager)
+        self._colony_memory_dir: Any = None
+        self._colony_worker_sessions_dir: Any = None
+        self._colony_recall_cache: dict[str, str] | None = None
+        self._colony_reflect_llm: Any = None
         self._accounts_data = accounts_data
         self._tool_provider_map = tool_provider_map
 
@@ -360,6 +368,11 @@ class AgentRuntime:
                     skill_dirs=self.skill_dirs,
                     context_warn_ratio=self.context_warn_ratio,
                     batch_init_nudge=self.batch_init_nudge,
+                    dynamic_memory_provider_factory=self._dynamic_memory_provider_factory,
+                    colony_memory_dir=self._colony_memory_dir,
+                    colony_worker_sessions_dir=self._colony_worker_sessions_dir,
+                    colony_recall_cache=self._colony_recall_cache,
+                    colony_reflect_llm=self._colony_reflect_llm,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -1446,12 +1459,12 @@ class AgentRuntime:
         ``session_state`` dict containing:
 
         - ``resume_session_id``: reuse the same session directory
-        - ``memory``: only the keys that the async entry node declares
+        - ``data_buffer``: only the keys that the async entry node declares
           as inputs (e.g. ``rules``, ``max_emails``).  Stale outputs
           from previous runs (``emails``, ``actions_taken``, …) are
           excluded so each trigger starts fresh.
 
-        The memory is read from the primary session's ``state.json``
+        The data buffer is read from the primary session's ``state.json``
         which is kept up-to-date by ``GraphExecutor._write_progress()``
         at every node transition.
 
@@ -1469,7 +1482,7 @@ class AgentRuntime:
         """
         import json as _json
 
-        # Determine which memory keys the async entry node needs.
+        # Determine which data buffer keys the async entry node needs.
         allowed_keys: set[str] | None = None
         # Look up the entry node from the correct graph
         src_graph_id = source_graph_id or self._graph_id
@@ -1505,19 +1518,21 @@ class AgentRuntime:
                 try:
                     if state_path.exists():
                         data = _json.loads(state_path.read_text(encoding="utf-8"))
-                        full_memory = data.get("memory", {})
-                        if not full_memory:
+                        full_buffer = data.get("data_buffer", data.get("memory", {}))
+                        if not full_buffer:
                             continue
                         # Filter to only input keys so stale outputs
                         # from previous triggers don't leak through.
                         if allowed_keys is not None:
-                            memory = {k: v for k, v in full_memory.items() if k in allowed_keys}
+                            buffer_data = {
+                                k: v for k, v in full_buffer.items() if k in allowed_keys
+                            }
                         else:
-                            memory = full_memory
-                        if memory:
+                            buffer_data = full_buffer
+                        if buffer_data:
                             return {
                                 "resume_session_id": exec_id,
-                                "memory": memory,
+                                "data_buffer": buffer_data,
                             }
                 except Exception:
                     logger.debug(
@@ -1666,7 +1681,7 @@ class AgentRuntime:
                     for node_id, node in executor.node_registry.items():
                         if getattr(node, "_awaiting_input", False):
                             # Skip escalation receivers — those are handled
-                            # by the queen via inject_worker_message(), not
+                            # by the queen via inject_message(), not
                             # by the user directly.
                             if ":escalation:" in node_id:
                                 continue
@@ -1781,7 +1796,7 @@ class AgentRuntime:
     # === PROPERTIES ===
 
     @property
-    def state_manager(self) -> SharedStateManager:
+    def state_manager(self) -> SharedBufferManager:
         """Access the shared state manager."""
         return self._state_manager
 

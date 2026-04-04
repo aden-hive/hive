@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from fastmcp import FastMCP
 
-from aden_tools.tools.file_system_toolkits.hashline import compute_line_hash
+from aden_tools.hashline import compute_line_hash
 
 
 @pytest.fixture
@@ -19,24 +19,22 @@ def mcp():
 
 @pytest.fixture
 def mock_workspace():
-    """Mock workspace, agent, and session IDs."""
+    """Mock agent ID."""
     return {
-        "workspace_id": "test-workspace",
         "agent_id": "test-agent",
-        "session_id": "test-session",
     }
 
 
 @pytest.fixture
 def mock_secure_path(tmp_path):
-    """Mock get_secure_path to return temp directory paths."""
+    """Mock get_sandboxed_path to return temp directory paths."""
 
-    def _get_secure_path(path, workspace_id, agent_id, session_id):
+    def _get_sandboxed_path(path, agent_id):
         return os.path.join(tmp_path, path)
 
     with patch(
-        "aden_tools.tools.file_system_toolkits.hashline_edit.hashline_edit.get_secure_path",
-        side_effect=_get_secure_path,
+        "aden_tools.tools.file_system_toolkits.hashline_edit.hashline_edit.get_sandboxed_path",
+        side_effect=_get_sandboxed_path,
     ):
         yield
 

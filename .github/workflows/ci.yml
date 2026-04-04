@@ -63,7 +63,7 @@ jobs:
         working-directory: core
         run: |
           uv sync
-          uv run pytest tests/ -v
+          uv run pytest tests/ -v --ignore=tests/dummy_agents
 
   test-tools:
     name: Test Tools (${{ matrix.os }})

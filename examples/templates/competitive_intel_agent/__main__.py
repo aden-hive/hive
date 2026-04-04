@@ -117,9 +117,7 @@ def tui(verbose: bool, debug: bool) -> None:
     try:
         from framework.tui.app import AdenTUI
     except ImportError:
-        click.echo(
-            "TUI requires the 'textual' package. Install with: pip install textual"
-        )
+        click.echo("TUI requires the 'textual' package. Install with: pip install textual")
         sys.exit(1)
 
     from framework.llm import LiteLLMProvider
@@ -249,9 +247,7 @@ async def _interactive_shell(verbose: bool = False) -> None:
 
                 click.echo("\nGathering competitive intelligence...\n")
 
-                result = await agent.trigger_and_wait(
-                    "start", {"competitors_input": user_input}
-                )
+                result = await agent.trigger_and_wait("start", {"competitors_input": user_input})
 
                 if result is None:
                     click.echo("\n[Execution timed out]\n")

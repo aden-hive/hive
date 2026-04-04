@@ -31,5 +31,5 @@
 18. **Passing `profile=` in GCU tool calls** — Profile isolation for parallel subagents is automatic. The framework injects a unique profile per subagent via an asyncio `ContextVar`. Hardcoding `profile="default"` in a GCU system prompt breaks this isolation.
 
 ## Worker Agent Errors
-19. **Adding client-facing intake node to workers** — The queen owns intake. Workers should start with an autonomous processing node. Client-facing nodes in workers are for mid-execution review/approval only.
+19. **Adding client-facing intake node to workers** — The queen owns intake. Workers should start with an autonomous processing node. Route worker review/approval through queen escalation instead of direct worker HITL.
 20. **Putting `escalate` or `set_output` in NodeSpec `tools=[]`** — These are synthetic framework tools, auto-injected at runtime. Only list MCP tools from `list_agent_tools()`.

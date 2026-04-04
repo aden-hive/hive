@@ -108,7 +108,7 @@ class EdgeSpec(BaseModel):
         self,
         source_success: bool,
         source_output: dict[str, Any],
-        memory: dict[str, Any],
+        buffer_data: dict[str, Any],
         llm: Any | None = None,
         goal: Any | None = None,
         source_node_name: str | None = None,
@@ -120,7 +120,7 @@ class EdgeSpec(BaseModel):
         Args:
             source_success: Whether the source node succeeded
             source_output: Output from the source node
-            memory: Current shared memory state
+            buffer_data: Current data buffer state
             llm: LLM provider for LLM_DECIDE edges
             goal: Goal object for LLM_DECIDE edges
             source_node_name: Name of source node (for LLM context)
@@ -139,7 +139,7 @@ class EdgeSpec(BaseModel):
             return not source_success
 
         if self.condition == EdgeCondition.CONDITIONAL:
-            return self._evaluate_condition(source_output, memory)
+            return self._evaluate_condition(source_output, buffer_data)
 
         if self.condition == EdgeCondition.LLM_DECIDE:
             if llm is None or goal is None:
@@ -150,7 +150,7 @@ class EdgeSpec(BaseModel):
                 goal=goal,
                 source_success=source_success,
                 source_output=source_output,
-                memory=memory,
+                buffer_data=buffer_data,
                 source_node_name=source_node_name,
                 target_node_name=target_node_name,
             )
@@ -160,7 +160,7 @@ class EdgeSpec(BaseModel):
     def _evaluate_condition(
         self,
         output: dict[str, Any],
-        memory: dict[str, Any],
+        buffer_data: dict[str, Any],
     ) -> bool:
         """Evaluate a conditional expression."""
 
@@ -168,14 +168,14 @@ class EdgeSpec(BaseModel):
             return True
 
         # Build evaluation context
-        # Include memory keys directly for easier access in conditions
+        # Include buffer keys directly for easier access in conditions
         context = {
             "output": output,
-            "memory": memory,
+            "buffer": buffer_data,
             "result": output.get("result"),
             "true": True,  # Allow lowercase true/false in conditions
             "false": False,
-            **memory,  # Unpack memory keys directly into context
+            **buffer_data,  # Unpack buffer keys directly into context
         }
 
         try:
@@ -186,7 +186,7 @@ class EdgeSpec(BaseModel):
             expr_vars = {
                 k: repr(context[k])
                 for k in context
-                if k not in ("output", "memory", "result", "true", "false")
+                if k not in ("output", "buffer", "result", "true", "false")
                 and k in self.condition_expr
             }
             logger.info(
@@ -209,7 +209,7 @@ class EdgeSpec(BaseModel):
         goal: Any,
         source_success: bool,
         source_output: dict[str, Any],
-        memory: dict[str, Any],
+        buffer_data: dict[str, Any],
         source_node_name: str | None,
         target_node_name: str | None,
     ) -> bool:
@@ -234,8 +234,8 @@ class EdgeSpec(BaseModel):
 Should we proceed to: {target_node_name or self.target}?
 Edge description: {self.description or "No description"}
 
-**Context from memory**:
-{json.dumps({k: str(v)[:100] for k, v in list(memory.items())[:5]}, indent=2)}
+**Context from data buffer**:
+{json.dumps({k: str(v)[:100] for k, v in list(buffer_data.items())[:5]}, indent=2)}
 
 Evaluate whether proceeding to this next node is the right step toward achieving the goal.
 Consider:
@@ -276,14 +276,14 @@ Respond with ONLY a JSON object:
     def map_inputs(
         self,
         source_output: dict[str, Any],
-        memory: dict[str, Any],
+        buffer_data: dict[str, Any],
     ) -> dict[str, Any]:
         """
         Map source outputs to target inputs.
 
         Args:
             source_output: Output from source node
-            memory: Current shared memory
+            buffer_data: Current data buffer
 
         Returns:
             Input dict for target node
@@ -294,70 +294,13 @@ Respond with ONLY a JSON object:
 
         result = {}
         for target_key, source_key in self.input_mapping.items():
-            # Try source output first, then memory
+            # Try source output first, then buffer
             if source_key in source_output:
                 result[target_key] = source_output[source_key]
-            elif source_key in memory:
-                result[target_key] = memory[source_key]
+            elif source_key in buffer_data:
+                result[target_key] = buffer_data[source_key]
 
         return result
-
-
-class AsyncEntryPointSpec(BaseModel):
-    """
-    Specification for an asynchronous entry point.
-
-    Used with AgentRuntime for multi-entry-point agents that handle
-    concurrent execution streams (e.g., webhook + API handlers).
-
-    Example:
-        AsyncEntryPointSpec(
-            id="webhook",
-            name="Zendesk Webhook Handler",
-            entry_node="process-webhook",
-            trigger_type="webhook",
-            isolation_level="shared",
-        )
-    """
-
-    id: str = Field(description="Unique identifier for this entry point")
-    name: str = Field(description="Human-readable name")
-    entry_node: str = Field(
-        default="",
-        description="Deprecated: Node ID to start execution from. "
-        "Triggers are graph-level; worker always enters at GraphSpec.entry_node.",
-    )
-    trigger_type: str = Field(
-        default="manual",
-        description="How this entry point is triggered: webhook, api, timer, event, manual",
-    )
-    trigger_config: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Trigger-specific configuration (e.g., webhook URL, timer interval)",
-    )
-    task: str = Field(
-        default="",
-        description="Worker task string when this trigger fires autonomously",
-    )
-    isolation_level: str = Field(
-        default="shared", description="State isolation: isolated, shared, or synchronized"
-    )
-    priority: int = Field(default=0, description="Execution priority (higher = more priority)")
-    max_concurrent: int = Field(
-        default=10, description="Maximum concurrent executions for this entry point"
-    )
-    max_resurrections: int = Field(
-        default=3,
-        description="Auto-restart on non-fatal failure (0 to disable)",
-    )
-
-    model_config = {"extra": "allow"}
-
-    def get_isolation_level(self):
-        """Convert string isolation level to enum (duck-type with EntryPointSpec)."""
-        from framework.runtime.execution_stream import IsolationLevel
-
-        return IsolationLevel(self.isolation_level)
 
 
 class GraphSpec(BaseModel):
@@ -403,9 +346,9 @@ class GraphSpec(BaseModel):
     )
     edges: list[EdgeSpec] = Field(default_factory=list, description="All edge specifications")
 
-    # Shared memory keys
-    memory_keys: list[str] = Field(
-        default_factory=list, description="Keys available in shared memory"
+    # Data buffer keys
+    buffer_keys: list[str] = Field(
+        default_factory=list, description="Keys available in data buffer"
     )
 
     # Default LLM settings
@@ -609,21 +552,16 @@ class GraphSpec(BaseModel):
                     continue
                 errors.append(f"Node '{node.id}' is unreachable from entry")
 
-        # Client-facing fan-out validation
-        fan_outs = self.detect_fan_out_nodes()
-        for source_id, targets in fan_outs.items():
-            client_facing_targets = [
-                t
-                for t in targets
-                if self.get_node(t) and getattr(self.get_node(t), "client_facing", False)
-            ]
-            if len(client_facing_targets) > 1:
-                errors.append(
-                    f"Fan-out from '{source_id}' has multiple client-facing nodes: "
-                    f"{client_facing_targets}. Only one branch may be client-facing."
+        for node in self.nodes:
+            if getattr(node, "client_facing", False) and getattr(node, "id", "") != "queen":
+                warnings.append(
+                    f"Node '{node.id}' sets deprecated client_facing=True. "
+                    "Only the queen talks directly to users now; migrate this node "
+                    "to queen-mediated escalation."
                 )
 
         # Output key overlap on parallel event_loop nodes
+        fan_outs = self.detect_fan_out_nodes()
         for source_id, targets in fan_outs.items():
             event_loop_targets = [
                 t

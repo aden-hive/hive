@@ -462,6 +462,59 @@ def _is_stream_transient_error(exc: BaseException) -> bool:
     return isinstance(exc, transient_types)
 
 
+def _extract_text_tool_calls(
+    text: str,
+) -> tuple[list, str]:
+    """Extract hallucinated tool calls from ``<tool_code>`` blocks in LLM text.
+
+    Some models (notably Gemini) emit tool invocations as text instead of using
+    the structured function-calling API.  This function parses those blocks and
+    returns ``(tool_call_events, cleaned_text)`` where *cleaned_text* has the
+    ``<tool_code>`` blocks removed.
+
+    Expected format::
+
+        <tool_code>
+        {
+          "tool_name": { ...args }
+        }
+        </tool_code>
+    """
+    from framework.llm.stream_events import ToolCallEvent
+
+    pattern = re.compile(r"<tool_code>\s*(.*?)\s*</tool_code>", re.DOTALL)
+    events: list[ToolCallEvent] = []
+    cleaned = text
+
+    for match in pattern.finditer(text):
+        raw = match.group(1).strip()
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("[_extract_text_tool_calls] failed to parse JSON: %s", raw[:200])
+            continue
+
+        if not isinstance(payload, dict):
+            continue
+
+        for tool_name, tool_args in payload.items():
+            key = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
+            digest = hashlib.md5(key.encode()).hexdigest()[:12]
+            call_id = f"synth_{digest}"
+            events.append(
+                ToolCallEvent(
+                    tool_use_id=call_id,
+                    tool_name=tool_name,
+                    tool_input=tool_args if isinstance(tool_args, dict) else {},
+                )
+            )
+
+    if events:
+        cleaned = pattern.sub("", text).strip()
+
+    return events, cleaned
+
+
 class LiteLLMProvider(LLMProvider):
     """
     LiteLLM-based LLM provider for multi-provider support.
@@ -1755,6 +1808,10 @@ class LiteLLMProvider(LLMProvider):
 
                     # --- Finish ---
                     if choice.finish_reason:
+                        # Kimi's 'pause_turn' means the model emitted tool
+                        # calls and expects results — equivalent to 'tool_calls'.
+                        if choice.finish_reason == "pause_turn":
+                            choice.finish_reason = "tool_calls" if tool_calls_acc else "stop"
                         stream_finish_reason = choice.finish_reason
                         for _idx, tc_data in sorted(tool_calls_acc.items()):
                             parsed_args = self._parse_tool_call_arguments(
@@ -1922,6 +1979,35 @@ class LiteLLMProvider(LLMProvider):
                         f"(last_role={last_role}). Returning empty result."
                     )
 
+                # Gemini sometimes outputs tool calls as text in
+                # <tool_code>{"name": {...args}}</tool_code> blocks
+                # instead of using the function-calling API.  Extract
+                # these as real ToolCallEvents and strip them from the
+                # text so the rest of the system treats them normally.
+                if accumulated_text and "<tool_code>" in accumulated_text:
+                    extracted, cleaned = _extract_text_tool_calls(accumulated_text)
+                    if extracted:
+                        logger.info(
+                            "[stream] extracted %d hallucinated tool call(s) from text",
+                            len(extracted),
+                        )
+                        accumulated_text = cleaned
+                        # Emit a corrected TextDeltaEvent so the caller's
+                        # accumulated_text is overwritten with the cleaned text.
+                        yield TextDeltaEvent(content="", snapshot=cleaned)
+                        # Insert synthetic ToolCallEvents before FinishEvent.
+                        finish_idx = next(
+                            (i for i, ev in enumerate(tail_events) if isinstance(ev, FinishEvent)),
+                            len(tail_events),
+                        )
+                        for tc_ev in reversed(extracted):
+                            tail_events.insert(finish_idx, tc_ev)
+                        # Update TextEndEvent if present.
+                        for _i, _ev in enumerate(tail_events):
+                            if isinstance(_ev, TextEndEvent):
+                                tail_events[_i] = TextEndEvent(full_text=cleaned)
+                                break
+
                 # Success (or empty after exhausted retries) — flush events.
                 for event in tail_events:
                     yield event
@@ -1941,6 +2027,36 @@ class LiteLLMProvider(LLMProvider):
                 return
 
             except Exception as e:
+                # Some providers return non-standard finish_reason values
+                # (e.g., kimi-k2.5 sends 'pause_turn') that LiteLLM's
+                # internal stream_chunk_builder rejects via Pydantic
+                # validation.  If we already accumulated content and built
+                # tail_events before the error, the stream was successful —
+                # yield what we have instead of discarding it.
+                if (accumulated_text or tool_calls_acc) and tail_events:
+                    # LiteLLM may wrap the original ValidationError in an
+                    # APIError with a different message.  Check the full
+                    # exception chain (str(e) + str(__cause__)).
+                    _err_chain = f"{e} {e.__cause__}" if e.__cause__ else str(e)
+                    _is_finish_reason_err = (
+                        "finish_reason" in _err_chain and "validation error" in _err_chain.lower()
+                    ) or (
+                        # Fallback: the APIError wrapper message for chunk-building failures
+                        "building chunks" in str(e).lower() and (accumulated_text or tool_calls_acc)
+                    )
+                    if _is_finish_reason_err:
+                        logger.warning(
+                            "[stream] %s: LiteLLM finish_reason validation "
+                            "error (non-standard provider value). "
+                            "Content was streamed successfully — "
+                            "using accumulated result. Error: %s",
+                            self.model,
+                            e,
+                        )
+                        for event in tail_events:
+                            yield event
+                        return
+
                 if self._should_use_openrouter_tool_compat(e, tools):
                     _remember_openrouter_tool_compat_model(self.model)
                     async for event in self._stream_via_openrouter_tool_compat(

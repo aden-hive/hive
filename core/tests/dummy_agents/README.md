@@ -14,6 +14,7 @@ The script detects available credentials and prompts you to pick a provider. You
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `GEMINI_API_KEY`
+- `KIMI_API_KEY`
 - `ZAI_API_KEY`
 - Claude Code / Codex / Kimi subscription
 
@@ -35,7 +36,7 @@ uv run python tests/dummy_agents/run_all.py --verbose
 | parallel_merge | 4 | Fan-out/fan-in, failure strategies |
 | retry | 4 | Retry mechanics, exhaustion, ON_FAILURE edges |
 | feedback_loop | 3 | Feedback cycles, max_node_visits |
-| worker | 4 | Real MCP tools (example_tool, get_current_time, save_data/load_data) |
+| worker | 5 | Real MCP tools plus a two-worker artifact round-trip smoke test |
 
 ## Notes
 
