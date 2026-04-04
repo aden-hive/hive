@@ -19,8 +19,9 @@ intake → job-search → job-review → customize
 ### Nodes (4 total)
 
 1. **intake** (event_loop)
-   - Collect resume from user, analyze skills and experience, identify 2-3 strongest role types
+   - Collect resume from user (pasted text or PDF file path), analyze skills and experience, identify 3-5 strongest role types
    - Writes: `resume_text, role_analysis`
+   - Tools: `pdf_read`
    - Client-facing: Yes (blocks for user input)
 2. **job-review** (event_loop)
    - Present all 10 jobs to the user, let them select which to pursue
@@ -79,6 +80,7 @@ intake → job-search → job-review → customize
 
 ## Required Tools
 
+- `pdf_read`
 - `save_data`
 - `web_scrape`
 - `web_search`
