@@ -131,9 +131,20 @@ def _is_cors_allowed(origin: str) -> bool:
     return False
 
 
+def _get_allowed_cors_origins() -> set[str]:
+    """Get allowed CORS origins from environment variables."""
+    # Check for HIVE_CORS_ORIGINS environment variable
+    env_origins = os.environ.get("HIVE_CORS_ORIGINS", "")
+    if env_origins:
+        return set(env_origins.split(","))
+    
+    # Fallback to default localhost origins
+    return _CORS_ORIGINS
+
+
 @web.middleware
 async def cors_middleware(request: web.Request, handler):
-    """CORS middleware scoped to localhost origins."""
+    """CORS middleware scoped to allowed origins."""
     origin = request.headers.get("Origin", "")
 
     # Handle preflight
@@ -145,11 +156,15 @@ async def cors_middleware(request: web.Request, handler):
         except web.HTTPException as exc:
             response = exc
 
+    # Get allowed origins (from env or default)
+    allowed_origins = _get_allowed_cors_origins()
+    
     if _is_cors_allowed(origin):
         response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS, PUT, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-API-Key"
         response.headers["Access-Control-Max-Age"] = "3600"
+        response.headers["Access-Control-Expose-Headers"] = "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset"
 
     return response
 
@@ -197,7 +212,13 @@ def create_app(model: str | None = None) -> web.Application:
     Returns:
         Configured aiohttp Application ready to run.
     """
+    # Initialize security middleware
+    from framework.server.security import setup_security_middleware
+    
     app = web.Application(middlewares=[cors_middleware, error_middleware])
+    
+    # Setup security middleware
+    app.on_startup.append(setup_security_middleware)
 
     # Initialize credential store (before SessionManager so it can be shared)
     from framework.credentials.store import CredentialStore
