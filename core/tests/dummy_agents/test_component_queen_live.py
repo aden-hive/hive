@@ -406,11 +406,11 @@ async def test_queen_emits_phase_change_events(llm_provider, tmp_path, artifact)
         await ps.switch_to_editing(source="test")
         assert await capture.wait_for_phase("editing", timeout=5)
 
-        # editing -> planning
-        await ps.switch_to_planning(source="test")
-        assert await capture.wait_for_phase("planning", timeout=5)
+        # editing -> running (re-run)
+        await ps.switch_to_running(source="test")
+        assert await capture.wait_for_phase("running", timeout=5)
 
-        expected_seq = ["building", "staging", "running", "editing", "planning"]
+        expected_seq = ["building", "staging", "running", "editing", "running"]
         artifact.record_value("phases", capture.phases, expected=str(expected_seq))
 
         artifact.check(
@@ -669,28 +669,28 @@ async def test_queen_full_phase_cycle_with_events(llm_provider, tmp_path, artifa
         assert ps.phase == "editing"
         editing_tools = {t.name for t in ps.get_current_tools()}
 
-        # -> back to planning (from editing, allowed)
-        await ps.switch_to_planning(source="test")
+        # -> back to running (from editing — the only forward path)
+        await ps.switch_to_running(source="test")
         artifact.check(
-            "phase is planning again",
-            ps.phase == "planning",
+            "phase is running again",
+            ps.phase == "running",
             actual=repr(ps.phase),
-            expected_val="'planning'",
+            expected_val="'running'",
         )
-        assert ps.phase == "planning"
+        assert ps.phase == "running"
         final_tools = {t.name for t in ps.get_current_tools()}
 
         artifact.check(
-            "final tools match original planning set",
-            final_tools == planning_tools,
+            "final tools match running set",
+            final_tools == running_tools,
             actual=f"final={sorted(final_tools)}",
-            expected_val=f"planning={sorted(planning_tools)}",
+            expected_val=f"running={sorted(running_tools)}",
         )
-        assert final_tools == planning_tools, "Tools should match original planning set"
+        assert final_tools == running_tools, "Tools should match running set"
 
         # Verify events
         await asyncio.sleep(0.3)
-        expected_seq = ["building", "staging", "running", "editing", "planning"]
+        expected_seq = ["building", "staging", "running", "editing", "running"]
         artifact.record_value("phase_events", capture.phases, expected=str(expected_seq))
 
         artifact.check(

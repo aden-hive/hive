@@ -273,16 +273,17 @@ class QueenPhaseState:
     async def switch_to_building(self, source: str = "tool") -> None:
         """Switch to building phase and notify the queen.
 
-        Blocked from RUNNING — must go through EDITING first.
+        Blocked from RUNNING and EDITING.
 
         Args:
             source: Who triggered the switch — "tool", "frontend", or "auto".
         """
         if self.phase == "building":
             return
-        if self.phase == "running":
+        if self.phase in ("running", "editing"):
             logger.warning(
-                "Queen phase: BLOCKED running → building (must go through editing first, source=%s)",
+                "Queen phase: BLOCKED %s → building (source=%s)",
+                self.phase,
                 source,
             )
             return
@@ -300,16 +301,17 @@ class QueenPhaseState:
     async def switch_to_planning(self, source: str = "tool") -> None:
         """Switch to planning phase and notify the queen.
 
-        Blocked from RUNNING — must go through EDITING first.
+        Blocked from RUNNING and EDITING.
 
         Args:
             source: Who triggered the switch — "tool", "frontend", or "auto".
         """
         if self.phase == "planning":
             return
-        if self.phase == "running":
+        if self.phase in ("running", "editing"):
             logger.warning(
-                "Queen phase: BLOCKED running → planning (must go through editing first, source=%s)",
+                "Queen phase: BLOCKED %s → planning (source=%s)",
+                self.phase,
                 source,
             )
             return
@@ -1053,6 +1055,45 @@ def register_queen_lifecycle_tools(
         parameters={"type": "object", "properties": {}},
     )
     registry.register("stop_graph", _stop_tool, lambda inputs: stop_graph())
+    tools_registered += 1
+
+    # --- switch_to_editing ----------------------------------------------------
+
+    async def switch_to_editing_tool() -> str:
+        """Stop the worker and switch to editing phase for config tweaks.
+
+        The worker stays loaded. You can re-run with different input,
+        inject config adjustments, or escalate to building/planning.
+        """
+        stop_result = await stop_graph()
+
+        if phase_state is not None:
+            await phase_state.switch_to_editing()
+            _update_meta_json(session_manager, manager_session_id, {"phase": "editing"})
+
+        result = json.loads(stop_result)
+        result["phase"] = "editing"
+        result["message"] = (
+            "Worker stopped. You are now in editing phase. "
+            "You can re-run with run_agent_with_input(task), tweak config "
+            "with inject_message, or escalate to building/planning."
+        )
+        return json.dumps(result)
+
+    _switch_editing_tool = Tool(
+        name="switch_to_editing",
+        description=(
+            "Stop the running worker and switch to editing phase. "
+            "The worker stays loaded — you can tweak config and re-run. "
+            "Use this when you want to adjust the worker without rebuilding."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "switch_to_editing",
+        _switch_editing_tool,
+        lambda inputs: switch_to_editing_tool(),
+    )
     tools_registered += 1
 
     # --- stop_graph_and_edit --------------------------------------------------
