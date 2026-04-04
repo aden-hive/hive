@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 CLI entry point for Research Agent.
 """
@@ -6,12 +8,13 @@ import asyncio
 import json
 import logging
 import sys
+
 import click
 
 from .agent import default_agent
 
 
-def setup_logging(verbose=False, debug=False):
+def setup_logging(verbose: bool = False, debug: bool = False) -> None:
     """Configure logging for execution visibility."""
     if debug:
         level, fmt = logging.DEBUG, "%(asctime)s %(name)s: %(message)s"
@@ -25,7 +28,7 @@ def setup_logging(verbose=False, debug=False):
 
 @click.group()
 @click.version_option(version="1.0.0")
-def cli():
+def cli() -> None:
     """Research + Summary Agent - Gathers info, extracts key points, and summarizes."""
     pass
 
@@ -35,7 +38,7 @@ def cli():
 @click.option("--quiet", is_flag=True, help="Only output result JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
-def run(query, quiet, verbose, debug):
+def run(query: str, quiet: bool, verbose: bool, debug: bool) -> None:
     """Execute research on a query."""
     if not quiet:
         setup_logging(verbose=verbose, debug=debug)
@@ -62,7 +65,7 @@ def run(query, quiet, verbose, debug):
 
 @cli.command()
 @click.option("--json", "output_json", is_flag=True)
-def info(output_json):
+def info(output_json: bool) -> None:
     """Show agent information."""
     info_data = default_agent.info()
     if output_json:

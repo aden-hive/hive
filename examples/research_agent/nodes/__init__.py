@@ -1,5 +1,7 @@
 """Nodes for the Research + Summary Agent."""
 
+from __future__ import annotations
+
 from framework.graph import NodeSpec
 
 # Node 1: Information Gathering
@@ -50,7 +52,8 @@ summarize_node = NodeSpec(
     input_keys=["query", "extracted_points"],
     output_keys=["final_summary"],
     system_prompt="""\\
-You are a technical writer. Taking the original query and the extracted points, write a concise, well-structured markdown summary.
+You are a technical writer. Taking the original query and the extracted points, write a concise, \
+well-structured markdown summary.
 The summary MUST include:
 1. An introductory paragraph about the topic.
 2. A bulleted list of Key Trends.

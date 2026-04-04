@@ -48,7 +48,7 @@ The landscape of AI agents is evolving rapidly, moving from single-turn chat int
 
 **Notable Tools / Technologies:**
 * LangChain & AutoGen
-* Tool Call/Function Calling APIS
+* Tool Call/Function Calling APIs
 * Browser use integrations
 
 ## Conclusion

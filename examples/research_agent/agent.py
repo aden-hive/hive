@@ -1,5 +1,7 @@
 """Research + Summary Agent implementation."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 from framework.graph import EdgeSpec, EdgeCondition, Goal
@@ -62,7 +64,7 @@ class ResearchAgent:
     Flow: gather_info -> extract_points -> summarize
     """
 
-    def __init__(self, config=None):
+    def __init__(self, config=None) -> None:
         self.config = config or default_config
         self.goal = goal
         self.nodes = nodes
@@ -141,7 +143,7 @@ class ResearchAgent:
             checkpoint_config=checkpoint_config,
         )
 
-    async def start(self, mock_mode=False) -> None:
+    async def start(self, mock_mode: bool = False) -> None:
         if self._agent_runtime is None:
             self._setup(mock_mode=mock_mode)
         if not self._agent_runtime.is_running:
@@ -152,7 +154,7 @@ class ResearchAgent:
             await self._agent_runtime.stop()
         self._agent_runtime = None
 
-    async def run(self, context: dict, mock_mode=False) -> ExecutionResult:
+    async def run(self, context: dict, mock_mode: bool = False) -> ExecutionResult:
         await self.start(mock_mode=mock_mode)
         try:
             result = await self._agent_runtime.trigger_and_wait(
@@ -163,13 +165,15 @@ class ResearchAgent:
         finally:
             await self.stop()
 
-    def info(self):
+    def info(self) -> dict:
         return {
             "name": metadata.name,
             "version": metadata.version,
             "description": metadata.description,
             "nodes": [n.id for n in self.nodes],
-            "client_facing_nodes": [n.id for n in self.nodes if getattr(n, 'client_facing', False)],
+            "client_facing_nodes": [
+                n.id for n in self.nodes if getattr(n, "client_facing", False)
+            ],
             "entry_node": self.entry_node,
             "terminal_nodes": self.terminal_nodes,
         }
