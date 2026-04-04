@@ -4,10 +4,10 @@ Verifies that:
 - Timer triggers fire inject_trigger() on the queen node
 - Webhook triggers fire inject_trigger() via EventBus WEBHOOK_RECEIVED
 - Queen node unavailable → trigger skipped silently
-- worker_runtime=None → trigger discarded (gating)
+- graph_runtime=None → trigger discarded (gating)
 - remove_trigger cleans up webhook subscription
 - run_agent_with_input is in _QUEEN_RUNNING_TOOLS
-- System prompts reference run_agent_with_input, not start_worker()
+- System prompts reference run_agent_with_input, not start_graph()
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ async def test_interval_timer_fires_inject_trigger_on_queen_node() -> None:
 
     bus = EventBus()
     session = _make_session(bus)
-    session.worker_runtime = object()  # non-None → worker is loaded
+    session.graph_runtime = object()  # non-None → graph is loaded
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -82,7 +82,7 @@ async def test_timer_skipped_when_queen_node_unavailable() -> None:
 
     bus = EventBus()
     session = _make_session(bus)
-    session.worker_runtime = object()
+    session.graph_runtime = object()
     session.queen_executor = None  # queen not ready
 
     tdef = TriggerDefinition(
@@ -114,7 +114,7 @@ async def test_webhook_trigger_fires_inject_trigger() -> None:
 
     bus = EventBus()
     session = _make_session(bus)
-    session.worker_runtime = object()
+    session.graph_runtime = object()
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -162,7 +162,7 @@ async def test_webhook_trigger_discarded_when_no_worker() -> None:
 
     bus = EventBus()
     session = _make_session(bus)
-    session.worker_runtime = None  # no worker
+    session.graph_runtime = None  # no graph
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -201,7 +201,7 @@ async def test_remove_trigger_cleans_up_webhook_subscription() -> None:
 
     bus = EventBus()
     session = _make_session(bus)
-    session.worker_runtime = object()
+    session.graph_runtime = object()
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -248,14 +248,14 @@ def test_run_agent_with_input_in_running_tools() -> None:
 
 
 def test_system_prompt_uses_correct_tool_name() -> None:
-    """Trigger handling rules must reference run_agent_with_input, not start_worker()."""
+    """Trigger handling rules must reference run_agent_with_input, not start_graph()."""
     from framework.agents.queen.nodes import (
         _queen_behavior_running,
         _queen_behavior_staging,
     )
 
     assert "run_agent_with_input" in _queen_behavior_running
-    assert "start_worker()" not in _queen_behavior_running
+    assert "start_graph()" not in _queen_behavior_running
 
     assert "run_agent_with_input" in _queen_behavior_staging
-    assert "start_worker()" not in _queen_behavior_staging
+    assert "start_graph()" not in _queen_behavior_staging

@@ -1,13 +1,11 @@
 """Subagent execution for the event loop.
 
 Handles the full subagent lifecycle: validation, context setup, tool filtering,
-conversation store derivation, execution, and cleanup.  Also includes the
-_EscalationReceiver helper used for subagent → queen escalation routing.
+conversation store derivation, execution, and cleanup.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import time
@@ -18,47 +16,15 @@ from typing import TYPE_CHECKING, Any
 from framework.graph.conversation import ConversationStore
 from framework.graph.event_loop.judge_pipeline import SubagentJudge
 from framework.graph.event_loop.types import LoopConfig, OutputAccumulator
-from framework.graph.node import NodeContext, SharedMemory
+from framework.graph.node import DataBuffer, NodeContext
 from framework.llm.provider import ToolResult, ToolUse
+from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.event_bus import EventBus
 
 if TYPE_CHECKING:
     from framework.graph.event_loop_node import EventLoopNode
 
 logger = logging.getLogger(__name__)
-
-
-class EscalationReceiver:
-    """Temporary receiver registered in node_registry for subagent escalation routing.
-
-    When a subagent calls ``report_to_parent(wait_for_response=True)``, the callback
-    creates one of these, registers it under a unique escalation ID in the executor's
-    ``node_registry``, and awaits ``wait()``.  The TUI / runner calls
-    ``inject_input(escalation_id, content)`` which the ``ExecutionStream`` routes here
-    via ``inject_event()`` — matching the same ``hasattr(node, "inject_event")`` check
-    used for regular ``EventLoopNode`` instances.
-    """
-
-    def __init__(self) -> None:
-        self._event = asyncio.Event()
-        self._response: str | None = None
-        self._awaiting_input = True  # So inject_worker_message() can prefer us
-
-    async def inject_event(
-        self,
-        content: str,
-        *,
-        is_client_input: bool = False,
-        image_content: list[dict[str, Any]] | None = None,
-    ) -> None:
-        """Called by ExecutionStream.inject_input() when the user responds."""
-        self._response = content
-        self._event.set()
-
-    async def wait(self) -> str | None:
-        """Block until inject_event() delivers the user's response."""
-        await self._event.wait()
-        return self._response
 
 
 async def execute_subagent(
@@ -68,7 +34,7 @@ async def execute_subagent(
     *,
     config: LoopConfig,
     event_loop_node_cls: type[EventLoopNode],
-    escalation_receiver_cls: type[EscalationReceiver],
+    escalation_receiver_cls: Callable[[], Any],
     accumulator: OutputAccumulator | None = None,
     event_bus: EventBus | None = None,
     tool_executor: Callable[[ToolUse], ToolResult | Awaitable[ToolResult]] | None = None,
@@ -127,7 +93,7 @@ async def execute_subagent(
     subagent_spec = ctx.node_registry[agent_id]
 
     # 2. Create read-only memory snapshot
-    parent_data = ctx.memory.read_all()
+    parent_data = ctx.buffer.read_all()
 
     # Merge in-flight outputs from the parent's accumulator.
     if accumulator:
@@ -135,12 +101,12 @@ async def execute_subagent(
             if key not in parent_data:
                 parent_data[key] = value
 
-    subagent_memory = SharedMemory()
+    subagent_buffer = DataBuffer()
     for key, value in parent_data.items():
-        subagent_memory.write(key, value, validate=False)
+        subagent_buffer.write(key, value, validate=False)
 
     read_keys = set(parent_data.keys()) | set(subagent_spec.input_keys or [])
-    scoped_memory = subagent_memory.with_permissions(
+    scoped_buffer = subagent_buffer.with_permissions(
         read_keys=list(read_keys),
         write_keys=[],  # Read-only!
     )
@@ -252,7 +218,7 @@ async def execute_subagent(
         runtime=ctx.runtime,
         node_id=sa_node_id,
         node_spec=subagent_spec,
-        memory=scoped_memory,
+        buffer=scoped_buffer,
         input_data={"task": task, **parent_data},
         llm=ctx.llm,
         available_tools=subagent_tools,
@@ -263,7 +229,12 @@ async def execute_subagent(
             f"for each required key: {subagent_spec.output_keys}\n"
             f"Alternatively, call report_to_parent(mark_complete=true) "
             f"with your findings in message/data.\n"
-            f"You have a maximum of {max_iter} turns to complete this task."
+            + (
+                "Before finishing, call browser_close_finished() to clean up your browser tabs.\n"
+                if subagent_spec.node_type == "gcu"
+                else ""
+            )
+            + f"You have a maximum of {max_iter} turns to complete this task."
         ),
         goal=ctx.goal,
         max_tokens=ctx.max_tokens,
@@ -307,14 +278,11 @@ async def execute_subagent(
         conversation_store=subagent_conv_store,
     )
 
-    # Inject a unique GCU browser profile for this subagent
-    _profile_token = None
-    try:
-        from gcu.browser.session import set_active_profile as _set_gcu_profile
-
-        _profile_token = _set_gcu_profile(f"{agent_id}-{subagent_instance}")
-    except ImportError:
-        pass  # GCU tools not installed; no-op
+    # Each subagent instance gets its own unique browser profile so concurrent
+    # subagents don't share tab groups. The profile is set as execution context
+    # so the tool registry auto-injects it into every browser_* MCP tool call.
+    _gcu_profile = f"{agent_id}:{subagent_instance}"
+    _profile_token = ToolRegistry.set_execution_context(profile=_gcu_profile)
 
     try:
         logger.info("🚀 Starting subagent '%s' execution...", agent_id)
@@ -386,27 +354,17 @@ async def execute_subagent(
             is_error=True,
         )
     finally:
-        # Restore the GCU profile context
-        if _profile_token is not None:
-            from gcu.browser.session import _active_profile as _gcu_profile_var
+        ToolRegistry.reset_execution_context(_profile_token)
+        # Close the tab group this subagent created, if any.
+        try:
+            from gcu.browser.bridge import get_bridge
+            from gcu.browser.tools.lifecycle import _contexts
 
-            _gcu_profile_var.reset(_profile_token)
-
-            # Stop the browser session for this subagent's profile
-            if tool_executor is not None:
-                _subagent_profile = f"{agent_id}-{subagent_instance}"
-                try:
-                    _stop_use = ToolUse(
-                        id="gcu-cleanup",
-                        name="browser_stop",
-                        input={"profile": _subagent_profile},
-                    )
-                    _stop_result = tool_executor(_stop_use)
-                    if asyncio.iscoroutine(_stop_result) or asyncio.isfuture(_stop_result):
-                        await _stop_result
-                except Exception as _gcu_exc:
-                    logger.warning(
-                        "GCU browser_stop failed for profile %r: %s",
-                        _subagent_profile,
-                        _gcu_exc,
-                    )
+            bridge = get_bridge()
+            ctx_entry = _contexts.pop(_gcu_profile, None)
+            if bridge and bridge.is_connected and ctx_entry:
+                group_id = ctx_entry.get("groupId")
+                if group_id is not None:
+                    await bridge.destroy_context(group_id)
+        except Exception:
+            pass

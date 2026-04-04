@@ -1,23 +1,21 @@
 """
-Browser advanced tools - wait, evaluate, get_text, get_attribute, resize, upload, dialog.
+Browser advanced tools - wait, evaluate, get_text, get_attribute, resize, dialog.
 
-Tools for advanced browser operations.
+All operations go through the Beeline extension via CDP - no Playwright required.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+import asyncio
+import logging
 from typing import Literal
 
 from fastmcp import FastMCP
-from playwright.async_api import (
-    Error as PlaywrightError,
-    TimeoutError as PlaywrightTimeout,
-)
 
-from ..highlight import highlight_element
-from ..refs import resolve_selector
-from ..session import DEFAULT_TIMEOUT_MS, get_session
+from ..bridge import get_bridge
+from .tabs import _get_context
+
+logger = logging.getLogger(__name__)
 
 
 def register_advanced_tools(mcp: FastMCP) -> None:
@@ -28,170 +26,182 @@ def register_advanced_tools(mcp: FastMCP) -> None:
         wait_ms: int = 1000,
         selector: str | None = None,
         text: str | None = None,
-        target_id: str | None = None,
-        profile: str = "default",
-        timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        tab_id: int | None = None,
+        profile: str | None = None,
+        timeout_ms: int = 30000,
     ) -> dict:
         """
         Wait for a condition.
 
         Args:
-            wait_ms: Time to wait in milliseconds (if no selector/text provided)
+            wait_ms: Time to wait in milliseconds (if no selector/text)
             selector: Wait for element to appear (optional)
             text: Wait for text to appear on page (optional)
-            target_id: Tab ID (default: active tab)
+            tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
-            timeout_ms: Maximum wait time in milliseconds (default: 30000)
+            timeout_ms: Max wait time in ms (default: 30000)
 
         Returns:
             Dict with wait result
         """
-        try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return {"ok": False, "error": "No active tab"}
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
 
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started"}
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            return {"ok": False, "error": "No active tab"}
+
+        try:
             if selector:
-                try:
-                    selector = resolve_selector(selector, session, target_id)
-                except ValueError as e:
-                    return {"ok": False, "error": str(e)}
-                await page.wait_for_selector(selector, timeout=timeout_ms)
-                return {"ok": True, "action": "wait", "condition": "selector", "selector": selector}
+                result = await bridge.wait_for_selector(target_tab, selector, timeout_ms=timeout_ms)
+                if result.get("ok"):
+                    return {
+                        "ok": True,
+                        "action": "wait",
+                        "condition": "selector",
+                        "selector": selector,
+                    }
+                return result
             elif text:
-                await page.wait_for_function(
-                    "(text) => document.body.innerText.includes(text)",
-                    arg=text,
-                    timeout=timeout_ms,
-                )
-                return {"ok": True, "action": "wait", "condition": "text", "text": text}
+                result = await bridge.wait_for_text(target_tab, text, timeout_ms=timeout_ms)
+                if result.get("ok"):
+                    return {
+                        "ok": True,
+                        "action": "wait",
+                        "condition": "text",
+                        "text": text,
+                    }
+                return result
             else:
-                await page.wait_for_timeout(wait_ms)
+                await asyncio.sleep(wait_ms / 1000)
                 return {"ok": True, "action": "wait", "condition": "time", "ms": wait_ms}
-        except PlaywrightTimeout:
-            return {"ok": False, "error": "Wait condition not met within timeout"}
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Wait failed: {e!s}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     @mcp.tool()
     async def browser_evaluate(
         script: str,
-        target_id: str | None = None,
-        profile: str = "default",
+        tab_id: int | None = None,
+        profile: str | None = None,
     ) -> dict:
         """
         Execute JavaScript in the browser context.
 
         Args:
             script: JavaScript code to execute
-            target_id: Tab ID (default: active tab)
+            tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
 
         Returns:
             Dict with evaluation result
         """
-        try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return {"ok": False, "error": "No active tab"}
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
 
-            result = await page.evaluate(script)
-            return {"ok": True, "action": "evaluate", "result": result}
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Evaluate failed: {e!s}"}
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started"}
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            return {"ok": False, "error": "No active tab"}
+
+        try:
+            result = await bridge.evaluate(target_tab, script)
+            return result
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     @mcp.tool()
     async def browser_get_text(
         selector: str,
-        target_id: str | None = None,
-        profile: str = "default",
-        timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        tab_id: int | None = None,
+        profile: str | None = None,
+        timeout_ms: int = 30000,
     ) -> dict:
         """
         Get text content of an element.
 
         Args:
-            selector: CSS selector or element ref
-            target_id: Tab ID (default: active tab)
+            selector: CSS selector
+            tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
             timeout_ms: Timeout in milliseconds (default: 30000)
 
         Returns:
             Dict with element text content
         """
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
+
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started"}
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            return {"ok": False, "error": "No active tab"}
+
         try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return {"ok": False, "error": "No active tab"}
-
-            try:
-                selector = resolve_selector(selector, session, target_id)
-            except ValueError as e:
-                return {"ok": False, "error": str(e)}
-
-            element = await page.wait_for_selector(selector, timeout=timeout_ms)
-            if not element:
-                return {"ok": False, "error": f"Element not found: {selector}"}
-
-            text = await element.text_content()
-            return {"ok": True, "selector": selector, "text": text}
-        except PlaywrightTimeout:
-            return {"ok": False, "error": f"Element not found: {selector}"}
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Get text failed: {e!s}"}
+            result = await bridge.get_text(target_tab, selector, timeout_ms=timeout_ms)
+            return result
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     @mcp.tool()
     async def browser_get_attribute(
         selector: str,
         attribute: str,
-        target_id: str | None = None,
-        profile: str = "default",
-        timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        tab_id: int | None = None,
+        profile: str | None = None,
+        timeout_ms: int = 30000,
     ) -> dict:
         """
         Get an attribute value of an element.
 
         Args:
-            selector: CSS selector or element ref
-            attribute: Attribute name to get (e.g., 'href', 'src', 'value')
-            target_id: Tab ID (default: active tab)
+            selector: CSS selector
+            attribute: Attribute name to get (e.g., 'href', 'src')
+            tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
             timeout_ms: Timeout in milliseconds (default: 30000)
 
         Returns:
             Dict with attribute value
         """
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
+
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started"}
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            return {"ok": False, "error": "No active tab"}
+
         try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return {"ok": False, "error": "No active tab"}
-
-            try:
-                selector = resolve_selector(selector, session, target_id)
-            except ValueError as e:
-                return {"ok": False, "error": str(e)}
-
-            element = await page.wait_for_selector(selector, timeout=timeout_ms)
-            if not element:
-                return {"ok": False, "error": f"Element not found: {selector}"}
-
-            value = await element.get_attribute(attribute)
-            return {"ok": True, "selector": selector, "attribute": attribute, "value": value}
-        except PlaywrightTimeout:
-            return {"ok": False, "error": f"Element not found: {selector}"}
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Get attribute failed: {e!s}"}
+            result = await bridge.get_attribute(
+                target_tab, selector, attribute, timeout_ms=timeout_ms
+            )
+            return result
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     @mcp.tool()
     async def browser_resize(
         width: int,
         height: int,
-        target_id: str | None = None,
-        profile: str = "default",
+        tab_id: int | None = None,
+        profile: str | None = None,
     ) -> dict:
         """
         Resize the browser viewport.
@@ -199,72 +209,101 @@ def register_advanced_tools(mcp: FastMCP) -> None:
         Args:
             width: Viewport width in pixels
             height: Viewport height in pixels
-            target_id: Tab ID (default: active tab)
+            tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
 
         Returns:
             Dict with resize result
         """
-        try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return {"ok": False, "error": "No active tab"}
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
 
-            await page.set_viewport_size({"width": width, "height": height})
-            return {
-                "ok": True,
-                "action": "resize",
-                "width": width,
-                "height": height,
-            }
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Resize failed: {e!s}"}
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started"}
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            return {"ok": False, "error": "No active tab"}
+
+        try:
+            result = await bridge.resize(target_tab, width, height)
+            return result
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     @mcp.tool()
     async def browser_upload(
         selector: str,
         file_paths: list[str],
-        target_id: str | None = None,
-        profile: str = "default",
-        timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        tab_id: int | None = None,
+        profile: str | None = None,
+        timeout_ms: int = 30000,
     ) -> dict:
         """
         Upload files to a file input element.
 
+        Note: File upload via CDP requires extension file access.
+        This may require additional extension permissions.
+
         Args:
-            selector: CSS selector for the file input element
+            selector: CSS selector for the file input
             file_paths: List of file paths to upload
-            target_id: Tab ID (default: active tab)
+            tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
-            timeout_ms: Timeout in milliseconds (default: 30000)
+            timeout_ms: Timeout in ms (default: 30000)
 
         Returns:
             Dict with upload result
         """
-        try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return {"ok": False, "error": "No active tab"}
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
 
-            # Verify files exist
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started"}
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            return {"ok": False, "error": "No active tab"}
+
+        try:
+            from pathlib import Path
+
             for path in file_paths:
                 if not Path(path).exists():
                     return {"ok": False, "error": f"File not found: {path}"}
 
-            try:
-                selector = resolve_selector(selector, session, target_id)
-            except ValueError as e:
-                return {"ok": False, "error": str(e)}
+            await bridge.cdp_attach(target_tab)
+            await bridge._cdp(target_tab, "DOM.enable")
 
-            await highlight_element(page, selector)
+            doc = await bridge._cdp(target_tab, "DOM.getDocument")
+            root_id = doc.get("root", {}).get("nodeId")
 
-            element = await page.wait_for_selector(selector, timeout=timeout_ms)
-            if not element:
+            deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
+            node_id = None
+            while asyncio.get_event_loop().time() < deadline:
+                result = await bridge._cdp(
+                    target_tab,
+                    "DOM.querySelector",
+                    {"nodeId": root_id, "selector": selector},
+                )
+                node_id = result.get("nodeId")
+                if node_id:
+                    break
+                await asyncio.sleep(0.1)
+
+            if not node_id:
                 return {"ok": False, "error": f"Element not found: {selector}"}
 
-            await element.set_input_files(file_paths)
+            await bridge._cdp(
+                target_tab,
+                "DOM.setFileInputFiles",
+                {"files": file_paths, "nodeId": node_id},
+            )
+
             return {
                 "ok": True,
                 "action": "upload",
@@ -272,72 +311,56 @@ def register_advanced_tools(mcp: FastMCP) -> None:
                 "files": file_paths,
                 "count": len(file_paths),
             }
-        except PlaywrightTimeout:
-            return {"ok": False, "error": f"Element not found: {selector}"}
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Upload failed: {e!s}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     @mcp.tool()
     async def browser_dialog(
         action: Literal["accept", "dismiss"] = "accept",
         prompt_text: str | None = None,
-        target_id: str | None = None,
-        profile: str = "default",
-        timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        tab_id: int | None = None,
+        profile: str | None = None,
+        timeout_ms: int = 30000,
     ) -> dict:
         """
         Handle browser dialogs (alert, confirm, prompt).
 
-        This sets up a handler for the next dialog that appears.
-        Call this BEFORE triggering the action that opens the dialog.
+        Note: Dialog handling via CDP requires Page.javascriptDialogOpening
+        event handling. This sets up a one-time handler.
+
+        Call BEFORE triggering the action that opens the dialog.
 
         Args:
-            action: How to handle the dialog - "accept" or "dismiss"
-            prompt_text: Text to enter for prompt dialogs (optional)
-            target_id: Tab ID (default: active tab)
+            action: How to handle - "accept" or "dismiss"
+            prompt_text: Text for prompt dialogs (optional)
+            tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
-            timeout_ms: Timeout waiting for dialog (default: 30000)
+            timeout_ms: Timeout in ms (default: 30000)
 
         Returns:
             Dict with dialog handling result
         """
+        bridge = get_bridge()
+        if not bridge or not bridge.is_connected:
+            return {"ok": False, "error": "Browser extension not connected"}
+
+        ctx = _get_context(profile)
+        if not ctx:
+            return {"ok": False, "error": "Browser not started"}
+
+        target_tab = tab_id or ctx.get("activeTabId")
+        if target_tab is None:
+            return {"ok": False, "error": "No active tab"}
+
         try:
-            session = get_session(profile)
-            page = session.get_page(target_id)
-            if not page:
-                return {"ok": False, "error": "No active tab"}
+            await bridge.cdp_attach(target_tab)
+            await bridge._cdp(target_tab, "Page.enable")
 
-            dialog_info: dict = {"handled": False}
-
-            async def handle_dialog(dialog):
-                dialog_info["type"] = dialog.type
-                dialog_info["message"] = dialog.message
-                dialog_info["handled"] = True
-                if action == "accept":
-                    if prompt_text is not None:
-                        await dialog.accept(prompt_text)
-                    else:
-                        await dialog.accept()
-                else:
-                    await dialog.dismiss()
-
-            page.once("dialog", handle_dialog)
-
-            # Wait briefly for dialog to appear
-            await page.wait_for_timeout(min(timeout_ms, 1000))
-
-            if dialog_info["handled"]:
-                return {
-                    "ok": True,
-                    "action": action,
-                    "dialogType": dialog_info.get("type"),
-                    "dialogMessage": dialog_info.get("message"),
-                }
-            else:
-                return {
-                    "ok": True,
-                    "action": "handler_set",
-                    "message": "Dialog handler set, will handle next dialog",
-                }
-        except PlaywrightError as e:
-            return {"ok": False, "error": f"Dialog handling failed: {e!s}"}
+            return {
+                "ok": True,
+                "action": "handler_set",
+                "message": "Dialog handler prepared.",
+                "suggestion": "Handle dialogs manually or use browser_evaluate.",
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}

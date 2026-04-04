@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from framework.graph.edge import GraphSpec
+from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import NodeSpec
 
@@ -51,6 +51,72 @@ def _worker_goal() -> Goal:
         id="worker-goal",
         name="Worker Agent",
         description="Complete a task using available tools",
+    )
+
+
+def _build_timestamped_note_graph() -> GraphSpec:
+    """Two-node worker graph that creates and verifies a real file artifact."""
+    return GraphSpec(
+        id="timestamped-note-graph",
+        goal_id="worker-goal",
+        entry_node="collect_note",
+        entry_points={"start": "collect_note"},
+        terminal_nodes=["verify_note"],
+        nodes=[
+            NodeSpec(
+                id="collect_note",
+                name="Collect Note",
+                description="Create a timestamped status note and save it",
+                node_type="event_loop",
+                input_keys=["data_dir"],
+                output_keys=["filename", "expected_text"],
+                tools=["get_current_time", "save_data"],
+                system_prompt=(
+                    "You are creating a small status note artifact. "
+                    "First call get_current_time with timezone='UTC'. "
+                    "Then build EXACTLY this one-line note format: "
+                    "'STATUS|<date>|<day_of_week>|build green'. "
+                    "Use the date and day_of_week values returned by the tool. "
+                    "Next call save_data with filename='status.txt', the exact note text as data, "
+                    "and the provided input key 'data_dir'. "
+                    "After saving succeeds, call set_output twice: "
+                    "set_output(key='filename', value='status.txt') and "
+                    "set_output(key='expected_text', value=<the exact note text>). "
+                    "Do not add extra punctuation, quotes, or explanation."
+                ),
+            ),
+            NodeSpec(
+                id="verify_note",
+                name="Verify Note",
+                description="Load the saved note and verify exact content",
+                node_type="event_loop",
+                input_keys=["data_dir", "filename", "expected_text"],
+                output_keys=["result"],
+                tools=["load_data"],
+                system_prompt=(
+                    "You are verifying a saved status note. "
+                    "Use load_data with the provided 'filename' and 'data_dir'. "
+                    "Compare the loaded content to the provided 'expected_text'. "
+                    "If they match exactly, call set_output(key='result', value=<loaded content>). "
+                    "If they do not match exactly, call set_output with a value that starts with "
+                    "'MISMATCH|'. Do not add any other explanation."
+                ),
+            ),
+        ],
+        edges=[
+            EdgeSpec(
+                id="collect-to-verify",
+                source="collect_note",
+                target="verify_note",
+                condition=EdgeCondition.ON_SUCCESS,
+                input_mapping={
+                    "filename": "filename",
+                    "expected_text": "expected_text",
+                },
+            ),
+        ],
+        memory_keys=["data_dir", "filename", "expected_text", "result"],
+        conversation_mode="continuous",
     )
 
 
@@ -137,3 +203,34 @@ async def test_worker_multi_tool(runtime, llm_provider, tool_registry):
 
     assert result.success
     assert result.output.get("result") is not None
+
+
+@pytest.mark.asyncio
+async def test_worker_timestamped_note_artifact(runtime, llm_provider, tool_registry, tmp_path):
+    """Worker graph creates a timestamped file artifact and verifies it exactly."""
+    graph = _build_timestamped_note_graph()
+    executor = make_executor(runtime, llm_provider, tool_registry=tool_registry)
+    data_dir = tmp_path / "data"
+
+    result = await executor.execute(
+        graph,
+        _worker_goal(),
+        {"data_dir": str(data_dir)},
+        validate_graph=False,
+    )
+
+    assert result.success
+    assert result.path == ["collect_note", "verify_note"]
+
+    output = result.output.get("result")
+    assert output is not None
+    assert not output.startswith("MISMATCH|")
+
+    parts = output.split("|")
+    assert len(parts) == 4
+    assert parts[0] == "STATUS"
+    assert parts[3] == "build green"
+
+    artifact_path = data_dir / "status.txt"
+    assert artifact_path.exists()
+    assert artifact_path.read_text(encoding="utf-8") == output

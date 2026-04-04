@@ -48,7 +48,7 @@ class ToolRegistry:
     # Framework-internal context keys injected into tool calls.
     # Stripped from LLM-facing schemas (the LLM doesn't know these values)
     # and auto-injected at call time for tools that accept them.
-    CONTEXT_PARAMS = frozenset({"workspace_id", "agent_id", "session_id", "data_dir"})
+    CONTEXT_PARAMS = frozenset({"agent_id", "data_dir", "profile"})
 
     # Credential directory used for change detection
     _CREDENTIAL_DIR = Path("~/.hive/credentials/credentials").expanduser()

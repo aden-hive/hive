@@ -51,6 +51,11 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Show detailed execution logs (steps, LLM calls, etc.)",
     )
+    run_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show all debug-level logs",
+    )
 
     run_parser.add_argument(
         "--model",
@@ -119,46 +124,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     list_parser.set_defaults(func=cmd_list)
 
-    # dispatch command (multi-agent)
-    dispatch_parser = subparsers.add_parser(
-        "dispatch",
-        help="Dispatch request to multiple agents",
-        description="Route a request to the best agent(s) using the orchestrator.",
-    )
-    dispatch_parser.add_argument(
-        "agents_dir",
-        type=str,
-        nargs="?",
-        default="exports",
-        help="Directory containing agent folders (default: exports)",
-    )
-    dispatch_parser.add_argument(
-        "--input",
-        "-i",
-        type=str,
-        required=True,
-        help="Input context as JSON string",
-    )
-    dispatch_parser.add_argument(
-        "--intent",
-        type=str,
-        help="Description of what you want to accomplish",
-    )
-    dispatch_parser.add_argument(
-        "--agents",
-        "-a",
-        type=str,
-        nargs="+",
-        help="Specific agent names to use (default: all in directory)",
-    )
-    dispatch_parser.add_argument(
-        "--quiet",
-        "-q",
-        action="store_true",
-        help="Only output the final result JSON",
-    )
-    dispatch_parser.set_defaults(func=cmd_dispatch)
-
     # shell command (interactive agent session)
     shell_parser = subparsers.add_parser(
         "shell",
@@ -176,11 +141,6 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         type=str,
         default="exports",
         help="Directory containing agents (default: exports)",
-    )
-    shell_parser.add_argument(
-        "--multi",
-        action="store_true",
-        help="Enable multi-agent mode with orchestrator",
     )
     shell_parser.add_argument(
         "--no-approve",
@@ -290,7 +250,10 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
 def _load_resume_state(
     agent_path: str, session_id: str, checkpoint_id: str | None = None
 ) -> dict | None:
-    """Load session or checkpoint state for headless resume.
+    """Load checkpoint state for headless resume.
+
+    All resumes require a checkpoint. If ``checkpoint_id`` is not provided
+    the latest checkpoint is auto-discovered.
 
     Args:
         agent_path: Path to the agent folder (e.g., exports/my_agent)
@@ -298,7 +261,7 @@ def _load_resume_state(
         checkpoint_id: Optional checkpoint ID within the session
 
     Returns:
-        session_state dict for executor, or None if not found
+        session_state dict for executor, or None if no checkpoint found
     """
     agent_name = Path(agent_path).name
     agent_work_dir = Path.home() / ".hive" / "agents" / agent_name
@@ -307,40 +270,37 @@ def _load_resume_state(
     if not session_dir.exists():
         return None
 
-    if checkpoint_id:
-        # Checkpoint-based resume: load checkpoint and extract state
-        cp_path = session_dir / "checkpoints" / f"{checkpoint_id}.json"
-        if not cp_path.exists():
+    # Auto-discover latest checkpoint when not specified
+    if not checkpoint_id:
+        cp_dir = session_dir / "checkpoints"
+        if cp_dir.exists():
+            checkpoints = sorted(
+                cp_dir.glob("*.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            if checkpoints:
+                checkpoint_id = checkpoints[0].stem
+        if not checkpoint_id:
             return None
-        try:
-            cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return None
-        return {
-            "resume_session_id": session_id,
-            "memory": cp_data.get("shared_memory", {}),
-            "paused_at": cp_data.get("next_node") or cp_data.get("current_node"),
-            "execution_path": cp_data.get("execution_path", []),
-            "node_visit_counts": {},
-        }
-    else:
-        # Session state resume: load state.json
-        state_path = session_dir / "state.json"
-        if not state_path.exists():
-            return None
-        try:
-            state_data = json.loads(state_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return None
-        progress = state_data.get("progress", {})
-        paused_at = progress.get("paused_at") or progress.get("resume_from")
-        return {
-            "resume_session_id": session_id,
-            "memory": state_data.get("memory", {}),
-            "paused_at": paused_at,
-            "execution_path": progress.get("path", []),
-            "node_visit_counts": progress.get("node_visit_counts", {}),
-        }
+
+    cp_path = session_dir / "checkpoints" / f"{checkpoint_id}.json"
+    if not cp_path.exists():
+        return None
+    try:
+        cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    return {
+        "resume_session_id": session_id,
+        "resume_from_checkpoint": checkpoint_id,
+        "run_id": cp_data.get("run_id") or None,
+        "data_buffer": cp_data.get("data_buffer", cp_data.get("shared_memory", {})),
+        "paused_at": cp_data.get("next_node") or cp_data.get("current_node"),
+        "execution_path": cp_data.get("execution_path", []),
+        "node_visit_counts": cp_data.get("node_visit_counts", {}),
+    }
 
 
 def _prompt_before_start(agent_path: str, runner, model: str | None = None):
@@ -387,6 +347,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     # Set logging level (quiet by default for cleaner output)
     if args.quiet:
         configure_logging(level="ERROR")
+    elif getattr(args, "debug", False):
+        configure_logging(level="DEBUG")
     elif getattr(args, "verbose", False):
         configure_logging(level="INFO")
     else:
@@ -722,118 +684,6 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_dispatch(args: argparse.Namespace) -> int:
-    """Dispatch request to multiple agents via orchestrator."""
-    from framework.runner import AgentOrchestrator
-
-    # Parse input
-    try:
-        context = json.loads(args.input)
-    except json.JSONDecodeError as e:
-        print(f"Error parsing --input JSON: {e}", file=sys.stderr)
-        return 1
-
-    # Find agents
-    agents_dir = Path(args.agents_dir)
-    if not agents_dir.exists():
-        print(f"Directory not found: {agents_dir}", file=sys.stderr)
-        return 1
-
-    # Create orchestrator and register agents
-    orchestrator = AgentOrchestrator()
-
-    agent_paths = []
-    if args.agents:
-        # Use specific agents
-        for agent_name in args.agents:
-            # Guard against full paths: if the name contains path separators
-            # (e.g. "exports/my_agent"), it will be doubled with agents_dir
-            agent_name_path = Path(agent_name)
-            if len(agent_name_path.parts) > 1:
-                print(
-                    f"Error: --agents expects agent names, not paths. "
-                    f"Use: --agents {agent_name_path.name} "
-                    f"instead of --agents {agent_name}",
-                    file=sys.stderr,
-                )
-                return 1
-            agent_path = agents_dir / agent_name
-            if not _is_valid_agent_dir(agent_path):
-                print(f"Agent not found: {agent_path}", file=sys.stderr)
-                return 1
-            agent_paths.append((agent_name, agent_path))
-    else:
-        # Discover all agents
-        for path in agents_dir.iterdir():
-            if _is_valid_agent_dir(path):
-                agent_paths.append((path.name, path))
-
-    if not agent_paths:
-        print(f"No agents found in {agents_dir}", file=sys.stderr)
-        return 1
-
-    # Register agents
-    for name, path in agent_paths:
-        try:
-            orchestrator.register(name, path)
-            if not args.quiet:
-                print(f"Registered agent: {name}")
-        except Exception as e:
-            print(f"Failed to register {name}: {e}", file=sys.stderr)
-
-    if not args.quiet:
-        print()
-        print(f"Input: {json.dumps(context)}")
-        if args.intent:
-            print(f"Intent: {args.intent}")
-        print()
-        print("=" * 60)
-        print("Dispatching to agents...")
-        print("=" * 60)
-        print()
-
-    # Dispatch
-    result = asyncio.run(orchestrator.dispatch(context, intent=args.intent))
-
-    # Output results
-    if args.quiet:
-        output = {
-            "success": result.success,
-            "handled_by": result.handled_by,
-            "results": result.results,
-            "error": result.error,
-        }
-        print(json.dumps(output, indent=2, default=str))
-    else:
-        print()
-        print("=" * 60)
-        print(f"Success: {result.success}")
-        print(f"Handled by: {', '.join(result.handled_by) or 'none'}")
-        if result.error:
-            print(f"Error: {result.error}")
-        print("=" * 60)
-
-        if result.results:
-            print("\n--- Results by Agent ---")
-            for agent_name, data in result.results.items():
-                print(f"\n{agent_name}:")
-                status = data.get("status", "unknown")
-                print(f"  Status: {status}")
-                if "completed_steps" in data:
-                    print(f"  Steps: {len(data['completed_steps'])}")
-                if "results" in data:
-                    results_preview = json.dumps(data["results"], default=str)
-                    if len(results_preview) > 200:
-                        results_preview = results_preview[:200] + "..."
-                    print(f"  Results: {results_preview}")
-
-        if not args.quiet:
-            print(f"\nMessage trace: {len(result.messages)} messages")
-
-    orchestrator.cleanup()
-    return 0 if result.success else 1
-
-
 def _interactive_approval(request):
     """Interactive approval callback for HITL mode."""
     from framework.graph import ApprovalDecision, ApprovalResult
@@ -931,11 +781,6 @@ def cmd_shell(args: argparse.Namespace) -> int:
 
     agents_dir = Path(args.agents_dir)
 
-    # Multi-agent mode with orchestrator
-    if args.multi:
-        return _interactive_multi(agents_dir)
-
-    # Single agent mode
     agent_path = args.agent_path
     if not agent_path:
         # List available agents and let user choose
@@ -1409,107 +1254,6 @@ def _select_agent(agents_dir: Path) -> str | None:
             return None
 
 
-def _interactive_multi(agents_dir: Path) -> int:
-    """Interactive multi-agent mode with orchestrator."""
-    from framework.runner import AgentOrchestrator
-
-    if not agents_dir.exists():
-        print(f"Directory not found: {agents_dir}", file=sys.stderr)
-        return 1
-
-    orchestrator = AgentOrchestrator()
-    agent_count = 0
-
-    # Register all agents
-    for path in agents_dir.iterdir():
-        if _is_valid_agent_dir(path):
-            try:
-                orchestrator.register(path.name, path)
-                agent_count += 1
-            except Exception as e:
-                print(f"Warning: Failed to register {path.name}: {e}")
-
-    if agent_count == 0:
-        print(f"No agents found in {agents_dir}", file=sys.stderr)
-        return 1
-
-    print(f"\n{'=' * 60}")
-    print("Multi-Agent Interactive Mode")
-    print(f"Registered {agent_count} agents")
-    print(f"{'=' * 60}")
-    print("\nCommands:")
-    print("  /agents  - List registered agents")
-    print("  /quit    - Exit")
-    print("  {...}    - JSON input to dispatch")
-    print()
-
-    while True:
-        try:
-            user_input = input(">>> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nExiting...")
-            break
-
-        if not user_input:
-            continue
-
-        if user_input == "/quit":
-            break
-
-        if user_input == "/agents":
-            print("\nRegistered agents:")
-            for agent in orchestrator.list_agents():
-                print(f"  - {agent['name']}: {agent['description'][:60]}...")
-            print()
-            continue
-
-        # Parse intent if provided
-        intent = None
-        if user_input.startswith("/intent "):
-            parts = user_input.split(" ", 2)
-            if len(parts) >= 3:
-                intent = parts[1]
-                user_input = parts[2]
-
-        # Try to parse as JSON
-        try:
-            context = json.loads(user_input)
-        except json.JSONDecodeError:
-            print("Error: Invalid JSON input. Use {...} format.")
-            continue
-
-        print(f"\nDispatching: {json.dumps(context)}")
-        if intent:
-            print(f"Intent: {intent}")
-        print("-" * 40)
-
-        result = asyncio.run(orchestrator.dispatch(context, intent=intent))
-
-        print(f"\nSuccess: {result.success}")
-        print(f"Handled by: {', '.join(result.handled_by) or 'none'}")
-
-        if result.error:
-            print(f"Error: {result.error}")
-
-        if result.results:
-            print("\nResults by agent:")
-            for agent_name, data in result.results.items():
-                print(f"\n  {agent_name}:")
-                status = data.get("status", "unknown")
-                print(f"    Status: {status}")
-                if "results" in data:
-                    results_preview = json.dumps(data["results"], default=str)
-                    if len(results_preview) > 150:
-                        results_preview = results_preview[:150] + "..."
-                    print(f"    Results: {results_preview}")
-
-        print(f"\nMessage trace: {len(result.messages)} messages")
-        print()
-
-    orchestrator.cleanup()
-    return 0
-
-
 def cmd_setup_credentials(args: argparse.Namespace) -> int:
     """Interactive credential setup for an agent."""
     from framework.credentials.setup import CredentialSetupSession
@@ -1532,10 +1276,51 @@ def cmd_setup_credentials(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _find_chrome_bin() -> str | None:
+    """Return the path to a Chrome/Chromium binary, or None if not found."""
+    import shutil
+
+    for candidate in (
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium",
+        "chromium-browser",
+        "microsoft-edge",
+        "microsoft-edge-stable",
+    ):
+        if shutil.which(candidate):
+            return candidate
+
+    mac_paths = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    ]
+    for p in mac_paths:
+        if Path(p).exists():
+            return str(p)
+
+    return None
+
+
 def _open_browser(url: str) -> None:
-    """Open URL in the default browser (best-effort, non-blocking)."""
+    """Open URL in the browser (best-effort, non-blocking)."""
     import subprocess
 
+    chrome = _find_chrome_bin()
+
+    try:
+        if chrome:
+            subprocess.Popen(
+                [chrome, url],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return
+    except Exception:
+        pass
+
+    # Fallback: open with system default browser
     try:
         if sys.platform == "darwin":
             subprocess.Popen(
@@ -1559,6 +1344,21 @@ def _open_browser(url: str) -> None:
             )
     except Exception:
         pass  # Best-effort — don't crash if browser can't open
+
+
+def _ping_hive_gateway_availability(from_source: str) -> None:
+    """Ping Hive gateway availability for lightweight reachability logging."""
+    from urllib import error, parse, request
+
+    base_url = "https://api.adenhq.com/v1/gateway/availability"
+    query = parse.urlencode({"from": from_source})
+    url = f"{base_url}?{query}"
+
+    try:
+        with request.urlopen(url, timeout=5) as response:
+            response.read()
+    except (error.URLError, TimeoutError, ValueError):
+        pass
 
 
 def _format_subprocess_output(output: str | bytes | None, limit: int = 2000) -> str:
@@ -1676,10 +1476,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
         # Preload agents specified via --agent
         for agent_path in args.agent:
             try:
-                session = await manager.create_session_with_worker(agent_path, model=model)
+                session = await manager.create_session_with_worker_graph(agent_path, model=model)
                 info = session.worker_info
-                name = info.name if info else session.worker_id
-                print(f"Loaded agent: {session.worker_id} ({name})")
+                name = info.name if info else session.graph_id
+                print(f"Loaded agent: {session.graph_id} ({name})")
             except Exception as e:
                 print(f"Error loading {agent_path}: {e}")
 
@@ -1702,7 +1502,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         if has_frontend:
             print(f"Dashboard: {dashboard_url}")
         print(f"Health: {dashboard_url}/api/health")
-        print(f"Agents loaded: {sum(1 for s in manager.list_sessions() if s.worker_runtime)}")
+        print(f"Agents loaded: {sum(1 for s in manager.list_sessions() if s.graph_runtime)}")
         print()
         print("Press Ctrl+C to stop")
 
@@ -1729,5 +1529,6 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 def cmd_open(args: argparse.Namespace) -> int:
     """Start the HTTP API server and open the dashboard in the browser."""
+    _ping_hive_gateway_availability("hive-open")
     args.open = True
     return cmd_serve(args)

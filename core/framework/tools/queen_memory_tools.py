@@ -45,13 +45,13 @@ def recall_diary(query: str = "", days_back: int = 7) -> str:
     Args:
         query: Optional keyword or phrase to filter entries. If empty, all
             recent entries are returned.
-        days_back: How many days to look back (1–30). Defaults to 7.
+        days_back: How many days to look back (1-30). Defaults to 7.
     """
     from datetime import date, timedelta
 
     from framework.agents.queen.queen_memory import format_memory_date, read_episodic_memory
 
-    days_back = max(1, min(days_back, 30))
+    days_back = max(1, min(int(days_back), 30))
     today = date.today()
     results: list[str] = []
     total_chars = 0

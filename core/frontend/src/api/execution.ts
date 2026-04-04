@@ -4,8 +4,6 @@ import type {
   InjectResult,
   ChatResult,
   StopResult,
-  ResumeResult,
-  ReplayResult,
   GoalProgress,
 } from "./types";
 
@@ -34,15 +32,21 @@ export const executionApi = {
       graph_id: graphId,
     }),
 
-  chat: (sessionId: string, message: string, images?: { type: string; image_url: { url: string } }[]) =>
-    api.post<ChatResult>(`/sessions/${sessionId}/chat`, { message, ...(images?.length ? { images } : {}) }),
+  chat: (
+    sessionId: string,
+    message: string,
+    images?: { type: string; image_url: { url: string } }[],
+    displayMessage?: string,
+  ) =>
+    api.post<ChatResult>(`/sessions/${sessionId}/chat`, {
+      message,
+      ...(images?.length ? { images } : {}),
+      ...(displayMessage !== undefined ? { display_message: displayMessage } : {}),
+    }),
 
   /** Queue context for the queen without triggering an LLM response. */
   queenContext: (sessionId: string, message: string) =>
     api.post<ChatResult>(`/sessions/${sessionId}/queen-context`, { message }),
-
-  workerInput: (sessionId: string, message: string) =>
-    api.post<ChatResult>(`/sessions/${sessionId}/worker-input`, { message }),
 
   stop: (sessionId: string, executionId: string) =>
     api.post<StopResult>(`/sessions/${sessionId}/stop`, {
@@ -56,18 +60,6 @@ export const executionApi = {
 
   cancelQueen: (sessionId: string) =>
     api.post<{ cancelled: boolean }>(`/sessions/${sessionId}/cancel-queen`),
-
-  resume: (sessionId: string, workerSessionId: string, checkpointId?: string) =>
-    api.post<ResumeResult>(`/sessions/${sessionId}/resume`, {
-      session_id: workerSessionId,
-      checkpoint_id: checkpointId,
-    }),
-
-  replay: (sessionId: string, workerSessionId: string, checkpointId: string) =>
-    api.post<ReplayResult>(`/sessions/${sessionId}/replay`, {
-      session_id: workerSessionId,
-      checkpoint_id: checkpointId,
-    }),
 
   goalProgress: (sessionId: string) =>
     api.get<GoalProgress>(`/sessions/${sessionId}/goal-progress`),

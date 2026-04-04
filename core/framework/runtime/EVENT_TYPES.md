@@ -22,7 +22,7 @@ Every event shares a common envelope:
 The identity tuple `(graph_id, stream_id, node_id, execution_id)` uniquely locates any event:
 
 - **`graph_id`** — Which graph produced the event. Set automatically by `GraphScopedEventBus` (a subclass that stamps `graph_id` on every `publish()` call). Values: `"worker"`, `"judge"`, `"queen"`, or the graph spec ID.
-- **`stream_id`** — Which entry point / pipeline. Corresponds to `EntryPointSpec.id` in the graph definition. For single-entry-point graphs, this equals the entry point name (e.g. `"default"`, `"health_check"`, `"ticket_receiver"`).
+- **`stream_id`** — Which entry point / pipeline. Corresponds to `EntryPointSpec.id` in the graph definition. For single-entry-point graphs, this equals the entry point name (e.g. `"default"`, `"health_check"`).
 - **`node_id`** — Which specific node emitted the event. For `EventLoopNode` events, this is the node spec ID.
 - **`execution_id`** — UUID identifying a specific execution run. Multiple concurrent executions of the same entry point each get a unique `execution_id`.
 
@@ -198,7 +198,7 @@ A tool call has finished executing.
 
 ## Client I/O
 
-These events are emitted only by nodes with `client_facing=True`. They drive the TUI's chat interface.
+These events are emitted by the queen's interactive turns. They drive the TUI's chat interface.
 
 ### `client_output_delta`
 
@@ -209,7 +209,7 @@ Incremental text output meant for the human operator.
 | `content`  | `str` | New text chunk (delta)       |
 | `snapshot` | `str` | Full accumulated text so far |
 
-**Emitted by:** `EventLoopNode._publish_text_delta()` when `client_facing=True`
+**Emitted by:** `EventLoopNode._publish_text_delta()` for queen/user-facing output
 
 ---
 
@@ -356,11 +356,11 @@ Not currently emitted — reserved for future use when `NodeConversation` compac
 
 ### `state_changed`
 
-A shared memory key has been modified.
+A shared buffer key has been modified.
 
 | Data Field  | Type  | Description                        |
 | ----------- | ----- | ---------------------------------- |
-| `key`       | `str` | Memory key that changed            |
+| `key`       | `str` | Buffer key that changed            |
 | `old_value` | `Any` | Previous value                     |
 | `new_value` | `Any` | New value                          |
 | `scope`     | `str` | Scope of the change                |
@@ -449,60 +449,6 @@ An agent has requested handoff to the Hive Coder (via the `escalate` synthetic t
 | `context`  | `str` | Additional context for the coder|
 
 **Emitted by:** `EventLoopNode` when the LLM calls `escalate`.
-
----
-
-## Worker Health Monitoring
-
-These events form the **queen → operator** escalation pipeline.
-
-### `worker_escalation_ticket`
-
-A worker degradation pattern has been detected and is being escalated to the Queen.
-
-| Data Field | Type   | Description                          |
-| ---------- | ------ | ------------------------------------ |
-| `ticket`   | `dict` | Full `EscalationTicket` (see below)  |
-
-**Emitted by:** `emit_escalation_ticket` tool (in `worker_monitoring_tools.py`)
-
-#### EscalationTicket Schema
-
-| Field                     | Type               | Description                                              |
-| ------------------------- | ------------------ | -------------------------------------------------------- |
-| `ticket_id`               | `str`              | Auto-generated UUID                                      |
-| `created_at`              | `str`              | ISO timestamp                                            |
-| `worker_agent_id`         | `str`              | Which worker agent                                       |
-| `worker_session_id`       | `str`              | Which session                                            |
-| `worker_node_id`          | `str`              | Which node is struggling                                 |
-| `worker_graph_id`         | `str`              | Which graph                                              |
-| `severity`                | `str`              | `"low"`, `"medium"`, `"high"`, or `"critical"`           |
-| `cause`                   | `str`              | Human-readable problem description                       |
-| `judge_reasoning`         | `str`              | Judge's deliberation chain                               |
-| `suggested_action`        | `str`              | e.g. `"Restart node"`, `"Human review"`, `"Kill session"`|
-| `recent_verdicts`         | `list[str]`        | e.g. `["RETRY", "RETRY", "CONTINUE", "RETRY"]`          |
-| `total_steps_checked`     | `int`              | Steps the judge inspected                                |
-| `steps_since_last_accept` | `int`              | Consecutive non-ACCEPT steps                             |
-| `stall_minutes`           | `float \| null`    | Minutes since last activity (null if active)             |
-| `evidence_snippet`        | `str`              | Excerpt from recent LLM output                           |
-
----
-
-### `queen_intervention_requested`
-
-The Queen has triaged an escalation ticket and decided the human operator should be involved.
-
-| Data Field        | Type  | Description                                          |
-| ----------------- | ----- | ---------------------------------------------------- |
-| `ticket_id`       | `str` | From the original `EscalationTicket`                 |
-| `analysis`        | `str` | Queen's 2–3 sentence analysis                        |
-| `severity`        | `str` | `"low"`, `"medium"`, `"high"`, or `"critical"`       |
-| `queen_graph_id`  | `str` | Queen's graph ID (for TUI navigation)                |
-| `queen_stream_id` | `str` | Queen's stream ID                                    |
-
-**Emitted by:** `notify_operator` tool (in `worker_monitoring_tools.py`)
-
-The TUI subscribes to this event and shows a non-disruptive notification. The worker continues running.
 
 ---
 

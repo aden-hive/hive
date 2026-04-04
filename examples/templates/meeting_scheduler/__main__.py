@@ -27,9 +27,7 @@ def cli():
 
 @cli.command()
 @click.option("--attendee", "-a", required=True, help="Attendee email address")
-@click.option(
-    "--duration", "-d", type=int, required=True, help="Meeting duration in minutes"
-)
+@click.option("--duration", "-d", type=int, required=True, help="Meeting duration in minutes")
 @click.option("--title", "-t", required=True, help="Meeting title")
 @click.option("--verbose", "-v", is_flag=True)
 def run(attendee, duration, title, verbose):
@@ -45,9 +43,7 @@ def run(attendee, duration, title, verbose):
         )
     )
     click.echo(
-        json.dumps(
-            {"success": result.success, "output": result.output}, indent=2, default=str
-        )
+        json.dumps({"success": result.success, "output": result.output}, indent=2, default=str)
     )
     sys.exit(0 if result.success else 1)
 

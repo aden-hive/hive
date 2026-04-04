@@ -268,7 +268,7 @@ Default skills differ from community skills in how they integrate:
 | Aspect       | Default Skills                                 | Community Skills                                      |
 | ------------ | ---------------------------------------------- | ----------------------------------------------------- |
 | Loaded by    | Framework automatically                        | Agent decides at runtime (or pre-activated in config) |
-| Integration  | System prompt injection + shared memory hooks  | Instruction-following (standard Agent Skills)         |
+| Integration  | System prompt injection + shared buffer hooks  | Instruction-following (standard Agent Skills)         |
 | Graph impact | No dedicated nodes — woven into existing nodes | None (just context)                                   |
 | Overridable  | Yes (disable, configure, or replace)           | N/A                                                   |
 
@@ -294,7 +294,7 @@ Six default skills ship with Hive:
 ```markdown
 ## Operational Protocol: Structured Note-Taking
 
-Maintain structured working notes in shared memory key `_working_notes`.
+Maintain structured working notes in shared buffer key `_working_notes`.
 Update at these checkpoints:
 
 - After completing each discrete subtask or batch item
@@ -503,7 +503,7 @@ All default skill protocols combined must total under **2000 tokens** to minimiz
 
 ### 5.6 Shared Memory Convention
 
-All default skill shared memory keys use the `_` prefix (`_working_notes`, `_batch_ledger`, etc.) to avoid collisions with domain-level keys. These keys are:
+All default skill shared buffer keys use the `_` prefix (`_working_notes`, `_batch_ledger`, etc.) to avoid collisions with domain-level keys. These keys are:
 
 - Visible to the agent (for self-reference)
 - Visible to the judge (for evaluation context)
@@ -651,7 +651,7 @@ CI runs these evals on submitted skills to validate quality.
 | DS-2  | Default skills are valid Agent Skills packages (`SKILL.md` format) in the framework install directory                                                                 | P0       |
 | DS-3  | All default skills loaded automatically for every worker agent unless explicitly disabled                                                                             | P0       |
 | DS-4  | Default skills integrate via system prompt injection — no additional graph nodes                                                                                      | P0       |
-| DS-5  | Default skills use `_`-prefixed shared memory keys to avoid domain collisions                                                                                         | P0       |
+| DS-5  | Default skills use `_`-prefixed shared buffer keys to avoid domain collisions                                                                                         | P0       |
 | DS-6  | Each default skill independently configurable via `default_skills` in agent config                                                                                    | P0       |
 | DS-7  | All defaults disableable at once: `{"_all": {"enabled": false}}`                                                                                                      | P0       |
 | DS-8  | Default skill protocols appended in a `## Operational Protocols` system prompt section                                                                                | P0       |
@@ -853,7 +853,7 @@ Skills and MCP servers are complementary:
 | "Install and use your first skill"     | Users             | From `hive skill search` to skill activating in a session                      |
 | "Write your first skill"               | Contributors      | Step-by-step: `hive skill init` → write SKILL.md → validate → submit PR        |
 | "Port a skill from Claude Code/Cursor" | Contributors      | Usually just install it — guide explains verification                          |
-| "Default skills reference"             | All users         | All 6 defaults: purpose, config, shared memory keys, tuning                    |
+| "Default skills reference"             | All users         | All 6 defaults: purpose, config, shared buffer keys, tuning                    |
 | "Tuning default skills"                | Advanced builders | When to disable vs. configure; per-agent overrides; measuring impact           |
 | Skill cookbook                         | Contributors      | Annotated examples: research, triage, draft, review, outreach, data extraction |
 | "Evaluating skill quality"             | Contributors      | Setting up evals, writing assertions, iterating with the eval-driven loop      |
@@ -865,7 +865,7 @@ Skills and MCP servers are complementary:
 
 | Phase                                   | Scope                                                                                                                                                                                                                                                                                                                                                      | Depends On |
 | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| **Phase 0: Default Skills**             | Implement 6 default skills as `SKILL.md` packages; `DefaultSkillManager` with system prompt injection, iteration callbacks, node completion hooks, phase transition hooks; `DefaultSkillConfig` in Python API and `agent.json`; `_`-prefixed shared memory convention; startup logging                                                                     | —          |
+| **Phase 0: Default Skills**             | Implement 6 default skills as `SKILL.md` packages; `DefaultSkillManager` with system prompt injection, iteration callbacks, node completion hooks, phase transition hooks; `DefaultSkillConfig` in Python API and `agent.json`; `_`-prefixed shared buffer convention; startup logging                                                                     | —          |
 | **Phase 1: Agent Skills Standard**      | `SkillDiscovery` scanning `.agents/skills/` and `.hive/skills/`; `SKILL.md` parsing with lenient validation; progressive disclosure (catalog injection, activation, resource loading); model-driven and user-driven activation; context protection; deduplication; pre-activated skills config; compatibility tests against `github.com/anthropics/skills` | —          |
 | **Phase 2: CLI & Contributor Tooling**  | `hive skill init`, `validate`, `test`, `fork`; `hive skill doctor`; `hive skill install/remove/list/search/info/update`; version pinning; `skills-ref` integration for validation                                                                                                                                                                          | Phase 1    |
 | **Phase 3: Registry Repo**              | Create `hive-skill-registry` GitHub repo; CI validation using `skills-ref`; `_template/`; `CONTRIBUTING.md`; seed with 10+ skills (extracted from templates + ported from anthropics/skills); eval CI                                                                                                                                                      | Phase 1    |
@@ -884,14 +884,13 @@ Phase 0 and Phase 1 can proceed in parallel — default skills depend on the pro
 | Q1  | Should the registry repo live under `aden-hive` org or a shared `agentskills` org?                                                     | Platform            | Open   |
 | Q2  | Should default skill protocols be adaptive (e.g., `hive.batch-ledger` adjusts checkpoint frequency based on item size)?                | Engineering         | Open   |
 | Q3  | Should default skills be tunable per-node (not just per-agent)?                                                                        | Engineering         | Open   |
-| Q4  | How should default skill protocols interact with existing `adapt.md` working memory? Should `_working_notes` replace or supplement it? | Engineering         | Open   |
-| Q5  | Should `hive.quality-monitor` self-assessments feed into judge decisions (auto-trigger RETRY on self-reported degradation)?            | Engineering         | Open   |
-| Q6  | What is the right combined token budget for default skill prompts? 2000 tokens proposed — configurable or fixed?                       | Engineering         | Open   |
-| Q7  | Should Hive support subagent delegation for skill execution (run skill in isolated session, return summary)?                           | Engineering         | Open   |
-| Q8  | Should Hive also scan `.claude/skills/` for pragmatic compatibility with Claude Code's native skill location?                          | Engineering         | Open   |
-| Q9  | What is the process for promoting a `community` skill to `verified`?                                                                   | Platform + Security | Open   |
-| Q10 | Should the registry support private/enterprise skill indexes (`hive skill config --index-url`)?                                        | Platform            | Open   |
-| Q11 | Should `hive skill test` use the official `skills-ref` library or a Hive-native implementation?                                        | Engineering         | Open   |
+| Q4  | Should `hive.quality-monitor` self-assessments feed into judge decisions (auto-trigger RETRY on self-reported degradation)?            | Engineering         | Open   |
+| Q5  | What is the right combined token budget for default skill prompts? 2000 tokens proposed — configurable or fixed?                       | Engineering         | Open   |
+| Q6  | Should Hive support subagent delegation for skill execution (run skill in isolated session, return summary)?                           | Engineering         | Open   |
+| Q7  | Should Hive also scan `.claude/skills/` for pragmatic compatibility with Claude Code's native skill location?                          | Engineering         | Open   |
+| Q8  | What is the process for promoting a `community` skill to `verified`?                                                                   | Platform + Security | Open   |
+| Q9  | Should the registry support private/enterprise skill indexes (`hive skill config --index-url`)?                                        | Platform            | Open   |
+| Q10 | Should `hive skill test` use the official `skills-ref` library or a Hive-native implementation?                                        | Engineering         | Open   |
 | Q12 | How should skill-level telemetry (activation counts, eval pass rates) be collected without compromising privacy?                       | Product + Privacy   | Open   |
 
 ---

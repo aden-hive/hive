@@ -114,6 +114,82 @@ After reading or extracting data from a tab, close it immediately.
 
 Never accumulate tabs. Treat every tab you open as a resource you must free.
 
+## Shadow DOM & Overlays
+
+Some sites (LinkedIn messaging, etc.) render content inside closed shadow roots that are
+invisible to regular DOM queries and `browser_snapshot` coordinates.
+
+**Detecting shadow DOM**: `document.elementFromPoint(x, y)` returns a zero-height host element
+(e.g. `#interop-outlet`) for the entire overlay area — this is normal, not a bug.
+`document.body.innerText` and `document.querySelectorAll` return nothing for shadow content.
+`browser_snapshot` CAN read shadow DOM text but cannot return coordinates.
+
+**Querying into shadow DOM:**
+```
+browser_shadow_query("#interop-outlet >>> #msg-overlay >>> p")
+```
+Uses `>>>` to pierce shadow roots. Returns `rect` in CSS pixels and `physicalRect` ready for
+`browser_click_coordinate` / `browser_hover_coordinate`.
+
+**Getting physical rect for any element (including shadow DOM):**
+```
+browser_get_rect(selector="#interop-outlet >>> .msg-convo-wrapper", pierce_shadow=true)
+```
+
+**Manual JS traversal when selector is dynamic:**
+```js
+const shadow = document.getElementById('interop-outlet').shadowRoot;
+const convo = shadow.querySelector('#ember37');
+const rect = convo.querySelector('p').getBoundingClientRect();
+// rect is in CSS pixels — multiply by DPR for physical pixels
+```
+Pass this as a multi-statement script to `browser_evaluate`; it wraps automatically in an IIFE.
+Use `JSON.stringify(rect)` to serialize the result.
+
+## Coordinate System
+
+There are THREE coordinate spaces. Using the wrong one causes clicks/hovers to land in the
+wrong place.
+
+| Space | Used by | How to get |
+|---|---|---|
+| Physical pixels | `browser_click_coordinate` | `browser_coords` `physical_x/y` |
+| CSS pixels | `getBoundingClientRect()`, `elementFromPoint` | `browser_coords` `css_x/y` |
+| Screenshot pixels | What you see in the 800px image | Raw position in screenshot |
+
+**Converting screenshot → physical**: `browser_coords(x, y)` → use `physical_x/y`.
+**Converting CSS → physical**: multiply by `window.devicePixelRatio` (typically 1.6 on HiDPI).
+**Never** pass raw `getBoundingClientRect()` values to `browser_hover_coordinate` without
+multiplying by DPR first.
+
+## Screenshots
+
+Screenshot data is base64-encoded PNG. To view it:
+```
+run_command("echo '<base64_data>' | base64 -d > /tmp/screenshot.png")
+```
+Then use `read_file("/tmp/screenshot.png")` to view the image.
+
+Always use `full_page=false` (default) unless you specifically need the full scrolled page.
+
+## JavaScript Evaluation
+
+`browser_evaluate` wraps your script in an IIFE automatically:
+- Single expression (`document.title`) → wrapped with `return`
+- Multi-statement or contains `;`/`\n` → wrapped without return (add explicit `return` yourself)
+- Already an IIFE → run as-is
+
+**Avoid**: complex closures with `return` inside `for` loops — Chrome CDP returns `null`.
+**Use instead**: `Array.from(...).map(...).join(...)` chains, or build result objects and
+`JSON.stringify()` them.
+
+**For shadow DOM traversal with dynamic selectors**, write the full JS path:
+```js
+const s = document.getElementById('interop-outlet').shadowRoot;
+const el = s.querySelector('.msg-convo-wrapper');
+return JSON.stringify(el.getBoundingClientRect());
+```
+
 ## Login & Auth Walls
 - If you see a "Log in" or "Sign up" prompt instead of expected
   content, report the auth wall immediately — do NOT attempt to log in.

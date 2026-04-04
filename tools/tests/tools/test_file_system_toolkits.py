@@ -16,56 +16,54 @@ def mcp():
 
 @pytest.fixture
 def mock_workspace():
-    """Mock workspace, agent, and session IDs."""
+    """Mock agent ID."""
     return {
-        "workspace_id": "test-workspace",
         "agent_id": "test-agent",
-        "session_id": "test-session",
     }
 
 
 @pytest.fixture
 def mock_secure_path(tmp_path):
-    """Mock get_secure_path to return temp directory paths."""
+    """Mock get_sandboxed_path to return temp directory paths."""
 
-    def _get_secure_path(path, workspace_id, agent_id, session_id):
+    def _get_sandboxed_path(path, agent_id):
         return os.path.join(tmp_path, path)
 
     with patch(
-        "aden_tools.tools.file_system_toolkits.list_dir.list_dir.get_secure_path",
-        side_effect=_get_secure_path,
+        "aden_tools.tools.file_system_toolkits.list_dir.list_dir.get_sandboxed_path",
+        side_effect=_get_sandboxed_path,
     ):
         with patch(
-            "aden_tools.tools.file_system_toolkits.replace_file_content.replace_file_content.get_secure_path",
-            side_effect=_get_secure_path,
+            "aden_tools.tools.file_system_toolkits.replace_file_content.replace_file_content.get_sandboxed_path",
+            side_effect=_get_sandboxed_path,
         ):
             with patch(
-                "aden_tools.tools.file_system_toolkits.apply_diff.apply_diff.get_secure_path",
-                side_effect=_get_secure_path,
+                "aden_tools.tools.file_system_toolkits.apply_diff.apply_diff.get_sandboxed_path",
+                side_effect=_get_sandboxed_path,
             ):
                 with patch(
-                    "aden_tools.tools.file_system_toolkits.apply_patch.apply_patch.get_secure_path",
-                    side_effect=_get_secure_path,
+                    "aden_tools.tools.file_system_toolkits.apply_patch.apply_patch.get_sandboxed_path",
+                    side_effect=_get_sandboxed_path,
                 ):
                     with patch(
-                        "aden_tools.tools.file_system_toolkits.grep_search.grep_search.get_secure_path",
-                        side_effect=_get_secure_path,
+                        "aden_tools.tools.file_system_toolkits.grep_search.grep_search.get_sandboxed_path",
+                        side_effect=_get_sandboxed_path,
                     ):
                         with patch(
-                            "aden_tools.tools.file_system_toolkits.grep_search.grep_search.WORKSPACES_DIR",
+                            "aden_tools.tools.file_system_toolkits.grep_search.grep_search.AGENT_SANDBOXES_DIR",
                             str(tmp_path),
                         ):
                             with patch(
-                                "aden_tools.tools.file_system_toolkits.execute_command_tool.execute_command_tool.get_secure_path",
-                                side_effect=_get_secure_path,
+                                "aden_tools.tools.file_system_toolkits.execute_command_tool.execute_command_tool.get_sandboxed_path",
+                                side_effect=_get_sandboxed_path,
                             ):
                                 with patch(
-                                    "aden_tools.tools.file_system_toolkits.execute_command_tool.execute_command_tool.WORKSPACES_DIR",
+                                    "aden_tools.tools.file_system_toolkits.execute_command_tool.execute_command_tool.AGENT_SANDBOXES_DIR",
                                     str(tmp_path),
                                 ):
                                     with patch(
-                                        "aden_tools.tools.file_system_toolkits.hashline_edit.hashline_edit.get_secure_path",
-                                        side_effect=_get_secure_path,
+                                        "aden_tools.tools.file_system_toolkits.hashline_edit.hashline_edit.get_sandboxed_path",
+                                        side_effect=_get_sandboxed_path,
                                     ):
                                         yield
 

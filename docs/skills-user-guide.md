@@ -249,7 +249,7 @@ Hive ships with six built-in operational skills that provide runtime resilience.
 
 | Skill | Purpose |
 |-------|---------|
-| `hive.note-taking` | Structured working notes in shared memory |
+| `hive.note-taking` | Structured working notes in the shared buffer |
 | `hive.batch-ledger` | Track per-item status in batch operations |
 | `hive.context-preservation` | Save context before context window pruning |
 | `hive.quality-monitor` | Self-assess output quality periodically |

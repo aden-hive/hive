@@ -237,9 +237,9 @@ class TestExecutionQuality:
         # Verify - this should be failed
         assert result.success is False
         assert result.execution_quality == "failed"
-        assert result.total_retries == 2
+        assert result.total_retries == 1
         assert "fails" in result.nodes_with_failures
-        assert result.retry_details["fails"] == 2
+        assert result.retry_details["fails"] == 1
         assert result.had_partial_failures is True
         assert result.error is not None
         assert "failed after 2 attempts" in result.error

@@ -134,7 +134,12 @@ from .twilio_tool import register_tools as register_twilio
 from .twitter_tool import register_tools as register_twitter
 from .vercel_tool import register_tools as register_vercel
 from .vision_tool import register_tools as register_vision
-from .web_scrape_tool import register_tools as register_web_scrape
+
+try:
+    from .web_scrape_tool import register_tools as register_web_scrape
+except ImportError:
+    # playwright not installed - web_scrape_tool unavailable
+    register_web_scrape = None  # type: ignore
 from .web_search_tool import register_tools as register_web_search
 from .wikipedia_tool import register_tools as register_wikipedia
 from .yahoo_finance_tool import register_tools as register_yahoo_finance
@@ -152,7 +157,8 @@ def _register_verified(
     """Register verified (stable) tools."""
     # --- No credentials ---
     register_example(mcp)
-    register_web_scrape(mcp)
+    if register_web_scrape:
+        register_web_scrape(mcp)
     register_pdf_read(mcp)
     register_time(mcp)
     register_runtime_logs(mcp)

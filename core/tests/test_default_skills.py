@@ -6,7 +6,7 @@ import pytest
 
 from framework.skills.config import DefaultSkillConfig, SkillsConfig
 from framework.skills.defaults import (
-    SHARED_MEMORY_KEYS,
+    DATA_BUFFER_KEYS,
     SKILL_REGISTRY,
     DefaultSkillManager,
     is_batch_scenario,
@@ -51,10 +51,10 @@ class TestDefaultSkillFiles:
             f"({total_chars} chars), exceeding the 2000 token budget"
         )
 
-    def test_shared_memory_keys_all_prefixed(self):
-        """All shared memory keys must start with underscore."""
-        for key in SHARED_MEMORY_KEYS:
-            assert key.startswith("_"), f"Shared memory key missing _ prefix: {key}"
+    def test_data_buffer_keys_all_prefixed(self):
+        """All data buffer keys must start with underscore."""
+        for key in DATA_BUFFER_KEYS:
+            assert key.startswith("_"), f"Data buffer key missing _ prefix: {key}"
 
 
 class TestDefaultSkillManager:

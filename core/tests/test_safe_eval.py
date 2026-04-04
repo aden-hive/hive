@@ -494,12 +494,12 @@ class TestEdgeConditionPatterns:
         )
 
     def test_success_flag_check(self):
-        ctx = {"output": {"success": True}, "memory": {"attempts": 2}}
+        ctx = {"output": {"success": True}, "buffer": {"attempts": 2}}
         assert safe_eval("output.get('success') == True", ctx) is True
 
-    def test_memory_threshold(self):
-        ctx = {"memory": {"score": 0.85}}
-        assert safe_eval("memory.get('score', 0) >= 0.8", ctx) is True
+    def test_buffer_threshold(self):
+        ctx = {"buffer": {"score": 0.85}}
+        assert safe_eval("buffer.get('score', 0) >= 0.8", ctx) is True
 
     def test_string_contains_check(self):
         ctx = {"output": {"status": "completed_with_warnings"}}

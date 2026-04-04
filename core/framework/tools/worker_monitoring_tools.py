@@ -1,23 +1,17 @@
-"""Worker monitoring tools for Queen triage agents.
+"""Worker monitoring tools for Queen runtime inspection.
 
-Three tools are registered by ``register_worker_monitoring_tools()``:
+The following tool is registered by ``register_worker_monitoring_tools()``:
 
 - ``get_worker_health_summary`` — reads the worker's session log files and
   returns a compact health snapshot (recent verdicts, step count, timing).
   session_id is optional: if omitted, the most recent active session is
   auto-discovered from storage.
 
-- ``emit_escalation_ticket`` — validates and publishes an EscalationTicket
-  to the shared EventBus as a WORKER_ESCALATION_TICKET event.
-
-- ``notify_operator`` — emits a QUEEN_INTERVENTION_REQUESTED event so the TUI
-  can surface a non-disruptive operator notification.
-
 Usage::
 
     from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
 
-    register_worker_monitoring_tools(tool_registry, event_bus, storage_path)
+    register_worker_monitoring_tools(tool_registry, storage_path)
 """
 
 from __future__ import annotations
@@ -30,7 +24,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -40,20 +33,16 @@ _DEFAULT_LAST_N_STEPS = 40
 
 def register_worker_monitoring_tools(
     registry: ToolRegistry,
-    event_bus: EventBus,
     storage_path: Path,
-    stream_id: str = "monitoring",
     worker_graph_id: str | None = None,
     default_session_id: str | None = None,
 ) -> int:
-    """Register worker monitoring tools bound to *event_bus* and *storage_path*.
+    """Register worker monitoring tools bound to *storage_path*.
 
     Args:
         registry: ToolRegistry to register tools on.
-        event_bus: The shared EventBus for the worker runtime.
         storage_path: Root storage path of the worker runtime
                       (e.g. ``~/.hive/agents/{name}``).
-        stream_id: Stream ID used when emitting events.
         worker_graph_id: The primary worker graph's ID. Included in health summary
                          so the judge can populate ticket identity fields accurately.
         default_session_id: When set, ``get_worker_health_summary`` uses this
@@ -239,170 +228,6 @@ def register_worker_monitoring_tools(
         "get_worker_health_summary",
         _health_summary_tool,
         lambda inputs: get_worker_health_summary(**inputs),
-    )
-    tools_registered += 1
-
-    # -------------------------------------------------------------------------
-    # emit_escalation_ticket
-    # -------------------------------------------------------------------------
-
-    async def emit_escalation_ticket(ticket_json: str) -> str:
-        """Validate and publish an EscalationTicket to the shared EventBus.
-
-        ticket_json must be a JSON string containing all required EscalationTicket
-        fields. The ticket is validated before publishing.
-
-        Returns a confirmation JSON with the ticket_id on success, or an error.
-        """
-        from framework.runtime.escalation_ticket import EscalationTicket
-
-        try:
-            raw = json.loads(ticket_json) if isinstance(ticket_json, str) else ticket_json
-            ticket = EscalationTicket(**raw)
-        except Exception as e:
-            return json.dumps({"error": f"Invalid ticket: {e}"})
-
-        try:
-            await event_bus.emit_worker_escalation_ticket(
-                stream_id=stream_id,
-                node_id="monitoring",
-                ticket=ticket.model_dump(),
-            )
-            logger.info(
-                "EscalationTicket emitted: ticket_id=%s severity=%s cause=%r",
-                ticket.ticket_id,
-                ticket.severity,
-                ticket.cause[:80],
-            )
-            return json.dumps(
-                {
-                    "status": "emitted",
-                    "ticket_id": ticket.ticket_id,
-                    "severity": ticket.severity,
-                }
-            )
-        except Exception as e:
-            return json.dumps({"error": f"Failed to emit ticket: {e}"})
-
-    _emit_ticket_tool = Tool(
-        name="emit_escalation_ticket",
-        description=(
-            "Validate and publish a structured EscalationTicket to the shared EventBus. "
-            "ticket_json must be a JSON string with all required EscalationTicket fields: "
-            "worker_agent_id, worker_session_id, worker_node_id, worker_graph_id, "
-            "severity (low/medium/high/critical), cause, judge_reasoning, suggested_action, "
-            "recent_verdicts (list), total_steps_checked, steps_since_last_accept, "
-            "stall_minutes (float or null), evidence_snippet."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "ticket_json": {
-                    "type": "string",
-                    "description": "JSON string of the complete EscalationTicket",
-                },
-            },
-            "required": ["ticket_json"],
-        },
-    )
-    registry.register(
-        "emit_escalation_ticket",
-        _emit_ticket_tool,
-        lambda inputs: emit_escalation_ticket(**inputs),
-    )
-    tools_registered += 1
-
-    # -------------------------------------------------------------------------
-    # notify_operator
-    # -------------------------------------------------------------------------
-
-    async def notify_operator(
-        ticket_id: str,
-        analysis: str,
-        urgency: str,
-    ) -> str:
-        """Emit a QUEEN_INTERVENTION_REQUESTED event to notify the human operator.
-
-        The TUI subscribes to this event and surfaces a non-disruptive dismissable
-        notification. The worker agent is NOT paused. The operator can choose to
-        open the queen's graph view via Ctrl+Q.
-
-        Args:
-            ticket_id: The ticket_id from the original EscalationTicket.
-            analysis: 2-3 sentence description of what is wrong, why it matters,
-                      and what action is suggested.
-            urgency: Severity level: "low", "medium", "high", or "critical".
-
-        Returns:
-            Confirmation JSON.
-        """
-        valid_urgencies = {"low", "medium", "high", "critical"}
-        if urgency not in valid_urgencies:
-            return json.dumps(
-                {"error": f"urgency must be one of {sorted(valid_urgencies)}, got {urgency!r}"}
-            )
-
-        try:
-            await event_bus.emit_queen_intervention_requested(
-                stream_id=stream_id,
-                node_id="ticket_triage",
-                ticket_id=ticket_id,
-                analysis=analysis,
-                severity=urgency,
-                queen_graph_id="queen",
-                queen_stream_id="queen",
-            )
-            logger.info(
-                "Queen intervention requested: ticket_id=%s urgency=%s",
-                ticket_id,
-                urgency,
-            )
-            return json.dumps(
-                {
-                    "status": "operator_notified",
-                    "ticket_id": ticket_id,
-                    "urgency": urgency,
-                }
-            )
-        except Exception as e:
-            return json.dumps({"error": f"Failed to notify operator: {e}"})
-
-    _notify_tool = Tool(
-        name="notify_operator",
-        description=(
-            "Notify the human operator that a worker agent needs attention. "
-            "This emits a QUEEN_INTERVENTION_REQUESTED event that the TUI surfaces "
-            "as a non-disruptive notification. The worker keeps running. "
-            "Only call this when you (the Queen) have decided the issue warrants "
-            "human attention after reading the escalation ticket."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "ticket_id": {
-                    "type": "string",
-                    "description": "The ticket_id from the EscalationTicket being triaged",
-                },
-                "analysis": {
-                    "type": "string",
-                    "description": (
-                        "2-3 sentence analysis: what is wrong, why it matters, "
-                        "and what action you suggest."
-                    ),
-                },
-                "urgency": {
-                    "type": "string",
-                    "enum": ["low", "medium", "high", "critical"],
-                    "description": "Severity level for the operator notification",
-                },
-            },
-            "required": ["ticket_id", "analysis", "urgency"],
-        },
-    )
-    registry.register(
-        "notify_operator",
-        _notify_tool,
-        lambda inputs: notify_operator(**inputs),
     )
     tools_registered += 1
 

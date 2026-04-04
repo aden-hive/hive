@@ -114,9 +114,7 @@ async def _interactive_shell(verbose=False):
     try:
         while True:
             try:
-                query = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Query> "
-                )
+                query = await asyncio.get_event_loop().run_in_executor(None, input, "Query> ")
                 if query.lower() in ["quit", "exit", "q"]:
                     click.echo("Goodbye!")
                     break

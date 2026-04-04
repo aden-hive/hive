@@ -1,6 +1,6 @@
 """Tests for subagent capability in EventLoopNode.
 
-Tests the delegate_to_sub_agent tool, subagent execution with read-only memory,
+Tests the delegate_to_sub_agent tool, subagent execution with read-only data buffer,
 prevention of nested subagent delegation, and report_to_parent one-way channel.
 """
 
@@ -19,7 +19,7 @@ from framework.graph.event_loop_node import (
     LoopConfig,
     SubagentJudge,
 )
-from framework.graph.node import NodeContext, NodeSpec, SharedMemory
+from framework.graph.node import DataBuffer, NodeContext, NodeSpec
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
     FinishEvent,
@@ -193,14 +193,14 @@ class TestSubagentExecution:
         """Should return error when subagent ID is not in registry."""
         node = EventLoopNode(config=LoopConfig(max_iterations=5))
 
-        memory = SharedMemory()
-        memory.write("query", "test query")
+        buffer = DataBuffer()
+        buffer.write("query", "test query")
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=memory,
+            buffer=buffer,
             input_data={},
             llm=MockStreamingLLM([]),
             available_tools=[],
@@ -219,7 +219,7 @@ class TestSubagentExecution:
     async def test_subagent_receives_readonly_memory(
         self, runtime, parent_node_spec, subagent_node_spec
     ):
-        """Subagent should have read-only access to memory."""
+        """Subagent should have read-only access to data buffer."""
         # Create LLM that will set output for the subagent
         subagent_llm = MockStreamingLLM(
             [
@@ -232,10 +232,10 @@ class TestSubagentExecution:
             config=LoopConfig(max_iterations=5),
         )
 
-        # Parent memory with some data
-        memory = SharedMemory()
-        memory.write("query", "research AI")
-        scoped_memory = memory.with_permissions(
+        # Parent data buffer with some data
+        buffer = DataBuffer()
+        buffer.write("query", "research AI")
+        scoped_buffer = buffer.with_permissions(
             read_keys=["query"],
             write_keys=["result"],
         )
@@ -244,7 +244,7 @@ class TestSubagentExecution:
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped_memory,
+            buffer=scoped_buffer,
             input_data={"query": "research AI"},
             llm=subagent_llm,
             available_tools=[],
@@ -275,14 +275,14 @@ class TestSubagentExecution:
 
         node = EventLoopNode(config=LoopConfig(max_iterations=5))
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -332,14 +332,14 @@ class TestSubagentExecution:
         browser_tool = Tool(name="browser_snapshot", description="Snapshot")
 
         node = EventLoopNode(config=LoopConfig(max_iterations=5))
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=spy_llm,
             available_tools=[],
@@ -383,12 +383,12 @@ class TestNestedSubagentPrevention:
             sub_agents=["another"],  # This should be ignored in subagent mode
         )
 
-        memory = SharedMemory()
+        buffer = DataBuffer()
         ctx = NodeContext(
             runtime=runtime,
             node_id="nested",
             node_spec=subagent_with_subagents,
-            memory=memory,
+            buffer=buffer,
             input_data={},
             llm=MockStreamingLLM([]),
             available_tools=[],
@@ -459,9 +459,9 @@ class TestDelegationIntegration:
         # For this test, let's just verify the parent can call delegate_to_sub_agent
         # and the tool handling correctly queues and executes it
 
-        memory = SharedMemory()
-        memory.write("query", "What are AI trends?")
-        scoped = memory.with_permissions(
+        buffer = DataBuffer()
+        buffer.write("query", "What are AI trends?")
+        scoped = buffer.with_permissions(
             read_keys=["query"],
             write_keys=["result"],
         )
@@ -475,7 +475,7 @@ class TestDelegationIntegration:
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={"query": "What are AI trends?"},
             llm=parent_llm,
             available_tools=[],
@@ -538,12 +538,12 @@ class TestBuildReportToParentTool:
         node = EventLoopNode()
 
         # Parent mode: no report_to_parent
-        memory = SharedMemory()
+        buffer = DataBuffer()
         parent_ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=memory,
+            buffer=buffer,
             input_data={},
             llm=MockStreamingLLM([]),
             available_tools=[],
@@ -567,7 +567,7 @@ class TestBuildReportToParentTool:
             runtime=runtime,
             node_id="sub",
             node_spec=subagent_node_spec,
-            memory=memory,
+            buffer=buffer,
             input_data={},
             llm=MockStreamingLLM([]),
             available_tools=[],
@@ -587,13 +587,13 @@ class TestBuildReportToParentTool:
     def test_tool_not_visible_without_callback(self, runtime, subagent_node_spec):
         """report_to_parent should NOT appear when callback is None even in subagent mode."""
         node = EventLoopNode()
-        memory = SharedMemory()
+        buffer = DataBuffer()
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="sub",
             node_spec=subagent_node_spec,
-            memory=memory,
+            buffer=buffer,
             input_data={},
             llm=MockStreamingLLM([]),
             available_tools=[],
@@ -630,14 +630,14 @@ class TestReportToParentExecution:
 
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -689,14 +689,14 @@ class TestReportToParentExecution:
             config=LoopConfig(max_iterations=10),
         )
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -744,14 +744,14 @@ class TestReportToParentExecution:
             config=LoopConfig(max_iterations=10),
         )
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -790,14 +790,14 @@ class TestReportToParentExecution:
 
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -831,14 +831,14 @@ class TestReportToParentExecution:
 
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -967,14 +967,14 @@ class TestEscalationFlow:
             config=LoopConfig(max_iterations=10),
         )
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -1045,14 +1045,14 @@ class TestEscalationFlow:
             config=LoopConfig(max_iterations=10),
         )
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -1122,14 +1122,14 @@ class TestEscalationFlow:
             config=LoopConfig(max_iterations=10),
         )
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -1182,14 +1182,14 @@ class TestEscalationFlow:
             config=LoopConfig(max_iterations=10),
         )
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -1232,14 +1232,14 @@ class TestEscalationFlow:
             config=LoopConfig(max_iterations=10),
         )
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -1368,15 +1368,15 @@ class TestSubagentJudge:
             tool_executor=mock_tool_executor,
         )
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         task_text = "Check the profile at https://example.com/user789"
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -1463,14 +1463,14 @@ class TestMarkCompleteViaReport:
 
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -1524,14 +1524,14 @@ class TestMarkCompleteViaReport:
 
         node = EventLoopNode(config=LoopConfig(max_iterations=10))
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=["result"])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=["result"])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="parent",
             node_spec=parent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={},
             llm=subagent_llm,
             available_tools=[],
@@ -1594,14 +1594,14 @@ class TestMarkCompleteViaReport:
             config=LoopConfig(max_iterations=5),
         )
 
-        memory = SharedMemory()
-        scoped = memory.with_permissions(read_keys=[], write_keys=[])
+        buffer = DataBuffer()
+        scoped = buffer.with_permissions(read_keys=[], write_keys=[])
 
         ctx = NodeContext(
             runtime=runtime,
             node_id="sub",
             node_spec=subagent_node_spec,
-            memory=scoped,
+            buffer=scoped,
             input_data={"task": "test task"},
             llm=subagent_llm,
             available_tools=[],

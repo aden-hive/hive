@@ -21,7 +21,7 @@ from framework.graph.conversation import NodeConversation
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
-from framework.graph.node import NodeResult, NodeSpec, SharedMemory
+from framework.graph.node import DataBuffer, NodeResult, NodeSpec
 from framework.graph.prompt_composer import (
     build_narrative,
     build_transition_marker,
@@ -160,8 +160,8 @@ class TestComposeSystemPrompt:
 
 class TestBuildNarrative:
     def test_with_execution_path(self):
-        memory = SharedMemory()
-        memory.write("findings", "some findings")
+        buffer = DataBuffer()
+        buffer.write("findings", "some findings")
 
         node_a = NodeSpec(
             id="a", name="Research", description="Research the topic", node_type="event_loop"
@@ -175,14 +175,14 @@ class TestBuildNarrative:
             edges=[],
         )
 
-        result = build_narrative(memory, ["a"], graph)
+        result = build_narrative(buffer, ["a"], graph)
         assert "Research" in result
         assert "findings" in result
 
     def test_empty_state(self):
-        memory = SharedMemory()
+        buffer = DataBuffer()
         graph = GraphSpec(id="g1", goal_id="g1", entry_node="a", nodes=[], edges=[])
-        result = build_narrative(memory, [], graph)
+        result = build_narrative(buffer, [], graph)
         assert result == ""
 
 
@@ -194,13 +194,13 @@ class TestBuildTransitionMarker:
         next_n = NodeSpec(
             id="report", name="Report", description="Write report", node_type="event_loop"
         )
-        memory = SharedMemory()
-        memory.write("findings", "important stuff")
+        buffer = DataBuffer()
+        buffer.write("findings", "important stuff")
 
         marker = build_transition_marker(
             previous_node=prev,
             next_node=next_n,
-            memory=memory,
+            buffer=buffer,
             cumulative_tool_names=["web_search", "save_data"],
         )
 

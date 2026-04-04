@@ -31,6 +31,7 @@ class RestoredState:
     start_iteration: int
     recent_responses: list[str]
     recent_tool_fingerprints: list[list[tuple[str, str]]]
+    pending_input: dict[str, Any] | None
 
 
 async def restore(
@@ -56,24 +57,34 @@ async def restore(
     conversation = await NodeConversation.restore(
         conversation_store,
         phase_id=phase_filter,
+        run_id=ctx.effective_run_id,
     )
     if conversation is None:
         return None
 
-    accumulator = await OutputAccumulator.restore(conversation_store)
+    # If run_id filtering removed all messages, this is an intentional
+    # restart (new run), not a crash recovery.  Return None so the caller
+    # falls through to the fresh-conversation path.
+    if conversation.message_count == 0:
+        return None
+
+    accumulator = await OutputAccumulator.restore(conversation_store, run_id=ctx.effective_run_id)
     accumulator.spillover_dir = config.spillover_dir
     accumulator.max_value_chars = config.max_output_value_chars
 
-    cursor = await conversation_store.read_cursor()
-    start_iteration = cursor.get("iteration", 0) + 1 if cursor else 0
+    cursor = await conversation_store.read_cursor() or {}
+    start_iteration = cursor.get("iteration", 0) + 1
 
     # Restore stall/doom-loop detection state
-    recent_responses: list[str] = cursor.get("recent_responses", []) if cursor else []
-    raw_fps = cursor.get("recent_tool_fingerprints", []) if cursor else []
+    recent_responses: list[str] = cursor.get("recent_responses", [])
+    raw_fps = cursor.get("recent_tool_fingerprints", [])
     recent_tool_fingerprints: list[list[tuple[str, str]]] = [
         [tuple(pair) for pair in fps]  # type: ignore[misc]
         for fps in raw_fps
     ]
+    pending_input = cursor.get("pending_input")
+    if not isinstance(pending_input, dict):
+        pending_input = None
 
     logger.info(
         f"Restored event loop: iteration={start_iteration}, "
@@ -88,6 +99,7 @@ async def restore(
         start_iteration=start_iteration,
         recent_responses=recent_responses,
         recent_tool_fingerprints=recent_tool_fingerprints,
+        pending_input=pending_input,
     )
 
 
@@ -100,6 +112,7 @@ async def write_cursor(
     *,
     recent_responses: list[str] | None = None,
     recent_tool_fingerprints: list[list[tuple[str, str]]] | None = None,
+    pending_input: dict[str, Any] | None = None,
 ) -> None:
     """Write checkpoint cursor for crash recovery.
 
@@ -112,7 +125,6 @@ async def write_cursor(
             {
                 "iteration": iteration,
                 "node_id": ctx.node_id,
-                "next_seq": conversation.next_seq,
                 "outputs": accumulator.to_dict(),
             }
         )
@@ -124,6 +136,9 @@ async def write_cursor(
             cursor["recent_tool_fingerprints"] = [
                 [list(pair) for pair in fps] for fps in recent_tool_fingerprints
             ]
+        # Persist blocked-input state so restored runs re-block instead of
+        # manufacturing a synthetic continuation turn.
+        cursor["pending_input"] = pending_input
         await conversation_store.write_cursor(cursor)
 
 
@@ -138,6 +153,10 @@ async def drain_injection_queue(
 ) -> int:
     """Drain all pending injected events as user messages. Returns count."""
     count = 0
+    logger.debug(
+        "[drain_injection_queue] Starting to drain queue, initial queue size: %s",
+        queue.qsize() if hasattr(queue, "qsize") else "unknown",
+    )
     while not queue.empty():
         try:
             content, is_client_input, image_content = queue.get_nowait()
@@ -228,7 +247,7 @@ async def check_pause(
     pause_requested = ctx.input_data.get("pause_requested", False)
     if not pause_requested:
         try:
-            pause_requested = ctx.memory.read("pause_requested") or False
+            pause_requested = ctx.buffer.read("pause_requested") or False
         except (PermissionError, KeyError):
             pause_requested = False
     if pause_requested:

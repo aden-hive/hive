@@ -8,6 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
+LEGACY_RUN_ID = "__legacy_run__"
+
+
+def is_legacy_run_id(run_id: str | None) -> bool:
+    """True when run_id represents pre-migration (no run boundary) data."""
+    return run_id is None or run_id == LEGACY_RUN_ID
+
 
 @dataclass
 class Message:
@@ -37,6 +44,8 @@ class Message:
     image_content: list[dict[str, Any]] | None = None
     # True when message contains an activated skill body (AS-10: never prune)
     is_skill_content: bool = False
+    # Logical worker run identifier for shared-session persistence
+    run_id: str | None = None
 
     def to_llm_dict(self) -> dict[str, Any]:
         """Convert to OpenAI-format message dict."""
@@ -93,6 +102,8 @@ class Message:
             d["is_client_input"] = self.is_client_input
         if self.image_content is not None:
             d["image_content"] = self.image_content
+        if self.run_id is not None:
+            d["run_id"] = self.run_id
         return d
 
     @classmethod
@@ -109,7 +120,38 @@ class Message:
             is_transition_marker=data.get("is_transition_marker", False),
             is_client_input=data.get("is_client_input", False),
             image_content=data.get("image_content"),
+            run_id=data.get("run_id"),
         )
+
+
+def _normalize_cursor(cursor: dict[str, Any] | None) -> dict[str, Any]:
+    """Normalize legacy and run-scoped cursor formats into one flat shape."""
+    return dict(cursor) if cursor else {}
+
+
+def get_cursor_next_seq(cursor: dict[str, Any] | None) -> int | None:
+    next_seq = (cursor or {}).get("next_seq")
+    return next_seq if isinstance(next_seq, int) else None
+
+
+def update_cursor_next_seq(cursor: dict[str, Any] | None, next_seq: int) -> dict[str, Any]:
+    updated = dict(cursor or {})
+    updated["next_seq"] = next_seq
+    return updated
+
+
+def get_run_cursor(cursor: dict[str, Any] | None, run_id: str | None) -> dict[str, Any] | None:
+    return dict(cursor) if cursor else None
+
+
+def update_run_cursor(
+    cursor: dict[str, Any] | None,
+    run_id: str | None,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    updated = dict(cursor or {})
+    updated.update(values)
+    return updated
 
 
 def _extract_spillover_filename(content: str) -> str | None:
@@ -261,7 +303,7 @@ class ConversationStore(Protocol):
 
     async def read_cursor(self) -> dict[str, Any] | None: ...
 
-    async def delete_parts_before(self, seq: int) -> None: ...
+    async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None: ...
 
     async def close(self) -> None: ...
 
@@ -333,6 +375,7 @@ class NodeConversation:
         compaction_threshold: float = 0.8,
         output_keys: list[str] | None = None,
         store: ConversationStore | None = None,
+        run_id: str | None = None,
     ) -> None:
         self._system_prompt = system_prompt
         self._max_context_tokens = max_context_tokens
@@ -344,6 +387,7 @@ class NodeConversation:
         self._meta_persisted: bool = False
         self._last_api_input_tokens: int | None = None
         self._current_phase: str | None = None
+        self._run_id: str | None = run_id
 
     # --- Properties --------------------------------------------------------
 
@@ -402,12 +446,16 @@ class NodeConversation:
             role="user",
             content=content,
             phase_id=self._current_phase,
+            run_id=self._run_id,
             is_transition_marker=is_transition_marker,
             is_client_input=is_client_input,
             image_content=image_content,
         )
         self._messages.append(msg)
         self._next_seq += 1
+        # Invalidate stale API token count so estimate_tokens() uses
+        # the char-based heuristic which reflects the new message.
+        self._last_api_input_tokens = None
         await self._persist(msg)
         return msg
 
@@ -422,9 +470,11 @@ class NodeConversation:
             content=content,
             tool_calls=tool_calls,
             phase_id=self._current_phase,
+            run_id=self._run_id,
         )
         self._messages.append(msg)
         self._next_seq += 1
+        self._last_api_input_tokens = None
         await self._persist(msg)
         return msg
 
@@ -445,9 +495,11 @@ class NodeConversation:
             phase_id=self._current_phase,
             image_content=image_content,
             is_skill_content=is_skill_content,
+            run_id=self._run_id,
         )
         self._messages.append(msg)
         self._next_seq += 1
+        self._last_api_input_tokens = None
         await self._persist(msg)
         return msg
 
@@ -528,12 +580,15 @@ class NodeConversation:
 
         Uses actual API input token count when available (set via
         :meth:`update_token_count`), otherwise falls back to a
-        ``total_chars / 4`` heuristic that includes both message content
-        AND tool_call argument sizes.
+        character-based heuristic that includes message content, tool_call
+        arguments, and image blocks.  The heuristic applies a 4/3 safety
+        margin to avoid under-counting (inspired by Claude Code's compact
+        service).
         """
         if self._last_api_input_tokens is not None:
             return self._last_api_input_tokens
         total_chars = 0
+        image_tokens = 0
         for m in self._messages:
             total_chars += len(m.content)
             if m.tool_calls:
@@ -541,7 +596,11 @@ class NodeConversation:
                     func = tc.get("function", {})
                     total_chars += len(func.get("arguments", ""))
                     total_chars += len(func.get("name", ""))
-        return total_chars // 4
+            if m.image_content:
+                # Images/documents have a fixed token cost per block
+                image_tokens += len(m.image_content) * 2000
+        # Apply 4/3 safety margin to character-based estimate
+        return (total_chars * 4) // (3 * 4) + image_tokens
 
     def update_token_count(self, actual_input_tokens: int) -> None:
         """Store actual API input token count for more accurate compaction.
@@ -688,6 +747,7 @@ class NodeConversation:
                 is_error=msg.is_error,
                 phase_id=msg.phase_id,
                 is_transition_marker=msg.is_transition_marker,
+                run_id=msg.run_id,
             )
             count += 1
 
@@ -764,14 +824,14 @@ class NodeConversation:
             summary_seq = self._next_seq
             self._next_seq += 1
 
-        summary_msg = Message(seq=summary_seq, role="user", content=summary)
+        summary_msg = Message(seq=summary_seq, role="user", content=summary, run_id=self._run_id)
 
         # Persist
         if self._store:
             delete_before = recent_messages[0].seq if recent_messages else self._next_seq
             await self._store.delete_parts_before(delete_before)
             await self._store.write_part(summary_msg.seq, summary_msg.to_storage_dict())
-            await self._store.write_cursor({"next_seq": self._next_seq})
+            await self._write_next_seq()
 
         self._messages = [summary_msg] + recent_messages
         self._last_api_input_tokens = None  # reset; next LLM call will recalibrate
@@ -829,6 +889,15 @@ class NodeConversation:
         freeform_lines: list[str] = []
         collapsed_msgs: list[Message] = []
 
+        # Collect all tool_use IDs present in old messages so we can detect
+        # orphaned tool results whose parent assistant message was already
+        # compacted away (API invariant protection).
+        old_tc_ids: set[str] = set()
+        for msg in old_messages:
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    old_tc_ids.add(tc.get("id", ""))
+
         if aggressive:
             # Aggressive: only keep set_output tool pairs and error results.
             # Everything else is collapsed into a tool-call history summary.
@@ -850,9 +919,17 @@ class NodeConversation:
                 else:
                     collapsible_tc_ids |= tc_ids
 
+            # Skill content and transition markers are always protected
+            for msg in old_messages:
+                if msg.role == "tool" and msg.is_skill_content and msg.tool_use_id:
+                    protected_tc_ids.add(msg.tool_use_id)
+
             # Second pass: classify all messages
             for msg in old_messages:
-                if msg.role == "tool":
+                if msg.is_transition_marker:
+                    # Transition markers are always kept (phase boundaries)
+                    kept_structural.append(msg)
+                elif msg.role == "tool":
                     tc_id = msg.tool_use_id or ""
                     if tc_id in protected_tc_ids:
                         kept_structural.append(msg)
@@ -861,6 +938,12 @@ class NodeConversation:
                         kept_structural.append(msg)
                         # Protect the parent assistant message too
                         protected_tc_ids.add(tc_id)
+                    elif msg.is_skill_content:
+                        kept_structural.append(msg)
+                    elif tc_id and tc_id not in old_tc_ids:
+                        # Orphaned tool result — parent tool_use not in old msgs.
+                        # Keep it to maintain API invariants.
+                        kept_structural.append(msg)
                     else:
                         collapsed_msgs.append(msg)
                 elif msg.role == "assistant" and msg.tool_calls:
@@ -877,6 +960,7 @@ class NodeConversation:
                                 is_error=msg.is_error,
                                 phase_id=msg.phase_id,
                                 is_transition_marker=msg.is_transition_marker,
+                                run_id=msg.run_id,
                             )
                         )
                     else:
@@ -891,7 +975,10 @@ class NodeConversation:
         else:
             # Standard mode: keep all tool call pairs as structural
             for msg in old_messages:
-                if msg.role == "tool":
+                if msg.is_transition_marker:
+                    # Transition markers are always kept (phase boundaries)
+                    kept_structural.append(msg)
+                elif msg.role == "tool":
                     kept_structural.append(msg)
                 elif msg.role == "assistant" and msg.tool_calls:
                     compact_tcs = _compact_tool_calls(msg.tool_calls)
@@ -904,6 +991,7 @@ class NodeConversation:
                             is_error=msg.is_error,
                             phase_id=msg.phase_id,
                             is_transition_marker=msg.is_transition_marker,
+                            run_id=msg.run_id,
                         )
                     )
                 else:
@@ -961,7 +1049,7 @@ class NodeConversation:
             ref_seq = self._next_seq
             self._next_seq += 1
 
-        ref_msg = Message(seq=ref_seq, role="user", content=ref_content)
+        ref_msg = Message(seq=ref_seq, role="user", content=ref_content, run_id=self._run_id)
 
         # Persist: delete old messages from store, write reference + kept structural.
         # In aggressive mode, collapsed messages may be interspersed with kept
@@ -975,7 +1063,7 @@ class NodeConversation:
             # Write kept structural messages (they may have been modified)
             for msg in kept_structural:
                 await self._store.write_part(msg.seq, msg.to_storage_dict())
-            await self._store.write_cursor({"next_seq": self._next_seq})
+            await self._write_next_seq()
 
         # Reassemble: reference + kept structural (in original order) + recent
         self._messages = [ref_msg] + kept_structural + recent_messages
@@ -1012,7 +1100,7 @@ class NodeConversation:
         """Remove all messages, keep system prompt, preserve ``_next_seq``."""
         if self._store:
             await self._store.delete_parts_before(self._next_seq)
-            await self._store.write_cursor({"next_seq": self._next_seq})
+            await self._write_next_seq()
         self._messages.clear()
         self._last_api_input_tokens = None
 
@@ -1054,21 +1142,31 @@ class NodeConversation:
         if not self._meta_persisted:
             await self._persist_meta()
         await self._store.write_part(message.seq, message.to_storage_dict())
-        await self._store.write_cursor({"next_seq": self._next_seq})
+        await self._write_next_seq()
 
     async def _persist_meta(self) -> None:
-        """Lazily write conversation metadata to the store (called once)."""
+        """Lazily write conversation metadata to the store (called once).
+
+        When ``self._run_id`` is set, metadata is written flat for backward
+        compatibility (run-scoped isolation has been reverted).
+        """
         if self._store is None:
             return
-        await self._store.write_meta(
-            {
-                "system_prompt": self._system_prompt,
-                "max_context_tokens": self._max_context_tokens,
-                "compaction_threshold": self._compaction_threshold,
-                "output_keys": self._output_keys,
-            }
-        )
+        run_meta = {
+            "system_prompt": self._system_prompt,
+            "max_context_tokens": self._max_context_tokens,
+            "compaction_threshold": self._compaction_threshold,
+            "output_keys": self._output_keys,
+        }
+        await self._store.write_meta(run_meta)
         self._meta_persisted = True
+
+    async def _write_next_seq(self) -> None:
+        if self._store is None:
+            return
+        cursor = await self._store.read_cursor() or {}
+        cursor["next_seq"] = self._next_seq
+        await self._store.write_cursor(cursor)
 
     # --- Restore -----------------------------------------------------------
 
@@ -1077,6 +1175,7 @@ class NodeConversation:
         cls,
         store: ConversationStore,
         phase_id: str | None = None,
+        run_id: str | None = None,
     ) -> NodeConversation | None:
         """Reconstruct a NodeConversation from a store.
 
@@ -1086,6 +1185,9 @@ class NodeConversation:
                 Used in isolated mode so a node only sees its own
                 messages in the shared flat store.  In continuous mode
                 pass ``None`` to load all parts.
+            run_id: If set, only load parts matching this run_id.
+                Ensures intentional restarts (new run_id) start fresh
+                while crash recovery (same run_id) resumes correctly.
 
         Returns ``None`` if the store contains no metadata (i.e. the
         conversation was never persisted).
@@ -1100,17 +1202,23 @@ class NodeConversation:
             compaction_threshold=meta.get("compaction_threshold", 0.8),
             output_keys=meta.get("output_keys"),
             store=store,
+            run_id=run_id,
         )
         conv._meta_persisted = True
 
         parts = await store.read_parts()
         if phase_id:
             parts = [p for p in parts if p.get("phase_id") == phase_id]
+        # Filter by run_id so intentional restarts (new run_id) start fresh
+        # while crash recovery (same run_id) loads prior parts.
+        if run_id and not is_legacy_run_id(run_id):
+            parts = [p for p in parts if p.get("run_id") == run_id]
         conv._messages = [Message.from_storage_dict(p) for p in parts]
 
         cursor = await store.read_cursor()
-        if cursor:
-            conv._next_seq = cursor["next_seq"]
+        next_seq = get_cursor_next_seq(cursor)
+        if next_seq is not None:
+            conv._next_seq = next_seq
         elif conv._messages:
             conv._next_seq = conv._messages[-1].seq + 1
 

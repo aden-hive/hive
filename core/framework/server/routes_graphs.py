@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 def _get_graph_registration(session, graph_id: str):
     """Get _GraphRegistration for a graph_id. Returns (reg, None) or (None, error_response)."""
-    if not session.worker_runtime:
+    if not session.graph_runtime:
         return None, web.json_response({"error": "No worker loaded in this session"}, status=503)
-    reg = session.worker_runtime.get_graph_registration(graph_id)
+    reg = session.graph_runtime.get_graph_registration(graph_id)
     if reg is None:
         return None, web.json_response({"error": f"Graph '{graph_id}' not found"}, status=404)
     return reg, None
@@ -101,7 +101,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         {"source": e.source, "target": e.target, "condition": e.condition, "priority": e.priority}
         for e in graph.edges
     ]
-    rt = session.worker_runtime
+    rt = session.graph_runtime
     entry_points = [
         {
             "id": ep.id,
@@ -193,8 +193,8 @@ async def handle_node_criteria(request: web.Request) -> web.Response:
     }
 
     worker_session_id = request.query.get("session_id")
-    if worker_session_id and session.worker_runtime:
-        log_store = getattr(session.worker_runtime, "_runtime_log_store", None)
+    if worker_session_id and session.graph_runtime:
+        log_store = getattr(session.graph_runtime, "_runtime_log_store", None)
         if log_store:
             details = await log_store.load_details(worker_session_id)
             if details:

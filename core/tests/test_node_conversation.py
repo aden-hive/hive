@@ -7,7 +7,11 @@ from typing import Any
 
 import pytest
 
-from framework.graph.conversation import Message, NodeConversation, extract_tool_call_history
+from framework.graph.conversation import (
+    Message,
+    NodeConversation,
+    extract_tool_call_history,
+)
 from framework.storage.conversation_store import FileConversationStore
 
 # ---------------------------------------------------------------------------
@@ -41,7 +45,7 @@ class MockConversationStore:
     async def read_cursor(self) -> dict[str, Any] | None:
         return self._cursor
 
-    async def delete_parts_before(self, seq: int) -> None:
+    async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         self._parts = {k: v for k, v in self._parts.items() if k >= seq}
 
     async def close(self) -> None:
@@ -167,14 +171,15 @@ class TestNodeConversation:
     async def test_token_estimation(self):
         conv = NodeConversation()
         await conv.add_user_message("a" * 400)
-        assert conv.estimate_tokens() == 100
+        # chars // 3 (4/3 safety margin over chars/4 base)
+        assert conv.estimate_tokens() == 400 // 3
 
     @pytest.mark.asyncio
     async def test_update_token_count_overrides_estimate(self):
         """When actual API token count is provided, estimate_tokens uses it."""
         conv = NodeConversation()
         await conv.add_user_message("a" * 400)
-        assert conv.estimate_tokens() == 100  # chars/4 fallback
+        assert conv.estimate_tokens() == 400 // 3  # char-based fallback with safety margin
 
         conv.update_token_count(500)
         assert conv.estimate_tokens() == 500  # actual API value
@@ -188,8 +193,8 @@ class TestNodeConversation:
         assert conv.estimate_tokens() == 500
 
         await conv.compact("summary", keep_recent=0)
-        # Falls back to chars/4 for the summary message
-        assert conv.estimate_tokens() == len("summary") // 4
+        # Falls back to char-based heuristic with 4/3 safety margin (chars // 3)
+        assert conv.estimate_tokens() == len("summary") // 3
 
     @pytest.mark.asyncio
     async def test_clear_resets_token_count(self):
@@ -207,7 +212,8 @@ class TestNodeConversation:
         """usage_ratio returns estimate / max_context_tokens."""
         conv = NodeConversation(max_context_tokens=1000)
         await conv.add_user_message("a" * 400)
-        assert conv.usage_ratio() == pytest.approx(0.1)  # 100/1000
+        # 400 // 3 = 133 tokens (with safety margin), so 133/1000
+        assert conv.usage_ratio() == pytest.approx(400 // 3 / 1000)
 
         conv.update_token_count(800)
         assert conv.usage_ratio() == pytest.approx(0.8)  # 800/1000
@@ -468,6 +474,38 @@ class TestPersistence:
         assert restored.message_count == 2
         assert restored.next_seq == 2
         assert restored.messages[0].content == "u1"
+
+    @pytest.mark.asyncio
+    async def test_restore_ignores_run_id_and_loads_all_parts(self):
+        store = MockConversationStore()
+        await store.write_meta({"system_prompt": "hello"})
+        await store.write_part(0, {"seq": 0, "role": "user", "content": "legacy"})
+        await store.write_part(1, {"seq": 1, "role": "user", "content": "run-a", "run_id": "run-a"})
+        await store.write_part(
+            2,
+            {"seq": 2, "role": "assistant", "content": "run-b", "run_id": "run-b"},
+        )
+        await store.write_cursor({"next_seq": 3})
+
+        restored = await NodeConversation.restore(store, run_id="run-a")
+        assert restored is not None
+        assert [m.content for m in restored.messages] == ["legacy", "run-a", "run-b"]
+        assert restored.next_seq == 3
+
+    @pytest.mark.asyncio
+    async def test_clear_deletes_all_parts(self):
+        store = MockConversationStore()
+        conv_a = NodeConversation(system_prompt="hello", store=store, run_id="run-a")
+        conv_b = NodeConversation(system_prompt="hello", store=store, run_id="run-b")
+
+        await conv_a.add_user_message("a1")
+        await conv_b.add_user_message("b1")
+
+        await conv_a.clear()
+
+        restored = await NodeConversation.restore(store)
+        assert restored is not None
+        assert [m.content for m in restored.messages] == []
 
     @pytest.mark.asyncio
     async def test_restore_preserves_tool_messages(self):
