@@ -368,7 +368,7 @@ def register_tools(
             }
         return _VisionClient(api_key)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def vision_detect_labels(
         image_source: str,
         max_labels: int = 10,
@@ -388,7 +388,7 @@ def register_tools(
             return client
         return client.detect_labels(image_source, min(max(1, max_labels), 100))
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def vision_detect_text(image_source: str) -> dict:
         """
         Extract text from an image (OCR).
@@ -404,7 +404,7 @@ def register_tools(
             return client
         return client.detect_text(image_source)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def vision_detect_faces(
         image_source: str,
         max_faces: int = 10,
@@ -424,7 +424,7 @@ def register_tools(
             return client
         return client.detect_faces(image_source, min(max(1, max_faces), 100))
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def vision_localize_objects(
         image_source: str,
         max_objects: int = 10,
@@ -444,7 +444,7 @@ def register_tools(
             return client
         return client.localize_objects(image_source, min(max(1, max_objects), 100))
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def vision_detect_logos(
         image_source: str,
         max_logos: int = 5,
@@ -464,7 +464,7 @@ def register_tools(
             return client
         return client.detect_logos(image_source, min(max(1, max_logos), 20))
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def vision_detect_landmarks(
         image_source: str,
         max_landmarks: int = 5,
@@ -484,7 +484,7 @@ def register_tools(
             return client
         return client.detect_landmarks(image_source, min(max(1, max_landmarks), 20))
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def vision_image_properties(image_source: str) -> dict:
         """
         Get image properties including dominant colors and crop hints.
@@ -500,7 +500,7 @@ def register_tools(
             return client
         return client.get_image_properties(image_source)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def vision_web_detection(image_source: str) -> dict:
         """
         Find similar images and web references for an image.
@@ -516,7 +516,7 @@ def register_tools(
             return client
         return client.web_detection(image_source)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def vision_safe_search(image_source: str) -> dict:
         """
         Detect inappropriate content in an image.

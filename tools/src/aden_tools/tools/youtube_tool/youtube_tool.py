@@ -93,7 +93,7 @@ def register_tools(
 ) -> None:
     """Register YouTube Data API tools with the MCP server."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def youtube_search_videos(
         query: str,
         max_results: int = 10,
@@ -170,7 +170,7 @@ def register_tools(
             "total_results": data.get("pageInfo", {}).get("totalResults", 0),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def youtube_get_video_details(
         video_ids: str,
     ) -> dict[str, Any]:
@@ -229,7 +229,7 @@ def register_tools(
             )
         return {"videos": videos}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def youtube_get_channel(
         channel_id: str = "",
         username: str = "",
@@ -290,7 +290,7 @@ def register_tools(
             .get("uploads", ""),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def youtube_list_channel_videos(
         channel_id: str,
         max_results: int = 20,
@@ -346,7 +346,7 @@ def register_tools(
             )
         return {"channel_id": channel_id, "videos": videos}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def youtube_get_playlist(
         playlist_id: str,
         max_results: int = 20,
@@ -423,7 +423,7 @@ def register_tools(
             "items": items,
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def youtube_search_channels(
         query: str,
         max_results: int = 10,
@@ -477,7 +477,7 @@ def register_tools(
             )
         return {"query": query, "results": results}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def youtube_get_video_comments(
         video_id: str,
         max_results: int = 20,
@@ -532,7 +532,7 @@ def register_tools(
             )
         return {"video_id": video_id, "comments": comments}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def youtube_get_video_categories(
         region_code: str = "US",
     ) -> dict[str, Any]:

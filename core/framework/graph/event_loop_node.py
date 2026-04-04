@@ -219,6 +219,32 @@ HookResult = event_loop_types.HookResult
 OutputAccumulator = event_loop_types.OutputAccumulator
 
 
+def _build_economic_block(remaining: int, paid_tool_names: list[str]) -> str:
+    """Build the ## Economic Mode system prompt block."""
+    tool_list = ", ".join(paid_tool_names) if paid_tool_names else "none"
+    if remaining > 0:
+        guidance = (
+            f"You have {remaining} paid call(s) available — use them to get higher-quality results. "
+            f"Prefer paid tools over free alternatives when they are relevant to the task. "
+            f"When multiple paid tools could satisfy a requirement, prefer the one likely to be cheaper. "
+            f"This budget applies only to the current step — use it as needed, there is no benefit to saving calls for later."
+        )
+    else:
+        guidance = (
+            f"Your paid tool budget is exhausted. "
+            f"Do not call paid tools — use only free alternatives. "
+            f"If a task cannot be completed without paid tools, inform the user of what is missing."
+        )
+    return (
+        f"## Economic Mode\n"
+        f"Paid tool call budget remaining: {remaining} call(s).\n"
+        f"Paid tools (each call counts against your budget): {tool_list}.\n"
+        f"{guidance}"
+    )
+
+
+
+
 # ---------------------------------------------------------------------------
 # EventLoopNode
 # ---------------------------------------------------------------------------
@@ -387,6 +413,7 @@ class EventLoopNode(NodeProtocol):
             _restored_recent_responses: list[str] = []
             _restored_tool_fingerprints: list[list[tuple[str, str]]] = []
             _restored_pending_input = None
+            _restored_paid_calls_used: int = 0
         else:
             # Try crash-recovery restore from store, then fall back to fresh.
             restored = await self._restore(ctx)
@@ -397,6 +424,7 @@ class EventLoopNode(NodeProtocol):
                 _restored_recent_responses = restored.recent_responses
                 _restored_tool_fingerprints = restored.recent_tool_fingerprints
                 _restored_pending_input = restored.pending_input
+                _restored_paid_calls_used = restored.paid_calls_used
 
                 # Refresh the system prompt with full composition including
                 # execution preamble and node-type preamble.  The stored
@@ -418,6 +446,7 @@ class EventLoopNode(NodeProtocol):
                 _restored_recent_responses = []
                 _restored_tool_fingerprints = []
                 _restored_pending_input = None
+                _restored_paid_calls_used = 0
 
                 # Clear any stale conversation parts before starting fresh.
                 # This ensures a clean slate even if the store directory is reused.
@@ -542,6 +571,21 @@ class EventLoopNode(NodeProtocol):
             type(self._judge).__name__ if self._judge else "None",
         )
 
+        # 3b. Economic mode: inject budget block into system prompt now that
+        # the tools list is fully built (paid tool names are known).
+        if self._config.max_paid_calls_per_node >= 0:
+            _paid_names = [t.name for t in tools if t.is_paid]
+            _eco_block = _build_economic_block(self._config.max_paid_calls_per_node, _paid_names)
+            conversation.update_system_prompt(
+                f"{conversation.system_prompt}\n\n{_eco_block}"
+            )
+            logger.info(
+                "[%s] Economic mode active: budget=%d paid tool calls, paid tools: %s",
+                node_id,
+                self._config.max_paid_calls_per_node,
+                _paid_names or "none",
+            )
+
         # 4. Publish loop started
         await self._publish_loop_started(stream_id, node_id, execution_id)
 
@@ -562,6 +606,11 @@ class EventLoopNode(NodeProtocol):
         recent_tool_fingerprints: list[list[tuple[str, str]]] = _restored_tool_fingerprints
         pending_input_state: dict[str, Any] | None = _restored_pending_input
         _consecutive_empty_turns: int = 0
+
+        # 5b. Economic mode: paid-tool-call counter. Restored from cursor on
+        # crash-resume so the budget is not accidentally reset mid-execution.
+        paid_calls_used: int = _restored_paid_calls_used
+        budget_blocked_calls: int = 0  # total paid calls blocked by budget this node run
 
         # 6. Main loop
         logger.debug(
@@ -707,6 +756,16 @@ class EventLoopNode(NodeProtocol):
                     conversation.update_system_prompt(_new_prompt)
                     logger.info("[%s] Dynamic prompt updated", node_id)
 
+            # 6b4. Economic mode: refresh remaining budget in system prompt each iteration.
+            if self._config.max_paid_calls_per_node >= 0 and iteration > start_iteration:
+                _remaining = self._config.max_paid_calls_per_node - paid_calls_used
+                _paid_names = [t.name for t in tools if t.is_paid]
+                _eco_block = _build_economic_block(_remaining, _paid_names)
+                _current_sp = conversation.system_prompt
+                _marker = "\n\n## Economic Mode\n"
+                _base_sp = _current_sp.split(_marker)[0] if _marker in _current_sp else _current_sp
+                conversation.update_system_prompt(f"{_base_sp}\n\n{_eco_block}")
+
             # 6c. Publish iteration event (with per-iteration metadata when available)
             _iter_meta = None
             if ctx.iteration_metadata_provider is not None:
@@ -769,9 +828,32 @@ class EventLoopNode(NodeProtocol):
                         request_system_prompt,
                         request_messages,
                         reported_to_parent,
+                        _paid_this_turn,
+                        _budget_blocked_this_turn,
                     ) = await self._run_single_turn(
-                        ctx, conversation, tools, iteration, accumulator
+                        ctx,
+                        conversation,
+                        tools,
+                        iteration,
+                        accumulator,
+                        paid_budget_remaining=(
+                            self._config.max_paid_calls_per_node - paid_calls_used
+                            if self._config.max_paid_calls_per_node >= 0
+                            else -1
+                        ),
                     )
+                    # Economic mode: accumulate paid calls used this turn for logging.
+                    if self._config.max_paid_calls_per_node >= 0 and _paid_this_turn > 0:
+                        paid_calls_used += _paid_this_turn
+                        logger.info(
+                            "[%s] Economic mode: %d paid call(s) this turn, "
+                            "%d/%d total used",
+                            node_id,
+                            _paid_this_turn,
+                            paid_calls_used,
+                            self._config.max_paid_calls_per_node,
+                        )
+                    budget_blocked_calls += _budget_blocked_this_turn
                     logger.debug(
                         "[EventLoopNode.execute] iteration=%d:"
                         " _run_single_turn completed successfully",
@@ -1265,6 +1347,7 @@ class EventLoopNode(NodeProtocol):
                 recent_responses=recent_responses,
                 recent_tool_fingerprints=recent_tool_fingerprints,
                 pending_input=None,
+                paid_calls_used=paid_calls_used,
             )
 
             # 6h. Worker auto-escalation on text-only turns
@@ -1856,6 +1939,8 @@ class EventLoopNode(NodeProtocol):
                         retry_count=_retry_count,
                         escalate_count=_escalate_count,
                         continue_count=_continue_count,
+                        paid_tool_calls_used=paid_calls_used,
+                        budget_blocked_calls=budget_blocked_calls,
                     )
                 return NodeResult(
                     success=True,
@@ -1931,7 +2016,7 @@ class EventLoopNode(NodeProtocol):
                     await conversation.add_user_message(f"[Judge feedback]: {fb}")
                 continue
 
-        # 7. Max iterations exhausted
+        # 7. Max iterations exhausted (falls through from the for loop)
         await self._publish_loop_completed(
             stream_id, node_id, self._config.max_iterations, execution_id
         )
@@ -1953,6 +2038,8 @@ class EventLoopNode(NodeProtocol):
                 retry_count=_retry_count,
                 escalate_count=_escalate_count,
                 continue_count=_continue_count,
+                paid_tool_calls_used=paid_calls_used,
+                budget_blocked_calls=budget_blocked_calls,
             )
         return NodeResult(
             success=False,
@@ -2107,6 +2194,7 @@ class EventLoopNode(NodeProtocol):
         tools: list[Tool],
         iteration: int,
         accumulator: OutputAccumulator,
+        paid_budget_remaining: int = -1,
     ) -> tuple[
         str,
         list[dict],
@@ -2120,12 +2208,15 @@ class EventLoopNode(NodeProtocol):
         str,
         list[dict[str, Any]],
         bool,
+        int,
+        int,
     ]:
         """Run a single LLM turn with streaming and tool execution.
 
         Returns (assistant_text, real_tool_results, outputs_set, token_counts, logged_tool_calls,
         user_input_requested, ask_user_prompt, ask_user_options, queen_input_requested,
-        system_prompt, messages, reported_to_parent).
+        system_prompt, messages, reported_to_parent, paid_calls_this_turn,
+        budget_blocked_this_turn).
 
         ``real_tool_results`` contains only results from actual tools (web_search,
         etc.), NOT from synthetic framework tools such as ``set_output``,
@@ -2158,6 +2249,10 @@ class EventLoopNode(NodeProtocol):
         ask_user_options: list[str] | None = None
         queen_input_requested = False
         reported_to_parent = False
+        # Economic mode: count paid tool calls made this turn.
+        paid_calls_this_turn: int = 0
+        # Economic mode: accumulate budget-blocked calls across all inner iterations.
+        _total_blocked_this_turn: int = 0
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
@@ -2206,6 +2301,21 @@ class EventLoopNode(NodeProtocol):
             tool_calls: list[ToolCallEvent] = []
             _stream_error: StreamErrorEvent | None = None
 
+            # Economic mode: hide paid tools from the LLM when budget is exhausted
+            # so it cannot attempt to call them (stronger than error-result fallback).
+            if paid_budget_remaining == 0:
+                _visible_tools = [t for t in tools if not t.is_paid]
+                _hidden = [t.name for t in tools if t.is_paid]
+                if _hidden:
+                    logger.info(
+                        "[%s] Economic mode: paid budget exhausted — hiding %s from LLM; "
+                        "free tools still available: %s",
+                        node_id,
+                        _hidden,
+                        [t.name for t in _visible_tools],
+                    )
+            else:
+                _visible_tools = tools
             logger.debug(
                 "[_run_single_turn] inner_turn=%d: Starting LLM stream with %d messages, %d tools",
                 inner_turn,
@@ -2226,7 +2336,7 @@ class EventLoopNode(NodeProtocol):
                 async for event in ctx.llm.stream(
                     messages=_msgs,
                     system=conversation.system_prompt,
-                    tools=tools if tools else None,
+                    tools=_visible_tools if _visible_tools else None,
                     max_tokens=ctx.max_tokens,
                 ):
                     if isinstance(event, TextDeltaEvent):
@@ -2349,6 +2459,8 @@ class EventLoopNode(NodeProtocol):
                     final_system_prompt,
                     final_messages,
                     reported_to_parent,
+                    paid_calls_this_turn,
+                    _total_blocked_this_turn,
                 )
 
             # Execute tool calls — framework tools (set_output, ask_user)
@@ -2368,6 +2480,7 @@ class EventLoopNode(NodeProtocol):
             ] = {}  # tool_use_id -> {start_timestamp, duration_s}
             pending_real: list[ToolCallEvent] = []
             pending_subagent: list[ToolCallEvent] = []
+            budget_blocked: list[ToolCallEvent] = []  # paid calls blocked by economic mode
 
             for tc in tool_calls:
                 tool_call_count += 1
@@ -2699,6 +2812,21 @@ class EventLoopNode(NodeProtocol):
                         )
                         results_by_id[tc.tool_use_id] = result
                     else:
+                        # Economic mode: block paid calls when budget exhausted.
+                        # paid_budget_remaining == -1 means mode is off.
+                        if paid_budget_remaining >= 0:
+                            _paid_tool_names = {t.name for t in tools if t.is_paid}
+                            if tc.tool_name in _paid_tool_names:
+                                # Count paid calls already queued ahead of this one.
+                                _paid_in_batch = sum(
+                                    1 for _t in pending_real
+                                    if _t.tool_name in _paid_tool_names
+                                )
+                                # paid_calls_this_turn: paid calls executed in prior
+                                # inner iterations of this _run_single_turn call.
+                                if paid_calls_this_turn + _paid_in_batch >= paid_budget_remaining:
+                                    budget_blocked.append(tc)
+                                    continue
                         pending_real.append(tc)
 
             # Phase 2a: execute real tools in parallel.
@@ -2753,6 +2881,39 @@ class EventLoopNode(NodeProtocol):
                     else:
                         result = raw
                     results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
+                    # Economic mode: count executed paid tool calls for logging.
+                    _tool_obj = next((t for t in tools if t.name == tc.tool_name), None)
+                    if _tool_obj and _tool_obj.is_paid:
+                        paid_calls_this_turn += 1
+
+            # Phase 2a-eco: return error results for budget-blocked paid calls.
+            if budget_blocked:
+                _paid_names = {t.name for t in tools if t.is_paid}
+                _free_ran = [tc.tool_name for tc in pending_real if tc.tool_name not in _paid_names]
+                logger.info(
+                    "[%s] Economic mode: budget exhausted mid-turn — "
+                    "LLM requested paid tool(s) %s (blocked); "
+                    "free tool(s) that ran in the same turn: %s",
+                    node_id,
+                    [tc.tool_name for tc in budget_blocked],
+                    _free_ran or ["(none)"],
+                )
+            for tc in budget_blocked:
+                results_by_id[tc.tool_use_id] = ToolResult(
+                    tool_use_id=tc.tool_use_id,
+                    content=(
+                        f"Budget exhausted: '{tc.tool_name}' is a paid tool and the paid-call "
+                        f"budget for this run has been reached. "
+                        f"Use a free alternative or let the user know this step could not be completed."
+                    ),
+                    is_error=False,
+                )
+                timing_by_id[tc.tool_use_id] = {
+                    "start_timestamp": datetime.now(UTC).isoformat(),
+                    "duration_s": 0.0,
+                }
+            # Accumulate across inner iterations so the final return reflects all blocks.
+            _total_blocked_this_turn += len(budget_blocked)
 
             # Phase 2b: execute subagent delegations in parallel.
             if pending_subagent:
@@ -2925,6 +3086,10 @@ class EventLoopNode(NodeProtocol):
 
             # Phase 3: record results into conversation in original order,
             # build logged/real lists, and publish completed events.
+            # Budget-blocked calls are informational only — exclude them from
+            # real_tool_results so the implicit judge does not treat them as
+            # real work and issue a spurious RETRY.
+            _budget_blocked_ids = {tc.tool_use_id for tc in budget_blocked}
             for tc in tool_calls[:executed_in_batch]:
                 result = results_by_id.get(tc.tool_use_id)
                 if result is None:
@@ -2939,15 +3104,20 @@ class EventLoopNode(NodeProtocol):
                     "delegate_to_sub_agent",
                     "report_to_parent",
                 ):
+                    _tool_obj_phase3 = next((t for t in tools if t.name == tc.tool_name), None)
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
                         "tool_name": tc.tool_name,
                         "tool_input": tc.tool_input,
                         "content": result.content,
                         "is_error": result.is_error,
+                        "is_paid": _tool_obj_phase3.is_paid if _tool_obj_phase3 else False,
                         **timing_by_id.get(tc.tool_use_id, {}),
                     }
-                    real_tool_results.append(tool_entry)
+                    # Budget-blocked calls go to log only; real_tool_results is
+                    # used by the implicit judge to decide whether to RETRY.
+                    if tc.tool_use_id not in _budget_blocked_ids:
+                        real_tool_results.append(tool_entry)
                     logged_tool_calls.append(tool_entry)
 
                 image_content = result.image_content
@@ -3057,6 +3227,8 @@ class EventLoopNode(NodeProtocol):
                     final_system_prompt,
                     final_messages,
                     reported_to_parent,
+                    paid_calls_this_turn,
+                    _total_blocked_this_turn,
                 )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
@@ -3091,6 +3263,8 @@ class EventLoopNode(NodeProtocol):
                     final_system_prompt,
                     final_messages,
                     reported_to_parent,
+                    paid_calls_this_turn,
+                    _total_blocked_this_turn,
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation
@@ -3463,11 +3637,13 @@ class EventLoopNode(NodeProtocol):
         recent_responses: list[str] | None = None,
         recent_tool_fingerprints: list[list[tuple[str, str]]] | None = None,
         pending_input: dict[str, Any] | None = None,
+        paid_calls_used: int | None = None,
     ) -> None:
         """Write checkpoint cursor for crash recovery.
 
-        Persists iteration counter, accumulator outputs, and stall/doom-loop
-        detection state so that resume picks up exactly where execution stopped.
+        Persists iteration counter, accumulator outputs, stall/doom-loop
+        detection state, and economic-mode paid-call counter so that resume
+        picks up exactly where execution stopped.
         """
         return await write_cursor(
             conversation_store=self._conversation_store,
@@ -3478,6 +3654,7 @@ class EventLoopNode(NodeProtocol):
             recent_responses=recent_responses,
             recent_tool_fingerprints=recent_tool_fingerprints,
             pending_input=pending_input,
+            paid_calls_used=paid_calls_used,
         )
 
     async def _drain_injection_queue(self, conversation: NodeConversation, ctx: NodeContext) -> int:

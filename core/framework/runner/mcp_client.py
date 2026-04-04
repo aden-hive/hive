@@ -49,6 +49,7 @@ class MCPTool:
     description: str
     input_schema: dict[str, Any]
     server_name: str
+    annotations: Any = None  # ToolAnnotations or dict from MCP server
 
 
 class MCPClient:
@@ -373,6 +374,7 @@ class MCPClient:
                     description=tool_data.get("description", ""),
                     input_schema=tool_data.get("inputSchema", {}),
                     server_name=self.config.name,
+                    annotations=tool_data.get("annotations"),
                 )
                 self._tools[tool.name] = tool
 
@@ -400,6 +402,7 @@ class MCPClient:
                     "name": tool.name,
                     "description": tool.description,
                     "inputSchema": tool.inputSchema,
+                    "annotations": getattr(tool, "annotations", None),
                 }
             )
 

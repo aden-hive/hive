@@ -152,7 +152,7 @@ def register_tools(
             "brave_api_key": os.getenv("BRAVE_SEARCH_API_KEY"),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def web_search(
         query: str,
         num_results: int = 10,

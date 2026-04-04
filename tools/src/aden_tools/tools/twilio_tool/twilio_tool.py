@@ -95,7 +95,7 @@ def register_tools(
 ) -> None:
     """Register Twilio tools with the MCP server."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def twilio_send_sms(
         to: str,
         from_number: str,
@@ -131,7 +131,7 @@ def register_tools(
 
         return _extract_message(data)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def twilio_send_whatsapp(
         to: str,
         from_number: str,
@@ -173,7 +173,7 @@ def register_tools(
 
         return _extract_message(data)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def twilio_list_messages(
         to: str = "",
         from_number: str = "",
@@ -208,7 +208,7 @@ def register_tools(
         messages = [_extract_message(m) for m in data.get("messages", [])]
         return {"messages": messages, "count": len(messages)}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def twilio_get_message(message_sid: str) -> dict[str, Any]:
         """
         Get details about a specific Twilio message.
@@ -232,7 +232,7 @@ def register_tools(
 
         return _extract_message(data)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def twilio_list_phone_numbers() -> dict[str, Any]:
         """
         List phone numbers owned by the Twilio account.
@@ -265,7 +265,7 @@ def register_tools(
             )
         return {"phone_numbers": numbers, "count": len(numbers)}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def twilio_list_calls(
         to: str = "",
         from_number: str = "",
@@ -319,7 +319,7 @@ def register_tools(
             )
         return {"calls": calls, "count": len(calls)}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def twilio_delete_message(message_sid: str) -> dict[str, Any]:
         """
         Delete a message from Twilio.

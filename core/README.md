@@ -40,6 +40,20 @@ uv run python -m framework shell exports/calculator
 uv run python -m framework info exports/calculator
 ```
 
+### Economic Mode
+
+Limit how many paid external API calls (e.g. web search, data enrichment) an agent can make per node with `--node-budget`:
+
+```bash
+# Allow at most 2 paid tool calls per node
+uv run hive run examples/templates/deep_research_agent --node-budget 2
+
+# Block all paid tool calls (free tools only)
+uv run hive run examples/templates/deep_research_agent --node-budget 0
+```
+
+When the budget is exhausted the agent receives an error result and paid tools are hidden from its tool list, so it adapts gracefully using free alternatives. Budget usage is tracked in the runtime logs (`paid_tool_calls_used`, `budget_blocked_calls`) at both node and run level.
+
 ### Using the Runtime
 
 ```python

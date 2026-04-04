@@ -26,6 +26,8 @@ class ToolCallLog(BaseModel):
     is_error: bool = False
     start_timestamp: str = ""  # ISO 8601 timestamp when tool execution started
     duration_s: float = 0.0  # Wall-clock execution time in seconds
+    # Economic mode: True when this tool call counts against the paid budget.
+    is_paid: bool = False
 
 
 class NodeStepLog(BaseModel):
@@ -89,6 +91,9 @@ class NodeDetail(BaseModel):
     retry_count: int = 0
     escalate_count: int = 0
     continue_count: int = 0
+    # Economic mode:
+    paid_tool_calls_used: int = 0
+    budget_blocked_calls: int = 0   # paid calls blocked due to exhausted budget
     needs_attention: bool = False
     attention_reasons: list[str] = Field(default_factory=list)
     # OTel / trace context (from observability; empty if not set):
@@ -120,6 +125,11 @@ class RunSummaryLog(BaseModel):
     started_at: str = ""  # ISO timestamp
     duration_ms: int = 0
     execution_quality: str = ""  # "clean"|"degraded"|"failed"
+    # Economic mode:
+    economic_mode: bool = False       # True when --node-budget was set
+    node_budget: int = 0              # max_paid_calls_per_node for this run
+    total_paid_tool_calls: int = 0    # sum across all nodes
+    budget_blocked_calls: int = 0     # paid calls blocked (returned error) due to exhausted budget
     # OTel / trace context (from observability; empty if not set):
     trace_id: str = ""
     execution_id: str = ""

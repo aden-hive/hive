@@ -82,7 +82,7 @@ def register_tools(
 ) -> None:
     """Register Cloudinary tools with the MCP server."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def cloudinary_upload(
         file_url: str,
         public_id: str = "",
@@ -133,7 +133,7 @@ def register_tools(
             "created_at": result.get("created_at", ""),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def cloudinary_list_resources(
         resource_type: str = "image",
         max_results: int = 30,
@@ -178,7 +178,7 @@ def register_tools(
             )
         return {"resources": resources, "count": len(resources)}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def cloudinary_get_resource(
         public_id: str,
         resource_type: str = "image",
@@ -217,7 +217,7 @@ def register_tools(
             "status": data.get("status", ""),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def cloudinary_delete_resource(
         public_id: str,
         resource_type: str = "image",
@@ -245,7 +245,7 @@ def register_tools(
 
         return {"public_id": public_id, "result": data.get("result", "unknown")}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def cloudinary_search(
         expression: str,
         max_results: int = 30,
@@ -294,7 +294,7 @@ def register_tools(
             "total_count": data.get("total_count", 0),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def cloudinary_get_usage() -> dict[str, Any]:
         """
         Get current Cloudinary account usage and limits.
@@ -333,7 +333,7 @@ def register_tools(
             "last_updated": data.get("last_updated", ""),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def cloudinary_rename_resource(
         from_public_id: str,
         to_public_id: str,
@@ -377,7 +377,7 @@ def register_tools(
             "status": "renamed",
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def cloudinary_add_tag(
         tag: str,
         public_ids: str,

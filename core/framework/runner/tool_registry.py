@@ -808,6 +808,19 @@ class ToolRegistry:
         properties = {k: v for k, v in properties.items() if k not in self.CONTEXT_PARAMS}
         required = [r for r in required if r not in self.CONTEXT_PARAMS]
 
+        # Read is_paid from MCP tool annotations (set by tool authors via
+        # @mcp.tool(annotations={"is_paid": True})).
+        # ToolAnnotations is a Pydantic model with extra="allow", so is_paid is
+        # preserved as an attribute but .get() doesn't exist on Pydantic models.
+        _annotations = getattr(mcp_tool, "annotations", None)
+        if _annotations is None:
+            _is_paid = False
+        elif isinstance(_annotations, dict):
+            _is_paid = bool(_annotations.get("is_paid", False))
+        else:
+            # Pydantic model (ToolAnnotations with extra="allow")
+            _is_paid = bool(getattr(_annotations, "is_paid", False))
+
         # Convert to framework Tool format
         tool = Tool(
             name=mcp_tool.name,
@@ -817,6 +830,7 @@ class ToolRegistry:
                 "properties": properties,
                 "required": required,
             },
+            is_paid=_is_paid,
         )
 
         return tool

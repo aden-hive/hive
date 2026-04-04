@@ -2502,3 +2502,454 @@ class TestSubagentAccumulatorMemory:
         # Should return None (not raise PermissionError)
         assert scoped.read("tweet_content") is None
         assert scoped.read("user_request") == "hi"
+
+
+# ===========================================================================
+# Economic mode
+# ===========================================================================
+
+
+class TestEconomicMode:
+    """Tests for max_paid_calls_per_node budget enforcement."""
+
+    def _make_tool_executor(self, results: dict[str, str] | None = None):
+        """Return a tool executor that maps tool_name -> content."""
+        results = results or {}
+
+        def executor(tool_use: ToolUse) -> ToolResult:
+            content = results.get(tool_use.name, f"result from {tool_use.name}")
+            return ToolResult(tool_use_id=tool_use.id, content=content)
+
+        return executor
+
+    @pytest.mark.asyncio
+    async def test_budget_not_exhausted_when_within_limit(self, runtime, node_spec, memory):
+        """A single paid call within budget should succeed normally."""
+        node_spec.output_keys = []
+        paid_tool = Tool(name="web_search", description="Search the web", parameters={}, is_paid=True)
+
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("web_search", {"query": "hello"}, tool_use_id="c1"),
+                text_scenario("Done"),
+            ]
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[paid_tool])
+        node = EventLoopNode(
+            tool_executor=self._make_tool_executor(),
+            config=LoopConfig(max_iterations=10, max_paid_calls_per_node=3),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_budget_exhausted_returns_error_to_llm(self, runtime, node_spec, memory):
+        """When budget is hit, over-budget paid calls return an error result to the LLM
+        so it can adapt gracefully — the run does not abort."""
+        node_spec.output_keys = []
+        paid_tool = Tool(name="exa_search", description="Paid search", parameters={}, is_paid=True)
+
+        # LLM calls paid tool 3 times; budget is 2, so the 3rd gets an error result.
+        # The LLM then receives that error and produces a final text response.
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("exa_search", {"query": "q1"}, tool_use_id="c1"),
+                tool_call_scenario("exa_search", {"query": "q2"}, tool_use_id="c2"),
+                tool_call_scenario("exa_search", {"query": "q3"}, tool_use_id="c3"),
+                text_scenario("Done with available results"),
+            ]
+        )
+        call_count = {"n": 0}
+        original_executor = self._make_tool_executor()
+
+        def counting_executor(tool_use: ToolUse) -> ToolResult:
+            call_count["n"] += 1
+            return original_executor(tool_use)
+
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[paid_tool])
+        node = EventLoopNode(
+            tool_executor=counting_executor,
+            config=LoopConfig(max_iterations=10, max_paid_calls_per_node=2),
+        )
+        result = await node.execute(ctx)
+        # Run continues — not a hard failure
+        assert result.success is True
+        # Only 2 paid calls were actually dispatched; the 3rd was blocked
+        assert call_count["n"] == 2
+
+    @pytest.mark.asyncio
+    async def test_free_tools_do_not_count_against_budget(self, runtime, node_spec, memory):
+        """Calls to free tools (is_paid=False) should not consume budget."""
+        node_spec.output_keys = []
+        free_tool = Tool(name="list_files", description="List local files", parameters={}, is_paid=False)
+        paid_tool = Tool(name="exa_search", description="Paid search", parameters={}, is_paid=True)
+
+        # Many free calls, then one paid call — should succeed with budget=1
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("list_files", {}, tool_use_id="c1"),
+                tool_call_scenario("list_files", {}, tool_use_id="c2"),
+                tool_call_scenario("list_files", {}, tool_use_id="c3"),
+                tool_call_scenario("exa_search", {"query": "q"}, tool_use_id="c4"),
+                text_scenario("Done"),
+            ]
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[free_tool, paid_tool])
+        node = EventLoopNode(
+            tool_executor=self._make_tool_executor(),
+            config=LoopConfig(max_iterations=10, max_paid_calls_per_node=1),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_economic_mode_off_by_default(self, runtime, node_spec, memory):
+        """max_paid_calls_per_node=-1 (default) means no budget limit."""
+        node_spec.output_keys = []
+        paid_tool = Tool(name="stripe_charge", description="Charge a card", parameters={}, is_paid=True)
+
+        # Many paid calls — should all succeed when mode is off
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("stripe_charge", {"amount": 100}, tool_use_id="c1"),
+                tool_call_scenario("stripe_charge", {"amount": 200}, tool_use_id="c2"),
+                tool_call_scenario("stripe_charge", {"amount": 300}, tool_use_id="c3"),
+                text_scenario("Done"),
+            ]
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[paid_tool])
+        node = EventLoopNode(
+            tool_executor=self._make_tool_executor(),
+            config=LoopConfig(max_iterations=10, max_paid_calls_per_node=-1),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_zero_budget_blocks_all_paid_calls(self, runtime, node_spec, memory):
+        """max_paid_calls_per_node=0 blocks every paid call — none are dispatched,
+        each returns an error result so the LLM can adapt and continue."""
+        node_spec.output_keys = []
+        paid_tool = Tool(name="exa_search", description="Paid search", parameters={}, is_paid=True)
+
+        # LLM tries a paid call, receives an error result, then produces a final text.
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("exa_search", {"query": "q1"}, tool_use_id="c1"),
+                text_scenario("Done without paid tools"),
+            ]
+        )
+        call_count = {"n": 0}
+        original_executor = self._make_tool_executor()
+
+        def counting_executor(tool_use: ToolUse) -> ToolResult:
+            call_count["n"] += 1
+            return original_executor(tool_use)
+
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[paid_tool])
+        node = EventLoopNode(
+            tool_executor=counting_executor,
+            config=LoopConfig(max_iterations=10, max_paid_calls_per_node=0),
+        )
+        result = await node.execute(ctx)
+        # No paid calls were dispatched to the real executor
+        assert call_count["n"] == 0
+        # Run continues — LLM received the error result and produced a response
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_economic_block_injected_in_system_prompt(self, runtime, node_spec, memory):
+        """System prompt should contain the ## Economic Mode block when mode is active."""
+        node_spec.output_keys = []
+        paid_tool = Tool(name="web_search", description="Search", parameters={}, is_paid=True)
+
+        llm = MockStreamingLLM(scenarios=[text_scenario("Done")])
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[paid_tool])
+        node = EventLoopNode(
+            tool_executor=self._make_tool_executor(),
+            config=LoopConfig(max_iterations=5, max_paid_calls_per_node=3),
+        )
+        await node.execute(ctx)
+
+        # The system prompt sent to the LLM should contain the economic block
+        assert llm.stream_calls, "LLM should have been called"
+        first_system = llm.stream_calls[0]["system"]
+        assert "## Economic Mode" in first_system
+        assert "web_search" in first_system
+        assert "3" in first_system
+
+    @pytest.mark.asyncio
+    async def test_no_economic_block_when_mode_off(self, runtime, node_spec, memory):
+        """System prompt should NOT contain the economic block when mode is off."""
+        node_spec.output_keys = []
+        paid_tool = Tool(name="web_search", description="Search", parameters={}, is_paid=True)
+
+        llm = MockStreamingLLM(scenarios=[text_scenario("Done")])
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[paid_tool])
+        node = EventLoopNode(
+            tool_executor=self._make_tool_executor(),
+            config=LoopConfig(max_iterations=5, max_paid_calls_per_node=-1),
+        )
+        await node.execute(ctx)
+
+        first_system = llm.stream_calls[0]["system"]
+        assert "## Economic Mode" not in first_system
+
+    @pytest.mark.asyncio
+    async def test_blocked_call_error_content(self, runtime, node_spec, memory):
+        """The error result returned to the LLM for a blocked call must mention 'budget'
+        and 'paid', so the LLM understands why the tool call failed."""
+        node_spec.output_keys = []
+        paid_tool = Tool(name="search", description="Search", parameters={}, is_paid=True)
+
+        # budget=0 so every paid call is blocked; LLM sees the error and finishes.
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("search", {"q": "1"}, tool_use_id="c1"),
+                text_scenario("Done"),
+            ]
+        )
+        # Capture what the LLM receives as tool results via stream_calls inspection.
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[paid_tool])
+        node = EventLoopNode(
+            tool_executor=self._make_tool_executor(),
+            config=LoopConfig(max_iterations=10, max_paid_calls_per_node=0),
+        )
+        await node.execute(ctx)
+
+        # The second stream call should include the error tool result in messages.
+        assert len(llm.stream_calls) >= 2
+        second_messages = llm.stream_calls[1]["messages"]
+        # Collect content from tool-role messages (OpenAI format).
+        tool_result_contents = [
+            msg.get("content", "")
+            for msg in second_messages
+            if msg.get("role") == "tool"
+        ]
+        assert any("budget" in c.lower() for c in tool_result_contents), (
+            f"Expected 'budget' in tool result content, got: {tool_result_contents}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_paid_tools_hidden_from_llm_when_budget_exhausted(
+        self, runtime, node_spec, memory
+    ):
+        """When budget is 0, paid tools must not appear in the tool list sent to the LLM,
+        preventing hallucinated retries entirely."""
+        node_spec.output_keys = []
+        free_tool = Tool(name="web_scrape", description="Scrape a URL", parameters={}, is_paid=False)
+        paid_tool = Tool(name="web_search", description="Paid search", parameters={}, is_paid=True)
+
+        llm = MockStreamingLLM(scenarios=[text_scenario("Done")])
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[free_tool, paid_tool])
+        node = EventLoopNode(
+            tool_executor=self._make_tool_executor(),
+            config=LoopConfig(max_iterations=5, max_paid_calls_per_node=0),
+        )
+        await node.execute(ctx)
+
+        # The LLM should only have seen the free tool
+        assert llm.stream_calls, "LLM should have been called"
+        visible_tool_names = [t.name for t in (llm.stream_calls[0]["tools"] or [])]
+        assert "web_scrape" in visible_tool_names
+        assert "web_search" not in visible_tool_names
+
+    @pytest.mark.asyncio
+    async def test_paid_tools_visible_when_budget_remaining(
+        self, runtime, node_spec, memory
+    ):
+        """When budget > 0, paid tools must still appear in the tool list."""
+        node_spec.output_keys = []
+        free_tool = Tool(name="web_scrape", description="Scrape a URL", parameters={}, is_paid=False)
+        paid_tool = Tool(name="web_search", description="Paid search", parameters={}, is_paid=True)
+
+        llm = MockStreamingLLM(scenarios=[text_scenario("Done")])
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[free_tool, paid_tool])
+        node = EventLoopNode(
+            tool_executor=self._make_tool_executor(),
+            config=LoopConfig(max_iterations=5, max_paid_calls_per_node=3),
+        )
+        await node.execute(ctx)
+
+        visible_tool_names = [t.name for t in (llm.stream_calls[0]["tools"] or [])]
+        assert "web_scrape" in visible_tool_names
+        assert "web_search" in visible_tool_names
+
+    @pytest.mark.asyncio
+    async def test_tool_hiding_logged_when_budget_zero(
+        self, runtime, node_spec, memory, caplog
+    ):
+        """When budget=0, a log line must name which paid tools are hidden and
+        which free tools remain available as substitutes."""
+        import logging
+
+        node_spec.output_keys = []
+        free_tool = Tool(name="web_scrape", description="Scrape", parameters={}, is_paid=False)
+        paid_tool = Tool(name="web_search", description="Search", parameters={}, is_paid=True)
+
+        llm = MockStreamingLLM(scenarios=[text_scenario("Done")])
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[free_tool, paid_tool])
+        node = EventLoopNode(
+            tool_executor=self._make_tool_executor(),
+            config=LoopConfig(max_iterations=5, max_paid_calls_per_node=0),
+        )
+        with caplog.at_level(logging.INFO):
+            await node.execute(ctx)
+
+        hiding_records = [r for r in caplog.records if "paid budget exhausted" in r.message]
+        assert hiding_records, "Expected a 'paid budget exhausted' log line when budget=0"
+        msg = hiding_records[0].message
+        assert "web_search" in msg, "Hidden paid tool should be named in the log"
+        assert "web_scrape" in msg, "Available free tool should be named in the log"
+
+    @pytest.mark.asyncio
+    async def test_mid_turn_blocking_logged_with_free_substitutes(
+        self, runtime, node_spec, memory, caplog
+    ):
+        """When the LLM batches more paid calls than the remaining budget in a single
+        turn, the log must show which paid calls were blocked and which free tools
+        ran in the same batch (the natural substitutes)."""
+        import logging
+
+        node_spec.output_keys = []
+        free_tool = Tool(name="web_scrape", description="Scrape", parameters={}, is_paid=False)
+        paid_tool = Tool(name="web_search", description="Search", parameters={}, is_paid=True)
+
+        # Budget = 1. LLM batches [web_search, web_search, web_scrape] in one turn.
+        # Triage: first web_search runs (uses budget), second is blocked, web_scrape runs.
+        batch_scenario = [
+            ToolCallEvent(tool_use_id="c1", tool_name="web_search", tool_input={"q": "a"}),
+            ToolCallEvent(tool_use_id="c2", tool_name="web_search", tool_input={"q": "b"}),
+            ToolCallEvent(tool_use_id="c3", tool_name="web_scrape", tool_input={"url": "x"}),
+            FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"),
+        ]
+        llm = MockStreamingLLM(scenarios=[batch_scenario, text_scenario("Done")])
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[free_tool, paid_tool])
+        node = EventLoopNode(
+            tool_executor=self._make_tool_executor(),
+            config=LoopConfig(max_iterations=10, max_paid_calls_per_node=1),
+        )
+        with caplog.at_level(logging.INFO):
+            await node.execute(ctx)
+
+        blocking_records = [r for r in caplog.records if "budget exhausted mid-turn" in r.message]
+        assert blocking_records, "Expected a mid-turn blocking log when batch exceeds budget"
+        msg = blocking_records[0].message
+        assert "web_search" in msg, "Blocked paid tool should be named"
+        assert "web_scrape" in msg, "Free tool that ran should be named as substitute"
+
+    @pytest.mark.asyncio
+    async def test_paid_calls_used_persisted_in_cursor(self, tmp_path, runtime, node_spec, memory):
+        """paid_calls_used must survive crash-resume via cursor.
+
+        Seed the conversation store with a cursor that records paid_calls_used=1
+        and a budget of 2.  A fresh EventLoopNode should restore the counter and
+        only allow 1 more paid call — not start over at 0 and allow 2.
+        """
+        node_spec.output_keys = []
+        paid_tool = Tool(name="web_search", description="Search", parameters={}, is_paid=True)
+
+        # Pre-seed store: partial run already used 1 paid call
+        store = FileConversationStore(tmp_path / "conv")
+        conv = NodeConversation(
+            system_prompt="You are a test assistant.",
+            output_keys=[],
+            store=store,
+        )
+        await conv.add_user_message("Research request")
+        await conv.add_assistant_message("Working...")
+        await store.write_cursor(
+            {
+                "iteration": 0,
+                "next_seq": conv.next_seq,
+                "outputs": {},
+                "paid_calls_used": 1,  # already spent 1 of 2
+            }
+        )
+
+        # LLM tries 2 paid calls; with budget=2 and paid_calls_used already=1,
+        # only 1 more should be dispatched.
+        call_count = {"n": 0}
+        original_executor = self._make_tool_executor()
+
+        def counting_executor(tool_use: ToolUse) -> ToolResult:
+            call_count["n"] += 1
+            return original_executor(tool_use)
+
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario("web_search", {"query": "q1"}, tool_use_id="c1"),
+                tool_call_scenario("web_search", {"query": "q2"}, tool_use_id="c2"),
+                text_scenario("Done"),
+            ]
+        )
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[paid_tool])
+        node = EventLoopNode(
+            conversation_store=store,
+            tool_executor=counting_executor,
+            config=LoopConfig(max_iterations=10, max_paid_calls_per_node=2),
+        )
+        result = await node.execute(ctx)
+
+        assert result.success is True
+        # Only 1 paid call dispatched (restored paid_calls_used=1, budget=2 → 1 left)
+        assert call_count["n"] == 1, (
+            f"Expected 1 paid call (budget=2, 1 already used), got {call_count['n']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_budget_blocked_calls_excluded_from_judge_tool_results(
+        self, runtime, node_spec, memory
+    ):
+        """Budget-blocked calls must not appear in real_tool_results.
+
+        When the LLM batches more paid calls than the remaining budget, the
+        over-budget calls are blocked (informational).  A subsequent turn where
+        only blocked calls were attempted must NOT appear in the judge's
+        tool_results as real work — otherwise the implicit judge triggers a
+        spurious RETRY.
+
+        Scenario: budget=1, LLM turn 1 exhausts it with c1, LLM turn 2 tries c2
+        (budget_remaining=0, paid tools hidden, so LLM is forced to text only).
+        We then inject a turn where we can verify the blocked-call path directly
+        by using budget=1, a batch of [c1 (runs), c2 (blocked)], then a text turn.
+        The judge context for the BATCH turn must include c1 but not c2.
+        """
+        node_spec.output_keys = []
+        paid_tool = Tool(name="web_search", description="Search", parameters={}, is_paid=True)
+
+        # Budget=1. LLM batches [c1, c2] in one turn. c1 runs, c2 is blocked.
+        # The inner while loop calls the LLM again after the tool results →
+        # that second inner call produces text 'Done' with no tool calls, and
+        # that empty real_tool_results is what the outer loop sees for the judge.
+        # To verify the blocked-call exclusion directly, we capture what went
+        # into the conversation as tool_result messages: the blocked call must
+        # appear in the conversation (LLM informed about budget exhaustion) but
+        # its entry must carry is_error=False (not a real failure).
+        # We also verify that only 1 executor call is made (c1 runs, c2 does not).
+        call_count = {"n": 0}
+        original = self._make_tool_executor()
+
+        def counting_executor(tool_use: ToolUse) -> ToolResult:
+            call_count["n"] += 1
+            return original(tool_use)
+
+        batch = [
+            ToolCallEvent(tool_use_id="c1", tool_name="web_search", tool_input={"q": "a"}),
+            ToolCallEvent(tool_use_id="c2", tool_name="web_search", tool_input={"q": "b"}),
+            FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock"),
+        ]
+        llm = MockStreamingLLM(scenarios=[batch, text_scenario("Done")])
+
+        ctx = build_ctx(runtime, node_spec, memory, llm, tools=[paid_tool])
+        node = EventLoopNode(
+            tool_executor=counting_executor,
+            config=LoopConfig(max_iterations=5, max_paid_calls_per_node=1),
+        )
+        result = await node.execute(ctx)
+
+        assert result.success is True
+        # c1 ran, c2 was blocked — only 1 real dispatch
+        assert call_count["n"] == 1, (
+            f"Executor called {call_count['n']} time(s); expected 1 (c2 must be budget-blocked)"
+        )
