@@ -8,6 +8,7 @@ helper functions.
 import json
 import logging
 import os
+from functools import lru_cache
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ HIVE_LLM_ENDPOINT = "https://api.adenhq.com"
 logger = logging.getLogger(__name__)
 
 
+@lru_cache(maxsize=1)
 def get_hive_config() -> dict[str, Any]:
     """Load hive configuration from ~/.hive/configuration.json."""
     if not HIVE_CONFIG_FILE.exists():
