@@ -12,6 +12,7 @@ from framework.llm import LiteLLMProvider
 from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
+from framework.config import RuntimeConfig
 
 from .config import default_config, metadata
 from .nodes import (
@@ -64,7 +65,7 @@ class ResearchAgent:
     Flow: gather_info -> extract_points -> summarize
     """
 
-    def __init__(self, config=None) -> None:
+    def __init__(self, config: RuntimeConfig | None = None) -> None:
         self.config = config or default_config
         self.goal = goal
         self.nodes = nodes
