@@ -31,7 +31,7 @@ except ImportError:
 F = TypeVar("F", bound=Callable[..., Any])
 
 # Log directory setup
-LOG_DIR = Path(__file__).parent.parent.parent.parent.parent / ".hive" / "browser-logs"
+LOG_DIR = Path.home() / ".hive" / "browser-logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Current log file (rotated daily)
