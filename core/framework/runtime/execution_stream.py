@@ -1228,9 +1228,22 @@ class ExecutionStream:
             task.cancel()
             # Wait briefly for the task to finish. Don't block indefinitely —
             # the task may be stuck in a long LLM API call that doesn't
-            # respond to cancellation quickly. The cancellation is already
-            # requested; the task will clean up in the background.
+            # respond to cancellation quickly.
             done, _ = await asyncio.wait({task}, timeout=5.0)
+            if not done:
+                # Task didn't finish within timeout — clean up bookkeeping now
+                # so the session doesn't think it still has running executions.
+                # The task will continue winding down in the background and its
+                # finally block will harmlessly pop already-removed keys.
+                logger.warning(
+                    "Execution %s did not finish within cancel timeout; "
+                    "force-cleaning bookkeeping",
+                    execution_id,
+                )
+                async with self._lock:
+                    self._active_executions.pop(execution_id, None)
+                    self._execution_tasks.pop(execution_id, None)
+                self._active_executors.pop(execution_id, None)
             return True
         return False
 
