@@ -44,7 +44,7 @@ Hive is a runtime harness for AI agents in production. You describe your goal in
 
 Visit [adenhq.com](https://adenhq.com) for complete documentation, examples, and guides.
 
-Visit [HoneyComb](http://honeycomb.open-hive.com/) to see what jobs are being automated by AI. It’s a stock market for jobs, driven by our community’s AI agent progress. You can long and short jobs (with no real money but compute token)based on how much you think a job is going to be replaced by AI.
+Visit [HoneyComb](http://honeycomb.open-hive.com/) to see what jobs are being automated by AI. It’s a stock market for jobs, driven by our community’s AI agent progress. You can long and short jobs (with no real money but compute token) based on how much you think a job is going to be replaced by AI.
 
 https://github.com/user-attachments/assets/bf10edc3-06ba-48b6-98ba-d069b15fb69d
 
