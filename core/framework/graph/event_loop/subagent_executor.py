@@ -229,7 +229,12 @@ async def execute_subagent(
             f"for each required key: {subagent_spec.output_keys}\n"
             f"Alternatively, call report_to_parent(mark_complete=true) "
             f"with your findings in message/data.\n"
-            f"You have a maximum of {max_iter} turns to complete this task."
+            + (
+                "Before finishing, call browser_close_finished() to clean up your browser tabs.\n"
+                if subagent_spec.node_type == "gcu"
+                else ""
+            )
+            + f"You have a maximum of {max_iter} turns to complete this task."
         ),
         goal=ctx.goal,
         max_tokens=ctx.max_tokens,
