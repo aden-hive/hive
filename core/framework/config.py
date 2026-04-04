@@ -8,6 +8,7 @@ helper functions.
 import json
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,20 +27,46 @@ HIVE_LLM_ENDPOINT = "https://api.adenhq.com"
 logger = logging.getLogger(__name__)
 
 
+import threading
+
+# Configuration singleton cache with thread-safe lock
+_CONFIG_CACHE: dict[str, Any] | None = None
+_CONFIG_MTIME: float = 0
+_CONFIG_LOCK = threading.Lock()
+
+
 def get_hive_config() -> dict[str, Any]:
-    """Load hive configuration from ~/.hive/configuration.json."""
+    """Load hive configuration from ~/.hive/configuration.json with thread-safe caching.
+
+    Uses mtime-based invalidation to avoid redundant disk reads while ensuring
+    concurrent requests do not trigger multiple parses.
+    """
+    global _CONFIG_CACHE, _CONFIG_MTIME
+
     if not HIVE_CONFIG_FILE.exists():
         return {}
-    try:
-        with open(HIVE_CONFIG_FILE, encoding="utf-8-sig") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning(
-            "Failed to load Hive config %s: %s",
-            HIVE_CONFIG_FILE,
-            e,
-        )
-        return {}
+
+    with _CONFIG_LOCK:
+        try:
+            current_mtime = HIVE_CONFIG_FILE.stat().st_mtime
+            # Return cached version if file has not been modified since last load
+            if _CONFIG_CACHE is not None and current_mtime <= _CONFIG_MTIME:
+                return _CONFIG_CACHE
+
+            # Parse config from disk
+            with open(HIVE_CONFIG_FILE, encoding="utf-8-sig") as f:
+                _CONFIG_CACHE = json.load(f)
+                _CONFIG_MTIME = current_mtime
+                return _CONFIG_CACHE
+
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(
+                "Failed to load Hive config %s: %s. Using stale cache if available.",
+                HIVE_CONFIG_FILE,
+                e,
+            )
+            # Return last known good config or empty dict on failure
+            return _CONFIG_CACHE or {}
 
 
 # ---------------------------------------------------------------------------
