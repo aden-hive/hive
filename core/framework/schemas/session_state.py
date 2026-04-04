@@ -256,7 +256,11 @@ class SessionState(BaseModel):
                 error=result.error,
                 output=result.output,
             ),
-            data_buffer=result.session_state.get("data_buffer", result.session_state.get("memory", {})) if result.session_state else {},
+            data_buffer=result.session_state.get(
+                "data_buffer", result.session_state.get("memory", {})
+            )
+            if result.session_state
+            else {},
             input_data=input_data or {},
         )
 

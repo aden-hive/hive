@@ -83,7 +83,7 @@ async def test_escalation_worker_calls_escalate(runtime, goal, llm_provider, tmp
             ),
             timeout=30,
         )
-    except (TimeoutError, _asyncio.TimeoutError):
+    except TimeoutError:
         pass  # Expected: worker hangs waiting for queen
 
     artifact.record_value(

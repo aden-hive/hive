@@ -47,7 +47,7 @@ def test_tools_registry_has_expected_tools(tool_registry, artifact):
     )
     artifact.record_value("expected_tools", sorted(expected))
 
-    missing = expected - tool_names
+    missing = expected - tool_names  # noqa: F841
     artifact.check(
         "expected tools present",
         expected.issubset(tool_names),

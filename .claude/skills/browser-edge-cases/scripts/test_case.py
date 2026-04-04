@@ -97,7 +97,7 @@ async def test_problematic_site(bridge: BeelineBridge, tab_id: int) -> dict:
                 });
                 return results;
             })();
-        """
+        """,
         )
         print(f"  Before scroll: {before.get('result', {})}")
 
@@ -126,7 +126,7 @@ async def test_problematic_site(bridge: BeelineBridge, tab_id: int) -> dict:
                 });
                 return results;
             })();
-        """
+        """,
         )
         print(f"  After scroll: {after.get('result', {})}")
 
@@ -137,8 +137,14 @@ async def test_problematic_site(bridge: BeelineBridge, tab_id: int) -> dict:
         changed = False
         for key in after_data:
             if key in before_data:
-                b_val = before_data[key].get("scrollTop", 0) if isinstance(before_data[key], dict) else 0
-                a_val = after_data[key].get("scrollTop", 0) if isinstance(after_data[key], dict) else 0
+                b_val = (
+                    before_data[key].get("scrollTop", 0)
+                    if isinstance(before_data[key], dict)
+                    else 0
+                )
+                a_val = (
+                    after_data[key].get("scrollTop", 0) if isinstance(after_data[key], dict) else 0
+                )
                 if a_val != b_val:
                     print(f"  ✓ CHANGE DETECTED: {key} scrolled from {b_val} to {a_val}")
                     changed = True
@@ -194,7 +200,7 @@ async def detect_root_cause(bridge: BeelineBridge, tab_id: int) -> dict:
                 largest: candidates[0]
             };
         })();
-    """
+    """,
     )
     detections["nested_scroll"] = scroll_check.get("result", {})
     print(f"  Nested scroll containers: {detections['nested_scroll']}")
@@ -212,7 +218,7 @@ async def detect_root_cause(bridge: BeelineBridge, tab_id: int) -> dict:
             });
             return { count: withShadow.length, elements: withShadow.slice(0, 5) };
         })();
-    """
+    """,
     )
     detections["shadow_dom"] = shadow_check.get("result", {})
     print(f"  Shadow DOM: {detections['shadow_dom']}")
@@ -225,7 +231,7 @@ async def detect_root_cause(bridge: BeelineBridge, tab_id: int) -> dict:
             const iframes = document.querySelectorAll('iframe');
             return { count: iframes.length };
         })();
-    """
+    """,
     )
     detections["iframes"] = iframe_check.get("result", {})
     print(f"  iframes: {detections['iframes']}")
@@ -240,7 +246,7 @@ async def detect_root_cause(bridge: BeelineBridge, tab_id: int) -> dict:
                 body_children: document.body.children.length
             };
         })();
-    """
+    """,
     )
     detections["dom_size"] = dom_check.get("result", {})
     print(f"  DOM size: {detections['dom_size']}")
@@ -256,7 +262,7 @@ async def detect_root_cause(bridge: BeelineBridge, tab_id: int) -> dict:
                 angular: !!document.querySelector('[ng-app], [ng-version]')
             };
         })();
-    """
+    """,
     )
     detections["frameworks"] = framework_check.get("result", {})
     print(f"  Frameworks: {detections['frameworks']}")
@@ -289,7 +295,7 @@ async def main():
             if bridge.is_connected:
                 print("✓ Extension connected!")
                 break
-            print(f"Waiting for extension... ({i+1}/10)")
+            print(f"Waiting for extension... ({i + 1}/10)")
         else:
             print("✗ Extension not connected. Ensure Chrome with Beeline extension is running.")
             return

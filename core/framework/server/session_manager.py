@@ -324,9 +324,9 @@ class SessionManager:
             runtime = runner._agent_runtime
 
             if runtime is not None:
-                runtime._dynamic_memory_provider_factory = (
-                    lambda execution_id, session=session: (
-                        lambda execution_id=execution_id, session=session: session.worker_colony_recall_blocks.get(
+                runtime._dynamic_memory_provider_factory = lambda execution_id, session=session: (
+                    lambda execution_id=execution_id, session=session: (
+                        session.worker_colony_recall_blocks.get(
                             execution_id,
                             "",
                         )
@@ -716,7 +716,9 @@ class SessionManager:
             from framework.agents.queen.reflection_agent import run_long_reflection
 
             asyncio.create_task(
-                run_long_reflection(_llm, memory_dir=colony_memory_dir(_storage_id), caller="queen"),
+                run_long_reflection(
+                    _llm, memory_dir=colony_memory_dir(_storage_id), caller="queen"
+                ),
                 name=f"queen-memory-long-reflection-{session_id}",
             )
 
@@ -780,9 +782,9 @@ class SessionManager:
         colony_dir = colony_memory_dir(session.id)
         init_memory_dir(colony_dir, migrate_legacy=True)
 
-        runtime._dynamic_memory_provider_factory = (
-            lambda execution_id, session=session: (
-                lambda execution_id=execution_id, session=session: session.worker_colony_recall_blocks.get(
+        runtime._dynamic_memory_provider_factory = lambda execution_id, session=session: (
+            lambda execution_id=execution_id, session=session: (
+                session.worker_colony_recall_blocks.get(
                     execution_id,
                     "",
                 )
@@ -833,7 +835,11 @@ class SessionManager:
         """
         from framework.server.queen_orchestrator import create_queen
 
-        logger.debug("[_start_queen] Starting for session %s, current queen_executor=%s", session.id, session.queen_executor)
+        logger.debug(
+            "[_start_queen] Starting for session %s, current queen_executor=%s",
+            session.id,
+            session.queen_executor,
+        )
 
         hive_home = Path.home() / ".hive"
 
@@ -926,7 +932,11 @@ class SessionManager:
             queen_dir=queen_dir,
             initial_prompt=initial_prompt,
         )
-        logger.debug("[_start_queen] create_queen returned, queen_task=%s, queen_executor=%s", session.queen_task, session.queen_executor)
+        logger.debug(
+            "[_start_queen] create_queen returned, queen_task=%s, queen_executor=%s",
+            session.queen_task,
+            session.queen_executor,
+        )
 
         # Auto-load worker on cold restore — the queen's conversation expects
         # the agent to be loaded, but the new session has no worker.
@@ -1092,7 +1102,11 @@ class SessionManager:
         """
         from framework.tools.queen_lifecycle_tools import build_worker_profile
 
-        logger.debug("[revive_queen] Starting revival for session '%s', current queen_executor=%s", session.id, session.queen_executor)
+        logger.debug(
+            "[revive_queen] Starting revival for session '%s', current queen_executor=%s",
+            session.id,
+            session.queen_executor,
+        )
 
         # Build worker identity if worker is loaded
         worker_identity = (
@@ -1104,11 +1118,13 @@ class SessionManager:
 
         # Start queen with existing session context
         logger.debug("[revive_queen] Calling _start_queen...")
-        await self._start_queen(
-            session, worker_identity=worker_identity
-        )
+        await self._start_queen(session, worker_identity=worker_identity)
 
-        logger.info("Queen revived for session '%s', new queen_executor=%s", session.id, session.queen_executor)
+        logger.info(
+            "Queen revived for session '%s', new queen_executor=%s",
+            session.id,
+            session.queen_executor,
+        )
 
     # ------------------------------------------------------------------
     # Lookups

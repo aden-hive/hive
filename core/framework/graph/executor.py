@@ -18,17 +18,17 @@ from typing import Any
 
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.context import GraphContext, build_node_context
+from framework.graph.conversation import LEGACY_RUN_ID
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Goal
-from framework.graph.conversation import LEGACY_RUN_ID, get_run_cursor
 from framework.graph.node import (
+    DataBuffer,
     NodeProtocol,
     NodeResult,
     NodeSpec,
-    DataBuffer,
 )
 from framework.graph.validator import OutputValidator
-from framework.llm.provider import LLMProvider, Tool, ToolUse
+from framework.llm.provider import LLMProvider, Tool
 from framework.observability import set_trace_context
 from framework.runtime.core import Runtime
 from framework.schemas.checkpoint import Checkpoint
@@ -205,7 +205,14 @@ class GraphExecutor:
         self.approval_callback = approval_callback
         self.validator = OutputValidator()
         self.logger = logging.getLogger(__name__)
-        self.logger.debug("[GraphExecutor.__init__] Created with stream_id=%s, execution_id=%s, initial node_registry keys: %s", stream_id, execution_id, list(self.node_registry.keys()))
+        self.logger.debug(
+            "[GraphExecutor.__init__] Created with"
+            " stream_id=%s, execution_id=%s,"
+            " initial node_registry keys: %s",
+            stream_id,
+            execution_id,
+            list(self.node_registry.keys()),
+        )
         self._event_bus = event_bus
         self._stream_id = stream_id
         self._execution_id = execution_id or getattr(runtime, "execution_id", "")
@@ -529,13 +536,15 @@ class GraphExecutor:
 
         # Continuous conversation mode state
         is_continuous = getattr(graph, "conversation_mode", "isolated") == "continuous"
-        continuous_conversation = None  # NodeConversation threaded across nodes
-        cumulative_tools: list = []  # Tools accumulate, never removed
-        cumulative_tool_names: set[str] = set()
-        cumulative_output_keys: list[str] = []  # Output keys from all visited nodes
+        continuous_conversation = None  # NodeConversation threaded across nodes  # noqa: F841
+        cumulative_tools: list = []  # Tools accumulate, never removed  # noqa: F841
+        cumulative_tool_names: set[str] = set()  # noqa: F841
+        cumulative_output_keys: list[str] = []  # noqa: F841
 
         # Build node registry for subagent lookup
-        node_registry: dict[str, NodeSpec] = {node.id: node for node in graph.nodes}
+        node_registry: dict[str, NodeSpec] = {  # noqa: F841
+            node.id: node for node in graph.nodes
+        }
 
         # Initialize checkpoint store if checkpointing is enabled
         checkpoint_store: CheckpointStore | None = None
@@ -575,10 +584,7 @@ class GraphExecutor:
         # input_data would overwrite intermediate results with stale values.
         _is_resuming = bool(
             session_state
-            and (
-                session_state.get("paused_at")
-                or session_state.get("resume_from_checkpoint")
-            )
+            and (session_state.get("paused_at") or session_state.get("resume_from_checkpoint"))
         )
         if input_data and not _is_resuming:
             for key, value in input_data.items():
@@ -588,9 +594,9 @@ class GraphExecutor:
         _event_triggered = bool(input_data and isinstance(input_data.get("event"), dict))
 
         path: list[str] = []
-        total_tokens = 0
-        total_latency = 0
-        node_retry_counts: dict[str, int] = {}  # Track retries per node
+        total_tokens = 0  # noqa: F841
+        total_latency = 0  # noqa: F841
+        node_retry_counts: dict[str, int] = {}  # noqa: F841
         node_visit_counts: dict[str, int] = {}  # Track visits for feedback loops
         _is_retry = False  # True when looping back for a retry (not a new visit)
 
@@ -661,7 +667,7 @@ class GraphExecutor:
         else:
             current_node_id = graph.get_entry_point(session_state)
 
-        steps = 0
+        steps = 0  # noqa: F841
 
         if session_state and current_node_id != graph.entry_node:
             self.logger.info(f"🔄 Resuming from: {current_node_id}")
@@ -719,7 +725,6 @@ class GraphExecutor:
 
                 ToolRegistry.reset_execution_context(_ctx_token)
 
-
     VALID_NODE_TYPES = {
         "event_loop",
         "gcu",
@@ -739,9 +744,17 @@ class GraphExecutor:
         """Get or create a node implementation."""
         # Check registry first
         if node_spec.id in self.node_registry:
-            logger.debug("[GraphExecutor._get_node_implementation] Found node '%s' in registry", node_spec.id)
+            logger.debug(
+                "[GraphExecutor._get_node_implementation] Found node '%s' in registry", node_spec.id
+            )
             return self.node_registry[node_spec.id]
-        logger.debug("[GraphExecutor._get_node_implementation] Node '%s' not in registry (keys: %s), creating new", node_spec.id, list(self.node_registry.keys()))
+        logger.debug(
+            "[GraphExecutor._get_node_implementation]"
+            " Node '%s' not in registry (keys: %s),"
+            " creating new",
+            node_spec.id,
+            list(self.node_registry.keys()),
+        )
 
         # Reject removed node types with migration guidance
         if node_spec.node_type in self.REMOVED_NODE_TYPES:
@@ -807,7 +820,13 @@ class GraphExecutor:
             )
             # Cache so inject_event() is reachable for queen interaction and escalation routing
             self.node_registry[node_spec.id] = node
-            logger.debug("[GraphExecutor._get_node_implementation] Cached node '%s' in node_registry, registry now has keys: %s", node_spec.id, list(self.node_registry.keys()))
+            logger.debug(
+                "[GraphExecutor._get_node_implementation]"
+                " Cached node '%s' in node_registry,"
+                " registry now has keys: %s",
+                node_spec.id,
+                list(self.node_registry.keys()),
+            )
             return node
 
         # Should never reach here due to validation above
@@ -1408,8 +1427,7 @@ class GraphExecutor:
             if any(w.lifecycle == WorkerLifecycle.RUNNING for w in workers.values()):
                 return False
             return any(
-                tid in completed_terminals or tid in failed_workers
-                for tid in terminal_worker_ids
+                tid in completed_terminals or tid in failed_workers for tid in terminal_worker_ids
             )
 
         def _mark_quiescent_terminal_failure() -> bool:
@@ -1419,8 +1437,7 @@ class GraphExecutor:
             if any(w.lifecycle == WorkerLifecycle.RUNNING for w in workers.values()):
                 return False
             if any(
-                tid in completed_terminals or tid in failed_workers
-                for tid in terminal_worker_ids
+                tid in completed_terminals or tid in failed_workers for tid in terminal_worker_ids
             ):
                 return False
             execution_error = (
@@ -1432,7 +1449,9 @@ class GraphExecutor:
 
         # Track fan-out branch workers for per-branch timeout enforcement
         _fanout_branch_tasks: dict[str, asyncio.Task] = {}  # worker_id → timeout-wrapper task
-        branch_timeout = self._parallel_config.branch_timeout_seconds if self._parallel_config else 300.0
+        branch_timeout = (
+            self._parallel_config.branch_timeout_seconds if self._parallel_config else 300.0
+        )
 
         def _route_activation(
             activation: Activation,
@@ -1468,8 +1487,7 @@ class GraphExecutor:
                 if target_worker._task is not None:
                     # Fan-out branch: wrap with timeout
                     is_fanout_branch = any(
-                        tag.via_branch == activation.target_id
-                        for tag in activation.fan_out_tags
+                        tag.via_branch == activation.target_id for tag in activation.fan_out_tags
                     )
                     if is_fanout_branch and branch_timeout > 0:
                         timed_task = asyncio.ensure_future(
@@ -1526,14 +1544,15 @@ class GraphExecutor:
                     gc.continuous_conversation = completion.conversation
 
             self.logger.info(
-                f"  ✓ Worker completed: {worker_id} "
-                f"({len(activations)} outgoing activation(s))"
+                f"  ✓ Worker completed: {worker_id} ({len(activations)} outgoing activation(s))"
             )
 
             # Route activations to target workers
             for activation in activations:
                 _route_activation(
-                    activation, workers, {},
+                    activation,
+                    workers,
+                    {},
                     has_event_subscription=True,
                 )
 
@@ -1567,8 +1586,8 @@ class GraphExecutor:
                 completion_event.set()
 
         # Subscribe to events (only if event bus has subscribe capability)
-        has_event_subscription = (
-            self._event_bus is not None and hasattr(self._event_bus, "subscribe")
+        has_event_subscription = self._event_bus is not None and hasattr(
+            self._event_bus, "subscribe"
         )
         if has_event_subscription:
             sub_completed = self._event_bus.subscribe(
@@ -1597,9 +1616,7 @@ class GraphExecutor:
             else:
                 # No event bus: wait on worker tasks directly and route completions inline.
                 pending_tasks: dict[str, asyncio.Task] = {
-                    wid: w._task
-                    for wid, w in workers.items()
-                    if w._task is not None
+                    wid: w._task for wid, w in workers.items() if w._task is not None
                 }
                 while True:
                     if _check_graph_done():
@@ -1651,7 +1668,10 @@ class GraphExecutor:
                             task_error = exc
 
                         # Check for fan-out branch timeout
-                        if isinstance(task_error, asyncio.TimeoutError) and wid in _fanout_branch_tasks:
+                        if (
+                            isinstance(task_error, asyncio.TimeoutError)
+                            and wid in _fanout_branch_tasks
+                        ):
                             error = f"Branch failed (timed out after {branch_timeout}s)"
                             failed_workers[wid] = error
                             worker.lifecycle = WorkerLifecycle.FAILED
@@ -1716,7 +1736,9 @@ class GraphExecutor:
                             # Route activations
                             for activation in outgoing_activations:
                                 _route_activation(
-                                    activation, workers, pending_tasks,
+                                    activation,
+                                    workers,
+                                    pending_tasks,
                                     has_event_subscription=False,
                                 )
 
@@ -1744,7 +1766,9 @@ class GraphExecutor:
                             if outgoing_activations:
                                 for activation in outgoing_activations:
                                     _route_activation(
-                                        activation, workers, pending_tasks,
+                                        activation,
+                                        workers,
+                                        pending_tasks,
                                         has_event_subscription=False,
                                     )
                         elif task_error is not None:

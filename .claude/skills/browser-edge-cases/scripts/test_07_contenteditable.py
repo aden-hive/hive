@@ -10,7 +10,6 @@ Fix: Focus via JavaScript, use execCommand('insertText') or Input.dispatchKeyEve
 
 import asyncio
 import sys
-import base64
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "tools" / "src"))
@@ -54,10 +53,14 @@ async def test_contenteditable():
             <h2>ContentEditable Test</h2>
 
             <h3>1. Simple contenteditable div</h3>
-            <div id="editor1" contenteditable="true" style="border:1px solid #ccc;padding:10px;min-height:50px;">Start text</div>
+            <div id="editor1" contenteditable="true"
+            style="border:1px solid #ccc;padding:10px;
+            min-height:50px;">Start text</div>
 
             <h3>2. Rich text editor (like Notion)</h3>
-            <div id="editor2" contenteditable="true" style="border:1px solid #ccc;padding:10px;min-height:50px;">
+            <div id="editor2" contenteditable="true"
+            style="border:1px solid #ccc;padding:10px;
+            min-height:50px;">
                 <p>Type here...</p>
             </div>
 
@@ -106,7 +109,7 @@ async def test_contenteditable():
                     ids: Array.from(editables).map(el => el.id)
                 };
             })();
-        """
+        """,
         )
         print(f"Contenteditable detection: {detection.get('result', {})}")
 
@@ -115,8 +118,7 @@ async def test_contenteditable():
         await bridge.click(tab_id, "#input1")
         await bridge.type_text(tab_id, "#input1", "Hello input")
         input_result = await bridge.evaluate(
-            tab_id,
-            "(function() { return document.getElementById('input1').value; })()"
+            tab_id, "(function() { return document.getElementById('input1').value; })()"
         )
         print(f"Input value: {input_result.get('result', '')}")
 
@@ -126,7 +128,7 @@ async def test_contenteditable():
         await bridge.type_text(tab_id, "#editor1", "Hello contenteditable", clear_first=True)
         editor_result = await bridge.evaluate(
             tab_id,
-            "(function() { return document.getElementById('editor1').innerText; })()"
+            "(function() { return document.getElementById('editor1').innerText; })()",
         )
         print(f"Editor1 innerText: {editor_result.get('result', '')}")
 
@@ -142,7 +144,7 @@ async def test_contenteditable():
                 document.execCommand('insertText', false, 'Hello from execCommand');
                 return editor.innerText;
             })();
-        """
+        """,
         )
         print(f"Editor2 after execCommand: {insert_result.get('result', '')}")
 

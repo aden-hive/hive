@@ -166,7 +166,7 @@ class QueenPhaseState:
 
         from framework.agents.queen.queen_memory import format_for_injection
 
-        memory = format_for_injection()
+        _memory = format_for_injection()  # noqa: F841
         parts = []
         if self.persona_prefix:
             parts.append(self.persona_prefix)
@@ -1130,9 +1130,7 @@ def register_queen_lifecycle_tools(
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register(
-        "stop_graph_and_edit", _stop_edit_tool, lambda inputs: stop_graph_and_edit()
-    )
+    registry.register("stop_graph_and_edit", _stop_edit_tool, lambda inputs: stop_graph_and_edit())
     tools_registered += 1
 
     # --- stop_graph_and_plan (Running/Staging → Planning) ---------------------
@@ -1164,9 +1162,7 @@ def register_queen_lifecycle_tools(
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register(
-        "stop_graph_and_plan", _stop_plan_tool, lambda inputs: stop_graph_and_plan()
-    )
+    registry.register("stop_graph_and_plan", _stop_plan_tool, lambda inputs: stop_graph_and_plan())
     tools_registered += 1
 
     # --- replan_agent (Building → Planning) -----------------------------------
@@ -3221,9 +3217,7 @@ def register_queen_lifecycle_tools(
                 "focus": {
                     "type": "string",
                     "enum": ["activity", "memory", "tools", "issues", "progress", "full"],
-                    "description": (
-                        "Aspect to inspect. Omit for a brief summary."
-                    ),
+                    "description": ("Aspect to inspect. Omit for a brief summary."),
                 },
                 "last_n": {
                     "type": "integer",
@@ -3310,9 +3304,7 @@ def register_queen_lifecycle_tools(
             "required": ["content"],
         },
     )
-    registry.register(
-        "inject_message", _inject_tool, lambda inputs: inject_message(**inputs)
-    )
+    registry.register("inject_message", _inject_tool, lambda inputs: inject_message(**inputs))
     tools_registered += 1
 
     # --- list_credentials -----------------------------------------------------

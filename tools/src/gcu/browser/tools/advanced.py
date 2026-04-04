@@ -8,13 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Literal
 
 from fastmcp import FastMCP
 
 from ..bridge import get_bridge
-from ..telemetry import log_tool_call
 from .tabs import _get_context
 
 logger = logging.getLogger(__name__)

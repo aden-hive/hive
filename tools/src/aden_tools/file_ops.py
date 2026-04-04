@@ -110,7 +110,8 @@ BINARY_EXTENSIONS = frozenset(
 # ── Context-aware sandboxing ─────────────────────────────────────────────────
 
 # Context variable for additional allowed paths (beyond base_root)
-_allowed_paths_ctx: ContextVar[list[str]] = ContextVar("allowed_paths", default=[])
+_EMPTY_PATHS: list[str] = []
+_allowed_paths_ctx: ContextVar[list[str]] = ContextVar("allowed_paths", default=_EMPTY_PATHS)
 
 
 def set_allowed_paths(paths: list[str]) -> None:
@@ -150,7 +151,7 @@ def create_sandboxed_resolver(
     - Allows absolute paths under base_root or any allowed_path
     - Blocks access outside allowed scopes with a helpful error message
     """
-    hive_dir = os.path.expanduser("~/.hive")
+    hive_dir = os.path.expanduser("~/.hive")  # noqa: F841
 
     def resolve(path: str) -> str:
         # Normalize slashes for cross-platform
@@ -180,10 +181,7 @@ def create_sandboxed_resolver(
 
         # Block and remind
         allowed_str = ", ".join(f"'{p}'" for p in all_allowed)
-        raise ValueError(
-            f"Access denied: '{path}' is not accessible. "
-            f"Allowed paths: {allowed_str}"
-        )
+        raise ValueError(f"Access denied: '{path}' is not accessible. Allowed paths: {allowed_str}")
 
     return resolve
 

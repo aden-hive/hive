@@ -40,13 +40,7 @@ class TestGetSandboxedPath:
 
         result = get_sandboxed_path("subdir/file.txt", agent_id=agent_id["agent_id"])
 
-        expected = (
-            self.sandboxes_dir
-            / "test-agent"
-            / "current"
-            / "subdir"
-            / "file.txt"
-        )
+        expected = self.sandboxes_dir / "test-agent" / "current" / "subdir" / "file.txt"
         assert result == str(expected)
 
     def test_absolute_path_treated_as_relative(self, agent_id):
@@ -55,13 +49,7 @@ class TestGetSandboxedPath:
 
         result = get_sandboxed_path("/etc/passwd", agent_id=agent_id["agent_id"])
 
-        expected = (
-            self.sandboxes_dir
-            / "test-agent"
-            / "current"
-            / "etc"
-            / "passwd"
-        )
+        expected = self.sandboxes_dir / "test-agent" / "current" / "etc" / "passwd"
         assert result == str(expected)
 
     def test_path_traversal_blocked(self, agent_id):
@@ -123,13 +111,7 @@ class TestGetSandboxedPath:
 
         result = get_sandboxed_path("./subdir/file.txt", agent_id=agent_id["agent_id"])
 
-        expected = (
-            self.sandboxes_dir
-            / "test-agent"
-            / "current"
-            / "subdir"
-            / "file.txt"
-        )
+        expected = self.sandboxes_dir / "test-agent" / "current" / "subdir" / "file.txt"
         assert result == str(expected)
 
     def test_deeply_nested_path(self, agent_id):
@@ -139,15 +121,7 @@ class TestGetSandboxedPath:
         result = get_sandboxed_path("a/b/c/d/e/file.txt", agent_id=agent_id["agent_id"])
 
         expected = (
-            self.sandboxes_dir
-            / "test-agent"
-            / "current"
-            / "a"
-            / "b"
-            / "c"
-            / "d"
-            / "e"
-            / "file.txt"
+            self.sandboxes_dir / "test-agent" / "current" / "a" / "b" / "c" / "d" / "e" / "file.txt"
         )
         assert result == str(expected)
 
@@ -157,13 +131,7 @@ class TestGetSandboxedPath:
 
         result = get_sandboxed_path("my folder/my file.txt", agent_id=agent_id["agent_id"])
 
-        expected = (
-            self.sandboxes_dir
-            / "test-agent"
-            / "current"
-            / "my folder"
-            / "my file.txt"
-        )
+        expected = self.sandboxes_dir / "test-agent" / "current" / "my folder" / "my file.txt"
         assert result == str(expected)
 
     def test_path_with_special_characters(self, agent_id):
@@ -172,12 +140,7 @@ class TestGetSandboxedPath:
 
         result = get_sandboxed_path("file-name_v2.0.txt", agent_id=agent_id["agent_id"])
 
-        expected = (
-            self.sandboxes_dir
-            / "test-agent"
-            / "current"
-            / "file-name_v2.0.txt"
-        )
+        expected = self.sandboxes_dir / "test-agent" / "current" / "file-name_v2.0.txt"
         assert result == str(expected)
 
     def test_empty_path(self, agent_id):

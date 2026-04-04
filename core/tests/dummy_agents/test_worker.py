@@ -7,8 +7,6 @@ accomplish tasks, matching how real agents are structured.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec

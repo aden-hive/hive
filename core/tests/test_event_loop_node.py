@@ -21,7 +21,7 @@ from framework.graph.event_loop_node import (
     LoopConfig,
     OutputAccumulator,
 )
-from framework.graph.node import NodeContext, NodeProtocol, NodeSpec, DataBuffer
+from framework.graph.node import DataBuffer, NodeContext, NodeProtocol, NodeSpec
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
     FinishEvent,
@@ -1645,9 +1645,7 @@ class TestTransientErrorRetry:
         assert llm._call_index == 1  # only tried once
 
     @pytest.mark.asyncio
-    async def test_queen_non_transient_error_does_not_crash(
-        self, runtime, node_spec, buffer
-    ):
+    async def test_queen_non_transient_error_does_not_crash(self, runtime, node_spec, buffer):
         """Queen non-transient errors should wait for input, not crash on token vars."""
         node_spec.output_keys = []
         llm = ErrorThenSuccessLLM(

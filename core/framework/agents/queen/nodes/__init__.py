@@ -88,16 +88,13 @@ _QUEEN_PLANNING_TOOLS = [
 ]
 
 # Building phase: full coding + agent construction tools.
-_QUEEN_BUILDING_TOOLS = (
-    _SHARED_TOOLS
-    + [
-        "load_built_agent",
-        "list_credentials",
-        "replan_agent",
-        "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
-        "save_global_memory",
-    ]
-)
+_QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
+    "load_built_agent",
+    "list_credentials",
+    "replan_agent",
+    "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
+    "save_global_memory",
+]
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
 # No backward transitions — staging only goes forward to running.

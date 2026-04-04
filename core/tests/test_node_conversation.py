@@ -8,11 +8,9 @@ from typing import Any
 import pytest
 
 from framework.graph.conversation import (
-    LEGACY_RUN_ID,
     Message,
     NodeConversation,
     extract_tool_call_history,
-    is_legacy_run_id,
 )
 from framework.storage.conversation_store import FileConversationStore
 

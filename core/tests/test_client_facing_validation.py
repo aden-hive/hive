@@ -50,7 +50,9 @@ class TestDeprecatedClientFacingWarnings:
             entry_node="queen",
             nodes=[
                 NodeSpec(id="queen", name="Queen", description="Queen node", client_facing=True),
-                NodeSpec(id="worker", name="Worker", description="Worker node", client_facing=False),
+                NodeSpec(
+                    id="worker", name="Worker", description="Worker node", client_facing=False
+                ),
             ],
             edges=[
                 EdgeSpec(

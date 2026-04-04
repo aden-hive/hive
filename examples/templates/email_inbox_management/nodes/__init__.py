@@ -144,10 +144,7 @@ Do NOT add commentary or explanation. Execute the steps and call set_output when
 classify_and_act_node = NodeSpec(
     id="classify-and-act",
     name="Classify and Act",
-    description=(
-        "Apply the user's rules to each email and execute "
-        "the appropriate Gmail actions."
-    ),
+    description=("Apply the user's rules to each email and execute the appropriate Gmail actions."),
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,

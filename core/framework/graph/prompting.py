@@ -104,7 +104,9 @@ def build_accounts_prompt(
         tools_for_provider = sorted(provider_tools.get(provider, []))
 
         if node_tool_set is not None:
-            relevant_tools = [tool_name for tool_name in tools_for_provider if tool_name in node_tool_set]
+            relevant_tools = [
+                tool_name for tool_name in tools_for_provider if tool_name in node_tool_set
+            ]
             if not relevant_tools:
                 continue
             tools_for_provider = relevant_tools
@@ -153,7 +155,9 @@ def build_prompt_spec_from_node_context(
                 resolved_memory_prompt = getattr(ctx, "memory_prompt", "") or ""
     return NodePromptSpec(
         identity_prompt=ctx.identity_prompt or "",
-        focus_prompt=focus_prompt if focus_prompt is not None else (ctx.node_spec.system_prompt or ""),
+        focus_prompt=focus_prompt
+        if focus_prompt is not None
+        else (ctx.node_spec.system_prompt or ""),
         narrative=narrative if narrative is not None else (ctx.narrative or ""),
         accounts_prompt=ctx.accounts_prompt or "",
         skills_catalog_prompt=ctx.skills_catalog_prompt or "",
@@ -191,11 +195,7 @@ def build_system_prompt(spec: NodePromptSpec) -> str:
     if spec.narrative:
         parts.append(f"\n--- Context (what has happened so far) ---\n{spec.narrative}")
 
-    if (
-        not spec.is_subagent_mode
-        and spec.node_type in ("event_loop", "gcu")
-        and spec.output_keys
-    ):
+    if not spec.is_subagent_mode and spec.node_type in ("event_loop", "gcu") and spec.output_keys:
         parts.append(f"\n{EXECUTION_SCOPE_PREAMBLE}")
 
     if spec.node_type == "gcu":

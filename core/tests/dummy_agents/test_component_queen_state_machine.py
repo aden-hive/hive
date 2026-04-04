@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,7 +24,6 @@ import pytest
 from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.server.session_manager import Session
 from framework.tools.queen_lifecycle_tools import QueenPhaseState
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -76,7 +74,7 @@ async def _shutdown(session, task):
         task.cancel()
     try:
         await asyncio.wait_for(task, timeout=5)
-    except (asyncio.CancelledError, TimeoutError, asyncio.TimeoutError):
+    except (asyncio.CancelledError, TimeoutError):
         pass
 
 
@@ -309,9 +307,7 @@ async def test_running_to_building_blocked(llm_provider, tmp_path, artifact):
             actual=repr(ps.phase),
             expected_val="'running'",
         )
-        assert ps.phase == "running", (
-            f"running->building should be BLOCKED, got: {ps.phase}"
-        )
+        assert ps.phase == "running", f"running->building should be BLOCKED, got: {ps.phase}"
     finally:
         await _shutdown(session, task)
 
@@ -338,9 +334,7 @@ async def test_running_to_planning_blocked(llm_provider, tmp_path, artifact):
             actual=repr(ps.phase),
             expected_val="'running'",
         )
-        assert ps.phase == "running", (
-            f"running->planning should be BLOCKED, got: {ps.phase}"
-        )
+        assert ps.phase == "running", f"running->planning should be BLOCKED, got: {ps.phase}"
     finally:
         await _shutdown(session, task)
 
@@ -378,18 +372,14 @@ async def test_editing_to_building_blocked(llm_provider, tmp_path, artifact):
 
         await ps.switch_to_building(source="test")
 
-        artifact.record_value(
-            "phase_after_blocked", ps.phase, expected="'editing' (blocked)"
-        )
+        artifact.record_value("phase_after_blocked", ps.phase, expected="'editing' (blocked)")
         artifact.check(
             "phase still editing",
             ps.phase == "editing",
             actual=repr(ps.phase),
             expected_val="'editing'",
         )
-        assert ps.phase == "editing", (
-            f"editing->building should be BLOCKED, got: {ps.phase}"
-        )
+        assert ps.phase == "editing", f"editing->building should be BLOCKED, got: {ps.phase}"
     finally:
         await _shutdown(session, task)
 
@@ -405,18 +395,14 @@ async def test_editing_to_planning_blocked(llm_provider, tmp_path, artifact):
 
         await ps.switch_to_planning(source="test")
 
-        artifact.record_value(
-            "phase_after_blocked", ps.phase, expected="'editing' (blocked)"
-        )
+        artifact.record_value("phase_after_blocked", ps.phase, expected="'editing' (blocked)")
         artifact.check(
             "phase still editing",
             ps.phase == "editing",
             actual=repr(ps.phase),
             expected_val="'editing'",
         )
-        assert ps.phase == "editing", (
-            f"editing->planning should be BLOCKED, got: {ps.phase}"
-        )
+        assert ps.phase == "editing", f"editing->planning should be BLOCKED, got: {ps.phase}"
     finally:
         await _shutdown(session, task)
 

@@ -21,7 +21,7 @@ from framework.graph.conversation import NodeConversation
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
-from framework.graph.node import NodeResult, NodeSpec, DataBuffer
+from framework.graph.node import DataBuffer, NodeResult, NodeSpec
 from framework.graph.prompt_composer import (
     build_narrative,
     build_transition_marker,

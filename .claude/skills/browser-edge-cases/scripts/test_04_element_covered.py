@@ -52,7 +52,9 @@ async def test_overlay_click():
         <head><title>Overlay Test</title></head>
         <body>
             <button id="target-btn" onclick="alert('Clicked!')">Click Me</button>
-            <div id="overlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:1000;"></div>
+            <div id="overlay" style="position:fixed;top:0;left:0;
+            width:100%;height:100%;
+            background:rgba(0,0,0,0.3);z-index:1000;"></div>
             <script>
                 window.clickCount = 0;
                 document.getElementById('target-btn').addEventListener('click', () => {
@@ -65,6 +67,7 @@ async def test_overlay_click():
 
         # Navigate to data URL
         import base64
+
         data_url = f"data:text/html;base64,{base64.b64encode(test_html.encode()).decode()}"
         await bridge.navigate(tab_id, data_url, wait_until="load")
 
@@ -91,7 +94,7 @@ async def test_overlay_click():
                     targetElement: btn.tagName
                 };
             })();
-        """
+        """,
         )
         print(f"Coverage check: {coverage_check.get('result', {})}")
 
@@ -100,10 +103,7 @@ async def test_overlay_click():
         print(f"Click result: {click_result}")
 
         # Check if click registered
-        count_result = await bridge.evaluate(
-            tab_id,
-            "(function() { return window.clickCount; })()"
-        )
+        count_result = await bridge.evaluate(tab_id, "(function() { return window.clickCount; })()")
         count = count_result.get("result", 0)
         print(f"Click count after CDP click: {count}")
 

@@ -11,9 +11,6 @@ Tests cover:
 from __future__ import annotations
 
 import asyncio
-import json
-from collections.abc import Callable
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -26,7 +23,6 @@ from gcu.browser.tools.interactions import register_interaction_tools
 from gcu.browser.tools.lifecycle import register_lifecycle_tools
 from gcu.browser.tools.navigation import register_navigation_tools
 from gcu.browser.tools.tabs import register_tab_tools
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
@@ -453,13 +449,13 @@ class TestNavigation:
                 "gcu.browser.tools.navigation._get_context",
                 return_value={"groupId": 1, "activeTabId": 100},
             ):
-                result = await browser_navigate(
-                    url="https://example.com", wait_until="networkidle"
-                )
+                result = await browser_navigate(url="https://example.com", wait_until="networkidle")
 
         assert result.get("ok") is True
         # The bridge.navigate is called with wait_until as keyword argument
-        mock_bridge.navigate.assert_awaited_once_with(100, "https://example.com", wait_until="networkidle")
+        mock_bridge.navigate.assert_awaited_once_with(
+            100, "https://example.com", wait_until="networkidle"
+        )
 
     @pytest.mark.asyncio
     async def test_navigation_history(self, mcp: FastMCP, mock_bridge: MagicMock):
@@ -551,12 +547,14 @@ class TestInteractions:
     async def test_drag_and_drop(self, mcp: FastMCP, mock_bridge: MagicMock):
         """Test drag and drop operation."""
         # browser_drag uses _cdp directly for DOM queries and mouse events
-        mock_bridge._cdp = AsyncMock(side_effect=lambda tab_id, method, params=None: {
-            "DOM.getDocument": {"root": {"nodeId": 1}},
-            "DOM.querySelector": {"nodeId": 2},
-            "DOM.getBoxModel": {"content": [0, 0, 100, 0, 100, 50, 0, 50]},
-            "Input.dispatchMouseEvent": {},
-        }.get(method, {}))
+        mock_bridge._cdp = AsyncMock(
+            side_effect=lambda tab_id, method, params=None: {
+                "DOM.getDocument": {"root": {"nodeId": 1}},
+                "DOM.querySelector": {"nodeId": 2},
+                "DOM.getBoxModel": {"content": [0, 0, 100, 0, 100, 50, 0, 50]},
+                "Input.dispatchMouseEvent": {},
+            }.get(method, {})
+        )
 
         register_interaction_tools(mcp)
         browser_drag = mcp._tool_manager._tools["browser_drag"].fn
@@ -604,7 +602,12 @@ class TestInspection:
     async def test_screenshot_full_page(self, mcp: FastMCP, mock_bridge: MagicMock):
         """Test taking full page screenshot."""
         mock_bridge.screenshot = AsyncMock(
-            return_value={"ok": True, "data": "base64encodedimagedata", "width": 1920, "height": 5000}
+            return_value={
+                "ok": True,
+                "data": "base64encodedimagedata",
+                "width": 1920,
+                "height": 5000,
+            }
         )
 
         register_inspection_tools(mcp)
@@ -722,9 +725,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_cdp_command_failure(self, mcp: FastMCP, mock_bridge: MagicMock):
         """Test handling of CDP command failures."""
-        mock_bridge.click = AsyncMock(
-            side_effect=RuntimeError("CDP error: Element not found")
-        )
+        mock_bridge.click = AsyncMock(side_effect=RuntimeError("CDP error: Element not found"))
 
         register_interaction_tools(mcp)
         browser_click = mcp._tool_manager._tools["browser_click"].fn

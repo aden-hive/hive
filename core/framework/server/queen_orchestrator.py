@@ -75,6 +75,7 @@ async def create_queen(
         QueenPhaseState,
         register_queen_lifecycle_tools,
     )
+
     hive_home = Path.home() / ".hive"
 
     # ---- Tool registry ------------------------------------------------
@@ -436,7 +437,9 @@ async def create_queen(
                 input_data={"greeting": initial_prompt or "Session started."},
                 session_state={"resume_session_id": session.id},
             )
-            logger.debug("[_queen_loop] executor.execute() returned with success=%s", result.success)
+            logger.debug(
+                "[_queen_loop] executor.execute() returned with success=%s", result.success
+            )
             if result.success:
                 logger.warning("Queen executor returned (should be forever-alive)")
             else:
@@ -451,7 +454,10 @@ async def create_queen(
             logger.exception("[_queen_loop] Queen conversation crashed: %s", e)
             raise
         finally:
-            logger.warning("[_queen_loop] Queen loop exiting — clearing queen_executor for session '%s'", session.id)
+            logger.warning(
+                "[_queen_loop] Queen loop exiting — clearing queen_executor for session '%s'",
+                session.id,
+            )
             session.queen_executor = None
 
     return asyncio.create_task(_queen_loop())

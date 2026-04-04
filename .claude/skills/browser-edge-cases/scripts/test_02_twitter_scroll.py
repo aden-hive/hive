@@ -9,7 +9,6 @@ Fix: Add wait_for_selector between scroll calls
 
 import asyncio
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "tools" / "src"))
@@ -36,7 +35,7 @@ async def test_twitter_lazy_scroll():
             if bridge.is_connected:
                 print("✓ Extension connected!")
                 break
-            print(f"Waiting for extension... ({i+1}/10)")
+            print(f"Waiting for extension... ({i + 1}/10)")
         else:
             print("✗ Extension not connected")
             return
@@ -58,7 +57,8 @@ async def test_twitter_lazy_scroll():
         # Count initial tweets
         initial_count = await bridge.evaluate(
             tab_id,
-            '(function() { return document.querySelectorAll(\'[data-testid="tweet"]\').length; })()'
+            "(function() { return document.querySelectorAll("
+            "'[data-testid=\"tweet\"]').length; })()",
         )
         print(f"Initial tweet count: {initial_count.get('result', 0)}")
 
@@ -70,7 +70,7 @@ async def test_twitter_lazy_scroll():
         print("\n--- Scrolling with waits ---")
         for i in range(3):
             result = await bridge.scroll(tab_id, "down", 500)
-            print(f"  Scroll {i+1}: {result.get('method', 'unknown')} method")
+            print(f"  Scroll {i + 1}: {result.get('method', 'unknown')} method")
 
             # Wait for new content to load
             await asyncio.sleep(2)
@@ -78,20 +78,22 @@ async def test_twitter_lazy_scroll():
             # Count tweets after scroll
             count_result = await bridge.evaluate(
                 tab_id,
-                '(function() { return document.querySelectorAll(\'[data-testid="tweet"]\').length; })()'
+                "(function() { return document.querySelectorAll("
+                "'[data-testid=\"tweet\"]').length; })()",
             )
-            count = count_result.get('result', 0)
+            count = count_result.get("result", 0)
             print(f"  Tweet count after scroll: {count}")
 
         # Final count
         final_count = await bridge.evaluate(
             tab_id,
-            '(function() { return document.querySelectorAll(\'[data-testid="tweet"]\').length; })()'
+            "(function() { return document.querySelectorAll("
+            "'[data-testid=\"tweet\"]').length; })()",
         )
-        final = final_count.get('result', 0)
-        initial = initial_count.get('result', 0)
+        final = final_count.get("result", 0)
+        initial = initial_count.get("result", 0)
 
-        print(f"\n--- Results ---")
+        print("\n--- Results ---")
         print(f"Initial tweets: {initial}")
         print(f"Final tweets: {final}")
 

@@ -10,7 +10,6 @@ Fix: Use piercing selector (host >>> target) or traverse shadow roots
 
 import asyncio
 import sys
-import base64
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "tools" / "src"))
@@ -100,7 +99,7 @@ async def test_shadow_dom():
                 });
                 return { count: hosts.length, hosts };
             })();
-        """
+        """,
         )
         print(f"Shadow DOM detection: {detection.get('result', {})}")
 
@@ -126,14 +125,13 @@ async def test_shadow_dom():
                 }
                 return { success: false, error: 'Button not found' };
             })();
-        """
+        """,
         )
         print(f"JS click result: {click_result.get('result', {})}")
 
         # Verify click was registered
         count_result = await bridge.evaluate(
-            tab_id,
-            "(function() { return window.shadowClickCount || 0; })()"
+            tab_id, "(function() { return window.shadowClickCount || 0; })()"
         )
         count = count_result.get("result") or 0
         print(f"Shadow click count: {count}")

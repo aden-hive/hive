@@ -11,11 +11,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from framework.agents.queen import queen_memory_v2 as qm
-from framework.agents.queen.reflection_agent import subscribe_worker_memory_triggers
 from framework.agents.queen.recall_selector import (
     format_recall_injection,
     select_memories,
 )
+from framework.agents.queen.reflection_agent import subscribe_worker_memory_triggers
 from framework.graph.prompting import build_system_prompt_for_node_context
 from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.tools.queen_lifecycle_tools import QueenPhaseState
@@ -237,9 +237,7 @@ async def test_select_memories_with_files(tmp_path: Path):
     (tmp_path / "b.md").write_text("---\nname: b\ndescription: about B\ntype: reference\n---\nbody")
 
     llm = AsyncMock()
-    llm.acomplete.return_value = MagicMock(
-        content=json.dumps({"selected_memories": ["a.md"]})
-    )
+    llm.acomplete.return_value = MagicMock(content=json.dumps({"selected_memories": ["a.md"]}))
 
     result = await select_memories("tell me about A", llm, memory_dir=tmp_path)
     assert result == ["a.md"]
@@ -309,7 +307,12 @@ async def test_short_reflection(tmp_path: Path):
                         "name": "write_memory_file",
                         "input": {
                             "filename": "user-likes-tests.md",
-                            "content": "---\nname: user-likes-tests\ntype: technique\ndescription: User values thorough testing\n---\nObserved emphasis on test coverage.",
+                            "content": (
+                                "---\nname: user-likes-tests\n"
+                                "type: technique\n"
+                                "description: User values thorough testing\n"
+                                "---\nObserved emphasis on test coverage."
+                            ),
                         },
                     }
                 ]
@@ -341,8 +344,12 @@ async def test_long_reflection(tmp_path: Path):
 
     mem_dir = tmp_path / "memories"
     mem_dir.mkdir()
-    (mem_dir / "dup-a.md").write_text("---\nname: dup-a\ntype: goal\ndescription: goal A\n---\nGoal A details.")
-    (mem_dir / "dup-b.md").write_text("---\nname: dup-b\ntype: goal\ndescription: goal A duplicate\n---\nSame goal A.")
+    (mem_dir / "dup-a.md").write_text(
+        "---\nname: dup-a\ntype: goal\ndescription: goal A\n---\nGoal A details."
+    )
+    (mem_dir / "dup-b.md").write_text(
+        "---\nname: dup-b\ntype: goal\ndescription: goal A duplicate\n---\nSame goal A."
+    )
 
     llm = AsyncMock()
     llm.acomplete.side_effect = [
@@ -365,7 +372,12 @@ async def test_long_reflection(tmp_path: Path):
                         "name": "write_memory_file",
                         "input": {
                             "filename": "dup-a.md",
-                            "content": "---\nname: dup-a\ntype: goal\ndescription: goal A (merged)\n---\nGoal A details. Also same goal A.",
+                            "content": (
+                                "---\nname: dup-a\ntype: goal\n"
+                                "description: goal A (merged)\n"
+                                "---\nGoal A details."
+                                " Also same goal A."
+                            ),
                         },
                     },
                     {
@@ -512,7 +524,9 @@ def test_save_global_memory_persists_frontmatter(tmp_path: Path):
 def test_build_system_prompt_injects_dynamic_memory():
     ctx = SimpleNamespace(
         identity_prompt="Identity",
-        node_spec=SimpleNamespace(system_prompt="Focus", node_type="event_loop", output_keys=["out"]),
+        node_spec=SimpleNamespace(
+            system_prompt="Focus", node_type="event_loop", output_keys=["out"]
+        ),
         narrative="Narrative",
         accounts_prompt="",
         skills_catalog_prompt="",
@@ -649,5 +663,3 @@ async def test_subscribe_worker_triggers_only_lifecycle_events(tmp_path: Path):
     finally:
         for sub_id in subs:
             bus.unsubscribe(sub_id)
-
-

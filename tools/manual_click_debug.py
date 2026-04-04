@@ -31,7 +31,7 @@ async def main():
             if bridge.is_connected:
                 print("✓ Extension connected!")
                 break
-            print(f"Waiting for extension... ({i+1}/5)")
+            print(f"Waiting for extension... ({i + 1}/5)")
         else:
             print("✗ Extension not connected")
             return
@@ -132,6 +132,7 @@ async def main():
                     print(f"✗ Hover failed: {result.get('error')}")
         except Exception as e:
             import traceback
+
             print(f"✗ Hover exception: {e}")
             traceback.print_exc()
 

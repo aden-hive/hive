@@ -25,15 +25,35 @@ TESTS_DIR = Path(__file__).parent
 # (env_var, display_name, litellm_model, display_model)
 # display_model matches quickstart.sh labels; litellm_model is what LiteLLMProvider needs.
 API_KEY_PROVIDERS = [
-    ("ANTHROPIC_API_KEY", "Anthropic (Claude)", "claude-sonnet-4-20250514", "claude-sonnet-4-20250514"),
+    (
+        "ANTHROPIC_API_KEY",
+        "Anthropic (Claude)",
+        "claude-sonnet-4-20250514",
+        "claude-sonnet-4-20250514",
+    ),
     ("OPENAI_API_KEY", "OpenAI", "gpt-5-mini", "gpt-5-mini"),
-    ("GEMINI_API_KEY", "Google Gemini", "gemini/gemini-3-flash-preview", "gemini/gemini-3-flash-preview"),
+    (
+        "GEMINI_API_KEY",
+        "Google Gemini",
+        "gemini/gemini-3-flash-preview",
+        "gemini/gemini-3-flash-preview",
+    ),
     ("KIMI_API_KEY", "Kimi", "kimi/kimi-k2.5", "kimi-k2.5"),
     ("ZAI_API_KEY", "ZAI (GLM)", "openai/glm-5", "openai/glm-5"),
-    ("GROQ_API_KEY", "Groq", "moonshotai/kimi-k2-instruct-0905", "moonshotai/kimi-k2-instruct-0905"),
+    (
+        "GROQ_API_KEY",
+        "Groq",
+        "moonshotai/kimi-k2-instruct-0905",
+        "moonshotai/kimi-k2-instruct-0905",
+    ),
     ("MISTRAL_API_KEY", "Mistral", "mistral-large-latest", "mistral-large-latest"),
     ("CEREBRAS_API_KEY", "Cerebras", "cerebras/zai-glm-4.7", "cerebras/zai-glm-4.7"),
-    ("TOGETHER_API_KEY", "Together AI", "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo", "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+    (
+        "TOGETHER_API_KEY",
+        "Together AI",
+        "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    ),
     ("DEEPSEEK_API_KEY", "DeepSeek", "deepseek-chat", "deepseek-chat"),
     ("MINIMAX_API_KEY", "MiniMax", "MiniMax-M2.5", "MiniMax-M2.5"),
     ("HIVE_API_KEY", "Hive LLM", "hive/queen", "hive/queen"),
@@ -219,12 +239,12 @@ async def _smoke_test_provider_async(provider: dict, timeout_seconds: float = 25
     This catches the common "pytest looks frozen on the first test" failure mode
     where the first real LLM call hangs or never reaches a usable response.
     """
-    from framework.llm.litellm import LiteLLMProvider
-    from framework.llm.provider import Tool
     from framework.graph.edge import GraphSpec
     from framework.graph.executor import GraphExecutor
     from framework.graph.goal import Goal
     from framework.graph.node import NodeSpec
+    from framework.llm.litellm import LiteLLMProvider
+    from framework.llm.provider import Tool
     from framework.runtime.core import Runtime
 
     kwargs = {
@@ -333,9 +353,7 @@ async def _smoke_test_provider_async(provider: dict, timeout_seconds: float = 25
             if not result.success:
                 raise RuntimeError(result.error or "worker execution smoke failed")
             if result.output.get("result") != "OK":
-                raise RuntimeError(
-                    "worker execution completed but did not produce result='OK'"
-                )
+                raise RuntimeError("worker execution completed but did not produce result='OK'")
 
     async def _run_branch_execution() -> None:
         with TemporaryDirectory(prefix="dummy-branch-smoke-") as tmpdir:
@@ -428,8 +446,7 @@ async def _smoke_test_provider_async(provider: dict, timeout_seconds: float = 25
                 raise RuntimeError(result.error or "branch execution smoke failed")
             if result.path != ["classify", "positive"]:
                 raise RuntimeError(
-                    "branch execution did not reach the expected terminal path: "
-                    f"{result.path}"
+                    f"branch execution did not reach the expected terminal path: {result.path}"
                 )
             if not result.output.get("result"):
                 raise RuntimeError(
@@ -462,8 +479,7 @@ async def _smoke_test_provider_async(provider: dict, timeout_seconds: float = 25
         await asyncio.wait_for(_run_branch_execution(), timeout=current_timeout)
     except TimeoutError as exc:
         raise RuntimeError(
-            f"provider smoke test timed out during {current_step} "
-            f"after {current_timeout:.0f}s"
+            f"provider smoke test timed out during {current_step} after {current_timeout:.0f}s"
         ) from exc
 
 

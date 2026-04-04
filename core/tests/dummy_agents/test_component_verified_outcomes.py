@@ -236,8 +236,7 @@ async def test_verified_artifact_binary_match(
     artifact.record(
         result,
         expected=(
-            "success=True, file 'verified.txt' on disk "
-            "matches VERIFIED_PAYLOAD_99_ZULU exactly"
+            "success=True, file 'verified.txt' on disk matches VERIFIED_PAYLOAD_99_ZULU exactly"
         ),
     )
 

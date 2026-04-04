@@ -7,7 +7,7 @@ string content, not just the first 500 characters.
 
 import pytest
 
-from framework.graph.node import DataBufferWriteError, DataBuffer
+from framework.graph.node import DataBuffer, DataBufferWriteError
 from framework.graph.validator import OutputValidator, ValidationResult
 
 

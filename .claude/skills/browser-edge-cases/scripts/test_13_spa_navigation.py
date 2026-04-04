@@ -11,7 +11,6 @@ Fix: Use wait_until="networkidle" or wait_for_selector
 import asyncio
 import sys
 import time
-import base64
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "tools" / "src"))
@@ -82,9 +81,13 @@ async def test_spa_navigation():
 
                     // Render content
                     const content = {
-                        home: '<h1>Home Page</h1><p>Welcome to the SPA!</p><button id="home-btn">Home Action</button>',
-                        about: '<h1>About Page</h1><p>This is a simulated SPA.</p><button id="about-btn">About Action</button>',
-                        contact: '<h1>Contact Page</h1><p>Contact us at test@example.com</p><button id="contact-btn">Contact Action</button>'
+                        home: '<h1>Home Page</h1><p>Welcome!</p>'
+                            + '<button id="home-btn">Home Action</button>',
+                        about: '<h1>About Page</h1><p>Simulated SPA.</p>'
+                            + '<button id="about-btn">About Action</button>',
+                        contact: '<h1>Contact Page</h1>'
+                            + '<p>Contact us at test@example.com</p>'
+                            + '<button id="contact-btn">Contact Action</button>'
                     };
 
                     document.getElementById('app').innerHTML = content[page] || '<h1>404</h1>';
@@ -121,7 +124,7 @@ async def test_spa_navigation():
         # Check content immediately
         content = await bridge.evaluate(
             tab_id,
-            "(function() { return document.getElementById('app').innerText; })()"
+            "(function() { return document.getElementById('app').innerText; })()",
         )
         print(f"Content immediately after load: '{content.get('result', '')}'")
 
@@ -137,7 +140,7 @@ async def test_spa_navigation():
         # Check content after wait
         content_after = await bridge.evaluate(
             tab_id,
-            "(function() { return document.getElementById('app').innerText; })()"
+            "(function() { return document.getElementById('app').innerText; })()",
         )
         print(f"Content after wait: '{content_after.get('result', '')}'")
 
@@ -151,7 +154,7 @@ async def test_spa_navigation():
         # Check if content changed
         about_content = await bridge.evaluate(
             tab_id,
-            "(function() { return document.getElementById('app').innerText; })()"
+            "(function() { return document.getElementById('app').innerText; })()",
         )
         print(f"Content after SPA nav: '{about_content.get('result', '')}'")
 
@@ -167,7 +170,7 @@ async def test_spa_navigation():
         # Check content immediately
         content_networkidle = await bridge.evaluate(
             tab_id,
-            "(function() { return document.getElementById('app').innerText; })()"
+            "(function() { return document.getElementById('app').innerText; })()",
         )
         print(f"Content after networkidle: '{content_networkidle.get('result', '')}'")
 

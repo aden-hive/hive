@@ -728,8 +728,9 @@ async def test_strict_artifact_creation_and_verification(
 @pytest.mark.asyncio
 async def test_strict_feedback_loop_visit_counts(runtime, goal, llm_provider, artifact):
     """Feedback loop must respect max_node_visits and record visit counts."""
-    from .nodes import StatefulNode, SuccessNode
     from framework.graph.node import NodeResult
+
+    from .nodes import StatefulNode, SuccessNode
 
     graph = GraphSpec(
         id="strict-feedback",

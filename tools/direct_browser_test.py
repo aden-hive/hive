@@ -28,7 +28,7 @@ async def main():
         if bridge.is_connected:
             print("✓ Extension connected!")
             break
-        print(f"  Waiting... ({i+1}/10)")
+        print(f"  Waiting... ({i + 1}/10)")
     else:
         print("✗ Extension not connected")
         await bridge.stop()

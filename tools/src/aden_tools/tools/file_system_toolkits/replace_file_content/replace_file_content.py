@@ -9,9 +9,7 @@ def register_tools(mcp: FastMCP) -> None:
     """Register file content replacement tools with the MCP server."""
 
     @mcp.tool()
-    def replace_file_content(
-        path: str, target: str, replacement: str, agent_id: str
-    ) -> dict:
+    def replace_file_content(path: str, target: str, replacement: str, agent_id: str) -> dict:
         """
         Purpose
             Replace all occurrences of a target string with replacement text in a file.

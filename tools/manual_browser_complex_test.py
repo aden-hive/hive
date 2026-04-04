@@ -25,7 +25,7 @@ from gcu.browser.bridge import BeelineBridge
 async def wait_for_bridge(bridge: BeelineBridge, timeout: int = 5) -> bool:
     """Wait for extension connection."""
     await bridge.start()
-    for i in range(timeout):
+    for _i in range(timeout):
         await asyncio.sleep(1)
         if bridge.is_connected:
             return True
@@ -38,7 +38,9 @@ async def test_linkedin_profile_scroll(bridge: BeelineBridge, tab_id: int) -> di
 
     try:
         # Navigate to a LinkedIn page (public profile, no login required)
-        await bridge.navigate(tab_id, "https://www.linkedin.com/in/williamhgates/", wait_until="networkidle")
+        await bridge.navigate(
+            tab_id, "https://www.linkedin.com/in/williamhgates/", wait_until="networkidle"
+        )
         await asyncio.sleep(3)
 
         results = {"steps": []}
@@ -108,7 +110,9 @@ async def test_twitter_timeline(bridge: BeelineBridge, tab_id: int) -> dict:
         await asyncio.sleep(2)
         results["steps"].append("scrolled")
 
-        results["ok"] = data.get("pageTitle", "").lower().find("x") >= 0 or data.get("tweetCount", 0) >= 0
+        results["ok"] = (
+            data.get("pageTitle", "").lower().find("x") >= 0 or data.get("tweetCount", 0) >= 0
+        )
         print(f"  {'✓' if results['ok'] else '✗'} Twitter page loaded")
         return results
 
@@ -123,7 +127,9 @@ async def test_youtube_controls(bridge: BeelineBridge, tab_id: int) -> dict:
 
     try:
         # Navigate to a YouTube video
-        await bridge.navigate(tab_id, "https://www.youtube.com/watch?v=dQw4w9WgXcQ", wait_until="networkidle")
+        await bridge.navigate(
+            tab_id, "https://www.youtube.com/watch?v=dQw4w9WgXcQ", wait_until="networkidle"
+        )
         await asyncio.sleep(3)
 
         results = {"steps": []}
@@ -188,7 +194,11 @@ async def test_form_interaction(bridge: BeelineBridge, tab_id: int) -> dict:
         results["steps"].append(f"type_name: {result.get('ok')}")
 
         # Fill textarea
-        result = await bridge.type_text(tab_id, "textarea[name='comments']", "This is a test comment with multiple lines.\nLine 2.\nLine 3.")
+        result = await bridge.type_text(
+            tab_id,
+            "textarea[name='comments']",
+            "This is a test comment with multiple lines.\nLine 2.\nLine 3.",
+        )
         results["steps"].append(f"type_comments: {result.get('ok')}")
 
         # Click radio button
@@ -215,9 +225,9 @@ async def test_form_interaction(bridge: BeelineBridge, tab_id: int) -> dict:
 
         # Check all fields are filled correctly
         results["ok"] = (
-            form_state.get("name") == "Test Customer" and
-            form_state.get("medium") is True and
-            form_state.get("cheese") is True
+            form_state.get("name") == "Test Customer"
+            and form_state.get("medium") is True
+            and form_state.get("cheese") is True
         )
 
         print(f"  {'✓' if results['ok'] else '✗'} Form interaction")
@@ -234,7 +244,9 @@ async def test_drag_drop(bridge: BeelineBridge, tab_id: int) -> dict:
 
     try:
         # Navigate to a drag-drop demo page
-        await bridge.navigate(tab_id, "https://www.w3schools.com/html/html5_draganddrop.asp", wait_until="load")
+        await bridge.navigate(
+            tab_id, "https://www.w3schools.com/html/html5_draganddrop.asp", wait_until="load"
+        )
         await asyncio.sleep(2)
 
         results = {"steps": []}
@@ -245,7 +257,9 @@ async def test_drag_drop(bridge: BeelineBridge, tab_id: int) -> dict:
 
         # Try drag operation - this page has draggable elements
         # Note: HTML5 drag-drop via CDP is limited, this tests mouse events
-        result = await bridge.evaluate(tab_id, """
+        result = await bridge.evaluate(
+            tab_id,
+            """
             // Check if drag elements exist
             const drag1 = document.getElementById('drag1');
             const div2 = document.getElementById('div2');
@@ -253,7 +267,8 @@ async def test_drag_drop(bridge: BeelineBridge, tab_id: int) -> dict:
                 hasDragElement: !!drag1,
                 hasDropZone: !!div2
             };
-        """)
+        """,
+        )
         elements = result.get("result", {}).get("value", {})
         results["elements"] = elements
         print(f"  Elements found: {elements}")

@@ -149,12 +149,11 @@ def _inject_last_modified_by(content: str, caller: str) -> str:
     fm_body = m.group(1)
     # Remove existing last_modified_by line if present.
     fm_lines = [
-        ln for ln in fm_body.splitlines()
-        if not ln.strip().lower().startswith("last_modified_by")
+        ln for ln in fm_body.splitlines() if not ln.strip().lower().startswith("last_modified_by")
     ]
     fm_lines.append(f"last_modified_by: {caller}")
     new_fm = "\n".join(fm_lines)
-    return f"---\n{new_fm}\n---{content[m.end():]}"
+    return f"---\n{new_fm}\n---{content[m.end() :]}"
 
 
 def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path, caller: str) -> str:
@@ -208,7 +207,9 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path, caller: str
                 return f"ERROR: File cap reached ({MAX_FILES}).  Delete a file first."
         memory_dir.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        logger.debug("reflect: tool write_memory_file [%s] → %s (%d chars)", caller, filename, len(content))
+        logger.debug(
+            "reflect: tool write_memory_file [%s] → %s (%d chars)", caller, filename, len(content)
+        )
         return f"Wrote {filename} ({len(content)} chars)."
 
     if name == "delete_memory_file":
@@ -262,7 +263,10 @@ async def _reflection_loop(
         preview = user_content[:300] if isinstance(user_content, str) else str(user_content)[:300]
         logger.debug(
             "reflect: turn %d — sending %d messages to LLM, last msg role=%s, preview=%s",
-            _turn, len(messages), messages[-1].get("role", "?") if messages else "?", preview,
+            _turn,
+            len(messages),
+            messages[-1].get("role", "?") if messages else "?",
+            preview,
         )
 
         try:
@@ -282,13 +286,23 @@ async def _reflection_loop(
             tool_calls_raw = resp.raw_response.get("tool_calls", [])
 
         # Log the full LLM response for debugging.
-        raw_keys = list(resp.raw_response.keys()) if isinstance(resp.raw_response, dict) else type(resp.raw_response).__name__
+        raw_keys = (
+            list(resp.raw_response.keys())
+            if isinstance(resp.raw_response, dict)
+            else type(resp.raw_response).__name__
+        )
         logger.debug(
             "reflect: turn %d — LLM response: content=%r (len=%d), stop_reason=%s, "
             "tool_calls=%d, model=%s, tokens=%d/%d, raw_keys=%s",
-            _turn, (resp.content or "")[:200], len(resp.content or ""),
-            resp.stop_reason, len(tool_calls_raw), resp.model,
-            resp.input_tokens, resp.output_tokens, raw_keys,
+            _turn,
+            (resp.content or "")[:200],
+            len(resp.content or ""),
+            resp.stop_reason,
+            len(tool_calls_raw),
+            resp.model,
+            resp.input_tokens,
+            resp.output_tokens,
+            raw_keys,
         )
         # Accumulate non-empty text across turns so we don't lose a reason
         # given alongside tool calls on an earlier turn.
@@ -320,7 +334,12 @@ async def _reflection_loop(
             break
 
         # Execute each tool call and append results.
-        logger.debug("reflect: turn %d — executing %d tool call(s): %s", _turn + 1, len(tool_calls_raw), [tc["name"] for tc in tool_calls_raw])
+        logger.debug(
+            "reflect: turn %d — executing %d tool call(s): %s",
+            _turn + 1,
+            len(tool_calls_raw),
+            [tc["name"] for tc in tool_calls_raw],
+        )
         for tc in tool_calls_raw:
             result = _execute_tool(tc["name"], tc.get("input", {}), memory_dir, caller)
             # Track files that were written or deleted.
@@ -328,11 +347,13 @@ async def _reflection_loop(
                 fname = tc.get("input", {}).get("filename", "")
                 if fname and not result.startswith("ERROR"):
                     changed_files.append(fname)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": result,
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result,
+                }
+            )
 
     return True, changed_files, last_text
 
@@ -351,7 +372,7 @@ Your goal: identify anything from the recent messages worth remembering across
 future sessions — user preferences, project context, techniques that worked,
 goals, environment details, reference pointers.
 
-Memory types: {', '.join(MEMORY_TYPES)}
+Memory types: {", ".join(MEMORY_TYPES)}
 
 Expected format for each memory file:
 {_FRONTMATTER_EXAMPLE}
@@ -382,7 +403,7 @@ You are a reflection agent performing a periodic housekeeping pass over the
 memory directory.  Your job is to organise, deduplicate, and trim noise from
 the accumulated memory files.
 
-Memory types: {', '.join(MEMORY_TYPES)}
+Memory types: {", ".join(MEMORY_TYPES)}
 
 Expected format for each memory file:
 {_FRONTMATTER_EXAMPLE}
@@ -472,12 +493,20 @@ async def run_short_reflection(
     )
 
     _, changed, reason = await _reflection_loop(
-        llm, _SHORT_REFLECT_SYSTEM, user_msg, mem_dir, caller=caller,
+        llm,
+        _SHORT_REFLECT_SYSTEM,
+        user_msg,
+        mem_dir,
+        caller=caller,
     )
     if changed:
         logger.debug("reflect: short reflection done [%s], changed files: %s", caller, changed)
     else:
-        logger.debug("reflect: short reflection done [%s], no changes — %s", caller, reason or "no reason given")
+        logger.debug(
+            "reflect: short reflection done [%s], no changes — %s",
+            caller,
+            reason or "no reason given",
+        )
 
 
 async def run_long_reflection(
@@ -503,12 +532,26 @@ async def run_long_reflection(
     )
 
     _, changed, reason = await _reflection_loop(
-        llm, _LONG_REFLECT_SYSTEM, user_msg, mem_dir, caller=caller,
+        llm,
+        _LONG_REFLECT_SYSTEM,
+        user_msg,
+        mem_dir,
+        caller=caller,
     )
     if changed:
-        logger.debug("reflect: long reflection done [%s] (%d files), changed files: %s", caller, len(files), changed)
+        logger.debug(
+            "reflect: long reflection done [%s] (%d files), changed files: %s",
+            caller,
+            len(files),
+            changed,
+        )
     else:
-        logger.debug("reflect: long reflection done [%s] (%d files), no changes — %s", caller, len(files), reason or "no reason given")
+        logger.debug(
+            "reflect: long reflection done [%s] (%d files), no changes — %s",
+            caller,
+            len(files),
+            reason or "no reason given",
+        )
 
 
 async def run_diary_update(
@@ -627,7 +670,8 @@ async def subscribe_reflection_triggers(
         if is_tool_turn and not is_interval:
             logger.debug(
                 "reflect: skipping turn %d (stop_reason=%s, next reflect at %d)",
-                _short_count, stop_reason,
+                _short_count,
+                stop_reason,
                 (_short_count // _LONG_REFLECT_INTERVAL + 1) * _LONG_REFLECT_INTERVAL,
             )
             return
@@ -638,7 +682,12 @@ async def subscribe_reflection_triggers(
 
         async with _lock:
             try:
-                logger.debug("reflect: turn complete — count %d/%d (stop_reason=%s)", _short_count, _LONG_REFLECT_INTERVAL, stop_reason)
+                logger.debug(
+                    "reflect: turn complete — count %d/%d (stop_reason=%s)",
+                    _short_count,
+                    _LONG_REFLECT_INTERVAL,
+                    stop_reason,
+                )
                 if is_interval:
                     await run_short_reflection(session_dir, llm, mem_dir, caller="queen")
                     await run_long_reflection(llm, mem_dir, caller="queen")
@@ -659,6 +708,7 @@ async def subscribe_reflection_triggers(
             if phase_state is not None:
                 try:
                     from framework.agents.queen.recall_selector import update_recall_cache
+
                     await update_recall_cache(
                         session_dir,
                         llm,

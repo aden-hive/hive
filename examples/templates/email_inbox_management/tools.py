@@ -102,8 +102,7 @@ def _get_data_dir() -> str:
     ctx = _execution_context.get()
     if not ctx or "data_dir" not in ctx:
         raise RuntimeError(
-            "data_dir not set in execution context. "
-            "Is the tool running inside a GraphExecutor?"
+            "data_dir not set in execution context. Is the tool running inside a GraphExecutor?"
         )
     return ctx["data_dir"]
 
@@ -216,9 +215,7 @@ def _bulk_fetch_emails(
 
             resp = client.get(f"{GMAIL_API_BASE}/messages", params=params)
             if resp.status_code != 200:
-                raise RuntimeError(
-                    f"Gmail list failed (HTTP {resp.status_code}): {resp.text}"
-                )
+                raise RuntimeError(f"Gmail list failed (HTTP {resp.status_code}): {resp.text}")
 
             data = resp.json()
             messages = data.get("messages", [])
@@ -261,9 +258,7 @@ def _bulk_fetch_emails(
                     )
                     if r.status_code == 200:
                         raw = r.json()
-                        parsed = _parse_headers(
-                            raw.get("payload", {}).get("headers", [])
-                        )
+                        parsed = _parse_headers(raw.get("payload", {}).get("headers", []))
                         emails.append(
                             {
                                 "id": raw.get("id"),
@@ -285,9 +280,7 @@ def _bulk_fetch_emails(
                     if attempt < retries:
                         time.sleep(0.5)
                         continue
-                    logger.warning(
-                        f"Failed to fetch {msg_id} after {retries + 1} attempts: {e}"
-                    )
+                    logger.warning(f"Failed to fetch {msg_id} after {retries + 1} attempts: {e}")
 
     dropped = len(message_ids) - len(emails)
     if dropped > 0:
@@ -302,9 +295,7 @@ def _bulk_fetch_emails(
         for email in emails:
             f.write(json.dumps(email, ensure_ascii=False) + "\n")
 
-    logger.info(
-        f"Wrote {len(emails)} emails to emails.jsonl ({output_path.stat().st_size} bytes)"
-    )
+    logger.info(f"Wrote {len(emails)} emails to emails.jsonl ({output_path.stat().st_size} bytes)")
     return {
         "filename": "emails.jsonl",
         "count": len(emails),

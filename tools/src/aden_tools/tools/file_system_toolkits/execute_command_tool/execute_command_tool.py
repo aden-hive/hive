@@ -11,9 +11,7 @@ def register_tools(mcp: FastMCP) -> None:
     """Register command execution tools with the MCP server."""
 
     @mcp.tool()
-    def execute_command_tool(
-        command: str, agent_id: str, cwd: str | None = None
-    ) -> dict:
+    def execute_command_tool(command: str, agent_id: str, cwd: str | None = None) -> dict:
         """
         Purpose
             Execute a shell command within the agent sandbox.

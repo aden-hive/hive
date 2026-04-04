@@ -8,7 +8,6 @@ No Playwright required - all operations go through the Chrome extension.
 from __future__ import annotations
 
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -93,7 +92,9 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                 "step_2": "Enable 'Developer mode' (toggle in the top-right corner)",
                 "step_3": "Click 'Load unpacked'",
                 "step_4": f"Select this directory: {ext_path}",
-                "step_5": "Click the extension icon in the Chrome toolbar to confirm it says 'Connected'",
+                "step_5": (
+                    "Click the extension icon in the Chrome toolbar to confirm it says 'Connected'"
+                ),
                 "step_6": "Return here and call browser_start",
             },
             "extensionPath": ext_path,
@@ -122,7 +123,11 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         if not bridge or not bridge.is_connected:
             result = {
                 "ok": False,
-                "error": "Browser extension not connected. Call browser_setup for installation instructions.",
+                "error": (
+                    "Browser extension not connected."
+                    " Call browser_setup for"
+                    " installation instructions."
+                ),
                 "connected": False,
             }
             log_tool_call("browser_status", params, result=result)
@@ -204,7 +209,9 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             result = {
                 "ok": False,
                 "error": (
-                    "Browser extension not connected. Call browser_setup for installation instructions."
+                    "Browser extension not connected."
+                    " Call browser_setup for"
+                    " installation instructions."
                 ),
             }
             log_tool_call("browser_start", params, result=result)

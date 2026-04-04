@@ -25,11 +25,11 @@ from framework.graph.event_loop_node import (
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
 from framework.graph.node import (
+    DataBuffer,
     NodeContext,
     NodeProtocol,
     NodeResult,
     NodeSpec,
-    DataBuffer,
 )
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
@@ -368,13 +368,21 @@ async def test_event_loop_branch_graph_routes_to_terminal(runtime):
     scripts = [
         StreamScript(
             tool_calls=[
-                {"name": "set_output", "id": "tc_label", "input": {"key": "label", "value": "positive"}}
+                {
+                    "name": "set_output",
+                    "id": "tc_label",
+                    "input": {"key": "label", "value": "positive"},
+                }
             ],
         ),
         StreamScript(text="Classification done."),
         StreamScript(
             tool_calls=[
-                {"name": "set_output", "id": "tc_result", "input": {"key": "result", "value": "positive path"}}
+                {
+                    "name": "set_output",
+                    "id": "tc_result",
+                    "input": {"key": "result", "value": "positive path"},
+                }
             ],
         ),
         StreamScript(text="Handled positive branch."),

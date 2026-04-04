@@ -59,10 +59,7 @@ def _resolve_path(path: str, data_dir: str | None) -> str:
 
     # Block and remind
     allowed_str = ", ".join(f"'{p}'" for p in allowed_paths)
-    raise ValueError(
-        f"Access denied: '{path}' is not accessible. "
-        f"Allowed paths: {allowed_str}"
-    )
+    raise ValueError(f"Access denied: '{path}' is not accessible. Allowed paths: {allowed_str}")
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -144,7 +141,11 @@ def register_tools(mcp: FastMCP) -> None:
             actual_end = start_idx + lines_shown
 
             if actual_end < total_lines:
-                result += f"\n\n(Showing lines {start_idx + 1}-{actual_end} of {total_lines}. Use offset={actual_end + 1} to continue reading.)"
+                result += (
+                    f"\n\n(Showing lines {start_idx + 1}-{actual_end}"
+                    f" of {total_lines}."
+                    f" Use offset={actual_end + 1} to continue reading.)"
+                )
 
             return result
         except Exception as e:

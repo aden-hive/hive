@@ -44,7 +44,7 @@ def check_png(data: str) -> bool:
     """Verify that base64 data decodes to a valid PNG."""
     try:
         raw = base64.b64decode(data)
-        return raw[:8] == b'\x89PNG\r\n\x1a\n'
+        return raw[:8] == b"\x89PNG\r\n\x1a\n"
     except Exception:
         return False
 
@@ -136,7 +136,10 @@ async def test_selector_screenshot(bridge: BeelineBridge, tab_id: int, data_url:
                 print("  ⚠ WARNING: Selector screenshot not smaller (may be full page)")
                 return False
     else:
-        print(f"  ⚠ NOT IMPLEMENTED: selector param ignored (returns full page) - error={result.get('error')}")
+        print(
+            "  ⚠ NOT IMPLEMENTED: selector param ignored"
+            f" (returns full page) - error={result.get('error')}"
+        )
         print("  NOTE: selector parameter exists in signature but is not used in implementation")
         return False
 
@@ -178,7 +181,9 @@ async def test_screenshot_timeout(bridge: BeelineBridge, tab_id: int, data_url: 
             print(f"  ⚠ Fast enough to beat timeout: {err!r} in {elapsed:.3f}s")
             return True  # Not a failure, just fast
     else:
-        print(f"  ⚠ Screenshot completed before timeout ({elapsed:.3f}s) - too fast to test timeout")
+        print(
+            f"  ⚠ Screenshot completed before timeout ({elapsed:.3f}s) - too fast to test timeout"
+        )
         return True  # Still ok, just very fast
 
 
@@ -218,7 +223,7 @@ async def main():
             if bridge.is_connected:
                 print("✓ Extension connected!")
                 break
-            print(f"Waiting for extension... ({i+1}/10)")
+            print(f"Waiting for extension... ({i + 1}/10)")
         else:
             print("✗ Extension not connected. Ensure Chrome with Beeline extension is running.")
             return

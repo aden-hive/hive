@@ -34,7 +34,7 @@ async def main():
             if bridge.is_connected:
                 print("✓ Extension connected!")
                 break
-            print(f"Waiting for extension... ({i+1}/10)")
+            print(f"Waiting for extension... ({i + 1}/10)")
         else:
             print("✗ Extension not connected")
             return
@@ -48,7 +48,9 @@ async def main():
         # Navigate to LinkedIn
         print("\n--- Navigating to LinkedIn ---")
         try:
-            await bridge.navigate(tab_id, "https://www.linkedin.com", wait_until="load", timeout_ms=30000)
+            await bridge.navigate(
+                tab_id, "https://www.linkedin.com", wait_until="load", timeout_ms=30000
+            )
             print("✓ Page loaded")
         except Exception as e:
             print(f"Navigation result: {e}")
@@ -59,6 +61,7 @@ async def main():
         print("\n--- Test 1: Snapshot (with timeout protection) ---")
         try:
             import time
+
             start = time.perf_counter()
             snapshot = await bridge.snapshot(tab_id, timeout_s=15.0)
             elapsed = time.perf_counter() - start
@@ -68,7 +71,7 @@ async def main():
             if "truncated" in tree:
                 print("  (Tree was truncated due to size)")
             print(f"  First 300 chars:\n{tree[:300]}...")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             print("✗ Snapshot timed out (this shouldn't happen with 15s timeout)")
         except Exception as e:
             print(f"✗ Snapshot error: {e}")
@@ -105,7 +108,7 @@ async def main():
         try:
             pos_before = await bridge.evaluate(tab_id, get_scroll_positions)
             before_data = pos_before.get("result", {}) if pos_before else {}
-            print(f"  Positions before scroll:")
+            print("  Positions before scroll:")
             if isinstance(before_data, dict):
                 for key, val in before_data.items():
                     print(f"    {key}: {val}")
@@ -117,7 +120,7 @@ async def main():
 
             if result.get("ok"):
                 method = result.get("method", "unknown")
-                container = result.get("container", "unknown")
+                container = result.get("container", "unknown")  # noqa: F841
                 print(f"  ✓ Scroll command succeeded using {method}")
             else:
                 print(f"  ✗ Scroll command failed: {result.get('error')}")
@@ -127,7 +130,7 @@ async def main():
             # Get scroll positions after
             pos_after = await bridge.evaluate(tab_id, get_scroll_positions)
             after_data = pos_after.get("result", {}) if pos_after else {}
-            print(f"  Positions after scroll:")
+            print("  Positions after scroll:")
             if isinstance(after_data, dict):
                 for key, val in after_data.items():
                     print(f"    {key}: {val}")
@@ -139,8 +142,16 @@ async def main():
             if isinstance(before_data, dict) and isinstance(after_data, dict):
                 for key in after_data:
                     if key in before_data:
-                        b_val = before_data[key].get("scrollTop", 0) if isinstance(before_data[key], dict) else 0
-                        a_val = after_data[key].get("scrollTop", 0) if isinstance(after_data[key], dict) else 0
+                        b_val = (
+                            before_data[key].get("scrollTop", 0)
+                            if isinstance(before_data[key], dict)
+                            else 0
+                        )
+                        a_val = (
+                            after_data[key].get("scrollTop", 0)
+                            if isinstance(after_data[key], dict)
+                            else 0
+                        )
                         if a_val != b_val:
                             print(f"  ✓ SCROLL CONFIRMED: {key} changed from {b_val} to {a_val}")
                             changed = True
@@ -149,6 +160,7 @@ async def main():
 
         except Exception as e:
             import traceback
+
             print(f"✗ Scroll error: {e}")
             traceback.print_exc()
 
@@ -157,10 +169,14 @@ async def main():
         for i in range(3):
             try:
                 result = await bridge.scroll(tab_id, "down", 200)
-                print(f"  Scroll {i+1}: {result.get('method', 'failed')} on {result.get('container', 'unknown')}")
+                print(
+                    f"  Scroll {i + 1}: "
+                    f"{result.get('method', 'failed')} "
+                    f"on {result.get('container', 'unknown')}"
+                )
                 await asyncio.sleep(0.5)
             except Exception as e:
-                print(f"  Scroll {i+1} failed: {e}")
+                print(f"  Scroll {i + 1} failed: {e}")
 
         # Test 4: Snapshot after scroll
         print("\n--- Test 4: Snapshot After Scroll ---")

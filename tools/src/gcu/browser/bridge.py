@@ -89,6 +89,7 @@ class BeelineBridge:
             # Suppress noisy websockets logging for invalid upgrade attempts
             # by providing a null logger
             import logging
+
             null_logger = logging.getLogger("websockets.null")
             null_logger.setLevel(logging.CRITICAL)
             null_logger.addHandler(logging.NullHandler())
@@ -98,7 +99,9 @@ class BeelineBridge:
                 "127.0.0.1",
                 port,
                 logger=null_logger,
-                max_size=50 * 1024 * 1024,  # 50 MB — CDP responses (AX tree, screenshots) can be large
+                max_size=50
+                * 1024
+                * 1024,  # 50 MB — CDP responses (AX tree, screenshots) can be large
             )
             logger.info("Beeline bridge listening on ws://127.0.0.1:%d", port)
         except OSError as e:
@@ -134,7 +137,9 @@ class BeelineBridge:
                 pass
             self._status_server = None
 
-    async def _http_status_handler(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def _http_status_handler(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
         """Minimal asyncio TCP handler serving HTTP GET /status on the status port."""
         try:
             raw = await asyncio.wait_for(reader.read(512), timeout=2.0)
@@ -146,7 +151,9 @@ class BeelineBridge:
                     b"Content-Type: application/json\r\n"
                     b"Access-Control-Allow-Origin: *\r\n"
                     b"Access-Control-Allow-Headers: *\r\n"
-                    + b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                    + b"Content-Length: "
+                    + str(len(body)).encode()
+                    + b"\r\n"
                     + b"Connection: close\r\n"
                     b"\r\n" + body
                 )
@@ -160,7 +167,9 @@ class BeelineBridge:
                     b"\r\n"
                 )
             else:
-                response = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                response = (
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                )
             writer.write(response)
             await writer.drain()
         except Exception:
@@ -566,14 +575,16 @@ class BeelineBridge:
                 # JavaScript click succeeded — highlight element
                 rx = value.get("x", 0) - value.get("width", 0) / 2
                 ry = value.get("y", 0) - value.get("height", 0) / 2
-                await self.highlight_rect(tab_id, rx, ry, value.get("width", 0), value.get("height", 0), label=selector)
+                await self.highlight_rect(
+                    tab_id, rx, ry, value.get("width", 0), value.get("height", 0), label=selector
+                )
                 return {
                     "ok": True,
                     "action": "click",
                     "selector": selector,
                     "x": value.get("x", 0),
                     "y": value.get("y", 0),
-                    "method": "javascript"
+                    "method": "javascript",
                 }
 
             # If JavaScript click failed, try CDP approach
@@ -639,7 +650,7 @@ class BeelineBridge:
                     ),
                     timeout=1.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # Continue even if timeout
 
             await asyncio.sleep(0.08)
@@ -660,13 +671,20 @@ class BeelineBridge:
                     ),
                     timeout=3.0,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # Continue even if timeout
 
             w = bounds_value.get("width", 0)
             h = bounds_value.get("height", 0)
             await self.highlight_rect(tab_id, x - w / 2, y - h / 2, w, h, label=selector)
-            return {"ok": True, "action": "click", "selector": selector, "x": x, "y": y, "method": "cdp"}
+            return {
+                "ok": True,
+                "action": "click",
+                "selector": selector,
+                "x": x,
+                "y": y,
+                "method": "cdp",
+            }
 
         except Exception as e:
             return {"ok": False, "error": f"Click failed: {e}"}
@@ -775,12 +793,16 @@ class BeelineBridge:
         # Highlight the element that was typed into
         rect_result = await self.evaluate(
             tab_id,
-            f"(function(){{const el=document.querySelector({json.dumps(selector)});if(!el)return null;"
-            f"const r=el.getBoundingClientRect();return{{x:r.left,y:r.top,w:r.width,h:r.height}};}})()",
+            f"(function(){{const el=document.querySelector("
+            f"{json.dumps(selector)});if(!el)return null;"
+            f"const r=el.getBoundingClientRect();"
+            f"return{{x:r.left,y:r.top,w:r.width,h:r.height}};}})()",
         )
         rect = (rect_result or {}).get("result")
         if rect:
-            await self.highlight_rect(tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label=selector)
+            await self.highlight_rect(
+                tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label=selector
+            )
         return {"ok": True, "action": "type", "selector": selector, "length": len(text)}
 
     async def press_key(self, tab_id: int, key: str, selector: str | None = None) -> dict:
@@ -1036,18 +1058,33 @@ class BeelineBridge:
             },
         )
         _interaction_highlights[tab_id] = {
-            "x": x, "y": y, "w": w, "h": h, "label": label, "kind": "rect",
+            "x": x,
+            "y": y,
+            "w": w,
+            "h": h,
+            "label": label,
+            "kind": "rect",
         }
 
     async def highlight_point(self, tab_id: int, x: float, y: float, label: str = "") -> None:
         """Highlight a coordinate as a small crosshair box in the browser."""
         r = 12  # half-size of the crosshair box in CSS px
         await self.highlight_rect(
-            tab_id, x - r, y - r, r * 2, r * 2, label=label,
+            tab_id,
+            x - r,
+            y - r,
+            r * 2,
+            r * 2,
+            label=label,
             color={"r": 239, "g": 68, "b": 68, "a": 0.45},  # red-500 @ 45%
         )
         _interaction_highlights[tab_id] = {
-            "x": x, "y": y, "w": 0, "h": 0, "label": label, "kind": "point",
+            "x": x,
+            "y": y,
+            "w": 0,
+            "h": 0,
+            "label": label,
+            "kind": "point",
         }
 
     async def clear_highlight(self, tab_id: int) -> None:
@@ -1119,10 +1156,7 @@ class BeelineBridge:
         """
 
         try:
-            result = await asyncio.wait_for(
-                self.evaluate(tab_id, scroll_script),
-                timeout=5.0
-            )
+            result = await asyncio.wait_for(self.evaluate(tab_id, scroll_script), timeout=5.0)
             value = (result or {}).get("result") or {}
 
             if value.get("success"):
@@ -1132,12 +1166,12 @@ class BeelineBridge:
                     "direction": direction,
                     "amount": amount,
                     "method": value.get("method", "js"),
-                    "container": value.get("tag", "unknown")
+                    "container": value.get("tag", "unknown"),
                 }
             else:
                 return {"ok": False, "error": "scroll script returned failure"}
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return {"ok": False, "error": "scroll timed out"}
         except Exception as e:
             logger.warning("Scroll failed: %s", e)
@@ -1182,8 +1216,10 @@ class BeelineBridge:
         )
         # Arrow-function IIFE: (() => { ... })()
         is_arrow_iife = stripped.startswith("(()") and (
-            stripped.endswith("})()") or stripped.endswith("})();")
-            or stripped.endswith(")()") or stripped.endswith(")()")
+            stripped.endswith("})()")
+            or stripped.endswith("})();")
+            or stripped.endswith(")()")
+            or stripped.endswith(")()")
         )
 
         if is_iife or is_arrow_iife:
@@ -1212,7 +1248,9 @@ class BeelineBridge:
         if "exceptionDetails" in result:
             ex = result["exceptionDetails"]
             # Extract the actual exception message from the nested structure
-            ex_value = (ex.get("exception") or {}).get("description") or ex.get("text", "Script error")
+            ex_value = (ex.get("exception") or {}).get("description") or ex.get(
+                "text", "Script error"
+            )
             return {"ok": False, "error": ex_value}
 
         # The CDP response structure is {result: {type: ..., value: ...}}
@@ -1285,7 +1323,7 @@ class BeelineBridge:
                 "url": url,
                 "tree": snapshot,
             }
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Snapshot timed out after %ss", timeout_s)
             return {"ok": False, "error": f"snapshot timed out after {timeout_s}s"}
         except asyncio.CancelledError:
@@ -1332,7 +1370,8 @@ class BeelineBridge:
                     }
 
                     const tag = el.tagName.toLowerCase();
-                    const text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '').substring(0, 80);
+                    const text = (el.innerText || el.value || el.placeholder
+                        || el.getAttribute('aria-label') || '').substring(0, 80);
                     const type = el.type || tag;
                     const role = el.getAttribute('role') || tag;
                     const name = el.name || el.id || '';
@@ -1383,7 +1422,7 @@ class BeelineBridge:
             if text:
                 desc += f' "{text[:40]}"'
             if el.get("href"):
-                desc += f' [href]'
+                desc += " [href]"
             desc += f" [ref={ref}]"
             lines.append(f"  - {desc}")
 
@@ -1557,7 +1596,10 @@ class BeelineBridge:
         return {"ok": False, "error": f"Element not found: {selector}"}
 
     async def screenshot(
-        self, tab_id: int, full_page: bool = False, selector: str | None = None,
+        self,
+        tab_id: int,
+        full_page: bool = False,
+        selector: str | None = None,
         timeout_s: float = 30.0,
     ) -> dict:
         """Take a screenshot of the page or element.
@@ -1587,9 +1629,7 @@ class BeelineBridge:
                             "returnByValue": True,
                         },
                     )
-                    rect = (
-                        (rect_result or {}).get("result", {}).get("result", {}).get("value")
-                    )
+                    rect = (rect_result or {}).get("result", {}).get("result", {}).get("value")
                     if rect and rect.get("width") and rect.get("height"):
                         params["clip"] = {
                             "x": rect["x"],
@@ -1648,12 +1688,15 @@ class BeelineBridge:
                     "data": data,
                     "mimeType": "image/png",
                 }
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Screenshot timed out after %ss", timeout_s)
             return {"ok": False, "error": f"screenshot timed out after {timeout_s}s"}
         except asyncio.CancelledError:
             logger.warning("Screenshot cancelled (timeout or task cancellation)")
-            return {"ok": False, "error": f"screenshot timed out or cancelled (limit: {timeout_s}s)"}
+            return {
+                "ok": False,
+                "error": f"screenshot timed out or cancelled (limit: {timeout_s}s)",
+            }
         except Exception as e:
             logger.error("Screenshot failed: %s", e)
             return {"ok": False, "error": str(e)}

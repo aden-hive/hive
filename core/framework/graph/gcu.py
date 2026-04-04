@@ -153,7 +153,7 @@ wrong place.
 
 | Space | Used by | How to get |
 |---|---|---|
-| Physical pixels | `browser_click_coordinate`, `browser_hover_coordinate` | `browser_coords` `physical_x/y`, or CSS × DPR |
+| Physical pixels | `browser_click_coordinate` | `browser_coords` `physical_x/y` |
 | CSS pixels | `getBoundingClientRect()`, `elementFromPoint` | `browser_coords` `css_x/y` |
 | Screenshot pixels | What you see in the 800px image | Raw position in screenshot |
 

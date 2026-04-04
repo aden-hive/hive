@@ -1236,8 +1236,7 @@ class ExecutionStream:
                 # The task will continue winding down in the background and its
                 # finally block will harmlessly pop already-removed keys.
                 logger.warning(
-                    "Execution %s did not finish within cancel timeout; "
-                    "force-cleaning bookkeeping",
+                    "Execution %s did not finish within cancel timeout; force-cleaning bookkeeping",
                     execution_id,
                 )
                 async with self._lock:

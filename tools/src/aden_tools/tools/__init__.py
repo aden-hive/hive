@@ -133,6 +133,7 @@ from .twilio_tool import register_tools as register_twilio
 from .twitter_tool import register_tools as register_twitter
 from .vercel_tool import register_tools as register_vercel
 from .vision_tool import register_tools as register_vision
+
 try:
     from .web_scrape_tool import register_tools as register_web_scrape
 except ImportError:

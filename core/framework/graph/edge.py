@@ -302,6 +302,7 @@ Respond with ONLY a JSON object:
 
         return result
 
+
 class GraphSpec(BaseModel):
     """
     Complete specification of an agent graph.

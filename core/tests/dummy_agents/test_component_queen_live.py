@@ -18,7 +18,6 @@ import pytest
 from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.server.session_manager import Session
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -53,7 +52,7 @@ class PhaseCapture:
         try:
             await asyncio.wait_for(evt.wait(), timeout=timeout)
             return True
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             return False
 
 
@@ -74,7 +73,7 @@ class TextCapture:
         try:
             await asyncio.wait_for(self._has_text.wait(), timeout=timeout)
             return True
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             return False
 
     @property
@@ -145,7 +144,7 @@ async def _shutdown_queen(session: Session, task: asyncio.Task) -> None:
         task.cancel()
     try:
         await asyncio.wait_for(task, timeout=5)
-    except (asyncio.CancelledError, TimeoutError, asyncio.TimeoutError):
+    except (asyncio.CancelledError, TimeoutError):
         pass
 
 
@@ -508,7 +507,7 @@ async def test_queen_responds_to_message(llm_provider, tmp_path, artifact):
         try:
             await asyncio.wait_for(turn_complete.wait(), timeout=QUEEN_RESPONSE_TIMEOUT)
             got_turn = True
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             pass
 
         artifact.record_value(
@@ -546,7 +545,7 @@ async def test_queen_responds_after_injected_message(llm_provider, tmp_path, art
         )
         try:
             await asyncio.wait_for(first_turn.wait(), timeout=QUEEN_RESPONSE_TIMEOUT)
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             pass
         session.event_bus.unsubscribe(sub_id)
 
@@ -573,7 +572,7 @@ async def test_queen_responds_after_injected_message(llm_provider, tmp_path, art
         try:
             await asyncio.wait_for(second_turn.wait(), timeout=QUEEN_RESPONSE_TIMEOUT)
             got_turn = True
-        except (TimeoutError, asyncio.TimeoutError):
+        except TimeoutError:
             pass
 
         artifact.record_value(

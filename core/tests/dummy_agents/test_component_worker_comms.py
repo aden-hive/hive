@@ -887,7 +887,7 @@ async def test_worker_escalation_emits_event_with_reason(
             ),
             timeout=30,
         )
-    except (TimeoutError, asyncio.TimeoutError):
+    except TimeoutError:
         pass  # Expected: worker hangs waiting for queen
 
     escalations = capture.of_type(EventType.ESCALATION_REQUESTED)

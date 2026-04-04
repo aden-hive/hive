@@ -11,7 +11,6 @@ have already been processed by the reflection agent.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import shutil
@@ -262,8 +261,7 @@ def validate_global_memory_payload(
     parsed = parse_global_memory_category(category)
     if parsed is None:
         raise ValueError(
-            "Invalid global memory category. Use one of: "
-            + ", ".join(GLOBAL_MEMORY_CATEGORIES)
+            "Invalid global memory category. Use one of: " + ", ".join(GLOBAL_MEMORY_CATEGORIES)
         )
     if not description.strip():
         raise ValueError("Global memory description cannot be empty.")
@@ -304,9 +302,7 @@ def save_global_memory(
         body=content,
     )
     if len(doc.encode("utf-8")) > MAX_FILE_SIZE_BYTES:
-        raise ValueError(
-            f"Global memory entry exceeds the {MAX_FILE_SIZE_BYTES} byte limit."
-        )
+        raise ValueError(f"Global memory entry exceeds the {MAX_FILE_SIZE_BYTES} byte limit.")
     path = target_dir / filename
     path.write_text(doc, encoding="utf-8")
     return filename, path
@@ -315,6 +311,7 @@ def save_global_memory(
 # ---------------------------------------------------------------------------
 # Manifest formatting
 # ---------------------------------------------------------------------------
+
 
 def _age_label(mtime: float) -> str:
     """Human-readable age string from an mtime."""
@@ -483,10 +480,7 @@ def migrate_shared_v2_memories(
     if not src.is_dir():
         return
 
-    md_files = sorted(
-        f for f in src.glob("*.md")
-        if f.is_file() and not f.name.startswith(".")
-    )
+    md_files = sorted(f for f in src.glob("*.md") if f.is_file() and not f.name.startswith("."))
     if not md_files:
         marker.write_text("no shared memories found\n", encoding="utf-8")
         return
@@ -533,13 +527,7 @@ def _write_migration_file(
 ) -> None:
     """Write a single migrated memory file with frontmatter."""
     # Truncate body to respect file size limit (leave room for frontmatter).
-    header = (
-        f"---\n"
-        f"name: {name}\n"
-        f"description: {description}\n"
-        f"type: {mem_type}\n"
-        f"---\n\n"
-    )
+    header = f"---\nname: {name}\ndescription: {description}\ntype: {mem_type}\n---\n\n"
     max_body = MAX_FILE_SIZE_BYTES - len(header.encode("utf-8"))
     if len(body.encode("utf-8")) > max_body:
         # Rough truncation — cut at character level then trim to last newline.

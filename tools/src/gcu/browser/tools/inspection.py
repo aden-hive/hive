@@ -67,7 +67,9 @@ def _resize_and_annotate(
             overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
             draw = ImageDraw.Draw(overlay)
             try:
-                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
+                font = ImageFont.truetype(
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11
+                )
             except Exception:
                 font = ImageFont.load_default()
 
@@ -82,13 +84,25 @@ def _resize_and_annotate(
 
                 if kind == "point":
                     cx, cy, r = ix, iy, 10
-                    draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)],
-                                 fill=(239, 68, 68, 100), outline=(239, 68, 68, 220), width=2)
-                    draw.line([(cx - r - 4, cy), (cx + r + 4, cy)], fill=(239, 68, 68, 220), width=2)
-                    draw.line([(cx, cy - r - 4), (cx, cy + r + 4)], fill=(239, 68, 68, 220), width=2)
+                    draw.ellipse(
+                        [(cx - r, cy - r), (cx + r, cy + r)],
+                        fill=(239, 68, 68, 100),
+                        outline=(239, 68, 68, 220),
+                        width=2,
+                    )
+                    draw.line(
+                        [(cx - r - 4, cy), (cx + r + 4, cy)], fill=(239, 68, 68, 220), width=2
+                    )
+                    draw.line(
+                        [(cx, cy - r - 4), (cx, cy + r + 4)], fill=(239, 68, 68, 220), width=2
+                    )
                 else:
-                    draw.rectangle([(ix, iy), (ix + iw, iy + ih)],
-                                   fill=(59, 130, 246, 70), outline=(59, 130, 246, 220), width=2)
+                    draw.rectangle(
+                        [(ix, iy), (ix + iw, iy + ih)],
+                        fill=(59, 130, 246, 70),
+                        outline=(59, 130, 246, 220),
+                        width=2,
+                    )
 
                 # Label: show image pixel position so user knows where to look
                 img_coords = f"img:({round(ix)},{round(iy)})"
@@ -109,7 +123,11 @@ def _resize_and_annotate(
 
         buf = io.BytesIO()
         img.save(buf, format="PNG", optimize=True)
-        return base64.b64encode(buf.getvalue()).decode(), round(physical_scale, 4), round(css_scale, 4)
+        return (
+            base64.b64encode(buf.getvalue()).decode(),
+            round(physical_scale, 4),
+            round(css_scale, 4),
+        )
     except Exception:
         logger.debug("Screenshot resize/annotate failed, using original", exc_info=True)
         return data, 1.0, 1.0
@@ -210,6 +228,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
 
             # Collect highlights: last interaction from bridge + CDP already drew in browser
             from ..bridge import _interaction_highlights
+
             highlights: list[dict] | None = None
             if annotate and target_tab in _interaction_highlights:
                 highlights = [_interaction_highlights[target_tab]]
@@ -235,8 +254,11 @@ def register_inspection_tools(mcp: FastMCP) -> None:
                     "cssScale": css_scale,
                     "annotated": bool(highlights),
                     "scaleHint": (
-                        f"image_coord × {physical_scale} = physical px (for browser_click_coordinate/hover_coordinate); "
-                        f"image_coord × {css_scale} = CSS px (for getBoundingClientRect)"
+                        f"image_coord × {physical_scale} = physical px "
+                        f"(for browser_click_coordinate/"
+                        f"hover_coordinate); "
+                        f"image_coord × {css_scale} = CSS px "
+                        f"(for getBoundingClientRect)"
                     ),
                 }
             )
@@ -299,7 +321,9 @@ def register_inspection_tools(mcp: FastMCP) -> None:
 
         physical_scale = _screenshot_scales.get(target_tab, 1.0) if target_tab else 1.0
         # css_scale stored in second slot via _screenshot_css_scales
-        css_scale = _screenshot_css_scales.get(target_tab, physical_scale) if target_tab else physical_scale
+        css_scale = (
+            _screenshot_css_scales.get(target_tab, physical_scale) if target_tab else physical_scale
+        )
 
         return {
             "ok": True,
@@ -310,7 +334,12 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             "physicalScale": physical_scale,
             "cssScale": css_scale,
             "tabId": target_tab,
-            "note": "Use physical_x/y with browser_click_coordinate, browser_hover_coordinate, browser_press_at. Use css_x/y with getBoundingClientRect and DOM APIs.",
+            "note": (
+                "Use physical_x/y with browser_click_coordinate,"
+                " browser_hover_coordinate, browser_press_at."
+                " Use css_x/y with getBoundingClientRect"
+                " and DOM APIs."
+            ),
         }
 
     @mcp.tool()
@@ -358,14 +387,29 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             "ok": True,
             "selector": selector,
             "tag": rect.get("tag"),
-            "css": {"x": rect["x"], "y": rect["y"], "w": rect["w"], "h": rect["h"],
-                    "cx": rect["cx"], "cy": rect["cy"]},
-            "physical": {
-                "x": round(rect["x"] * dpr, 1), "y": round(rect["y"] * dpr, 1),
-                "w": round(rect["w"] * dpr, 1), "h": round(rect["h"] * dpr, 1),
-                "cx": round(rect["cx"] * dpr, 1), "cy": round(rect["cy"] * dpr, 1),
+            "css": {
+                "x": rect["x"],
+                "y": rect["y"],
+                "w": rect["w"],
+                "h": rect["h"],
+                "cx": rect["cx"],
+                "cy": rect["cy"],
             },
-            "note": "Use physical.cx/cy with browser_click_coordinate or browser_hover_coordinate. Use css.cx/cy with getBoundingClientRect comparisons.",
+            "physical": {
+                "x": round(rect["x"] * dpr, 1),
+                "y": round(rect["y"] * dpr, 1),
+                "w": round(rect["w"] * dpr, 1),
+                "h": round(rect["h"] * dpr, 1),
+                "cx": round(rect["cx"] * dpr, 1),
+                "cy": round(rect["cy"] * dpr, 1),
+            },
+            "note": (
+                "Use physical.cx/cy with"
+                " browser_click_coordinate or"
+                " browser_hover_coordinate."
+                " Use css.cx/cy with"
+                " getBoundingClientRect comparisons."
+            ),
         }
 
     @mcp.tool()
@@ -413,12 +457,21 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             "ok": True,
             "selector": selector,
             "tag": rect.get("tag"),
-            "css": {"x": rect["x"], "y": rect["y"], "w": rect["w"], "h": rect["h"],
-                    "cx": rect["cx"], "cy": rect["cy"]},
+            "css": {
+                "x": rect["x"],
+                "y": rect["y"],
+                "w": rect["w"],
+                "h": rect["h"],
+                "cx": rect["cx"],
+                "cy": rect["cy"],
+            },
             "physical": {
-                "x": round(rect["x"] * dpr, 1), "y": round(rect["y"] * dpr, 1),
-                "w": round(rect["w"] * dpr, 1), "h": round(rect["h"] * dpr, 1),
-                "cx": round(rect["cx"] * dpr, 1), "cy": round(rect["cy"] * dpr, 1),
+                "x": round(rect["x"] * dpr, 1),
+                "y": round(rect["y"] * dpr, 1),
+                "w": round(rect["w"] * dpr, 1),
+                "h": round(rect["h"] * dpr, 1),
+                "cx": round(rect["cx"] * dpr, 1),
+                "cy": round(rect["cy"] * dpr, 1),
             },
             "note": "Use physical.cx/cy with browser_click_coordinate or browser_hover_coordinate.",
         }

@@ -16,7 +16,6 @@ This will test:
 """
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -37,7 +36,7 @@ async def test_connection(bridge: BeelineBridge) -> bool:
         if bridge.is_connected:
             print("✓ Extension connected!")
             return True
-        print(f"  Waiting... ({i+1}/5)")
+        print(f"  Waiting... ({i + 1}/5)")
 
     print("✗ Extension not connected. Ensure Chrome extension is installed.")
     return False

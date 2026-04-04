@@ -238,7 +238,9 @@ class AgentRuntime:
         self._tools = tools or []
         self._tool_executor = tool_executor
         self._accounts_prompt = accounts_prompt
-        self._dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = None
+        self._dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = (
+            None
+        )
         # Colony memory config for reflection-at-handoff (set by session_manager)
         self._colony_memory_dir: Any = None
         self._colony_worker_sessions_dir: Any = None
@@ -1522,7 +1524,9 @@ class AgentRuntime:
                         # Filter to only input keys so stale outputs
                         # from previous triggers don't leak through.
                         if allowed_keys is not None:
-                            buffer_data = {k: v for k, v in full_buffer.items() if k in allowed_keys}
+                            buffer_data = {
+                                k: v for k, v in full_buffer.items() if k in allowed_keys
+                            }
                         else:
                             buffer_data = full_buffer
                         if buffer_data:

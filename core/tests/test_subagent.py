@@ -19,7 +19,7 @@ from framework.graph.event_loop_node import (
     LoopConfig,
     SubagentJudge,
 )
-from framework.graph.node import NodeContext, NodeSpec, DataBuffer
+from framework.graph.node import DataBuffer, NodeContext, NodeSpec
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
     FinishEvent,

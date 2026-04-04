@@ -10,9 +10,7 @@ def register_tools(mcp: FastMCP) -> None:
     """Register diff application tools with the MCP server."""
 
     @mcp.tool()
-    def apply_diff(
-        path: str, diff_text: str, agent_id: str
-    ) -> dict:
+    def apply_diff(path: str, diff_text: str, agent_id: str) -> dict:
         """
         Purpose
             Apply a structured diff to update a file while preserving context.

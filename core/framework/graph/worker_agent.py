@@ -256,7 +256,9 @@ class WorkerAgent:
             if node_spec.max_node_visits > 0 and visit_count > node_spec.max_node_visits:
                 logger.info(
                     "Worker %s: visit %d exceeds max_node_visits=%d, skipping",
-                    node_spec.id, visit_count, node_spec.max_node_visits,
+                    node_spec.id,
+                    visit_count,
+                    node_spec.max_node_visits,
                 )
                 # Build a synthetic success result from current buffer state
                 existing_output: dict[str, Any] = {}
@@ -351,15 +353,14 @@ class WorkerAgent:
             self._last_activations = []
             await self._publish_failure(error)
 
-    async def _execute_with_retries(
-        self, node_impl: NodeProtocol, ctx: NodeContext
-    ) -> NodeResult:
+    async def _execute_with_retries(self, node_impl: NodeProtocol, ctx: NodeContext) -> NodeResult:
         """Execute node with exponential backoff retry."""
         gc = self._gc
         # Only skip retries for actual EventLoopNode instances (they handle
         # retries internally).  Custom NodeProtocol impls registered via
         # register_node should be retried by the executor.
         from framework.graph.event_loop_node import EventLoopNode as _ELN
+
         if isinstance(node_impl, _ELN):
             max_retries = 0
         else:
@@ -382,7 +383,9 @@ class WorkerAgent:
 
                 # Failure
                 if attempt + 1 < total_attempts:
-                    gc.retry_counts[self.node_spec.id] = gc.retry_counts.get(self.node_spec.id, 0) + 1
+                    gc.retry_counts[self.node_spec.id] = (
+                        gc.retry_counts.get(self.node_spec.id, 0) + 1
+                    )
                     gc.nodes_with_retries.add(self.node_spec.id)
                     delay = 1.0 * (2**attempt)
                     logger.warning(
@@ -412,7 +415,9 @@ class WorkerAgent:
 
             except Exception as exc:
                 if attempt + 1 < total_attempts:
-                    gc.retry_counts[self.node_spec.id] = gc.retry_counts.get(self.node_spec.id, 0) + 1
+                    gc.retry_counts[self.node_spec.id] = (
+                        gc.retry_counts.get(self.node_spec.id, 0) + 1
+                    )
                     gc.nodes_with_retries.add(self.node_spec.id)
                     delay = 1.0 * (2**attempt)
                     logger.warning(
@@ -439,9 +444,7 @@ class WorkerAgent:
     # Edge evaluation (source-side)
     # ------------------------------------------------------------------
 
-    async def _evaluate_outgoing_edges(
-        self, result: NodeResult
-    ) -> list[Activation]:
+    async def _evaluate_outgoing_edges(self, result: NodeResult) -> list[Activation]:
         """Evaluate outgoing edges and create activations for downstream.
 
         Same logic as current _get_all_traversable_edges() plus
@@ -573,14 +576,17 @@ class WorkerAgent:
                         elif conflict_strategy == "first_wins":
                             logger.debug(
                                 "Skipping write to '%s' (first_wins: already set by %s)",
-                                key, prior_worker,
+                                key,
+                                prior_worker,
                             )
                             continue
                         else:
                             # last_wins: log and overwrite
                             logger.debug(
                                 "Key '%s' overwritten (last_wins: %s -> %s)",
-                                key, prior_worker, node_spec.id,
+                                key,
+                                prior_worker,
+                                node_spec.id,
                             )
                     gc._fanout_written_keys[key] = node_spec.id
                 gc.buffer.write(key, value, validate=False)
@@ -602,8 +608,8 @@ class WorkerAgent:
 
         # Auto-create EventLoopNode
         if self.node_spec.node_type in ("event_loop", "gcu"):
-            from framework.graph.event_loop_node import EventLoopNode
             from framework.graph.event_loop.types import LoopConfig
+            from framework.graph.event_loop_node import EventLoopNode
             from framework.graph.node import warn_if_deprecated_client_facing
 
             conv_store = None
@@ -641,8 +647,7 @@ class WorkerAgent:
             return node
 
         raise RuntimeError(
-            f"No implementation for node '{self.node_spec.id}' "
-            f"(type: {self.node_spec.node_type})"
+            f"No implementation for node '{self.node_spec.id}' (type: {self.node_spec.node_type})"
         )
 
     def _build_node_context(self) -> NodeContext:
@@ -676,7 +681,9 @@ class WorkerAgent:
                 from framework.agents.queen.reflection_agent import run_short_reflection
 
                 await run_short_reflection(
-                    session_dir, gc.colony_reflect_llm, gc.colony_memory_dir,
+                    session_dir,
+                    gc.colony_reflect_llm,
+                    gc.colony_memory_dir,
                     caller="worker",
                 )
             except Exception:
@@ -721,21 +728,23 @@ class WorkerAgent:
         # Serialize activations to dicts for event data
         activations_data = []
         for act in completion.activations:
-            activations_data.append({
-                "source_id": act.source_id,
-                "target_id": act.target_id,
-                "edge_id": act.edge_id,
-                "mapped_inputs": act.mapped_inputs,
-                "fan_out_tags": [
-                    {
-                        "fan_out_id": t.fan_out_id,
-                        "fan_out_source": t.fan_out_source,
-                        "branches": list(t.branches),
-                        "via_branch": t.via_branch,
-                    }
-                    for t in act.fan_out_tags
-                ],
-            })
+            activations_data.append(
+                {
+                    "source_id": act.source_id,
+                    "target_id": act.target_id,
+                    "edge_id": act.edge_id,
+                    "mapped_inputs": act.mapped_inputs,
+                    "fan_out_tags": [
+                        {
+                            "fan_out_id": t.fan_out_id,
+                            "fan_out_source": t.fan_out_source,
+                            "branches": list(t.branches),
+                            "via_branch": t.via_branch,
+                        }
+                        for t in act.fan_out_tags
+                    ],
+                }
+            )
 
         await gc.event_bus.emit_worker_completed(
             stream_id=gc.stream_id,

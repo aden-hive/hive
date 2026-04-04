@@ -10,7 +10,6 @@ Fix: Add delay_ms between keystrokes
 
 import asyncio
 import sys
-import base64
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "tools" / "src"))
@@ -87,7 +86,26 @@ async def test_autocomplete():
             <div id="log" style="margin-top:20px;font-family:monospace;"></div>
 
             <script>
-                const countries = ["Afghanistan","Albania","Algeria","Andorra","Angola","Argentina","Armenia","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Brazil","Canada","China","Colombia","Denmark","Egypt","France","Germany","India","Indonesia","Italy","Japan","Mexico","Netherlands","Nigeria","Norway","Pakistan","Peru","Philippines","Poland","Portugal","Russia","Spain","Sweden","Switzerland","Thailand","Turkey","Ukraine","United Kingdom","United States","Vietnam"];
+                const countries = [
+                    "Afghanistan","Albania","Algeria",
+                    "Andorra","Angola","Argentina",
+                    "Armenia","Australia","Austria",
+                    "Azerbaijan","Bahamas","Bahrain",
+                    "Bangladesh","Belarus","Belgium",
+                    "Belize","Benin","Bhutan",
+                    "Bolivia","Brazil","Canada",
+                    "China","Colombia","Denmark",
+                    "Egypt","France","Germany",
+                    "India","Indonesia","Italy",
+                    "Japan","Mexico","Netherlands",
+                    "Nigeria","Norway","Pakistan",
+                    "Peru","Philippines","Poland",
+                    "Portugal","Russia","Spain",
+                    "Sweden","Switzerland","Thailand",
+                    "Turkey","Ukraine",
+                    "United Kingdom","United States",
+                    "Vietnam"
+                ];
 
                 const input = document.getElementById('search');
                 const log = document.getElementById('log');
@@ -126,11 +144,15 @@ async def test_autocomplete():
                         div.setAttribute('class', 'autocomplete-items');
                         this.parentNode.appendChild(div);
 
-                        countries.filter(c => c.substr(0, val.length).toUpperCase() === val.toUpperCase())
-                            .slice(0, 5)
-                            .forEach(country => {
+                        countries.filter(
+                            c => c.substr(0, val.length).toUpperCase()
+                                === val.toUpperCase()
+                        ).slice(0, 5).forEach(country => {
                                 const item = document.createElement('div');
-                                item.innerHTML = '<strong>' + country.substr(0, val.length) + '</strong>' + country.substr(val.length);
+                                item.innerHTML = '<strong>'
+                                    + country.substr(0, val.length)
+                                    + '</strong>'
+                                    + country.substr(val.length);
                                 item.addEventListener('click', function() {
                                     input.value = country;
                                     closeAllLists();
@@ -172,16 +194,14 @@ async def test_autocomplete():
         await asyncio.sleep(0.5)
 
         fast_result = await bridge.evaluate(
-            tab_id,
-            "(function() { return document.getElementById('search').value; })()"
+            tab_id, "(function() { return document.getElementById('search').value; })()"
         )
         fast_value = fast_result.get("result", "")
         print(f"Value after fast typing: '{fast_value}'")
 
         # Check events
         events_result = await bridge.evaluate(
-            tab_id,
-            "(function() { return window.inputEvents; })()"
+            tab_id, "(function() { return window.inputEvents; })()"
         )
         print(f"Events logged: {events_result.get('result', [])}")
 
@@ -192,8 +212,7 @@ async def test_autocomplete():
         await asyncio.sleep(0.5)
 
         slow_result = await bridge.evaluate(
-            tab_id,
-            "(function() { return document.getElementById('search').value; })()"
+            tab_id, "(function() { return document.getElementById('search').value; })()"
         )
         slow_value = slow_result.get("result", "")
         print(f"Value after slow typing: '{slow_value}'")
@@ -201,7 +220,8 @@ async def test_autocomplete():
         # Check if dropdown appeared
         dropdown_result = await bridge.evaluate(
             tab_id,
-            "(function() { return document.querySelectorAll('.autocomplete-items div').length; })()"
+            "(function() { return document.querySelectorAll("
+            "'.autocomplete-items div').length; })()",
         )
         dropdown_count = dropdown_result.get("result", 0)
         print(f"Dropdown items: {dropdown_count}")

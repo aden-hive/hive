@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import functools
 import json
-import os
 import time
 import traceback
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 # Try to import context variable, but don't fail if not available
 try:
@@ -43,7 +43,7 @@ def _get_log_file() -> Path:
     """Get the current log file, rotating daily."""
     global _current_log_file, _log_file_date
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     if _log_file_date != today:
         _log_file_date = today
         _current_log_file = LOG_DIR / f"browser-{today}.jsonl"
@@ -95,7 +95,7 @@ def write_log(entry: dict[str, Any]) -> None:
     """Write a log entry to the current log file."""
     try:
         log_file = _get_log_file()
-        entry["ts"] = datetime.now(timezone.utc).isoformat()
+        entry["ts"] = datetime.now(UTC).isoformat()
         entry["profile"] = _get_profile()
 
         with open(log_file, "a", encoding="utf-8") as f:
@@ -283,4 +283,4 @@ def instrument_tool(tool_name: str) -> Callable[[F], F]:
 
 
 # Import asyncio at the end to avoid circular import issues
-import asyncio
+import asyncio  # noqa: E402

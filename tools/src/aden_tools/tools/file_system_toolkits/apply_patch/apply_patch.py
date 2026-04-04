@@ -10,9 +10,7 @@ def register_tools(mcp: FastMCP) -> None:
     """Register patch application tools with the MCP server."""
 
     @mcp.tool()
-    def apply_patch(
-        path: str, patch_text: str, agent_id: str
-    ) -> dict:
+    def apply_patch(path: str, patch_text: str, agent_id: str) -> dict:
         """
         Purpose
             Apply a scoped, line-level modification to an existing file.

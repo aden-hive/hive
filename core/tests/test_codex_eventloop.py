@@ -16,7 +16,7 @@ logging.getLogger("framework.llm.litellm").setLevel(logging.DEBUG)
 
 from framework.config import RuntimeConfig  # noqa: E402
 from framework.graph.event_loop_node import EventLoopNode, LoopConfig  # noqa: E402
-from framework.graph.node import NodeContext, NodeResult, NodeSpec, DataBuffer  # noqa: E402
+from framework.graph.node import DataBuffer, NodeContext, NodeResult, NodeSpec  # noqa: E402
 from framework.llm.litellm import LiteLLMProvider  # noqa: E402
 
 

@@ -188,6 +188,7 @@ async def handle_browser_status(request: web.Request) -> web.Response:
         if b"\r\n\r\n" in raw:
             body = raw.split(b"\r\n\r\n", 1)[1]
             import json
+
             data = json.loads(body)
             return web.json_response({"bridge": True, "connected": data.get("connected", False)})
     except Exception:

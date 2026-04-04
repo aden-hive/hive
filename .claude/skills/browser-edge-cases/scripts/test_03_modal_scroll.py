@@ -9,7 +9,6 @@ Fix: Find visible modal container (highest z-index scrollable), scroll that
 
 import asyncio
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "tools" / "src"))
@@ -60,7 +59,7 @@ async def test_modal_scroll():
         # Click button to open modal
         print("\n--- Opening modal ---")
         # Find and click the "Open Modal" button
-        result = await bridge.click(tab_id, '.ws-btn', timeout_ms=5000)
+        result = await bridge.click(tab_id, ".ws-btn", timeout_ms=5000)
         print(f"Click result: {result}")
 
         await asyncio.sleep(1)

@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any
 
 
-
 class FileConversationStore:
     """File-per-part ConversationStore.
 

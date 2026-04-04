@@ -19,7 +19,6 @@ from framework.graph.prompting import (
 )
 
 if TYPE_CHECKING:
-    from framework.graph.edge import GraphSpec
     from framework.graph.node import DataBuffer, NodeSpec
 
 
@@ -136,8 +135,7 @@ def build_transition_marker(
     )
 
 
-from framework.graph.prompting import build_transition_message
-
+from framework.graph.prompting import build_transition_message  # noqa: E402
 
 __all__ = [
     "EXECUTION_SCOPE_PREAMBLE",

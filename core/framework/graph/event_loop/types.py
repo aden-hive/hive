@@ -11,8 +11,6 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from framework.graph.conversation import (
     ConversationStore,
-    get_run_cursor,
-    update_run_cursor,
 )
 
 logger = logging.getLogger(__name__)

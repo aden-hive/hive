@@ -279,12 +279,14 @@ class TestArtifact:
 
     def check(self, description: str, passed: bool, actual: str = "", expected_val: str = ""):
         """Record an individual assertion check."""
-        self._data["checks"].append({
-            "description": description,
-            "passed": passed,
-            "actual": actual,
-            "expected": expected_val,
-        })
+        self._data["checks"].append(
+            {
+                "description": description,
+                "passed": passed,
+                "actual": actual,
+                "expected": expected_val,
+            }
+        )
 
     def save(self):
         """Write artifact to disk."""

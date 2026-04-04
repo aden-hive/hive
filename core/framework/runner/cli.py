@@ -1253,6 +1253,7 @@ def _select_agent(agents_dir: Path) -> str | None:
             print()
             return None
 
+
 def cmd_setup_credentials(args: argparse.Namespace) -> int:
     """Interactive credential setup for an agent."""
     from framework.credentials.setup import CredentialSetupSession

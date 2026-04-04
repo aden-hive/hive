@@ -136,8 +136,12 @@ async def handle_chat(request: web.Request) -> web.Response:
     display_message = body.get("display_message")
     image_content = body.get("images") or None  # list[dict] | None
 
-    logger.debug("[handle_chat] session_id=%s, message_len=%d, has_images=%s", 
-                 session.id, len(message), bool(image_content))
+    logger.debug(
+        "[handle_chat] session_id=%s, message_len=%d, has_images=%s",
+        session.id,
+        len(message),
+        bool(image_content),
+    )
     logger.debug("[handle_chat] session.queen_executor=%s", session.queen_executor)
 
     if not message and not image_content:
@@ -146,17 +150,31 @@ async def handle_chat(request: web.Request) -> web.Response:
     queen_executor = session.queen_executor
     if queen_executor is not None:
         logger.debug("[handle_chat] Queen executor exists, looking for 'queen' node...")
-        logger.debug("[handle_chat] node_registry type=%s, id=%s", type(queen_executor.node_registry), id(queen_executor.node_registry))
-        logger.debug("[handle_chat] node_registry keys: %s", list(queen_executor.node_registry.keys()))
+        logger.debug(
+            "[handle_chat] node_registry type=%s, id=%s",
+            type(queen_executor.node_registry),
+            id(queen_executor.node_registry),
+        )
+        logger.debug(
+            "[handle_chat] node_registry keys: %s", list(queen_executor.node_registry.keys())
+        )
         node = queen_executor.node_registry.get("queen")
-        logger.debug("[handle_chat] node=%s, node_type=%s", node, type(node).__name__ if node else None)
-        logger.debug("[handle_chat] has_inject_event=%s", hasattr(node, "inject_event") if node else False)
-        
+        logger.debug(
+            "[handle_chat] node=%s, node_type=%s", node, type(node).__name__ if node else None
+        )
+        logger.debug(
+            "[handle_chat] has_inject_event=%s", hasattr(node, "inject_event") if node else False
+        )
+
         # Race condition: executor exists but node not created yet (still initializing)
         if node is None and session.queen_task is not None and not session.queen_task.done():
-            logger.warning("[handle_chat] Queen executor exists but node not ready yet (initializing). Waiting...")
+            logger.warning(
+                "[handle_chat] Queen executor exists but node"
+                " not ready yet (initializing). Waiting..."
+            )
             # Wait a short time for initialization to progress
             import asyncio
+
             for _ in range(50):  # Max 5 seconds
                 await asyncio.sleep(0.1)
                 node = queen_executor.node_registry.get("queen")
@@ -165,7 +183,7 @@ async def handle_chat(request: web.Request) -> web.Response:
                     break
             else:
                 logger.error("[handle_chat] Node still not available after 5s wait")
-        
+
         if node is not None and hasattr(node, "inject_event"):
             try:
                 logger.debug("[handle_chat] Calling node.inject_event()...")
@@ -199,12 +217,22 @@ async def handle_chat(request: web.Request) -> web.Response:
             )
         else:
             if node is None:
-                logger.error("[handle_chat] CRITICAL: Queen node is None! node_registry has %d keys: %s, queen_task=%s, queen_task_done=%s", 
-                             len(queen_executor.node_registry), list(queen_executor.node_registry.keys()),
-                             session.queen_task, session.queen_task.done() if session.queen_task else None)
+                logger.error(
+                    "[handle_chat] CRITICAL: Queen node is None!"
+                    " node_registry has %d keys: %s,"
+                    " queen_task=%s, queen_task_done=%s",
+                    len(queen_executor.node_registry),
+                    list(queen_executor.node_registry.keys()),
+                    session.queen_task,
+                    session.queen_task.done() if session.queen_task else None,
+                )
             else:
-                logger.error("[handle_chat] CRITICAL: Queen node exists but missing inject_event! node_attrs=%s", 
-                             [a for a in dir(node) if not a.startswith('_')])
+                logger.error(
+                    "[handle_chat] CRITICAL: Queen node exists"
+                    " but missing inject_event!"
+                    " node_attrs=%s",
+                    [a for a in dir(node) if not a.startswith("_")],
+                )
 
     # Queen is dead — try to revive her
     logger.warning(
@@ -220,7 +248,9 @@ async def handle_chat(request: web.Request) -> web.Response:
         _revived_executor = session.queen_executor
         _revived_node = _revived_executor.node_registry.get("queen") if _revived_executor else None
         if _revived_node is not None and hasattr(_revived_node, "inject_event"):
-            await _revived_node.inject_event(message, is_client_input=True, image_content=image_content)
+            await _revived_node.inject_event(
+                message, is_client_input=True, image_content=image_content
+            )
         return web.json_response(
             {
                 "status": "queen_revived",

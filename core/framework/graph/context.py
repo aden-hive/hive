@@ -307,7 +307,9 @@ def build_node_context_from_graph_context(
         accounts_data=gc.accounts_data,
         tool_provider_map=gc.tool_provider_map,
         fallback_to_default_accounts_prompt=fallback_to_default_accounts_prompt,
-        identity_prompt=identity_prompt if identity_prompt is not None else getattr(gc.graph, "identity_prompt", "") or "",
+        identity_prompt=identity_prompt
+        if identity_prompt is not None
+        else getattr(gc.graph, "identity_prompt", "") or "",
         narrative=narrative,
         execution_id=gc.execution_id,
         run_id=gc.run_id,

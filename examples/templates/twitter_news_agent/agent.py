@@ -198,9 +198,7 @@ class TwitterNewsAgent:
     async def run(self, context, session_state=None):
         await self.start()
         try:
-            result = await self.trigger_and_wait(
-                "default", context, session_state=session_state
-            )
+            result = await self.trigger_and_wait("default", context, session_state=session_state)
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
             await self.stop()

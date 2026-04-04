@@ -3,8 +3,12 @@
 
 Examples:
     uv run scripts/debug_agent_node.py exports/reddit_star_growth_agent --list-nodes
-    uv run scripts/debug_agent_node.py exports/reddit_star_growth_agent --node load_contacted_users --task '{"repo_url":"https://github.com/acme/repo"}'
-    uv run scripts/debug_agent_node.py exports/reddit_star_growth_agent/nodes/__init__.py --node load_contacted_users --input-file /tmp/payload.json
+    uv run scripts/debug_agent_node.py exports/reddit_star_growth_agent \
+        --node load_contacted_users \
+        --task '{"repo_url":"https://github.com/acme/repo"}'
+    uv run scripts/debug_agent_node.py \
+        exports/reddit_star_growth_agent/nodes/__init__.py \
+        --node load_contacted_users --input-file /tmp/payload.json
 """
 
 from __future__ import annotations
@@ -23,11 +27,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from framework.graph.checkpoint_config import CheckpointConfig
-from framework.graph.edge import GraphSpec
-from framework.runtime.agent_runtime import create_agent_runtime
-from framework.runtime.execution_stream import EntryPointSpec
-from framework.runner.runner import AgentRunner
+from framework.graph.checkpoint_config import CheckpointConfig  # noqa: E402
+from framework.graph.edge import GraphSpec  # noqa: E402
+from framework.runtime.agent_runtime import create_agent_runtime  # noqa: E402
+from framework.runtime.execution_stream import EntryPointSpec  # noqa: E402
+from framework.runner.runner import AgentRunner  # noqa: E402
 
 
 def _configure_event_debug_logging(storage_path: Path) -> None:
@@ -122,7 +126,10 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "agent_path",
-        help="Export directory or file path (for example exports/my_agent or exports/my_agent/nodes/__init__.py).",
+        help=(
+            "Export directory or file path (for example"
+            " exports/my_agent or exports/my_agent/nodes/__init__.py)."
+        ),
     )
     parser.add_argument(
         "--node",
