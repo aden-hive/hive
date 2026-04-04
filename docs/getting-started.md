@@ -65,7 +65,7 @@ uv run python core/examples/manual_agent.py
 
 **Expected output:**
 
-```
+```text
 Setting up Manual Agent...
 Executing agent with input: name='Alice'...
 
@@ -131,7 +131,7 @@ Or use the `hive` CLI:
 
 ## Project Structure
 
-```
+```text
 hive/
 ├── core/                    # Core framework package (`framework`)
 │   ├── framework/           # Runtime, graph executor, LLM providers
@@ -159,7 +159,7 @@ hive/
 The recommended workflow for new agents uses the `coder-tools` MCP server with Claude Code or Cursor:
 
 **Claude Code:**
-```
+```text
 Use the `initialize_and_build_agent` coder-tools MCP tool
 Goal: "An agent that monitors Hacker News for AI articles and sends a daily digest"
 ```
