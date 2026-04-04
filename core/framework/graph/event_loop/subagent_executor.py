@@ -273,18 +273,28 @@ async def execute_subagent(
         conversation_store=subagent_conv_store,
     )
 
-    # Inject a GCU browser profile for this subagent.
-    # Use just agent_id (not subagent_instance) so the profile is stable
-    # across multiple calls to the same subagent type. This allows
-    # cookies/auth to persist between runs.
-    _profile_token = None
-    _subagent_profile = agent_id  # Stable profile per agent type
-    try:
-        from gcu.browser.session import set_active_profile as _set_gcu_profile
+    # Each subagent instance gets its own unique browser profile so concurrent
+    # subagents don't share tab groups. The profile is injected into every
+    # browser_* tool call by wrapping the tool executor.
+    _gcu_profile = f"{agent_id}:{subagent_instance}"
+    _original_tool_executor = None
 
-        _profile_token = _set_gcu_profile(_subagent_profile)
-    except ImportError:
-        pass  # GCU tools not installed; no-op
+    if tool_executor is not None:
+        _original_tool_executor = tool_executor
+
+        async def _gcu_profile_injecting_executor(
+            tool_use: ToolUse,
+        ) -> ToolResult | Awaitable[ToolResult]:
+            if tool_use.name.startswith("browser_") and "profile" not in (tool_use.input or {}):
+                from dataclasses import replace
+
+                tool_use = replace(tool_use, input={**(tool_use.input or {}), "profile": _gcu_profile})
+            result = _original_tool_executor(tool_use)
+            if asyncio.isfuture(result) or asyncio.iscoroutine(result):
+                return await result
+            return result
+
+        tool_executor = _gcu_profile_injecting_executor
 
     try:
         logger.info("🚀 Starting subagent '%s' execution...", agent_id)
@@ -356,14 +366,16 @@ async def execute_subagent(
             is_error=True,
         )
     finally:
-        # Restore the GCU profile context
-        if _profile_token is not None:
-            from gcu.browser.session import _active_profile as _gcu_profile_var
-
-            _gcu_profile_var.reset(_profile_token)
-
-            # NOTE: We intentionally do NOT call browser_stop() here.
-            # Keeping the browser session alive allows cookies and auth state
-            # to persist across multiple subagent calls. The browser will be
-            # cleaned up when the parent agent stops or when explicitly
-            # requested via browser_stop().
+        # Close the tab group this subagent created, if any.
+        if _original_tool_executor is not None:
+            try:
+                stop_call = ToolUse(
+                    id="__subagent_cleanup__",
+                    name="browser_stop",
+                    input={"profile": _gcu_profile},
+                )
+                result = _original_tool_executor(stop_call)
+                if asyncio.isfuture(result) or asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                pass

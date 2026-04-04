@@ -45,12 +45,10 @@ def get_all_sessions() -> dict[str, Any]:
 
 
 async def shutdown_all_browsers() -> None:
-    """Stop all browser sessions.
+    """Stop all browser sessions. Called at server shutdown to clean up."""
+    from gcu.browser.tools.lifecycle import shutdown_all_contexts
 
-    Called at server shutdown to clean up.
-    Note: Sessions are managed via bridge extension.
-    """
-    pass
+    await shutdown_all_contexts()
 
 
 class BrowserSession:

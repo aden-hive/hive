@@ -38,6 +38,24 @@ _EXTENSION_PATH = (
 ).resolve()
 
 
+async def shutdown_all_contexts() -> None:
+    """Close all active browser contexts. Called at GCU server shutdown."""
+    if not _contexts:
+        return
+    bridge = get_bridge()
+    for profile_name, ctx in list(_contexts.items()):
+        group_id = ctx.get("groupId")
+        if group_id is not None and bridge and bridge.is_connected:
+            try:
+                await bridge.destroy_context(group_id)
+                logger.info(
+                    "Shutdown: closed browser context '%s' (groupId=%s)", profile_name, group_id
+                )
+            except Exception as e:
+                logger.warning("Shutdown: failed to close context '%s': %s", profile_name, e)
+    _contexts.clear()
+
+
 def register_lifecycle_tools(mcp: FastMCP) -> None:
     """Register browser lifecycle management tools."""
 

@@ -98,6 +98,7 @@ class BeelineBridge:
                 "127.0.0.1",
                 port,
                 logger=null_logger,
+                max_size=50 * 1024 * 1024,  # 50 MB — CDP responses (AX tree, screenshots) can be large
             )
             logger.info("Beeline bridge listening on ws://127.0.0.1:%d", port)
         except OSError as e:
