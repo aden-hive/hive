@@ -41,10 +41,7 @@ def _get_creds(
     if not api_key:
         return {
             "error": "Weights & Biases credentials not configured",
-            "help": (
-                "Set WANDB_API_KEY environment variable or configure via "
-                "credential store"
-            ),
+            "help": ("Set WANDB_API_KEY environment variable or configure via credential store"),
         }
     host = host.rstrip("/")
     return api_key, host
