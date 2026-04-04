@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from framework.config import RuntimeConfig
@@ -16,8 +17,8 @@ from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config, metadata
 from .nodes import (
-    research_node,
     extraction_node,
+    research_node,
     summarize_node,
 )
 
@@ -25,7 +26,10 @@ from .nodes import (
 goal = Goal(
     id="research-and-summarize",
     name="Research and Summarize",
-    description="Gather information on a topic, extract key points, and produce a structured summary.",
+    description=(
+        "Gather information on a topic, extract key points, and produce a "
+        "structured summary."
+    ),
 )
 
 # Node list
@@ -76,6 +80,7 @@ class ResearchAgent:
         self._graph: GraphSpec | None = None
         self._agent_runtime: AgentRuntime | None = None
         self._tool_registry: ToolRegistry | None = None
+        self._run_lock = asyncio.Lock()
 
     def _build_graph(self) -> GraphSpec:
         """Build the GraphSpec."""
@@ -109,8 +114,14 @@ class ResearchAgent:
             raise RuntimeError(f"MCP configuration not found at {mcp_config_path}")
         self._tool_registry.load_mcp_config(mcp_config_path)
 
-        if not self._tool_registry.get_tools():
-            raise RuntimeError("Failed to load required MCP tools: no tools available.")
+        available_tools = self._tool_registry.get_tools()
+        required_tools = {"web_search", "web_scrape"}
+        missing_tools = sorted(required_tools - set(available_tools))
+        if missing_tools:
+            raise RuntimeError(
+                "Failed to load required MCP tools: "
+                + ", ".join(missing_tools)
+            )
 
         llm = None
         if not mock_mode:
@@ -121,7 +132,7 @@ class ResearchAgent:
             )
 
         tool_executor = self._tool_registry.get_executor()
-        tools = list(self._tool_registry.get_tools().values())
+        tools = list(available_tools.values())
 
         self._graph = self._build_graph()
 
@@ -160,15 +171,19 @@ class ResearchAgent:
         self._agent_runtime = None
 
     async def run(self, context: dict, mock_mode: bool = False) -> ExecutionResult:
-        await self.start(mock_mode=mock_mode)
-        try:
-            result = await self._agent_runtime.trigger_and_wait(
-                entry_point_id="default",
-                input_data=context,
-            )
-            return result or ExecutionResult(success=False, error="Execution timeout")
-        finally:
-            await self.stop()
+        async with self._run_lock:
+            try:
+                await self.start(mock_mode=mock_mode)
+                result = await self._agent_runtime.trigger_and_wait(
+                    entry_point_id="default",
+                    input_data=context,
+                )
+                return result or ExecutionResult(
+                    success=False,
+                    error="Execution timeout",
+                )
+            finally:
+                await self.stop()
 
     def info(self) -> dict:
         return {
