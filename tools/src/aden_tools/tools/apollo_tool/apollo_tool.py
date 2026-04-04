@@ -458,7 +458,7 @@ def register_tools(
 
     # --- Person Enrichment ---
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apollo_enrich_person(
         email: str | None = None,
         linkedin_url: str | None = None,
@@ -529,7 +529,7 @@ def register_tools(
 
     # --- Company Enrichment ---
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apollo_enrich_company(domain: str) -> dict:
         """
         Enrich a company by domain.
@@ -562,7 +562,7 @@ def register_tools(
 
     # --- People Search ---
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apollo_search_people(
         titles: list[str] | None = None,
         seniorities: list[str] | None = None,
@@ -624,7 +624,7 @@ def register_tools(
 
     # --- Person Activities ---
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apollo_get_person_activities(person_id: str) -> dict:
         """
         Get activity history for a person in Apollo (emails, calls, tasks).
@@ -649,7 +649,7 @@ def register_tools(
 
     # --- Email Accounts ---
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apollo_list_email_accounts() -> dict:
         """
         List email accounts connected to Apollo for sending sequences.
@@ -669,7 +669,7 @@ def register_tools(
 
     # --- Bulk Enrichment ---
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apollo_bulk_enrich_people(details_json: str) -> dict:
         """
         Bulk enrich up to 10 people at once by email or domain+name.
@@ -707,7 +707,7 @@ def register_tools(
 
     # --- Company Search ---
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apollo_search_companies(
         industries: list[str] | None = None,
         employee_counts: list[str] | None = None,

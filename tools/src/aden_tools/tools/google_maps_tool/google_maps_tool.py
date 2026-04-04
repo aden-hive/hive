@@ -102,7 +102,7 @@ def register_tools(
 
     # ── Tool 1: Geocoding ──────────────────────────────────────────────
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def maps_geocode(
         address: str,
         components: str = "",
@@ -191,7 +191,7 @@ def register_tools(
 
     # ── Tool 2: Reverse Geocoding ──────────────────────────────────────
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def maps_reverse_geocode(
         latitude: float,
         longitude: float,
@@ -277,7 +277,7 @@ def register_tools(
 
     # ── Tool 3: Directions ─────────────────────────────────────────────
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def maps_directions(
         origin: str,
         destination: str,
@@ -407,7 +407,7 @@ def register_tools(
 
     # ── Tool 4: Distance Matrix ────────────────────────────────────────
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def maps_distance_matrix(
         origins: str,
         destinations: str,
@@ -504,7 +504,7 @@ def register_tools(
 
     # ── Tool 5: Place Details ──────────────────────────────────────────
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def maps_place_details(
         place_id: str,
         fields: str = (
@@ -580,7 +580,7 @@ def register_tools(
 
     # ── Tool 6: Place Search ───────────────────────────────────────────
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def maps_place_search(
         query: str,
         location: str = "",

@@ -72,7 +72,7 @@ def _extract_company(c: dict) -> dict:
 def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
     """Register Lusha tools."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def lusha_enrich_person(
         first_name: str = "",
         last_name: str = "",
@@ -115,7 +115,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
 
         return _extract_person(data)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def lusha_enrich_company(
         domain: str = "",
         company_name: str = "",
@@ -147,7 +147,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
 
         return _extract_company(data)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def lusha_search_contacts(
         seniorities: str = "",
         departments: str = "",
@@ -226,7 +226,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             ],
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def lusha_search_companies(
         company_names: str = "",
         domains: str = "",
@@ -288,7 +288,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             "companies": [_extract_company(c) for c in companies],
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def lusha_get_usage() -> dict:
         """Get Lusha API credit usage statistics."""
         headers = _get_headers()
@@ -304,7 +304,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
 
         return data
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def lusha_bulk_enrich_persons(
         details_json: str,
     ) -> dict:
@@ -345,7 +345,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             results.append(_extract_person(p))
         return {"results": results, "count": len(results)}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def lusha_get_technologies(
         domain: str,
     ) -> dict:
@@ -374,7 +374,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             "industry": data.get("industry", ""),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def lusha_search_decision_makers(
         company_domains: str,
         country: str = "",

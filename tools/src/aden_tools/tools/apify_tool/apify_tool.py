@@ -80,7 +80,7 @@ def register_tools(
 ) -> None:
     """Register Apify tools with the MCP server."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apify_run_actor(
         actor_id: str,
         input_data: dict[str, Any] | None = None,
@@ -143,7 +143,7 @@ def register_tools(
             "started_at": data.get("startedAt", ""),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apify_get_run(
         actor_id: str,
         run_id: str,
@@ -180,7 +180,7 @@ def register_tools(
             "usage_usd": usage.get("ACTOR_COMPUTE_UNITS", 0),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apify_get_dataset_items(
         dataset_id: str,
         limit: int = 100,
@@ -229,7 +229,7 @@ def register_tools(
             return {"items": items, "count": len(items)}
         return {"items": [items], "count": 1}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apify_list_actors(
         limit: int = 50,
         offset: int = 0,
@@ -267,7 +267,7 @@ def register_tools(
             )
         return {"actors": actors, "count": len(actors)}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apify_list_runs(
         actor_id: str = "",
         limit: int = 50,
@@ -308,7 +308,7 @@ def register_tools(
             )
         return {"runs": runs, "count": len(runs)}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def apify_get_kv_store_record(
         store_id: str,
         key: str,

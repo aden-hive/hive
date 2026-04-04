@@ -250,7 +250,7 @@ def register_tools(
             }
         return _BrevoClient(api_key)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def brevo_send_email(
         to_email: str,
         to_name: str,
@@ -299,7 +299,7 @@ def register_tools(
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def brevo_send_sms(
         to: str,
         content: str,
@@ -339,7 +339,7 @@ def register_tools(
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def brevo_create_contact(
         email: str,
         first_name: str | None = None,
@@ -385,7 +385,7 @@ def register_tools(
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def brevo_get_contact(email: str) -> dict:
         """
         Retrieve a contact from Brevo by email address.
@@ -424,7 +424,7 @@ def register_tools(
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def brevo_update_contact(
         email: str,
         first_name: str | None = None,
@@ -466,7 +466,7 @@ def register_tools(
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def brevo_list_contacts(
         limit: int = 50,
         offset: int = 0,
@@ -516,7 +516,7 @@ def register_tools(
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def brevo_delete_contact(email: str) -> dict:
         """
         Delete a contact from Brevo by email address.
@@ -542,7 +542,7 @@ def register_tools(
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def brevo_list_email_campaigns(
         status: str = "",
         limit: int = 50,
@@ -594,7 +594,7 @@ def register_tools(
         except httpx.RequestError as e:
             return {"error": f"Network error: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def brevo_get_email_stats(message_id: str) -> dict:
         """
         Get delivery statistics for a sent transactional email.

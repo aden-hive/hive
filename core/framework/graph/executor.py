@@ -669,6 +669,70 @@ class GraphExecutor:
 
         steps = 0  # noqa: F841
 
+        # Fresh shared-session execution: clear stale cursor so the entry
+        # node doesn't restore a filled OutputAccumulator from the previous
+        # webhook run (which would cause the judge to accept immediately).
+        # The conversation history is preserved (continuous memory).
+        # Exclude cold restores — those need to continue the conversation
+        # naturally without a "start fresh" marker.
+        _is_fresh_shared = bool(
+            session_state
+            and session_state.get("resume_session_id")
+            and not session_state.get("paused_at")
+            and not session_state.get("resume_from_checkpoint")
+            and not session_state.get("cold_restore")
+            and not session_state.get("resume_from")  # exclude resurrection (failure recovery)
+        )
+        if _is_fresh_shared and is_continuous and self._storage_path:
+            try:
+                from framework.storage.conversation_store import FileConversationStore
+
+                entry_conv_path = self._storage_path / "conversations"
+                if entry_conv_path.exists():
+                    _store = FileConversationStore(base_path=entry_conv_path)
+
+                    # Read cursor to find next seq for the transition marker.
+                    _cursor = await _store.read_cursor() or {}
+                    _next_seq = _cursor.get("next_seq", 0)
+                    if _next_seq == 0:
+                        # Fallback: scan part files for max seq
+                        _parts = await _store.read_parts()
+                        if _parts:
+                            _next_seq = max(p.get("seq", 0) for p in _parts) + 1
+
+                    # Reset cursor — clears stale accumulator outputs and
+                    # iteration counter so the node starts fresh work while
+                    # the conversation thread carries forward.
+                    await _store.write_cursor({})
+
+                    # Append a transition marker so the LLM knows a new
+                    # event arrived and previous results are outdated.
+                    await _store.write_part(
+                        _next_seq,
+                        {
+                            "role": "user",
+                            "content": (
+                                "--- NEW EVENT TRIGGER ---\n"
+                                "A new event has been received. "
+                                "Process this as a fresh request — "
+                                "previous outputs are no longer valid."
+                            ),
+                            "seq": _next_seq,
+                            "is_transition_marker": True,
+                        },
+                    )
+                    self.logger.info(
+                        "🔄 Cleared stale cursor and added transition marker "
+                        "for shared-session entry node '%s'",
+                        current_node_id,
+                    )
+            except Exception:
+                self.logger.debug(
+                    "Could not prepare conversation store for shared-session entry node '%s'",
+                    current_node_id,
+                    exc_info=True,
+                )
+
         if session_state and current_node_id != graph.entry_node:
             self.logger.info(f"🔄 Resuming from: {current_node_id}")
 
@@ -690,6 +754,7 @@ class GraphExecutor:
         if self.runtime_logger:
             session_id = self._get_runtime_log_session_id()
             self.runtime_logger.start_run(goal_id=goal.id, session_id=session_id)
+            self.runtime_logger.set_node_budget(self._loop_config.get("max_paid_calls_per_node", -1))
 
         self.logger.info(f"🚀 Starting execution: {goal.name}")
         self.logger.info(f"   Goal: {goal.description}")
@@ -814,6 +879,7 @@ class GraphExecutor:
                     max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
                     spillover_dir=spillover,
                     hooks=lc.get("hooks", {}),
+                    max_paid_calls_per_node=lc.get("max_paid_calls_per_node", -1),
                 ),
                 tool_executor=self.tool_executor,
                 conversation_store=conv_store,

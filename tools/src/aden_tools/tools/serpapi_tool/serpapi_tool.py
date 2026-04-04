@@ -193,7 +193,7 @@ def register_tools(
             }
         return _SerpAPIClient(api_key)
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def scholar_search(
         query: str,
         num_results: int = 10,
@@ -282,7 +282,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Scholar search failed: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def scholar_get_citations(result_id: str) -> dict:
         """
         Get formatted citations for a Google Scholar paper.
@@ -321,7 +321,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Citation lookup failed: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def scholar_get_author(
         author_id: str,
         num_articles: int = 20,
@@ -400,7 +400,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Author lookup failed: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def patents_search(
         query: str,
         page: int = 1,
@@ -485,7 +485,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Patent search failed: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def patents_get_details(patent_id: str) -> dict:
         """
         Get detailed information for a specific patent.
@@ -540,7 +540,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Patent detail lookup failed: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def scholar_cited_by(
         cites_id: str,
         num_results: int = 10,
@@ -605,7 +605,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Cited-by lookup failed: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def scholar_search_profiles(
         query: str,
         num_results: int = 10,
@@ -662,7 +662,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Profile search failed: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def serpapi_google_search(
         query: str,
         num_results: int = 10,

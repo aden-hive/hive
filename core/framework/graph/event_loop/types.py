@@ -92,6 +92,10 @@ class LoopConfig:
     # Set to 0 to use only the wall-clock timeout.
     subagent_inactivity_timeout_seconds: float = 300.0
 
+    # Economic mode: max paid tool calls (is_paid=True) allowed per node run.
+    # -1 = disabled (default). 0 = all paid calls blocked.
+    max_paid_calls_per_node: int = -1
+
     # Lifecycle hooks.
     hooks: dict[str, list] | None = None
 

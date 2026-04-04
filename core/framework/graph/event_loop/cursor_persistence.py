@@ -32,6 +32,7 @@ class RestoredState:
     recent_responses: list[str]
     recent_tool_fingerprints: list[list[tuple[str, str]]]
     pending_input: dict[str, Any] | None
+    paid_calls_used: int = 0
 
 
 async def restore(
@@ -86,12 +87,16 @@ async def restore(
     if not isinstance(pending_input, dict):
         pending_input = None
 
+    # Restore economic mode counter so budget is not reset on crash-resume.
+    paid_calls_used: int = cursor.get("paid_calls_used", 0)
+
     logger.info(
         f"Restored event loop: iteration={start_iteration}, "
         f"messages={conversation.message_count}, "
         f"outputs={list(accumulator.values.keys())}, "
         f"stall_window={len(recent_responses)}, "
-        f"doom_window={len(recent_tool_fingerprints)}"
+        f"doom_window={len(recent_tool_fingerprints)}, "
+        f"paid_calls_used={paid_calls_used}"
     )
     return RestoredState(
         conversation=conversation,
@@ -100,6 +105,7 @@ async def restore(
         recent_responses=recent_responses,
         recent_tool_fingerprints=recent_tool_fingerprints,
         pending_input=pending_input,
+        paid_calls_used=paid_calls_used,
     )
 
 
@@ -113,6 +119,7 @@ async def write_cursor(
     recent_responses: list[str] | None = None,
     recent_tool_fingerprints: list[list[tuple[str, str]]] | None = None,
     pending_input: dict[str, Any] | None = None,
+    paid_calls_used: int | None = None,
 ) -> None:
     """Write checkpoint cursor for crash recovery.
 
@@ -139,6 +146,9 @@ async def write_cursor(
         # Persist blocked-input state so restored runs re-block instead of
         # manufacturing a synthetic continuation turn.
         cursor["pending_input"] = pending_input
+        # Persist economic mode counter so budget survives crash-resume.
+        if paid_calls_used is not None:
+            cursor["paid_calls_used"] = paid_calls_used
         await conversation_store.write_cursor(cursor)
 
 

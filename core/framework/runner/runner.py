@@ -1025,6 +1025,7 @@ class AgentRunner:
         configure_for_account: Callable | None = None,
         list_accounts: Callable | None = None,
         credential_store: Any | None = None,
+        node_budget: int | None = None,
     ):
         """
         Initialize the runner (use AgentRunner.load() instead).
@@ -1053,6 +1054,9 @@ class AgentRunner:
         self.model = model or self._resolve_default_model()
         self.intro_message = intro_message
         self.runtime_config = runtime_config
+        # Economic mode: max paid tool calls per node (None = disabled).
+        if node_budget is not None and node_budget >= 0:
+            self.graph.loop_config["max_paid_calls_per_node"] = node_budget
         self._interactive = interactive
         self.skip_credential_validation = skip_credential_validation
         self.requires_account_selection = requires_account_selection
@@ -1158,6 +1162,7 @@ class AgentRunner:
         interactive: bool = True,
         skip_credential_validation: bool | None = None,
         credential_store: Any | None = None,
+        node_budget: int | None = None,
     ) -> "AgentRunner":
         """
         Load an agent from an export folder.
@@ -1293,6 +1298,7 @@ class AgentRunner:
                 configure_for_account=configure_fn,
                 list_accounts=list_accts_fn,
                 credential_store=credential_store,
+                node_budget=node_budget,
             )
             # Stash skill config for use in _setup()
             runner._agent_default_skills = agent_default_skills
@@ -1328,6 +1334,7 @@ class AgentRunner:
             interactive=interactive,
             skip_credential_validation=skip_credential_validation or False,
             credential_store=credential_store,
+            node_budget=node_budget,
         )
         runner._agent_default_skills = None
         runner._agent_skills = None

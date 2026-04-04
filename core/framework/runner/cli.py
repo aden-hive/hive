@@ -76,6 +76,14 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Resume from a specific checkpoint (requires --resume-session)",
     )
+    run_parser.add_argument(
+        "--node-budget",
+        type=int,
+        default=None,
+        metavar="N",
+        dest="node_budget",
+        help="Economic mode: maximum number of paid tool calls allowed per node",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # info command
@@ -393,6 +401,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         runner = AgentRunner.load(
             args.agent_path,
             model=args.model,
+            node_budget=getattr(args, "node_budget", None),
         )
     except CredentialError as e:
         print(f"\n{e}", file=sys.stderr)
