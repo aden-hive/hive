@@ -25,9 +25,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import shutil
+import time
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class FileConversationStore:
@@ -45,8 +49,10 @@ class FileConversationStore:
     # --- sync helpers --------------------------------------------------------
 
     def _write_json(self, path: Path, data: dict) -> None:
+        from framework.utils.io import atomic_write
+        
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        with atomic_write(path) as f:
             json.dump(data, f)
 
     def _read_json(self, path: Path) -> dict | None:
@@ -55,7 +61,26 @@ class FileConversationStore:
         try:
             with open(path, encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError) as e:
+            # Move corrupted file to .corrupted directory for forensics
+            corrupted_dir = self._base / ".corrupted"
+            corrupted_dir.mkdir(exist_ok=True)
+            
+            timestamp = int(time.time())
+            corrupted_name = f"corrupted_{path.name}_{timestamp}.json"
+            corrupted_path = corrupted_dir / corrupted_name
+            
+            try:
+                shutil.move(str(path), str(corrupted_path))
+                logger.error(
+                    f"Moved corrupted file to .corrupted directory: {path} -> {corrupted_path}".
+                    f"Error: {str(e)}"
+                )
+            except Exception as move_error:
+                logger.error(
+                    f"Failed to move corrupted file {path} to .corrupted directory: {str(move_error)}"
+                )
+            
             return None
 
     # --- async wrapper -------------------------------------------------------
@@ -75,10 +100,21 @@ class FileConversationStore:
                 return []
             files = sorted(self._parts_dir.glob("*.json"))
             parts = []
+            corrupted_count = 0
+            
             for f in files:
                 data = self._read_json(f)
                 if data is not None:
                     parts.append(data)
+                else:
+                    corrupted_count += 1
+            
+            if corrupted_count > 0:
+                logger.warning(
+                    f"Skipped {corrupted_count} corrupted JSON files in {self._parts_dir}. "
+                    f"Files moved to .corrupted directory for forensics."
+                )
+            
             return parts
 
         return await self._run(_read_all)
