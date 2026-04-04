@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 from framework.config import RuntimeConfig
 from framework.graph import EdgeCondition, EdgeSpec, Goal
@@ -170,7 +171,7 @@ class ResearchAgent:
             await self._agent_runtime.stop()
         self._agent_runtime = None
 
-    async def run(self, context: dict, mock_mode: bool = False) -> ExecutionResult:
+    async def run(self, context: dict[str, Any], mock_mode: bool = False) -> ExecutionResult:
         async with self._run_lock:
             try:
                 await self.start(mock_mode=mock_mode)
@@ -185,7 +186,7 @@ class ResearchAgent:
             finally:
                 await self.stop()
 
-    def info(self) -> dict:
+    def info(self) -> dict[str, Any]:
         return {
             "name": metadata.name,
             "version": metadata.version,
