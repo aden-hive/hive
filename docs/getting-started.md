@@ -1,239 +1,240 @@
-# Getting Started
+# Getting Started with Hive
 
-This guide will help you set up the Aden Agent Framework and build your first agent.
+> **Important:** Hive uses a `uv` workspace layout. Do **not** use `pip install .` — it will fail. Use the commands in this guide instead.
 
 ## Prerequisites
 
-- **Python 3.11+** ([Download](https://www.python.org/downloads/)) - Python 3.12 or 3.13 recommended
-- **pip** - Package installer for Python (comes with Python)
-- **git** - Version control
-- **Claude Code** ([Install](https://docs.anthropic.com/claude/docs/claude-code)) - Optional, for using building skills
+| Tool | Version | Install |
+|------|---------|---------|
+| Python | 3.11+ (3.12 recommended) | [python.org](https://www.python.org/downloads/) |
+| uv | latest | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| git | any | [git-scm.com](https://git-scm.com/) |
+| Node.js | 20+ | Required only if running the frontend dashboard |
 
-## Quick Start
+---
 
-The fastest way to get started:
-
-**Linux / macOS:**
+## 1. Clone and Install
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/aden-hive/hive.git
 cd hive
 
-# 2. Run automated setup
-./quickstart.sh
+# Sets up the full uv workspace (both `framework` and `aden_tools` packages)
+uv sync
+```
 
-# 3. Verify installation (optional, quickstart.sh already verifies)
+Verify the install:
+
+```bash
 uv run python -c "import framework; import aden_tools; print('✓ Setup complete')"
 ```
 
-**Windows (PowerShell):**
+> **Windows (PowerShell):** Use `.\quickstart.ps1` instead of `uv sync`. If you see "running scripts is disabled", first run: `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`
 
-```powershell
-# 1. Clone the repository
-git clone https://github.com/aden-hive/hive.git
-cd hive
+---
 
-# 2. Run automated setup
-.\quickstart.ps1
+## 2. Set Your LLM API Key
 
-# 3. Verify installation (optional, quickstart.ps1 already verifies)
-uv run python -c "import framework; import aden_tools; print('Setup complete')"
-```
-
-> **Note:** On Windows, running `.\quickstart.ps1` requires PowerShell 5.1+. If you see a "running scripts is disabled" error, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first. Alternatively, use WSL — see [environment-setup.md](./environment-setup.md) for details.
-
-## Building Your First Agent
-
-Agents are not included by default in a fresh clone.
-
-Agents are created using Claude Code or by manual creation in the
-exports/ directory. Until an agent exists, agent validation and run
-commands will fail.
-
-### Option 1: Using Claude Code Skills (Recommended)
-
-This is the recommended way to create your first agent.
-
-**Requirements**
-
-- Anthropic (Claude) API access
-- Claude Code CLI installed
-- Unix-based shell (macOS, Linux, or Windows via WSL)
+Hive needs at least one LLM provider to run agents:
 
 ```bash
-# Setup already done via quickstart.sh above
-
-# Start Claude Code and build an agent
-Use the coder-tools initialize_and_build_agent tool
+# Pick one (Anthropic recommended for best compatibility)
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-..."           # Optional
+export OPENROUTER_API_KEY="..."          # Optional
 ```
 
-Follow the interactive prompts to:
+Add to `~/.zshrc` or `~/.bashrc` to persist across sessions.
 
-1. Define your agent's goal
-2. Design the workflow (nodes and edges)
-3. Generate the agent package
-4. Test the agent
+Get your key:
+- Anthropic → [console.anthropic.com](https://console.anthropic.com/)
+- OpenAI → [platform.openai.com](https://platform.openai.com/)
+- OpenRouter → [openrouter.ai/keys](https://openrouter.ai/keys)
 
-### Option 2: Create Agent Manually
+Quickstart can configure this interactively — see [configuration.md](./configuration.md) for all provider options including Hive LLM.
 
-> **Note:** The `exports/` directory is where your agents are created. It is not included in the repository (gitignored) because agents are user-generated via Claude Code skills or created manually.
+---
 
-```bash
-# Create exports directory if it doesn't exist
-mkdir -p exports/my_agent
+## 3. Run Your First Agent (No API Key Required)
 
-# Create your agent structure
-cd exports/my_agent
-# Create agent.json, tools.py, README.md (see developer-guide.md for structure)
-
-# Validate the agent
-PYTHONPATH=exports uv run python -m my_agent validate
-```
-
-### Option 3: Manual Code-First (Minimal Example)
-
-If you prefer to start with code rather than CLI wizards, check out the manual agent example:
+Hive ships with a minimal example that runs entirely in Python — no LLM calls, no setup:
 
 ```bash
-# View the minimal example
-cat core/examples/manual_agent.py
-
-# Run it (no API keys required)
 uv run python core/examples/manual_agent.py
 ```
 
-This demonstrates the core runtime loop using pure Python functions, skipping the complexity of LLM setup and file-based configuration.
+**Expected output:**
+
+```text
+Setting up Manual Agent...
+Executing agent with input: name='Alice'...
+
+Success!
+Path taken: greeter -> uppercaser
+Final output: HELLO, ALICE!
+```
+
+This is the core runtime loop: a two-node graph where the first node greets and the second uppercases the result. It demonstrates `NodeSpec`, `EdgeSpec`, `GraphSpec`, `GraphExecutor`, and `NodeProtocol` — the primitives your real agents are built from.
+
+---
+
+## 4. Use a Template Agent
+
+Templates are production-ready agent scaffolds you can run immediately.
+
+```bash
+# Copy a template into exports/ (the directory for your agents)
+cp -r examples/templates/deep_research_agent exports/my_researcher
+
+# Validate it loads correctly
+uv run python -m framework info exports/my_researcher
+```
+
+Available templates in `examples/templates/`:
+
+| Template | What it does |
+|----------|-------------|
+| `deep_research_agent` | Multi-step research with web search |
+| `tech_news_reporter` | Monitors and summarizes tech news |
+| `email_reply_agent` | Drafts context-aware email replies |
+| `job_hunter` | Searches and tracks job listings |
+| `competitive_intel_agent` | Gathers competitor intelligence |
+| `meeting_scheduler` | Automates scheduling workflows |
+
+Run a template (requires LLM API key):
+
+```bash
+uv run python -m framework run exports/my_researcher --input '{"topic": "LLM agent frameworks 2025"}'
+```
+
+---
+
+## 5. Open the Dashboard
+
+The Hive UI gives you a visual interface to build, monitor, and run agents:
+
+```bash
+# Installs frontend deps (first time only)
+make frontend-install
+
+# Starts the dev server
+make frontend-dev
+```
+
+Or use the `hive` CLI:
+
+```bash
+./hive open
+```
+
+---
 
 ## Project Structure
 
-```
+```text
 hive/
-├── core/                   # Core Framework
-│   ├── framework/          # Agent runtime, graph executor
-│   │   ├── builder/        # Agent builder utilities
-│   │   ├── credentials/    # Credential management
-│   │   ├── graph/          # GraphExecutor - executes node graphs
-│   │   ├── llm/            # LLM provider integrations
-│   │   ├── mcp/            # MCP server integration
-│   │   ├── runner/         # AgentRunner - loads and runs agents
-│   │   ├── runtime/        # Runtime environment
-│   │   ├── schemas/        # Data schemas
-│   │   ├── storage/        # File-based persistence
-│   │   ├── testing/        # Testing utilities
-│   │   └── tui/            # Terminal UI dashboard
-│   └── pyproject.toml      # Package metadata
+├── core/                    # Core framework package (`framework`)
+│   ├── framework/           # Runtime, graph executor, LLM providers
+│   └── examples/            # Runnable examples (start here)
 │
-├── tools/                  # MCP Tools Package
-│   ├── mcp_server.py       # MCP server entry point
-│   └── src/aden_tools/     # Tools for agent capabilities
-│       └── tools/          # Individual tool implementations
-│           ├── web_search_tool/
-│           ├── web_scrape_tool/
-│           └── file_system_toolkits/
-│
-├── exports/                # Agent Packages (user-generated, not in repo)
-│   └── your_agent/         # Your agents created via coder-tools workflow
+├── tools/                   # MCP tools package (`aden_tools`)
+│   └── src/aden_tools/      # Web search, PDF, file system, etc.
 │
 ├── examples/
-│   └── templates/          # Pre-built template agents
+│   ├── templates/           # Ready-to-run agent scaffolds
+│   └── recipes/             # Design patterns (not runnable, for learning)
 │
-└── docs/                   # Documentation
+├── exports/                 # Your agents live here (gitignored)
+├── docs/                    # Documentation
+├── pyproject.toml           # uv workspace config (not a pip package)
+└── hive / hive.ps1          # CLI entry point
 ```
 
-## Running an Agent
+> `exports/` is gitignored — it's where your custom agents are generated or placed.
 
-```bash
-# Launch the web dashboard in your browser
-hive open
+---
 
-# Run a specific agent
-hive run exports/my_agent --input '{"task": "Your input here"}'
+## Build an Agent From a Goal
 
+The recommended workflow for new agents uses the `coder-tools` MCP server with Claude Code or Cursor:
+
+**Claude Code:**
+```text
+Use the `initialize_and_build_agent` coder-tools MCP tool
+Goal: "An agent that monitors Hacker News for AI articles and sends a daily digest"
 ```
 
-## API Keys Setup
+**Or build manually** by creating a folder under `exports/` with:
+- `agent.py` — graph definition (nodes, edges, goal)
+- `nodes/` — node logic (each node is a `NodeProtocol` subclass)
+- `config.py` — model and tool config
+- `__main__.py` — CLI entry point
 
-For running agents with real LLMs:
+See [developer-guide.md](./developer-guide.md) for the full agent structure reference.
 
-```bash
-# Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
-export ANTHROPIC_API_KEY="your-key-here"
-export OPENAI_API_KEY="your-key-here"        # Optional
-export OPENROUTER_API_KEY="your-key-here"    # Optional, for OpenRouter models
-export HIVE_API_KEY="your-key-here"          # Optional, for Hive LLM
-export BRAVE_SEARCH_API_KEY="your-key-here"  # Optional, for web search
-```
+---
 
-Get your API keys:
-
-- **Anthropic**: [console.anthropic.com](https://console.anthropic.com/)
-- **OpenAI**: [platform.openai.com](https://platform.openai.com/)
-- **OpenRouter**: [openrouter.ai/keys](https://openrouter.ai/keys)
-- **Hive LLM**: [Hive Discord](https://discord.com/invite/hQdU7QDkgR)
-- **Brave Search**: [brave.com/search/api](https://brave.com/search/api/)
-
-Quickstart can configure OpenRouter and Hive LLM for you interactively. See [configuration.md](./configuration.md) for the full configuration examples.
-
-## Testing Your Agent
+## Test Your Agent
 
 ```bash
-# Run tests
-PYTHONPATH=exports uv run python -m my_agent test
+# Validate structure (no LLM required)
+PYTHONPATH=exports uv run python -m my_agent validate
 
-# Run with specific test type
+# Run constraint tests
 PYTHONPATH=exports uv run python -m my_agent test --type constraint
+
+# Run success tests
 PYTHONPATH=exports uv run python -m my_agent test --type success
 ```
 
-## Next Steps
+---
 
-1. **Dashboard**: Run `hive open` to launch the web dashboard
-2. **Detailed Setup**: See [environment-setup.md](./environment-setup.md)
-3. **Developer Guide**: See [developer-guide.md](./developer-guide.md)
-4. **Build Agents**: Use the coder-tools `initialize_and_build_agent` tool in Claude Code
-5. **Custom Tools**: Learn to integrate MCP servers
-6. **Join Community**: [Discord](https://discord.com/invite/MXE49hrKDk)
+## Common Commands
+
+```bash
+uv sync                                                   # Install / refresh all deps
+uv run python core/examples/manual_agent.py               # Run the no-key example
+uv run python -m framework info exports/<agent>           # Inspect an agent
+uv run python -m framework run exports/<agent> --input …  # Run an agent
+make test                                                 # Run core + tools test suites
+make frontend-dev                                         # Start the frontend
+./hive open                                               # Open dashboard in browser
+```
+
+---
 
 ## Troubleshooting
 
-### ModuleNotFoundError: No module named 'framework'
+**`pip install .` fails with "Multiple top-level packages"**
+This is expected. Hive is a `uv` workspace, not a pip package. Use `uv sync` instead.
 
+**`ModuleNotFoundError: No module named 'framework'`**
 ```bash
-# Reinstall framework package
-cd core
-uv pip install -e .
+uv sync   # From the repository root
 ```
 
-### ModuleNotFoundError: No module named 'aden_tools'
-
+**`ModuleNotFoundError: No module named 'my_agent'`**
+Always run from the repo root and include `PYTHONPATH`:
 ```bash
-# Reinstall tools package
-cd tools
-uv pip install -e .
+PYTHONPATH=exports uv run python -m my_agent validate
 ```
 
-### LLM API Errors
-
+**API key not found**
 ```bash
-# Verify API key is set
-echo $ANTHROPIC_API_KEY
-echo $OPENROUTER_API_KEY
-echo $HIVE_API_KEY
+echo $ANTHROPIC_API_KEY   # Should print your key, not empty
+```
+If empty, re-export it or add it to your shell profile.
 
+**Frontend won't start**
+```bash
+make frontend-install   # Run this first, then make frontend-dev
 ```
 
-### Package Installation Issues
+---
 
-```bash
-# Remove and reinstall
-pip uninstall -y framework tools
-./quickstart.sh
-```
+## Next Steps
 
-## Getting Help
-
-- **Documentation**: Check the `/docs` folder
-- **Issues**: [github.com/adenhq/hive/issues](https://github.com/aden-hive/hive/issues)
-- **Discord**: [discord.com/invite/MXE49hrKDk](https://discord.com/invite/MXE49hrKDk)
-- **Build Agents**: Use the coder-tools workflow to create agents
+- **[environment-setup.md](./environment-setup.md)** — Detailed setup, virtualenvs, Alpine/WSL
+- **[configuration.md](./configuration.md)** — All LLM provider configs, per-agent settings
+- **[developer-guide.md](./developer-guide.md)** — Full agent structure, node types, edge routing
+- **[Discord](https://discord.com/invite/MXE49hrKDk)** — Community support
