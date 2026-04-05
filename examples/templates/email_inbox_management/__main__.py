@@ -77,9 +77,7 @@ def tui(mock, verbose, debug):
     try:
         from framework.tui.app import AdenTUI
     except ImportError:
-        click.echo(
-            "TUI requires the 'textual' package. Install with: pip install textual"
-        )
+        click.echo("TUI requires the 'textual' package. Install with: pip install textual")
         sys.exit(1)
 
     from pathlib import Path
@@ -202,9 +200,7 @@ async def _interactive_shell(verbose=False):
     try:
         while True:
             try:
-                rules = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Rules> "
-                )
+                rules = await asyncio.get_event_loop().run_in_executor(None, input, "Rules> ")
                 if rules.lower() in ["quit", "exit", "q"]:
                     click.echo("Goodbye!")
                     break

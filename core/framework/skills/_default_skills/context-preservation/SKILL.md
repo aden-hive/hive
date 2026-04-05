@@ -20,3 +20,5 @@ What to extract: URLs and key snippets (not full pages), relevant API fields
 
 Before transitioning to the next phase/node, write a handoff summary to
 `_handoff_context` with everything the next phase needs to know.
+
+You will receive an alert when context reaches {{warn_at_usage_ratio_pct}}% — preserve immediately.

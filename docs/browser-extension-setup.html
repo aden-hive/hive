@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hive — Browser Extension Setup</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-subtle: #1f6feb33;
+      --green: #3fb950;
+      --yellow: #d29922;
+      --orange: #f0883e;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+    }
+
+    .step {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .step-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      font-size: 0.875rem;
+      flex-shrink: 0;
+    }
+
+    .step-title {
+      font-weight: 600;
+      font-size: 1.1rem;
+    }
+
+    .step p {
+      margin-bottom: 0.5rem;
+      color: var(--text-muted);
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .chrome-link {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 0.6rem 1.25rem;
+      margin-top: 0.75rem;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      text-decoration: none;
+    }
+
+    .chrome-link:hover {
+      background: #1f6feb;
+      text-decoration: none;
+    }
+
+    code {
+      background: #1c2128;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.9rem;
+    }
+
+    .path-box {
+      background: #1c2128;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-top: 0.5rem;
+      font-family: monospace;
+      font-size: 0.9rem;
+      word-break: break-all;
+      user-select: all;
+    }
+
+    .screenshot-placeholder {
+      background: #1c2128;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      padding: 2rem;
+      margin-top: 0.75rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    .note {
+      background: #d2992215;
+      border-left: 3px solid var(--yellow);
+      border-radius: 0 6px 6px 0;
+      padding: 0.75rem 1rem;
+      margin-top: 0.75rem;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .done-section {
+      text-align: center;
+      margin-top: 2rem;
+      padding: 1.5rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .done-section p {
+      color: var(--green);
+      font-weight: 600;
+      font-size: 1.1rem;
+    }
+
+    .done-section .hint {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Hive Browser Extension Setup</h1>
+    <p class="subtitle">Follow these steps to load the Hive Browser Bridge extension into Chrome.</p>
+
+    <!-- Step 1 -->
+    <div class="step">
+      <div class="step-header">
+        <span class="step-number">1</span>
+        <span class="step-title">Go to Chrome Extension Settings</span>
+      </div>
+      <p>Open the Chrome extensions page and enable <strong style="color:var(--text)">Developer mode</strong> using the toggle in the top-right corner.</p>
+      <a class="chrome-link" href="chrome://extensions/">chrome://extensions/</a>
+      <div class="note">If the link above doesn't open, copy <code>chrome://extensions/</code> and paste it into your Chrome address bar.</div>
+      <img width="1236" height="921" alt="Image" src="https://github.com/user-attachments/assets/36aef101-ac02-4940-9bbd-4613167d6030" style="max-width:100%;height:auto;border-radius:6px;margin-top:0.75rem;" />
+    </div>
+
+    <!-- Step 2 -->
+    <div class="step">
+      <div class="step-header">
+        <span class="step-number">2</span>
+        <span class="step-title">Click "Load unpacked"</span>
+      </div>
+      <p>Once Developer mode is enabled, you'll see a button bar appear. Click <strong style="color:var(--text)">Load unpacked</strong>.</p>
+      <img width="1236" height="921" alt="Image" src="https://github.com/user-attachments/assets/9200925c-1959-484f-b05c-e2e77b858b32" style="max-width:100%;height:auto;border-radius:6px;margin-top:0.75rem;" />
+    </div>
+
+    <!-- Step 3 -->
+    <div class="step">
+      <div class="step-header">
+        <span class="step-number">3</span>
+        <span class="step-title">Select the extension folder</span>
+      </div>
+      <p>In the folder picker, navigate to (or paste) the following path:</p>
+      <div class="path-box" id="extension-path">tools/browser-extension</div>
+      <div class="note">The quickstart script copies this path to your clipboard — just paste it in the folder picker.</div>
+      <div class="note">If pasting doesn't work, navigate manually: open the folder where you cloned the Hive repo, then go into <code>tools</code> → <code>browser-extension</code>. For example, if you cloned to <code>~/projects/hive</code>, the full path would be <code>~/projects/hive/tools/browser-extension</code>.</div>
+      <img width="1236" height="921" alt="Image" src="https://github.com/user-attachments/assets/119b8794-d956-4278-9284-3f122597b34c" style="max-width:100%;height:auto;border-radius:6px;margin-top:0.75rem;" />
+    </div>
+
+    <!-- Step 4 -->
+    <div class="step">
+      <div class="step-header">
+        <span class="step-number">4</span>
+        <span class="step-title">Verify the extension loaded</span>
+      </div>
+      <p>You should see <strong style="color:var(--text)">Hive Browser Bridge</strong> appear in your extensions list. Make sure it is enabled.</p>
+      <img width="423" height="250" alt="Image" src="https://github.com/user-attachments/assets/2c2bb008-d49e-4dcf-8431-44209ded1783" style="max-width:100%;height:auto;border-radius:6px;margin-top:0.75rem;" />
+    </div>
+
+    <div class="done-section">
+      <p>You're all set!</p>
+      <p class="hint">Return to your terminal and press Enter to continue the quickstart.</p>
+    </div>
+  </div>
+
+  <script>
+    // Populate extension path from URL parameter if provided
+    const params = new URLSearchParams(window.location.search);
+    const extPath = params.get('path');
+    if (extPath) {
+      document.getElementById('extension-path').textContent = extPath;
+    }
+  </script>
+</body>
+</html>

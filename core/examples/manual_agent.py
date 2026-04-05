@@ -27,7 +27,7 @@ class GreeterNode(NodeProtocol):
     async def execute(self, ctx: NodeContext) -> NodeResult:
         name = ctx.input_data.get("name", "World")
         greeting = f"Hello, {name}!"
-        ctx.memory.write("greeting", greeting)
+        ctx.buffer.write("greeting", greeting)
         return NodeResult(success=True, output={"greeting": greeting})
 
 
@@ -35,9 +35,9 @@ class UppercaserNode(NodeProtocol):
     """Convert text to uppercase."""
 
     async def execute(self, ctx: NodeContext) -> NodeResult:
-        greeting = ctx.input_data.get("greeting") or ctx.memory.read("greeting") or ""
+        greeting = ctx.input_data.get("greeting") or ctx.buffer.read("greeting") or ""
         result = greeting.upper()
-        ctx.memory.write("final_greeting", result)
+        ctx.buffer.write("final_greeting", result)
         return NodeResult(success=True, output={"final_greeting": result})
 
 

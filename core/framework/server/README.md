@@ -4,14 +4,14 @@ HTTP API backend for the Hive agent framework. Built on **aiohttp**, fully async
 
 ## Architecture
 
-Sessions are the primary entity. A session owns an EventBus + LLM and always has a queen executor. Workers are optional — they can be loaded into and unloaded from a session at any time.
+Sessions are the primary entity. A session owns an EventBus + LLM and always has a queen executor. Graphs are optional and can be loaded into and unloaded from a session at any time.
 
 ```
 Session {
-    event_bus       # owned by session, shared with queen + worker
+    event_bus       # owned by session, shared with queen + graph
     llm             # owned by session
     queen_executor  # always present
-    worker_runtime? # optional — loaded/unloaded independently
+    graph_runtime?  # optional — loaded/unloaded independently
 }
 ```
 
@@ -20,9 +20,9 @@ Session {
 ```
 server/
 ├── app.py                 # Application factory, middleware, static serving
-├── session_manager.py     # Session lifecycle (create/load worker/unload/stop)
+├── session_manager.py     # Session lifecycle (create/load graph/unload/stop)
 ├── sse.py                 # Server-Sent Events helper
-├── routes_sessions.py     # Session lifecycle, info, worker-session browsing, discovery
+├── routes_sessions.py     # Session lifecycle, info, and discovery
 ├── routes_execution.py    # Trigger, inject, chat, stop, resume, replay
 ├── routes_events.py       # SSE event streaming
 ├── routes_graphs.py       # Graph topology & node inspection
@@ -48,16 +48,16 @@ server/
 
 Manages `Session` objects. Key methods:
 
-- **`create_session()`** — creates EventBus + LLM, starts queen (no worker)
-- **`create_session_with_worker()`** — one-step: session + worker + judge
-- **`load_worker()`** — loads agent into existing session, starts judge
-- **`unload_worker()`** — removes worker + judge, queen stays alive
-- **`stop_session()`** — tears down everything (worker + queen)
+- **`create_session()`** — creates EventBus + LLM, starts queen (no graph)
+- **`create_session_with_worker_graph()`** — one-step: session + graph + judge
+- **`load_graph()`** — loads agent into existing session, starts judge
+- **`unload_graph()`** — removes graph + judge, queen stays alive
+- **`stop_session()`** — tears down everything (graph + queen)
 
 Three-conversation model:
 1. **Queen** — persistent interactive executor for user chat (always present)
 2. **Worker** — `AgentRuntime` that executes graphs (optional)
-3. **Judge** — timer-driven background executor for health monitoring (active when worker is loaded)
+3. **Judge** — timer-driven background executor for health monitoring (active when a graph is loaded)
 
 ### `sse.py` — SSE Helper
 
@@ -81,23 +81,23 @@ Returns agents grouped by category with metadata (name, description, node count,
 |--------|-------|-------------|
 | `POST` | `/api/sessions` | Create a session |
 | `GET` | `/api/sessions` | List all active sessions |
-| `GET` | `/api/sessions/{session_id}` | Session detail (includes entry points + graphs if worker loaded) |
+| `GET` | `/api/sessions/{session_id}` | Session detail (includes entry points + graphs if a graph is loaded) |
 | `DELETE` | `/api/sessions/{session_id}` | Stop session entirely |
 
 **Create session** has two modes:
 
 ```jsonc
-// Queen-only session (no worker)
+// Queen-only session (no graph)
 POST /api/sessions
 {}
 // or with custom ID:
 { "session_id": "my-custom-id" }
 
-// Session with worker (one-step)
+// Session with graph (one-step)
 POST /api/sessions
 {
   "agent_path": "exports/my-agent",
-  "agent_id": "custom-worker-name",  // optional
+  "agent_id": "custom-graph-name",  // optional
   "model": "claude-sonnet-4-20250514"      // optional
 }
 ```
@@ -108,24 +108,24 @@ POST /api/sessions
 
 **Get session** returns `202` with `{"loading": true}` while loading, `404` if not found.
 
-### Worker Lifecycle
+### Graph Lifecycle
 
 | Method | Route | Description |
 |--------|-------|-------------|
-| `POST` | `/api/sessions/{session_id}/worker` | Load a worker into session |
-| `DELETE` | `/api/sessions/{session_id}/worker` | Unload worker (queen stays alive) |
+| `POST` | `/api/sessions/{session_id}/graph` | Load a graph into session |
+| `DELETE` | `/api/sessions/{session_id}/graph` | Unload graph (queen stays alive) |
 
 ```jsonc
-// Load worker into existing session
-POST /api/sessions/{session_id}/worker
+// Load graph into existing session
+POST /api/sessions/{session_id}/graph
 {
   "agent_path": "exports/my-agent",
-  "worker_id": "custom-name",  // optional
+  "graph_id": "custom-name",  // optional
   "model": "..."               // optional
 }
 
-// Unload worker
-DELETE /api/sessions/{session_id}/worker
+// Unload graph
+DELETE /api/sessions/{session_id}/graph
 ```
 
 ### Execution Control
@@ -152,10 +152,10 @@ POST /api/sessions/{session_id}/trigger
 // Returns: { "execution_id": "..." }
 ```
 
-**Chat** routes messages with priority:
-1. Worker awaiting input -> inject into worker node
-2. Queen active -> inject into queen conversation
-3. Neither available -> 503
+**Chat** always delivers messages to the queen conversation.
+Worker-originated questions are still shown in the UI, but the user's reply
+is mediated by the queen, which can then relay it to the blocked worker via
+`inject_message()` when appropriate.
 
 ```jsonc
 POST /api/sessions/{session_id}/chat
@@ -206,7 +206,7 @@ GET /api/sessions/{session_id}/events?types=CLIENT_OUTPUT_DELTA,EXECUTION_COMPLE
 
 Keepalive ping every 15s. Streams from the session's EventBus (covers both queen and worker events).
 
-Default event types: `CLIENT_OUTPUT_DELTA`, `CLIENT_INPUT_REQUESTED`, `LLM_TEXT_DELTA`, `TOOL_CALL_STARTED`, `TOOL_CALL_COMPLETED`, `EXECUTION_STARTED`, `EXECUTION_COMPLETED`, `EXECUTION_FAILED`, `EXECUTION_PAUSED`, `NODE_LOOP_STARTED`, `NODE_LOOP_ITERATION`, `NODE_LOOP_COMPLETED`, `NODE_ACTION_PLAN`, `EDGE_TRAVERSED`, `GOAL_PROGRESS`, `QUEEN_INTERVENTION_REQUESTED`, `WORKER_ESCALATION_TICKET`, `NODE_INTERNAL_OUTPUT`, `NODE_STALLED`, `NODE_RETRY`, `NODE_TOOL_DOOM_LOOP`, `CONTEXT_COMPACTED`, `WORKER_LOADED`.
+Default event types: `CLIENT_OUTPUT_DELTA`, `CLIENT_INPUT_REQUESTED`, `LLM_TEXT_DELTA`, `TOOL_CALL_STARTED`, `TOOL_CALL_COMPLETED`, `EXECUTION_STARTED`, `EXECUTION_COMPLETED`, `EXECUTION_FAILED`, `EXECUTION_PAUSED`, `NODE_LOOP_STARTED`, `NODE_LOOP_ITERATION`, `NODE_LOOP_COMPLETED`, `NODE_ACTION_PLAN`, `EDGE_TRAVERSED`, `GOAL_PROGRESS`, `NODE_INTERNAL_OUTPUT`, `NODE_STALLED`, `NODE_RETRY`, `NODE_TOOL_DOOM_LOOP`, `CONTEXT_COMPACTED`, `WORKER_GRAPH_LOADED`.
 
 ### Session Info
 
@@ -253,25 +253,6 @@ GET .../nodes/{node_id}/logs?session_id=ws_id&level=all
 ```
 
 Log levels: `summary` (run stats), `details` (per-node execution), `tools` (tool calls + LLM text).
-
-### Worker Session Browsing
-
-Browse persisted execution runs on disk.
-
-| Method | Route | Description |
-|--------|-------|-------------|
-| `GET` | `/api/sessions/{session_id}/worker-sessions` | List worker sessions |
-| `GET` | `/api/sessions/{session_id}/worker-sessions/{ws_id}` | Worker session state |
-| `DELETE` | `/api/sessions/{session_id}/worker-sessions/{ws_id}` | Delete worker session |
-| `GET` | `/api/sessions/{session_id}/worker-sessions/{ws_id}/checkpoints` | List checkpoints |
-| `POST` | `/api/sessions/{session_id}/worker-sessions/{ws_id}/checkpoints/{cp_id}/restore` | Restore from checkpoint |
-| `GET` | `/api/sessions/{session_id}/worker-sessions/{ws_id}/messages` | Get conversation messages |
-
-**Messages** support filtering:
-```
-GET .../messages?node_id=gather_info      # filter by node
-GET .../messages?client_only=true         # only user inputs + client-facing assistant outputs
-```
 
 ### Credentials
 

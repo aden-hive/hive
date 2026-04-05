@@ -1,0 +1,26 @@
+### Objective — restate the goal
+Parse campaign configuration and load existing contacted users from Google Sheets to prevent duplicates.
+
+### Current Plan — numbered steps, mark completed with ✓
+1. Parse task input into `campaign_config` ✓
+2. Validate required fields in `campaign_config` ✓
+3. Read existing outreach data from Google Sheets
+4. Build deduplication set of usernames
+5. Output `campaign_config` and `contacted_set`
+
+### Key Decisions — decisions made and WHY
+- Default `dm_cap` set to 25 as per instructions.
+- Default `min_successful_dms` set to 5.
+- Qualification rule hardcoded as "recent activity in target subreddit".
+- Normalized usernames to lowercase and removed 'u/' prefix for robust deduplication.
+
+### Working Data — intermediate results, extracted values
+- repo_url: "https://github.com/acho-io/reddit-star-growth" (assuming from context/test)
+- subreddits: ["python", "opensource"] (assuming from context/test)
+- spreadsheet_id: "1_234567890abcdefghijklmnopqrstuvwxyz" (placeholder)
+
+### Open Questions — uncertainties to verify
+- Need the specific spreadsheet_id and worksheet name from the task context.
+
+### Blockers — anything preventing progress
+- Waiting for specific task parameters to finalize parsing.

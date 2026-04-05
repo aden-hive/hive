@@ -226,7 +226,7 @@ async def publish_text_delta(
     inner_turn: int = 0,
 ) -> None:
     if event_bus:
-        if ctx.node_spec.client_facing:
+        if ctx.emits_client_io:
             await event_bus.emit_client_output_delta(
                 stream_id=stream_id,
                 node_id=node_id,

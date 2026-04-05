@@ -68,12 +68,20 @@ from gcu import register_gcu_tools  # noqa: E402
 
 @asynccontextmanager
 async def _lifespan(server: FastMCP) -> AsyncIterator[dict]:
-    """FastMCP lifespan hook: clean up all browsers on shutdown."""
+    """FastMCP lifespan hook: start the Beeline bridge, clean up on shutdown."""
+    from gcu.browser.bridge import init_bridge
+
+    bridge = init_bridge()
+    bridge_port = int(os.getenv("HIVE_BRIDGE_PORT", "9229"))
+    await bridge.start(port=bridge_port)
+
     yield {}
+
     from gcu.browser.session import shutdown_all_browsers
 
     logger.info("Server shutting down, cleaning up browser sessions...")
     await shutdown_all_browsers()
+    await bridge.stop()
 
 
 def _sync_shutdown() -> None:

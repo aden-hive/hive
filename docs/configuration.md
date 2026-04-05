@@ -58,6 +58,25 @@ The framework supports 100+ LLM providers through [LiteLLM](https://docs.litellm
 
 ### Provider Examples
 
+Native Supported Providers (DeepSeek, Mistral, Together AI, xAI, Perplexity):
+
+```json
+{
+  "llm": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "max_tokens": 8192,
+    "api_key_env_var": "DEEPSEEK_API_KEY"
+  }
+}
+```
+
+Notes:
+
+- Set `provider` to `deepseek` (or `mistral`, `together`, `xai`, `perplexity`)
+- Use the standard model name in `model`, for example `deepseek-chat`
+- **No `api_base` is required** for these natively supported providers
+
 OpenRouter:
 
 ```json

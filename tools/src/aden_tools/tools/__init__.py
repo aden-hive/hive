@@ -44,6 +44,7 @@ from .brevo_tool import register_tools as register_brevo
 from .calcom_tool import register_tools as register_calcom
 from .calendar_tool import register_tools as register_calendar
 from .calendly_tool import register_tools as register_calendly
+from .cloudflare_tool import register_tools as register_cloudflare
 from .cloudinary_tool import register_tools as register_cloudinary
 from .confluence_tool import register_tools as register_confluence
 from .csv_tool import register_tools as register_csv
@@ -70,6 +71,7 @@ from .file_system_toolkits.list_dir import register_tools as register_list_dir
 from .file_system_toolkits.replace_file_content import (
     register_tools as register_replace_file_content,
 )
+from .freshdesk_tool import register_tools as register_freshdesk
 from .github_tool import register_tools as register_github
 from .gitlab_tool import register_tools as register_gitlab
 from .gmail_tool import register_tools as register_gmail
@@ -131,7 +133,12 @@ from .twilio_tool import register_tools as register_twilio
 from .twitter_tool import register_tools as register_twitter
 from .vercel_tool import register_tools as register_vercel
 from .vision_tool import register_tools as register_vision
-from .web_scrape_tool import register_tools as register_web_scrape
+
+try:
+    from .web_scrape_tool import register_tools as register_web_scrape
+except ImportError:
+    # playwright not installed - web_scrape_tool unavailable
+    register_web_scrape = None  # type: ignore
 from .web_search_tool import register_tools as register_web_search
 from .wikipedia_tool import register_tools as register_wikipedia
 from .yahoo_finance_tool import register_tools as register_yahoo_finance
@@ -149,7 +156,8 @@ def _register_verified(
     """Register verified (stable) tools."""
     # --- No credentials ---
     register_example(mcp)
-    register_web_scrape(mcp)
+    if register_web_scrape:
+        register_web_scrape(mcp)
     register_pdf_read(mcp)
     register_time(mcp)
     register_runtime_logs(mcp)
@@ -252,6 +260,7 @@ def _register_unverified(
     register_stripe(mcp, credentials=credentials)
     register_postgres(mcp, credentials=credentials)
     register_calendly(mcp, credentials=credentials)
+    register_cloudflare(mcp, credentials=credentials)
     register_cloudinary(mcp, credentials=credentials)
     register_confluence(mcp, credentials=credentials)
     register_databricks(mcp, credentials=credentials)
@@ -297,6 +306,7 @@ def _register_unverified(
     register_zendesk(mcp, credentials=credentials)
     register_zoho_crm(mcp, credentials=credentials)
     register_zoom(mcp, credentials=credentials)
+    register_freshdesk(mcp, credentials=credentials)
 
 
 def register_all_tools(

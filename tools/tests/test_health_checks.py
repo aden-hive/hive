@@ -66,6 +66,7 @@ class TestHealthCheckerRegistry:
             "brevo",
             "calcom",
             "calendly_pat",
+            "cloudflare",
             "discord",
             "docker_hub",
             "exa_search",

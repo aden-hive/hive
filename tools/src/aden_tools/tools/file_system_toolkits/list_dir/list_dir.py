@@ -2,17 +2,17 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from ..security import get_secure_path
+from ..security import get_sandboxed_path
 
 
 def register_tools(mcp: FastMCP) -> None:
     """Register directory listing tools with the MCP server."""
 
     @mcp.tool()
-    def list_dir(path: str, workspace_id: str, agent_id: str, session_id: str) -> dict:
+    def list_dir(path: str, agent_id: str) -> dict:
         """
         Purpose
-            List the contents of a directory within the session sandbox.
+            List the contents of a directory within the agent sandbox.
 
         When to use
             Explore directory structure and contents
@@ -25,16 +25,14 @@ def register_tools(mcp: FastMCP) -> None:
             Does not recurse into subdirectories
 
         Args:
-            path: The directory path (relative to session root)
-            workspace_id: The ID of the workspace
+            path: The directory path (relative to agent sandbox)
             agent_id: The ID of the agent
-            session_id: The ID of the current session
 
         Returns:
             Dict with directory contents and metadata, or error dict
         """
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
             if not os.path.exists(secure_path):
                 return {"error": f"Path not found: {path}"}
 

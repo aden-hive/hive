@@ -30,15 +30,13 @@ DEFAULT_EVENT_TYPES = [
     EventType.NODE_ACTION_PLAN,
     EventType.EDGE_TRAVERSED,
     EventType.GOAL_PROGRESS,
-    EventType.QUEEN_INTERVENTION_REQUESTED,
-    EventType.WORKER_ESCALATION_TICKET,
     EventType.NODE_INTERNAL_OUTPUT,
     EventType.NODE_STALLED,
     EventType.NODE_RETRY,
     EventType.NODE_TOOL_DOOM_LOOP,
     EventType.CONTEXT_COMPACTED,
     EventType.CONTEXT_USAGE_UPDATED,
-    EventType.WORKER_LOADED,
+    EventType.WORKER_GRAPH_LOADED,
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
     EventType.QUEEN_PHASE_CHANGED,
@@ -102,7 +100,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
         "node_loop_iteration",
         "node_loop_started",
         "credentials_required",
-        "worker_loaded",
+        "worker_graph_loaded",
         "queen_phase_changed",
     }
 
@@ -171,10 +169,10 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     # currently running.  This covers the case where the user navigated away
     # and back — the localStorage snapshot is stale, and the ring-buffer
     # replay may not include the original node_loop_started events.
-    worker_runtime = getattr(session, "worker_runtime", None)
-    if worker_runtime and getattr(worker_runtime, "is_running", False):
+    graph_runtime = getattr(session, "graph_runtime", None)
+    if graph_runtime and getattr(graph_runtime, "is_running", False):
         try:
-            for stream_info in worker_runtime.get_active_streams():
+            for stream_info in graph_runtime.get_active_streams():
                 graph_id = stream_info.get("graph_id")
                 stream_id = stream_info.get("stream_id", "default")
                 for exec_id in stream_info.get("active_execution_ids", []):
@@ -192,7 +190,7 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
                         pass
 
                 # Find the currently executing node via the executor
-                for _gid, reg in worker_runtime._graphs.items():
+                for _gid, reg in graph_runtime._graphs.items():
                     if _gid != graph_id:
                         continue
                     for _ep_id, stream in reg.streams.items():

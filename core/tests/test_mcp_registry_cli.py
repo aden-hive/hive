@@ -1123,7 +1123,7 @@ def test_find_agents_using_server_resolves_via_load_agent_selection(
             if not registry_json.exists():
                 continue
             try:
-                configs = registry.load_agent_selection(agent_dir)
+                configs, _max_tools = registry.load_agent_selection(agent_dir)
                 resolved_names = {c["name"] for c in configs}
                 if name in resolved_names:
                     matches.append(str(agent_dir))

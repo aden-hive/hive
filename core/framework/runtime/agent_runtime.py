@@ -9,6 +9,7 @@ import asyncio
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -21,7 +22,7 @@ from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.runtime_log_store import RuntimeLogStore
-from framework.runtime.shared_state import SharedStateManager
+from framework.runtime.shared_state import SharedBufferManager
 from framework.storage.concurrent import ConcurrentStorage
 from framework.storage.session_store import SessionStore
 
@@ -44,6 +45,9 @@ class AgentRuntimeConfig:
     max_history: int = 1000
     execution_result_max: int = 1000
     execution_result_ttl_seconds: float | None = None
+    # Idempotency cache for trigger() deduplication
+    idempotency_ttl_seconds: float = 300.0
+    idempotency_max_keys: int = 10000
     # Webhook server config (only starts if webhook_routes is non-empty)
     webhook_host: str = "127.0.0.1"
     webhook_port: int = 8080
@@ -200,6 +204,8 @@ class AgentRuntime:
             self._skills_manager.load()
 
         self.skill_dirs: list[str] = self._skills_manager.allowlisted_dirs
+        self.context_warn_ratio: float | None = self._skills_manager.context_warn_ratio
+        self.batch_init_nudge: str | None = self._skills_manager.batch_init_nudge
 
         # Primary graph identity
         self._graph_id: str = graph_id or "primary"
@@ -223,7 +229,7 @@ class AgentRuntime:
         self._session_store = SessionStore(storage_path_obj)
 
         # Initialize shared components
-        self._state_manager = SharedStateManager()
+        self._state_manager = SharedBufferManager()
         self._event_bus = event_bus or EventBus(max_history=self._config.max_history)
         self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
 
@@ -232,6 +238,14 @@ class AgentRuntime:
         self._tools = tools or []
         self._tool_executor = tool_executor
         self._accounts_prompt = accounts_prompt
+        self._dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = (
+            None
+        )
+        # Colony memory config for reflection-at-handoff (set by session_manager)
+        self._colony_memory_dir: Any = None
+        self._colony_worker_sessions_dir: Any = None
+        self._colony_recall_cache: dict[str, str] | None = None
+        self._colony_reflect_llm: Any = None
         self._accounts_data = accounts_data
         self._tool_provider_map = tool_provider_map
 
@@ -247,6 +261,10 @@ class AgentRuntime:
         self._timer_tasks: list[asyncio.Task] = []
         # Next fire time for each timer entry point (ep_id -> datetime)
         self._timer_next_fire: dict[str, float] = {}
+
+        # Idempotency cache for trigger() deduplication
+        self._idempotency_keys: OrderedDict[str, str] = OrderedDict()
+        self._idempotency_times: dict[str, float] = {}
 
         # State
         self._running = False
@@ -348,6 +366,13 @@ class AgentRuntime:
                     skills_catalog_prompt=self.skills_catalog_prompt,
                     protocols_prompt=self.protocols_prompt,
                     skill_dirs=self.skill_dirs,
+                    context_warn_ratio=self.context_warn_ratio,
+                    batch_init_nudge=self.batch_init_nudge,
+                    dynamic_memory_provider_factory=self._dynamic_memory_provider_factory,
+                    colony_memory_dir=self._colony_memory_dir,
+                    colony_worker_sessions_dir=self._colony_worker_sessions_dir,
+                    colony_recall_cache=self._colony_recall_cache,
+                    colony_reflect_llm=self._colony_reflect_llm,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream
@@ -849,12 +874,29 @@ class AgentRuntime:
         # Primary graph (also stored in self._streams)
         return self._streams.get(entry_point_id)
 
+    def _prune_idempotency_keys(self) -> None:
+        """Prune expired idempotency keys based on TTL and max size."""
+        ttl = self._config.idempotency_ttl_seconds
+        if ttl > 0:
+            cutoff = time.time() - ttl
+            for key, recorded_at in list(self._idempotency_times.items()):
+                if recorded_at < cutoff:
+                    self._idempotency_times.pop(key, None)
+                    self._idempotency_keys.pop(key, None)
+
+        max_keys = self._config.idempotency_max_keys
+        if max_keys > 0:
+            while len(self._idempotency_keys) > max_keys:
+                old_key, _ = self._idempotency_keys.popitem(last=False)
+                self._idempotency_times.pop(old_key, None)
+
     async def trigger(
         self,
         entry_point_id: str,
         input_data: dict[str, Any],
         correlation_id: str | None = None,
         session_state: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
         graph_id: str | None = None,
     ) -> str:
         """
@@ -867,6 +909,10 @@ class AgentRuntime:
             input_data: Input data for the execution
             correlation_id: Optional ID to correlate related executions
             session_state: Optional session state to resume from (with paused_at, memory)
+            idempotency_key: Optional key for deduplication. If a trigger with
+                the same key was already processed within the TTL window, the
+                cached execution_id is returned instead of starting a new
+                execution. Useful for webhook providers that retry on timeout.
             graph_id: Graph to trigger on.  ``None`` uses the active graph
                 first, then falls back to the primary graph.
 
@@ -880,12 +926,32 @@ class AgentRuntime:
         if not self._running:
             raise RuntimeError("AgentRuntime is not running")
 
+        # Idempotency check: return cached execution_id for duplicate keys.
+        if idempotency_key is not None:
+            self._prune_idempotency_keys()
+            cached = self._idempotency_keys.get(idempotency_key)
+            if cached is not None:
+                logger.debug(
+                    "Idempotent trigger: key '%s' already seen, returning %s",
+                    idempotency_key,
+                    cached,
+                )
+                return cached
+
         stream = self._resolve_stream(entry_point_id, graph_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
 
         run_id = uuid.uuid4().hex[:12]
-        return await stream.execute(input_data, correlation_id, session_state, run_id=run_id)
+        exec_id = await stream.execute(input_data, correlation_id, session_state, run_id=run_id)
+
+        # Cache after execute() so the value is always a real execution_id
+        # that callers can use for tracking.
+        if idempotency_key is not None:
+            self._idempotency_keys[idempotency_key] = exec_id
+            self._idempotency_times[idempotency_key] = time.time()
+
+        return exec_id
 
     async def trigger_and_wait(
         self,
@@ -893,6 +959,7 @@ class AgentRuntime:
         input_data: dict[str, Any],
         timeout: float | None = None,
         session_state: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> ExecutionResult | None:
         """
         Trigger execution and wait for completion.
@@ -902,11 +969,17 @@ class AgentRuntime:
             input_data: Input data for the execution
             timeout: Maximum time to wait (seconds)
             session_state: Optional session state to resume from (with paused_at, memory)
+            idempotency_key: Optional key for deduplication (see trigger() for details).
 
         Returns:
             ExecutionResult or None if timeout
         """
-        exec_id = await self.trigger(entry_point_id, input_data, session_state=session_state)
+        exec_id = await self.trigger(
+            entry_point_id,
+            input_data,
+            session_state=session_state,
+            idempotency_key=idempotency_key,
+        )
         stream = self._resolve_stream(entry_point_id)
         if stream is None:
             raise ValueError(f"Entry point '{entry_point_id}' not found")
@@ -1386,12 +1459,12 @@ class AgentRuntime:
         ``session_state`` dict containing:
 
         - ``resume_session_id``: reuse the same session directory
-        - ``memory``: only the keys that the async entry node declares
+        - ``data_buffer``: only the keys that the async entry node declares
           as inputs (e.g. ``rules``, ``max_emails``).  Stale outputs
           from previous runs (``emails``, ``actions_taken``, …) are
           excluded so each trigger starts fresh.
 
-        The memory is read from the primary session's ``state.json``
+        The data buffer is read from the primary session's ``state.json``
         which is kept up-to-date by ``GraphExecutor._write_progress()``
         at every node transition.
 
@@ -1409,7 +1482,7 @@ class AgentRuntime:
         """
         import json as _json
 
-        # Determine which memory keys the async entry node needs.
+        # Determine which data buffer keys the async entry node needs.
         allowed_keys: set[str] | None = None
         # Look up the entry node from the correct graph
         src_graph_id = source_graph_id or self._graph_id
@@ -1445,19 +1518,21 @@ class AgentRuntime:
                 try:
                     if state_path.exists():
                         data = _json.loads(state_path.read_text(encoding="utf-8"))
-                        full_memory = data.get("memory", {})
-                        if not full_memory:
+                        full_buffer = data.get("data_buffer", data.get("memory", {}))
+                        if not full_buffer:
                             continue
                         # Filter to only input keys so stale outputs
                         # from previous triggers don't leak through.
                         if allowed_keys is not None:
-                            memory = {k: v for k, v in full_memory.items() if k in allowed_keys}
+                            buffer_data = {
+                                k: v for k, v in full_buffer.items() if k in allowed_keys
+                            }
                         else:
-                            memory = full_memory
-                        if memory:
+                            buffer_data = full_buffer
+                        if buffer_data:
                             return {
                                 "resume_session_id": exec_id,
-                                "memory": memory,
+                                "data_buffer": buffer_data,
                             }
                 except Exception:
                     logger.debug(
@@ -1606,7 +1681,7 @@ class AgentRuntime:
                     for node_id, node in executor.node_registry.items():
                         if getattr(node, "_awaiting_input", False):
                             # Skip escalation receivers — those are handled
-                            # by the queen via inject_worker_message(), not
+                            # by the queen via inject_message(), not
                             # by the user directly.
                             if ":escalation:" in node_id:
                                 continue
@@ -1721,7 +1796,7 @@ class AgentRuntime:
     # === PROPERTIES ===
 
     @property
-    def state_manager(self) -> SharedStateManager:
+    def state_manager(self) -> SharedBufferManager:
         """Access the shared state manager."""
         return self._state_manager
 

@@ -95,7 +95,7 @@ class FileConversationStore:
     async def read_cursor(self) -> dict[str, Any] | None:
         return await self._run(self._read_json, self._base / "cursor.json")
 
-    async def delete_parts_before(self, seq: int) -> None:
+    async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         def _delete() -> None:
             if not self._parts_dir.exists():
                 return
@@ -109,6 +109,28 @@ class FileConversationStore:
     async def close(self) -> None:
         """No-op — no persistent handles for file-per-part storage."""
         pass
+
+    async def clear(self) -> None:
+        """Clear all parts and cursor, keeping the directory structure.
+
+        Used when starting a fresh execution in the same session directory.
+        """
+
+        def _clear() -> None:
+            # Clear all parts
+            if self._parts_dir.exists():
+                for f in self._parts_dir.glob("*.json"):
+                    f.unlink()
+            # Clear cursor
+            cursor_path = self._base / "cursor.json"
+            if cursor_path.exists():
+                cursor_path.unlink()
+            # Clear meta
+            meta_path = self._base / "meta.json"
+            if meta_path.exists():
+                meta_path.unlink()
+
+        await self._run(_clear)
 
     async def destroy(self) -> None:
         """Delete the entire base directory and all persisted data."""

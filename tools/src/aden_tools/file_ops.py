@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from contextvars import ContextVar
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -105,6 +106,85 @@ BINARY_EXTENSIONS = frozenset(
         ".obj",
     }
 )
+
+# ── Context-aware sandboxing ─────────────────────────────────────────────────
+
+# Context variable for additional allowed paths (beyond base_root)
+_EMPTY_PATHS: list[str] = []
+_allowed_paths_ctx: ContextVar[list[str]] = ContextVar("allowed_paths", default=_EMPTY_PATHS)
+
+
+def set_allowed_paths(paths: list[str]) -> None:
+    """Set additional allowed paths for file operations in this context.
+
+    Use this to grant access to paths beyond the base root (e.g., ~/.hive/
+    for cross-agent file access).
+    """
+    _allowed_paths_ctx.set(list(paths))
+
+
+def get_allowed_paths() -> list[str]:
+    """Get current allowed paths including ~/.hive/."""
+    paths = list(_allowed_paths_ctx.get())
+    hive_dir = os.path.expanduser("~/.hive")
+    if hive_dir not in paths:
+        paths.append(hive_dir)
+    return paths
+
+
+def create_sandboxed_resolver(
+    base_root: str,
+    allowed_paths: list[str] | None = None,
+) -> Callable[[str], str]:
+    """Create a path resolver that enforces sandbox boundaries.
+
+    Args:
+        base_root: The primary allowed directory (e.g., PROJECT_ROOT or data_dir).
+        allowed_paths: Additional allowed paths. If None, uses get_allowed_paths()
+            which includes ~/.hive/ by default.
+
+    Returns:
+        A path resolver function that raises ValueError for paths outside allowed scopes.
+
+    The resolver:
+    - Resolves relative paths against base_root
+    - Allows absolute paths under base_root or any allowed_path
+    - Blocks access outside allowed scopes with a helpful error message
+    """
+    hive_dir = os.path.expanduser("~/.hive")  # noqa: F841
+
+    def resolve(path: str) -> str:
+        # Normalize slashes for cross-platform
+        path = path.replace("/", os.sep)
+
+        # Expand ~ to home directory
+        if path.startswith("~"):
+            path = os.path.expanduser(path)
+
+        # Resolve to absolute path
+        if os.path.isabs(path):
+            resolved = os.path.abspath(path)
+        else:
+            resolved = os.path.abspath(os.path.join(base_root, path))
+
+        # Build allowed paths list
+        extra_paths = allowed_paths if allowed_paths is not None else get_allowed_paths()
+        all_allowed = [base_root] + extra_paths
+
+        # Check against all allowed paths
+        for allowed_path in all_allowed:
+            try:
+                if os.path.commonpath([resolved, allowed_path]) == allowed_path:
+                    return resolved
+            except ValueError:
+                continue
+
+        # Block and remind
+        allowed_str = ", ".join(f"'{p}'" for p in all_allowed)
+        raise ValueError(f"Access denied: '{path}' is not accessible. Allowed paths: {allowed_str}")
+
+    return resolve
+
 
 # ── Private helpers ───────────────────────────────────────────────────────
 

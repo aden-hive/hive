@@ -59,6 +59,13 @@ class ActiveNodeClientIO(NodeClientIO):
         self._input_result: str | None = None
 
     async def emit_output(self, content: str, is_final: bool = False) -> None:
+        # Strip leading whitespace from first output chunk to avoid leading spaces
+        # (some LLMs like Kimi output leading whitespace before text)
+        if not self._output_snapshot and content:
+            content = content.lstrip()
+            if not content:  # Content was all whitespace
+                return
+
         self._output_snapshot += content
         await self._output_queue.put(content)
 

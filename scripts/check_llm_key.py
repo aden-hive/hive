@@ -65,9 +65,7 @@ def _extract_error_message(response: httpx.Response) -> str:
 def _sanitize_openrouter_model_id(value: str) -> str:
     """Sanitize pasted OpenRouter model IDs into a comparable slug."""
     normalized = unicodedata.normalize("NFKC", value or "")
-    normalized = "".join(
-        ch for ch in normalized if unicodedata.category(ch) not in {"Cc", "Cf"}
-    )
+    normalized = "".join(ch for ch in normalized if unicodedata.category(ch) not in {"Cc", "Cf"})
     normalized = normalized.translate(OPENROUTER_SEPARATOR_TRANSLATION)
     normalized = re.sub(r"\s+", "", normalized)
     if normalized.casefold().startswith("openrouter/"):
@@ -203,9 +201,7 @@ def check_openrouter_model(
         )
     if r.status_code == 200:
         available_model_lookup = _extract_openrouter_model_lookup(r.json())
-        matched_model = available_model_lookup.get(
-            _normalize_openrouter_model_id(requested_model)
-        )
+        matched_model = available_model_lookup.get(_normalize_openrouter_model_id(requested_model))
         if matched_model:
             return {
                 "valid": True,
@@ -231,10 +227,7 @@ def check_openrouter_model(
 
     detail = _extract_error_message(r)
     if r.status_code in (400, 404, 422):
-        base = (
-            "OpenRouter model is not available for this key/settings: "
-            f"{requested_model}"
-        )
+        base = f"OpenRouter model is not available for this key/settings: {requested_model}"
         return {"valid": False, "message": f"{base}. {detail}" if detail else base}
 
     suffix = f": {detail}" if detail else ""
@@ -244,9 +237,7 @@ def check_openrouter_model(
     }
 
 
-def check_minimax(
-    api_key: str, api_base: str = "https://api.minimax.io/v1", **_: str
-) -> dict:
+def check_minimax(api_key: str, api_base: str = "https://api.minimax.io/v1", **_: str) -> dict:
     """Validate via chatcompletion_v2 endpoint with empty messages.
 
     MiniMax doesn't support GET /models; their native endpoint is
@@ -327,9 +318,7 @@ PROVIDERS = {
     "mistral": lambda key, **_: check_openai_compatible(
         key, "https://api.mistral.ai/v1/models", "Mistral"
     ),
-    "xai": lambda key, **_: check_openai_compatible(
-        key, "https://api.x.ai/v1/models", "xAI"
-    ),
+    "xai": lambda key, **_: check_openai_compatible(key, "https://api.x.ai/v1/models", "xAI"),
     "perplexity": lambda key, **_: check_openai_compatible(
         key, "https://api.perplexity.ai/v1/models", "Perplexity"
     ),

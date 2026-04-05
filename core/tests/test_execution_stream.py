@@ -13,7 +13,7 @@ from framework.llm.stream_events import FinishEvent, StreamEvent, TextDeltaEvent
 from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
-from framework.runtime.shared_state import SharedStateManager
+from framework.runtime.shared_state import SharedBufferManager
 from framework.storage.concurrent import ConcurrentStorage
 
 
@@ -119,7 +119,7 @@ async def test_execution_stream_retention(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, EventBus()),
         event_bus=None,
@@ -211,7 +211,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, EventBus()),
         event_bus=None,
@@ -247,7 +247,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, EventBus()),
         event_bus=None,
@@ -262,7 +262,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
     # Run async execution with resume_session_id pointing to primary session
     session_state = {
         "resume_session_id": primary_exec_id,
-        "memory": {"rules": "star important emails"},
+        "data_buffer": {"rules": "star important emails"},
     }
     async_exec_id = await async_stream.execute({"event": "new_email"}, session_state=session_state)
 

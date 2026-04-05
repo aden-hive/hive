@@ -6,9 +6,10 @@ import pytest
 
 from framework.skills.config import DefaultSkillConfig, SkillsConfig
 from framework.skills.defaults import (
-    SHARED_MEMORY_KEYS,
+    DATA_BUFFER_KEYS,
     SKILL_REGISTRY,
     DefaultSkillManager,
+    is_batch_scenario,
 )
 from framework.skills.parser import parse_skill_md
 
@@ -50,10 +51,10 @@ class TestDefaultSkillFiles:
             f"({total_chars} chars), exceeding the 2000 token budget"
         )
 
-    def test_shared_memory_keys_all_prefixed(self):
-        """All shared memory keys must start with underscore."""
-        for key in SHARED_MEMORY_KEYS:
-            assert key.startswith("_"), f"Shared memory key missing _ prefix: {key}"
+    def test_data_buffer_keys_all_prefixed(self):
+        """All data buffer keys must start with underscore."""
+        for key in DATA_BUFFER_KEYS:
+            assert key.startswith("_"), f"Data buffer key missing _ prefix: {key}"
 
 
 class TestDefaultSkillManager:
@@ -186,3 +187,128 @@ class TestSkillsConfig:
         assert config.skills == []
         assert config.default_skills == {}
         assert config.all_defaults_disabled is False
+
+
+class TestConfigOverrideSubstitution:
+    """Config overrides replace {{placeholder}} values in injected protocol text."""
+
+    def test_quality_monitor_default_interval(self):
+        manager = DefaultSkillManager()
+        manager.load()
+        prompt = manager.build_protocols_prompt()
+        assert "Every 5 iterations" in prompt
+
+    def test_quality_monitor_override_interval(self):
+        config = SkillsConfig.from_agent_vars(
+            default_skills={"hive.quality-monitor": {"assessment_interval": 10}}
+        )
+        manager = DefaultSkillManager(config)
+        manager.load()
+        prompt = manager.build_protocols_prompt()
+        assert "Every 10 iterations" in prompt
+        assert "Every 5 iterations" not in prompt
+
+    def test_error_recovery_default_retries(self):
+        manager = DefaultSkillManager()
+        manager.load()
+        prompt = manager.build_protocols_prompt()
+        assert "3+ times" in prompt
+
+    def test_error_recovery_override_retries(self):
+        config = SkillsConfig.from_agent_vars(
+            default_skills={"hive.error-recovery": {"max_retries_per_tool": 5}}
+        )
+        manager = DefaultSkillManager(config)
+        manager.load()
+        prompt = manager.build_protocols_prompt()
+        assert "5+ times" in prompt
+        assert "3+ times" not in prompt
+
+    def test_context_preservation_default_threshold(self):
+        manager = DefaultSkillManager()
+        manager.load()
+        prompt = manager.build_protocols_prompt()
+        assert "45%" in prompt
+
+    def test_context_preservation_override_threshold(self):
+        config = SkillsConfig.from_agent_vars(
+            default_skills={"hive.context-preservation": {"warn_at_usage_ratio": 0.4}}
+        )
+        manager = DefaultSkillManager(config)
+        manager.load()
+        prompt = manager.build_protocols_prompt()
+        assert "40%" in prompt
+        assert "45%" not in prompt
+
+    def test_no_unreplaced_placeholders_with_defaults(self):
+        """All {{...}} placeholders should be replaced when using defaults."""
+        manager = DefaultSkillManager()
+        manager.load()
+        prompt = manager.build_protocols_prompt()
+        assert "{{" not in prompt
+
+
+class TestBatchAutoDetection:
+    """DS-12: is_batch_scenario() and batch_init_nudge property."""
+
+    def test_detects_list_of(self):
+        assert is_batch_scenario("process a list of 100 leads") is True
+
+    def test_detects_collection_of(self):
+        assert is_batch_scenario("a collection of invoices") is True
+
+    def test_detects_items(self):
+        assert is_batch_scenario("go through all items in the spreadsheet") is True
+
+    def test_detects_for_each(self):
+        assert is_batch_scenario("for each record, send an email") is True
+
+    def test_no_match_single_task(self):
+        assert is_batch_scenario("write a summary of the quarterly report") is False
+
+    def test_batch_nudge_active_by_default(self):
+        manager = DefaultSkillManager()
+        manager.load()
+        assert manager.batch_init_nudge is not None
+        assert "_batch_ledger" in manager.batch_init_nudge
+
+    def test_batch_nudge_none_when_skill_disabled(self):
+        config = SkillsConfig.from_agent_vars(
+            default_skills={"hive.batch-ledger": {"enabled": False}}
+        )
+        manager = DefaultSkillManager(config)
+        manager.load()
+        assert manager.batch_init_nudge is None
+
+    def test_batch_nudge_none_when_auto_detect_disabled(self):
+        config = SkillsConfig.from_agent_vars(
+            default_skills={"hive.batch-ledger": {"auto_detect_batch": False}}
+        )
+        manager = DefaultSkillManager(config)
+        manager.load()
+        assert manager.batch_init_nudge is None
+
+
+class TestContextWarnRatio:
+    """DS-13: context_warn_ratio property."""
+
+    def test_default_ratio(self):
+        manager = DefaultSkillManager()
+        manager.load()
+        assert manager.context_warn_ratio == pytest.approx(0.45)
+
+    def test_override_ratio(self):
+        config = SkillsConfig.from_agent_vars(
+            default_skills={"hive.context-preservation": {"warn_at_usage_ratio": 0.3}}
+        )
+        manager = DefaultSkillManager(config)
+        manager.load()
+        assert manager.context_warn_ratio == pytest.approx(0.3)
+
+    def test_ratio_none_when_skill_disabled(self):
+        config = SkillsConfig.from_agent_vars(
+            default_skills={"hive.context-preservation": {"enabled": False}}
+        )
+        manager = DefaultSkillManager(config)
+        manager.load()
+        assert manager.context_warn_ratio is None

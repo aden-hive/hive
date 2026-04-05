@@ -265,15 +265,11 @@ class JobHunterAgent:
             session_state=session_state,
         )
 
-    async def run(
-        self, context: dict, mock_mode=False, session_state=None
-    ) -> ExecutionResult:
+    async def run(self, context: dict, mock_mode=False, session_state=None) -> ExecutionResult:
         """Run the agent (convenience method for single execution)."""
         await self.start(mock_mode=mock_mode)
         try:
-            result = await self.trigger_and_wait(
-                "default", context, session_state=session_state
-            )
+            result = await self.trigger_and_wait("default", context, session_state=session_state)
             return result or ExecutionResult(success=False, error="Execution timeout")
         finally:
             await self.stop()
