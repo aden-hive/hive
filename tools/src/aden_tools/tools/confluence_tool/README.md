@@ -8,7 +8,7 @@ Wiki and knowledge management via Confluence Cloud REST API v2.
 
 - `confluence_list_spaces(limit=25)`
   - `limit` (int, optional): Max results (1-250, default 25)
-  - Returns: `{"spaces": [...], "cougit restore tools/src/aden_tools/tools/*/README.mdnt": N}` with id, key, name, type, status
+  - Returns: `{"spaces": [...], "count": N}` with id, key, name, type, status
 
 - `confluence_list_pages(space_id="", title="", limit=25)`
   - `space_id` (str, optional): Filter by space ID

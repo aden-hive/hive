@@ -88,6 +88,7 @@ vercel_create_env_var(
 | Type | Description |
 |------|-------------|
 | `encrypted` | Encrypted at rest, not visible after creation (default) |
+| `secret` | Reference to a shared secret, value not stored directly |
 | `plain` | Plaintext, visible in dashboard |
 | `sensitive` | Encrypted, never shown after creation |
 | `system` | System-provided variable |
