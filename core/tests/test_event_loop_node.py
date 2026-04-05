@@ -819,9 +819,7 @@ class TestEscalate:
         # runs in subagent pattern (no queen). Opts out of worker auto-escalation
         # that would otherwise fire extra ESCALATION_REQUESTED events on
         # subsequent text-only turns.
-        ctx = build_ctx(
-            runtime, node_spec, buffer, llm, stream_id="worker", is_subagent_mode=True
-        )
+        ctx = build_ctx(runtime, node_spec, buffer, llm, stream_id="worker", is_subagent_mode=True)
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
 
         async def queen_reply():
@@ -866,10 +864,8 @@ class TestEscalate:
         manager._subscribe_worker_handoffs(session, queen_executor)
 
         # is_subagent_mode=True opts out of worker auto-escalation.
-        # Standalone test without real queen loop — see other escalate tests.
-        ctx = build_ctx(
-            runtime, node_spec, buffer, llm, stream_id="worker", is_subagent_mode=True
-        )
+        # Standalone test without real queen loop, see other escalate tests.
+        ctx = build_ctx(runtime, node_spec, buffer, llm, stream_id="worker", is_subagent_mode=True)
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
 
         async def queen_reply():
