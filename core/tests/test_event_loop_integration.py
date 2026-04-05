@@ -168,6 +168,13 @@ class MockConversationStore:
     async def close(self) -> None:
         pass
 
+    async def clear(self) -> None:
+        # Clear parts, cursor, and meta — keep the store object alive.
+        # Matches the real store (storage/conversation_store.py:clear).
+        self._parts.clear()
+        self._cursor = None
+        self._meta = None
+
     async def destroy(self) -> None:
         self._parts.clear()
         self._meta = None
@@ -246,6 +253,7 @@ def make_ctx(
     client_facing: bool = False,
     available_tools: list[Tool] | None = None,
     stream_id: str = "",
+    is_subagent_mode: bool = False,
 ) -> NodeContext:
     """Build a NodeContext for direct EventLoopNode testing."""
     runtime = MagicMock(spec=Runtime)
@@ -278,6 +286,7 @@ def make_ctx(
         llm=llm,
         available_tools=available_tools or [],
         stream_id=stream_id,
+        is_subagent_mode=is_subagent_mode,
     )
 
 
@@ -474,7 +483,12 @@ async def test_event_loop_with_event_bus():
 
     scripts = [StreamScript(text="All done.")]
     llm = make_llm(scripts)
-    ctx = make_ctx(llm=llm, output_keys=[])
+    # is_subagent_mode=True bypasses worker auto-escalation in EventLoopNode.
+    # When event_bus is provided, a non-queen/non-subagent node is treated as
+    # a worker and auto-escalates to queen after a text-only turn (grace=1),
+    # then blocks forever on _await_user_input waiting for queen guidance.
+    # Standalone unit tests have no queen, so we mark as subagent to opt out.
+    ctx = make_ctx(llm=llm, output_keys=[], is_subagent_mode=True)
 
     node = EventLoopNode(
         event_bus=bus,
@@ -1000,10 +1014,13 @@ async def test_context_handoff_between_nodes(runtime):
     result = await executor.execute(graph, goal, {})
 
     assert result.success
-    assert "lead_score" in result.output
+    # After hive-v1 executor refactor, result.output only contains terminal
+    # node outputs. Full buffer (with handoff data) is in session_state.
     assert "strategy" in result.output
+    buffer_data = result.session_state.get("data_buffer", {})
+    assert "lead_score" in buffer_data
     if USE_MOCK_LLM:
-        assert result.output["lead_score"] == 92
+        assert buffer_data["lead_score"] == 92
         assert result.output["strategy"] == "premium"
 
 
@@ -1068,7 +1085,8 @@ async def test_internal_node_no_client_output():
 
     scripts = [StreamScript(text="Internal processing.")]
     llm = make_llm(scripts)
-    ctx = make_ctx(llm=llm, output_keys=[], client_facing=False)
+    # is_subagent_mode=True: standalone test, opts out of worker auto-escalation.
+    ctx = make_ctx(llm=llm, output_keys=[], client_facing=False, is_subagent_mode=True)
 
     node = EventLoopNode(
         event_bus=bus,
@@ -1167,10 +1185,13 @@ async def test_mixed_node_graph(runtime):
     result = await executor.execute(graph, goal, {})
 
     assert result.success
-    assert "summary" in result.output
+    # Terminal node is "format" - only its output appears in result.output.
+    # Intermediate outputs are in session_state's data buffer.
     assert "report" in result.output
+    buffer_data = result.session_state.get("data_buffer", {})
+    assert "summary" in buffer_data
     if USE_MOCK_LLM:
-        assert "3 leads processed" in result.output["summary"]
+        assert "3 leads processed" in buffer_data["summary"]
 
 
 # ===========================================================================
