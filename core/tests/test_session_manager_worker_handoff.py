@@ -147,7 +147,6 @@ async def test_load_worker_core_defaults_to_session_llm_model(monkeypatch, tmp_p
 
     monkeypatch.setattr("framework.runner.AgentRunner.load", fake_load)
     monkeypatch.setattr(manager, "_cleanup_stale_active_sessions", lambda *_args: None)
-    monkeypatch.setattr(manager, "_subscribe_worker_digest", lambda *_args: None)
     monkeypatch.setattr(manager, "_subscribe_worker_colony_memory", AsyncMock())
     monkeypatch.setattr(
         "framework.tools.queen_lifecycle_tools._read_agent_triggers_json",
@@ -184,7 +183,6 @@ async def test_load_worker_core_keeps_explicit_worker_model_override(monkeypatch
 
     monkeypatch.setattr("framework.runner.AgentRunner.load", fake_load)
     monkeypatch.setattr(manager, "_cleanup_stale_active_sessions", lambda *_args: None)
-    monkeypatch.setattr(manager, "_subscribe_worker_digest", lambda *_args: None)
     monkeypatch.setattr(manager, "_subscribe_worker_colony_memory", AsyncMock())
     monkeypatch.setattr(
         "framework.tools.queen_lifecycle_tools._read_agent_triggers_json",
@@ -220,7 +218,6 @@ async def test_load_worker_core_continues_when_colony_memory_subscription_fails(
 
     monkeypatch.setattr("framework.runner.AgentRunner.load", lambda *args, **kwargs: runner)
     monkeypatch.setattr(manager, "_cleanup_stale_active_sessions", lambda *_args: None)
-    monkeypatch.setattr(manager, "_subscribe_worker_digest", lambda *_args: None)
     monkeypatch.setattr(
         manager,
         "_subscribe_worker_colony_memory",
