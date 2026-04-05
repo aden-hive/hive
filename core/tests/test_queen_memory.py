@@ -410,7 +410,9 @@ def test_path_traversal_read(tmp_path: Path):
     from framework.agents.queen.reflection_agent import _execute_tool
 
     (tmp_path / "safe.md").write_text("safe content")
-    result = _execute_tool("read_memory_file", {"filename": "../../etc/passwd"}, tmp_path)
+    result = _execute_tool(
+        "read_memory_file", {"filename": "../../etc/passwd"}, tmp_path, caller="queen"
+    )
     assert "ERROR" in result
     assert "path components not allowed" in result.lower() or "escapes" in result.lower()
 
@@ -422,6 +424,7 @@ def test_path_traversal_write(tmp_path: Path):
         "write_memory_file",
         {"filename": "../escape.md", "content": "---\nname: evil\n---\nbad"},
         tmp_path,
+        caller="queen",
     )
     assert "ERROR" in result
     assert not (tmp_path.parent / "escape.md").exists()
@@ -431,7 +434,9 @@ def test_path_traversal_delete(tmp_path: Path):
     from framework.agents.queen.reflection_agent import _execute_tool
 
     (tmp_path / "target.md").write_text("content")
-    result = _execute_tool("delete_memory_file", {"filename": "../target.md"}, tmp_path)
+    result = _execute_tool(
+        "delete_memory_file", {"filename": "../target.md"}, tmp_path, caller="queen"
+    )
     assert "ERROR" in result
     assert (tmp_path / "target.md").exists()  # not deleted
 
@@ -443,14 +448,19 @@ def test_safe_path_accepted(tmp_path: Path):
         "write_memory_file",
         {"filename": "good-file.md", "content": "---\nname: good\n---\ncontent"},
         tmp_path,
+        caller="queen",
     )
     assert "Wrote" in result
     assert (tmp_path / "good-file.md").exists()
 
-    result = _execute_tool("read_memory_file", {"filename": "good-file.md"}, tmp_path)
+    result = _execute_tool(
+        "read_memory_file", {"filename": "good-file.md"}, tmp_path, caller="queen"
+    )
     assert "content" in result
 
-    result = _execute_tool("delete_memory_file", {"filename": "good-file.md"}, tmp_path)
+    result = _execute_tool(
+        "delete_memory_file", {"filename": "good-file.md"}, tmp_path, caller="queen"
+    )
     assert "Deleted" in result
 
 

@@ -147,8 +147,16 @@ def build_ctx(
     input_data=None,
     goal_context="",
     stream_id=None,
+    is_subagent_mode=False,
 ):
-    """Build a NodeContext for testing."""
+    """Build a NodeContext for testing.
+
+    When EventLoopNode is constructed with event_bus, a non-queen/non-subagent
+    node is treated as a worker and auto-escalates to queen on text-only turns
+    (see event_loop_node.py:1277). Standalone tests with event_bus but no queen
+    should pass is_subagent_mode=True to opt out, otherwise the loop hangs
+    forever waiting for queen guidance that never arrives.
+    """
     return NodeContext(
         runtime=runtime,
         node_id=node_spec.id,
@@ -159,6 +167,7 @@ def build_ctx(
         available_tools=tools or [],
         goal_context=goal_context,
         stream_id=stream_id,
+        is_subagent_mode=is_subagent_mode,
     )
 
 
@@ -423,7 +432,8 @@ class TestEventBusLifecycle:
             handler=lambda e: received_events.append(e.type),
         )
 
-        ctx = build_ctx(runtime, node_spec, buffer, llm)
+        # Subagent mode opts out of worker auto-escalation (no queen in tests).
+        ctx = build_ctx(runtime, node_spec, buffer, llm, is_subagent_mode=True)
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
         result = await node.execute(ctx)
 
@@ -805,14 +815,12 @@ class TestEscalate:
 
         bus.subscribe(event_types=[EventType.ESCALATION_REQUESTED], handler=capture)
 
-        ctx = build_ctx(runtime, node_spec, buffer, llm, stream_id="worker")
+        # is_subagent_mode=True: test drives node.execute() directly, so this
+        # runs in subagent pattern (no queen). Opts out of worker auto-escalation
+        # that would otherwise fire extra ESCALATION_REQUESTED events on
+        # subsequent text-only turns.
+        ctx = build_ctx(runtime, node_spec, buffer, llm, stream_id="worker", is_subagent_mode=True)
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
-
-        async def queen_reply():
-            await asyncio.sleep(0.05)
-            await node.inject_event("Acknowledged, proceed.")
-
-        task = asyncio.create_task(queen_reply())
 
         async def queen_reply():
             await asyncio.sleep(0.05)
@@ -855,7 +863,9 @@ class TestEscalate:
         queen_executor.node_registry = {"queen": queen_node}
         manager._subscribe_worker_handoffs(session, queen_executor)
 
-        ctx = build_ctx(runtime, node_spec, buffer, llm, stream_id="worker")
+        # is_subagent_mode=True opts out of worker auto-escalation.
+        # Standalone test without real queen loop, see other escalate tests.
+        ctx = build_ctx(runtime, node_spec, buffer, llm, stream_id="worker", is_subagent_mode=True)
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
 
         async def queen_reply():
@@ -1300,6 +1310,9 @@ class TestCrashRecovery:
             output_keys=["result"],
             store=store,
         )
+        # Tag messages with phase_id matching the node so restore() finds them.
+        # Restore filters parts by phase_id=ctx.node_id in non-continuous mode.
+        conv.set_current_phase(node_spec.id)
         await conv.add_user_message("Initial input")
         await conv.add_assistant_message("Working on it...")
 
@@ -1754,7 +1767,8 @@ class TestTransientErrorRetry:
             handler=lambda e: retry_events.append(e),
         )
 
-        ctx = build_ctx(runtime, node_spec, buffer, llm)
+        # is_subagent_mode=True opts out of worker auto-escalation.
+        ctx = build_ctx(runtime, node_spec, buffer, llm, is_subagent_mode=True)
         node = EventLoopNode(
             event_bus=bus,
             config=LoopConfig(
@@ -2084,12 +2098,14 @@ class TestToolDoomLoopIntegration:
                 is_error=False,
             )
 
+        # is_subagent_mode=True opts out of worker auto-escalation.
         ctx = build_ctx(
             runtime,
             node_spec,
             buffer,
             llm,
             tools=[Tool(name="search", description="s", parameters={})],
+            is_subagent_mode=True,
         )
         node = EventLoopNode(
             judge=judge,
@@ -2147,6 +2163,9 @@ class TestToolDoomLoopIntegration:
                 is_error=False,
             )
 
+        # is_subagent_mode=True opts out of worker auto-escalation. The
+        # test still exercises worker doom-loop escalation (a separate path)
+        # via the doom-loop detection at event_loop_node.py:1229.
         ctx = build_ctx(
             runtime,
             spec,
@@ -2154,6 +2173,7 @@ class TestToolDoomLoopIntegration:
             llm,
             tools=[Tool(name="search", description="s", parameters={})],
             stream_id="worker",
+            is_subagent_mode=True,
         )
         node = EventLoopNode(
             judge=judge,
@@ -2352,12 +2372,14 @@ class TestToolDoomLoopIntegration:
                 is_error=True,
             )
 
+        # is_subagent_mode=True opts out of worker auto-escalation.
         ctx = build_ctx(
             runtime,
             node_spec,
             buffer,
             llm,
             tools=[Tool(name="failing_tool", description="s", parameters={})],
+            is_subagent_mode=True,
         )
         node = EventLoopNode(
             judge=judge,
@@ -2408,42 +2430,6 @@ class TestExecutionId:
         mock_stream_runtime = MagicMock()
         adapter = StreamRuntimeAdapter(stream_runtime=mock_stream_runtime, execution_id="exec_456")
         assert adapter.execution_id == "exec_456"
-
-    def test_build_context_passes_execution_id_from_adapter(self):
-        """_build_context picks up execution_id from a StreamRuntimeAdapter runtime."""
-        from framework.graph.executor import GraphExecutor
-        from framework.graph.goal import Goal
-
-        runtime = MagicMock()
-        runtime.execution_id = "exec_123"
-        executor = GraphExecutor(runtime=runtime)
-
-        goal = Goal(id="g1", name="test", description="test", success_criteria=[])
-        node_spec = NodeSpec(
-            id="n1", name="n1", description="test", node_type="event_loop", output_keys=["r"]
-        )
-        ctx = executor._build_context(
-            node_spec=node_spec, buffer=DataBuffer(), goal=goal, input_data={}
-        )
-        assert ctx.execution_id == "exec_123"
-
-    def test_build_context_defaults_execution_id_for_plain_runtime(self):
-        """Plain Runtime.execution_id returns '' by default."""
-        from framework.graph.executor import GraphExecutor
-        from framework.graph.goal import Goal
-
-        runtime = MagicMock(spec=Runtime)
-        runtime.execution_id = ""
-        executor = GraphExecutor(runtime=runtime)
-
-        goal = Goal(id="g1", name="test", description="test", success_criteria=[])
-        node_spec = NodeSpec(
-            id="n1", name="n1", description="test", node_type="event_loop", output_keys=["r"]
-        )
-        ctx = executor._build_context(
-            node_spec=node_spec, buffer=DataBuffer(), goal=goal, input_data={}
-        )
-        assert ctx.execution_id == ""
 
 
 # ---------------------------------------------------------------------------

@@ -688,20 +688,20 @@ def test_convert_mcp_tool_strips_context_params():
         input_schema={
             "type": "object",
             "properties": {
-                "workspace_id": {"type": "string"},  # context param → stripped
                 "agent_id": {"type": "string"},  # context param → stripped
+                "data_dir": {"type": "string"},  # context param → stripped
                 "query": {"type": "string"},  # regular param → kept
             },
-            "required": ["workspace_id", "query"],
+            "required": ["agent_id", "query"],
         },
     )
     tool = registry._convert_mcp_tool_to_framework_tool(mcp_tool)  # noqa: SLF001
     props = tool.parameters["properties"]
-    assert "workspace_id" not in props
     assert "agent_id" not in props
+    assert "data_dir" not in props
     assert "query" in props
-    # workspace_id should also be stripped from required
-    assert "workspace_id" not in tool.parameters["required"]
+    # agent_id should also be stripped from required
+    assert "agent_id" not in tool.parameters["required"]
     assert "query" in tool.parameters["required"]
 
 

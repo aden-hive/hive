@@ -476,7 +476,13 @@ class TestPersistence:
         assert restored.messages[0].content == "u1"
 
     @pytest.mark.asyncio
-    async def test_restore_ignores_run_id_and_loads_all_parts(self):
+    async def test_restore_filters_by_run_id_for_crash_recovery(self):
+        """Restore with a non-legacy run_id only loads parts from that run.
+
+        This ensures intentional restarts (new run_id) start fresh while
+        crash recovery (same run_id) resumes correctly. Legacy parts (no
+        run_id) and other runs' parts are excluded.
+        """
         store = MockConversationStore()
         await store.write_meta({"system_prompt": "hello"})
         await store.write_part(0, {"seq": 0, "role": "user", "content": "legacy"})
@@ -489,7 +495,7 @@ class TestPersistence:
 
         restored = await NodeConversation.restore(store, run_id="run-a")
         assert restored is not None
-        assert [m.content for m in restored.messages] == ["legacy", "run-a", "run-b"]
+        assert [m.content for m in restored.messages] == ["run-a"]
         assert restored.next_seq == 3
 
     @pytest.mark.asyncio
