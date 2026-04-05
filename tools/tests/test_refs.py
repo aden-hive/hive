@@ -136,8 +136,8 @@ class TestResolveRef:
     def test_quoted_name_passes_through(self):
         # Note: the CSS selector output does not currently escape inner quotes.
         # This produces technically-broken CSS when name contains double quotes,
-        # but the bridge-based matcher appears to tolerate it. Tracked as
-        # a follow-up concern — see PR #6955.
+        # but the bridge-based matcher appears to tolerate it. Tracked
+        # separately as a follow-up.
         ref_map = {
             "e0": RefEntry(role="button", name='Say "Hello"', nth=0),
         }
