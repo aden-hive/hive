@@ -6,6 +6,8 @@ Use `node_type="gcu"` when:
 - The user's workflow requires **navigating real websites** (scraping, form-filling, social media interaction, testing web UIs)
 - The task involves **dynamic/JS-rendered pages** that `web_scrape` cannot handle (SPAs, infinite scroll, login-gated content)
 - The agent needs to **interact with a website** — clicking, typing, scrolling, selecting, uploading files
+- The workflow requires **computer vision** for screen understanding (screenshot capture + vision models)
+- Tasks need **deterministic step-by-step browser automation** in headless Chrome
 
 Do NOT use GCU for:
 - Static content that `web_scrape` handles fine
@@ -17,7 +19,10 @@ Do NOT use GCU for:
 
 - `node_type="gcu"` — a declarative enhancement over `event_loop`
 - Framework auto-prepends browser best-practices system prompt
-- Framework auto-includes all 31 browser tools from `gcu-tools` MCP server
+- Framework auto-includes all browser automation tools from `gcu-tools` MCP server
+- Uses **Playwright-based headless Chrome** for reliable, cross-platform automation
+- Supports **structured action execution** for deterministic browser workflows
+- Includes **screenshot capture** for vision model integration
 - Same underlying `EventLoopNode` class — no new imports needed
 - `tools=[]` is correct — tools are auto-populated at runtime
 
@@ -102,12 +107,14 @@ Note: `gcu-tools` is auto-added if any node uses `node_type="gcu"`, but includin
 Key rules to bake into GCU node prompts:
 
 - Prefer `browser_snapshot` over `browser_get_text("body")` — compact accessibility tree vs 100KB+ raw HTML
-- Always `browser_wait` after navigation
+- Use `browser_screenshot` for visual context when text extraction isn't sufficient (integrates with vision models)
+- Always `browser_wait` after navigation to ensure page loads
 - Use large scroll amounts (~2000-5000) for lazy-loaded content
 - For spillover files, use `run_command` with grep, not `read_file`
 - If auth wall detected, report immediately — don't attempt login
 - Keep tool calls per turn ≤10
-- Tab isolation: when browser is already running, use `browser_open(background=true)` and pass `target_id` to every call
+- Tab isolation: each GCU subagent gets its own isolated browser context automatically
+- Follow step-by-step browser plans deterministically using structured actions
 
 ## Multiple Concurrent GCU Subagents
 
