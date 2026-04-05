@@ -622,7 +622,7 @@ class TestInspection:
 
         # browser_screenshot returns list of content blocks
         assert isinstance(result, list)
-        mock_bridge.screenshot.assert_awaited_once_with(100, full_page=True)
+        mock_bridge.screenshot.assert_awaited_once_with(100, full_page=True, selector=None)
 
 
 class TestAdvancedTools:
@@ -671,9 +671,27 @@ class TestAdvancedTools:
         assert result["result"]["value"]["status"] == "success"
 
     @pytest.mark.asyncio
-    async def test_file_upload(self, mcp: FastMCP, mock_bridge: MagicMock):
+    async def test_file_upload(self, mcp: FastMCP, mock_bridge: MagicMock, tmp_path):
         """Test file upload functionality."""
-        mock_bridge.upload_file = AsyncMock(return_value={"ok": True, "files": 2})
+        # Create real files — browser_upload validates they exist on disk
+        file1 = tmp_path / "file1.pdf"
+        file2 = tmp_path / "file2.pdf"
+        file1.write_bytes(b"fake pdf 1")
+        file2.write_bytes(b"fake pdf 2")
+
+        # Mock the CDP calls used by browser_upload
+        mock_bridge.cdp_attach = AsyncMock(return_value={"ok": True})
+
+        async def mock_cdp(tab_id, method, params=None):
+            if method == "DOM.getDocument":
+                return {"root": {"nodeId": 1}}
+            if method == "DOM.querySelector":
+                return {"nodeId": 42}
+            if method == "DOM.setFileInputFiles":
+                return {"ok": True}
+            return {"ok": True}
+
+        mock_bridge._cdp = AsyncMock(side_effect=mock_cdp)
 
         register_advanced_tools(mcp)
         browser_upload = mcp._tool_manager._tools["browser_upload"].fn
@@ -685,10 +703,11 @@ class TestAdvancedTools:
             ):
                 result = await browser_upload(
                     selector="input[type='file']",
-                    file_paths=["/tmp/file1.pdf", "/tmp/file2.pdf"],
+                    file_paths=[str(file1), str(file2)],
                 )
 
         assert result.get("ok") is True
+        assert result.get("count") == 2
 
 
 class TestErrorHandling:
@@ -745,8 +764,14 @@ class TestIFWrapping:
     """Tests for JavaScript IIFE wrapping to handle return statements."""
 
     @pytest.mark.asyncio
-    async def test_evaluate_with_bare_return(self, mcp: FastMCP, mock_bridge: MagicMock):
-        """Test that scripts with bare return statements are wrapped properly."""
+    async def test_evaluate_passes_script_through_to_bridge(
+        self, mcp: FastMCP, mock_bridge: MagicMock
+    ):
+        """browser_evaluate should pass the script through to bridge.evaluate unchanged.
+
+        IIFE wrapping happens inside bridge.evaluate (see bridge.py), not in
+        the tool layer. The tool's job is just to forward the script.
+        """
         call_args = []
 
         async def mock_evaluate_capture(tab_id: int, script: str) -> dict:
@@ -763,15 +788,12 @@ class TestIFWrapping:
                 "gcu.browser.tools.advanced._get_context",
                 return_value={"groupId": 1, "activeTabId": 100},
             ):
-                # Script with bare return at top level
                 result = await browser_evaluate(script="return 42;")
 
-        # Verify the script was wrapped in IIFE
-        assert len(call_args) == 1
-        wrapped_script = call_args[0]
-        assert wrapped_script.startswith("(function()")
-        assert wrapped_script.endswith("})()")
-        assert result.get("ok") is True
+        # Tool passes script through unchanged — wrapping is bridge's job
+        assert call_args == ["return 42;"]
+        # Tool returns bridge's raw result
+        assert result == {"result": {"value": 42}}
 
     @pytest.mark.asyncio
     async def test_evaluate_complex_script(self, mcp: FastMCP, mock_bridge: MagicMock):
@@ -798,7 +820,9 @@ class TestIFWrapping:
                 """
                 result = await browser_evaluate(script=complex_script)
 
-        assert result.get("ok") is True
+        # browser_evaluate returns bridge.evaluate's raw result
+        assert "result" in result
+        assert result["result"]["value"] == {"total": 100, "filtered": 50}
 
 
 class TestConcurrentOperations:
