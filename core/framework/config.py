@@ -221,16 +221,37 @@ def get_max_context_tokens() -> int:
     return get_hive_config().get("llm", {}).get("max_context_tokens", DEFAULT_MAX_CONTEXT_TOKENS)
 
 
+def get_api_keys() -> list[str] | None:
+    """Return a list of API keys if ``api_keys`` is configured, else ``None``.
+
+    This supports key-pool rotation: configure multiple keys in
+    ``~/.hive/configuration.json`` under ``llm.api_keys`` and the
+    :class:`~framework.llm.key_pool.KeyPool` will rotate through them.
+    """
+    llm = get_hive_config().get("llm", {})
+    keys = llm.get("api_keys")
+    if keys and isinstance(keys, list) and len(keys) > 0:
+        return [k for k in keys if k]  # filter empties
+    return None
+
+
 def get_api_key() -> str | None:
     """Return the API key, supporting env var, Claude Code subscription, Codex, and ZAI Code.
 
     Priority:
+    0. Explicit key pool (``api_keys`` list) -- returns first key for
+       single-key callers; full pool available via :func:`get_api_keys`.
     1. Claude Code subscription (``use_claude_code_subscription: true``)
        reads the OAuth token from ``~/.claude/.credentials.json``.
     2. Codex subscription (``use_codex_subscription: true``)
        reads the OAuth token from macOS Keychain or ``~/.codex/auth.json``.
     3. Environment variable named in ``api_key_env_var``.
     """
+    # If an explicit key pool is configured, use the first key.
+    pool_keys = get_api_keys()
+    if pool_keys:
+        return pool_keys[0]
+
     llm = get_hive_config().get("llm", {})
 
     # Claude Code subscription: read OAuth token directly
