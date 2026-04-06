@@ -70,6 +70,8 @@ tmp/
 temp/
 
 exports/*
+exports.old*
+artifacts/*
 
 .claude/settings.local.json
 
