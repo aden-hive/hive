@@ -1,17 +1,16 @@
 """
-Weights & Biases integration tool for experiment tracking and model monitoring.
+Weights & Biases ML experiment tracking tool.
 
 Supports:
-- HTTP Bearer Auth with WANDB_API_KEY.
-- Cloud (api.wandb.ai) and self-hosted instances.
+- HTTP Bearer Auth with WANDB_API_KEY
+- Cloud (api.wandb.ai) instances
 
-API Reference: https://api.wandb.ai/api/v1/
+API Reference: https://docs.wandb.ai/ref/app/pages/run-page
 """
 
 from __future__ import annotations
 
 import os
-from json import JSONDecodeError
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -28,12 +27,8 @@ def _get_creds(
 ) -> tuple[str, str] | dict[str, Any]:
     """Return (api_key, host) or an error dict."""
     if credentials is not None:
-        try:
-            api_key = credentials.get("wandb_api_key") or os.getenv("WANDB_API_KEY")
-            host = credentials.get("wandb_host") or os.getenv("WANDB_HOST") or DEFAULT_HOST
-        except KeyError:
-            api_key = os.getenv("WANDB_API_KEY")
-            host = os.getenv("WANDB_HOST") or DEFAULT_HOST
+        api_key = credentials.get("wandb_api_key")
+        host = credentials.get("wandb_host") or os.getenv("WANDB_HOST") or DEFAULT_HOST
     else:
         api_key = os.getenv("WANDB_API_KEY")
         host = os.getenv("WANDB_HOST") or DEFAULT_HOST
@@ -45,10 +40,6 @@ def _get_creds(
         }
     host = host.rstrip("/")
     return api_key, host
-
-
-def _auth_header(api_key: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {api_key}"}
 
 
 def _handle_response(resp: httpx.Response) -> dict[str, Any]:
@@ -64,7 +55,7 @@ def _handle_response(resp: httpx.Response) -> dict[str, Any]:
         try:
             body = resp.json()
             detail = body.get("message", body.get("error", resp.text))
-        except (ValueError, JSONDecodeError):
+        except Exception:
             detail = resp.text
         return {"error": f"Weights & Biases API error (HTTP {resp.status_code}): {detail}"}
     return resp.json()
@@ -77,15 +68,15 @@ def register_tools(
     """Register Weights & Biases experiment tracking tools with the MCP server."""
 
     @mcp.tool()
-    def wandb_list_projects(entity: str) -> dict[str, Any]:
+    def wandb_list_projects(entity: str) -> dict:
         """
-        List projects from Weights & Biases for a given entity (username or org).
+        List all projects for a Weights & Biases entity (user or organization).
 
         Args:
-            entity: The entity name (username or organization).
+            entity: The W&B entity name (username or organization).
 
         Returns:
-            Dict containing projects list.
+            Dict containing the list of projects for the entity.
         """
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
@@ -94,8 +85,9 @@ def register_tools(
 
         try:
             resp = httpx.get(
-                f"{host}/api/v1/projects/{entity}",
-                headers=_auth_header(api_key),
+                f"{host}/api/v1/projects",
+                headers={"Authorization": f"Bearer {api_key}"},
+                params={"entity": entity},
                 timeout=30.0,
             )
             return _handle_response(resp)
@@ -105,31 +97,37 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def wandb_list_runs(entity: str, project: str, per_page: int = 50) -> dict[str, Any]:
+    def wandb_get_runs(
+        entity: str,
+        project: str,
+        filters: str = "",
+        per_page: int = 50,
+    ) -> dict:
         """
-        List runs in a project from Weights & Biases.
+        List runs in a Weights & Biases project.
 
         Args:
-            entity: The entity name.
+            entity: The W&B entity name (username or organization).
             project: The project name.
-            per_page: Number of runs to return (default 50, max 1000).
+            filters: Optional JSON filter string to narrow results.
+            per_page: Number of runs per page (default 50).
 
         Returns:
-            Dict containing runs list.
+            Dict containing the list of runs in the project.
         """
-        if per_page < 1 or per_page > 1000:
-            return {"error": "per_page must be between 1 and 1000"}
-
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
             return creds
         api_key, host = creds
 
         try:
-            params = {"per_page": per_page}
+            params: dict[str, Any] = {"per_page": per_page}
+            if filters:
+                params["filters"] = filters
+
             resp = httpx.get(
                 f"{host}/api/v1/runs/{entity}/{project}",
-                headers=_auth_header(api_key),
+                headers={"Authorization": f"Bearer {api_key}"},
                 params=params,
                 timeout=30.0,
             )
@@ -140,17 +138,17 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def wandb_get_run(entity: str, project: str, run_id: str) -> dict[str, Any]:
+    def wandb_get_run(entity: str, project: str, run_id: str) -> dict:
         """
         Get details of a specific Weights & Biases run.
 
         Args:
-            entity: The entity name.
+            entity: The W&B entity name (username or organization).
             project: The project name.
             run_id: The run ID.
 
         Returns:
-            Dict containing run details.
+            Dict containing full run details including config and metadata.
         """
         if not run_id:
             return {"error": "run_id is required"}
@@ -163,7 +161,7 @@ def register_tools(
         try:
             resp = httpx.get(
                 f"{host}/api/v1/runs/{entity}/{project}/{run_id}",
-                headers=_auth_header(api_key),
+                headers={"Authorization": f"Bearer {api_key}"},
                 timeout=30.0,
             )
             return _handle_response(resp)
@@ -173,17 +171,61 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def wandb_get_run_metrics(entity: str, project: str, run_id: str) -> dict[str, Any]:
+    def wandb_get_run_metrics(
+        entity: str,
+        project: str,
+        run_id: str,
+        metric_keys: str = "",
+    ) -> dict:
         """
         Get metrics history for a specific Weights & Biases run.
 
         Args:
-            entity: The entity name.
+            entity: The W&B entity name (username or organization).
+            project: The project name.
+            run_id: The run ID.
+            metric_keys: Optional comma-separated list of metric keys to filter.
+
+        Returns:
+            Dict containing the run's metric history.
+        """
+        if not run_id:
+            return {"error": "run_id is required"}
+
+        creds = _get_creds(credentials)
+        if isinstance(creds, dict):
+            return creds
+        api_key, host = creds
+
+        try:
+            params: dict[str, Any] = {}
+            if metric_keys:
+                params["keys"] = metric_keys
+
+            resp = httpx.get(
+                f"{host}/api/v1/runs/{entity}/{project}/{run_id}/history",
+                headers={"Authorization": f"Bearer {api_key}"},
+                params=params,
+                timeout=30.0,
+            )
+            return _handle_response(resp)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def wandb_get_artifacts(entity: str, project: str, run_id: str) -> dict:
+        """
+        List artifacts for a specific Weights & Biases run.
+
+        Args:
+            entity: The W&B entity name (username or organization).
             project: The project name.
             run_id: The run ID.
 
         Returns:
-            Dict containing metric history.
+            Dict containing the list of artifacts logged by the run.
         """
         if not run_id:
             return {"error": "run_id is required"}
@@ -195,8 +237,8 @@ def register_tools(
 
         try:
             resp = httpx.get(
-                f"{host}/api/v1/runs/{entity}/{project}/{run_id}/history",
-                headers=_auth_header(api_key),
+                f"{host}/api/v1/runs/{entity}/{project}/{run_id}/artifacts",
+                headers={"Authorization": f"Bearer {api_key}"},
                 timeout=30.0,
             )
             return _handle_response(resp)
@@ -206,17 +248,21 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def wandb_list_artifacts(entity: str, project: str) -> dict[str, Any]:
+    def wandb_get_summary(entity: str, project: str, run_id: str) -> dict:
         """
-        List artifacts in a Weights & Biases project.
+        Get summary metrics for a specific Weights & Biases run.
 
         Args:
-            entity: The entity name.
+            entity: The W&B entity name (username or organization).
             project: The project name.
+            run_id: The run ID.
 
         Returns:
-            Dict containing artifacts list.
+            Dict containing the run's final summary metrics.
         """
+        if not run_id:
+            return {"error": "run_id is required"}
+
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
             return creds
@@ -224,8 +270,8 @@ def register_tools(
 
         try:
             resp = httpx.get(
-                f"{host}/api/v1/artifacts/{entity}/{project}",
-                headers=_auth_header(api_key),
+                f"{host}/api/v1/runs/{entity}/{project}/{run_id}/summary",
+                headers={"Authorization": f"Bearer {api_key}"},
                 timeout=30.0,
             )
             return _handle_response(resp)
