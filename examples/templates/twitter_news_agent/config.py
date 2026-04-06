@@ -14,7 +14,9 @@ class AgentMetadata:
     description: str = (
         "Monitors Twitter feeds and provides a daily news digest, focused on tech news."
     )
-    intro_message: str = "I'm ready to fetch the latest tech news from Twitter. Which tech handles should I check?"
+    intro_message: str = (
+        "I'm ready to fetch the latest tech news from Twitter. Which tech handles should I check?"
+    )
 
 
 metadata = AgentMetadata()

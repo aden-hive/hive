@@ -25,11 +25,11 @@ from framework.graph.event_loop_node import (
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
 from framework.graph.node import (
+    DataBuffer,
     NodeContext,
     NodeProtocol,
     NodeResult,
     NodeSpec,
-    SharedMemory,
 )
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
@@ -160,13 +160,20 @@ class MockConversationStore:
     async def read_cursor(self) -> dict[str, Any] | None:
         return self._cursor
 
-    async def delete_parts_before(self, seq: int) -> None:
+    async def delete_parts_before(self, seq: int, run_id: str | None = None) -> None:
         keys_to_delete = [k for k in self._parts if k < seq]
         for k in keys_to_delete:
             del self._parts[k]
 
     async def close(self) -> None:
         pass
+
+    async def clear(self) -> None:
+        # Clear parts, cursor, and meta — keep the store object alive.
+        # Matches the real store (storage/conversation_store.py:clear).
+        self._parts.clear()
+        self._cursor = None
+        self._meta = None
 
     async def destroy(self) -> None:
         self._parts.clear()
@@ -245,6 +252,8 @@ def make_ctx(
     system_prompt: str = "You are a test assistant.",
     client_facing: bool = False,
     available_tools: list[Tool] | None = None,
+    stream_id: str = "",
+    is_subagent_mode: bool = False,
 ) -> NodeContext:
     """Build a NodeContext for direct EventLoopNode testing."""
     runtime = MagicMock(spec=Runtime)
@@ -266,16 +275,18 @@ def make_ctx(
         client_facing=client_facing,
     )
 
-    memory = SharedMemory()
+    buffer = DataBuffer()
 
     return NodeContext(
         runtime=runtime,
         node_id=node_id,
         node_spec=spec,
-        memory=memory,
+        buffer=buffer,
         input_data=input_data or {},
         llm=llm,
         available_tools=available_tools or [],
+        stream_id=stream_id,
+        is_subagent_mode=is_subagent_mode,
     )
 
 
@@ -361,6 +372,98 @@ async def test_event_loop_node_in_graph(runtime):
 
 
 @pytest.mark.asyncio
+async def test_event_loop_branch_graph_routes_to_terminal(runtime):
+    """Worker execution should preserve outputs used for conditional routing."""
+    scripts = [
+        StreamScript(
+            tool_calls=[
+                {
+                    "name": "set_output",
+                    "id": "tc_label",
+                    "input": {"key": "label", "value": "positive"},
+                }
+            ],
+        ),
+        StreamScript(text="Classification done."),
+        StreamScript(
+            tool_calls=[
+                {
+                    "name": "set_output",
+                    "id": "tc_result",
+                    "input": {"key": "result", "value": "positive path"},
+                }
+            ],
+        ),
+        StreamScript(text="Handled positive branch."),
+    ]
+    llm = make_llm(scripts)
+
+    graph = GraphSpec(
+        id="branch_graph",
+        goal_id="branch_goal",
+        name="Branch Graph",
+        entry_node="classify",
+        nodes=[
+            NodeSpec(
+                id="classify",
+                name="Classify",
+                description="classifies the route",
+                node_type="event_loop",
+                output_keys=["label"],
+            ),
+            NodeSpec(
+                id="positive",
+                name="Positive",
+                description="positive branch",
+                node_type="event_loop",
+                output_keys=["result"],
+            ),
+            NodeSpec(
+                id="negative",
+                name="Negative",
+                description="negative branch",
+                node_type="event_loop",
+                output_keys=["result"],
+            ),
+        ],
+        edges=[
+            EdgeSpec(
+                id="to_positive",
+                source="classify",
+                target="positive",
+                condition=EdgeCondition.CONDITIONAL,
+                condition_expr="output.get('label') == 'positive'",
+                priority=1,
+            ),
+            EdgeSpec(
+                id="to_negative",
+                source="classify",
+                target="negative",
+                condition=EdgeCondition.CONDITIONAL,
+                condition_expr="output.get('label') == 'negative'",
+                priority=0,
+            ),
+        ],
+        terminal_nodes=["positive", "negative"],
+    )
+    goal = Goal(id="branch_goal", name="Branch Goal", description="test")
+
+    executor = GraphExecutor(runtime=runtime, llm=llm)
+    executor.register_node("classify", EventLoopNode(config=LoopConfig(max_iterations=5)))
+    executor.register_node("positive", EventLoopNode(config=LoopConfig(max_iterations=5)))
+    executor.register_node("negative", EventLoopNode(config=LoopConfig(max_iterations=5)))
+
+    result = await executor.execute(graph, goal, {})
+
+    assert result.success
+    assert result.path == ["classify", "positive"]
+    if USE_MOCK_LLM:
+        assert result.output.get("result") == "positive path"
+    else:
+        assert "result" in result.output
+
+
+@pytest.mark.asyncio
 async def test_event_loop_with_event_bus():
     """Lifecycle events are published correctly to EventBus."""
     recorded: list[AgentEvent] = []
@@ -380,7 +483,12 @@ async def test_event_loop_with_event_bus():
 
     scripts = [StreamScript(text="All done.")]
     llm = make_llm(scripts)
-    ctx = make_ctx(llm=llm, output_keys=[])
+    # is_subagent_mode=True bypasses worker auto-escalation in EventLoopNode.
+    # When event_bus is provided, a non-queen/non-subagent node is treated as
+    # a worker and auto-escalates to queen after a text-only turn (grace=1),
+    # then blocks forever on _await_user_input waiting for queen guidance.
+    # Standalone unit tests have no queen, so we mark as subagent to opt out.
+    ctx = make_ctx(llm=llm, output_keys=[], is_subagent_mode=True)
 
     node = EventLoopNode(
         event_bus=bus,
@@ -906,10 +1014,13 @@ async def test_context_handoff_between_nodes(runtime):
     result = await executor.execute(graph, goal, {})
 
     assert result.success
-    assert "lead_score" in result.output
+    # After hive-v1 executor refactor, result.output only contains terminal
+    # node outputs. Full buffer (with handoff data) is in session_state.
     assert "strategy" in result.output
+    buffer_data = result.session_state.get("data_buffer", {})
+    assert "lead_score" in buffer_data
     if USE_MOCK_LLM:
-        assert result.output["lead_score"] == 92
+        assert buffer_data["lead_score"] == 92
         assert result.output["strategy"] == "premium"
 
 
@@ -920,8 +1031,8 @@ async def test_context_handoff_between_nodes(runtime):
 
 @pytest.mark.asyncio
 @pytest.mark.skip(reason="Hangs in non-interactive shells (client-facing blocks on stdin)")
-async def test_client_facing_node_streams_output():
-    """Client-facing node emits CLIENT_OUTPUT_DELTA events."""
+async def test_queen_node_streams_output():
+    """Queen turns emit CLIENT_OUTPUT_DELTA events."""
     recorded: list[AgentEvent] = []
 
     async def handler(event: AgentEvent) -> None:
@@ -935,7 +1046,7 @@ async def test_client_facing_node_streams_output():
 
     scripts = [StreamScript(text="Hello, user!")]
     llm = make_llm(scripts)
-    ctx = make_ctx(llm=llm, output_keys=[], client_facing=True)
+    ctx = make_ctx(llm=llm, output_keys=[], client_facing=False, stream_id="queen")
 
     node = EventLoopNode(
         event_bus=bus,
@@ -974,7 +1085,8 @@ async def test_internal_node_no_client_output():
 
     scripts = [StreamScript(text="Internal processing.")]
     llm = make_llm(scripts)
-    ctx = make_ctx(llm=llm, output_keys=[], client_facing=False)
+    # is_subagent_mode=True: standalone test, opts out of worker auto-escalation.
+    ctx = make_ctx(llm=llm, output_keys=[], client_facing=False, is_subagent_mode=True)
 
     node = EventLoopNode(
         event_bus=bus,
@@ -1001,14 +1113,14 @@ async def test_mixed_node_graph(runtime):
     class LoadLeadsNode(NodeProtocol):
         async def execute(self, ctx: NodeContext) -> NodeResult:
             leads = ["lead_A", "lead_B", "lead_C"]
-            ctx.memory.write("leads", leads)
+            ctx.buffer.write("leads", leads)
             return NodeResult(success=True, output={"leads": leads})
 
     class FormatOutputNode(NodeProtocol):
         async def execute(self, ctx: NodeContext) -> NodeResult:
-            summary = ctx.input_data.get("summary", ctx.memory.read("summary") or "no summary")
+            summary = ctx.input_data.get("summary", ctx.buffer.read("summary") or "no summary")
             report = f"Report: {summary}"
-            ctx.memory.write("report", report)
+            ctx.buffer.write("report", report)
             return NodeResult(success=True, output={"report": report})
 
     # Event loop: process leads, produce summary
@@ -1073,10 +1185,13 @@ async def test_mixed_node_graph(runtime):
     result = await executor.execute(graph, goal, {})
 
     assert result.success
-    assert "summary" in result.output
+    # Terminal node is "format" - only its output appears in result.output.
+    # Intermediate outputs are in session_state's data buffer.
     assert "report" in result.output
+    buffer_data = result.session_state.get("data_buffer", {})
+    assert "summary" in buffer_data
     if USE_MOCK_LLM:
-        assert "3 leads processed" in result.output["summary"]
+        assert "3 leads processed" in buffer_data["summary"]
 
 
 # ===========================================================================

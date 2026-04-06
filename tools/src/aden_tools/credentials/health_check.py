@@ -1307,6 +1307,11 @@ class YouTubeHealthChecker(BaseHttpHealthChecker):
     AUTH_QUERY_PARAM_NAME = "key"
 
 
+class CloudflareHealthChecker(BaseHttpHealthChecker):
+    ENDPOINT = "https://api.cloudflare.com/client/v4/user/tokens/verify"
+    SERVICE_NAME = "Cloudflare"
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "apify": ApifyHealthChecker(),
@@ -1317,6 +1322,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "brevo": BrevoHealthChecker(),
     "calcom": CalcomHealthChecker(),
     "calendly_pat": CalendlyHealthChecker(),
+    "cloudflare": CloudflareHealthChecker(),
     "discord": DiscordHealthChecker(),
     "docker_hub": DockerHubHealthChecker(),
     "exa_search": ExaSearchHealthChecker(),

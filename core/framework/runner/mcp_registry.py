@@ -16,6 +16,11 @@ import httpx
 
 from framework.runner.mcp_client import MCPClient, MCPServerConfig
 from framework.runner.mcp_connection_manager import MCPConnectionManager
+from framework.runner.mcp_errors import (
+    MCPError,
+    MCPErrorCode,
+    MCPInstallError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +146,12 @@ class MCPRegistry:
         """
         data = self._read_installed()
         if name in data["servers"]:
-            raise ValueError(f"Server '{name}' already exists. Use remove first.")
+            raise MCPError(
+                code=MCPErrorCode.MCP_INSTALL_FAILED,
+                what=f"Server '{name}' already exists",
+                why="A server with this name is already registered locally.",
+                fix=f"Run: hive mcp remove {name}  — then add it again.",
+            )
 
         if manifest is not None:
             # Inline manifest provided directly
@@ -153,7 +163,12 @@ class MCPRegistry:
         else:
             # Build manifest from individual params
             if not transport:
-                raise ValueError("transport is required when manifest is not provided")
+                raise MCPError(
+                    code=MCPErrorCode.MCP_INSTALL_FAILED,
+                    what=f"Cannot register server '{name}'",
+                    why="transport is required when manifest is not provided.",
+                    fix="Pass --transport stdio|http|unix|sse when using hive mcp add.",
+                )
             manifest = {
                 "name": name,
                 "description": description,
@@ -162,11 +177,21 @@ class MCPRegistry:
             match transport:
                 case "http":
                     if not url:
-                        raise ValueError("url is required for http transport")
+                        raise MCPError(
+                            code=MCPErrorCode.MCP_INSTALL_FAILED,
+                            what=f"Cannot register server '{name}' with http transport",
+                            why="url is required for http transport.",
+                            fix="Pass --url https://your-server to hive mcp add.",
+                        )
                     manifest["http"] = {"url": url, "headers": headers or {}}
                 case "stdio":
                     if not command:
-                        raise ValueError("command is required for stdio transport")
+                        raise MCPError(
+                            code=MCPErrorCode.MCP_INSTALL_FAILED,
+                            what=f"Cannot register server '{name}' with stdio transport",
+                            why="command is required for stdio transport.",
+                            fix="Pass --command <executable> to hive mcp add.",
+                        )
                     manifest["stdio"] = {
                         "command": command,
                         "args": args or [],
@@ -175,15 +200,30 @@ class MCPRegistry:
                     }
                 case "unix":
                     if not socket_path:
-                        raise ValueError("socket_path is required for unix transport")
+                        raise MCPError(
+                            code=MCPErrorCode.MCP_INSTALL_FAILED,
+                            what=f"Cannot register server '{name}' with unix transport",
+                            why="socket_path is required for unix transport.",
+                            fix="Pass --socket-path /path/to/socket to hive mcp add.",
+                        )
                     manifest["unix"] = {"socket_path": socket_path}
                     manifest["http"] = {"url": url or "http://localhost"}
                 case "sse":
                     if not url:
-                        raise ValueError("url is required for sse transport")
+                        raise MCPError(
+                            code=MCPErrorCode.MCP_INSTALL_FAILED,
+                            what=f"Cannot register server '{name}' with sse transport",
+                            why="url is required for sse transport.",
+                            fix="Pass --url https://your-server to hive mcp add.",
+                        )
                     manifest["sse"] = {"url": url}
                 case _:
-                    raise ValueError(f"Unsupported transport: {transport}")
+                    raise MCPError(
+                        code=MCPErrorCode.MCP_INSTALL_FAILED,
+                        what=f"Cannot register server '{name}'",
+                        why=f"Unsupported transport: '{transport}'.",
+                        fix="Use one of: stdio, http, unix, sse.",
+                    )
 
         entry = self._make_entry(
             source="local",
@@ -203,34 +243,48 @@ class MCPRegistry:
         """Install a server from the cached remote registry index."""
         data = self._read_installed()
         if name in data["servers"]:
-            raise ValueError(f"Server '{name}' already exists. Remove it first or use update.")
+            raise MCPInstallError(
+                server=name,
+                why=f"Server '{name}' already exists in the registry.",
+                fix=f"Run: hive mcp remove {name}  — then install again.",
+            )
 
         index = self._read_cached_index()
         manifest = index.get("servers", {}).get(name)
         if manifest is None:
-            raise ValueError(
-                f"Server '{name}' not found in registry index. "
-                "Run 'hive mcp update' to refresh the index."
+            raise MCPInstallError(
+                server=name,
+                why=f"Server '{name}' not found in registry index.",
+                fix="Run: hive mcp update  — then try again.",
             )
 
         # Validate version if specified
         if version is not None:
             index_version = manifest.get("version")
             if index_version is None:
-                raise ValueError(f"Cannot pin version for '{name}': manifest has no version field.")
+                raise MCPError(
+                    code=MCPErrorCode.MCP_VERSION_CONFLICT,
+                    what=f"Cannot pin version for '{name}'",
+                    why="The registry manifest has no version field.",
+                    fix="Run: hive mcp update  — then omit --version to use latest.",
+                )
             if index_version != version:
-                raise ValueError(
-                    f"Version mismatch for '{name}': requested {version}, "
-                    f"index has {index_version}. "
-                    "Run 'hive mcp update' to refresh the index."
+                raise MCPError(
+                    code=MCPErrorCode.MCP_VERSION_CONFLICT,
+                    what=f"Version mismatch for '{name}'",
+                    why=f"Requested {version} but index has {index_version}.",
+                    fix="Run: hive mcp update  — or omit --version to use latest.",
                 )
 
         transport_config = manifest.get("transport", {})
         supported = transport_config.get("supported", [])
         if transport is not None:
             if supported and transport not in supported:
-                raise ValueError(
-                    f"Transport '{transport}' not supported by '{name}'. Supported: {supported}"
+                raise MCPError(
+                    code=MCPErrorCode.MCP_INSTALL_FAILED,
+                    what=f"Transport '{transport}' not supported by '{name}'",
+                    why=f"Server supports: {supported}.",
+                    fix=f"Use one of the supported transports: {supported}.",
                 )
             resolved_transport = transport
         else:
@@ -261,7 +315,12 @@ class MCPRegistry:
         """Remove a server from the registry."""
         data = self._read_installed()
         if name not in data["servers"]:
-            raise ValueError(f"Server '{name}' is not installed.")
+            raise MCPError(
+                code=MCPErrorCode.MCP_INSTALL_FAILED,
+                what=f"Cannot remove server '{name}'",
+                why="Server is not installed.",
+                fix="Run: hive mcp list  — to see installed servers.",
+            )
         del data["servers"][name]
         self._write_installed(data)
         logger.info("Removed MCP server '%s'", name)
@@ -277,7 +336,12 @@ class MCPRegistry:
     def _set_enabled(self, name: str, *, enabled: bool) -> None:
         data = self._read_installed()
         if name not in data["servers"]:
-            raise ValueError(f"Server '{name}' is not installed.")
+            raise MCPError(
+                code=MCPErrorCode.MCP_INSTALL_FAILED,
+                what=f"Cannot {'enable' if enabled else 'disable'} server '{name}'",
+                why="Server is not installed.",
+                fix="Run: hive mcp list  — to see installed servers.",
+            )
         data["servers"][name]["enabled"] = enabled
         self._write_installed(data)
         logger.info("%s MCP server '%s'", "Enabled" if enabled else "Disabled", name)
@@ -314,9 +378,19 @@ class MCPRegistry:
         """Set an env or header override for a server."""
         data = self._read_installed()
         if name not in data["servers"]:
-            raise ValueError(f"Server '{name}' is not installed.")
+            raise MCPError(
+                code=MCPErrorCode.MCP_INSTALL_FAILED,
+                what=f"Cannot set override for server '{name}'",
+                why="Server is not installed.",
+                fix="Run: hive mcp list  — to see installed servers.",
+            )
         if override_type not in ("env", "headers"):
-            raise ValueError(f"Invalid override type: {override_type}")
+            raise MCPError(
+                code=MCPErrorCode.MCP_INSTALL_FAILED,
+                what=f"Invalid override type '{override_type}' for server '{name}'",
+                why="Override type must be 'env' or 'headers'.",
+                fix="Use --type env or --type headers.",
+            )
         data["servers"][name]["overrides"][override_type][key] = value
         self._write_installed(data)
         logger.info("Set %s override %s for MCP server '%s'", override_type, key, name)
@@ -401,14 +475,16 @@ class MCPRegistry:
 
     # ── load_agent_selection ────────────────────────────────────────
 
-    def load_agent_selection(self, agent_path: Path) -> list[dict[str, Any]]:
+    def load_agent_selection(self, agent_path: Path) -> tuple[list[dict[str, Any]], int | None]:
         """Load mcp_registry.json from an agent directory and resolve servers.
 
-        Returns list of plain dicts compatible with ToolRegistry.register_mcp_server().
+        Returns:
+            (server_config_dicts, max_tools) for :meth:`ToolRegistry.load_registry_servers`.
+            ``max_tools`` is ``None`` when omitted or invalid in JSON.
         """
         registry_json_path = agent_path / "mcp_registry.json"
         if not registry_json_path.exists():
-            return []
+            return [], None
 
         selection = json.loads(registry_json_path.read_text(encoding="utf-8"))
 
@@ -437,15 +513,16 @@ class MCPRegistry:
                 continue
             validated[field] = value
 
+        max_tools = validated.get("max_tools")
         configs = self.resolve_for_agent(
             include=validated.get("include"),
             tags=validated.get("tags"),
             exclude=validated.get("exclude"),
             profile=validated.get("profile"),
-            max_tools=validated.get("max_tools"),
+            max_tools=max_tools,
             versions=validated.get("versions"),
         )
-        return [self._server_config_to_dict(c) for c in configs]
+        return [self._server_config_to_dict(c) for c in configs], max_tools
 
     # ── resolve_for_agent ───────────────────────────────────────────
 
@@ -552,12 +629,14 @@ class MCPRegistry:
                     )
                     continue
 
-            # Check tool count cap before adding (FR-56)
+            # Check tool count cap before adding (FR-56), using manifest tool list when present.
+            # When ``tools`` is empty (e.g. ``add_local``), counts are unknown here—callers should
+            # pass the same ``max_tools`` to ToolRegistry.load_registry_servers to cap registration.
             manifest_tools = manifest.get("tools", [])
             server_tool_count = len(manifest_tools)
             if max_tools is not None and server_tool_count == 0:
                 logger.debug(
-                    "Server '%s' has no declared tools in manifest, skipping max_tools check",
+                    "Server '%s' has no tools list in manifest; max_tools enforced at registration",
                     name,
                 )
             elif max_tools is not None and total_tools + server_tool_count > max_tools:
@@ -693,7 +772,12 @@ class MCPRegistry:
 
         data = self._read_installed()
         if name not in data["servers"]:
-            raise ValueError(f"Server '{name}' is not installed.")
+            raise MCPError(
+                code=MCPErrorCode.MCP_HEALTH_FAILED,
+                what=f"Cannot health-check server '{name}'",
+                why="Server is not installed.",
+                fix="Run: hive mcp list  — to see installed servers.",
+            )
 
         entry = data["servers"][name]
         manifest = self._get_effective_manifest(name, entry)
@@ -728,7 +812,12 @@ class MCPRegistry:
             if manager.has_connection(name):
                 is_healthy = manager.health_check(name)
                 if not is_healthy:
-                    raise RuntimeError("Shared MCP connection health check failed")
+                    raise MCPError(
+                        code=MCPErrorCode.MCP_HEALTH_FAILED,
+                        what=f"Health check failed for server '{name}'",
+                        why="Shared MCP connection reported unhealthy.",
+                        fix=f"Run: hive mcp doctor {name}  — for diagnostics.",
+                    )
                 pooled_client = manager.acquire(config)
                 try:
                     tools = pooled_client.list_tools()

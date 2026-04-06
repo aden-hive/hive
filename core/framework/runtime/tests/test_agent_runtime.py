@@ -5,7 +5,7 @@ Tests:
 1. AgentRuntime creation and lifecycle
 2. Entry point registration
 3. Concurrent executions across streams
-4. SharedStateManager isolation levels
+4. SharedBufferManager isolation levels
 5. OutcomeAggregator goal evaluation
 6. EventBus pub/sub
 """
@@ -24,7 +24,8 @@ from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
 from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.outcome_aggregator import OutcomeAggregator
-from framework.runtime.shared_state import IsolationLevel, SharedStateManager
+from framework.runtime.shared_state import IsolationLevel, SharedBufferManager
+from framework.schemas.session_state import SessionState, SessionTimestamps
 
 # === Test Fixtures ===
 
@@ -121,45 +122,45 @@ def temp_storage():
         yield Path(tmpdir)
 
 
-# === SharedStateManager Tests ===
+# === SharedBufferManager Tests ===
 
 
-class TestSharedStateManager:
-    """Tests for SharedStateManager."""
+class TestSharedBufferManager:
+    """Tests for SharedBufferManager."""
 
-    def test_create_memory(self):
-        """Test creating execution-scoped memory."""
-        manager = SharedStateManager()
-        memory = manager.create_memory(
+    def test_create_buffer(self):
+        """Test creating execution-scoped buffer."""
+        manager = SharedBufferManager()
+        buffer = manager.create_buffer(
             execution_id="exec-1",
             stream_id="webhook",
             isolation=IsolationLevel.SHARED,
         )
-        assert memory is not None
-        assert memory._execution_id == "exec-1"
-        assert memory._stream_id == "webhook"
+        assert buffer is not None
+        assert buffer._execution_id == "exec-1"
+        assert buffer._stream_id == "webhook"
 
     @pytest.mark.asyncio
     async def test_isolated_state(self):
         """Test isolated state doesn't leak between executions."""
-        manager = SharedStateManager()
+        manager = SharedBufferManager()
 
-        mem1 = manager.create_memory("exec-1", "stream-1", IsolationLevel.ISOLATED)
-        mem2 = manager.create_memory("exec-2", "stream-1", IsolationLevel.ISOLATED)
+        buf1 = manager.create_buffer("exec-1", "stream-1", IsolationLevel.ISOLATED)
+        buf2 = manager.create_buffer("exec-2", "stream-1", IsolationLevel.ISOLATED)
 
-        await mem1.write("key", "value1")
-        await mem2.write("key", "value2")
+        await buf1.write("key", "value1")
+        await buf2.write("key", "value2")
 
-        assert await mem1.read("key") == "value1"
-        assert await mem2.read("key") == "value2"
+        assert await buf1.read("key") == "value1"
+        assert await buf2.read("key") == "value2"
 
     @pytest.mark.asyncio
     async def test_shared_state(self):
         """Test shared state is visible across executions."""
-        manager = SharedStateManager()
+        manager = SharedBufferManager()
 
-        manager.create_memory("exec-1", "stream-1", IsolationLevel.SHARED)
-        manager.create_memory("exec-2", "stream-1", IsolationLevel.SHARED)
+        manager.create_buffer("exec-1", "stream-1", IsolationLevel.SHARED)
+        manager.create_buffer("exec-2", "stream-1", IsolationLevel.SHARED)
 
         # Write to global scope
         await manager.write(
@@ -180,14 +181,34 @@ class TestSharedStateManager:
 
     def test_cleanup_execution(self):
         """Test execution cleanup removes state."""
-        manager = SharedStateManager()
-        manager.create_memory("exec-1", "stream-1", IsolationLevel.ISOLATED)
+        manager = SharedBufferManager()
+        manager.create_buffer("exec-1", "stream-1", IsolationLevel.ISOLATED)
 
         assert "exec-1" in manager._execution_state
 
         manager.cleanup_execution("exec-1")
 
         assert "exec-1" not in manager._execution_state
+
+
+class TestSessionState:
+    """Tests for session state data-buffer compatibility."""
+
+    def test_legacy_memory_alias_populates_data_buffer(self):
+        """Legacy `memory` payloads should still hydrate the session buffer."""
+        state = SessionState(
+            session_id="session-1",
+            goal_id="goal-1",
+            timestamps=SessionTimestamps(
+                started_at="2026-01-01T00:00:00",
+                updated_at="2026-01-01T00:00:00",
+            ),
+            memory={"rules": "keep starred mail"},
+        )
+
+        assert state.data_buffer == {"rules": "keep starred mail"}
+        assert state.memory == {"rules": "keep starred mail"}
+        assert state.to_session_state_dict()["data_buffer"] == {"rules": "keep starred mail"}
 
 
 # === EventBus Tests ===

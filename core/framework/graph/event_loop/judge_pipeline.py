@@ -139,9 +139,9 @@ async def judge_turn(
             ),
         )
 
-    # Client-facing with no output keys → continuous interaction node.
+    # Queen with no output keys → continuous interaction node.
     # Inject tool-use pressure instead of auto-accepting.
-    if not output_keys and ctx.node_spec.client_facing:
+    if not output_keys and ctx.supports_direct_user_io:
         return JudgeVerdict(
             action="RETRY",
             feedback=(

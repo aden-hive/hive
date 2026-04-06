@@ -8,6 +8,7 @@ the context-window-exceeded error detector.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -221,7 +222,7 @@ def truncate_tool_result(
     - Small results (≤ limit): full content kept + file annotation
     - Large results (> limit): preview + file reference
     - Errors: pass through unchanged
-    - load_data results: truncate with pagination hint (no re-spill)
+    - read_file/load_data results: truncate with pagination hint (no re-spill)
     """
     limit = max_tool_result_chars
 
@@ -229,12 +230,12 @@ def truncate_tool_result(
     if result.is_error:
         return result
 
-    # load_data reads FROM spilled files — never re-spill (circular).
+    # read_file/load_data reads FROM spilled files — never re-spill (circular).
     # Just truncate with a pagination hint if the result is too large.
-    if tool_name == "load_data":
+    if tool_name in ("load_data", "read_file"):
         if limit <= 0 or len(result.content) <= limit:
-            return result  # Small load_data result — pass through as-is
-        # Large load_data result — truncate with smart preview
+            return result  # Small result — pass through as-is
+        # Large result — truncate with smart preview
         PREVIEW_CAP = min(5000, max(limit - 500, limit // 2))
 
         metadata_str = ""
@@ -283,7 +284,7 @@ def truncate_tool_result(
         spill_path.mkdir(parents=True, exist_ok=True)
         filename = next_spill_filename_fn(tool_name)
 
-        # Pretty-print JSON content so load_data's line-based
+        # Pretty-print JSON content so read_file's line-based
         # pagination works correctly.
         write_content = result.content
         parsed_json: Any = None  # track for metadata extraction
@@ -293,7 +294,10 @@ def truncate_tool_result(
         except (json.JSONDecodeError, TypeError, ValueError):
             pass  # Not JSON — write as-is
 
-        (spill_path / filename).write_text(write_content, encoding="utf-8")
+        file_path = spill_path / filename
+        file_path.write_text(write_content, encoding="utf-8")
+        # Use absolute path so parent agents can find files from subagents
+        abs_path = str(file_path.resolve())
 
         if limit > 0 and len(result.content) > limit:
             # Large result: build a small, metadata-rich preview so the
@@ -315,14 +319,14 @@ def truncate_tool_result(
             # Assemble header with structural info + warning
             header = (
                 f"[Result from {tool_name}: {len(result.content):,} chars — "
-                f"too large for context, saved to '{filename}'.]\n"
+                f"too large for context, saved to '{abs_path}'.]\n"
             )
             if metadata_str:
                 header += f"\nData structure:\n{metadata_str}"
             header += (
                 f"\n\nWARNING: The preview below is INCOMPLETE. "
                 f"Do NOT draw conclusions or counts from it. "
-                f"Use load_data(filename='{filename}') to read the "
+                f"Use read_file(path='{abs_path}') to read the "
                 f"full data before analysis."
             )
 
@@ -331,11 +335,11 @@ def truncate_tool_result(
                 "Tool result spilled to file: %s (%d chars → %s)",
                 tool_name,
                 len(result.content),
-                filename,
+                abs_path,
             )
         else:
-            # Small result: keep full content + annotation
-            content = f"{result.content}\n\n[Saved to '{filename}']"
+            # Small result: keep full content + annotation with absolute path
+            content = f"{result.content}\n\n[Saved to '{abs_path}']"
             logger.info(
                 "Tool result saved to file: %s (%d chars → %s)",
                 tool_name,
@@ -446,8 +450,11 @@ async def execute_tool(
         # Offload the executor call to a thread.  Sync MCP executors
         # block on future.result() — running in a thread keeps the
         # event loop free so asyncio.wait_for can fire the timeout.
+        # Copy the current context so contextvars (e.g. data_dir from
+        # execution context) propagate into the worker thread.
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, tool_executor, tool_use)
+        ctx = contextvars.copy_context()
+        result = await loop.run_in_executor(None, ctx.run, tool_executor, tool_use)
         # Async executors return a coroutine — await it on the loop
         if asyncio.iscoroutine(result) or asyncio.isfuture(result):
             result = await result
@@ -470,56 +477,6 @@ async def execute_tool(
             is_error=True,
         )
     return result
-
-
-def record_learning(key: str, value: Any, spillover_dir: str | None) -> None:
-    """Append a set_output value to adapt.md as a learning entry.
-
-    Called at set_output time — the moment knowledge is produced — so that
-    adapt.md accumulates the agent's outputs across the session.  Since
-    adapt.md is injected into the system prompt, these persist through
-    any compaction.
-    """
-    if not spillover_dir:
-        return
-    try:
-        adapt_path = Path(spillover_dir) / "adapt.md"
-        adapt_path.parent.mkdir(parents=True, exist_ok=True)
-        content = adapt_path.read_text(encoding="utf-8") if adapt_path.exists() else ""
-
-        if "## Outputs" not in content:
-            content += "\n\n## Outputs\n"
-
-        # Truncate long values for memory (full value is in shared memory)
-        v_str = str(value)
-        if len(v_str) > 500:
-            v_str = v_str[:500] + "…"
-
-        entry = f"- {key}: {v_str}\n"
-
-        # Replace existing entry for same key (update, not duplicate)
-        lines = content.splitlines(keepends=True)
-        replaced = False
-        for i, line in enumerate(lines):
-            if line.startswith(f"- {key}:"):
-                lines[i] = entry
-                replaced = True
-                break
-        if replaced:
-            content = "".join(lines)
-        else:
-            content += entry
-
-        adapt_path.write_text(content, encoding="utf-8")
-    except Exception as e:
-        logger.warning("Failed to record learning for key=%s: %s", key, e)
-
-
-def next_spill_filename(tool_name: str, counter: int) -> str:
-    """Return a short, monotonic filename for a tool result spill."""
-    # Shorten common tool name prefixes to save tokens
-    short = tool_name.removeprefix("tool_").removeprefix("mcp_")
-    return f"{short}_{counter}.txt"
 
 
 def restore_spill_counter(spillover_dir: str | None) -> int:

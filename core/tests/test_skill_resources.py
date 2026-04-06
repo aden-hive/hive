@@ -76,7 +76,7 @@ class TestSkillDirsPropagation:
             runtime=MagicMock(),
             node_id="n",
             node_spec=MagicMock(),
-            memory={},
+            buffer={},
             **kwargs,
         )
 

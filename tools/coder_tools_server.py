@@ -83,11 +83,28 @@ def _find_project_root() -> str:
 
 
 def _resolve_path(path: str) -> str:
-    """Resolve path relative to PROJECT_ROOT. Raises ValueError if outside."""
+    """Resolve path relative to PROJECT_ROOT. Raises ValueError if outside.
+
+    Also allows access to ~/.hive/ directory for agent session data files.
+    """
     # Normalize slashes for cross-platform (e.g. exports/hi_agent from LLM)
     path = path.replace("/", os.sep)
+
+    # Expand ~ to home directory
+    if path.startswith("~"):
+        path = os.path.expanduser(path)
+
     if os.path.isabs(path):
         resolved = os.path.abspath(path)
+
+        # Allow access to ~/.hive/ for agent session data
+        hive_dir = os.path.expanduser("~/.hive")
+        try:
+            if os.path.commonpath([resolved, hive_dir]) == hive_dir:
+                return resolved  # Path is under ~/.hive, allow it
+        except ValueError:
+            pass
+
         try:
             common = os.path.commonpath([resolved, PROJECT_ROOT])
         except ValueError:

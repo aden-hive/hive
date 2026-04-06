@@ -4,7 +4,7 @@ Tests the FULL routing chain:
   ExecutionStream → GraphExecutor → EventLoopNode → _execute_subagent
   → _report_callback registers _EscalationReceiver in executor.node_registry
   → emit ESCALATION_REQUESTED (queen handles the escalation)
-  → queen inject_worker_message() finds _EscalationReceiver via get_waiting_nodes()
+  → queen inject_message() finds _EscalationReceiver via get_waiting_nodes()
   → receiver.inject_event("done") unblocks the subagent
   → subagent continues and completes
 """
@@ -29,7 +29,7 @@ from framework.llm.stream_events import (
 from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
-from framework.runtime.shared_state import SharedStateManager
+from framework.runtime.shared_state import SharedBufferManager
 from framework.storage.concurrent import ConcurrentStorage
 
 # ---------------------------------------------------------------------------
@@ -235,7 +235,7 @@ async def test_escalation_e2e_through_execution_stream(tmp_path):
             await asyncio.sleep(0.05)
             # Route through the REAL inject_input chain — find the waiting
             # escalation receiver via get_waiting_nodes() (mirrors what
-            # inject_worker_message does in the queen lifecycle tools).
+            # inject_message does in the queen lifecycle tools).
             stream = stream_holder[0]
             waiting = stream.get_waiting_nodes()
             assert waiting, "Should have a waiting escalation receiver"
@@ -268,7 +268,7 @@ async def test_escalation_e2e_through_execution_stream(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, bus),
         event_bus=bus,
@@ -479,7 +479,7 @@ async def test_escalation_cleanup_after_completion(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, bus),
         event_bus=bus,
@@ -649,7 +649,7 @@ async def test_mark_complete_e2e_through_execution_stream(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, bus),
         event_bus=bus,

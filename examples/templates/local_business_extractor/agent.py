@@ -111,9 +111,7 @@ class LocalBusinessExtractor:
         )
 
     def _setup(self):
-        self._storage_path = (
-            Path.home() / ".hive" / "agents" / "local_business_extractor"
-        )
+        self._storage_path = Path.home() / ".hive" / "agents" / "local_business_extractor"
         self._storage_path.mkdir(parents=True, exist_ok=True)
         self._tool_registry = ToolRegistry()
         mcp_config = Path(__file__).parent / "mcp_servers.json"
@@ -143,9 +141,7 @@ class LocalBusinessExtractor:
             llm=llm,
             tools=tools,
             tool_executor=tool_executor,
-            checkpoint_config=CheckpointConfig(
-                enabled=True, checkpoint_on_node_complete=True
-            ),
+            checkpoint_config=CheckpointConfig(enabled=True, checkpoint_on_node_complete=True),
         )
 
     async def start(self):

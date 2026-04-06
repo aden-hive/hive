@@ -6,7 +6,7 @@ import re
 
 from fastmcp import FastMCP
 
-from ..file_system_toolkits.security import get_secure_path
+from ..file_system_toolkits.security import get_sandboxed_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -15,9 +15,7 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def csv_read(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         limit: int | None = None,
         offset: int = 0,
     ) -> dict:
@@ -25,10 +23,8 @@ def register_tools(mcp: FastMCP) -> None:
         Read a CSV file and return its contents.
 
         Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the CSV file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
             limit: Maximum number of rows to return (None = all rows)
             offset: Number of rows to skip from the beginning
 
@@ -38,7 +34,7 @@ def register_tools(mcp: FastMCP) -> None:
         if offset < 0 or (limit is not None and limit < 0):
             return {"error": "offset and limit must be non-negative"}
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -91,9 +87,7 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def csv_write(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         columns: list[str],
         rows: list[dict],
     ) -> dict:
@@ -101,10 +95,8 @@ def register_tools(mcp: FastMCP) -> None:
         Write data to a new CSV file.
 
         Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the CSV file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
             columns: List of column names for the header
             rows: List of dictionaries, each representing a row
 
@@ -112,7 +104,7 @@ def register_tools(mcp: FastMCP) -> None:
             dict with success status and metadata
         """
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
@@ -148,26 +140,22 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def csv_append(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         rows: list[dict],
     ) -> dict:
         """
         Append rows to an existing CSV file.
 
         Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the CSV file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
             rows: List of dictionaries to append, keys should match existing columns
 
         Returns:
             dict with success status and metadata
         """
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}. Use csv_write to create a new file."}
@@ -215,24 +203,20 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def csv_info(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
     ) -> dict:
         """
         Get metadata about a CSV file without reading all data.
 
         Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the CSV file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
 
         Returns:
             dict with file metadata (columns, row count, file size)
         """
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -274,9 +258,7 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def csv_sql(
         path: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         query: str,
     ) -> dict:
         """
@@ -285,10 +267,8 @@ def register_tools(mcp: FastMCP) -> None:
         The CSV file is loaded as a table named 'data'. Use standard SQL syntax.
 
         Args:
-            path: Path to the CSV file (relative to session sandbox)
-            workspace_id: Workspace identifier
+            path: Path to the CSV file (relative to agent sandbox)
             agent_id: Agent identifier
-            session_id: Session identifier
             query: SQL query to execute. The CSV is available as table 'data'.
                    Example: "SELECT * FROM data WHERE price > 100 ORDER BY name LIMIT 10"
 
@@ -320,7 +300,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}

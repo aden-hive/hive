@@ -34,6 +34,22 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Hive LLM router endpoint
 HIVE_LLM_ENDPOINT="https://api.adenhq.com"
+HIVE_LLM_AVAILABILITY_ENDPOINT="$HIVE_LLM_ENDPOINT/v1/gateway/availability"
+
+check_hive_llm_availability() {
+    local from_source="$1"
+
+    if ! command -v curl >/dev/null 2>&1; then
+        return 2
+    fi
+
+    local response
+    response="$(curl -fsSL --max-time 5 "${HIVE_LLM_AVAILABILITY_ENDPOINT}?from=${from_source}" 2>/dev/null)" || return 2
+    if [ "$response" = "true" ]; then
+        return 0
+    fi
+    return 1
+}
 
 # Helper function for prompts
 prompt_yes_no() {
@@ -257,10 +273,53 @@ fi
 
 # Check for Chrome/Edge (required for GCU browser tools)
 echo -n "  Checking for Chrome/Edge browser... "
-if uv run python -c "from gcu.browser.chrome_finder import find_chrome; assert find_chrome()" > /dev/null 2>&1; then
+# Check common browser locations
+CHROME_FOUND=false
+for browser in "google-chrome" "google-chrome-stable" "chromium" "chromium-browser" "microsoft-edge"; do
+    if command -v "$browser" &> /dev/null; then
+        CHROME_FOUND=true
+        break
+    fi
+done
+# Also check common desktop locations (for macOS/Windows)
+if [ "$CHROME_FOUND" = false ]; then
+    for path in "/Applications/Google Chrome.app" "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" "/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" "$HOME/Applications/Google Chrome.app" "$HOME/.local/share/applications/google-chrome.desktop"; do
+        if [ -e "$path" ]; then
+            CHROME_FOUND=true
+            break
+        fi
+    done
+fi
+if [ "$CHROME_FOUND" = true ]; then
     echo -e "${GREEN}ok${NC}"
 else
     echo -e "${YELLOW}not found — install Chrome or Edge for browser tools${NC}"
+fi
+
+# Ensure playwright is installed for web scraping tools
+echo -n "  Checking playwright installation... "
+if uv run python -c "import playwright" > /dev/null 2>&1; then
+    # Check if browser binaries are installed
+    if uv run playwright install --dry-run chromium > /dev/null 2>&1; then
+        echo -e "${GREEN}ok${NC}"
+    else
+        echo -e "${YELLOW}installing browser...${NC}"
+        uv run playwright install chromium > /dev/null 2>&1
+        if [ $? -eq 0 ]; then
+            echo -e "  ${GREEN}✓ playwright chromium installed${NC}"
+        else
+            echo -e "  ${YELLOW}⚠ playwright browser installation failed (web scraping may not work)${NC}"
+        fi
+    fi
+else
+    echo -e "${YELLOW}not found — installing...${NC}"
+    uv pip install playwright playwright-stealth > /dev/null 2>&1
+    uv run playwright install chromium > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo -e "  ${GREEN}✓ playwright installed${NC}"
+    else
+        echo -e "  ${YELLOW}⚠ playwright installation failed (web scraping may not work)${NC}"
+    fi
 fi
 
 cd "$SCRIPT_DIR"
@@ -1151,8 +1210,23 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
     fi
 fi
 
+HIVE_LLM_AVAILABLE="unknown"
+if check_hive_llm_availability "quickstart"; then
+    HIVE_LLM_AVAILABLE="yes"
+elif [ $? -eq 1 ]; then
+    HIVE_LLM_AVAILABLE="no"
+fi
+
 # ── Show unified provider selection menu ─────────────────────
 echo -e "${BOLD}Select your default LLM provider:${NC}"
+echo ""
+if [ "$HIVE_LLM_AVAILABLE" = "yes" ]; then
+    echo -e "${GREEN}⬢${NC} Hive LLM availability check: ${DIM}available${NC}"
+elif [ "$HIVE_LLM_AVAILABLE" = "no" ]; then
+    echo -e "${YELLOW}⬢${NC} Hive LLM availability check: ${DIM}currently unavailable${NC}"
+else
+    echo -e "${YELLOW}⬢${NC} Hive LLM availability check: ${DIM}could not verify${NC}"
+fi
 echo ""
 echo -e "  ${CYAN}${BOLD}Subscription modes (no API key purchase needed):${NC}"
 
@@ -1192,10 +1266,18 @@ else
 fi
 
 # 6) Hive LLM
-if [ "$HIVE_CRED_DETECTED" = true ]; then
-    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}  ${GREEN}(credential detected)${NC}"
+if [ "$HIVE_LLM_AVAILABLE" = "yes" ]; then
+    HIVE_LLM_STATUS="${GREEN}(available)${NC}"
+elif [ "$HIVE_LLM_AVAILABLE" = "no" ]; then
+    HIVE_LLM_STATUS="${YELLOW}(unavailable)${NC}"
 else
-    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}"
+    HIVE_LLM_STATUS="${YELLOW}(status unknown)${NC}"
+fi
+
+if [ "$HIVE_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}  $HIVE_LLM_STATUS  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}  $HIVE_LLM_STATUS"
 fi
 
 # 7) Antigravity
@@ -1805,6 +1887,79 @@ fi
 echo ""
 
 # ============================================================
+# Step 4b: Load browser extension into Chrome (one-time setup)
+# ============================================================
+
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Setting up browser extension...${NC}"
+echo ""
+
+EXTENSION_PATH="$SCRIPT_DIR/tools/browser-extension"
+CHROME_BIN=""
+CHROME_LAUNCHED=false
+
+# Find Chrome binary
+for _bin in "google-chrome" "google-chrome-stable" "chromium" "chromium-browser" "microsoft-edge" "microsoft-edge-stable"; do
+    if command -v "$_bin" &> /dev/null; then
+        CHROME_BIN="$_bin"
+        break
+    fi
+done
+# macOS
+if [ -z "$CHROME_BIN" ]; then
+    for _path in \
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+        "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"; do
+        if [ -e "$_path" ]; then
+            CHROME_BIN="$_path"
+            break
+        fi
+    done
+fi
+
+if [ ! -d "$EXTENSION_PATH" ]; then
+    echo -e "${YELLOW}  Extension not found at $EXTENSION_PATH — skipping${NC}"
+elif [ -z "$CHROME_BIN" ]; then
+    echo -e "${YELLOW}  Chrome not found — skipping${NC}"
+    echo -e "${DIM}    Install Chrome, then load: $EXTENSION_PATH via chrome://extensions${NC}"
+else
+    # Copy path to clipboard (best-effort)
+    if command -v xclip &> /dev/null; then
+        printf '%s' "$EXTENSION_PATH" | xclip -selection clipboard 2>/dev/null && _copied=true
+    elif command -v xsel &> /dev/null; then
+        printf '%s' "$EXTENSION_PATH" | xsel --clipboard --input 2>/dev/null && _copied=true
+    elif command -v pbcopy &> /dev/null; then
+        printf '%s' "$EXTENSION_PATH" | pbcopy 2>/dev/null && _copied=true
+    fi
+
+    read -r -p "  Press Enter when you are ready to set up the Chrome extension... " _dummy || true
+    echo ""
+
+    # Open setup guide in default browser
+    SETUP_URL="file://$SCRIPT_DIR/docs/browser-extension-setup.html?path=$(printf '%s' "$EXTENSION_PATH" | sed 's/ /%20/g')"
+    echo -e "  Opening browser extension setup guide..."
+    if [ "${_copied:-false}" = "true" ]; then
+        echo -e "  ${DIM}(extension path copied to clipboard — paste it in the folder picker)${NC}"
+    fi
+    if [[ "$OSTYPE" == darwin* ]]; then
+        open "$SETUP_URL" 2>/dev/null
+    elif command -v xdg-open &> /dev/null; then
+        xdg-open "$SETUP_URL" > /dev/null 2>&1 &
+    elif command -v wslview &> /dev/null; then
+        wslview "$SETUP_URL" > /dev/null 2>&1 &
+    else
+        echo -e "  ${DIM}Could not open browser automatically. Visit:${NC}"
+        echo -e "  ${BOLD}$SETUP_URL${NC}"
+    fi
+
+    echo ""
+    read -r -p "  Press Enter once you've finished the extension setup... " _dummy || true
+    CHROME_LAUNCHED=true
+fi
+
+echo ""
+
+# ============================================================
 # Step 5: Verify Setup
 # ============================================================
 
@@ -1856,6 +2011,17 @@ fi
 echo -n "  ⬡ frontend... "
 if [ -f "$SCRIPT_DIR/core/frontend/dist/index.html" ]; then
     echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
+echo -n "  ⬡ browser extension... "
+if [ "$CHROME_LAUNCHED" = true ]; then
+    echo -e "${GREEN}ok${NC}"
+elif [ -d "$EXTENSION_PATH" ] && [ -n "$CHROME_BIN" ]; then
+    echo -e "${GREEN}ok${NC}"
+elif [ -d "$EXTENSION_PATH" ]; then
+    echo -e "${YELLOW}-- (Chrome not found)${NC}"
 else
     echo -e "${YELLOW}--${NC}"
 fi

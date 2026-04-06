@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import AliasChoices, BaseModel, Field, computed_field
 
 if TYPE_CHECKING:
     from framework.graph.executor import ExecutionResult
@@ -119,8 +119,11 @@ class SessionState(BaseModel):
     # Result
     result: SessionResult = Field(default_factory=SessionResult)
 
-    # Memory (for resumability)
-    memory: dict[str, Any] = Field(default_factory=dict)
+    # Data buffer (for resumability)
+    data_buffer: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("data_buffer", "memory"),
+    )
 
     # Metrics
     metrics: SessionMetrics = Field(default_factory=SessionMetrics)
@@ -133,6 +136,7 @@ class SessionState(BaseModel):
 
     # Input data (for debugging/replay)
     input_data: dict[str, Any] = Field(default_factory=dict)
+    current_run_id: str | None = None
 
     # Process ID of the owning process (for cross-process stale session detection)
     pid: int | None = None
@@ -153,6 +157,16 @@ class SessionState(BaseModel):
 
     model_config = {"extra": "allow"}
 
+    @property
+    def memory(self) -> dict[str, Any]:
+        """Backward-compatible alias for legacy callers."""
+        return self.data_buffer
+
+    @memory.setter
+    def memory(self, value: dict[str, Any]) -> None:
+        """Backward-compatible alias for legacy callers."""
+        self.data_buffer = value
+
     @computed_field
     @property
     def duration_ms(self) -> int:
@@ -168,11 +182,10 @@ class SessionState(BaseModel):
     def is_resumable(self) -> bool:
         """Can this session be resumed?
 
-        Every non-completed session is resumable. If resume_from/paused_at
-        aren't set, the executor falls back to the graph entry point —
-        so we don't gate on those. Even catastrophic failures are resumable.
+        Only sessions with a valid checkpoint can be resumed.
+        State-based resume (without a checkpoint) is no longer supported.
         """
-        return self.status != SessionStatus.COMPLETED
+        return self.is_resumable_from_checkpoint
 
     @computed_field
     @property
@@ -243,7 +256,11 @@ class SessionState(BaseModel):
                 error=result.error,
                 output=result.output,
             ),
-            memory=result.session_state.get("memory", {}) if result.session_state else {},
+            data_buffer=result.session_state.get(
+                "data_buffer", result.session_state.get("memory", {})
+            )
+            if result.session_state
+            else {},
             input_data=input_data or {},
         )
 
@@ -293,7 +310,11 @@ class SessionState(BaseModel):
         )
 
     def to_session_state_dict(self) -> dict[str, Any]:
-        """Convert to session_state format for GraphExecutor.execute()."""
+        """Convert to session_state format for GraphExecutor.execute().
+
+        NOTE: state-based resume via paused_at/resume_from is deprecated.
+        Use checkpoint-based resume (``resume_from_checkpoint`` key) instead.
+        """
         # Derive resume target: explicit > last node in path > entry point
         resume_from = (
             self.progress.resume_from
@@ -303,7 +324,7 @@ class SessionState(BaseModel):
         return {
             "paused_at": resume_from,
             "resume_from": resume_from,
-            "memory": self.memory,
+            "data_buffer": self.data_buffer,
             "execution_path": self.progress.path,
             "node_visit_counts": self.progress.node_visit_counts,
         }

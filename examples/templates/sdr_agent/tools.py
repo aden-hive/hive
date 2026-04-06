@@ -56,8 +56,7 @@ def _get_data_dir() -> str:
     ctx = _execution_context.get()
     if not ctx or "data_dir" not in ctx:
         raise RuntimeError(
-            "data_dir not set in execution context. "
-            "Is the tool running inside a GraphExecutor?"
+            "data_dir not set in execution context. Is the tool running inside a GraphExecutor?"
         )
     return ctx["data_dir"]
 

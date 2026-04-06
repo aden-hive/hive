@@ -18,7 +18,7 @@ from aden_tools.hashline import (
     validate_anchor,
 )
 
-from ..security import get_secure_path
+from ..security import get_sandboxed_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -28,9 +28,7 @@ def register_tools(mcp: FastMCP) -> None:
     def hashline_edit(
         path: str,
         edits: str,
-        workspace_id: str,
         agent_id: str,
-        session_id: str,
         auto_cleanup: bool = True,
         encoding: str = "utf-8",
     ) -> dict:
@@ -48,7 +46,7 @@ def register_tools(mcp: FastMCP) -> None:
             Overlapping line ranges within a single call are rejected.
 
         Args:
-            path: The path to the file (relative to session root)
+            path: The path to the file (relative to agent sandbox)
             edits: JSON string containing a list of edit operations.
                 Each op is a dict with:
                 - set_line: anchor, content
@@ -57,9 +55,7 @@ def register_tools(mcp: FastMCP) -> None:
                 - insert_before: anchor, content
                 - replace: old_content, new_content, allow_multiple
                 - append: content
-            workspace_id: The ID of workspace
-            agent_id: The ID of agent
-            session_id: The ID of the current session
+            agent_id: The ID of the agent
             auto_cleanup: If True (default), automatically strip hashline prefixes and
                 echoed context from edit content. Set to False to write content exactly
                 as provided.
@@ -85,7 +81,7 @@ def register_tools(mcp: FastMCP) -> None:
 
         # 2. Read file
         try:
-            secure_path = get_secure_path(path, workspace_id, agent_id, session_id)
+            secure_path = get_sandboxed_path(path, agent_id)
             if not os.path.exists(secure_path):
                 return {"error": f"File not found at {path}"}
             if not os.path.isfile(secure_path):
