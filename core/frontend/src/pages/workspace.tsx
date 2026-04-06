@@ -401,7 +401,9 @@ function defaultAgentState(): AgentBackendState {
 export default function Workspace() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [graphCollapsed, setGraphCollapsed] = useState(false);
+  const [graphCollapsed, setGraphCollapsed] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 768
+  );
   const rawAgent = searchParams.get("agent") || "new-agent";
   const hasExplicitAgent = searchParams.has("agent");
   const initialPrompt = searchParams.get("prompt") || "";
@@ -2940,8 +2942,8 @@ export default function Workspace() {
 
         {/* ── Draft flowchart + chat ─────────────────────────────────── */}
         <div
-          className={`bg-card flex flex-col border-r border-border/30 transition-all duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-20 md:relative md:shrink-0 ${graphCollapsed ? "max-md:-translate-x-full" : "max-md:translate-x-0 max-md:w-[85vw]"}`}
-          style={{ width: `${graphPanelPct}%`, minWidth: 240, flexShrink: 0 }}
+          className={`bg-card flex flex-col border-r border-border/30 transition-all duration-300 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-20 md:relative md:w-md:w-(--graph-panel-width) md:min-w-60 md:shrink-0 ${graphCollapsed ? "max-md:-translate-x-full" : "max-md:translate-x-0 max-md:w-[85vw]"}`}
+          style={{ ["--graph-panel-width" as string]: `${graphPanelPct}%` } as React.CSSProperties}
         >
           <div className="flex-1 min-h-0">
             <DraftGraph
@@ -2975,6 +2977,8 @@ export default function Workspace() {
           {/* Mobile toggle button */}
           <button
             onClick={() => setGraphCollapsed((c) => !c)}
+            aria-label={graphCollapsed ? "Open graph panel" : "Collapse graph panel"}
+            aria-expanded={!graphCollapsed}
             className="md:hidden absolute top-1/2 -translate-y-1/2 -right-6 z-30 flex items-center justify-center w-6 h-10 bg-card border border-l-0 border-border/40 rounded-r-lg text-muted-foreground hover:text-foreground shadow-md"
           >
             <ChevronLeft className={`w-3.5 h-3.5 transition-transform duration-300 ${graphCollapsed ? "rotate-180" : ""}`} />
