@@ -20,6 +20,7 @@ Requires MongoDB Atlas Data API credentials:
 ```bash
 export MONGODB_DATA_API_URL="https://data.mongodb-api.com/app/<app-id>/endpoint/data/v1"
 export MONGODB_API_KEY="your_api_key"
+export MONGODB_DATA_SOURCE="your_cluster_name"  # e.g. "Cluster0"
 ```
 
 > Enable the Data API and get credentials from https://cloud.mongodb.com under **App Services → Data API**
