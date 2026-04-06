@@ -10,7 +10,7 @@ Order, product, and customer management via the Shopify Admin REST API.
 | `shopify_get_order` | Get full details of a specific order by ID |
 | `shopify_list_products` | List products with optional status, type, and vendor filters |
 | `shopify_get_product` | Get full product details including variants and images |
-| `shopify_update_product` | Update title, description, status, tags, or vendor of a product |
+| `shopify_update_product` | Update title, body_html, status, tags, or vendor of a product |
 | `shopify_list_customers` | List customers in the store |
 | `shopify_get_customer` | Get full customer details including addresses and order stats |
 | `shopify_search_customers` | Search customers by email, name, or other fields |
@@ -50,7 +50,7 @@ shopify_list_orders(status="open", limit=50)
 ```python
 shopify_list_orders(
     financial_status="paid",
-    fulfillment_status="unfulfilled",
+    fulfillment_status="unshipped",
     limit=25,
 )
 ```
