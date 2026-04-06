@@ -28,7 +28,10 @@ def _get_creds(
     """Return (api_key, host) or an error dict."""
     if credentials is not None:
         api_key = credentials.get("wandb_api_key")
-        host = credentials.get("wandb_host") or os.getenv("WANDB_HOST") or DEFAULT_HOST
+        try:
+            host = credentials.get("wandb_host") or os.getenv("WANDB_HOST") or DEFAULT_HOST
+        except KeyError:
+            host = os.getenv("WANDB_HOST") or DEFAULT_HOST
     else:
         api_key = os.getenv("WANDB_API_KEY")
         host = os.getenv("WANDB_HOST") or DEFAULT_HOST
@@ -97,7 +100,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def wandb_get_runs(
+    def wandb_list_runs(
         entity: str,
         project: str,
         filters: str = "",
@@ -215,7 +218,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def wandb_get_artifacts(entity: str, project: str, run_id: str) -> dict:
+    def wandb_list_artifacts(entity: str, project: str, run_id: str) -> dict:
         """
         List artifacts for a specific Weights & Biases run.
 

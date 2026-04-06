@@ -15,10 +15,10 @@ WANDB_CREDENTIALS = {
         env_var="WANDB_API_KEY",
         tools=[
             "wandb_list_projects",
-            "wandb_get_runs",
+            "wandb_list_runs",
             "wandb_get_run",
             "wandb_get_run_metrics",
-            "wandb_get_artifacts",
+            "wandb_list_artifacts",
             "wandb_get_summary",
         ],
         required=True,
