@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { Plus, KeyRound, Loader2, WifiOff, X, FolderOpen } from "lucide-react";
+import { Plus, KeyRound, Loader2, WifiOff, X, FolderOpen, ChevronLeft, Layers } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import DraftGraph from "@/components/DraftGraph";
 import ChatPanel, { type ChatMessage } from "@/components/ChatPanel";
@@ -434,13 +434,30 @@ export default function Workspace() {
   const [triggerCronSaved, setTriggerCronSaved] = useState(false);
   const [triggerTaskSaved, setTriggerTaskSaved] = useState(false);
   const [graphPanelPct, setGraphPanelPct] = useState(30);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [showGraphMobile, setShowGraphMobile] = useState(false);
   const savedGraphPanelPct = useRef(30);
   const resizing = useRef(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const syncViewport = () => {
+      const nextIsMobile = media.matches;
+      setIsMobileViewport(nextIsMobile);
+      if (!nextIsMobile) {
+        setShowGraphMobile(false);
+      }
+    };
+
+    syncViewport();
+    media.addEventListener("change", syncViewport);
+    return () => media.removeEventListener("change", syncViewport);
+  }, []);
 
   // Drag-to-resize the graph panel
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
-      if (!resizing.current) return;
+      if (!resizing.current || isMobileViewport) return;
       const pct = (e.clientX / window.innerWidth) * 100;
       setGraphPanelPct(Math.max(15, Math.min(50, pct)));
     };
@@ -454,7 +471,7 @@ export default function Workspace() {
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, []);
+  }, [isMobileViewport]);
 
   // Shrink graph panel when node detail opens, restore when it closes
   const nodeIsSelected = selectedNode !== null;
@@ -2348,6 +2365,25 @@ export default function Workspace() {
   const liveSelectedNode = selectedNode && currentGraph.nodes.find(n => n.id === selectedNode.id);
   const resolvedSelectedNode = liveSelectedNode || selectedNode;
 
+  useEffect(() => {
+    if (isMobileViewport && resolvedSelectedNode) {
+      setShowGraphMobile(false);
+    }
+  }, [isMobileViewport, resolvedSelectedNode]);
+
+  useEffect(() => {
+    if (!showGraphMobile) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowGraphMobile(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showGraphMobile]);
+
   // Sync trigger drafts when selected trigger node changes
   useEffect(() => {
     if (resolvedSelectedNode?.nodeType === "trigger") {
@@ -2725,11 +2761,65 @@ export default function Workspace() {
       </TopBar>
 
       {/* Main content area */}
-      <div className="flex flex-1 min-h-0">
+      <div className="relative flex flex-1 min-h-0">
+        {showGraphMobile && (
+          <button
+            type="button"
+            aria-label="Close graph panel backdrop"
+            onClick={() => setShowGraphMobile(false)}
+            className="absolute inset-0 z-20 bg-black/45 backdrop-blur-[1px] md:hidden"
+          />
+        )}
+
+        {isMobileViewport && (
+          <div
+            className="fixed inset-y-0 left-0 z-30 flex w-[min(24rem,calc(100vw-0.75rem))] max-w-[calc(100vw-0.75rem)] md:hidden"
+            style={{
+              transform: showGraphMobile ? "translateX(0)" : "translateX(calc(-100% + 3rem))",
+              transition: "transform 220ms ease",
+            }}
+          >
+            <div className="flex min-w-0 flex-1 flex-col border-r border-border/40 bg-card/95 shadow-2xl backdrop-blur">
+              <div className="flex-1 min-h-0">
+                <DraftGraph
+                  key={`${activeWorker}-mobile`}
+                  draft={activeAgentState?.originalDraft ?? activeAgentState?.draftGraph ?? null}
+                  originalDraft={activeAgentState?.originalDraft ?? null}
+                  loadingMessage={
+                    activeAgentState?.designingDraft
+                      ? "Designing flowchart..."
+                      : !activeAgentState?.originalDraft && !activeAgentState?.draftGraph && activeAgentState?.queenPhase !== "planning"
+                        ? "Loading flowchart..."
+                        : null
+                  }
+                  building={activeAgentState?.queenBuilding}
+                  onRun={handleRun}
+                  onPause={handlePause}
+                  runState={activeAgentState?.workerRunState ?? "idle"}
+                  flowchartMap={activeAgentState?.flowchartMap ?? undefined}
+                  runtimeNodes={currentGraph.nodes}
+                  onRuntimeNodeClick={(runtimeNodeId) => {
+                    const node = currentGraph.nodes.find(n => n.id === runtimeNodeId);
+                    if (node) setSelectedNode(prev => prev?.id === node.id ? null : node);
+                  }}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-label={showGraphMobile ? "Hide graph panel" : "Show graph panel"}
+              aria-expanded={showGraphMobile}
+              onClick={() => setShowGraphMobile(open => !open)}
+              className="absolute right-0 top-1/2 z-10 flex h-12 w-12 -translate-y-1/2 translate-x-full items-center justify-center rounded-r-xl border border-l-0 border-border/50 bg-card/95 text-foreground shadow-lg transition-colors hover:bg-card"
+            >
+              {showGraphMobile ? <ChevronLeft className="h-4 w-4" /> : <Layers className="h-4 w-4" />}
+            </button>
+          </div>
+        )}
 
         {/* ── Draft flowchart + chat ─────────────────────────────────── */}
         <div
-          className="bg-card/30 flex flex-col border-r border-border/30 relative"
+          className="relative hidden flex-col border-r border-border/30 bg-card/30 md:flex"
           style={{ width: `${graphPanelPct}%`, minWidth: 240, flexShrink: 0 }}
         >
           <div className="flex-1 min-h-0">
@@ -2758,11 +2848,11 @@ export default function Workspace() {
           </div>
           {/* Resize handle */}
           <div
-            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/40 transition-colors z-10"
+            className="absolute top-0 right-0 z-10 h-full w-1 cursor-col-resize transition-colors hover:bg-primary/30 active:bg-primary/40"
             onMouseDown={() => { resizing.current = true; document.body.style.cursor = "col-resize"; }}
           />
         </div>
-        <div className="flex-1 min-w-0 flex">
+        <div className="flex min-w-0 flex-1">
           <div className="flex-1 min-w-0 relative">
             {/* Loading overlay */}
             {activeAgentState?.loading && (
@@ -2841,9 +2931,9 @@ export default function Workspace() {
             )}
           </div>
           {resolvedSelectedNode && (
-            <div className="w-[480px] min-w-[400px] flex-shrink-0">
+            <div className={isMobileViewport ? "fixed inset-0 z-40 flex min-w-0 bg-background" : "w-[480px] min-w-[400px] flex-shrink-0"}>
               {resolvedSelectedNode.nodeType === "trigger" ? (
-                <div className="flex flex-col h-full border-l border-border/40 bg-card/20 animate-in slide-in-from-right">
+                <div className={isMobileViewport ? "flex h-full w-full flex-col overflow-y-auto bg-background" : "flex h-full flex-col border-l border-border/40 bg-card/20 animate-in slide-in-from-right"}>
                   <div className="px-4 pt-4 pb-3 border-b border-border/30 flex items-start justify-between gap-2">
                     <div className="flex items-start gap-3 min-w-0">
                       <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 bg-[hsl(210,40%,55%)]/15 border border-[hsl(210,40%,55%)]/25">
@@ -3030,19 +3120,21 @@ export default function Workspace() {
                   </div>
                 </div>
               ) : (
-                <NodeDetailPanel
-                  node={resolvedSelectedNode}
-                  nodeSpec={activeAgentState?.nodeSpecs.find(n => n.id === resolvedSelectedNode.id) ?? null}
-                  allNodeSpecs={activeAgentState?.nodeSpecs}
-                  subagentReports={activeAgentState?.subagentReports}
-                  sessionId={activeAgentState?.sessionId || undefined}
-                  graphId={activeAgentState?.graphId || undefined}
-                  workerSessionId={null}
-                  nodeLogs={activeAgentState?.nodeLogs[resolvedSelectedNode.id] || []}
-                  actionPlan={activeAgentState?.nodeActionPlans[resolvedSelectedNode.id]}
-                  contextUsage={activeAgentState?.contextUsage[resolvedSelectedNode.id]}
-                  onClose={() => setSelectedNode(null)}
-                />
+                <div className={isMobileViewport ? "h-full w-full overflow-y-auto bg-background" : "h-full"}>
+                  <NodeDetailPanel
+                    node={resolvedSelectedNode}
+                    nodeSpec={activeAgentState?.nodeSpecs.find(n => n.id === resolvedSelectedNode.id) ?? null}
+                    allNodeSpecs={activeAgentState?.nodeSpecs}
+                    subagentReports={activeAgentState?.subagentReports}
+                    sessionId={activeAgentState?.sessionId || undefined}
+                    graphId={activeAgentState?.graphId || undefined}
+                    workerSessionId={null}
+                    nodeLogs={activeAgentState?.nodeLogs[resolvedSelectedNode.id] || []}
+                    actionPlan={activeAgentState?.nodeActionPlans[resolvedSelectedNode.id]}
+                    contextUsage={activeAgentState?.contextUsage[resolvedSelectedNode.id]}
+                    onClose={() => setSelectedNode(null)}
+                  />
+                </div>
               )}
             </div>
           )}
