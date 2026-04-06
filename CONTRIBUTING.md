@@ -340,10 +340,10 @@ make test-live     # Run live API integration tests (requires credentials)
 > initial setup is complete.
 
 ```bash
-# Restart the web interface
+# Start the backend server
 hive serve
 
-# Or run the dev server with hot-reload (from the project root)
+# In a separate terminal, run the frontend dev server with hot-reload
 cd core/frontend
 npm install   # only needed after dependency changes
 npm run dev
