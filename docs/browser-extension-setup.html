@@ -129,6 +129,28 @@
       font-size: 0.9rem;
       word-break: break-all;
       user-select: all;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    .copy-btn {
+      background: var(--border);
+      color: var(--text);
+      border: none;
+      border-radius: 4px;
+      padding: 0.35rem 0.7rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+
+    .copy-btn:hover {
+      background: var(--accent);
     }
 
     .screenshot-placeholder {
@@ -186,8 +208,8 @@
         <span class="step-title">Go to Chrome Extension Settings</span>
       </div>
       <p>Open the Chrome extensions page and enable <strong style="color:var(--text)">Developer mode</strong> using the toggle in the top-right corner.</p>
-      <a class="chrome-link" href="chrome://extensions/">chrome://extensions/</a>
-      <div class="note">If the link above doesn't open, copy <code>chrome://extensions/</code> and paste it into your Chrome address bar.</div>
+      <button class="chrome-link" id="chrome-link-btn">Copy chrome://extensions/</button>
+      <div class="note">Chrome doesn't allow pages to open <code>chrome://</code> URLs directly. Click the button above to copy the link, then paste it into your address bar and press Enter.</div>
       <img width="1236" height="921" alt="Image" src="https://github.com/user-attachments/assets/36aef101-ac02-4940-9bbd-4613167d6030" style="max-width:100%;height:auto;border-radius:6px;margin-top:0.75rem;" />
     </div>
 
@@ -208,7 +230,10 @@
         <span class="step-title">Select the extension folder</span>
       </div>
       <p>In the folder picker, navigate to (or paste) the following path:</p>
-      <div class="path-box" id="extension-path">tools/browser-extension</div>
+      <div class="path-box">
+        <span id="extension-path">tools/browser-extension</span>
+        <button class="copy-btn" id="copy-path-btn">Copy</button>
+      </div>
       <div class="note">The quickstart script copies this path to your clipboard — just paste it in the folder picker.</div>
       <div class="note">If pasting doesn't work, navigate manually: open the folder where you cloned the Hive repo, then go into <code>tools</code> → <code>browser-extension</code>. For example, if you cloned to <code>~/projects/hive</code>, the full path would be <code>~/projects/hive/tools/browser-extension</code>.</div>
       <img width="1236" height="921" alt="Image" src="https://github.com/user-attachments/assets/119b8794-d956-4278-9284-3f122597b34c" style="max-width:100%;height:auto;border-radius:6px;margin-top:0.75rem;" />
@@ -237,6 +262,23 @@
     if (extPath) {
       document.getElementById('extension-path').textContent = extPath;
     }
+
+    // Copy chrome://extensions/ button
+    document.getElementById('chrome-link-btn').addEventListener('click', function() {
+      navigator.clipboard.writeText('chrome://extensions/').then(() => {
+        this.textContent = 'Copied!';
+        setTimeout(() => { this.textContent = 'Copy chrome://extensions/'; }, 1500);
+      });
+    });
+
+    // Copy path button
+    document.getElementById('copy-path-btn').addEventListener('click', function() {
+      const path = document.getElementById('extension-path').textContent;
+      navigator.clipboard.writeText(path).then(() => {
+        this.textContent = 'Copied!';
+        setTimeout(() => { this.textContent = 'Copy'; }, 1500);
+      });
+    });
   </script>
 </body>
 </html>
