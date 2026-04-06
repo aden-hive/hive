@@ -1,11 +1,13 @@
 """
 Weights & Biases ML experiment tracking tool.
 
-Supports:
-- HTTP Bearer Auth with WANDB_API_KEY
-- Cloud (api.wandb.ai) instances
+Uses the official W&B Python SDK (wandb.Api) — no undocumented REST endpoints.
 
-API Reference: https://docs.wandb.ai/ref/app/pages/run-page
+Supports:
+- Credential store via wandb_api_key
+- Environment variable WANDB_API_KEY
+
+SDK reference: https://docs.wandb.ai/guides/track/public-api-guide
 """
 
 from __future__ import annotations
@@ -13,59 +15,41 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
-import httpx
-from fastmcp import FastMCP
-
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
-
-DEFAULT_HOST = "https://api.wandb.ai"
 
 
 def _get_creds(
     credentials: CredentialStoreAdapter | None,
-) -> tuple[str, str] | dict[str, Any]:
-    """Return (api_key, host) or an error dict."""
+) -> tuple[str] | dict[str, Any]:
+    """Return (api_key,) or an error dict."""
     if credentials is not None:
         api_key = credentials.get("wandb_api_key")
         try:
-            host = credentials.get("wandb_host") or os.getenv("WANDB_HOST") or DEFAULT_HOST
+            # wandb_host is optional; SDK doesn't need it for cloud
+            _ = credentials.get("wandb_host")
         except KeyError:
-            host = os.getenv("WANDB_HOST") or DEFAULT_HOST
+            pass
     else:
         api_key = os.getenv("WANDB_API_KEY")
-        host = os.getenv("WANDB_HOST") or DEFAULT_HOST
 
     if not api_key:
         return {
             "error": "Weights & Biases credentials not configured",
             "help": ("Set WANDB_API_KEY environment variable or configure via credential store"),
         }
-    host = host.rstrip("/")
-    return api_key, host
+    return (api_key,)
 
 
-def _handle_response(resp: httpx.Response) -> dict[str, Any]:
-    if resp.status_code == 401:
-        return {"error": "Invalid Weights & Biases API key"}
-    if resp.status_code == 403:
-        return {"error": "Insufficient permissions for this Weights & Biases resource"}
-    if resp.status_code == 404:
-        return {"error": "Weights & Biases resource not found"}
-    if resp.status_code == 429:
-        return {"error": "Weights & Biases rate limit exceeded. Try again later."}
-    if resp.status_code >= 400:
-        try:
-            body = resp.json()
-            detail = body.get("message", body.get("error", resp.text))
-        except Exception:
-            detail = resp.text
-        return {"error": f"Weights & Biases API error (HTTP {resp.status_code}): {detail}"}
-    return resp.json()
+def _make_api(api_key: str) -> Any:
+    """Create a wandb.Api instance with the given key."""
+    import wandb
+
+    return wandb.Api(api_key=api_key)
 
 
 def register_tools(
-    mcp: FastMCP,
+    mcp: Any,
     credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """Register Weights & Biases experiment tracking tools with the MCP server."""
@@ -84,20 +68,25 @@ def register_tools(
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
             return creds
-        api_key, host = creds
+        (api_key,) = creds
 
         try:
-            resp = httpx.get(
-                f"{host}/api/v1/projects",
-                headers={"Authorization": f"Bearer {api_key}"},
-                params={"entity": entity},
-                timeout=30.0,
-            )
-            return _handle_response(resp)
-        except httpx.TimeoutException:
-            return {"error": "Request timed out"}
-        except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            api = _make_api(api_key)
+            projects = api.projects(entity=entity)
+            return {
+                "entity": entity,
+                "projects": [
+                    {
+                        "name": p.name,
+                        "id": p.id,
+                        "description": getattr(p, "description", ""),
+                        "url": getattr(p, "url", ""),
+                    }
+                    for p in projects
+                ],
+            }
+        except Exception as e:
+            return {"error": f"Weights & Biases error: {e}"}
 
     @mcp.tool()
     def wandb_list_runs(
@@ -121,24 +110,42 @@ def register_tools(
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
             return creds
-        api_key, host = creds
+        (api_key,) = creds
 
         try:
-            params: dict[str, Any] = {"per_page": per_page}
-            if filters:
-                params["filters"] = filters
+            import json as _json
 
-            resp = httpx.get(
-                f"{host}/api/v1/runs/{entity}/{project}",
-                headers={"Authorization": f"Bearer {api_key}"},
-                params=params,
-                timeout=30.0,
-            )
-            return _handle_response(resp)
-        except httpx.TimeoutException:
-            return {"error": "Request timed out"}
-        except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            # Validate filters JSON before touching the API
+            parsed_filters: dict[str, Any] | None = None
+            if filters:
+                try:
+                    parsed_filters = _json.loads(filters)
+                except _json.JSONDecodeError:
+                    return {"error": "filters must be a valid JSON string"}
+
+            api = _make_api(api_key)
+            kwargs: dict[str, Any] = {"per_page": per_page}
+            if parsed_filters is not None:
+                kwargs["filters"] = parsed_filters
+
+            runs = api.runs(path=f"{entity}/{project}", **kwargs)
+            return {
+                "entity": entity,
+                "project": project,
+                "runs": [
+                    {
+                        "id": r.id,
+                        "name": r.name,
+                        "state": r.state,
+                        "url": r.url,
+                        "created_at": str(r.created_at),
+                        "config": dict(r.config),
+                    }
+                    for r in runs
+                ],
+            }
+        except Exception as e:
+            return {"error": f"Weights & Biases error: {e}"}
 
     @mcp.tool()
     def wandb_get_run(entity: str, project: str, run_id: str) -> dict:
@@ -159,19 +166,23 @@ def register_tools(
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
             return creds
-        api_key, host = creds
+        (api_key,) = creds
 
         try:
-            resp = httpx.get(
-                f"{host}/api/v1/runs/{entity}/{project}/{run_id}",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=30.0,
-            )
-            return _handle_response(resp)
-        except httpx.TimeoutException:
-            return {"error": "Request timed out"}
-        except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            api = _make_api(api_key)
+            run = api.run(f"{entity}/{project}/{run_id}")
+            return {
+                "id": run.id,
+                "name": run.name,
+                "state": run.state,
+                "url": run.url,
+                "created_at": str(run.created_at),
+                "config": dict(run.config),
+                "tags": list(run.tags),
+                "notes": run.notes or "",
+            }
+        except Exception as e:
+            return {"error": f"Weights & Biases error: {e}"}
 
     @mcp.tool()
     def wandb_get_run_metrics(
@@ -190,7 +201,7 @@ def register_tools(
             metric_keys: Optional comma-separated list of metric keys to filter.
 
         Returns:
-            Dict containing the run's metric history.
+            Dict containing the run's metric history as a list of step dicts.
         """
         if not run_id:
             return {"error": "run_id is required"}
@@ -198,29 +209,26 @@ def register_tools(
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
             return creds
-        api_key, host = creds
+        (api_key,) = creds
 
         try:
-            params: dict[str, Any] = {}
-            if metric_keys:
-                params["keys"] = metric_keys
+            api = _make_api(api_key)
+            run = api.run(f"{entity}/{project}/{run_id}")
 
-            resp = httpx.get(
-                f"{host}/api/v1/runs/{entity}/{project}/{run_id}/history",
-                headers={"Authorization": f"Bearer {api_key}"},
-                params=params,
-                timeout=30.0,
-            )
-            return _handle_response(resp)
-        except httpx.TimeoutException:
-            return {"error": "Request timed out"}
-        except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            keys = [k.strip() for k in metric_keys.split(",") if k.strip()] if metric_keys else None
+            history = run.history(samples=500, keys=keys)
+
+            return {
+                "run_id": run_id,
+                "steps": history.to_dict(orient="records"),
+            }
+        except Exception as e:
+            return {"error": f"Weights & Biases error: {e}"}
 
     @mcp.tool()
     def wandb_list_artifacts(entity: str, project: str, run_id: str) -> dict:
         """
-        List artifacts for a specific Weights & Biases run.
+        List artifacts logged by a specific Weights & Biases run.
 
         Args:
             entity: The W&B entity name (username or organization).
@@ -236,19 +244,26 @@ def register_tools(
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
             return creds
-        api_key, host = creds
+        (api_key,) = creds
 
         try:
-            resp = httpx.get(
-                f"{host}/api/v1/runs/{entity}/{project}/{run_id}/artifacts",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=30.0,
-            )
-            return _handle_response(resp)
-        except httpx.TimeoutException:
-            return {"error": "Request timed out"}
-        except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            api = _make_api(api_key)
+            run = api.run(f"{entity}/{project}/{run_id}")
+            artifacts = run.logged_artifacts()
+            return {
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "name": a.name,
+                        "type": a.type,
+                        "version": getattr(a, "version", ""),
+                        "size": getattr(a, "size", 0),
+                    }
+                    for a in artifacts
+                ],
+            }
+        except Exception as e:
+            return {"error": f"Weights & Biases error: {e}"}
 
     @mcp.tool()
     def wandb_get_summary(entity: str, project: str, run_id: str) -> dict:
@@ -269,16 +284,16 @@ def register_tools(
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
             return creds
-        api_key, host = creds
+        (api_key,) = creds
 
         try:
-            resp = httpx.get(
-                f"{host}/api/v1/runs/{entity}/{project}/{run_id}/summary",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=30.0,
-            )
-            return _handle_response(resp)
-        except httpx.TimeoutException:
-            return {"error": "Request timed out"}
-        except httpx.RequestError as e:
-            return {"error": f"Network error: {e}"}
+            api = _make_api(api_key)
+            run = api.run(f"{entity}/{project}/{run_id}")
+            # Filter out internal W&B keys (prefixed with _)
+            summary = {k: v for k, v in run.summary.items() if not k.startswith("_")}
+            return {
+                "run_id": run_id,
+                "summary": summary,
+            }
+        except Exception as e:
+            return {"error": f"Weights & Biases error: {e}"}
