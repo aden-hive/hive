@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide will help you set up the Aden Agent Framework and build your first agent.
+This guide will help you set up the Aden Agent Framework, avoid the most common install mistake, and run a known-good example before building your first agent.
 
 ## Prerequisites
 
@@ -12,6 +12,10 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 ## Quick Start
 
 The fastest way to get started:
+
+> **Important:** Hive uses a `uv` workspace layout.
+> Do not run `pip install -e .` or `uv pip install -e .` from the repository root.
+> The supported setup path is `./quickstart.sh` on macOS/Linux or `.\quickstart.ps1` on Windows.
 
 **Linux / macOS:**
 
@@ -42,6 +46,27 @@ uv run python -c "import framework; import aden_tools; print('Setup complete')"
 ```
 
 > **Note:** On Windows, running `.\quickstart.ps1` requires PowerShell 5.1+. If you see a "running scripts is disabled" error, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first. Alternatively, use WSL — see [environment-setup.md](./environment-setup.md) for details.
+
+## Run a Known-Good Example
+
+Before creating your own agent, verify the environment with the minimal manual example:
+
+```bash
+uv run python core/examples/manual_agent.py
+```
+
+Expected output should look similar to:
+
+```text
+Setting up Manual Agent...
+Executing agent with input: name='Alice'...
+
+Success!
+Path taken: greeter -> uppercaser
+Final output: HELLO, ALICE!
+```
+
+This example does not require API keys and confirms that the core runtime is working.
 
 ## Building Your First Agent
 
@@ -96,12 +121,11 @@ PYTHONPATH=exports uv run python -m my_agent validate
 If you prefer to start with code rather than CLI wizards, check out the manual agent example:
 
 ```bash
-# View the minimal example
-cat core/examples/manual_agent.py
-
 # Run it (no API keys required)
 uv run python core/examples/manual_agent.py
 ```
+
+You can inspect the example at `core/examples/manual_agent.py`.
 
 This demonstrates the core runtime loop using pure Python functions, skipping the complexity of LLM setup and file-based configuration.
 
@@ -226,9 +250,15 @@ echo $HIVE_API_KEY
 ### Package Installation Issues
 
 ```bash
-# Remove and reinstall
-pip uninstall -y framework tools
+# Root-level editable installs are not supported
+# Re-run the project quickstart from the repository root instead
 ./quickstart.sh
+```
+
+On Windows PowerShell:
+
+```powershell
+.\quickstart.ps1
 ```
 
 ## Getting Help
