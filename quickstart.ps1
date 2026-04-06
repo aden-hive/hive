@@ -589,14 +589,14 @@ if ($NodeAvailable) {
         Write-Host "  Installing npm packages... " -NoNewline
         Push-Location $frontendDir
         try {
-            $installOutput = & npm install --no-fund --no-audit 2>&1
+            $installOutput = npm install --no-fund --no-audit 2>&1
             if ($LASTEXITCODE -eq 0) {
                 Write-Ok "ok"
                 # Clean stale tsbuildinfo cache — tsc -b incremental builds fail
                 # silently when these are out of sync with source files
                 Get-ChildItem -Path $frontendDir -Filter "tsconfig*.tsbuildinfo" -ErrorAction SilentlyContinue | Remove-Item -Force
                 Write-Host "  Building frontend... " -NoNewline
-                $buildOutput = & npm run build 2>&1
+                $buildOutput = npm run build 2>&1
                 if ($LASTEXITCODE -eq 0) {
                     Write-Ok "ok"
                     Write-Ok "Frontend built -> core/frontend/dist/"
