@@ -72,6 +72,9 @@ class FinishEvent:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_tokens: int = 0
+    reasoning_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
     model: str = ""
 
 

@@ -16,6 +16,9 @@ class LLMResponse:
     model: str
     input_tokens: int = 0
     output_tokens: int = 0
+    reasoning_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
     stop_reason: str = ""
     raw_response: Any = None
 
@@ -157,6 +160,9 @@ class LLMProvider(ABC):
             stop_reason=response.stop_reason,
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
+            reasoning_tokens=response.reasoning_tokens,
+            cache_read_tokens=response.cache_read_tokens,
+            cache_creation_tokens=response.cache_creation_tokens,
             model=response.model,
         )
 

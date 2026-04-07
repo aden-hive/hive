@@ -515,6 +515,21 @@ def _extract_text_tool_calls(
     return events, cleaned
 
 
+def _extract_token_details(usage: Any) -> tuple[int, int, int]:
+    """Return (reasoning_tokens, cache_read_tokens, cache_creation_tokens)."""
+    if usage is None:
+        return 0, 0, 0
+
+    completion_details = getattr(usage, "completion_tokens_details", None)
+    reasoning_tokens = getattr(completion_details, "reasoning_tokens", None) or 0
+
+    prompt_details = getattr(usage, "prompt_tokens_details", None)
+    cache_read_tokens = getattr(prompt_details, "cached_tokens", None) or 0
+    cache_creation_tokens = getattr(prompt_details, "cache_creation_tokens", None) or 0
+
+    return reasoning_tokens, cache_read_tokens, cache_creation_tokens
+
+
 class LiteLLMProvider(LLMProvider):
     """
     LiteLLM-based LLM provider for multi-provider support.
@@ -826,12 +841,16 @@ class LiteLLMProvider(LLMProvider):
         usage = response.usage
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
+        reasoning_tokens, cache_read_tokens, cache_creation_tokens = _extract_token_details(usage)
 
         return LLMResponse(
             content=content,
             model=response.model or self.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             stop_reason=response.choices[0].finish_reason or "",
             raw_response=response,
         )
@@ -1015,12 +1034,16 @@ class LiteLLMProvider(LLMProvider):
         usage = response.usage
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
+        reasoning_tokens, cache_read_tokens, cache_creation_tokens = _extract_token_details(usage)
 
         return LLMResponse(
             content=content,
             model=response.model or self.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             stop_reason=response.choices[0].finish_reason or "",
             raw_response=response,
         )
@@ -1471,6 +1494,7 @@ class LiteLLMProvider(LLMProvider):
         usage = response.usage
         input_tokens = usage.prompt_tokens if usage else 0
         output_tokens = usage.completion_tokens if usage else 0
+        reasoning_tokens, cache_read_tokens, cache_creation_tokens = _extract_token_details(usage)
         stop_reason = "tool_calls" if tool_calls else (response.choices[0].finish_reason or "stop")
 
         return LLMResponse(
@@ -1478,6 +1502,9 @@ class LiteLLMProvider(LLMProvider):
             model=response.model or self.model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             stop_reason=stop_reason,
             raw_response={
                 "compat_mode": "openrouter_tool_emulation",
@@ -1535,6 +1562,9 @@ class LiteLLMProvider(LLMProvider):
             stop_reason=response.stop_reason,
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
+            reasoning_tokens=response.reasoning_tokens,
+            cache_read_tokens=response.cache_read_tokens,
+            cache_creation_tokens=response.cache_creation_tokens,
             model=response.model,
         )
 
@@ -1600,6 +1630,9 @@ class LiteLLMProvider(LLMProvider):
             stop_reason=response.stop_reason or "stop",
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
+            reasoning_tokens=response.reasoning_tokens,
+            cache_read_tokens=response.cache_read_tokens,
+            cache_creation_tokens=response.cache_creation_tokens,
             model=response.model,
         )
 
@@ -1836,29 +1869,37 @@ class LiteLLMProvider(LLMProvider):
                             type(usage).__name__,
                         )
                         cached_tokens = 0
+                        reasoning_tokens = 0
+                        cache_read_tokens = 0
+                        cache_creation_tokens = 0
                         if usage:
                             input_tokens = getattr(usage, "prompt_tokens", 0) or 0
                             output_tokens = getattr(usage, "completion_tokens", 0) or 0
-                            _details = getattr(usage, "prompt_tokens_details", None)
-                            cached_tokens = (
-                                getattr(_details, "cached_tokens", 0) or 0
-                                if _details is not None
-                                else getattr(usage, "cache_read_input_tokens", 0) or 0
-                            )
+                            (
+                                reasoning_tokens,
+                                cache_read_tokens,
+                                cache_creation_tokens,
+                            ) = _extract_token_details(usage)
+                            cached_tokens = cache_read_tokens
                             logger.debug(
                                 "[tokens] finish-chunk usage: "
-                                "input=%d output=%d cached=%d model=%s",
+                                "input=%d output=%d reasoning=%d cached=%d cache_write=%d model=%s",
                                 input_tokens,
                                 output_tokens,
+                                reasoning_tokens,
                                 cached_tokens,
+                                cache_creation_tokens,
                                 self.model,
                             )
 
                         logger.debug(
-                            "[tokens] finish event: input=%d output=%d cached=%d stop=%s model=%s",
+                            "[tokens] finish event: input=%d output=%d reasoning=%d cached=%d "
+                            "cache_write=%d stop=%s model=%s",
                             input_tokens,
                             output_tokens,
+                            reasoning_tokens,
                             cached_tokens,
+                            cache_creation_tokens,
                             choice.finish_reason,
                             self.model,
                         )
@@ -1868,6 +1909,9 @@ class LiteLLMProvider(LLMProvider):
                                 input_tokens=input_tokens,
                                 output_tokens=output_tokens,
                                 cached_tokens=cached_tokens,
+                                reasoning_tokens=reasoning_tokens,
+                                cache_read_tokens=cache_read_tokens,
+                                cache_creation_tokens=cache_creation_tokens,
                                 model=self.model,
                             )
                         )
@@ -1887,18 +1931,20 @@ class LiteLLMProvider(LLMProvider):
                             _usage = calculate_total_usage(chunks=_chunks)
                             input_tokens = _usage.prompt_tokens or 0
                             output_tokens = _usage.completion_tokens or 0
-                            _details = getattr(_usage, "prompt_tokens_details", None)
-                            cached_tokens = (
-                                getattr(_details, "cached_tokens", 0) or 0
-                                if _details is not None
-                                else getattr(_usage, "cache_read_input_tokens", 0) or 0
-                            )
+                            (
+                                reasoning_tokens,
+                                cache_read_tokens,
+                                cache_creation_tokens,
+                            ) = _extract_token_details(_usage)
+                            cached_tokens = cache_read_tokens
                             logger.debug(
                                 "[tokens] post-loop chunks fallback:"
-                                " input=%d output=%d cached=%d model=%s",
+                                " input=%d output=%d reasoning=%d cached=%d cache_write=%d model=%s",
                                 input_tokens,
                                 output_tokens,
+                                reasoning_tokens,
                                 cached_tokens,
+                                cache_creation_tokens,
                                 self.model,
                             )
                             # Patch the FinishEvent already queued with 0 tokens
@@ -1909,6 +1955,9 @@ class LiteLLMProvider(LLMProvider):
                                         input_tokens=input_tokens,
                                         output_tokens=output_tokens,
                                         cached_tokens=cached_tokens,
+                                        reasoning_tokens=reasoning_tokens,
+                                        cache_read_tokens=cache_read_tokens,
+                                        cache_creation_tokens=cache_creation_tokens,
                                         model=_ev.model,
                                     )
                                     break
@@ -2105,6 +2154,9 @@ class LiteLLMProvider(LLMProvider):
         tool_calls: list[dict[str, Any]] = []
         input_tokens = 0
         output_tokens = 0
+        reasoning_tokens = 0
+        cache_read_tokens = 0
+        cache_creation_tokens = 0
         stop_reason = ""
         model = self.model
 
@@ -2122,6 +2174,9 @@ class LiteLLMProvider(LLMProvider):
             elif isinstance(event, FinishEvent):
                 input_tokens = event.input_tokens
                 output_tokens = event.output_tokens
+                reasoning_tokens = event.reasoning_tokens
+                cache_read_tokens = event.cache_read_tokens
+                cache_creation_tokens = event.cache_creation_tokens
                 stop_reason = event.stop_reason
                 if event.model:
                     model = event.model
@@ -2134,6 +2189,9 @@ class LiteLLMProvider(LLMProvider):
             model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             stop_reason=stop_reason,
             raw_response={"tool_calls": tool_calls} if tool_calls else None,
         )

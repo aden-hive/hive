@@ -24,6 +24,7 @@ from framework.llm.litellm import (
     OPENROUTER_TOOL_COMPAT_MODEL_CACHE,
     LiteLLMProvider,
     _compute_retry_delay,
+    _extract_token_details,
     _ensure_ollama_chat_prefix,
     _is_ollama_model,
 )
@@ -115,6 +116,9 @@ class TestLiteLLMProviderComplete:
         mock_response.model = "gpt-4o-mini"
         mock_response.usage.prompt_tokens = 10
         mock_response.usage.completion_tokens = 20
+        mock_response.usage.completion_tokens_details.reasoning_tokens = 7
+        mock_response.usage.prompt_tokens_details.cached_tokens = 11
+        mock_response.usage.prompt_tokens_details.cache_creation_tokens = 13
         mock_completion.return_value = mock_response
 
         provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
@@ -124,6 +128,9 @@ class TestLiteLLMProviderComplete:
         assert result.model == "gpt-4o-mini"
         assert result.input_tokens == 10
         assert result.output_tokens == 20
+        assert result.reasoning_tokens == 7
+        assert result.cache_read_tokens == 11
+        assert result.cache_creation_tokens == 13
         assert result.stop_reason == "stop"
 
         # Verify litellm.completion was called correctly
@@ -242,6 +249,21 @@ class TestToolConversion:
             provider._parse_tool_call_arguments('{"question": foo', "ask_user")
 
 
+class TestTokenDetails:
+    """Token detail extraction should be resilient across provider shapes."""
+
+    def test_extract_token_details_returns_zeroes_when_usage_missing(self):
+        assert _extract_token_details(None) == (0, 0, 0)
+
+    def test_extract_token_details_reads_public_litellm_fields(self):
+        usage = MagicMock()
+        usage.completion_tokens_details.reasoning_tokens = 17
+        usage.prompt_tokens_details.cached_tokens = 23
+        usage.prompt_tokens_details.cache_creation_tokens = 5
+
+        assert _extract_token_details(usage) == (17, 23, 5)
+
+
 class TestAnthropicProviderBackwardCompatibility:
     """Test AnthropicProvider backward compatibility with LiteLLM backend."""
 
@@ -333,6 +355,9 @@ class TestJsonMode:
         mock_response.model = "gpt-4o-mini"
         mock_response.usage.prompt_tokens = 10
         mock_response.usage.completion_tokens = 5
+        mock_response.usage.completion_tokens_details.reasoning_tokens = 2
+        mock_response.usage.prompt_tokens_details.cached_tokens = 3
+        mock_response.usage.prompt_tokens_details.cache_creation_tokens = 4
         mock_completion.return_value = mock_response
 
         provider = LiteLLMProvider(model="gpt-4o-mini", api_key="test-key")
@@ -583,6 +608,9 @@ class TestAsyncComplete:
         mock_response.model = "gpt-4o-mini"
         mock_response.usage.prompt_tokens = 10
         mock_response.usage.completion_tokens = 5
+        mock_response.usage.completion_tokens_details.reasoning_tokens = 2
+        mock_response.usage.prompt_tokens_details.cached_tokens = 3
+        mock_response.usage.prompt_tokens_details.cache_creation_tokens = 4
 
         # acompletion is async, so mock must return a coroutine
         async def async_return(*args, **kwargs):
@@ -600,6 +628,9 @@ class TestAsyncComplete:
         assert result.model == "gpt-4o-mini"
         assert result.input_tokens == 10
         assert result.output_tokens == 5
+        assert result.reasoning_tokens == 2
+        assert result.cache_read_tokens == 3
+        assert result.cache_creation_tokens == 4
         mock_acompletion.assert_called_once()
 
     @pytest.mark.asyncio
@@ -724,6 +755,32 @@ class TestMiniMaxStreamFallback:
         assert len(finish) == 1
         assert finish[0].model == "minimax-text-01"
 
+    @pytest.mark.asyncio
+    async def test_collect_stream_to_response_preserves_token_details(self):
+        """Collected stream responses should keep reasoning and cache token metadata."""
+        from framework.llm.stream_events import FinishEvent, TextDeltaEvent
+
+        provider = LiteLLMProvider(model="minimax-text-01", api_key="test-key")
+
+        async def stream():
+            yield TextDeltaEvent(content="hello", snapshot="hello")
+            yield FinishEvent(
+                stop_reason="stop",
+                input_tokens=10,
+                output_tokens=4,
+                reasoning_tokens=6,
+                cache_read_tokens=8,
+                cache_creation_tokens=2,
+                model="minimax-text-01",
+            )
+
+        result = await provider._collect_stream_to_response(stream())
+
+        assert result.content == "hello"
+        assert result.reasoning_tokens == 6
+        assert result.cache_read_tokens == 8
+        assert result.cache_creation_tokens == 2
+
     def test_is_minimax_model_variants(self):
         """Recognize both prefixed and plain MiniMax model names."""
         assert LiteLLMProvider(model="minimax-text-01", api_key="x")._is_minimax_model()
@@ -773,6 +830,9 @@ class TestOpenRouterToolCompatFallback:
         compat_response.model = provider.model
         compat_response.usage.prompt_tokens = 18
         compat_response.usage.completion_tokens = 9
+        compat_response.usage.completion_tokens_details.reasoning_tokens = 12
+        compat_response.usage.prompt_tokens_details.cached_tokens = 14
+        compat_response.usage.prompt_tokens_details.cache_creation_tokens = 6
 
         async def side_effect(*args, **kwargs):
             if kwargs.get("stream"):
@@ -809,6 +869,9 @@ class TestOpenRouterToolCompatFallback:
         assert finish_events[0].stop_reason == "tool_calls"
         assert finish_events[0].input_tokens == 18
         assert finish_events[0].output_tokens == 9
+        assert finish_events[0].reasoning_tokens == 12
+        assert finish_events[0].cache_read_tokens == 14
+        assert finish_events[0].cache_creation_tokens == 6
 
         assert mock_acompletion.call_count == 2
         first_call = mock_acompletion.call_args_list[0].kwargs

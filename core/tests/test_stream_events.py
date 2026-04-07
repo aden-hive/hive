@@ -84,6 +84,9 @@ class TestEventDefaults:
         assert e.stop_reason == ""
         assert e.input_tokens == 0
         assert e.output_tokens == 0
+        assert e.reasoning_tokens == 0
+        assert e.cache_read_tokens == 0
+        assert e.cache_creation_tokens == 0
         assert e.model == ""
 
     def test_stream_error_defaults(self):
@@ -150,6 +153,9 @@ class TestEventConstruction:
         assert e.stop_reason == "end_turn"
         assert e.input_tokens == 150
         assert e.output_tokens == 300
+        assert e.reasoning_tokens == 0
+        assert e.cache_read_tokens == 0
+        assert e.cache_creation_tokens == 0
         assert e.model == "claude-haiku-4-5"
 
     def test_stream_error_with_values(self):
@@ -241,6 +247,9 @@ class TestEventSerialization:
             "input_tokens": 10,
             "output_tokens": 20,
             "cached_tokens": 0,
+            "reasoning_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
             "model": "gpt-4",
         }
 
