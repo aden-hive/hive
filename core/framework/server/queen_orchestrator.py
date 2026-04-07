@@ -278,6 +278,32 @@ async def create_queen(
     _session_llm = session.llm
     _session_event_bus = session.event_bus
 
+    # ---- Recall on each real user turn --------------------------------
+    async def _recall_on_user_input(event: AgentEvent) -> None:
+        """Re-select memories when real user input arrives."""
+        content = (event.data or {}).get("content", "")
+        if not content or not isinstance(content, str):
+            return
+        try:
+            from framework.agents.queen.recall_selector import (
+                format_recall_injection,
+                select_memories,
+            )
+
+            mem_dir = phase_state.global_memory_dir
+            selected = await select_memories(content, _session_llm, mem_dir)
+            phase_state._cached_global_recall_block = format_recall_injection(
+                selected, mem_dir
+            )
+        except Exception:
+            logger.debug("recall: user-turn cache update failed", exc_info=True)
+
+    session.event_bus.subscribe(
+        [EventType.CLIENT_INPUT_RECEIVED],
+        _recall_on_user_input,
+        filter_stream="queen",
+    )
+
     async def _persona_hook(ctx: HookContext) -> HookResult | None:
         trigger = ctx.trigger or ""
         result = await select_expert_persona(
@@ -430,7 +456,6 @@ async def create_queen(
                 queen_dir,
                 session.llm,
                 memory_dir=global_dir,
-                phase_state=phase_state,
             )
             session.memory_reflection_subs = _reflection_subs
 

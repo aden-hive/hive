@@ -485,7 +485,6 @@ async def subscribe_reflection_triggers(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
-    phase_state: Any = None,
 ) -> list[str]:
     """Subscribe to queen turn events and return subscription IDs.
 
@@ -511,22 +510,6 @@ async def subscribe_reflection_triggers(
                 logger.warning("reflect: reflection failed", exc_info=True)
                 _write_error("short/long reflection")
 
-            # Update recall cache after reflection so next turn sees new memories.
-            if phase_state is not None:
-                try:
-                    from framework.agents.queen.recall_selector import update_recall_cache
-
-                    logger.debug("recall: post-reflection cache update starting")
-                    await update_recall_cache(
-                        session_dir,
-                        llm,
-                        memory_dir=mem_dir,
-                        cache_setter=lambda block: setattr(
-                            phase_state, "_cached_global_recall_block", block
-                        ),
-                    )
-                except Exception:
-                    logger.debug("recall: cache update failed", exc_info=True)
 
     async def _do_compaction_reflect() -> None:
         async with _lock:

@@ -31,29 +31,6 @@ logger = logging.getLogger(__name__)
 # Structured output schema
 # ---------------------------------------------------------------------------
 
-RECALL_SCHEMA: dict[str, Any] = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "memory_selection",
-        "strict": True,
-        "schema": {
-            "type": "object",
-            "properties": {
-                "selected_memories": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                },
-            },
-            "required": ["selected_memories"],
-            "additionalProperties": False,
-        },
-    },
-}
-
-# ---------------------------------------------------------------------------
-# System prompt
-# ---------------------------------------------------------------------------
-
 SELECT_MEMORIES_SYSTEM_PROMPT = """\
 You are selecting memories that will be useful to the Queen agent as it \
 processes a user's query.
@@ -103,17 +80,21 @@ async def select_memories(
         resp = await llm.acomplete(
             messages=[{"role": "user", "content": user_msg}],
             system=SELECT_MEMORIES_SYSTEM_PROMPT,
-            max_tokens=512,
-            response_format=RECALL_SCHEMA,
+            max_tokens=1024,
+            response_format={"type": "json_object"},
         )
-        data = json.loads(resp.content)
+        raw = (resp.content or "").strip()
+        if not raw:
+            logger.warning("recall: LLM returned empty response (model=%s, stop=%s)", resp.model, resp.stop_reason)
+            return []
+        data = json.loads(raw)
         selected = data.get("selected_memories", [])
         valid_names = {f.filename for f in files}
         result = [s for s in selected if s in valid_names][:max_results]
         logger.debug("recall: selected %d memories: %s", len(result), result)
         return result
-    except Exception:
-        logger.debug("recall: memory selection failed, returning []", exc_info=True)
+    except Exception as exc:
+        logger.warning("recall: memory selection failed (%s), returning []", exc)
         return []
 
 
@@ -142,57 +123,3 @@ def format_recall_injection(
 
     body = "\n\n---\n\n".join(blocks)
     return f"--- Global Memories ---\n\n{body}\n\n--- End Global Memories ---"
-
-
-# ---------------------------------------------------------------------------
-# Cache update (called after each queen reflection)
-# ---------------------------------------------------------------------------
-
-
-async def update_recall_cache(
-    session_dir: Path,
-    llm: Any,
-    memory_dir: Path | None = None,
-    *,
-    cache_setter: Any = None,
-) -> None:
-    """Update the recall cache for the next turn.
-
-    Reads the latest user message from conversation parts to use as the
-    query for memory selection.
-    """
-    mem_dir = memory_dir or global_memory_dir()
-
-    query = _extract_latest_user_query(session_dir)
-    if not query:
-        logger.debug("recall: no user query found for cache update")
-        return
-
-    logger.debug("recall: updating cache for query: %.100s", query)
-    try:
-        selected = await select_memories(query, llm, mem_dir)
-        injection = format_recall_injection(selected, mem_dir)
-        if cache_setter is not None:
-            cache_setter(injection)
-        logger.debug("recall: cache updated (%d chars injected)", len(injection))
-    except Exception:
-        logger.debug("recall: cache update failed", exc_info=True)
-
-
-def _extract_latest_user_query(session_dir: Path) -> str:
-    """Read the most recent user message from conversation parts."""
-    parts_dir = session_dir / "conversations" / "parts"
-    if not parts_dir.is_dir():
-        return ""
-
-    part_files = sorted(parts_dir.glob("*.json"), reverse=True)
-    for f in part_files[:20]:
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-            if data.get("role") == "user":
-                content = str(data.get("content", "")).strip()
-                if content:
-                    return content[:1000] if len(content) > 1000 else content
-        except (json.JSONDecodeError, OSError):
-            continue
-    return ""

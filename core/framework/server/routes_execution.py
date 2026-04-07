@@ -185,14 +185,8 @@ async def handle_chat(request: web.Request) -> web.Response:
                 logger.error("[handle_chat] Node still not available after 5s wait")
 
         if node is not None and hasattr(node, "inject_event"):
-            try:
-                logger.debug("[handle_chat] Calling node.inject_event()...")
-                await node.inject_event(message, is_client_input=True, image_content=image_content)
-                logger.debug("[handle_chat] inject_event() completed successfully")
-            except Exception as e:
-                logger.exception("[handle_chat] inject_event() failed: %s", e)
-                raise
-            # Publish to EventBus so the session event log captures user messages
+            # Publish BEFORE inject_event so handlers (e.g. memory recall)
+            # complete before the event loop unblocks and starts the LLM turn.
             from framework.runtime.event_bus import AgentEvent, EventType
 
             await session.event_bus.publish(
@@ -209,6 +203,13 @@ async def handle_chat(request: web.Request) -> web.Response:
                     },
                 )
             )
+            try:
+                logger.debug("[handle_chat] Calling node.inject_event()...")
+                await node.inject_event(message, is_client_input=True, image_content=image_content)
+                logger.debug("[handle_chat] inject_event() completed successfully")
+            except Exception as e:
+                logger.exception("[handle_chat] inject_event() failed: %s", e)
+                raise
             return web.json_response(
                 {
                     "status": "queen",
