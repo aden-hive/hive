@@ -57,12 +57,6 @@ class ActiveNodeClientIO(NodeClientIO):
         self._input_result: str | None = None
 
     async def emit_output(self, content: str, is_final: bool = False) -> None:
-        """Emit a node output chunk and optionally close the output stream.
-
-        Args:
-            content: Output text emitted by the active node.
-            is_final: When ``True``, appends the stream sentinel to stop consumers.
-        """
         self._output_snapshot += content
         await self._output_queue.put(content)
 
@@ -78,19 +72,6 @@ class ActiveNodeClientIO(NodeClientIO):
             await self._output_queue.put(None)
 
     async def request_input(self, prompt: str = "", timeout: float | None = None) -> str:
-        """Ask the client for input and wait until the response is provided.
-
-        Args:
-            prompt: Prompt text sent to the client.
-            timeout: Optional timeout in seconds for waiting on user input.
-
-        Returns:
-            The input text supplied by :meth:`provide_input`.
-
-        Raises:
-            RuntimeError: If another input request is already pending, or if the
-                wait is released without receiving input data.
-        """
         if self._input_event is not None:
             raise RuntimeError("request_input already pending for this node")
 
@@ -151,12 +132,6 @@ class InertNodeClientIO(NodeClientIO):
         self._event_bus = event_bus
 
     async def emit_output(self, content: str, is_final: bool = False) -> None:
-        """Publish internal node output events for non-client-facing nodes.
-
-        Args:
-            content: Output text emitted by the node.
-            is_final: Unused for inert nodes; included for interface compatibility.
-        """
         if self._event_bus is not None:
             await self._event_bus.emit_node_internal_output(
                 stream_id=self.node_id,
@@ -165,15 +140,6 @@ class InertNodeClientIO(NodeClientIO):
             )
 
     async def request_input(self, prompt: str = "", timeout: float | None = None) -> str:
-        """Block direct user input and return guidance for internal execution.
-
-        Args:
-            prompt: Prompt text that would have been shown to a user.
-            timeout: Optional timeout value from callers (ignored for inert nodes).
-
-        Returns:
-            A static message instructing the node to continue autonomously.
-        """
         if self._event_bus is not None:
             await self._event_bus.emit_node_input_blocked(
                 stream_id=self.node_id,
@@ -193,15 +159,6 @@ class ClientIOGateway:
         self._event_bus = event_bus
 
     def create_io(self, node_id: str, client_facing: bool) -> NodeClientIO:
-        """Create the proper I/O adapter for a node.
-
-        Args:
-            node_id: Unique node identifier used for stream/event correlation.
-            client_facing: Whether the node is allowed to interact with clients.
-
-        Returns:
-            ``ActiveNodeClientIO`` when client-facing, otherwise ``InertNodeClientIO``.
-        """
         if client_facing:
             return ActiveNodeClientIO(
                 node_id=node_id,
