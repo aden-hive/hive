@@ -28,10 +28,16 @@ async def analytical_node(raw_data: str) -> dict:
     """
     Extracts trends based on competitive bibliographic reviews.
     """
+    if not raw_data.strip():
+        raise ValueError("raw_data must not be empty")
+
     return {
-        "trends": ["Laplace Transformer control", "Real-time human-in-the-loop validation"],
+        "trends": [
+            f"Derived from gathered input: {raw_data[:80]}",
+            "Real-time human-in-the-loop validation",
+        ],
         "citations": ["Indexed Scholar 2025", "IEEE Robotics Vol 12"],
-        "feasibility": "High for small-business Fabric Lab resources"
+        "feasibility": "High for small-business Fabric Lab resources",
     }
 
 # --- Step 3: Sequential Node - MVP Summary ---
