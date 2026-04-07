@@ -160,41 +160,7 @@ def _is_context_too_large_error(exc: BaseException) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Escalation receiver (temporary routing target for subagent → user input)
 # ---------------------------------------------------------------------------
-
-
-class _EscalationReceiver:
-    """Temporary receiver registered in node_registry for subagent escalation routing.
-
-    When a subagent calls ``report_to_parent(wait_for_response=True)``, the callback
-    creates one of these, registers it under a unique escalation ID in the executor's
-    ``node_registry``, and awaits ``wait()``.  The TUI / runner calls
-    ``inject_input(escalation_id, content)`` which the ``ExecutionStream`` routes here
-    via ``inject_event()`` — matching the same ``hasattr(node, "inject_event")`` check
-    used for regular ``EventLoopNode`` instances.
-    """
-
-    def __init__(self) -> None:
-        self._event = asyncio.Event()
-        self._response: str | None = None
-        self._awaiting_input = True  # So inject_message() can prefer us
-
-    async def inject_event(
-        self,
-        content: str,
-        *,
-        is_client_input: bool = False,
-        image_content: list[dict] | None = None,
-    ) -> None:
-        """Called by ExecutionStream.inject_input() when the user responds."""
-        self._response = content
-        self._event.set()
-
-    async def wait(self) -> str | None:
-        """Block until inject_event() delivers the user's response."""
-        await self._event.wait()
-        return self._response
 
 
 # ---------------------------------------------------------------------------
@@ -281,9 +247,6 @@ class AgentLoop(NodeProtocol):
         # Monotonic counter for spillover file naming (web_search_1.txt, etc.)
         self._spill_counter: int = 0
         # Subagent mark_complete: when True, _evaluate returns ACCEPT immediately
-        self._mark_complete_flag = False
-        # Counter for subagent instances (1, 2, 3, ...)
-        self._subagent_instance_counter: dict[str, int] = {}
 
     def validate_input(self, ctx: NodeContext) -> list[str]:
         """Validate hard requirements only.
@@ -481,7 +444,7 @@ class AgentLoop(NodeProtocol):
         # 2a. Guard: ensure at least one non-system message exists.
         # A restored conversation may have 0 messages if phase_id filtering
         # removes them all, or if a prior run stored metadata without messages
-        # (e.g. subagent that failed before the first LLM call).
+        # (e.g. node that failed before the first LLM call).
         if conversation.message_count == 0:
             initial_message = self._build_initial_message(ctx)
             if initial_message:
@@ -499,36 +462,9 @@ class AgentLoop(NodeProtocol):
             tools.append(self._build_ask_user_tool())
             if stream_id == "queen":
                 tools.append(self._build_ask_user_multiple_tool())
-        # Workers/subagents can escalate blockers to the queen.
+        # Workers can escalate blockers to the queen.
         if stream_id not in ("queen", "judge"):
             tools.append(self._build_escalate_tool())
-
-        # Add delegate_to_sub_agent tool if:
-        # - Node has sub_agents defined
-        # - We are NOT in subagent mode (prevents nested delegation)
-        if not False:
-            sub_agents = getattr(ctx.node_spec, "sub_agents", None) or []
-            if sub_agents:
-                delegate_tool = self._build_delegate_tool(sub_agents, ctx.node_registry)
-                if delegate_tool:
-                    tools.append(delegate_tool)
-                    logger.info(
-                        "[%s] delegate_to_sub_agent injected (sub_agents=%s)",
-                        node_id,
-                        sub_agents,
-                    )
-                else:
-                    logger.error(
-                        "[%s] _build_delegate_tool returned None for sub_agents=%s",
-                        node_id,
-                        sub_agents,
-                    )
-        else:
-            logger.debug("[%s] Skipped delegate tool (is_subagent_mode=True)", node_id)
-
-        # Add report_to_parent tool for sub-agents with a report callback
-        if False and False:
-            tools.append(self._build_report_to_parent_tool())
 
         logger.info(
             "[%s] Tools available (%d): %s | direct_user_io=%s | judge=%s",
@@ -682,8 +618,6 @@ class AgentLoop(NodeProtocol):
                     "ask_user",
                     "ask_user_multiple",
                     "escalate",
-                    "delegate_to_sub_agent",
-                    "report_to_parent",
                 }
                 synthetic = [t for t in tools if t.name in _synthetic_names]
                 tools.clear()
@@ -765,7 +699,7 @@ class AgentLoop(NodeProtocol):
                         queen_input_requested,
                         request_system_prompt,
                         request_messages,
-                        reported_to_parent,
+                        _,
                     ) = await self._run_single_turn(
                         ctx, conversation, tools, iteration, accumulator
                     )
@@ -1021,7 +955,7 @@ class AgentLoop(NodeProtocol):
                 and not outputs_set
                 and not user_input_requested
                 and not queen_input_requested
-                and not reported_to_parent
+                
             )
             if truly_empty and accumulator is not None:
                 missing = self._get_missing_output_keys(
@@ -1280,7 +1214,7 @@ class AgentLoop(NodeProtocol):
             _worker_no_tool_turn = (
                 not real_tool_results
                 and not outputs_set
-                and not reported_to_parent
+                
                 and not queen_input_requested
                 and not user_input_requested
             )
@@ -1730,7 +1664,7 @@ class AgentLoop(NodeProtocol):
 
             # 6i. Judge evaluation
             should_judge = (
-                False  # Always evaluate subagents
+                False
                 or (iteration + 1) % self._config.judge_every_n_turns == 0
                 or not real_tool_results  # no real tool calls = natural stop
             )
@@ -1786,7 +1720,7 @@ class AgentLoop(NodeProtocol):
                 missing = self._get_missing_output_keys(
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 )
-                if missing and self._judge is not None and not self._mark_complete_flag:
+                if missing and self._judge is not None :
                     hint = (
                         f"Task incomplete. Required outputs not yet produced: {missing}. "
                         f"Follow your system prompt instructions to complete the work."
@@ -2154,7 +2088,6 @@ class AgentLoop(NodeProtocol):
         ask_user_prompt = ""
         ask_user_options: list[str] | None = None
         queen_input_requested = False
-        reported_to_parent = False
         # Accumulate ALL tool calls across inner iterations for L3 logging.
         # Unlike real_tool_results (reset each inner iteration), this persists.
         logged_tool_calls: list[dict] = []
@@ -2228,16 +2161,28 @@ class AgentLoop(NodeProtocol):
                 ):
                     if isinstance(event, TextDeltaEvent):
                         accumulated_text = event.snapshot
-                        await self._publish_text_delta(
-                            stream_id,
-                            node_id,
-                            event.content,
-                            event.snapshot,
-                            ctx,
-                            execution_id,
-                            iteration=iteration,
-                            inner_turn=inner_turn,
-                        )
+                        # Filter <think>...</think> blocks from client output.
+                        # Content inside think tags is internal reasoning -- only
+                        # the text after </think> is shown to the user.
+                        _content = event.content
+                        if "<think>" in event.snapshot and "</think>" not in event.snapshot:
+                            _content = ""  # still inside think block
+                        elif "</think>" in _content:
+                            # End of think block -- emit only text after the tag
+                            _content = _content.split("</think>", 1)[-1]
+                        elif "<think>" in _content:
+                            _content = ""  # opening tag in this chunk
+                        if _content:
+                            await self._publish_text_delta(
+                                stream_id,
+                                node_id,
+                                _content,
+                                event.snapshot,
+                                ctx,
+                                execution_id,
+                                iteration=iteration,
+                                inner_turn=inner_turn,
+                            )
 
                     elif isinstance(event, ToolCallEvent):
                         _tc.append(event)
@@ -2345,7 +2290,7 @@ class AgentLoop(NodeProtocol):
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
-                    reported_to_parent,
+                    False,
                 )
 
             # Execute tool calls — framework tools (set_output, ask_user)
@@ -2358,13 +2303,12 @@ class AgentLoop(NodeProtocol):
             )
 
             # Phase 1: triage — handle framework tools immediately,
-            # queue real tools and subagents for parallel execution.
+            # queue real tools for parallel execution.
             results_by_id: dict[str, ToolResult] = {}
             timing_by_id: dict[
                 str, dict[str, Any]
             ] = {}  # tool_use_id -> {start_timestamp, duration_s}
             pending_real: list[ToolCallEvent] = []
-            pending_subagent: list[ToolCallEvent] = []
 
             for tc in tool_calls:
                 tool_call_count += 1
@@ -2607,76 +2551,6 @@ class AgentLoop(NodeProtocol):
                     )
                     results_by_id[tc.tool_use_id] = result
 
-                elif tc.tool_name == "delegate_to_sub_agent":
-                    # Guard: in continuous mode the LLM may see delegate
-                    # calls from a previous node's conversation history and
-                    # attempt to re-use the tool on a node that doesn't own
-                    # it.  Only accept if the tool was actually offered.
-                    if not any(t.name == "delegate_to_sub_agent" for t in tools):
-                        logger.warning(
-                            "[%s] LLM called delegate_to_sub_agent but tool "
-                            "was not offered to this node — rejecting",
-                            node_id,
-                        )
-                        result = ToolResult(
-                            tool_use_id=tc.tool_use_id,
-                            content=(
-                                "ERROR: delegate_to_sub_agent is not available "
-                                "on this node. This tool belongs to a different "
-                                "node in the workflow."
-                            ),
-                            is_error=True,
-                        )
-                        results_by_id[tc.tool_use_id] = result
-                        continue
-                    # --- Framework-level subagent delegation ---
-                    # Queue for parallel execution in Phase 2
-                    logger.info(
-                        "🔄 LLM requesting subagent delegation: agent_id='%s', task='%s'",
-                        tc.tool_input.get("agent_id", "?"),
-                        (tc.tool_input.get("task", "")[:100] + "...")
-                        if len(tc.tool_input.get("task", "")) > 100
-                        else tc.tool_input.get("task", ""),
-                    )
-                    pending_subagent.append(tc)
-
-                elif tc.tool_name == "report_to_parent":
-                    # --- Report from sub-agent to parent (optionally blocking) ---
-                    reported_to_parent = True
-                    msg = tc.tool_input.get("message", "")
-                    data = tc.tool_input.get("data")
-                    wait = tc.tool_input.get("wait_for_response", False)
-                    mark_complete = tc.tool_input.get("mark_complete", False)
-                    response = None
-
-                    if ctx.report_callback:
-                        try:
-                            response = await ctx.report_callback(
-                                msg,
-                                data,
-                                wait_for_response=wait,
-                            )
-                        except Exception:
-                            logger.warning(
-                                "[%s] report_to_parent callback failed (swallowed)",
-                                node_id,
-                                exc_info=True,
-                            )
-
-                    if mark_complete:
-                        self._mark_complete_flag = True
-                        logger.info(
-                            "[%s] mark_complete=True — subagent will accept on this iteration",
-                            node_id,
-                        )
-
-                    result = ToolResult(
-                        tool_use_id=tc.tool_use_id,
-                        content=response if (wait and response) else "Report sent to parent.",
-                        is_error=False,
-                    )
-                    results_by_id[tc.tool_use_id] = result
-
                 else:
                     # --- Real tool: check for truncated args, else queue ---
                     if "_raw" in tc.tool_input:
@@ -2751,175 +2625,6 @@ class AgentLoop(NodeProtocol):
                         result = raw
                     results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
 
-            # Phase 2b: execute subagent delegations in parallel.
-            if pending_subagent:
-                _subagent_timeout = self._config.subagent_timeout_seconds
-                _inactivity_timeout = self._config.subagent_inactivity_timeout_seconds
-
-                async def _timed_subagent(
-                    _ctx: NodeContext,
-                    _tc: ToolCallEvent,
-                    _acc: OutputAccumulator = accumulator,
-                    _wall_timeout: float = _subagent_timeout,
-                    _activity_timeout: float = _inactivity_timeout,
-                ) -> tuple[ToolResult | BaseException, str, float]:
-                    _s = time.time()
-                    _iso = datetime.now(UTC).isoformat()
-                    _last_activity = _s
-                    _activity_event = asyncio.Event()
-
-                    async def _watchdog() -> None:
-                        """Watchdog that times out only after inactivity period."""
-                        nonlocal _last_activity
-                        while True:
-                            _now = time.time()
-                            _inactive_for = _now - _last_activity
-                            _remaining = _activity_timeout - _inactive_for
-
-                            if _remaining <= 0:
-                                # Inactivity timeout reached
-                                return
-
-                            try:
-                                await asyncio.wait_for(_activity_event.wait(), timeout=_remaining)
-                                _activity_event.clear()
-                            except TimeoutError:
-                                # Check again in case activity happened during wait
-                                continue
-
-                    async def _run_with_activity_timeout(
-                        _coro,
-                    ) -> ToolResult:
-                        """Run subagent with activity-based timeout."""
-                        _watchdog_task = asyncio.create_task(_watchdog())
-                        try:
-                            _result = await _coro
-                            return _result
-                        finally:
-                            _watchdog_task.cancel()
-                            try:
-                                await _watchdog_task
-                            except asyncio.CancelledError:
-                                pass
-
-                    try:
-                        # Subscribe to subagent activity events to reset inactivity timer
-                        async def _on_subagent_activity(event) -> None:
-                            nonlocal _last_activity
-                            _last_activity = time.time()
-                            _activity_event.set()
-
-                        _sub_id = None
-                        if self._event_bus and _activity_timeout > 0:
-                            from framework.host.event_bus import EventType
-
-                            _sub_id = self._event_bus.subscribe(
-                                event_types=[
-                                    EventType.TOOL_CALL_STARTED,
-                                    EventType.LLM_TEXT_DELTA,
-                                    EventType.EXECUTION_STARTED,
-                                ],
-                                handler=_on_subagent_activity,
-                            )
-
-                        try:
-                            _coro = self._execute_subagent(
-                                _ctx,
-                                _tc.tool_input.get("agent_id", ""),
-                                _tc.tool_input.get("task", ""),
-                                accumulator=_acc,
-                            )
-
-                            if _activity_timeout > 0:
-                                # Use activity-based timeout with wall-clock max
-                                _result_coro = _run_with_activity_timeout(_coro)
-                                if _wall_timeout > 0:
-                                    _r = await asyncio.wait_for(_result_coro, timeout=_wall_timeout)
-                                else:
-                                    _r = await _result_coro
-                            elif _wall_timeout > 0:
-                                _r = await asyncio.wait_for(_coro, timeout=_wall_timeout)
-                            else:
-                                _r = await _coro
-                        finally:
-                            if _sub_id and self._event_bus:
-                                self._event_bus.unsubscribe(_sub_id)
-
-                    except TimeoutError:
-                        _agent_id = _tc.tool_input.get("agent_id", "unknown")
-                        _elapsed = time.time() - _s
-                        logger.warning(
-                            "Subagent '%s' timed out after %.0fs (inactivity threshold: %.0fs)",
-                            _agent_id,
-                            _elapsed,
-                            _activity_timeout if _activity_timeout > 0 else _wall_timeout,
-                        )
-                        _r = ToolResult(
-                            tool_use_id=_tc.tool_use_id,
-                            content=(
-                                f"Subagent '{_agent_id}' timed out after "
-                                f"{_elapsed:.0f}s of inactivity. "
-                                "The subagent was not making progress. "
-                                "Try a simpler task or break it into smaller pieces."
-                            ),
-                            is_error=True,
-                        )
-                    except BaseException as _exc:
-                        _r = _exc
-                    _dur = round(time.time() - _s, 3)
-                    return _r, _iso, _dur
-
-                subagent_timed = await asyncio.gather(
-                    *(_timed_subagent(ctx, tc) for tc in pending_subagent),
-                    return_exceptions=True,
-                )
-                for tc, entry in zip(pending_subagent, subagent_timed, strict=True):
-                    if isinstance(entry, BaseException):
-                        raw = entry
-                        _start_iso = datetime.now(UTC).isoformat()
-                        _dur_s = 0
-                    else:
-                        raw, _start_iso, _dur_s = entry
-                    _sa_timing = {
-                        "start_timestamp": _start_iso,
-                        "duration_s": _dur_s,
-                    }
-                    if isinstance(raw, BaseException):
-                        result = ToolResult(
-                            tool_use_id=tc.tool_use_id,
-                            content=json.dumps(
-                                {
-                                    "message": f"Sub-agent execution raised: {raw}",
-                                    "data": None,
-                                    "metadata": {"success": False, "error": str(raw)},
-                                }
-                            ),
-                            is_error=True,
-                        )
-                    else:
-                        # Attach the tool_use_id to the result
-                        result = ToolResult(
-                            tool_use_id=tc.tool_use_id,
-                            content=raw.content,
-                            is_error=raw.is_error,
-                        )
-                    # Route through _truncate_tool_result so large
-                    # subagent results are saved to spillover files
-                    # and survive pruning (instead of being "cleared
-                    # from context" with no recovery path).
-                    result = self._truncate_tool_result(result, "delegate_to_sub_agent")
-                    results_by_id[tc.tool_use_id] = result
-                    logged_tool_calls.append(
-                        {
-                            "tool_use_id": tc.tool_use_id,
-                            "tool_name": "delegate_to_sub_agent",
-                            "tool_input": tc.tool_input,
-                            "content": result.content,
-                            "is_error": result.is_error,
-                            **_sa_timing,
-                        }
-                    )
-
             # Phase 3: record results into conversation in original order,
             # build logged/real lists, and publish completed events.
             for tc in tool_calls[:executed_in_batch]:
@@ -2933,8 +2638,6 @@ class AgentLoop(NodeProtocol):
                     "ask_user",
                     "ask_user_multiple",
                     "escalate",
-                    "delegate_to_sub_agent",
-                    "report_to_parent",
                 ):
                     tool_entry = {
                         "tool_use_id": tc.tool_use_id,
@@ -3053,7 +2756,7 @@ class AgentLoop(NodeProtocol):
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
-                    reported_to_parent,
+                    False,
                 )
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
@@ -3087,7 +2790,7 @@ class AgentLoop(NodeProtocol):
                     queen_input_requested,
                     final_system_prompt,
                     final_messages,
-                    reported_to_parent,
+                    False,
                 )
 
             # Tool calls processed -- loop back to stream with updated conversation
@@ -3138,7 +2841,7 @@ class AgentLoop(NodeProtocol):
     ) -> JudgeVerdict:
         """Evaluate the current state. Delegates to judge_pipeline module."""
         return await judge_turn(
-            mark_complete_flag=self._mark_complete_flag,
+            mark_complete_flag=False,
             judge=self._judge,
             ctx=ctx,
             conversation=conversation,

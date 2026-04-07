@@ -1861,12 +1861,12 @@ def register_queen_lifecycle_tools(
     # Explicit user confirmation is required before transitioning from planning
     # to building. This tool records that confirmation and proceeds.
 
-    async def confirm_and_build() -> str:
-        """Confirm the draft and transition from planning to building phase.
+    async def confirm_and_build(*, agent_name: str | None = None) -> str:
+        """Confirm the draft, create agent directory, and transition to building.
 
         This tool should ONLY be called after the user has explicitly approved
-        the draft graph design via ask_user. It gates the planning→building
-        transition so the user always has a chance to review before code is written.
+        the draft graph design via ask_user. It creates the agent directory and
+        transitions to BUILDING phase. The queen then writes agent.json directly.
         """
         if phase_state is None:
             return json.dumps({"error": "Phase state not available."})
@@ -1904,7 +1904,10 @@ def register_queen_lifecycle_tools(
 
         # Create agent folder early so flowchart and agent_path are available
         # throughout the entire BUILDING phase.
-        _agent_name = phase_state.draft_graph.get("agent_name", "").strip()
+        _agent_name = (
+            agent_name
+            or phase_state.draft_graph.get("agent_name", "").strip()
+        )
         if _agent_name:
             _agent_folder = Path("exports") / _agent_name
             _agent_folder.mkdir(parents=True, exist_ok=True)
@@ -1937,20 +1940,30 @@ def register_queen_lifecycle_tools(
                 f"{subagent_count} sub-agent node(s) dissolved into predecessor sub_agents"
             )
 
+        # Transition to BUILDING phase
+        await phase_state.switch_to_building(source="tool")
+        _update_meta_json(
+            session_manager, manager_session_id, {"phase": "building"}
+        )
+        phase_state.build_confirmed = False
+
+        # No injection here -- the return message tells the queen what to do.
+        # Injecting would queue a BUILDING message that drains AFTER the queen
+        # may have already moved to STAGING via load_built_agent.
+
         return json.dumps(
             {
                 "status": "confirmed",
-                "agent_name": phase_state.draft_graph.get("agent_name", ""),
+                "phase": "building",
+                "agent_name": _agent_name,
+                "agent_path": f"exports/{_agent_name}",
                 "planning_nodes_dissolved": dissolved_count,
-                "decision_nodes_dissolved": decision_count,
-                "subagent_nodes_dissolved": subagent_count,
                 "flowchart_map": fmap,
                 "message": (
-                    "User has confirmed the design. "
+                    "Design confirmed and directory created. "
                     + ("; ".join(dissolution_parts) + ". " if dissolution_parts else "")
-                    + "Now call initialize_and_build_agent(agent_name, nodes) to scaffold the "
-                    "agent package and start building. The draft metadata will be "
-                    "used to pre-populate the generated files."
+                    + f"Now write the complete agent config to exports/{_agent_name}/agent.json "
+                    "using write_file(). Include all system prompts, tools, edges, and goal."
                 ),
             }
         )
@@ -1958,179 +1971,29 @@ def register_queen_lifecycle_tools(
     _confirm_tool = Tool(
         name="confirm_and_build",
         description=(
-            "Confirm the draft graph design and approve transition to building phase. "
+            "Confirm the draft graph design, create agent directory, and transition to building phase. "
             "ONLY call this after the user has explicitly approved the design via ask_user. "
-            "After confirmation, call initialize_and_build_agent() to scaffold and build."
+            "After confirmation, write the complete agent.json using write_file()."
         ),
-        parameters={"type": "object", "properties": {}},
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_name": {
+                    "type": "string",
+                    "description": "Snake_case name for the agent (e.g. 'linkedin_outreach'). "
+                    "If omitted, uses the name from save_agent_draft().",
+                },
+            },
+        },
     )
     registry.register(
         "confirm_and_build",
         _confirm_tool,
-        lambda inputs: confirm_and_build(),
+        lambda inputs: confirm_and_build(
+            agent_name=inputs.get("agent_name"),
+        ),
     )
     tools_registered += 1
-
-    # --- initialize_and_build_agent wrapper (Planning → Building) -------------
-    # With agent_name: scaffold a new agent via MCP tool, then switch to building.
-    # Without agent_name: just switch to building (for fixing an existing loaded agent).
-
-    _existing_init = registry._tools.get("initialize_and_build_agent")
-    if _existing_init is not None:
-        _orig_init_executor = _existing_init.executor
-
-        async def initialize_and_build_agent_wrapper(inputs: dict) -> str:
-            """Wrapper: scaffold or just switch to building phase."""
-            agent_name = (inputs.get("agent_name") or "").strip()
-
-            # Gate: when in planning phase and creating a new agent,
-            # require the user to have confirmed the draft first.
-            if (
-                agent_name
-                and phase_state is not None
-                and phase_state.phase == "planning"
-                and not phase_state.build_confirmed
-            ):
-                if phase_state.draft_graph is None:
-                    return json.dumps(
-                        {
-                            "error": (
-                                "Cannot transition to building without a draft. "
-                                "Call save_agent_draft() first to create a visual draft of the "
-                                "graph, present it to the user for review, then call "
-                                "confirm_and_build() after the user approves."
-                            )
-                        }
-                    )
-                return json.dumps(
-                    {
-                        "error": (
-                            "The user has not confirmed the draft design yet. "
-                            "Present the draft to the user and call ask_user() to get "
-                            "their approval. Then call confirm_and_build() before "
-                            "calling initialize_and_build_agent()."
-                        )
-                    }
-                )
-
-            # No agent_name → try to fall back to the session's current agent,
-            # or fail with actionable guidance.
-            if not agent_name:
-                # Try to resolve agent_name from the current session
-                fallback_path = getattr(session, "worker_path", None)
-                if fallback_path is not None:
-                    agent_name = Path(fallback_path).name
-                else:
-                    # Server path: check SessionManager
-                    if session_manager is not None and manager_session_id:
-                        srv_session = session_manager.get_session(manager_session_id)
-                        if srv_session and getattr(srv_session, "worker_path", None):
-                            fallback_path = srv_session.worker_path
-                            agent_name = Path(fallback_path).name
-
-                if not agent_name:
-                    return json.dumps(
-                        {
-                            "error": (
-                                "No agent_name provided and no agent loaded in this session. "
-                                "To fix: call list_agents() to find the agent name, then call "
-                                "initialize_and_build_agent(agent_name='<name>') to scaffold it."
-                            )
-                        }
-                    )
-
-                # Fall back succeeded — switch to building without scaffolding
-                logger.info(
-                    "initialize_and_build_agent: no agent_name provided, "
-                    "falling back to session agent '%s'",
-                    agent_name,
-                )
-                if phase_state is not None:
-                    if fallback_path:
-                        phase_state.agent_path = str(fallback_path)
-                    await phase_state.switch_to_building(source="tool")
-                    _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
-                    if phase_state.inject_notification:
-                        await phase_state.inject_notification(
-                            "[PHASE CHANGE] Switched to BUILDING phase. "
-                            "Start implementing the fix now."
-                        )
-                return json.dumps(
-                    {
-                        "status": "editing",
-                        "phase": "building",
-                        "agent_name": agent_name,
-                        "warning": (
-                            f"No agent_name provided — using session agent '{agent_name}'. "
-                            f"Agent files are at exports/{agent_name}/."
-                        ),
-                        "message": (
-                            "Switched to BUILDING phase. Full coding tools restored. "
-                            "Implement the fix, then call load_built_agent(path) to reload."
-                        ),
-                    }
-                )
-
-            # Has agent_name → scaffold via MCP tool.
-            # If a draft exists, pass its metadata so the scaffolder can
-            # pre-populate descriptions, goals, and node metadata.
-            scaffold_inputs = dict(inputs)
-            draft = phase_state.draft_graph if phase_state else None
-            if draft and draft.get("agent_name") == agent_name:
-                scaffold_inputs["_draft"] = draft
-
-            result = _orig_init_executor(scaffold_inputs)
-            # Handle both sync and async executors
-            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
-                result = await result
-            # If result is a ToolResult, extract the text content
-            result_str = str(result)
-            if hasattr(result, "content"):
-                result_str = str(result.content)
-            try:
-                parsed = json.loads(result_str)
-                if parsed.get("success", True):
-                    if phase_state is not None:
-                        # Set agent_path so the frontend can query credentials
-                        phase_state.agent_path = phase_state.agent_path or str(
-                            Path("exports") / agent_name
-                        )
-                        await phase_state.switch_to_building(source="tool")
-                        _update_meta_json(
-                            session_manager, manager_session_id, {"phase": "building"}
-                        )
-                        # Reset draft state after successful scaffolding
-                        phase_state.build_confirmed = False
-                        # Persist flowchart now that the agent folder exists
-                        if phase_state.original_draft_graph and phase_state.flowchart_map:
-                            _save_flowchart_file(
-                                Path("exports") / agent_name,
-                                phase_state.original_draft_graph,
-                                phase_state.flowchart_map,
-                            )
-                        # Inject a continuation message so the queen starts
-                        # building immediately instead of blocking for user input.
-                        draft_hint = ""
-                        if draft:
-                            draft_hint = (
-                                " The draft metadata has been used to pre-populate "
-                                "node descriptions, goal, and success criteria. "
-                                "Review and refine the generated files."
-                            )
-                        if phase_state.inject_notification:
-                            await phase_state.inject_notification(
-                                "[PHASE CHANGE] Agent scaffolded and switched to BUILDING phase. "
-                                "Start implementing the agent nodes now." + draft_hint
-                            )
-            except (json.JSONDecodeError, KeyError, TypeError):
-                pass
-            return result_str
-
-        registry.register(
-            "initialize_and_build_agent",
-            _existing_init.tool,
-            lambda inputs: initialize_and_build_agent_wrapper(inputs),
-        )
 
     # --- stop_graph (Running → Staging) --------------------------------------
 

@@ -38,22 +38,58 @@ class PipelineRunner:
     async def initialize_all(self) -> None:
         """Call ``initialize`` on every registered stage."""
         for stage in self._stages:
+            name = stage.__class__.__name__
+            logger.info("[pipeline] Initializing %s (order=%d)", name, stage.order)
             await stage.initialize()
+            logger.info("[pipeline] %s initialized", name)
+        if self._stages:
+            logger.info(
+                "[pipeline] Ready: %d stages [%s]",
+                len(self._stages),
+                " -> ".join(s.__class__.__name__ for s in self._stages),
+            )
 
     async def run(self, ctx: PipelineContext) -> PipelineContext:
         """Run all stages.  Raises ``PipelineRejectedError`` on rejection.
 
         Returns the (possibly transformed) context.
         """
+        if not self._stages:
+            return ctx
+        import time
+
+        pipeline_start = time.perf_counter()
+        logger.info(
+            "[pipeline] Running %d stages for entry_point=%s",
+            len(self._stages),
+            ctx.entry_point_id,
+        )
         for stage in self._stages:
-            result = await stage.process(ctx)
             stage_name = stage.__class__.__name__
+            t0 = time.perf_counter()
+            result = await stage.process(ctx)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
             if result.action == "reject":
                 reason = result.rejection_reason or "(no reason given)"
-                logger.warning("Pipeline rejected by %s: %s", stage_name, reason)
+                logger.warning(
+                    "[pipeline] REJECTED by %s (%.1fms): %s",
+                    stage_name, elapsed_ms, reason,
+                )
                 raise PipelineRejectedError(stage_name, reason)
-            if result.action == "transform" and result.input_data is not None:
-                ctx.input_data = result.input_data
+            if result.action == "transform":
+                logger.info(
+                    "[pipeline] %s TRANSFORMED input (%.1fms)",
+                    stage_name, elapsed_ms,
+                )
+                if result.input_data is not None:
+                    ctx.input_data = result.input_data
+            else:
+                logger.info(
+                    "[pipeline] %s passed (%.1fms)",
+                    stage_name, elapsed_ms,
+                )
+        total_ms = (time.perf_counter() - pipeline_start) * 1000
+        logger.info("[pipeline] Complete (%.1fms total)", total_ms)
         return ctx
 
     async def run_post(self, ctx: PipelineContext, result: Any) -> Any:

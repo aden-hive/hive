@@ -1267,13 +1267,81 @@ class AgentLoader:
         os.environ["HIVE_AGENT_NAME"] = agent_path.name
         os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)
 
-        # Auto-discover MCP servers from mcp_servers.json
+        # Load MCP servers: prefer agent.json mcp_servers refs -> global registry
+        # Fallback to mcp_servers.json if it exists (legacy)
         mcp_config_path = agent_path / "mcp_servers.json"
-        if mcp_config_path.exists():
+        agent_json_path = agent_path / "agent.json"
+
+        logger.info(
+            "MCP loading: agent_json=%s, mcp_json=%s",
+            agent_json_path.exists(),
+            mcp_config_path.exists(),
+        )
+
+        mcp_loaded = False
+        # 1. From agent.json mcp_servers field (resolved via global registry)
+        if agent_json_path.exists():
+            try:
+                import json as _json
+
+                agent_data = _json.loads(agent_json_path.read_text(encoding="utf-8"))
+                server_refs = agent_data.get("mcp_servers", [])
+                if server_refs:
+                    names = [ref["name"] for ref in server_refs if ref.get("name")]
+                    if names:
+                        from framework.loader.mcp_registry import MCPRegistry
+
+                        registry = MCPRegistry()
+                        configs = registry.resolve_for_agent(include=names)
+                        if configs:
+                            self._tool_registry.load_registry_servers(configs)
+                            mcp_loaded = True
+                            logger.info(
+                                "Loaded %d MCP servers from registry: %s",
+                                len(configs),
+                                names,
+                            )
+            except Exception:
+                logger.warning("Failed to load MCP servers from agent.json refs", exc_info=True)
+
+        # 2. Legacy: mcp_servers.json file
+        if not mcp_loaded and mcp_config_path.exists():
             self._load_mcp_servers_from_config(mcp_config_path)
+            mcp_loaded = True
+
+        # 3. Fallback: load all servers from global registry
+        if not mcp_loaded:
+            try:
+                from framework.loader.mcp_registry import MCPRegistry
+
+                registry = MCPRegistry()
+                configs = registry.resolve_for_agent(profile="all")
+                if configs:
+                    self._tool_registry.load_registry_servers(configs)
+                    logger.info(
+                        "Loaded %d MCP servers from global registry (fallback)",
+                        len(configs),
+                    )
+            except Exception:
+                logger.warning("Failed to load MCP servers from global registry", exc_info=True)
 
         # Auto-discover registry-selected MCP servers from mcp_registry.json
         self._load_registry_mcp_servers(agent_path)
+
+        # Summary: how many tools were loaded from MCP servers?
+        _all_tools = self._tool_registry.get_tools()
+        logger.info(
+            "MCP loading complete: %d tools from tool registry",
+            len(_all_tools),
+        )
+        if not _all_tools:
+            logger.warning(
+                "ZERO tools loaded from MCP servers. Workers will only have "
+                "synthetic tools (set_output, escalate). Check: "
+                "1) agent.json mcp_servers field, "
+                "2) ~/.hive/mcp_registry/installed.json, "
+                "3) MCP server process startup."
+            )
 
     @staticmethod
     def _import_agent_module(agent_path: Path):

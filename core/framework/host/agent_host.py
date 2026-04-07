@@ -809,7 +809,12 @@ class AgentHost:
 
             self._running = True
             self._timers_paused = False
-            logger.info(f"AgentHost started with {len(self._streams)} streams")
+            n_stages = len(self._pipeline.stages)
+            logger.info(
+                "AgentHost started with %d streams, %d pipeline stages",
+                len(self._streams),
+                n_stages,
+            )
 
     async def stop(self) -> None:
         """Stop the agent runtime and all streams."""

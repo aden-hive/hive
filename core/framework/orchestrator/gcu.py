@@ -1,33 +1,13 @@
-"""GCU (browser automation) node type constants.
+"""Browser automation best-practices prompt.
 
-A ``gcu`` node is an ``event_loop`` node with two automatic enhancements:
-1. A canonical browser best-practices system prompt is prepended.
-2. All tools from the GCU MCP server are auto-included.
+This module provides ``GCU_BROWSER_SYSTEM_PROMPT`` -- a canonical set of
+browser automation guidelines that can be included in any node's system
+prompt that uses browser tools from the gcu-tools MCP server.
 
-No new ``NodeProtocol`` subclass — the ``gcu`` type is purely a declarative
-signal processed by the runner and executor at setup time.
+Browser tools are registered via the global MCP registry (gcu-tools).
+Nodes that need browser access declare ``tools: {policy: "all"}`` in their
+agent.json config.
 """
-
-# ---------------------------------------------------------------------------
-# MCP server identity
-# ---------------------------------------------------------------------------
-
-GCU_SERVER_NAME = "gcu-tools"
-"""Name used to identify the GCU MCP server in ``mcp_servers.json``."""
-
-GCU_MCP_SERVER_CONFIG: dict = {
-    "name": GCU_SERVER_NAME,
-    "transport": "stdio",
-    "command": "uv",
-    "args": ["run", "python", "-m", "gcu.server", "--stdio"],
-    "cwd": "../../tools",
-    "description": "GCU tools for browser automation",
-}
-"""Default stdio config for the GCU MCP server (relative to exports/<agent>/)."""
-
-# ---------------------------------------------------------------------------
-# Browser best-practices system prompt
-# ---------------------------------------------------------------------------
 
 GCU_BROWSER_SYSTEM_PROMPT = """\
 # Browser Automation Best Practices

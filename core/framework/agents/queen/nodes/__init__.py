@@ -81,7 +81,6 @@ _QUEEN_PLANNING_TOOLS = [
     "save_agent_draft",
     "confirm_and_build",
     # Scaffold + transition to building (requires confirm_and_build first)
-    "initialize_and_build_agent",
     # Load existing agent (after user confirms)
     "load_built_agent",
     "save_global_memory",
@@ -187,14 +186,18 @@ When designing worker nodes or writing worker system prompts, reference these \
 tool names — NOT the coder-tools names (read_file, write_file, etc.).
 
 Worker data tools (for large results and spillover):
-- save_data(filename, data, data_dir) — save data to a file for later retrieval
-- load_data(filename, data_dir, offset_bytes?, limit_bytes?) — load data \
-with byte-based pagination
-- list_data_files(data_dir) — list available data files
-- append_data(filename, data, data_dir) — append to a file incrementally
-- edit_data(filename, old_text, new_text, data_dir) — find-and-replace in a data file
-- serve_file_to_user(filename, data_dir, label?, open_in_browser?) — \
-generate a clickable file URI for the user
+Worker data tools (from files-tools MCP server):
+- read_file(path) — read a file
+- write_file(path, content) — write/create a file
+- list_files(path) — list directory contents
+- search_files(pattern, path) — regex search in files
+
+Worker data tools (from hive-tools MCP server):
+- csv_read, csv_write, csv_append — CSV operations
+- pdf_read — read PDF files
+
+All tools are registered in the global MCP registry (~/.hive/mcp_registry/). \
+Workers get tools from: hive-tools, gcu-tools, files-tools.
 
 IMPORTANT: Do NOT tell workers to use read_file, write_file, edit_file, \
 search_files, or list_directory — those are YOUR tools, not theirs.
@@ -209,7 +212,7 @@ _planning_knowledge = """\
 # Core Mandates (Planning)
 - **DO NOT propose a complete goal on your own.** Instead, \
 collaborate with the user to define it.
-- **NEVER call `initialize_and_build_agent` without explicit user approval.** \
+- **NEVER call `confirm_and_build` without explicit user approval.** \
 Present the full design first and wait for the user to confirm before building.
 - **Discover tools dynamically.** NEVER reference tools from static \
 docs. Always run list_agent_tools() to see what actually exists.
@@ -384,14 +387,14 @@ You MUST get explicit user approval before ANY code is generated.
 2. **WAIT for user response.** Do NOT proceed without it.
 3. Handle the response:
    - If **Approve / Proceed**: Call confirm_and_build(), then \
-   initialize_and_build_agent(agent_name, nodes)
+   confirm_and_build(agent_name)
    - If **Adjust scope**: Discuss changes, update the draft with \
    save_agent_draft() again, and re-ask
    - If **More questions**: Answer them honestly, then ask again
    - If **Reconsider**: Discuss alternatives. If they decide to proceed, \
    that's their informed choice
 
-**NEVER call initialize_and_build_agent without first calling \
+**NEVER call confirm_and_build without first calling \
 confirm_and_build().** The system will block the transition if you try.
 """
 
@@ -450,28 +453,35 @@ When a user says "my agent is failing" or "debug this agent":
 ## 5. Implement
 
 **You should only reach this step after the user has approved the draft design \
-in the planning phase. The draft metadata will pre-populate descriptions, \
-goals, success criteria, and node metadata in the generated files.**
+and you have called `confirm_and_build(agent_name="my_agent")`.**
 
-Call `initialize_and_build_agent(agent_name, nodes)` to generate the agent. \
-The agent_name must be snake_case (e.g., "my_agent"). Pass node names \
-as comma-separated string (e.g., "gather,process,review").
+`confirm_and_build` created the agent directory at `exports/{name}/`. \
+Now write the complete agent config directly:
 
-The tool creates a **declarative** agent as two files:
-- `agent.json` — the entire agent definition (goal, nodes, edges, prompts, tools)
-- `mcp_servers.json` — tool server config (auto-generated)
+```
+write_file("exports/{name}/agent.json", <complete JSON config>)
+```
 
-**There are NO Python files.** No agent.py, config.py, nodes/__init__.py, \
-__init__.py, or __main__.py. The framework loads agent.json directly.
+The agent.json must include ALL of these in one write:
+- `name`, `version`, `description`
+- `goal` with `description`, `success_criteria`, `constraints`
+- `identity_prompt` (agent-level behavior)
+- `nodes` — each with `id`, `description`, `system_prompt`, `tools`, \
+`input_keys`, `output_keys`, `success_criteria`
+- `edges` — connecting all nodes with proper conditions
+- `entry_node`, `terminal_nodes`
+- `mcp_servers` — reference by name: `[{"name": "hive-tools"}, {"name": "gcu-tools"}]`
+- `loop_config` — `max_iterations`, `max_context_tokens`
 
-### Customizing the generated agent
+**Write the COMPLETE config in one `write_file` call. No TODOs, no placeholders.** \
+The queen writes final production-ready system prompts directly.
 
-Use `edit_file` on `exports/{name}/agent.json` to customize TODO placeholders:
-- System prompts (in each node's `system_prompt:` field)
-- Tool access (in each node's `tools:` field — use `policy: explicit` with `allowed: [...]`)
-- Input/output keys, success criteria, goal description
-- Identity prompt (top-level `identity_prompt:` field)
-- Edge conditions and routing
+**There are NO Python files.** The framework loads agent.json directly.
+
+MCP servers are loaded from the global registry by name. Available servers:
+- `hive-tools` — web search, email, CRM, calendar, 100+ integrations
+- `gcu-tools` — browser automation (click, type, navigate, screenshot)
+- `files-tools` — file I/O (read, write, edit, search, list)
 
 **Template variables:** Add a `variables:` section at the top of agent.json \
 and use `{{variable_name}}` in system prompts for config injection:
@@ -491,7 +501,7 @@ Each node declares its tool access policy:
 # Explicit list (recommended)
 tools:
   policy: explicit
-  allowed: [web_search, save_data]
+  allowed: [web_search, write_file]
 
 # All tools (for browser automation nodes)
 tools:
@@ -507,7 +517,7 @@ tools:
 Call `validate_agent_package("{name}")` after initialization. \
 It runs structural checks (class validation, graph validation, tool \
 validation, tests) and returns a consolidated result. If anything \
-fails: read the error, fix with edit_file, re-validate. Up to 3x.
+fails: read the error, fix with read_file+write_file, re-validate. Up to 3x.
 
 When validation passes, immediately call \
 `load_built_agent("exports/{name}")` to load the agent into the \
@@ -616,7 +626,7 @@ hexagons — connect them as leaf nodes to their parent.
 - confirm_and_build() — Record user confirmation of the draft. Dissolves \
 planning-only nodes (decision → predecessor criteria; browser/GCU → \
 approves via ask_user.
-- initialize_and_build_agent(agent_name?, nodes?) — Scaffold the agent package \
+- confirm_and_build(agent_name) — Scaffold the agent package \
 and transition to BUILDING phase. For new agents, this REQUIRES \
 save_agent_draft() + confirm_and_build() first. The draft metadata is used to \
 pre-populate the generated files. Without agent_name: transition to BUILDING \
@@ -634,8 +644,8 @@ cross-queen memory about the user only (profile, preferences, environment, feedb
 2. Call save_agent_draft() to create visual draft → present to user
 3. Call ask_user() to get explicit approval
 4. Call confirm_and_build() to record approval
-5. Call initialize_and_build_agent() to scaffold and start building
-For diagnosis of existing agents, call initialize_and_build_agent() \
+5. Call confirm_and_build() to scaffold and start building
+For diagnosis of existing agents, call confirm_and_build() \
 (no args) after agreeing on a fix plan with the user.
 """
 
@@ -878,7 +888,7 @@ that changes the structure, call save_agent_draft() again so they see the \
 update in real-time. The flowchart is a live collaboration tool.
 8. When the design is stable, use ask_user to get explicit approval
 9. Call confirm_and_build() after the user approves
-10. Call initialize_and_build_agent(agent_name, nodes) to scaffold and start building
+10. Call confirm_and_build(agent_name) to scaffold and start building
 
 **The flowchart is your shared whiteboard.** Don't describe changes in text \
 and then ask "should I update the draft?" — just update it. If the user says \
@@ -889,7 +899,7 @@ see every structural change reflected in the visualizer as you discuss it.
 **CRITICAL: Planning → Building boundary.** You MUST get explicit user \
 confirmation before moving to building. The sequence is:
   save_agent_draft() → iterate with user → ask_user() → confirm_and_build() → \
-  initialize_and_build_agent()
+  confirm_and_build()
 Skipping any of these steps will be blocked by the system.
 
 Remember: DO NOT write or edit any files yet. This is a read-only exploration \
@@ -905,7 +915,7 @@ your priority is diagnosis, not new design:
 2. Summarize the root cause to the user
 3. Propose a fix plan (what to change, what behavior to adjust)
 4. Get user approval via ask_user
-5. Call initialize_and_build_agent() (no args) to transition to building and implement the fix
+5. Call confirm_and_build() (no args) to transition to building and implement the fix
 
 Do NOT start the full discovery workflow (tool discovery, gap analysis) in \
 diagnosis mode — you already have a built agent, you just need to fix it.
@@ -1240,7 +1250,7 @@ _queen_tools_docs = (
     + "\n\n### Phase transitions\n"
     "- save_agent_draft(...) → creates visual-only draft graph (stays in PLANNING)\n"
     "- confirm_and_build() → records user approval of draft (stays in PLANNING)\n"
-    "- initialize_and_build_agent(agent_name?, nodes?) → scaffolds package + switches to "
+    "- confirm_and_build(agent_name) → scaffolds package + switches to "
     "BUILDING (requires draft + confirmation for new agents)\n"
     "- replan_agent() → switches back to PLANNING phase (only when user explicitly requests)\n"
     "- load_built_agent(path) → switches to STAGING phase\n"
