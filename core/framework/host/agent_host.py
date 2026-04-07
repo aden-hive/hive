@@ -351,7 +351,12 @@ class AgentHost:
             # Start storage
             await self._storage.start()
 
-            # Create streams for each entry point
+            # Initialize pipeline stages FIRST -- they inject LLM, tools,
+            # credentials, and skills into the host before streams are created.
+            await self._pipeline.initialize_all()
+            self._apply_pipeline_results()
+
+            # Create streams for each entry point (uses pipeline results)
             for ep_id, spec in self._entry_points.items():
                 stream = ExecutionManager(
                     stream_id=ep_id,
@@ -804,9 +809,6 @@ class AgentHost:
             # Start skill hot-reload watcher (no-op if watchfiles not installed)
             await self._skills_manager.start_watching()
 
-            # Initialize pipeline stages (one-time setup)
-            await self._pipeline.initialize_all()
-
             self._running = True
             self._timers_paused = False
             n_stages = len(self._pipeline.stages)
@@ -898,6 +900,49 @@ class AgentHost:
 
         # Primary graph (also stored in self._streams)
         return self._streams.get(entry_point_id)
+
+    def _apply_pipeline_results(self) -> None:
+        """Extract tools/LLM/credentials/skills from pipeline stages.
+
+        Called after ``pipeline.initialize_all()`` so stages have finished
+        their async setup (MCP connected, skills discovered, etc.).
+        The host reads stage properties and updates its own state.
+        """
+        for stage in self._pipeline.stages:
+            stage_name = stage.__class__.__name__
+
+            # McpRegistryStage -> tools
+            if hasattr(stage, "tool_registry") and stage.tool_registry is not None:
+                tools = list(stage.tool_registry.get_tools().values())
+                executor = stage.tool_registry.get_executor()
+                if tools:
+                    self._tools = tools
+                    self._tool_executor = executor
+                    logger.info(
+                        "Pipeline injected %d tools from %s",
+                        len(tools), stage_name,
+                    )
+
+            # LlmProviderStage -> LLM
+            if hasattr(stage, "llm") and stage.llm is not None:
+                if self._llm is None:
+                    self._llm = stage.llm
+                    logger.info(
+                        "Pipeline injected LLM from %s", stage_name,
+                    )
+
+            # CredentialResolverStage -> accounts
+            if hasattr(stage, "accounts_prompt") and stage.accounts_prompt:
+                self._accounts_prompt = stage.accounts_prompt
+                self._accounts_data = getattr(stage, "accounts_data", None)
+                self._tool_provider_map = getattr(
+                    stage, "tool_provider_map", None,
+                )
+
+            # SkillRegistryStage -> skills manager
+            if hasattr(stage, "skills_manager") and stage.skills_manager is not None:
+                self._skills_manager = stage.skills_manager
+
 
     @staticmethod
     def _load_pipeline_from_config():
@@ -1917,6 +1962,7 @@ def create_agent_runtime(
     skills_catalog_prompt: str = "",
     protocols_prompt: str = "",
     skill_dirs: list[str] | None = None,
+    pipeline_stages: "list[PipelineStage] | None" = None,
 ) -> AgentHost:
     """
     Create and configure an AgentHost with entry points.
@@ -1980,6 +2026,7 @@ def create_agent_runtime(
         skills_catalog_prompt=skills_catalog_prompt,
         protocols_prompt=protocols_prompt,
         skill_dirs=skill_dirs,
+        pipeline_stages=pipeline_stages,
     )
 
     for spec in entry_points:

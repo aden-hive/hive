@@ -1267,82 +1267,7 @@ class AgentLoader:
         os.environ["HIVE_AGENT_NAME"] = agent_path.name
         os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)
 
-        # Load MCP servers: prefer agent.json mcp_servers refs -> global registry
-        # Fallback to mcp_servers.json if it exists (legacy)
-        mcp_config_path = agent_path / "mcp_servers.json"
-        agent_json_path = agent_path / "agent.json"
-
-        logger.info(
-            "MCP loading: agent_json=%s, mcp_json=%s",
-            agent_json_path.exists(),
-            mcp_config_path.exists(),
-        )
-
-        mcp_loaded = False
-        # 1. From agent.json mcp_servers field (resolved via global registry)
-        if agent_json_path.exists():
-            try:
-                import json as _json
-
-                agent_data = _json.loads(agent_json_path.read_text(encoding="utf-8"))
-                server_refs = agent_data.get("mcp_servers", [])
-                if server_refs:
-                    names = [ref["name"] for ref in server_refs if ref.get("name")]
-                    if names:
-                        from framework.loader.mcp_registry import MCPRegistry
-
-                        registry = MCPRegistry()
-                        configs = registry.resolve_for_agent(include=names)
-                        if configs:
-                            self._tool_registry.load_registry_servers(configs)
-                            mcp_loaded = True
-                            logger.info(
-                                "Loaded %d MCP servers from registry: %s",
-                                len(configs),
-                                names,
-                            )
-            except Exception:
-                logger.warning("Failed to load MCP servers from agent.json refs", exc_info=True)
-
-        # 2. Legacy: mcp_servers.json file
-        if not mcp_loaded and mcp_config_path.exists():
-            self._load_mcp_servers_from_config(mcp_config_path)
-            mcp_loaded = True
-
-        # 3. Fallback: load all servers from global registry
-        if not mcp_loaded:
-            try:
-                from framework.loader.mcp_registry import MCPRegistry
-
-                registry = MCPRegistry()
-                configs = registry.resolve_for_agent(profile="all")
-                if configs:
-                    self._tool_registry.load_registry_servers(configs)
-                    logger.info(
-                        "Loaded %d MCP servers from global registry (fallback)",
-                        len(configs),
-                    )
-            except Exception:
-                logger.warning("Failed to load MCP servers from global registry", exc_info=True)
-
-        # Auto-discover registry-selected MCP servers from mcp_registry.json
-        self._load_registry_mcp_servers(agent_path)
-
-        # Summary: how many tools were loaded from MCP servers?
-        _all_tools = self._tool_registry.get_tools()
-        logger.info(
-            "MCP loading complete: %d tools from tool registry",
-            len(_all_tools),
-        )
-        if not _all_tools:
-            logger.warning(
-                "ZERO tools loaded from MCP servers. Workers will only have "
-                "synthetic tools (set_output, escalate). Check: "
-                "1) agent.json mcp_servers field, "
-                "2) ~/.hive/mcp_registry/installed.json, "
-                "3) MCP server process startup."
-            )
-
+        # MCP tools are loaded by McpRegistryStage in the pipeline during AgentHost.start()
     @staticmethod
     def _import_agent_module(agent_path: Path):
         """Import an agent package from its directory path.
@@ -1695,228 +1620,148 @@ class AgentLoader:
         self._approval_callback = callback
 
     def _setup(self, event_bus=None) -> None:
-        """Set up runtime, LLM, and executor."""
-        # Configure structured logging (auto-detects JSON vs human-readable)
+        """Set up runtime via pipeline stages.
+
+        Builds a pipeline with the default stages (LLM, credentials, MCP,
+        skills) and passes it to AgentHost.  The stages initialize during
+        ``AgentHost.start()`` and inject tools/LLM/credentials/skills.
+        """
         from framework.observability import configure_logging
+        from framework.pipeline.stages.credential_resolver import CredentialResolverStage
+        from framework.pipeline.stages.llm_provider import LlmProviderStage
+        from framework.pipeline.stages.mcp_registry import McpRegistryStage
+        from framework.pipeline.stages.skill_registry import SkillRegistryStage
+        from framework.skills.config import SkillsConfig
 
         configure_logging(level="INFO", format="auto")
 
-        # Set up session context for tools (agent_id)
+        # Set up session context for tools
         agent_id = self.graph.id or "unknown"
+        self._tool_registry.set_session_context(agent_id=agent_id)
 
-        self._tool_registry.set_session_context(
-            agent_id=agent_id,
-        )
+        # Read MCP server refs from agent.json
+        mcp_refs = []
+        agent_json = self.agent_path / "agent.json"
+        if agent_json.exists():
+            try:
+                import json as _json
 
-        # Create LLM provider
-        # Uses LiteLLM which auto-detects the provider from model name
-        # Skip if already injected (e.g. worker agents with a pre-built LLM)
-        if self._llm is not None:
-            pass  # LLM already configured externally
-        elif self.mock_mode:
-            # Use mock LLM for testing without real API calls
-            from framework.llm.mock import MockLLMProvider
+                data = _json.loads(agent_json.read_text(encoding="utf-8"))
+                mcp_refs = data.get("mcp_servers", [])
+            except Exception:
+                pass
 
-            self._llm = MockLLMProvider(model=self.model)
-        else:
-            from framework.llm.litellm import LiteLLMProvider
-
-            # Check if a subscription mode is configured
-            config = get_hive_config()
-            llm_config = config.get("llm", {})
-            use_claude_code = llm_config.get("use_claude_code_subscription", False)
-            use_codex = llm_config.get("use_codex_subscription", False)
-            use_kimi_code = llm_config.get("use_kimi_code_subscription", False)
-            use_antigravity = llm_config.get("use_antigravity_subscription", False)
-            api_base = llm_config.get("api_base")
-
-            api_key = None
-            if use_claude_code:
-                # Get OAuth token from Claude Code subscription
-                api_key = get_claude_code_token()
-                if not api_key:
-                    logger.warning(
-                        "Claude Code subscription configured but no token found. "
-                        "Run 'claude' to authenticate, then try again."
-                    )
-            elif use_codex:
-                # Get OAuth token from Codex subscription
-                api_key = get_codex_token()
-                if not api_key:
-                    logger.warning(
-                        "Codex subscription configured but no token found. "
-                        "Run 'codex' to authenticate, then try again."
-                    )
-            elif use_kimi_code:
-                # Get API key from Kimi Code CLI config (~/.kimi/config.toml)
-                api_key = get_kimi_code_token()
-                if not api_key:
-                    logger.warning(
-                        "Kimi Code subscription configured but no key found. "
-                        "Run 'kimi /login' to authenticate, then try again."
-                    )
-            elif use_antigravity:
-                pass  # AntigravityProvider handles credentials internally
-
-            if api_key and use_claude_code:
-                # Use litellm's built-in Anthropic OAuth support.
-                # The lowercase "authorization" key triggers OAuth detection which
-                # adds the required anthropic-beta and browser-access headers.
-                self._llm = LiteLLMProvider(
-                    model=self.model,
-                    api_key=api_key,
-                    api_base=api_base,
-                    extra_headers={"authorization": f"Bearer {api_key}"},
-                )
-            elif api_key and use_codex:
-                # OpenAI Codex subscription routes through the ChatGPT backend
-                # (chatgpt.com/backend-api/codex/responses), NOT the standard
-                # OpenAI API.  The consumer OAuth token lacks platform API scopes.
-                extra_headers: dict[str, str] = {
-                    "Authorization": f"Bearer {api_key}",
-                    "User-Agent": "CodexBar",
-                }
-                account_id = get_codex_account_id()
-                if account_id:
-                    extra_headers["ChatGPT-Account-Id"] = account_id
-                self._llm = LiteLLMProvider(
-                    model=self.model,
-                    api_key=api_key,
-                    api_base="https://chatgpt.com/backend-api/codex",
-                    extra_headers=extra_headers,
-                    store=False,
-                    allowed_openai_params=["store"],
-                )
-            elif api_key and use_kimi_code:
-                # Kimi Code subscription uses the Kimi coding API (OpenAI-compatible).
-                # The api_base is set automatically by LiteLLMProvider for kimi/ models.
-                self._llm = LiteLLMProvider(
-                    model=self.model,
-                    api_key=api_key,
-                    api_base=api_base,
-                )
-            elif use_antigravity:
-                # Direct OAuth to Google's internal Cloud Code Assist gateway.
-                # No local proxy required — AntigravityProvider handles token
-                # refresh and Gemini-format request/response conversion natively.
-                from framework.llm.antigravity import AntigravityProvider  # noqa: PLC0415
-
-                provider = AntigravityProvider(model=self.model)
-                if not provider.has_credentials():
-                    print(
-                        "Warning: Antigravity credentials not found. "
-                        "Run: uv run python core/antigravity_auth.py auth account add"
-                    )
-                self._llm = provider
-            else:
-                # Local models (e.g. Ollama) don't need an API key
-                if self._is_local_model(self.model):
-                    self._llm = LiteLLMProvider(
-                        model=self.model,
-                        api_base=api_base,
-                    )
-                else:
-                    # Fall back to environment variable
-                    # First check api_key_env_var from config (set by quickstart)
-                    api_key_env = llm_config.get("api_key_env_var") or self._get_api_key_env_var(
-                        self.model
-                    )
-                    if api_key_env and os.environ.get(api_key_env):
-                        self._llm = LiteLLMProvider(
-                            model=self.model,
-                            api_key=os.environ[api_key_env],
-                            api_base=api_base,
-                        )
-                    else:
-                        # Fall back to credential store
-                        api_key = self._get_api_key_from_credential_store()
-                        if api_key:
-                            self._llm = LiteLLMProvider(
-                                model=self.model, api_key=api_key, api_base=api_base
-                            )
-                            # Set env var so downstream code (e.g. cleanup LLM in
-                            # node._extract_json) can also find it
-                            if api_key_env:
-                                os.environ[api_key_env] = api_key
-                        elif api_key_env:
-                            logger.warning(
-                                "%s not set. LLM calls will fail. "
-                                "Set it with: export %s=your-api-key",
-                                api_key_env,
-                                api_key_env,
-                            )
-
-            # Fail fast if the agent needs an LLM but none was configured
-            if self._llm is None:
-                has_llm_nodes = any(
-                    node.node_type in ("event_loop", "gcu") for node in self.graph.nodes
-                )
-                if has_llm_nodes:
-                    from framework.credentials.models import CredentialError
-
-                    if self._is_local_model(self.model):
-                        raise CredentialError(
-                            f"Failed to initialize LLM for local model '{self.model}'. "
-                            f"Ensure your local LLM server is running "
-                            f"(e.g. 'ollama serve' for Ollama)."
-                        )
-                    api_key_env = self._get_api_key_env_var(self.model)
-                    hint = (
-                        f"Set it with: export {api_key_env}=your-api-key"
-                        if api_key_env
-                        else "Configure an API key for your LLM provider."
-                    )
-                    raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
-
-        # Get tools for runtime
-        # (GCU and file tools are now registered via mcp_servers.json or MCP registry,
-        # not auto-registered here. Agents declare them in agent.json.)
-        tools = list(self._tool_registry.get_tools().values())
-        tool_executor = self._tool_registry.get_executor()
-
-        # Collect connected account info for system prompt injection
-        accounts_prompt = ""
-        accounts_data: list[dict] | None = None
-        tool_provider_map: dict[str, str] | None = None
-        try:
-            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
-
-            if self._credential_store is not None:
-                adapter = CredentialStoreAdapter(store=self._credential_store)
-            else:
-                adapter = CredentialStoreAdapter.default()
-            accounts_data = adapter.get_all_account_info()
-            tool_provider_map = adapter.get_tool_provider_map()
-            if accounts_data:
-                from framework.orchestrator.prompting import build_accounts_prompt
-
-                accounts_prompt = build_accounts_prompt(accounts_data, tool_provider_map)
-        except Exception:
-            pass  # Best-effort — agent works without account info
-
-        # Skill configuration — the runtime handles discovery, loading, trust-gating and
-        # prompt rasterization.  The runner just builds the config.
-        from framework.skills.config import SkillsConfig
-        from framework.skills.manager import SkillsManagerConfig
-
-        skills_manager_config = SkillsManagerConfig(
-            skills_config=SkillsConfig.from_agent_vars(
-                default_skills=getattr(self, "_agent_default_skills", None),
-                skills=getattr(self, "_agent_skills", None),
+        # Build default pipeline stages
+        # Default infrastructure stages (always present)
+        pipeline_stages = [
+            LlmProviderStage(
+                model=self.model,
+                mock_mode=self.mock_mode,
+                llm=self._llm,
             ),
-            project_root=self.agent_path,
-            interactive=self._interactive,
+            CredentialResolverStage(
+                credential_store=self._credential_store,
+            ),
+            McpRegistryStage(
+                server_refs=mcp_refs,
+                agent_path=self.agent_path,
+                tool_registry=self._tool_registry,
+            ),
+            SkillRegistryStage(
+                project_root=self.agent_path,
+                interactive=self._interactive,
+                skills_config=SkillsConfig.from_agent_vars(
+                    default_skills=getattr(self, "_agent_default_skills", None),
+                    skills=getattr(self, "_agent_skills", None),
+                ),
+            ),
+        ]
+
+        # Merge user-configured stages from ~/.hive/configuration.json
+        from framework.config import get_hive_config
+        from framework.pipeline.registry import build_pipeline_from_config
+
+        hive_config = get_hive_config()
+        user_stages_config = hive_config.get("pipeline", {}).get("stages", [])
+        if user_stages_config:
+            user_pipeline = build_pipeline_from_config(user_stages_config)
+            pipeline_stages.extend(user_pipeline.stages)
+
+        # Merge agent-level overrides from agent.json pipeline field
+        if agent_json.exists():
+            try:
+                agent_pipeline = (
+                    _json.loads(agent_json.read_text(encoding="utf-8"))
+                    .get("pipeline", {})
+                    .get("stages", [])
+                )
+                if agent_pipeline:
+                    agent_stages = build_pipeline_from_config(agent_pipeline)
+                    pipeline_stages.extend(agent_stages.stages)
+            except Exception:
+                pass
+
+        self._setup_agent_runtime_with_pipeline(
+            pipeline_stages=pipeline_stages,
+            event_bus=event_bus,
         )
 
-        self._setup_agent_runtime(
-            tools,
-            tool_executor,
-            accounts_prompt=accounts_prompt,
-            accounts_data=accounts_data,
-            tool_provider_map=tool_provider_map,
-            event_bus=event_bus,
-            skills_manager_config=skills_manager_config,
+    def _setup_agent_runtime_with_pipeline(
+        self,
+        pipeline_stages: list,
+        event_bus=None,
+    ) -> None:
+        """Create AgentHost with pipeline stages."""
+        from framework.host.execution_manager import EntryPointSpec
+        from framework.orchestrator.checkpoint_config import CheckpointConfig
+
+        entry_points = []
+        if self.graph.entry_node:
+            entry_points.append(
+                EntryPointSpec(
+                    id="default",
+                    name="Default",
+                    entry_node=self.graph.entry_node,
+                    trigger_type="manual",
+                    isolation_level="shared",
+                ),
+            )
+
+        log_store = RuntimeLogStore(
+            base_path=self._storage_path / "runtime_logs",
         )
+        checkpoint_config = CheckpointConfig(
+            enabled=True,
+            checkpoint_on_node_start=False,
+            checkpoint_on_node_complete=True,
+            checkpoint_max_age_days=7,
+            async_checkpoint=True,
+        )
+
+        runtime_config = None
+        if self.runtime_config is not None:
+            from framework.host.agent_host import AgentRuntimeConfig
+
+            if isinstance(self.runtime_config, AgentRuntimeConfig):
+                runtime_config = self.runtime_config
+
+
+        self._agent_runtime = create_agent_runtime(
+            graph=self.graph,
+            goal=self.goal,
+            storage_path=self._storage_path,
+            entry_points=entry_points,
+            llm=None,  # Injected by LlmProviderStage
+            tools=[],  # Injected by McpRegistryStage
+            tool_executor=None,  # Injected by McpRegistryStage
+            runtime_log_store=log_store,
+            checkpoint_config=checkpoint_config,
+            config=runtime_config,
+            graph_id=self.graph.id or self.agent_path.name,
+            event_bus=event_bus,
+            pipeline_stages=pipeline_stages,
+        )
+        self._agent_runtime.intro_message = self.intro_message
 
     def _get_api_key_env_var(self, model: str) -> str | None:
         """Get the environment variable name for the API key based on model name."""
@@ -2008,83 +1853,6 @@ class AgentLoader:
             "llamacpp/",
         )
         return model.lower().startswith(LOCAL_PREFIXES)
-
-    def _setup_agent_runtime(
-        self,
-        tools: list,
-        tool_executor: Callable | None,
-        accounts_prompt: str = "",
-        accounts_data: list[dict] | None = None,
-        tool_provider_map: dict[str, str] | None = None,
-        event_bus=None,
-        skills_catalog_prompt: str = "",
-        protocols_prompt: str = "",
-        skill_dirs: list[str] | None = None,
-        skills_manager_config=None,
-    ) -> None:
-        """Set up multi-entry-point execution using AgentRuntime."""
-        entry_points = []
-
-        # Always create a primary entry point for the graph's entry node.
-        # For multi-entry-point agents this ensures the primary path (e.g.
-        # user-facing rule setup) is reachable alongside async entry points.
-        if self.graph.entry_node:
-            entry_points.insert(
-                0,
-                EntryPointSpec(
-                    id="default",
-                    name="Default",
-                    entry_node=self.graph.entry_node,
-                    trigger_type="manual",
-                    isolation_level="shared",
-                ),
-            )
-
-        # Create AgentRuntime with all entry points
-        log_store = RuntimeLogStore(base_path=self._storage_path / "runtime_logs")
-
-        # Enable checkpointing by default for resumable sessions
-        from framework.orchestrator.checkpoint_config import CheckpointConfig
-
-        checkpoint_config = CheckpointConfig(
-            enabled=True,
-            checkpoint_on_node_start=False,  # Only checkpoint after nodes complete
-            checkpoint_on_node_complete=True,
-            checkpoint_max_age_days=7,
-            async_checkpoint=True,  # Non-blocking
-        )
-
-        # Handle runtime_config - only pass through if it's actually an AgentRuntimeConfig.
-        # Agents may export a RuntimeConfig (LLM settings) or queen-generated custom classes
-        # that would crash AgentRuntime if passed through.
-        runtime_config = None
-        if self.runtime_config is not None:
-            from framework.host.agent_host import AgentRuntimeConfig
-
-            if isinstance(self.runtime_config, AgentRuntimeConfig):
-                runtime_config = self.runtime_config
-
-        self._agent_runtime = create_agent_runtime(
-            graph=self.graph,
-            goal=self.goal,
-            storage_path=self._storage_path,
-            entry_points=entry_points,
-            llm=self._llm,
-            tools=tools,
-            tool_executor=tool_executor,
-            runtime_log_store=log_store,
-            checkpoint_config=checkpoint_config,
-            config=runtime_config,
-            graph_id=self.graph.id or self.agent_path.name,
-            accounts_prompt=accounts_prompt,
-            accounts_data=accounts_data,
-            tool_provider_map=tool_provider_map,
-            event_bus=event_bus,
-            skills_manager_config=skills_manager_config,
-        )
-
-        # Pass intro_message through for TUI display
-        self._agent_runtime.intro_message = self.intro_message
 
     # ------------------------------------------------------------------
     # Execution modes

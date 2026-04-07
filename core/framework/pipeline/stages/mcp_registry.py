@@ -1,21 +1,13 @@
 """MCP registry pipeline stage.
 
 Resolves MCP server references from the agent config against the global
-registry (``~/.hive/mcp_registry/installed.json``) and registers tools.
-Replaces the per-agent ``mcp_servers.json`` pattern with declarative
-name-based references.
-
-Agent config declares servers by name::
-
-    {"mcp_servers": [{"name": "hive-tools"}, {"name": "gcu-tools"}]}
-
-The stage resolves each name from the global registry at ``initialize()``
-time and injects the resolved ``ToolRegistry`` into the pipeline context.
+registry and registers tools. This is the ONLY place MCP tools get loaded.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -27,12 +19,7 @@ logger = logging.getLogger(__name__)
 
 @register("mcp_registry")
 class McpRegistryStage(PipelineStage):
-    """Resolve MCP tools from the global registry.
-
-    On ``initialize()``, connects to MCP servers declared in the agent
-    config.  On ``process()``, injects ``tools`` and ``tool_executor``
-    into the pipeline context metadata for downstream consumption.
-    """
+    """Resolve MCP tools from the global registry."""
 
     order = 50
 
@@ -40,55 +27,66 @@ class McpRegistryStage(PipelineStage):
         self,
         server_refs: list[dict[str, Any]] | None = None,
         agent_path: str | Path | None = None,
+        tool_registry: Any = None,
         **kwargs: Any,
     ) -> None:
-        """
-        Args:
-            server_refs: List of ``{"name": "server-name"}`` dicts from
-                the agent config's ``mcp_servers`` field.
-            agent_path: Path to the agent directory. If a ``mcp_servers.json``
-                file exists there, it's loaded as a fallback.
-        """
         self._server_refs = server_refs or []
         self._agent_path = Path(agent_path) if agent_path else None
-        self._tool_registry: Any = None
+        self._tool_registry = tool_registry
 
     async def initialize(self) -> None:
         """Connect to MCP servers and discover tools."""
+        if self._tool_registry is None:
+            from framework.loader.tool_registry import ToolRegistry
+
+            self._tool_registry = ToolRegistry()
+
         from framework.loader.mcp_registry import MCPRegistry
-        from framework.loader.tool_registry import ToolRegistry
 
-        self._tool_registry = ToolRegistry()
         registry = MCPRegistry()
+        mcp_loaded = False
 
-        # 1. Resolve named server refs from global registry
+        # 1. From agent.json mcp_servers refs
         if self._server_refs:
             names = [ref["name"] for ref in self._server_refs if ref.get("name")]
             if names:
                 configs = registry.resolve_for_agent(include=names)
                 if configs:
-                    self._tool_registry.load_registry_servers(configs)
+                    self._tool_registry.load_registry_servers(
+                        [asdict(c) for c in configs]
+                    )
+                    mcp_loaded = True
                     logger.info(
-                        "McpRegistryStage: resolved %d servers from registry",
+                        "[pipeline] McpRegistryStage: loaded %d servers: %s",
                         len(configs),
+                        names,
                     )
 
-        # 2. Fallback: load mcp_servers.json if it exists (backward compat)
-        if self._agent_path:
+        # 2. Legacy: mcp_servers.json
+        if not mcp_loaded and self._agent_path:
             mcp_json = self._agent_path / "mcp_servers.json"
             if mcp_json.exists():
                 self._tool_registry.load_mcp_config(mcp_json)
+                mcp_loaded = True
+
+        # 3. Fallback: all servers from global registry
+        if not mcp_loaded:
+            configs = registry.resolve_for_agent(profile="all")
+            if configs:
+                self._tool_registry.load_registry_servers(
+                    [asdict(c) for c in configs]
+                )
                 logger.info(
-                    "McpRegistryStage: loaded mcp_servers.json from %s",
-                    self._agent_path.name,
+                    "[pipeline] McpRegistryStage: loaded %d servers (fallback)",
+                    len(configs),
                 )
 
+        total = len(self._tool_registry.get_tools())
+        logger.info("[pipeline] McpRegistryStage: %d tools available", total)
+
     async def process(self, ctx: PipelineContext) -> PipelineResult:
-        """Inject resolved tools into pipeline context."""
-        if self._tool_registry:
-            ctx.metadata["tool_registry"] = self._tool_registry
-            ctx.metadata["tools"] = list(
-                self._tool_registry.get_tools().values()
-            )
-            ctx.metadata["tool_executor"] = self._tool_registry.get_executor()
         return PipelineResult(action="continue")
+
+    @property
+    def tool_registry(self):
+        return self._tool_registry

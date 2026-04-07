@@ -470,7 +470,8 @@ The agent.json must include ALL of these in one write:
 `input_keys`, `output_keys`, `success_criteria`
 - `edges` — connecting all nodes with proper conditions
 - `entry_node`, `terminal_nodes`
-- `mcp_servers` — reference by name: `[{"name": "hive-tools"}, {"name": "gcu-tools"}]`
+- `mcp_servers` — REQUIRED. Always include all three: \
+`[{"name": "hive-tools"}, {"name": "gcu-tools"}, {"name": "files-tools"}]`
 - `loop_config` — `max_iterations`, `max_context_tokens`
 
 **Write the COMPLETE config in one `write_file` call. No TODOs, no placeholders.** \

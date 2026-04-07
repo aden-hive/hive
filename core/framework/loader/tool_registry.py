@@ -262,15 +262,21 @@ class ToolRegistry:
                 is_error=False,
             )
 
+        registry_ref = self
+
         def executor(tool_use: ToolUse) -> ToolResult:
-            if tool_use.name not in self._tools:
+            # Check if credential files changed (lightweight dir listing).
+            # If new OAuth tokens appeared, restarts MCP servers to pick them up.
+            registry_ref.resync_mcp_servers_if_needed()
+
+            if tool_use.name not in registry_ref._tools:
                 return ToolResult(
                     tool_use_id=tool_use.id,
                     content=json.dumps({"error": f"Unknown tool: {tool_use.name}"}),
                     is_error=True,
                 )
 
-            registered = self._tools[tool_use.name]
+            registered = registry_ref._tools[tool_use.name]
             try:
                 result = registered.executor(tool_use.input)
 
@@ -921,6 +927,11 @@ class ToolRegistry:
         user connected an OAuth account mid-session), disconnects all MCP
         clients and re-loads them so the new subprocess picks up the fresh
         credentials.
+
+        Note: Individual credential TTL/refresh is handled by the MCP server
+        process internally -- it resolves tokens from the credential store
+        on every tool call, not at startup. This method only handles the case
+        where entirely new credential files appear.
 
         Returns True if a resync was performed, False otherwise.
         """

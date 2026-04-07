@@ -1,9 +1,8 @@
 """Credential resolver pipeline stage.
 
-Resolves connected accounts from the credential store and builds
-the ``accounts_prompt`` and ``tool_provider_map`` for system prompt
-injection.  Replaces the credential resolution block in
-``AgentLoader._setup()`` (lines 1861-1879).
+Resolves connected accounts at startup. Individual credential TTL/refresh
+is handled by MCP server processes internally -- they resolve tokens from
+the credential store on every tool call.
 """
 
 from __future__ import annotations
@@ -19,37 +18,41 @@ logger = logging.getLogger(__name__)
 
 @register("credential_resolver")
 class CredentialResolverStage(PipelineStage):
-    """Resolve connected accounts and inject into pipeline context."""
+    """Resolve connected accounts for system prompt injection."""
 
-    order = 40  # before MCP (tools need account info for routing)
+    order = 40
 
-    def __init__(self, **kwargs: Any) -> None:
-        self._accounts_prompt = ""
-        self._accounts_data: list[dict] | None = None
-        self._tool_provider_map: dict[str, str] | None = None
+    def __init__(self, credential_store: Any = None, **kwargs: Any) -> None:
+        self._credential_store = credential_store
+        self.accounts_prompt = ""
+        self.accounts_data: list[dict] | None = None
+        self.tool_provider_map: dict[str, str] | None = None
 
     async def initialize(self) -> None:
-        """Resolve credentials from the store."""
         try:
             from aden_tools.credentials.store_adapter import (
                 CredentialStoreAdapter,
             )
             from framework.orchestrator.prompting import build_accounts_prompt
 
-            adapter = CredentialStoreAdapter.default()
-            self._accounts_data = adapter.get_all_account_info()
-            self._tool_provider_map = adapter.get_tool_provider_map()
-            if self._accounts_data:
-                self._accounts_prompt = build_accounts_prompt(
-                    self._accounts_data,
-                    self._tool_provider_map,
+            if self._credential_store is not None:
+                adapter = CredentialStoreAdapter(store=self._credential_store)
+            else:
+                adapter = CredentialStoreAdapter.default()
+            self.accounts_data = adapter.get_all_account_info()
+            self.tool_provider_map = adapter.get_tool_provider_map()
+            if self.accounts_data:
+                self.accounts_prompt = build_accounts_prompt(
+                    self.accounts_data, self.tool_provider_map,
                 )
+            logger.info(
+                "[pipeline] CredentialResolverStage: %d accounts",
+                len(self.accounts_data or []),
+            )
         except Exception:
-            pass  # best-effort -- agent works without account info
+            logger.debug(
+                "Credential resolution failed (non-fatal)", exc_info=True,
+            )
 
     async def process(self, ctx: PipelineContext) -> PipelineResult:
-        """Inject credential info into pipeline context."""
-        ctx.metadata["accounts_prompt"] = self._accounts_prompt
-        ctx.metadata["accounts_data"] = self._accounts_data
-        ctx.metadata["tool_provider_map"] = self._tool_provider_map
         return PipelineResult(action="continue")
