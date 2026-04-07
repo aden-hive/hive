@@ -22,7 +22,7 @@ def mock_mode():
 
 @pytest_asyncio.fixture(scope="session")
 async def runner(tmp_path_factory, mock_mode):
-    from framework.runner.runner import AgentLoader
+    from framework.loader.agent_loader import AgentLoader
 
     storage = tmp_path_factory.mktemp("agent_storage")
     r = AgentLoader.load(AGENT_PATH, mock_mode=mock_mode, storage_path=storage)

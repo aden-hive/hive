@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from framework.runtime.event_bus import EventBus
+    from framework.host.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 

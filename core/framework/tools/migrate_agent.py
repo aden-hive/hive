@@ -11,7 +11,7 @@ original Python files are left untouched.
 After migration, verify with::
 
     uv run python -c "
-    from framework.runner.runner import load_agent_config
+    from framework.loader.agent_loader import load_agent_config
     import yaml, pathlib
     data = yaml.safe_load(pathlib.Path('exports/lead_enrichment_agent/agent.yaml').read_text())
     graph, goal = load_agent_config(data)

@@ -6,7 +6,7 @@ import logging
 from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionResetError as _AiohttpConnReset
 
-from framework.runtime.event_bus import AgentEvent, EventType
+from framework.host.event_bus import AgentEvent, EventType
 from framework.server.app import resolve_session
 
 logger = logging.getLogger(__name__)

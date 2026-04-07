@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from framework.graph.conversation import (
+from framework.agent_loop.conversation import (
     ConversationStore,
 )
 

@@ -12,8 +12,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from framework.graph.edge import GraphSpec
-    from framework.graph.node import DataBuffer
+    from framework.orchestrator.edge import GraphSpec
+    from framework.orchestrator.node import DataBuffer
 
 
 # Injected into every worker node's system prompt so the LLM understands

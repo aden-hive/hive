@@ -17,12 +17,12 @@ from pathlib import Path
 import pytest
 
 from framework.graph import Goal
-from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
-from framework.graph.goal import Constraint, SuccessCriterion
-from framework.graph.node import NodeSpec
-from framework.runtime.agent_runtime import AgentHost, create_agent_runtime
-from framework.runtime.event_bus import AgentEvent, EventBus, EventType
-from framework.runtime.execution_stream import EntryPointSpec
+from framework.orchestrator.edge import EdgeCondition, EdgeSpec, GraphSpec
+from framework.orchestrator.goal import Constraint, SuccessCriterion
+from framework.orchestrator.node import NodeSpec
+from framework.host.agent_host import AgentHost, create_agent_runtime
+from framework.host.event_bus import AgentEvent, EventBus, EventType
+from framework.host.execution_manager import EntryPointSpec
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.shared_state import IsolationLevel, SharedBufferManager
 from framework.schemas.session_state import SessionState, SessionTimestamps

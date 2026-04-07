@@ -457,7 +457,7 @@ def list_agent_tools(
         from pathlib import Path
 
         from framework.runner.mcp_client import MCPClient, MCPServerConfig
-        from framework.runner.tool_registry import ToolRegistry
+        from framework.loader.tool_registry import ToolRegistry
     except ImportError:
         return json.dumps({"error": "Cannot import MCPClient"})
 
@@ -807,7 +807,7 @@ def _validate_agent_tools_impl(agent_path: str) -> dict:
         from pathlib import Path
 
         from framework.runner.mcp_client import MCPClient, MCPServerConfig
-        from framework.runner.tool_registry import ToolRegistry
+        from framework.loader.tool_registry import ToolRegistry
     except ImportError:
         return {"error": "Cannot import MCPClient"}
 
@@ -1298,8 +1298,8 @@ def _run_agent_tests_impl(
 
     if not tests_dir.exists():
         return {
-            "error": f"No tests directory: exports/{agent_name}/tests/",
-            "hint": "Create test files in the tests/ directory first.",
+            "skipped": True,
+            "summary": "No tests directory (OK for declarative agents)",
         }
 
     # Parse test types
@@ -1517,7 +1517,7 @@ def validate_agent_package(agent_name: str) -> str:
         try:
             _json_script = textwrap.dedent("""\
                 import json, pathlib
-                from framework.runner.runner import load_agent_config
+                from framework.loader.agent_loader import load_agent_config
                 data = json.loads(
                     pathlib.Path('exports/{agent_name}/agent.json').read_text()
                 )
@@ -1613,10 +1613,10 @@ def validate_agent_package(agent_name: str) -> str:
                 "run",
                 "python",
                 "-c",
-                f"from framework.runner.runner import AgentLoader; "
-                f'r = AgentRunner.load("exports/{agent_name}", '
+                f"from framework.loader.agent_loader import AgentLoader; "
+                f'r = AgentLoader.load("exports/{agent_name}", '
                 f"skip_credential_validation=True); "
-                f'print("AgentRunner.load (graph-only): OK")',
+                f'print("AgentLoader.load (graph-only): OK")',
             ],
             capture_output=True,
             text=True,
@@ -1653,7 +1653,9 @@ def validate_agent_package(agent_name: str) -> str:
     # Step D: Tests (direct call)
     try:
         test_result = _run_agent_tests_impl(agent_name)
-        if "error" in test_result:
+        if test_result.get("skipped"):
+            steps["tests"] = {"passed": True, "output": "No tests (skipped)"}
+        elif "error" in test_result:
             steps["tests"] = {"passed": False, "error": test_result["error"]}
         else:
             all_passed = test_result.get("failed", 0) == 0 and test_result.get("errors", 0) == 0

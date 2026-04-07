@@ -19,7 +19,7 @@ from framework.graph.prompting import (
 )
 
 if TYPE_CHECKING:
-    from framework.graph.node import DataBuffer, NodeSpec
+    from framework.orchestrator.node import DataBuffer, NodeSpec
 
 
 _with_datetime = stamp_prompt_datetime

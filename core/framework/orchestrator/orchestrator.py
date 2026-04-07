@@ -17,11 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from framework.graph.checkpoint_config import CheckpointConfig
-from framework.graph.context import GraphContext, build_node_context
-from framework.graph.conversation import LEGACY_RUN_ID
-from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
-from framework.graph.goal import Goal
-from framework.graph.node import (
+from framework.orchestrator.context import GraphContext, build_node_context
+from framework.agent_loop.conversation import LEGACY_RUN_ID
+from framework.orchestrator.edge import EdgeCondition, EdgeSpec, GraphSpec
+from framework.orchestrator.goal import Goal
+from framework.orchestrator.node import (
     DataBuffer,
     NodeProtocol,
     NodeResult,
@@ -30,7 +30,7 @@ from framework.graph.node import (
 from framework.graph.validator import OutputValidator
 from framework.llm.provider import LLMProvider, Tool
 from framework.observability import set_trace_context
-from framework.runtime.core import DecisionTracker
+from framework.tracker.decision_tracker import DecisionTracker
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
 from framework.utils.io import atomic_write
@@ -370,8 +370,8 @@ class Orchestrator:
 
         Uses the same recursive binary-search splitting as EventLoopNode.
         """
-        from framework.graph.conversation import extract_tool_call_history
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.conversation import extract_tool_call_history
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         if _depth > self._PHASE_LLM_MAX_DEPTH:
             raise RuntimeError("Phase LLM compaction recursion limit")
@@ -699,7 +699,7 @@ class Orchestrator:
         # and spillover files share the same session-scoped directory.
         _ctx_token = None
         if self._storage_path:
-            from framework.runner.tool_registry import ToolRegistry
+            from framework.loader.tool_registry import ToolRegistry
 
             _ctx_token = ToolRegistry.set_execution_context(
                 data_dir=str(self._storage_path / "data"),
@@ -721,7 +721,7 @@ class Orchestrator:
 
         finally:
             if _ctx_token is not None:
-                from framework.runner.tool_registry import ToolRegistry
+                from framework.loader.tool_registry import ToolRegistry
 
                 ToolRegistry.reset_execution_context(_ctx_token)
 
@@ -776,7 +776,7 @@ class Orchestrator:
         if node_spec.node_type in ("event_loop", "gcu"):
             # Auto-create EventLoopNode with sensible defaults.
             # Custom configs can still be pre-registered via node_registry.
-            from framework.graph.event_loop_node import AgentLoop, LoopConfig
+            from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
 
             # Create a FileConversationStore if a storage path is available
             conv_store = None
@@ -796,7 +796,7 @@ class Orchestrator:
             if self._storage_path:
                 spillover = str(self._storage_path / "data")
 
-            from framework.graph.node import warn_if_deprecated_client_facing
+            from framework.orchestrator.node import warn_if_deprecated_client_facing
 
             warn_if_deprecated_client_facing(node_spec)
 
@@ -1008,7 +1008,7 @@ class Orchestrator:
 
             effective_max_retries = node_spec.max_retries
             # Only override for actual AgentLoop instances, not custom NodeProtocol impls
-            from framework.graph.event_loop_node import AgentLoop as _AgentLoop  # noqa: F811
+            from framework.agent_loop.agent_loop import AgentLoop as _AgentLoop  # noqa: F811
 
             if isinstance(branch_impl, _AgentLoop) and effective_max_retries > 1:
                 self.logger.warning(
@@ -1302,14 +1302,14 @@ class Orchestrator:
         Replaces the imperative while-loop with autonomous workers that
         self-activate based on edge conditions and fan-out tracking.
         """
-        from framework.graph.worker_agent import (
+        from framework.orchestrator.node_worker import (
             Activation,
             FanOutTag,
             NodeWorker,
             WorkerCompletion,
             WorkerLifecycle,
         )
-        from framework.runtime.event_bus import AgentEvent, EventType
+        from framework.host.event_bus import AgentEvent, EventType
 
         # Build shared graph context
         gc = GraphContext(

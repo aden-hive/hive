@@ -65,12 +65,12 @@ async def create_queen(
         _shared_building_knowledge,
     )
     from framework.agents.queen.nodes.thinking_hook import select_expert_persona
-    from framework.graph.event_loop_node import HookContext, HookResult
-    from framework.graph.executor import Orchestrator
+    from framework.agent_loop.agent_loop import HookContext, HookResult
+    from framework.orchestrator.orchestrator import Orchestrator
     from framework.runner.mcp_registry import MCPRegistry
-    from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.core import DecisionTracker  # noqa: F401
-    from framework.runtime.event_bus import AgentEvent, EventType
+    from framework.loader.tool_registry import ToolRegistry
+    from framework.tracker.decision_tracker import DecisionTracker  # noqa: F401
+    from framework.host.event_bus import AgentEvent, EventType
     from framework.tools.queen_lifecycle_tools import (
         QueenPhaseState,
         register_queen_lifecycle_tools,

@@ -557,7 +557,7 @@ def load_agent_nodes(agent_path: str | Path) -> list:
 def _load_nodes_from_json_declarative(agent_json: Path) -> list:
     """Load nodes from a declarative JSON agent."""
     try:
-        from framework.runner.runner import load_agent_config
+        from framework.loader.agent_loader import load_agent_config
 
         data = json.loads(agent_json.read_text(encoding="utf-8"))
         graph, _ = load_agent_config(data)

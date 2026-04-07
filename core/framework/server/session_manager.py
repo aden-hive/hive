@@ -99,7 +99,7 @@ class SessionManager:
         Internal helper — use create_session() or create_session_with_worker_graph().
         """
         from framework.config import RuntimeConfig, get_hive_config
-        from framework.runtime.event_bus import EventBus
+        from framework.host.event_bus import EventBus
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         resolved_id = session_id or f"session_{ts}_{uuid.uuid4().hex[:8]}"
@@ -807,7 +807,7 @@ class SessionManager:
 
     def _subscribe_worker_handoffs(self, session: Session, executor: Any) -> None:
         """Subscribe queen to worker/subagent escalation handoff events."""
-        from framework.runtime.event_bus import EventType as _ET
+        from framework.host.event_bus import EventType as _ET
 
         if session.worker_handoff_sub is not None:
             session.event_bus.unsubscribe(session.worker_handoff_sub)
@@ -1009,7 +1009,7 @@ class SessionManager:
 
     async def _emit_graph_loaded(self, session: Session) -> None:
         """Publish a WORKER_GRAPH_LOADED event so the frontend can update."""
-        from framework.runtime.event_bus import AgentEvent, EventType
+        from framework.host.event_bus import AgentEvent, EventType
 
         info = session.worker_info
         await session.event_bus.publish(
@@ -1028,7 +1028,7 @@ class SessionManager:
 
     async def _emit_flowchart_on_restore(self, session: Session, agent_path: str | Path) -> None:
         """Emit FLOWCHART_MAP_UPDATED from persisted flowchart file on cold restore."""
-        from framework.runtime.event_bus import AgentEvent, EventType
+        from framework.host.event_bus import AgentEvent, EventType
         from framework.tools.flowchart_utils import load_flowchart_file
 
         original_draft, flowchart_map = load_flowchart_file(agent_path)
@@ -1071,7 +1071,7 @@ class SessionManager:
         triggers: dict[str, TriggerDefinition],
     ) -> None:
         """Emit TRIGGER_AVAILABLE or TRIGGER_REMOVED events for each trigger."""
-        from framework.runtime.event_bus import AgentEvent, EventType
+        from framework.host.event_bus import AgentEvent, EventType
 
         event_type = (
             EventType.TRIGGER_AVAILABLE if kind == "available" else EventType.TRIGGER_REMOVED

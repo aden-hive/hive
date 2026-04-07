@@ -19,11 +19,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from framework.graph.conversation import Message, NodeConversation
+from framework.agent_loop.conversation import Message, NodeConversation
 from framework.graph.event_loop.event_publishing import publish_context_usage
 from framework.graph.event_loop.types import LoopConfig, OutputAccumulator
-from framework.graph.node import NodeContext
-from framework.runtime.event_bus import EventBus
+from framework.orchestrator.node import NodeContext
+from framework.host.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -368,7 +368,7 @@ async def llm_compact(
     in half and each half is summarised independently.  Tool history is
     appended once at the top-level call (``_depth == 0``).
     """
-    from framework.graph.conversation import extract_tool_call_history
+    from framework.agent_loop.conversation import extract_tool_call_history
     from framework.graph.event_loop.tool_result_handler import is_context_too_large_error
 
     if _depth > max_depth:
@@ -724,7 +724,7 @@ async def log_compaction(
         )
 
     if event_bus:
-        from framework.runtime.event_bus import AgentEvent, EventType
+        from framework.host.event_bus import AgentEvent, EventType
 
         event_data: dict[str, Any] = {
             "level": level,
@@ -861,6 +861,6 @@ def _extract_tool_call_history(conversation: NodeConversation) -> str:
     directly (vs. the module-level extract_tool_call_history in conversation.py
     which works on raw message lists).
     """
-    from framework.graph.conversation import extract_tool_call_history
+    from framework.agent_loop.conversation import extract_tool_call_history
 
     return extract_tool_call_history(list(conversation.messages))

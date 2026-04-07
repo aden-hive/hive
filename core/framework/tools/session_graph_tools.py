@@ -21,8 +21,8 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.agent_runtime import AgentHost
+    from framework.loader.tool_registry import ToolRegistry
+    from framework.host.agent_host import AgentHost
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +46,8 @@ def register_graph_tools(registry: ToolRegistry, runtime: AgentHost) -> int:
         are registered as a secondary graph on the runtime.  Returns a JSON
         summary.
         """
-        from framework.runner.runner import AgentLoader
-        from framework.runtime.execution_stream import EntryPointSpec
+        from framework.loader.agent_loader import AgentLoader
+        from framework.host.execution_manager import EntryPointSpec
         from framework.server.app import validate_agent_path
 
         try:

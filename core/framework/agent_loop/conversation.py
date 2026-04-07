@@ -324,7 +324,7 @@ def _try_extract_key(content: str, key: str) -> str | None:
     3. Colon format: ``key: value``.
     4. Equals format: ``key = value``.
     """
-    from framework.graph.node import find_json_object
+    from framework.orchestrator.node import find_json_object
 
     # 1. Whole message is JSON
     try:

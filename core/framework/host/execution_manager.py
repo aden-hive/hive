@@ -19,16 +19,16 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from framework.graph.checkpoint_config import CheckpointConfig
-from framework.graph.executor import ExecutionResult, Orchestrator
-from framework.runtime.event_bus import EventBus
+from framework.orchestrator.orchestrator import ExecutionResult, Orchestrator
+from framework.host.event_bus import EventBus
 from framework.runtime.shared_state import IsolationLevel, SharedBufferManager
 from framework.runtime.stream_runtime import StreamDecisionTracker, StreamRuntimeAdapter
 
 if TYPE_CHECKING:
-    from framework.graph.edge import GraphSpec
-    from framework.graph.goal import Goal
+    from framework.orchestrator.edge import GraphSpec
+    from framework.orchestrator.goal import Goal
     from framework.llm.provider import LLMProvider, Tool
-    from framework.runtime.event_bus import AgentEvent
+    from framework.host.event_bus import AgentEvent
     from framework.runtime.outcome_aggregator import OutcomeAggregator
     from framework.storage.concurrent import ConcurrentStorage
     from framework.storage.session_store import SessionStore
@@ -311,7 +311,7 @@ class ExecutionManager:
 
         # Emit stream started event
         if self._scoped_event_bus:
-            from framework.runtime.event_bus import AgentEvent, EventType
+            from framework.host.event_bus import AgentEvent, EventType
 
             await self._scoped_event_bus.publish(
                 AgentEvent(
@@ -436,7 +436,7 @@ class ExecutionManager:
 
         # Emit stream stopped event
         if self._scoped_event_bus:
-            from framework.runtime.event_bus import AgentEvent, EventType
+            from framework.host.event_bus import AgentEvent, EventType
 
             await self._scoped_event_bus.publish(
                 AgentEvent(
@@ -790,7 +790,7 @@ class ExecutionManager:
 
                         # Emit resurrection event
                         if self._scoped_event_bus:
-                            from framework.runtime.event_bus import AgentEvent, EventType
+                            from framework.host.event_bus import AgentEvent, EventType
 
                             await self._scoped_event_bus.publish(
                                 AgentEvent(
@@ -1146,7 +1146,7 @@ class ExecutionManager:
         Each stream only executes from its own entry_node, but the full
         graph must validate with all entry points accounted for.
         """
-        from framework.graph.edge import GraphSpec
+        from framework.orchestrator.edge import GraphSpec
 
         # Merge entry points: this stream's entry + original graph's primary
         # entry + any other entry points. This ensures all nodes are

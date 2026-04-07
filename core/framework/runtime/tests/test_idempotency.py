@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from framework.runtime.agent_runtime import AgentHost, AgentRuntimeConfig
+from framework.host.agent_host import AgentHost, AgentRuntimeConfig
 
 
 def _make_runtime(ttl=300.0, max_keys=10000):

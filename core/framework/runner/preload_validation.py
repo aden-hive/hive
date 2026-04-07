@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from framework.graph.edge import GraphSpec
-    from framework.graph.node import NodeSpec
+    from framework.orchestrator.edge import GraphSpec
+    from framework.orchestrator.node import NodeSpec
 
 logger = logging.getLogger(__name__)
 

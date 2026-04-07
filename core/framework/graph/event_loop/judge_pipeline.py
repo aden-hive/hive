@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from framework.graph.conversation import NodeConversation
+from framework.agent_loop.conversation import NodeConversation
 from framework.graph.event_loop.types import JudgeProtocol, JudgeVerdict, OutputAccumulator
-from framework.graph.node import NodeContext
+from framework.orchestrator.node import NodeContext
 
 logger = logging.getLogger(__name__)
 

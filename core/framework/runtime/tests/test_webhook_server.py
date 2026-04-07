@@ -13,9 +13,9 @@ from unittest.mock import patch
 import aiohttp
 import pytest
 
-from framework.runtime.agent_runtime import AgentHost, AgentRuntimeConfig  # noqa: F401
-from framework.runtime.event_bus import AgentEvent, EventBus, EventType
-from framework.runtime.execution_stream import EntryPointSpec
+from framework.host.agent_host import AgentHost, AgentRuntimeConfig  # noqa: F401
+from framework.host.event_bus import AgentEvent, EventBus, EventType
+from framework.host.execution_manager import EntryPointSpec
 from framework.runtime.webhook_server import (
     WebhookRoute,
     WebhookServer,
@@ -463,9 +463,9 @@ class TestEventDrivenEntryPoints:
     def _make_graph_and_goal(self):
         """Minimal graph + goal for testing entry point triggering."""
         from framework.graph import Goal
-        from framework.graph.edge import GraphSpec
-        from framework.graph.goal import SuccessCriterion
-        from framework.graph.node import NodeSpec
+        from framework.orchestrator.edge import GraphSpec
+        from framework.orchestrator.goal import SuccessCriterion
+        from framework.orchestrator.node import NodeSpec
 
         nodes = [
             NodeSpec(

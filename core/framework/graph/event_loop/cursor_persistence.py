@@ -14,9 +14,9 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from framework.graph.conversation import ConversationStore, NodeConversation
+from framework.agent_loop.conversation import ConversationStore, NodeConversation
 from framework.graph.event_loop.types import LoopConfig, OutputAccumulator, TriggerEvent
-from framework.graph.node import NodeContext
+from framework.orchestrator.node import NodeContext
 from framework.llm.capabilities import supports_image_tool_results
 
 logger = logging.getLogger(__name__)

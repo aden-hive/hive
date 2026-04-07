@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from framework.graph.conversation import NodeConversation
+from framework.agent_loop.conversation import NodeConversation
 from framework.llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)

@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from framework.graph.executor import Orchestrator
+from framework.orchestrator.orchestrator import Orchestrator
 from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.runtime.runtime_logger import RuntimeLogger
 

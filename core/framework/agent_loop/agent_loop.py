@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from framework.graph.conversation import ConversationStore, NodeConversation
+from framework.agent_loop.conversation import ConversationStore, NodeConversation
 from framework.graph.event_loop import types as event_loop_types
 from framework.graph.event_loop.compaction import (
     build_emergency_summary,
@@ -87,7 +87,7 @@ from framework.graph.event_loop.types import (
     JudgeVerdict,
     TriggerEvent,
 )
-from framework.graph.node import NodeContext, NodeProtocol, NodeResult
+from framework.orchestrator.node import NodeContext, NodeProtocol, NodeResult
 from framework.llm.capabilities import supports_image_tool_results
 from framework.llm.provider import Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
@@ -96,7 +96,7 @@ from framework.llm.stream_events import (
     TextDeltaEvent,
     ToolCallEvent,
 )
-from framework.runtime.event_bus import EventBus
+from framework.host.event_bus import EventBus
 from framework.runtime.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
@@ -2814,7 +2814,7 @@ class AgentLoop(NodeProtocol):
 
                         _sub_id = None
                         if self._event_bus and _activity_timeout > 0:
-                            from framework.runtime.event_bus import EventType
+                            from framework.host.event_bus import EventType
 
                             _sub_id = self._event_bus.subscribe(
                                 event_types=[
@@ -3176,7 +3176,7 @@ class AgentLoop(NodeProtocol):
 
         Delegates to :func:`extract_tool_call_history` in conversation.py.
         """
-        from framework.graph.conversation import extract_tool_call_history
+        from framework.agent_loop.conversation import extract_tool_call_history
 
         return extract_tool_call_history(conversation.messages, max_entries=max_entries)
 

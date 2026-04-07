@@ -6,10 +6,10 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from framework.graph.conversation import _try_extract_key
+from framework.agent_loop.conversation import _try_extract_key
 
 if TYPE_CHECKING:
-    from framework.graph.conversation import NodeConversation
+    from framework.agent_loop.conversation import NodeConversation
     from framework.llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)

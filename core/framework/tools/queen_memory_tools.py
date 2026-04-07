@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from framework.runner.tool_registry import ToolRegistry
+    from framework.loader.tool_registry import ToolRegistry
 
 
 def write_to_diary(entry: str) -> str:

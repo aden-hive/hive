@@ -645,7 +645,7 @@ async def subscribe_reflection_triggers(
     Call this once during queen setup.  Returns a list of event-bus
     subscription IDs for cleanup during session teardown.
     """
-    from framework.runtime.event_bus import EventType
+    from framework.host.event_bus import EventType
 
     mem_dir = memory_dir or MEMORY_DIR
     _lock = asyncio.Lock()
@@ -777,7 +777,7 @@ async def subscribe_worker_memory_triggers(
     - Recall cache initialisation on execution start
     - Final long reflection + cleanup on execution end
     """
-    from framework.runtime.event_bus import EventType
+    from framework.host.event_bus import EventType
 
     _terminal_lock = asyncio.Lock()
 

@@ -14,19 +14,19 @@ from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
 )
 from framework.graph import Goal
-from framework.graph.edge import (
+from framework.orchestrator.edge import (
     DEFAULT_MAX_TOKENS,
     EdgeCondition,
     EdgeSpec,
     GraphSpec,
 )
-from framework.graph.executor import ExecutionResult
-from framework.graph.node import NodeSpec
+from framework.orchestrator.orchestrator import ExecutionResult
+from framework.orchestrator.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.preload_validation import run_preload_validation
-from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentHost, AgentRuntimeConfig, create_agent_runtime
-from framework.runtime.execution_stream import EntryPointSpec
+from framework.loader.tool_registry import ToolRegistry
+from framework.host.agent_host import AgentHost, AgentRuntimeConfig, create_agent_runtime
+from framework.host.execution_manager import EntryPointSpec
 from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.tools.flowchart_utils import generate_fallback_flowchart
 
@@ -907,8 +907,8 @@ def load_agent_config(data: str | dict) -> tuple[GraphSpec, Goal]:
     Returns:
         Tuple of (GraphSpec, Goal)
     """
-    from framework.graph.edge import EdgeCondition, EdgeSpec
-    from framework.graph.goal import Constraint, Goal as GoalModel, SuccessCriterion
+    from framework.orchestrator.edge import EdgeCondition, EdgeSpec
+    from framework.orchestrator.goal import Constraint, Goal as GoalModel, SuccessCriterion
     from framework.schemas.agent_config import AgentConfig
 
     if isinstance(data, str):
@@ -1109,7 +1109,7 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     )
 
     # Build Goal
-    from framework.graph.goal import Constraint, SuccessCriterion
+    from framework.orchestrator.goal import Constraint, SuccessCriterion
 
     success_criteria = []
     for sc_data in goal_data.get("success_criteria", []):
@@ -2036,7 +2036,7 @@ class AgentLoader:
         # that would crash AgentRuntime if passed through.
         runtime_config = None
         if self.runtime_config is not None:
-            from framework.runtime.agent_runtime import AgentRuntimeConfig
+            from framework.host.agent_host import AgentRuntimeConfig
 
             if isinstance(self.runtime_config, AgentRuntimeConfig):
                 runtime_config = self.runtime_config
@@ -2143,7 +2143,7 @@ class AgentLoader:
         sub_ids: list[str] = []
 
         if has_queen and sys.stdin.isatty():
-            from framework.runtime.event_bus import EventType
+            from framework.host.event_bus import EventType
 
             runtime = self._agent_runtime
 

@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING, Any
 
 from framework.credentials.models import CredentialError
 from framework.runner.preload_validation import credential_errors_to_json, validate_credentials
-from framework.runtime.event_bus import AgentEvent, EventType
+from framework.host.event_bus import AgentEvent, EventType
 from framework.server.app import validate_agent_path
 from framework.tools.flowchart_utils import (
     FLOWCHART_TYPES,
@@ -55,9 +55,9 @@ from framework.tools.flowchart_utils import (
 )
 
 if TYPE_CHECKING:
-    from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.agent_runtime import AgentHost
-    from framework.runtime.event_bus import EventBus
+    from framework.loader.tool_registry import ToolRegistry
+    from framework.host.agent_host import AgentHost
+    from framework.host.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -459,7 +459,7 @@ async def _persist_active_triggers(session: Any, session_id: str) -> None:
 
 async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None:
     """Start an asyncio background task that fires the trigger on a timer."""
-    from framework.graph.event_loop_node import TriggerEvent
+    from framework.agent_loop.agent_loop import TriggerEvent
 
     cron_expr = tdef.trigger_config.get("cron")
     interval_minutes = tdef.trigger_config.get("interval_minutes")
@@ -520,7 +520,7 @@ async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None
 
 async def _start_trigger_webhook(session: Any, trigger_id: str, tdef: Any) -> None:
     """Subscribe to WEBHOOK_RECEIVED events and route matching ones to the queen."""
-    from framework.graph.event_loop_node import TriggerEvent
+    from framework.agent_loop.agent_loop import TriggerEvent
     from framework.runtime.webhook_server import WebhookRoute, WebhookServer, WebhookServerConfig
 
     bus = session.event_bus

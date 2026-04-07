@@ -96,8 +96,12 @@ def _ensure_builtins_registered() -> None:
     if _STAGE_REGISTRY:
         return  # already populated
     try:
-        import framework.pipeline.stages.rate_limit  # noqa: F401
-        import framework.pipeline.stages.input_validation  # noqa: F401
         import framework.pipeline.stages.cost_guard  # noqa: F401
+        import framework.pipeline.stages.credential_resolver  # noqa: F401
+        import framework.pipeline.stages.input_validation  # noqa: F401
+        import framework.pipeline.stages.llm_provider  # noqa: F401
+        import framework.pipeline.stages.mcp_registry  # noqa: F401
+        import framework.pipeline.stages.rate_limit  # noqa: F401
+        import framework.pipeline.stages.skill_registry  # noqa: F401
     except ImportError:
         pass

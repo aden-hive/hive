@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from framework.graph.edge import DEFAULT_MAX_TOKENS
+from framework.orchestrator.edge import DEFAULT_MAX_TOKENS
 
 # ---------------------------------------------------------------------------
 # Low-level config file access
@@ -88,7 +88,7 @@ def get_worker_api_key() -> str | None:
     # Worker-specific subscription / env var
     if worker_llm.get("use_claude_code_subscription"):
         try:
-            from framework.runner.runner import get_claude_code_token
+            from framework.loader.agent_loader import get_claude_code_token
 
             token = get_claude_code_token()
             if token:
@@ -98,7 +98,7 @@ def get_worker_api_key() -> str | None:
 
     if worker_llm.get("use_codex_subscription"):
         try:
-            from framework.runner.runner import get_codex_token
+            from framework.loader.agent_loader import get_codex_token
 
             token = get_codex_token()
             if token:
@@ -108,7 +108,7 @@ def get_worker_api_key() -> str | None:
 
     if worker_llm.get("use_kimi_code_subscription"):
         try:
-            from framework.runner.runner import get_kimi_code_token
+            from framework.loader.agent_loader import get_kimi_code_token
 
             token = get_kimi_code_token()
             if token:
@@ -118,7 +118,7 @@ def get_worker_api_key() -> str | None:
 
     if worker_llm.get("use_antigravity_subscription"):
         try:
-            from framework.runner.runner import get_antigravity_token
+            from framework.loader.agent_loader import get_antigravity_token
 
             token = get_antigravity_token()
             if token:
@@ -174,7 +174,7 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
                 "User-Agent": "CodexBar",
             }
             try:
-                from framework.runner.runner import get_codex_account_id
+                from framework.loader.agent_loader import get_codex_account_id
 
                 account_id = get_codex_account_id()
                 if account_id:
@@ -257,7 +257,7 @@ def get_api_key() -> str | None:
     # Claude Code subscription: read OAuth token directly
     if llm.get("use_claude_code_subscription"):
         try:
-            from framework.runner.runner import get_claude_code_token
+            from framework.loader.agent_loader import get_claude_code_token
 
             token = get_claude_code_token()
             if token:
@@ -268,7 +268,7 @@ def get_api_key() -> str | None:
     # Codex subscription: read OAuth token from Keychain / auth.json
     if llm.get("use_codex_subscription"):
         try:
-            from framework.runner.runner import get_codex_token
+            from framework.loader.agent_loader import get_codex_token
 
             token = get_codex_token()
             if token:
@@ -279,7 +279,7 @@ def get_api_key() -> str | None:
     # Kimi Code subscription: read API key from ~/.kimi/config.toml
     if llm.get("use_kimi_code_subscription"):
         try:
-            from framework.runner.runner import get_kimi_code_token
+            from framework.loader.agent_loader import get_kimi_code_token
 
             token = get_kimi_code_token()
             if token:
@@ -290,7 +290,7 @@ def get_api_key() -> str | None:
     # Antigravity subscription: read OAuth token from accounts JSON
     if llm.get("use_antigravity_subscription"):
         try:
-            from framework.runner.runner import get_antigravity_token
+            from framework.loader.agent_loader import get_antigravity_token
 
             token = get_antigravity_token()
             if token:
@@ -443,7 +443,7 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
                 "User-Agent": "CodexBar",
             }
             try:
-                from framework.runner.runner import get_codex_account_id
+                from framework.loader.agent_loader import get_codex_account_id
 
                 account_id = get_codex_account_id()
                 if account_id:

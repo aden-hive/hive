@@ -17,9 +17,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from framework.graph.checkpoint_config import CheckpointConfig
-from framework.graph.executor import ExecutionResult
-from framework.runtime.event_bus import EventBus
-from framework.runtime.execution_stream import EntryPointSpec, ExecutionManager
+from framework.orchestrator.orchestrator import ExecutionResult
+from framework.host.event_bus import EventBus
+from framework.host.execution_manager import EntryPointSpec, ExecutionManager
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.runtime.shared_state import SharedBufferManager
@@ -27,8 +27,8 @@ from framework.storage.concurrent import ConcurrentStorage
 from framework.storage.session_store import SessionStore
 
 if TYPE_CHECKING:
-    from framework.graph.edge import GraphSpec
-    from framework.graph.goal import Goal
+    from framework.orchestrator.edge import GraphSpec
+    from framework.orchestrator.goal import Goal
     from framework.llm.provider import LLMProvider, Tool
     from framework.pipeline.stage import PipelineStage
     from framework.skills.manager import SkillsManagerConfig
@@ -414,7 +414,7 @@ class AgentHost:
                 await self._webhook_server.start()
 
             # Subscribe event-driven entry points to EventBus
-            from framework.runtime.event_bus import EventType as _ET
+            from framework.host.event_bus import EventType as _ET
 
             for ep_id, spec in self._entry_points.items():
                 if spec.trigger_type != "event":
@@ -1125,7 +1125,7 @@ class AgentHost:
             streams[ep_id] = stream
 
         # Set up event-driven subscriptions
-        from framework.runtime.event_bus import EventType as _ET
+        from framework.host.event_bus import EventType as _ET
 
         event_subs: list[str] = []
         for ep_id, spec in entry_points.items():

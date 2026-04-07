@@ -527,7 +527,7 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
     # Emit SSE event so the frontend updates the graph and detail panel
     bus = getattr(session, "event_bus", None)
     if bus:
-        from framework.runtime.event_bus import AgentEvent, EventType
+        from framework.host.event_bus import AgentEvent, EventType
 
         await bus.publish(
             AgentEvent(

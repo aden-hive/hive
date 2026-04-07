@@ -13,16 +13,16 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from framework.graph.conversation import ConversationStore
+from framework.agent_loop.conversation import ConversationStore
 from framework.graph.event_loop.judge_pipeline import SubagentJudge
 from framework.graph.event_loop.types import LoopConfig, OutputAccumulator
-from framework.graph.node import DataBuffer, NodeContext
+from framework.orchestrator.node import DataBuffer, NodeContext
 from framework.llm.provider import ToolResult, ToolUse
-from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.event_bus import EventBus
+from framework.loader.tool_registry import ToolRegistry
+from framework.host.event_bus import EventBus
 
 if TYPE_CHECKING:
-    from framework.graph.event_loop_node import AgentLoop
+    from framework.agent_loop.agent_loop import AgentLoop
 
 logger = logging.getLogger(__name__)
 

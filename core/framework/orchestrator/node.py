@@ -25,7 +25,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from framework.llm.provider import LLMProvider, Tool
-from framework.runtime.core import DecisionTracker
+from framework.tracker.decision_tracker import DecisionTracker
 
 logger = logging.getLogger(__name__)
 

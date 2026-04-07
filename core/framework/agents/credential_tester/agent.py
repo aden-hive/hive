@@ -23,13 +23,13 @@ from typing import TYPE_CHECKING
 from framework.config import get_max_context_tokens
 from framework.graph import Goal, NodeSpec, SuccessCriterion
 from framework.graph.checkpoint_config import CheckpointConfig
-from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult
+from framework.orchestrator.edge import GraphSpec
+from framework.orchestrator.orchestrator import ExecutionResult
 from framework.llm import LiteLLMProvider
 from framework.runner.mcp_registry import MCPRegistry
-from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentHost, create_agent_runtime
-from framework.runtime.execution_stream import EntryPointSpec
+from framework.loader.tool_registry import ToolRegistry
+from framework.host.agent_host import AgentHost, create_agent_runtime
+from framework.host.execution_manager import EntryPointSpec
 
 from .config import default_config
 from .nodes import build_tester_node

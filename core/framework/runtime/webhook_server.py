@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from aiohttp import web
 
-from framework.runtime.event_bus import EventBus
+from framework.host.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 

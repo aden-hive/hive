@@ -9,10 +9,10 @@ from __future__ import annotations
 import logging
 import time
 
-from framework.graph.conversation import NodeConversation
+from framework.agent_loop.conversation import NodeConversation
 from framework.graph.event_loop.types import HookContext
-from framework.graph.node import NodeContext
-from framework.runtime.event_bus import EventBus
+from framework.orchestrator.node import NodeContext
+from framework.host.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +177,7 @@ async def publish_context_usage(
     if not event_bus:
         return
 
-    from framework.runtime.event_bus import AgentEvent, EventType
+    from framework.host.event_bus import AgentEvent, EventType
 
     estimated = conversation.estimate_tokens()
     max_tokens = conversation._max_context_tokens

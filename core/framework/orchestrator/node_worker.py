@@ -19,9 +19,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from framework.graph.context import GraphContext, build_node_context_from_graph_context
-from framework.graph.edge import EdgeCondition, EdgeSpec
-from framework.graph.node import (
+from framework.orchestrator.context import GraphContext, build_node_context_from_graph_context
+from framework.orchestrator.edge import EdgeCondition, EdgeSpec
+from framework.orchestrator.node import (
     NodeContext,
     NodeProtocol,
     NodeResult,
@@ -359,7 +359,7 @@ class NodeWorker:
         # Only skip retries for actual EventLoopNode instances (they handle
         # retries internally).  Custom NodeProtocol impls registered via
         # register_node should be retried by the executor.
-        from framework.graph.event_loop_node import AgentLoop as _ELN
+        from framework.agent_loop.agent_loop import AgentLoop as _ELN
 
         if isinstance(node_impl, _ELN):
             max_retries = 0
@@ -609,8 +609,8 @@ class NodeWorker:
         # Auto-create EventLoopNode
         if self.node_spec.node_type in ("event_loop", "gcu"):
             from framework.graph.event_loop.types import LoopConfig
-            from framework.graph.event_loop_node import AgentLoop
-            from framework.graph.node import warn_if_deprecated_client_facing
+            from framework.agent_loop.agent_loop import AgentLoop
+            from framework.orchestrator.node import warn_if_deprecated_client_facing
 
             conv_store = None
             if gc.storage_path:

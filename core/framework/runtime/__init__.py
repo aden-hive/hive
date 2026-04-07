@@ -1,5 +1,5 @@
 """Runtime core for agent execution."""
 
-from framework.runtime.core import DecisionTracker
+from framework.tracker.decision_tracker import DecisionTracker
 
 __all__ = ["DecisionTracker"]
