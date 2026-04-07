@@ -61,7 +61,7 @@ describe('Hive Research Agent: Academic Validation', () => {
     expect(analysis.citationWeights['Web of Science']).toBeGreaterThan(analysis.citationWeights['GeneralWeb']);
     expect(analysis.conclusions).toMatch(/Industrial|Peer-Reviewed/);
   });
-})
+});
 
 describe('Hive Core: Memory Isolation & Bridging', () => {
   it('should prevent cross-agent data corruption using Deep Copy', async () => {
