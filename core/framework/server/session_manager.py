@@ -65,6 +65,8 @@ class Session:
     # directory instead of creating a new one.  This lets cold-restores accumulate
     # all messages in the original session folder so history is never fragmented.
     queen_resume_from: str | None = None
+    # Queen session directory (set during _start_queen, used for shutdown reflection)
+    queen_dir: Path | None = None
 
 
 class SessionManager:
@@ -80,6 +82,9 @@ class SessionManager:
         self._model = model
         self._credential_store = credential_store
         self._lock = asyncio.Lock()
+        # Strong references for fire-and-forget background tasks (e.g. shutdown
+        # reflections) so they aren't garbage-collected before completion.
+        self._background_tasks: set[asyncio.Task] = set()
 
     # ------------------------------------------------------------------
     # Session lifecycle
@@ -631,6 +636,21 @@ class SessionManager:
                 pass
         session.memory_reflection_subs.clear()
 
+        # Run a final shutdown reflection so recent conversation insights
+        # are persisted before the session is destroyed (fire-and-forget).
+        if session.queen_dir is not None:
+            try:
+                from framework.agents.queen.reflection_agent import run_shutdown_reflection
+
+                task = asyncio.create_task(
+                    asyncio.shield(run_shutdown_reflection(session.queen_dir, session.llm)),
+                )
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
+                logger.info("Session '%s': shutdown reflection spawned", session_id)
+            except Exception:
+                logger.warning("Session '%s': failed to spawn shutdown reflection", session_id, exc_info=True)
+
         if session.queen_task is not None:
             session.queen_task.cancel()
             session.queen_task = None
@@ -741,6 +761,7 @@ class SessionManager:
         storage_session_id = session.queen_resume_from or session.id
         queen_dir = hive_home / "queen" / "session" / storage_session_id
         queen_dir.mkdir(parents=True, exist_ok=True)
+        session.queen_dir = queen_dir
 
         # Always write/update session metadata so history sidebar has correct
         # agent name, path, and last-active timestamp (important so the original
