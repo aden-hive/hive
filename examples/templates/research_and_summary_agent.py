@@ -1,6 +1,6 @@
-import time
+from __future__ import annotations
+
 from mcp.server.fastmcp import FastMCP
-from pydantic import BaseModel
 
 mcp = FastMCP("HiveResearchAgent")
 
