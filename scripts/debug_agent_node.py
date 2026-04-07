@@ -33,6 +33,34 @@ from framework.runtime.agent_runtime import create_agent_runtime  # noqa: E402
 from framework.runtime.execution_stream import EntryPointSpec  # noqa: E402
 from framework.runner.runner import AgentRunner  # noqa: E402
 
+import copy
+from types import MappingProxyType
+
+class SharedMemory:
+    def __init__(self):
+        self._data = {}
+
+    def read(self, key, deep=True):
+        """
+        Reads a value from shared memory. 
+        Defaults to deep copy to ensure isolation.
+        """
+        val = self._data.get(key)
+        if val is None:
+            return None
+        return copy.deepcopy(val) if deep else val
+
+    def read_all(self, bridge=False):
+        """
+        Returns the full memory state.
+        Use bridge=True for high-velocity read-only access (Active Tokens).
+        """
+        if bridge:
+            # Option B: Fast, read-only wrapper for large datasets
+            return MappingProxyType(self._data)
+        
+        # Option A: Full Deep Isolation
+        return copy.deepcopy(self._data)
 
 def _configure_event_debug_logging(storage_path: Path) -> None:
     """Redirect optional event debug logs into this run's writable storage.
