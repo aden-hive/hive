@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from framework.runtime.triggers import TriggerDefinition
+from framework.host.triggers import TriggerDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +280,7 @@ class SessionManager:
         Sets up the runner, runtime, and session fields. Does NOT notify
         the queen — callers handle that step.
         """
-        from framework.runner import AgentLoader
+        from framework.loader import AgentLoader
 
         agent_path = Path(agent_path)
         resolved_graph_id = graph_id or agent_path.name

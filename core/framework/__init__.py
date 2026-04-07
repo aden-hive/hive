@@ -28,7 +28,7 @@ try:
     from framework.llm import AnthropicProvider  # noqa: F401
 except ImportError:
     pass
-from framework.runner import AgentLoader
+from framework.loader import AgentLoader
 from framework.tracker.decision_tracker import DecisionTracker  # noqa: F401
 from framework.schemas.decision import Decision, DecisionEvaluation, Option, Outcome
 from framework.schemas.run import Problem, Run, RunSummary

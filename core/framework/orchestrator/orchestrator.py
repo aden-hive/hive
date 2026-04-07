@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from framework.graph.checkpoint_config import CheckpointConfig
+from framework.orchestrator.checkpoint_config import CheckpointConfig
 from framework.orchestrator.context import GraphContext, build_node_context
 from framework.agent_loop.conversation import LEGACY_RUN_ID
 from framework.orchestrator.edge import EdgeCondition, EdgeSpec, GraphSpec
@@ -27,7 +27,7 @@ from framework.orchestrator.node import (
     NodeResult,
     NodeSpec,
 )
-from framework.graph.validator import OutputValidator
+from framework.orchestrator.validator import OutputValidator
 from framework.llm.provider import LLMProvider, Tool
 from framework.observability import set_trace_context
 from framework.tracker.decision_tracker import DecisionTracker
@@ -1051,9 +1051,6 @@ class Orchestrator:
                         execution_id=self._execution_id,
                         run_id=self._run_id,
                         stream_id=self._stream_id,
-                        node_registry=node_registry,
-                        all_tools=self.tools,
-                        shared_node_registry=self.node_registry,
                         dynamic_tools_provider=self.dynamic_tools_provider,
                         dynamic_prompt_provider=self.dynamic_prompt_provider,
                         dynamic_memory_provider=self.dynamic_memory_provider,

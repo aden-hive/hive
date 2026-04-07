@@ -5,7 +5,7 @@ import threading
 
 import httpx
 
-from framework.runner.mcp_client import MCPClient, MCPServerConfig
+from framework.loader.mcp_client import MCPClient, MCPServerConfig
 
 logger = logging.getLogger(__name__)
 

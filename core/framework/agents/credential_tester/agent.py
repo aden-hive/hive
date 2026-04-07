@@ -21,12 +21,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from framework.config import get_max_context_tokens
-from framework.graph import Goal, NodeSpec, SuccessCriterion
-from framework.graph.checkpoint_config import CheckpointConfig
+from framework.orchestrator import Goal, NodeSpec, SuccessCriterion
+from framework.orchestrator.checkpoint_config import CheckpointConfig
 from framework.orchestrator.edge import GraphSpec
 from framework.orchestrator.orchestrator import ExecutionResult
 from framework.llm import LiteLLMProvider
-from framework.runner.mcp_registry import MCPRegistry
+from framework.loader.mcp_registry import MCPRegistry
 from framework.loader.tool_registry import ToolRegistry
 from framework.host.agent_host import AgentHost, create_agent_runtime
 from framework.host.execution_manager import EntryPointSpec
@@ -37,7 +37,7 @@ from .nodes import build_tester_node
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from framework.runner import AgentLoader
+    from framework.loader import AgentLoader
 
 logger = logging.getLogger(__name__)
 

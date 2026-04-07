@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 
 from framework.agent_loop.conversation import NodeConversation
-from framework.graph.event_loop.types import JudgeProtocol, JudgeVerdict, OutputAccumulator
+from framework.agent_loop.internals.types import JudgeProtocol, JudgeVerdict, OutputAccumulator
 from framework.orchestrator.node import NodeContext
 
 logger = logging.getLogger(__name__)
@@ -155,7 +155,7 @@ async def judge_turn(
 
     # Level 2b: conversation-aware quality check (if success_criteria set)
     if ctx.node_spec.success_criteria and ctx.llm:
-        from framework.graph.conversation_judge import evaluate_phase_completion
+        from framework.orchestrator.conversation_judge import evaluate_phase_completion
 
         verdict = await evaluate_phase_completion(
             llm=ctx.llm,

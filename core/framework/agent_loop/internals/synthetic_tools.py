@@ -205,60 +205,6 @@ def build_escalate_tool() -> Tool:
     )
 
 
-def build_delegate_tool(sub_agents: list[str], node_registry: dict[str, Any]) -> Tool | None:
-    """Build the synthetic delegate_to_sub_agent tool for subagent invocation.
-
-    Args:
-        sub_agents: List of node IDs that can be invoked as subagents.
-        node_registry: Map of node_id -> NodeSpec for looking up subagent descriptions.
-
-    Returns:
-        Tool definition if sub_agents is non-empty, None otherwise.
-    """
-    if not sub_agents:
-        return None
-
-    agent_descriptions = []
-    for agent_id in sub_agents:
-        spec = node_registry.get(agent_id)
-        if spec:
-            desc = getattr(spec, "description", "(no description)")
-            tools_list = getattr(spec, "tools", [])
-            tools_desc = ", ".join(tools_list) if tools_list else "(no tools)"
-            agent_descriptions.append(f"- {agent_id}: {desc} [tools: {tools_desc}]")
-        else:
-            agent_descriptions.append(f"- {agent_id}: (not found in registry)")
-
-    return Tool(
-        name="delegate_to_sub_agent",
-        description=(
-            "Delegate a task to a specialized sub-agent. The sub-agent runs "
-            "autonomously with read-only access to current memory and returns "
-            "its result. Use this to parallelize work or leverage specialized capabilities.\n\n"
-            "Available sub-agents:\n" + "\n".join(agent_descriptions)
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": f"The sub-agent to invoke. Must be one of: {sub_agents}",
-                    "enum": sub_agents,
-                },
-                "task": {
-                    "type": "string",
-                    "description": (
-                        "The task description for the sub-agent to execute. "
-                        "Be specific about what you want the sub-agent to do and "
-                        "what information to return."
-                    ),
-                },
-            },
-            "required": ["agent_id", "task"],
-        },
-    )
-
-
 def build_report_to_parent_tool() -> Tool:
     """Build the synthetic report_to_parent tool for sub-agent progress reports.
 

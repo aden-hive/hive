@@ -1,6 +1,6 @@
 """Queen graph definition."""
 
-from framework.graph import Goal
+from framework.orchestrator import Goal
 from framework.orchestrator.edge import GraphSpec
 
 from .nodes import queen_node

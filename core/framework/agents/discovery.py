@@ -157,7 +157,7 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
 
 def discover_agents() -> dict[str, list[AgentEntry]]:
     """Discover agents from all known sources grouped by category."""
-    from framework.runner.cli import (
+    from framework.loader.cli import (
         _extract_python_agent_metadata,
         _get_framework_agents_dir,
         _is_valid_agent_dir,

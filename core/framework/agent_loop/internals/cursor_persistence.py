@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from framework.agent_loop.conversation import ConversationStore, NodeConversation
-from framework.graph.event_loop.types import LoopConfig, OutputAccumulator, TriggerEvent
+from framework.agent_loop.internals.types import LoopConfig, OutputAccumulator, TriggerEvent
 from framework.orchestrator.node import NodeContext
 from framework.llm.capabilities import supports_image_tool_results
 

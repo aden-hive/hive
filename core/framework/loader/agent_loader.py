@@ -13,7 +13,7 @@ from framework.config import get_hive_config, get_max_context_tokens, get_prefer
 from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
 )
-from framework.graph import Goal
+from framework.orchestrator import Goal
 from framework.orchestrator.edge import (
     DEFAULT_MAX_TOKENS,
     EdgeCondition,
@@ -23,11 +23,11 @@ from framework.orchestrator.edge import (
 from framework.orchestrator.orchestrator import ExecutionResult
 from framework.orchestrator.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
-from framework.runner.preload_validation import run_preload_validation
+from framework.loader.preload_validation import run_preload_validation
 from framework.loader.tool_registry import ToolRegistry
 from framework.host.agent_host import AgentHost, AgentRuntimeConfig, create_agent_runtime
 from framework.host.execution_manager import EntryPointSpec
-from framework.runtime.runtime_log_store import RuntimeLogStore
+from framework.tracker.runtime_log_store import RuntimeLogStore
 from framework.tools.flowchart_utils import generate_fallback_flowchart
 
 logger = logging.getLogger(__name__)
@@ -981,7 +981,6 @@ def load_agent_config(data: str | dict) -> tuple[GraphSpec, Goal]:
             "system_prompt": _resolve_template_vars(nc.system_prompt, tvars),
             "tools": tools_list,
             "tool_access_policy": tool_policy,
-            "sub_agents": nc.sub_agents,
             "model": nc.model,
             "input_keys": nc.input_keys,
             "output_keys": nc.output_keys,
@@ -1576,7 +1575,7 @@ class AgentLoader:
         else:
             self._tool_registry.set_mcp_registry_agent_path(None)
 
-        from framework.runner.mcp_registry import MCPRegistry
+        from framework.loader.mcp_registry import MCPRegistry
 
         try:
             registry = MCPRegistry()
@@ -1801,53 +1800,9 @@ class AgentLoader:
                     )
                     raise CredentialError(f"LLM API key not found for model '{self.model}'. {hint}")
 
-        # For GCU nodes: auto-register GCU MCP server if needed, then expand tool lists
-        has_gcu_nodes = any(node.node_type == "gcu" for node in self.graph.nodes)
-        if has_gcu_nodes:
-            from framework.graph.gcu import GCU_MCP_SERVER_CONFIG, GCU_SERVER_NAME
-
-            # Auto-register GCU MCP server if tools aren't loaded yet
-            gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
-            if not gcu_tool_names:
-                # Resolve cwd to repo-level tools/ (not relative to agent_path)
-                gcu_config = dict(GCU_MCP_SERVER_CONFIG)
-                _repo_root = Path(__file__).resolve().parent.parent.parent.parent
-                gcu_config["cwd"] = str(_repo_root / "tools")
-                self._tool_registry.register_mcp_server(gcu_config)
-                gcu_tool_names = self._tool_registry.get_server_tool_names(GCU_SERVER_NAME)
-
-            # Expand each GCU node's tools list to include all GCU server tools
-            if gcu_tool_names:
-                for node in self.graph.nodes:
-                    if node.node_type == "gcu":
-                        existing = set(node.tools)
-                        for tool_name in sorted(gcu_tool_names):
-                            if tool_name not in existing:
-                                node.tools.append(tool_name)
-
-        # For event_loop/gcu nodes: auto-register file tools MCP server, then expand tool lists
-        has_loop_nodes = any(node.node_type in ("event_loop", "gcu") for node in self.graph.nodes)
-        if has_loop_nodes:
-            from framework.graph.files import FILES_MCP_SERVER_CONFIG, FILES_MCP_SERVER_NAME
-
-            files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
-            if not files_tool_names:
-                # Resolve cwd to repo-level tools/ (not relative to agent_path)
-                files_config = dict(FILES_MCP_SERVER_CONFIG)
-                _repo_root = Path(__file__).resolve().parent.parent.parent.parent
-                files_config["cwd"] = str(_repo_root / "tools")
-                self._tool_registry.register_mcp_server(files_config)
-                files_tool_names = self._tool_registry.get_server_tool_names(FILES_MCP_SERVER_NAME)
-
-            if files_tool_names:
-                for node in self.graph.nodes:
-                    if node.node_type in ("event_loop", "gcu"):
-                        existing = set(node.tools)
-                        for tool_name in sorted(files_tool_names):
-                            if tool_name not in existing:
-                                node.tools.append(tool_name)
-
         # Get tools for runtime
+        # (GCU and file tools are now registered via mcp_servers.json or MCP registry,
+        # not auto-registered here. Agents declare them in agent.json.)
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
 
@@ -1865,7 +1820,7 @@ class AgentLoader:
             accounts_data = adapter.get_all_account_info()
             tool_provider_map = adapter.get_tool_provider_map()
             if accounts_data:
-                from framework.graph.prompting import build_accounts_prompt
+                from framework.orchestrator.prompting import build_accounts_prompt
 
                 accounts_prompt = build_accounts_prompt(accounts_data, tool_provider_map)
         except Exception:
@@ -2021,7 +1976,7 @@ class AgentLoader:
         log_store = RuntimeLogStore(base_path=self._storage_path / "runtime_logs")
 
         # Enable checkpointing by default for resumable sessions
-        from framework.graph.checkpoint_config import CheckpointConfig
+        from framework.orchestrator.checkpoint_config import CheckpointConfig
 
         checkpoint_config = CheckpointConfig(
             enabled=True,

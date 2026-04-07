@@ -310,7 +310,7 @@ def _prompt_before_start(agent_path: str, runner, model: str | None = None):
         Updated runner if user proceeds, None if user aborts.
     """
     from framework.credentials.setup import CredentialSetupSession
-    from framework.runner import AgentLoader
+    from framework.loader import AgentLoader
 
     while True:
         print()
@@ -342,7 +342,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     from framework.credentials.models import CredentialError
     from framework.observability import configure_logging
-    from framework.runner import AgentLoader
+    from framework.loader import AgentLoader
 
     # Set logging level (quiet by default for cleaner output)
     if args.quiet:
@@ -528,7 +528,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_info(args: argparse.Namespace) -> int:
     """Show agent information."""
     from framework.credentials.models import CredentialError
-    from framework.runner import AgentLoader
+    from framework.loader import AgentLoader
 
     try:
         runner = AgentLoader.load(args.agent_path)
@@ -595,7 +595,7 @@ def cmd_info(args: argparse.Namespace) -> int:
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate an exported agent."""
     from framework.credentials.models import CredentialError
-    from framework.runner import AgentLoader
+    from framework.loader import AgentLoader
 
     try:
         runner = AgentLoader.load(args.agent_path)
@@ -632,7 +632,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_list(args: argparse.Namespace) -> int:
     """List available agents."""
-    from framework.runner import AgentLoader
+    from framework.loader import AgentLoader
 
     directory = Path(args.directory)
     if not directory.exists():
@@ -686,7 +686,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 def _interactive_approval(request):
     """Interactive approval callback for HITL mode."""
-    from framework.graph import ApprovalDecision, ApprovalResult
+    from framework.orchestrator import ApprovalDecision, ApprovalResult
 
     print()
     print("=" * 60)
@@ -775,7 +775,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
 
     from framework.credentials.models import CredentialError
     from framework.observability import configure_logging
-    from framework.runner import AgentLoader
+    from framework.loader import AgentLoader
 
     configure_logging(level="INFO")
 

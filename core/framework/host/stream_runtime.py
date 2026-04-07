@@ -18,7 +18,7 @@ from framework.schemas.run import Run, RunStatus
 from framework.storage.concurrent import ConcurrentStorage
 
 if TYPE_CHECKING:
-    from framework.runtime.outcome_aggregator import OutcomeAggregator
+    from framework.host.outcome_aggregator import OutcomeAggregator
 
 logger = logging.getLogger(__name__)
 

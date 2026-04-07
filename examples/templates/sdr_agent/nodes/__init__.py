@@ -1,6 +1,6 @@
 """Node definitions for SDR Agent."""
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # Node 1: Intake (client-facing)
 # Receives contact list and outreach goal, confirms with user before proceeding.

@@ -16,13 +16,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from framework.graph.checkpoint_config import CheckpointConfig
+from framework.orchestrator.checkpoint_config import CheckpointConfig
 from framework.orchestrator.orchestrator import ExecutionResult
 from framework.host.event_bus import EventBus
 from framework.host.execution_manager import EntryPointSpec, ExecutionManager
-from framework.runtime.outcome_aggregator import OutcomeAggregator
-from framework.runtime.runtime_log_store import RuntimeLogStore
-from framework.runtime.shared_state import SharedBufferManager
+from framework.host.outcome_aggregator import OutcomeAggregator
+from framework.tracker.runtime_log_store import RuntimeLogStore
+from framework.host.shared_state import SharedBufferManager
 from framework.storage.concurrent import ConcurrentStorage
 from framework.storage.session_store import SessionStore
 
@@ -390,7 +390,7 @@ class AgentHost:
 
             # Start webhook server if routes are configured
             if self._config.webhook_routes:
-                from framework.runtime.webhook_server import (
+                from framework.host.webhook_server import (
                     WebhookRoute,
                     WebhookServer,
                     WebhookServerConfig,
@@ -1951,7 +1951,7 @@ def create_agent_runtime(
     """
     # Auto-create runtime log store if logging is enabled and not provided
     if enable_logging and runtime_log_store is None:
-        from framework.runtime.runtime_log_store import RuntimeLogStore
+        from framework.tracker.runtime_log_store import RuntimeLogStore
 
         storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
         runtime_log_store = RuntimeLogStore(storage_path_obj / "runtime_logs")

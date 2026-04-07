@@ -27,7 +27,7 @@ from framework.orchestrator.node import (
     NodeResult,
     NodeSpec,
 )
-from framework.graph.validator import OutputValidator
+from framework.orchestrator.validator import OutputValidator
 
 logger = logging.getLogger(__name__)
 
@@ -608,7 +608,7 @@ class NodeWorker:
 
         # Auto-create EventLoopNode
         if self.node_spec.node_type in ("event_loop", "gcu"):
-            from framework.graph.event_loop.types import LoopConfig
+            from framework.agent_loop.internals.types import LoopConfig
             from framework.agent_loop.agent_loop import AgentLoop
             from framework.orchestrator.node import warn_if_deprecated_client_facing
 
@@ -793,7 +793,7 @@ class NodeWorker:
         if not next_spec or next_spec.node_type != "event_loop":
             return
 
-        from framework.graph.prompting import (
+        from framework.orchestrator.prompting import (
             TransitionSpec,
             build_narrative,
             build_system_prompt_for_node_context,

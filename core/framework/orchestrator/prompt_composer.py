@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from framework.graph.prompting import (
+from framework.orchestrator.prompting import (
     EXECUTION_SCOPE_PREAMBLE,
     TransitionSpec,
     build_accounts_prompt,
@@ -36,7 +36,7 @@ def compose_system_prompt(
     node_type_preamble: str | None = None,
 ) -> str:
     """Compatibility wrapper for the legacy function signature."""
-    from framework.graph.prompting import NodePromptSpec
+    from framework.orchestrator.prompting import NodePromptSpec
 
     spec = NodePromptSpec(
         identity_prompt=identity_prompt or "",
@@ -66,7 +66,6 @@ def compose_system_prompt(
             protocols_prompt=spec.protocols_prompt,
             node_type=spec.node_type,
             output_keys=spec.output_keys,
-            is_subagent_mode=spec.is_subagent_mode,
         )
     return build_system_prompt(spec)
 
@@ -135,7 +134,7 @@ def build_transition_marker(
     )
 
 
-from framework.graph.prompting import build_transition_message  # noqa: E402
+from framework.orchestrator.prompting import build_transition_message  # noqa: E402
 
 __all__ = [
     "EXECUTION_SCOPE_PREAMBLE",

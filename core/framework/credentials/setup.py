@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from framework.graph import NodeSpec
+    from framework.orchestrator import NodeSpec
 
 logger = logging.getLogger(__name__)
 
@@ -604,7 +604,7 @@ def _load_nodes_from_json_agent(agent_json: Path) -> list:
         with open(agent_json, encoding="utf-8-sig") as f:
             data = json.load(f)
 
-        from framework.graph import NodeSpec
+        from framework.orchestrator import NodeSpec
 
         nodes_data = data.get("graph", {}).get("nodes", [])
         nodes = []

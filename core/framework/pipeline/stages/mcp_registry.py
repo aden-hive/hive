@@ -55,7 +55,7 @@ class McpRegistryStage(PipelineStage):
 
     async def initialize(self) -> None:
         """Connect to MCP servers and discover tools."""
-        from framework.runner.mcp_registry import MCPRegistry
+        from framework.loader.mcp_registry import MCPRegistry
         from framework.loader.tool_registry import ToolRegistry
 
         self._tool_registry = ToolRegistry()

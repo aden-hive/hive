@@ -25,10 +25,7 @@
 14. **Forgetting sys.path setup in conftest.py** — Tests need `exports/` and `core/` on sys.path.
 
 ## GCU Errors
-15. **Manually wiring browser tools on event_loop nodes** — Use `node_type="gcu"` which auto-includes browser tools. Do NOT manually list browser tool names.
-16. **Using GCU nodes as regular graph nodes** — GCU nodes are subagents only. They must ONLY appear in `sub_agents=["gcu-node-id"]` and be invoked via `delegate_to_sub_agent()`. Never connect via edges or use as entry/terminal nodes.
-17. **Reusing the same GCU node ID for parallel tasks** — Each concurrent browser task needs a distinct GCU node ID (e.g. `gcu-site-a`, `gcu-site-b`). Two `delegate_to_sub_agent` calls with the same `agent_id` share a browser profile and will interfere with each other's pages.
-18. **Passing `profile=` in GCU tool calls** — Profile isolation for parallel subagents is automatic. The framework injects a unique profile per subagent via an asyncio `ContextVar`. Hardcoding `profile="default"` in a GCU system prompt breaks this isolation.
+15. **Manually wiring browser tools on event_loop nodes** — Browser nodes use tools: {policy: "all"} to get all browser tools.
 
 ## Worker Agent Errors
 19. **Adding client-facing intake node to workers** — The queen owns intake. Workers should start with an autonomous processing node. Route worker review/approval through queen escalation instead of direct worker HITL.

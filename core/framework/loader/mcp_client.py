@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 import httpx
 
-from framework.runner.mcp_errors import MCPToolNotFoundError
+from framework.loader.mcp_errors import MCPToolNotFoundError
 
 logger = logging.getLogger(__name__)
 

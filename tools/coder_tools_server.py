@@ -456,7 +456,7 @@ def list_agent_tools(
     try:
         from pathlib import Path
 
-        from framework.runner.mcp_client import MCPClient, MCPServerConfig
+        from framework.loader.mcp_client import MCPClient, MCPServerConfig
         from framework.loader.tool_registry import ToolRegistry
     except ImportError:
         return json.dumps({"error": "Cannot import MCPClient"})
@@ -806,7 +806,7 @@ def _validate_agent_tools_impl(agent_path: str) -> dict:
     try:
         from pathlib import Path
 
-        from framework.runner.mcp_client import MCPClient, MCPServerConfig
+        from framework.loader.mcp_client import MCPClient, MCPServerConfig
         from framework.loader.tool_registry import ToolRegistry
     except ImportError:
         return {"error": "Cannot import MCPClient"}

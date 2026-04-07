@@ -41,7 +41,7 @@ _HEADER_LINE_LIMIT: int = 30
 _MIGRATION_MARKER = ".migrated-from-shared-memory"
 _GLOBAL_MEMORY_CODE_PATTERN = re.compile(
     r"(/Users/|~/.hive|\.py\b|\.ts\b|\.tsx\b|\.js\b|"
-    r"\b(graph|node|runtime|session|execution|worker|queen|subagent|checkpoint|flowchart)\b)",
+    r"\b(graph|node|runtime|session|execution|worker|queen|checkpoint|flowchart)\b)",
     re.IGNORECASE,
 )
 

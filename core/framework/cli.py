@@ -79,7 +79,7 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Register runner commands (run, info, validate, list, shell)
-    from framework.runner.cli import register_commands
+    from framework.loader.cli import register_commands
 
     register_commands(subparsers)
 
@@ -99,7 +99,7 @@ def main():
     register_debugger_commands(subparsers)
 
     # Register MCP registry commands (mcp install, mcp add, ...)
-    from framework.runner.mcp_registry_cli import register_mcp_commands
+    from framework.loader.mcp_registry_cli import register_mcp_commands
 
     register_mcp_commands(subparsers)
 

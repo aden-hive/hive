@@ -10,7 +10,7 @@ import logging
 import time
 
 from framework.agent_loop.conversation import NodeConversation
-from framework.graph.event_loop.types import HookContext
+from framework.agent_loop.internals.types import HookContext
 from framework.orchestrator.node import NodeContext
 from framework.host.event_bus import EventBus
 

@@ -47,11 +47,10 @@ class NodeConfig(BaseModel):
     description: str | None = None
     node_type: str = Field(
         default="event_loop",
-        description="event_loop | gcu",
+        description="event_loop",
     )
     system_prompt: str | None = None
     tools: ToolAccessConfig = Field(default_factory=ToolAccessConfig)
-    sub_agents: list[str] = Field(default_factory=list)
     model: str | None = None
     input_keys: list[str] = Field(default_factory=list)
     output_keys: list[str] = Field(default_factory=list)

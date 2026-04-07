@@ -34,7 +34,7 @@ class CredentialResolverStage(PipelineStage):
             from aden_tools.credentials.store_adapter import (
                 CredentialStoreAdapter,
             )
-            from framework.graph.prompting import build_accounts_prompt
+            from framework.orchestrator.prompting import build_accounts_prompt
 
             adapter = CredentialStoreAdapter.default()
             self._accounts_data = adapter.get_all_account_info()

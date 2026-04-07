@@ -71,7 +71,7 @@ are defined in the top-level `variables` object:
 | id | str | required | kebab-case identifier |
 | name | str | id | Display name |
 | description | str | required | What the node does |
-| node_type | str | "event_loop" | `"event_loop"` or `"gcu"` (browser) |
+| node_type | str | "event_loop" | `"event_loop"` |
 | input_keys | list | [] | Memory keys this node reads |
 | output_keys | list | [] | Memory keys this node writes via set_output |
 | system_prompt | str | "" | LLM instructions |
@@ -79,7 +79,6 @@ are defined in the top-level `variables` object:
 | nullable_output_keys | list | [] | Keys that may remain unset |
 | max_node_visits | int | 1 | 0=unlimited (for forever-alive agents) |
 | success_criteria | str | "" | Natural language for judge evaluation |
-| sub_agents | list | [] | Node IDs that can be invoked as subagents |
 | client_facing | bool | false | Whether output is shown to user |
 
 ## Tool Access Policies
@@ -93,7 +92,7 @@ Each node declares its tools via a policy object:
 ```
 
 - `explicit` (default): only named tools. Empty `allowed` = zero tools.
-- `all`: all tools from registry (for GCU browser nodes).
+- `all`: all tools from registry (e.g. for browser automation nodes).
 - `none`: no tools (for handoff/summary nodes).
 
 ## Edge Fields

@@ -143,7 +143,7 @@ tools:
   policy: explicit
   allowed: [web_search, save_data]
 
-# All tools from registry (for GCU browser nodes)
+# All tools (for browser automation nodes)
 tools:
   policy: all
 

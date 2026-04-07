@@ -14,9 +14,9 @@ from typing import Any, Literal
 
 import httpx
 
-from framework.runner.mcp_client import MCPClient, MCPServerConfig
-from framework.runner.mcp_connection_manager import MCPConnectionManager
-from framework.runner.mcp_errors import (
+from framework.loader.mcp_client import MCPClient, MCPServerConfig
+from framework.loader.mcp_connection_manager import MCPConnectionManager
+from framework.loader.mcp_errors import (
     MCPError,
     MCPErrorCode,
     MCPInstallError,

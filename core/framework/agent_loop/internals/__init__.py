@@ -3,5 +3,5 @@
 Re-exports from legacy locations for the new import path.
 """
 
-from framework.graph.event_loop.compaction import *  # noqa: F401, F403
-from framework.graph.event_loop.synthetic_tools import *  # noqa: F401, F403
+from framework.agent_loop.internals.compaction import *  # noqa: F401, F403
+from framework.agent_loop.internals.synthetic_tools import *  # noqa: F401, F403

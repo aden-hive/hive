@@ -28,7 +28,7 @@ from typing import Any
 
 def _get_registry(base_path: Path | None = None):
     """Initialize and return an MCPRegistry instance."""
-    from framework.runner.mcp_registry import MCPRegistry
+    from framework.loader.mcp_registry import MCPRegistry
 
     registry = MCPRegistry(base_path=base_path)
     registry.initialize()

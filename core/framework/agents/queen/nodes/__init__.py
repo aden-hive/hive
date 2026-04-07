@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # Load reference docs at import time so they're always in the system prompt.
 # No voluntary read_file() calls needed — the LLM gets everything upfront.
@@ -37,7 +37,7 @@ _appendices = _build_appendices()
 
 # GCU guide — shared between planning and building via _shared_building_knowledge.
 _gcu_section = (
-    ("\n\n# GCU Nodes — Browser Automation\n\n" + _gcu_guide)
+    ("\n\n# Browser Automation Nodes\n\n" + _gcu_guide)
     if _is_gcu_enabled() and _gcu_guide
     else ""
 )
@@ -257,9 +257,9 @@ When the stakeholder describes what they want, mentally construct:
 
 **After the user responds, assess fit and gaps together.** Be honest and specific. \
 Reference tools from list_agent_tools() AND built-in capabilities:
-- **GCU browser automation** (`node_type="gcu"`) provides full Playwright-based \
+- **Browser automation provides full Playwright-based \
 browser control (navigation, clicking, typing, scrolling, JS-rendered pages, \
-multi-tab). Do NOT list browser automation as missing — use GCU nodes.
+multi-tab). Do NOT list browser automation as missing — use browser nodes with tools: {policy: "all"}.
 
 Present a short **Framework Fit Assessment**:
 - **Works well**: 2-4 strengths for this use case
@@ -311,14 +311,11 @@ explicitly on a node. Available types:
 - **io** (dusty purple, parallelogram): External data input/output
 - **document** (steel blue, wavy rect): Report or document generation
 - **database** (muted teal, cylinder): Database or data store
-- **subprocess** (dark cyan, subroutine): Delegated sub-agent / predefined process
-- **browser** (deep blue, hexagon): GCU browser automation / sub-agent \
-delegation. At build time, browser nodes are dissolved into the parent \
-node's sub_agents list. Use for any GCU or sub-agent leaf node.
+- **browser** (deep blue, hexagon): Browser automation node (uses gcu-tools).
 
 Auto-detection works well for most cases: first node → start, nodes with \
 no outgoing edges → terminal, nodes with multiple conditional outgoing \
-edges → decision, GCU nodes → browser, nodes mentioning "database" → \
+edges → decision, browser tool nodes → browser, nodes mentioning "database" → \
 database, nodes mentioning "report/document" → document, I/O tools like \
 send_email → io. Everything else defaults to process. Set flowchart_type \
 explicitly only when auto-detection would be wrong.
@@ -359,48 +356,19 @@ gather → [Valid data?] →Yes→ transform → deliver
 In the draft: the `[Valid data?]` node has `flowchart_type: "decision"`, \
 `decision_clause: "Data passes validation checks?"`, with labeled yes/no edges.
 
-## Sub-Agent Nodes — Planning-Only Delegation
+## Browser Automation Nodes
 
-Sub-agent nodes (dark teal subroutines) are **planning-only** visual elements \
-that show which nodes delegate to sub-agents. At `confirm_and_build()`, \
-sub-agent nodes are **dissolved** into their parent node:
-
-- The sub-agent node's ID is added to the predecessor's `sub_agents` list
-- The sub-agent node and its connecting edge are removed
-- At runtime, the parent node can invoke the sub-agent via `delegate_to_sub_agent`
-
-**Rules for sub-agent nodes (INCLUDING GCU nodes):**
-- GCU nodes are auto-detected as `flowchart_type: "browser"` (hexagon)
-- Connect from the managing parent node to the sub-agent node
-- Sub-agent nodes must be **leaf nodes** — NO outgoing edges to other nodes
-- At build time, browser/GCU nodes are dissolved into the parent's \
-`sub_agents` list, just like decision nodes are dissolved into criteria
-
-**CRITICAL: GCU nodes (`node_type: "gcu"`) are ALWAYS sub-agents.** \
-They MUST NOT appear in the linear flow. NEVER chain GCU nodes \
-sequentially (A → gcu1 → gcu2 → B is WRONG). Instead, attach them \
-as leaves to the parent that orchestrates them:
+Browser nodes are regular `event_loop` nodes with browser tools \
+(from the gcu-tools MCP server) in their tool list. They are wired \
+into the graph with edges like any other node:
 ```
-WRONG:  intake → gcu_find_prospect → gcu_scan_mutuals → check_results
-WRONG:  decision_node → gcu_node (as a yes/no branch)
-RIGHT:  intake (sub_agents: [gcu_find, gcu_scan]) → check_results
+research → browser_scan → analyze_results
 ```
-The parent node delegates to its GCU sub-agents and collects results. \
-The main flow continues from the parent, not from the GCU node. \
-GCU nodes MUST NOT be children of decision nodes — decision nodes \
-dissolve at build time, which would leave the GCU as a dangling \
-workflow step.
+Use `tools: {policy: "all"}` to give browser nodes access to all \
+browser tools, or list specific ones with `policy: "explicit"`.
 
-**How to show delegation in the flowchart:**
-```
-research → (deep_searcher)   ← browser/GCU node, leaf
-research → [Enough results?] ← decision node
-```
-After dissolution: `research` node gets `sub_agents: ["deep_searcher"]` \
-and `success_criteria: "Enough results?"`.
-
-If the worker agent start from some initial input it is okay. \
-The queen(you) owns intake: you gathers user requirements, then calls \
+If the worker agent starts from some initial input it is okay. \
+The queen(you) owns intake: you gather user requirements, then call \
 `run_agent_with_input(task)` with a structured task description. \
 When building the agent, design the entry node's `input_keys` to \
 match what the queen will provide at run time. Worker nodes should \
@@ -525,7 +493,7 @@ tools:
   policy: explicit
   allowed: [web_search, save_data]
 
-# All tools from registry (for GCU browser nodes)
+# All tools (for browser automation nodes)
 tools:
   policy: all
 
@@ -644,11 +612,9 @@ document, database, subprocess, etc.) with unique shapes and colors. Set \
 flowchart_type on a node to override. Nodes need only an id. \
 Use decision nodes (flowchart_type: "decision", with decision_clause and \
 labeled yes/no edges) to make conditional branching explicit. \
-GCU/sub-agent nodes (node_type: "gcu") are auto-detected as browser \
 hexagons — connect them as leaf nodes to their parent.
 - confirm_and_build() — Record user confirmation of the draft. Dissolves \
 planning-only nodes (decision → predecessor criteria; browser/GCU → \
-predecessor sub_agents list). Call this ONLY after the user explicitly \
 approves via ask_user.
 - initialize_and_build_agent(agent_name?, nodes?) — Scaffold the agent package \
 and transition to BUILDING phase. For new agents, this REQUIRES \
@@ -991,7 +957,7 @@ delegate agent construction to the worker, even as a "research" subtask.
 ## Keeping the flowchart in sync during building
 
 When you make structural changes to the agent (add/remove/rename nodes, \
-change edges, modify sub-agent assignments), call save_agent_draft() to \
+change edges, modify node connections), call save_agent_draft() to \
 update the flowchart. During building, this auto-dissolves planning-only \
 nodes without needing user re-confirmation. The user sees the updated \
 flowchart immediately.
@@ -1010,15 +976,15 @@ user says "replan", "go back", "let's redesign", "change the approach", \
 
 ## CRITICAL — Graph topology errors require replanning, not code edits
 
-If you discover that the agent graph has structural problems — GCU nodes \
+If you discover that the agent graph has structural problems — browser nodes \
 in the linear flow, missing edges, wrong node connections, incorrect \
-sub-agent assignments — you MUST call replan_agent() and fix the draft. \
+node connections — you MUST call replan_agent() and fix the draft. \
 Do NOT attempt to fix topology by editing agent.json directly. The graph \
 structure is defined by the draft → dissolution → code-gen pipeline. \
 Editing the config to rewire nodes bypasses the flowchart and creates drift \
 between what the user sees and what the config does.
 
-**WRONG:** "Let me fix agent.json to remove GCU nodes from edges..."
+**WRONG:** "Let me fix agent.json to remove browser nodes from edges..."
 **RIGHT:** Call replan_agent(), fix the draft with save_agent_draft(), \
 get user approval, then confirm_and_build() → the corrected code is \
 generated automatically.
@@ -1144,18 +1110,15 @@ You wake up when:
 If the user asks for progress, call get_graph_status() ONCE and report. \
 If the summary mentions issues, follow up with get_graph_status(focus="issues").
 
-## Subagent delegations (browser automation, GCU)
+## Browser automation nodes
 
-When the worker delegates to a subagent (e.g., GCU browser automation), expect it \
-to take 2-5 minutes. During this time:
-- Progress will show 0% — this is NORMAL. The subagent only calls set_output at the end.
-- Check get_graph_status(focus="full") for "subagent_activity" — this shows the \
-subagent's latest reasoning text and confirms it is making real progress.
-- Do NOT conclude the subagent is stuck just because progress is 0% or because \
-you see repeated browser_click/browser_snapshot calls — that is the expected \
-pattern for web scraping.
-- Only intervene if: the subagent has been running for 5+ minutes with no new \
-subagent_activity updates, OR the judge escalates.
+Browser nodes may take 2-5 minutes for web scraping tasks. During this time:
+- Progress will show 0% until the node calls set_output at the end.
+- Check get_graph_status(focus="full") for activity updates.
+- Do NOT conclude it is stuck just because you see repeated \
+browser_click/browser_snapshot calls — that is expected for web scraping.
+- Only intervene if: the node has been running for 5+ minutes with no new \
+activity updates, OR the judge escalates.
 
 ## Handling worker termination ([WORKER_TERMINAL])
 
@@ -1187,11 +1150,11 @@ escalations. If the user gave you instructions (e.g., "just retry on errors", \
 
 CRITICAL — escalation relay protocol:
 When an escalation requires user input (auth blocks, human review), the worker \
-or its subagent is BLOCKED and waiting for your response. You MUST follow this \
+or is BLOCKED and waiting for your response. You MUST follow this \
 exact two-step sequence:
   Step 1: call ask_user() to get the user's answer.
   Step 2: call inject_message() with the user's answer IMMEDIATELY after.
-If you skip Step 2, the worker/subagent stays blocked FOREVER and the task hangs. \
+If you skip Step 2, the worker stays blocked FOREVER and the task hangs. \
 NEVER respond to the user without also calling inject_message() to unblock \
 the worker. Even if the user says "skip" or "cancel", you must still relay that \
 decision via inject_message() so the worker can clean up.

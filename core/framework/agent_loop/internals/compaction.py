@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from framework.agent_loop.conversation import Message, NodeConversation
-from framework.graph.event_loop.event_publishing import publish_context_usage
-from framework.graph.event_loop.types import LoopConfig, OutputAccumulator
+from framework.agent_loop.internals.event_publishing import publish_context_usage
+from framework.agent_loop.internals.types import LoopConfig, OutputAccumulator
 from framework.orchestrator.node import NodeContext
 from framework.host.event_bus import EventBus
 
@@ -369,7 +369,7 @@ async def llm_compact(
     appended once at the top-level call (``_depth == 0``).
     """
     from framework.agent_loop.conversation import extract_tool_call_history
-    from framework.graph.event_loop.tool_result_handler import is_context_too_large_error
+    from framework.agent_loop.internals.tool_result_handler import is_context_too_large_error
 
     if _depth > max_depth:
         raise RuntimeError(f"LLM compaction recursion limit ({max_depth})")

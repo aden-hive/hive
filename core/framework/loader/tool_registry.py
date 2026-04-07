@@ -635,8 +635,8 @@ class ToolRegistry:
             Number of tools registered from this server
         """
         try:
-            from framework.runner.mcp_client import MCPClient, MCPServerConfig
-            from framework.runner.mcp_connection_manager import MCPConnectionManager
+            from framework.loader.mcp_client import MCPClient, MCPServerConfig
+            from framework.loader.mcp_connection_manager import MCPConnectionManager
 
             # Build config object
             config = MCPServerConfig(
@@ -883,7 +883,7 @@ class ToolRegistry:
         """Re-run ``mcp_registry.json`` resolution and register servers (post-resync)."""
         if self._mcp_registry_agent_path is None:
             return
-        from framework.runner.mcp_registry import MCPRegistry
+        from framework.loader.mcp_registry import MCPRegistry
 
         try:
             reg = MCPRegistry()
@@ -975,7 +975,7 @@ class ToolRegistry:
             server_name = self._mcp_client_servers.get(client_id, client.config.name)
             try:
                 if client_id in self._mcp_managed_clients:
-                    from framework.runner.mcp_connection_manager import MCPConnectionManager
+                    from framework.loader.mcp_connection_manager import MCPConnectionManager
 
                     MCPConnectionManager.get_instance().release(server_name)
                 else:

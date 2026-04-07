@@ -67,7 +67,7 @@ async def create_queen(
     from framework.agents.queen.nodes.thinking_hook import select_expert_persona
     from framework.agent_loop.agent_loop import HookContext, HookResult
     from framework.orchestrator.orchestrator import Orchestrator
-    from framework.runner.mcp_registry import MCPRegistry
+    from framework.loader.mcp_registry import MCPRegistry
     from framework.loader.tool_registry import ToolRegistry
     from framework.tracker.decision_tracker import DecisionTracker  # noqa: F401
     from framework.host.event_bus import AgentEvent, EventType

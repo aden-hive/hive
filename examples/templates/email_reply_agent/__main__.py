@@ -51,9 +51,9 @@ def tui():
 
     from framework.tui.app import AdenTUI
     from framework.llm import LiteLLMProvider
-    from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.agent_runtime import create_agent_runtime
-    from framework.runtime.execution_stream import EntryPointSpec
+    from framework.loader.tool_registry import ToolRegistry
+    from framework.host.agent_host import create_agent_runtime
+    from framework.host.execution_manager import EntryPointSpec
 
     async def run_tui():
         agent = EmailReplyAgent()

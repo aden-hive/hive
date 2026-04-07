@@ -22,15 +22,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 from framework.agent_loop.conversation import ConversationStore, NodeConversation
-from framework.graph.event_loop import types as event_loop_types
-from framework.graph.event_loop.compaction import (
+from framework.agent_loop.internals import types as event_loop_types
+from framework.agent_loop.internals.compaction import (
     build_emergency_summary,
     build_llm_compaction_prompt,
     compact,
     format_messages_for_summary,
     llm_compact,
 )
-from framework.graph.event_loop.cursor_persistence import (
+from framework.agent_loop.internals.cursor_persistence import (
     RestoredState,
     check_pause,
     drain_injection_queue,
@@ -38,7 +38,7 @@ from framework.graph.event_loop.cursor_persistence import (
     restore,
     write_cursor,
 )
-from framework.graph.event_loop.event_publishing import (
+from framework.agent_loop.internals.event_publishing import (
     generate_action_plan,
     log_skip_judge,
     publish_context_usage,
@@ -54,27 +54,24 @@ from framework.graph.event_loop.event_publishing import (
     publish_tool_started,
     run_hooks,
 )
-from framework.graph.event_loop.judge_pipeline import (
+from framework.agent_loop.internals.judge_pipeline import (
     SubagentJudge as SharedSubagentJudge,
     judge_turn,
 )
-from framework.graph.event_loop.stall_detector import (
+from framework.agent_loop.internals.stall_detector import (
     fingerprint_tool_calls,
     is_stalled,
     is_tool_doom_loop,
     ngram_similarity,
 )
-from framework.graph.event_loop.subagent_executor import execute_subagent
-from framework.graph.event_loop.synthetic_tools import (
+from framework.agent_loop.internals.synthetic_tools import (
     build_ask_user_multiple_tool,
     build_ask_user_tool,
-    build_delegate_tool,
     build_escalate_tool,
-    build_report_to_parent_tool,
     build_set_output_tool,
     handle_set_output,
 )
-from framework.graph.event_loop.tool_result_handler import (
+from framework.agent_loop.internals.tool_result_handler import (
     build_json_preview,
     execute_tool,
     extract_json_metadata,
@@ -82,7 +79,7 @@ from framework.graph.event_loop.tool_result_handler import (
     restore_spill_counter,
     truncate_tool_result,
 )
-from framework.graph.event_loop.types import (
+from framework.agent_loop.internals.types import (
     JudgeProtocol,
     JudgeVerdict,
     TriggerEvent,
@@ -97,7 +94,7 @@ from framework.llm.stream_events import (
     ToolCallEvent,
 )
 from framework.host.event_bus import EventBus
-from framework.runtime.llm_debug_logger import log_llm_turn
+from framework.tracker.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +399,7 @@ class AgentLoop(NodeProtocol):
                 # execution preamble and node-type preamble.  The stored
                 # prompt may be stale after code changes or when runtime-
                 # injected context (e.g. worker identity) has changed.
-                from framework.graph.prompting import build_system_prompt_for_node_context
+                from framework.orchestrator.prompting import build_system_prompt_for_node_context
 
                 _current_prompt = build_system_prompt_for_node_context(ctx)
                 if conversation.system_prompt != _current_prompt:
@@ -425,7 +422,7 @@ class AgentLoop(NodeProtocol):
                     await self._conversation_store.clear()
 
                 # Fresh conversation: either isolated mode or first node in continuous mode.
-                from framework.graph.prompting import build_system_prompt_for_node_context
+                from framework.orchestrator.prompting import build_system_prompt_for_node_context
 
                 system_prompt = build_system_prompt_for_node_context(ctx)
 
@@ -509,7 +506,7 @@ class AgentLoop(NodeProtocol):
         # Add delegate_to_sub_agent tool if:
         # - Node has sub_agents defined
         # - We are NOT in subagent mode (prevents nested delegation)
-        if not ctx.is_subagent_mode:
+        if not False:
             sub_agents = getattr(ctx.node_spec, "sub_agents", None) or []
             if sub_agents:
                 delegate_tool = self._build_delegate_tool(sub_agents, ctx.node_registry)
@@ -530,7 +527,7 @@ class AgentLoop(NodeProtocol):
             logger.debug("[%s] Skipped delegate tool (is_subagent_mode=True)", node_id)
 
         # Add report_to_parent tool for sub-agents with a report callback
-        if ctx.is_subagent_mode and ctx.report_callback is not None:
+        if False and False:
             tools.append(self._build_report_to_parent_tool())
 
         logger.info(
@@ -696,11 +693,11 @@ class AgentLoop(NodeProtocol):
             # 6b3. Dynamic prompt refresh (phase switching / memory refresh)
             if ctx.dynamic_prompt_provider is not None or ctx.dynamic_memory_provider is not None:
                 if ctx.dynamic_prompt_provider is not None:
-                    from framework.graph.prompting import stamp_prompt_datetime
+                    from framework.orchestrator.prompting import stamp_prompt_datetime
 
                     _new_prompt = stamp_prompt_datetime(ctx.dynamic_prompt_provider())
                 else:
-                    from framework.graph.prompting import build_system_prompt_for_node_context
+                    from framework.orchestrator.prompting import build_system_prompt_for_node_context
 
                     _new_prompt = build_system_prompt_for_node_context(ctx)
                 if _new_prompt != conversation.system_prompt:
@@ -1276,7 +1273,7 @@ class AgentLoop(NodeProtocol):
             # blocking and resumption.
             _is_worker = (
                 stream_id not in ("queen", "judge")
-                and not ctx.is_subagent_mode
+                and not False
                 and not ctx.supports_direct_user_io
                 and self._event_bus is not None
             )
@@ -1733,7 +1730,7 @@ class AgentLoop(NodeProtocol):
 
             # 6i. Judge evaluation
             should_judge = (
-                ctx.is_subagent_mode  # Always evaluate subagents
+                False  # Always evaluate subagents
                 or (iteration + 1) % self._config.judge_every_n_turns == 0
                 or not real_tool_results  # no real tool calls = natural stop
             )
@@ -3118,16 +3115,6 @@ class AgentLoop(NodeProtocol):
         """Build the synthetic escalate tool. Delegates to synthetic_tools module."""
         return build_escalate_tool()
 
-    def _build_delegate_tool(
-        self, sub_agents: list[str], node_registry: dict[str, Any]
-    ) -> Tool | None:
-        """Build the synthetic delegate_to_sub_agent tool. Delegates to synthetic_tools module."""
-        return build_delegate_tool(sub_agents, node_registry)
-
-    def _build_report_to_parent_tool(self) -> Tool:
-        """Build the synthetic report_to_parent tool. Delegates to synthetic_tools module."""
-        return build_report_to_parent_tool()
-
     def _handle_set_output(
         self,
         tool_input: dict[str, Any],
@@ -3781,46 +3768,3 @@ class AgentLoop(NodeProtocol):
     # Subagent Execution
     # -------------------------------------------------------------------
 
-    async def _execute_subagent(
-        self,
-        ctx: NodeContext,
-        agent_id: str,
-        task: str,
-        *,
-        accumulator: OutputAccumulator | None = None,
-    ) -> ToolResult:
-        """Execute a subagent and return the result as a ToolResult.
-
-        The subagent:
-        - Gets a fresh conversation with just the task
-        - Has read-only access to the parent's readable data buffer
-        - Cannot delegate to its own subagents (prevents recursion)
-        - Returns its output in structured JSON format
-
-        Args:
-            ctx: Parent node's context (for data buffer, tools, LLM access).
-            agent_id: The node ID of the subagent to invoke.
-            task: The task description to give the subagent.
-            accumulator: Parent's OutputAccumulator — provides outputs that
-                have been set via ``set_output`` but not yet written to
-                data buffer (which only happens after the node completes).
-
-        Returns:
-            ToolResult with structured JSON output containing:
-            - message: Human-readable summary
-            - data: Subagent's output (free-form JSON)
-            - metadata: Execution metadata (success, tokens, latency)
-        """
-        return await execute_subagent(
-            ctx=ctx,
-            agent_id=agent_id,
-            task=task,
-            accumulator=accumulator,
-            event_bus=self._event_bus,
-            config=self._config,
-            tool_executor=self._tool_executor,
-            conversation_store=self._conversation_store,
-            subagent_instance_counter=self._subagent_instance_counter,
-            event_loop_node_cls=type(self),
-            escalation_receiver_cls=_EscalationReceiver,
-        )

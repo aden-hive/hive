@@ -1,6 +1,6 @@
 """Node definitions for Credential Tester agent."""
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 
 def build_tester_node(

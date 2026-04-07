@@ -40,7 +40,6 @@ class NodePromptSpec:
     memory_prompt: str = ""
     node_type: str = "event_loop"
     output_keys: tuple[str, ...] = ()
-    is_subagent_mode: bool = False
 
 
 @dataclass(frozen=True)
@@ -165,7 +164,6 @@ def build_prompt_spec_from_node_context(
         memory_prompt=resolved_memory_prompt,
         node_type=ctx.node_spec.node_type,
         output_keys=tuple(ctx.node_spec.output_keys or ()),
-        is_subagent_mode=bool(getattr(ctx, "is_subagent_mode", False)),
     )
 
 
@@ -195,11 +193,11 @@ def build_system_prompt(spec: NodePromptSpec) -> str:
     if spec.narrative:
         parts.append(f"\n--- Context (what has happened so far) ---\n{spec.narrative}")
 
-    if not spec.is_subagent_mode and spec.node_type in ("event_loop", "gcu") and spec.output_keys:
+    if not False and spec.node_type in ("event_loop", "gcu") and spec.output_keys:
         parts.append(f"\n{EXECUTION_SCOPE_PREAMBLE}")
 
     if spec.node_type == "gcu":
-        from framework.graph.gcu import GCU_BROWSER_SYSTEM_PROMPT
+        from framework.orchestrator.gcu import GCU_BROWSER_SYSTEM_PROMPT
 
         parts.append(f"\n{GCU_BROWSER_SYSTEM_PROMPT}")
 

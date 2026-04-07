@@ -112,7 +112,7 @@ def build_node_accounts_prompt(
 
     resolved = accounts_prompt
     if accounts_data and tool_provider_map:
-        from framework.graph.prompting import build_accounts_prompt
+        from framework.orchestrator.prompting import build_accounts_prompt
 
         filtered = build_accounts_prompt(
             accounts_data,
@@ -256,9 +256,6 @@ def build_node_context(
         execution_id=execution_id,
         run_id=run_id,
         stream_id=stream_id,
-        node_registry=node_registry or {},
-        all_tools=list(all_tools or tools),
-        shared_node_registry=shared_node_registry or {},
         dynamic_tools_provider=dynamic_tools_provider,
         dynamic_prompt_provider=dynamic_prompt_provider,
         dynamic_memory_provider=dynamic_memory_provider,
@@ -330,9 +327,6 @@ def build_node_context_from_graph_context(
         execution_id=gc.execution_id,
         run_id=gc.run_id,
         stream_id=gc.stream_id,
-        node_registry=node_registry or gc.node_spec_registry,
-        all_tools=gc.tools,
-        shared_node_registry=gc.node_registry,
         dynamic_tools_provider=gc.dynamic_tools_provider,
         dynamic_prompt_provider=gc.dynamic_prompt_provider,
         dynamic_memory_provider=gc.dynamic_memory_provider,
