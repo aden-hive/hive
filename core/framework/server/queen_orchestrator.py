@@ -279,8 +279,9 @@ async def create_queen(
     _session_event_bus = session.event_bus
 
     async def _persona_hook(ctx: HookContext) -> HookResult | None:
+        trigger = ctx.trigger or ""
         result = await select_expert_persona(
-            ctx.trigger or "", _session_llm, memory_context=""
+            trigger, _session_llm, memory_context=""
         )
         if not result:
             return None
@@ -295,6 +296,23 @@ async def create_queen(
                     data={"persona": result.persona_prefix},
                 )
             )
+
+        # Seed recall cache so the first turn has relevant memories.
+        if trigger:
+            try:
+                from framework.agents.queen.recall_selector import (
+                    format_recall_injection,
+                    select_memories,
+                )
+
+                mem_dir = phase_state.global_memory_dir
+                selected = await select_memories(trigger, _session_llm, mem_dir)
+                phase_state._cached_global_recall_block = format_recall_injection(
+                    selected, mem_dir
+                )
+            except Exception:
+                logger.debug("recall: initial seeding failed", exc_info=True)
+
         return HookResult(system_prompt=phase_state.get_current_prompt())
 
     # ---- Graph preparation -------------------------------------------

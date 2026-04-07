@@ -217,6 +217,7 @@ async def _reflection_loop(
     last_text: str = ""
 
     for _turn in range(max_turns):
+        logger.debug("reflect: loop turn %d/%d", _turn + 1, max_turns)
         try:
             resp: LLMResponse = await llm.acomplete(
                 messages=messages,
@@ -352,6 +353,7 @@ async def run_short_reflection(
     memory_dir: Path | None = None,
 ) -> None:
     """Run a short reflection: extract user knowledge from conversation."""
+    logger.debug("reflect: starting short reflection")
     mem_dir = memory_dir or global_memory_dir()
 
     messages = await _read_conversation_parts(session_dir)
@@ -391,10 +393,12 @@ async def run_long_reflection(
     memory_dir: Path | None = None,
 ) -> None:
     """Run a long reflection: organise and deduplicate all global memories."""
+    logger.debug("reflect: starting long reflection")
     mem_dir = memory_dir or global_memory_dir()
     files = scan_memory_files(mem_dir)
 
     if not files:
+        logger.debug("reflect: no memory files, skipping long reflection")
         return
 
     manifest = format_memory_manifest(files)
@@ -454,11 +458,17 @@ async def subscribe_reflection_triggers(
         is_interval = _short_count % _LONG_REFLECT_INTERVAL == 0
 
         if is_tool_turn and not is_interval:
+            logger.debug("reflect: skipping tool turn (count=%d)", _short_count)
             return
 
         if _lock.locked():
+            logger.debug("reflect: skipping, already running (count=%d)", _short_count)
             return
 
+        logger.debug(
+            "reflect: triggered (count=%d, interval=%s, stop_reason=%s)",
+            _short_count, is_interval, stop_reason,
+        )
         async with _lock:
             try:
                 if is_interval:
@@ -475,6 +485,7 @@ async def subscribe_reflection_triggers(
                 try:
                     from framework.agents.queen.recall_selector import update_recall_cache
 
+                    logger.debug("recall: post-reflection cache update starting")
                     await update_recall_cache(
                         session_dir,
                         llm,
@@ -490,7 +501,9 @@ async def subscribe_reflection_triggers(
         if getattr(event, "stream_id", None) != "queen":
             return
         if _lock.locked():
+            logger.debug("reflect: skipping compaction trigger, already running")
             return
+        logger.debug("reflect: compaction triggered long reflection")
         async with _lock:
             try:
                 await run_long_reflection(llm, mem_dir)

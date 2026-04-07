@@ -92,8 +92,10 @@ async def select_memories(
     mem_dir = memory_dir or global_memory_dir()
     files = scan_memory_files(mem_dir)
     if not files:
+        logger.debug("recall: no memory files found, skipping selection")
         return []
 
+    logger.debug("recall: selecting from %d memories for query: %.100s", len(files), query)
     manifest = format_memory_manifest(files)
     user_msg = f"## User query\n\n{query}\n\n## Available memories\n\n{manifest}"
 
@@ -163,13 +165,16 @@ async def update_recall_cache(
 
     query = _extract_latest_user_query(session_dir)
     if not query:
+        logger.debug("recall: no user query found for cache update")
         return
 
+    logger.debug("recall: updating cache for query: %.100s", query)
     try:
         selected = await select_memories(query, llm, mem_dir)
         injection = format_recall_injection(selected, mem_dir)
         if cache_setter is not None:
             cache_setter(injection)
+        logger.debug("recall: cache updated (%d chars injected)", len(injection))
     except Exception:
         logger.debug("recall: cache update failed", exc_info=True)
 
