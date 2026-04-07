@@ -258,7 +258,19 @@ describe("decideAutoClose", () => {
     );
     expect(result).toBe(null);
   });
-  describe('Research and Summary Agent Pipeline', () => {
+  test("returns null when target state is not exactly 'open' (e.g. uppercase)", async () => {
+    const result = await decideAutoClose(
+      issue(1275),
+      comment("Found a possible duplicate of `#1000`"),
+      async () => ({ state: "OPEN" } as { state: string })
+    );
+    expect(result).toBe(null);
+  });
+});
+
+describe('Research and Summary Agent Pipeline', () => {
+  // ... rest of the Research Agent tests ...
+});
   let agent: ResearchAgent;
 
   beforeEach(() => {
