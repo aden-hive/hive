@@ -128,10 +128,11 @@ class QueenPhaseState:
     # Community skills catalog (XML) — appended after protocols
     skills_catalog_prompt: str = ""
 
-    # Persona and communication style (set once at session start by persona hook,
-    # persisted here so they survive dynamic prompt refreshes across iterations).
-    persona_prefix: str = ""  # e.g. "You are a CFO. I am a CFO with 20 years..."
-    style_directive: str = ""  # e.g. "## Communication Style: Peer\n\n..."
+    # Queen identity (set once at session start by queen identity hook,
+    # persisted here so it survives dynamic prompt refreshes across iterations).
+    queen_id: str | None = None
+    queen_profile: dict | None = None
+    queen_identity_prompt: str = ""
 
     # Cached recall block — populated async by recall_selector after each turn.
     _cached_recall_block: str = ""
@@ -168,11 +169,9 @@ class QueenPhaseState:
 
         _memory = format_for_injection()  # noqa: F841
         parts = []
-        if self.persona_prefix:
-            parts.append(self.persona_prefix)
+        if self.queen_identity_prompt:
+            parts.append(self.queen_identity_prompt)
         parts.append(base)
-        if self.style_directive:
-            parts.append(self.style_directive)
         if self.skills_catalog_prompt:
             parts.append(self.skills_catalog_prompt)
         if self.protocols_prompt:

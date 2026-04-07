@@ -64,7 +64,12 @@ async def create_queen(
         _queen_tools_staging,
         _shared_building_knowledge,
     )
-    from framework.agents.queen.nodes.thinking_hook import select_expert_persona
+    from framework.agents.queen.queen_profiles import (
+        ensure_default_queens,
+        format_queen_identity_prompt,
+        load_queen_profile,
+        select_queen,
+    )
     from framework.agent_loop.agent_loop import HookContext, HookResult
     from framework.orchestrator.orchestrator import Orchestrator
     from framework.loader.mcp_registry import MCPRegistry
@@ -277,28 +282,33 @@ async def create_queen(
     except Exception:
         logger.debug("Queen skill loading failed (non-fatal)", exc_info=True)
 
-    # ---- Persona hook ------------------------------------------------
+    # ---- Queen identity hook -----------------------------------------
     _session_llm = session.llm
     _session_event_bus = session.event_bus
 
-    async def _persona_hook(ctx: HookContext) -> HookResult | None:
-        from framework.agents.queen.queen_memory import format_for_injection
-
-        memory_context = format_for_injection()
-        result = await select_expert_persona(
-            ctx.trigger or "", _session_llm, memory_context=memory_context
-        )
-        if not result:
+    async def _queen_identity_hook(ctx: HookContext) -> HookResult | None:
+        ensure_default_queens()
+        queen_id = await select_queen(ctx.trigger or "", _session_llm)
+        try:
+            profile = load_queen_profile(queen_id)
+        except FileNotFoundError:
+            logger.warning("Queen profile %s not found after selection", queen_id)
             return None
-        # Store on phase_state so persona/style persist across dynamic prompt refreshes
-        phase_state.persona_prefix = result.persona_prefix
-        phase_state.style_directive = result.style_directive
+        identity_prompt = format_queen_identity_prompt(profile)
+        # Store on phase_state so identity persists across dynamic prompt refreshes
+        phase_state.queen_id = queen_id
+        phase_state.queen_profile = profile
+        phase_state.queen_identity_prompt = identity_prompt
         if _session_event_bus is not None:
             await _session_event_bus.publish(
                 AgentEvent(
-                    type=EventType.QUEEN_PERSONA_SELECTED,
+                    type=EventType.QUEEN_IDENTITY_SELECTED,
                     stream_id="queen",
-                    data={"persona": result.persona_prefix},
+                    data={
+                        "queen_id": queen_id,
+                        "name": profile.get("name", ""),
+                        "title": profile.get("title", ""),
+                    },
                 )
             )
         return HookResult(system_prompt=phase_state.get_current_prompt())
@@ -322,7 +332,7 @@ async def create_queen(
     adjusted_node = _orig_node.model_copy(update=node_updates)
     _queen_loop_config = {
         **(_queen_graph.loop_config or {}),
-        "hooks": {"session_start": [_persona_hook]},
+        "hooks": {"session_start": [_queen_identity_hook]},
     }
     queen_graph = _queen_graph.model_copy(
         update={"nodes": [adjusted_node], "loop_config": _queen_loop_config}

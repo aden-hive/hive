@@ -148,8 +148,8 @@ class EventType(StrEnum):
     # Queen phase changes (building <-> staging <-> running)
     QUEEN_PHASE_CHANGED = "queen_phase_changed"
 
-    # Queen thinking hook — persona selected for the current building session
-    QUEEN_PERSONA_SELECTED = "queen_persona_selected"
+    # Queen identity — which queen profile was selected for this session
+    QUEEN_IDENTITY_SELECTED = "queen_identity_selected"
 
     # Subagent reports (one-way progress updates from sub-agents)
     SUBAGENT_REPORT = "subagent_report"
