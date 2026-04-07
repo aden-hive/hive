@@ -56,7 +56,7 @@ from framework.tools.flowchart_utils import (
 
 if TYPE_CHECKING:
     from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.agent_runtime import AgentRuntime
+    from framework.runtime.agent_runtime import AgentHost
     from framework.runtime.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
@@ -330,7 +330,7 @@ class QueenPhaseState:
             )
 
 
-def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = None) -> str:
+def build_worker_profile(runtime: AgentHost, agent_path: Path | str | None = None) -> str:
     """Build a worker capability profile from its graph/goal definition.
 
     Injected into the queen's system prompt so it knows what the worker
@@ -823,7 +823,7 @@ def register_queen_lifecycle_tools(
     session: Any = None,
     session_id: str | None = None,
     # Legacy params — used by TUI when not passing a session object
-    graph_runtime: AgentRuntime | None = None,
+    graph_runtime: AgentHost | None = None,
     event_bus: EventBus | None = None,
     storage_path: Path | None = None,
     # Server context — enables load_built_agent tool
@@ -2561,7 +2561,7 @@ def register_queen_lifecycle_tools(
         return s
 
     def _build_preamble(
-        runtime: AgentRuntime,
+        runtime: AgentHost,
     ) -> dict[str, Any]:
         """Build the lightweight preamble: status, node, elapsed, iteration.
 
@@ -2719,7 +2719,7 @@ def register_queen_lifecycle_tools(
 
         return "\n".join(lines)
 
-    async def _format_memory(runtime: AgentRuntime) -> str:
+    async def _format_memory(runtime: AgentHost) -> str:
         """Format the worker's shared buffer snapshot and recent changes."""
         from framework.runtime.shared_state import IsolationLevel
 
@@ -2872,7 +2872,7 @@ def register_queen_lifecycle_tools(
         header = f"{total} issue(s) detected."
         return header + "\n\n" + "\n".join(lines)
 
-    async def _format_progress(runtime: AgentRuntime, bus: EventBus) -> str:
+    async def _format_progress(runtime: AgentHost, bus: EventBus) -> str:
         """Format goal progress, token consumption, and execution outcomes."""
         lines = []
 
@@ -2928,7 +2928,7 @@ def register_queen_lifecycle_tools(
         return "\n".join(lines)
 
     def _build_full_json(
-        runtime: AgentRuntime,
+        runtime: AgentHost,
         bus: EventBus,
         preamble: dict[str, Any],
         last_n: int,
@@ -3482,50 +3482,59 @@ def register_queen_lifecycle_tools(
             if not resolved_path.exists():
                 return json.dumps({"error": f"Agent path does not exist: {agent_path}"})
 
-            # Pre-check: verify the module exports goal/nodes/edges before
-            # attempting the full load.  This gives the queen an actionable
-            # error message instead of a cryptic ImportError or TypeError.
-            try:
-                import importlib
-                import sys as _sys
+            # Pre-check: verify the agent can be loaded before attempting
+            # the full session load.  Declarative (agent.json) agents skip
+            # the Python import check since AgentRunner.load() handles them.
+            _has_yaml = (resolved_path / "agent.json").exists()
+            if not _has_yaml:
+                # Legacy Python agent: verify module exports goal/nodes/edges
+                try:
+                    import importlib
+                    import sys as _sys
 
-                pkg_name = resolved_path.name
-                parent_dir = str(resolved_path.resolve().parent)
-                # Temporarily put parent on sys.path for import
-                if parent_dir not in _sys.path:
-                    _sys.path.insert(0, parent_dir)
-                # Evict stale cached modules
-                stale = [n for n in _sys.modules if n == pkg_name or n.startswith(f"{pkg_name}.")]
-                for n in stale:
-                    del _sys.modules[n]
+                    pkg_name = resolved_path.name
+                    parent_dir = str(resolved_path.resolve().parent)
+                    if parent_dir not in _sys.path:
+                        _sys.path.insert(0, parent_dir)
+                    stale = [
+                        n for n in _sys.modules
+                        if n == pkg_name or n.startswith(f"{pkg_name}.")
+                    ]
+                    for n in stale:
+                        del _sys.modules[n]
 
-                mod = importlib.import_module(pkg_name)
-                missing_attrs = [
-                    attr for attr in ("goal", "nodes", "edges") if getattr(mod, attr, None) is None
-                ]
-                if missing_attrs:
+                    mod = importlib.import_module(pkg_name)
+                    missing_attrs = [
+                        attr
+                        for attr in ("goal", "nodes", "edges")
+                        if getattr(mod, attr, None) is None
+                    ]
+                    if missing_attrs:
+                        return json.dumps(
+                            {
+                                "error": (
+                                    f"Agent module '{pkg_name}' is missing module-level "
+                                    f"attributes: {', '.join(missing_attrs)}. "
+                                    f"Fix: in {pkg_name}/__init__.py, add "
+                                    f"'from .agent import {', '.join(missing_attrs)}' "
+                                    f"so that 'import {pkg_name}' exposes them at "
+                                    f"package level."
+                                )
+                            }
+                        )
+                except Exception as pre_err:
                     return json.dumps(
                         {
                             "error": (
-                                f"Agent module '{pkg_name}' is missing module-level "
-                                f"attributes: {', '.join(missing_attrs)}. "
-                                f"Fix: in {pkg_name}/__init__.py, add "
-                                f"'from .agent import {', '.join(missing_attrs)}' "
-                                f"so that 'import {pkg_name}' exposes them at package level."
+                                f"Failed to import agent module "
+                                f"'{resolved_path.name}': {pre_err}. "
+                                f"Fix: ensure {resolved_path.name}/__init__.py "
+                                f"exists and can be imported without errors "
+                                f"(check syntax, missing dependencies, and "
+                                f"relative imports)."
                             )
                         }
                     )
-            except Exception as pre_err:
-                return json.dumps(
-                    {
-                        "error": (
-                            f"Failed to import agent module '{resolved_path.name}': {pre_err}. "
-                            f"Fix: ensure {resolved_path.name}/__init__.py exists and can be "
-                            f"imported without errors (check syntax, missing dependencies, "
-                            f"and relative imports)."
-                        )
-                    }
-                )
 
             try:
                 updated_session = await session_manager.load_graph(

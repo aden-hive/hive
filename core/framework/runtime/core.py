@@ -21,7 +21,7 @@ from framework.storage.concurrent import ConcurrentStorage
 logger = logging.getLogger(__name__)
 
 
-class Runtime:
+class DecisionTracker:
     """
     The runtime environment that agents execute within.
 

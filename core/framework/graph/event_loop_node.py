@@ -224,7 +224,7 @@ OutputAccumulator = event_loop_types.OutputAccumulator
 # ---------------------------------------------------------------------------
 
 
-class EventLoopNode(NodeProtocol):
+class AgentLoop(NodeProtocol):
     """Multi-turn LLM streaming loop with tool execution and judge evaluation.
 
     Lifecycle:
@@ -307,7 +307,7 @@ class EventLoopNode(NodeProtocol):
     async def execute(self, ctx: NodeContext) -> NodeResult:
         """Run the event loop."""
         logger.debug(
-            "[EventLoopNode.execute] Starting execution for node=%s, stream=%s",
+            "[AgentLoop.execute] Starting execution for node=%s, stream=%s",
             ctx.node_id,
             ctx.stream_id,
         )
@@ -320,7 +320,7 @@ class EventLoopNode(NodeProtocol):
         # Store skill dirs for AS-9 file-read interception in _execute_tool
         self._skill_dirs: list[str] = ctx.skill_dirs
         logger.debug(
-            "[EventLoopNode.execute] node_id=%s, execution_id=%s, max_iterations=%d",
+            "[AgentLoop.execute] node_id=%s, execution_id=%s, max_iterations=%d",
             node_id,
             execution_id,
             self._config.max_iterations,
@@ -565,11 +565,11 @@ class EventLoopNode(NodeProtocol):
 
         # 6. Main loop
         logger.debug(
-            "[EventLoopNode.execute] Entering main loop, start_iteration=%d", start_iteration
+            "[AgentLoop.execute] Entering main loop, start_iteration=%d", start_iteration
         )
         for iteration in range(start_iteration, self._config.max_iterations):
             iter_start = time.time()
-            logger.debug("[EventLoopNode.execute] iteration=%d starting", iteration)
+            logger.debug("[AgentLoop.execute] iteration=%d starting", iteration)
 
             # 6a. Check pause (no current-iteration data yet — only log_node_complete needed)
             if await self._check_pause(ctx, conversation, iteration):
@@ -601,18 +601,18 @@ class EventLoopNode(NodeProtocol):
 
             # 6b. Drain injection queue
             logger.debug(
-                "[EventLoopNode.execute] iteration=%d: draining injection queue...", iteration
+                "[AgentLoop.execute] iteration=%d: draining injection queue...", iteration
             )
             drained_injections = await self._drain_injection_queue(conversation, ctx)
             logger.debug(
-                "[EventLoopNode.execute] iteration=%d: drained %d injections",
+                "[AgentLoop.execute] iteration=%d: drained %d injections",
                 iteration,
                 drained_injections,
             )
             # 6b1. Drain trigger queue (framework-level signals)
             drained_triggers = await self._drain_trigger_queue(conversation)
             logger.debug(
-                "[EventLoopNode.execute] iteration=%d: drained %d triggers",
+                "[AgentLoop.execute] iteration=%d: drained %d triggers",
                 iteration,
                 drained_triggers,
             )
@@ -743,7 +743,7 @@ class EventLoopNode(NodeProtocol):
                 len(conversation.messages),
             )
             logger.debug(
-                "[EventLoopNode.execute] iteration=%d: entering _run_single_turn loop", iteration
+                "[AgentLoop.execute] iteration=%d: entering _run_single_turn loop", iteration
             )
             _stream_retry_count = 0
             _turn_cancelled = False
@@ -752,7 +752,7 @@ class EventLoopNode(NodeProtocol):
             while True:
                 try:
                     logger.debug(
-                        "[EventLoopNode.execute] iteration=%d: calling _run_single_turn (retry=%d)",
+                        "[AgentLoop.execute] iteration=%d: calling _run_single_turn (retry=%d)",
                         iteration,
                         _stream_retry_count,
                     )
@@ -773,7 +773,7 @@ class EventLoopNode(NodeProtocol):
                         ctx, conversation, tools, iteration, accumulator
                     )
                     logger.debug(
-                        "[EventLoopNode.execute] iteration=%d:"
+                        "[AgentLoop.execute] iteration=%d:"
                         " _run_single_turn completed successfully",
                         iteration,
                     )
@@ -842,13 +842,13 @@ class EventLoopNode(NodeProtocol):
                     break  # success — exit retry loop
 
                 except TurnCancelled:
-                    logger.debug("[EventLoopNode.execute] iteration=%d: TurnCancelled", iteration)
+                    logger.debug("[AgentLoop.execute] iteration=%d: TurnCancelled", iteration)
                     _turn_cancelled = True
                     break
 
                 except Exception as e:
                     logger.debug(
-                        "[EventLoopNode.execute] iteration=%d:"
+                        "[AgentLoop.execute] iteration=%d:"
                         " Exception in _run_single_turn: %s (%s)",
                         iteration,
                         type(e).__name__,
@@ -1988,7 +1988,7 @@ class EventLoopNode(NodeProtocol):
             image_content: Optional list of OpenAI-style image blocks to attach.
         """
         logger.debug(
-            "[EventLoopNode.inject_event] content_len=%d,"
+            "[AgentLoop.inject_event] content_len=%d,"
             " is_client_input=%s, has_images=%s,"
             " queue_size_before=%d",
             len(content) if content else 0,
@@ -1998,15 +1998,15 @@ class EventLoopNode(NodeProtocol):
         )
         try:
             await self._injection_queue.put((content, is_client_input, image_content))
-            logger.debug("[EventLoopNode.inject_event] Message queued successfully")
+            logger.debug("[AgentLoop.inject_event] Message queued successfully")
         except Exception as e:
-            logger.exception("[EventLoopNode.inject_event] Failed to queue message: %s", e)
+            logger.exception("[AgentLoop.inject_event] Failed to queue message: %s", e)
             raise
         try:
             self._input_ready.set()
-            logger.debug("[EventLoopNode.inject_event] _input_ready.set() called")
+            logger.debug("[AgentLoop.inject_event] _input_ready.set() called")
         except Exception as e:
-            logger.exception("[EventLoopNode.inject_event] Failed to set _input_ready: %s", e)
+            logger.exception("[AgentLoop.inject_event] Failed to set _input_ready: %s", e)
             raise
 
     async def inject_trigger(self, trigger: TriggerEvent) -> None:

@@ -5,20 +5,20 @@ from framework.graph.context_handoff import ContextHandoff, HandoffContext
 from framework.graph.conversation import ConversationStore, Message, NodeConversation
 from framework.graph.edge import DEFAULT_MAX_TOKENS, EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.event_loop_node import (
-    EventLoopNode,
+    AgentLoop,
     JudgeProtocol,
     JudgeVerdict,
     LoopConfig,
     OutputAccumulator,
 )
-from framework.graph.executor import GraphExecutor
+from framework.graph.executor import Orchestrator
 from framework.graph.goal import Constraint, Goal, GoalStatus, SuccessCriterion
 from framework.graph.node import NodeContext, NodeProtocol, NodeResult, NodeSpec
 from framework.graph.worker_agent import (
     Activation,
     FanOutTag,
     FanOutTracker,
-    WorkerAgent,
+    NodeWorker,
     WorkerCompletion,
     WorkerLifecycle,
 )
@@ -40,13 +40,13 @@ __all__ = [
     "GraphSpec",
     "DEFAULT_MAX_TOKENS",
     # Executor
-    "GraphExecutor",
+    "Orchestrator",
     # Conversation
     "NodeConversation",
     "ConversationStore",
     "Message",
     # Event Loop
-    "EventLoopNode",
+    "AgentLoop",
     "LoopConfig",
     "OutputAccumulator",
     "JudgeProtocol",
@@ -55,7 +55,7 @@ __all__ = [
     "ContextHandoff",
     "HandoffContext",
     # Worker Agent
-    "WorkerAgent",
+    "NodeWorker",
     "WorkerLifecycle",
     "WorkerCompletion",
     "Activation",

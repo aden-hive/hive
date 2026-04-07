@@ -1,4 +1,4 @@
-"""Tests for webhook idempotency key support in AgentRuntime.trigger()."""
+"""Tests for webhook idempotency key support in AgentHost.trigger()."""
 
 import asyncio
 import time
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig
+from framework.runtime.agent_runtime import AgentHost, AgentRuntimeConfig
 
 
 def _make_runtime(ttl=300.0, max_keys=10000):
@@ -16,7 +16,7 @@ def _make_runtime(ttl=300.0, max_keys=10000):
     Uses ``object.__new__`` to skip ``__init__`` and its heavy dependencies
     (storage, LLM, skills) — we only need the cache and config for these tests.
     """
-    runtime = object.__new__(AgentRuntime)
+    runtime = object.__new__(AgentHost)
     runtime._config = AgentRuntimeConfig(idempotency_ttl_seconds=ttl, idempotency_max_keys=max_keys)
     runtime._running = True
     runtime._lock = asyncio.Lock()
@@ -157,28 +157,28 @@ class TestTriggerIdempotency:
         """trigger() accepts idempotency_key as a keyword argument."""
         import inspect
 
-        sig = inspect.signature(AgentRuntime.trigger)
+        sig = inspect.signature(AgentHost.trigger)
         assert "idempotency_key" in sig.parameters
 
     def test_idempotency_key_defaults_to_none(self):
         """idempotency_key defaults to None (backward compatible)."""
         import inspect
 
-        sig = inspect.signature(AgentRuntime.trigger)
+        sig = inspect.signature(AgentHost.trigger)
         assert sig.parameters["idempotency_key"].default is None
 
     def test_trigger_and_wait_accepts_idempotency_key(self):
         """trigger_and_wait() also accepts idempotency_key."""
         import inspect
 
-        sig = inspect.signature(AgentRuntime.trigger_and_wait)
+        sig = inspect.signature(AgentHost.trigger_and_wait)
         assert "idempotency_key" in sig.parameters
 
     def test_trigger_and_wait_idempotency_key_defaults_to_none(self):
         """trigger_and_wait() idempotency_key defaults to None."""
         import inspect
 
-        sig = inspect.signature(AgentRuntime.trigger_and_wait)
+        sig = inspect.signature(AgentHost.trigger_and_wait)
         assert sig.parameters["idempotency_key"].default is None
 
     @pytest.mark.asyncio

@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from framework.graph.checkpoint_config import CheckpointConfig
 from framework.graph.executor import ExecutionResult
 from framework.runtime.event_bus import EventBus
-from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
+from framework.runtime.execution_stream import EntryPointSpec, ExecutionManager
 from framework.runtime.outcome_aggregator import OutcomeAggregator
 from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.runtime.shared_state import SharedBufferManager
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
     from framework.graph.goal import Goal
     from framework.llm.provider import LLMProvider, Tool
+    from framework.pipeline.stage import PipelineStage
     from framework.skills.manager import SkillsManagerConfig
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AgentRuntimeConfig:
-    """Configuration for AgentRuntime."""
+    """Configuration for AgentHost."""
 
     max_concurrent_executions: int = 100
     cache_ttl: float = 60.0
@@ -62,14 +63,14 @@ class _GraphRegistration:
     graph: "GraphSpec"
     goal: "Goal"
     entry_points: dict[str, EntryPointSpec]
-    streams: dict[str, ExecutionStream]  # ep_id -> stream (NOT namespaced)
+    streams: dict[str, ExecutionManager]  # ep_id -> stream (NOT namespaced)
     storage_subpath: str  # relative to session root, e.g. "graphs/email_agent"
     event_subscriptions: list[str] = field(default_factory=list)
     timer_tasks: list[asyncio.Task] = field(default_factory=list)
     timer_next_fire: dict[str, float] = field(default_factory=dict)
 
 
-class AgentRuntime:
+class AgentHost:
     """
     Top-level runtime that manages agent lifecycle and concurrent executions.
 
@@ -142,6 +143,7 @@ class AgentRuntime:
         skills_catalog_prompt: str = "",
         protocols_prompt: str = "",
         skill_dirs: list[str] | None = None,
+        pipeline_stages: "list[PipelineStage] | None" = None,
     ):
         """
         Initialize agent runtime.
@@ -171,6 +173,7 @@ class AgentRuntime:
             skills_catalog_prompt: Deprecated. Pre-rendered skills catalog.
             protocols_prompt: Deprecated. Pre-rendered operational protocols.
         """
+        from framework.pipeline.runner import PipelineRunner
         from framework.skills.manager import SkillsManager
 
         self.graph = graph
@@ -179,6 +182,14 @@ class AgentRuntime:
         self._runtime_log_store = runtime_log_store
         self._checkpoint_config = checkpoint_config
         self.accounts_prompt = accounts_prompt
+
+        # Pipeline middleware: runs before every trigger() dispatch.
+        # Accepts either pre-built stage objects or loads from config.
+        if pipeline_stages:
+            self._pipeline = PipelineRunner(pipeline_stages)
+        else:
+            self._pipeline = self._load_pipeline_from_config()
+
 
         # --- Skill lifecycle: runtime owns the SkillsManager ---
         if skills_manager_config is not None:
@@ -251,7 +262,7 @@ class AgentRuntime:
 
         # Entry points and streams (primary graph)
         self._entry_points: dict[str, EntryPointSpec] = {}
-        self._streams: dict[str, ExecutionStream] = {}
+        self._streams: dict[str, ExecutionManager] = {}
 
         # Webhook server (created on start if webhook_routes configured)
         self._webhook_server: Any = None
@@ -275,7 +286,7 @@ class AgentRuntime:
         self.intro_message: str = ""
 
     # ------------------------------------------------------------------
-    # Skill prompt accessors (read by ExecutionStream constructors)
+    # Skill prompt accessors (read by ExecutionManager constructors)
     # ------------------------------------------------------------------
 
     @property
@@ -342,7 +353,7 @@ class AgentRuntime:
 
             # Create streams for each entry point
             for ep_id, spec in self._entry_points.items():
-                stream = ExecutionStream(
+                stream = ExecutionManager(
                     stream_id=ep_id,
                     entry_spec=spec,
                     graph=self.graph,
@@ -790,9 +801,15 @@ class AgentRuntime:
                 timer_next_fire=self._timer_next_fire,
             )
 
+            # Start skill hot-reload watcher (no-op if watchfiles not installed)
+            await self._skills_manager.start_watching()
+
+            # Initialize pipeline stages (one-time setup)
+            await self._pipeline.initialize_all()
+
             self._running = True
             self._timers_paused = False
-            logger.info(f"AgentRuntime started with {len(self._streams)} streams")
+            logger.info(f"AgentHost started with {len(self._streams)} streams")
 
     async def stop(self) -> None:
         """Stop the agent runtime and all streams."""
@@ -827,11 +844,14 @@ class AgentRuntime:
             self._streams.clear()
             self._graphs.clear()
 
+            # Stop skill hot-reload watcher
+            await self._skills_manager.stop_watching()
+
             # Stop storage
             await self._storage.stop()
 
             self._running = False
-            logger.info("AgentRuntime stopped")
+            logger.info("AgentHost stopped")
 
     def pause_timers(self) -> None:
         """Pause all timer-driven entry points.
@@ -850,7 +870,7 @@ class AgentRuntime:
         self,
         entry_point_id: str,
         graph_id: str | None = None,
-    ) -> ExecutionStream | None:
+    ) -> ExecutionManager | None:
         """Find the stream for an entry point, searching the active graph first.
 
         Lookup order:
@@ -873,6 +893,32 @@ class AgentRuntime:
 
         # Primary graph (also stored in self._streams)
         return self._streams.get(entry_point_id)
+
+    @staticmethod
+    def _load_pipeline_from_config():
+        """Build pipeline from ``~/.hive/configuration.json`` ``pipeline`` key.
+
+        Returns an empty pipeline if no config is set.
+        """
+        from framework.config import get_hive_config
+        from framework.pipeline.registry import build_pipeline_from_config
+        from framework.pipeline.runner import PipelineRunner
+
+        config = get_hive_config()
+        stages_config = config.get("pipeline", {}).get("stages", [])
+        if not stages_config:
+            return PipelineRunner([])
+        return build_pipeline_from_config(stages_config)
+
+    async def _reload_pipeline(self) -> None:
+        """Hot-reload pipeline from config.  Atomic swap."""
+        new_pipeline = self._load_pipeline_from_config()
+        await new_pipeline.initialize_all()
+        self._pipeline = new_pipeline
+        logger.info(
+            "Pipeline reloaded: %d stages",
+            len(new_pipeline.stages),
+        )
 
     def _prune_idempotency_keys(self) -> None:
         """Prune expired idempotency keys based on TTL and max size."""
@@ -924,7 +970,7 @@ class AgentRuntime:
             RuntimeError: If runtime not running
         """
         if not self._running:
-            raise RuntimeError("AgentRuntime is not running")
+            raise RuntimeError("AgentHost is not running")
 
         # Idempotency check: return cached execution_id for duplicate keys.
         if idempotency_key is not None:
@@ -937,6 +983,21 @@ class AgentRuntime:
                     cached,
                 )
                 return cached
+
+        # Run pipeline middleware (rate limiting, validation, cost guards, ...)
+        # Raises PipelineRejectedError if any stage rejects.
+        if self._pipeline.stages:
+            from framework.pipeline.stage import PipelineContext
+
+            pipeline_ctx = PipelineContext(
+                entry_point_id=entry_point_id,
+                input_data=input_data,
+                correlation_id=correlation_id,
+                session_state=session_state,
+            )
+            pipeline_ctx = await self._pipeline.run(pipeline_ctx)
+            # Stages may have transformed the input_data.
+            input_data = pipeline_ctx.input_data
 
         stream = self._resolve_stream(entry_point_id, graph_id)
         if stream is None:
@@ -1032,9 +1093,9 @@ class AgentRuntime:
         graph_log_store = RuntimeLogStore(graph_base / "runtime_logs")
 
         # Create streams for each entry point
-        streams: dict[str, ExecutionStream] = {}
+        streams: dict[str, ExecutionManager] = {}
         for ep_id, spec in entry_points.items():
-            stream = ExecutionStream(
+            stream = ExecutionManager(
                 stream_id=f"{graph_id}::{ep_id}",
                 entry_spec=spec,
                 graph=graph,
@@ -1501,7 +1562,7 @@ class AgentRuntime:
         # Search primary graph's streams for an active session.
         # Skip isolated streams — they have their own session directories
         # and must never be used as a shared session.
-        all_streams: list[tuple[str, ExecutionStream]] = []
+        all_streams: list[tuple[str, ExecutionManager]] = []
         for _gid, reg in self._graphs.items():
             for ep_id, stream in reg.streams.items():
                 # Skip isolated entry points — they run in their own namespace
@@ -1662,7 +1723,7 @@ class AgentRuntime:
                 return max(0.0, mono - time.monotonic())
         return None
 
-    def get_stream(self, entry_point_id: str) -> ExecutionStream | None:
+    def get_stream(self, entry_point_id: str) -> ExecutionManager | None:
         """Get a specific execution stream."""
         return self._streams.get(entry_point_id)
 
@@ -1851,9 +1912,9 @@ def create_agent_runtime(
     skills_catalog_prompt: str = "",
     protocols_prompt: str = "",
     skill_dirs: list[str] | None = None,
-) -> AgentRuntime:
+) -> AgentHost:
     """
-    Create and configure an AgentRuntime with entry points.
+    Create and configure an AgentHost with entry points.
 
     Convenience factory that creates runtime and registers entry points.
     Runtime logging is enabled by default for observability.
@@ -1895,7 +1956,7 @@ def create_agent_runtime(
         storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
         runtime_log_store = RuntimeLogStore(storage_path_obj / "runtime_logs")
 
-    runtime = AgentRuntime(
+    runtime = AgentHost(
         graph=graph,
         goal=goal,
         storage_path=storage_path,

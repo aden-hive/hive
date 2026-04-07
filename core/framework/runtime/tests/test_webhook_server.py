@@ -13,7 +13,7 @@ from unittest.mock import patch
 import aiohttp
 import pytest
 
-from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig
+from framework.runtime.agent_runtime import AgentHost, AgentRuntimeConfig  # noqa: F401
 from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.webhook_server import (
@@ -518,7 +518,7 @@ class TestEventDrivenEntryPoints:
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            runtime = AgentRuntime(
+            runtime = AgentHost(
                 graph=graph,
                 goal=goal,
                 storage_path=Path(tmpdir),
@@ -589,7 +589,7 @@ class TestEventDrivenEntryPoints:
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            runtime = AgentRuntime(
+            runtime = AgentHost(
                 graph=graph,
                 goal=goal,
                 storage_path=Path(tmpdir),
@@ -644,7 +644,7 @@ class TestEventDrivenEntryPoints:
         graph, goal = self._make_graph_and_goal()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            runtime = AgentRuntime(
+            runtime = AgentHost(
                 graph=graph,
                 goal=goal,
                 storage_path=Path(tmpdir),
@@ -671,7 +671,7 @@ class TestEventDrivenEntryPoints:
         graph, goal = self._make_graph_and_goal()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            runtime = AgentRuntime(
+            runtime = AgentHost(
                 graph=graph,
                 goal=goal,
                 storage_path=Path(tmpdir),

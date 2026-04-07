@@ -8,12 +8,12 @@ from framework.runner.protocol import (
     MessageType,
     OrchestratorResult,
 )
-from framework.runner.runner import AgentInfo, AgentRunner, ValidationResult
+from framework.runner.runner import AgentInfo, AgentLoader, ValidationResult
 from framework.runner.tool_registry import ToolRegistry, tool
 
 __all__ = [
     # Single agent
-    "AgentRunner",
+    "AgentLoader",
     "AgentInfo",
     "ValidationResult",
     "ToolRegistry",

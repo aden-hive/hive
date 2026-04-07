@@ -223,7 +223,9 @@ def build_delegate_tool(sub_agents: list[str], node_registry: dict[str, Any]) ->
         spec = node_registry.get(agent_id)
         if spec:
             desc = getattr(spec, "description", "(no description)")
-            agent_descriptions.append(f"- {agent_id}: {desc}")
+            tools_list = getattr(spec, "tools", [])
+            tools_desc = ", ".join(tools_list) if tools_list else "(no tools)"
+            agent_descriptions.append(f"- {agent_id}: {desc} [tools: {tools_desc}]")
         else:
             agent_descriptions.append(f"- {agent_id}: (not found in registry)")
 

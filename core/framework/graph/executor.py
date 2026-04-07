@@ -30,7 +30,7 @@ from framework.graph.node import (
 from framework.graph.validator import OutputValidator
 from framework.llm.provider import LLMProvider, Tool
 from framework.observability import set_trace_context
-from framework.runtime.core import Runtime
+from framework.runtime.core import DecisionTracker
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
 from framework.utils.io import atomic_write
@@ -112,7 +112,7 @@ class ParallelExecutionConfig:
     branch_timeout_seconds: float = 300.0
 
 
-class GraphExecutor:
+class Orchestrator:
     """
     Executes agent graphs.
 
@@ -133,7 +133,7 @@ class GraphExecutor:
 
     def __init__(
         self,
-        runtime: Runtime,
+        runtime: DecisionTracker,
         llm: LLMProvider | None = None,
         tools: list[Tool] | None = None,
         tool_executor: Callable | None = None,
@@ -169,7 +169,7 @@ class GraphExecutor:
         Initialize the executor.
 
         Args:
-            runtime: Runtime for decision logging
+            runtime: DecisionTracker for decision logging
             llm: LLM provider for LLM nodes
             tools: Available tools
             tool_executor: Function to execute tools
@@ -206,7 +206,7 @@ class GraphExecutor:
         self.validator = OutputValidator()
         self.logger = logging.getLogger(__name__)
         self.logger.debug(
-            "[GraphExecutor.__init__] Created with"
+            "[Orchestrator.__init__] Created with"
             " stream_id=%s, execution_id=%s,"
             " initial node_registry keys: %s",
             stream_id,
@@ -745,11 +745,11 @@ class GraphExecutor:
         # Check registry first
         if node_spec.id in self.node_registry:
             logger.debug(
-                "[GraphExecutor._get_node_implementation] Found node '%s' in registry", node_spec.id
+                "[Orchestrator._get_node_implementation] Found node '%s' in registry", node_spec.id
             )
             return self.node_registry[node_spec.id]
         logger.debug(
-            "[GraphExecutor._get_node_implementation]"
+            "[Orchestrator._get_node_implementation]"
             " Node '%s' not in registry (keys: %s),"
             " creating new",
             node_spec.id,
@@ -776,7 +776,7 @@ class GraphExecutor:
         if node_spec.node_type in ("event_loop", "gcu"):
             # Auto-create EventLoopNode with sensible defaults.
             # Custom configs can still be pre-registered via node_registry.
-            from framework.graph.event_loop_node import EventLoopNode, LoopConfig
+            from framework.graph.event_loop_node import AgentLoop, LoopConfig
 
             # Create a FileConversationStore if a storage path is available
             conv_store = None
@@ -802,7 +802,7 @@ class GraphExecutor:
 
             lc = self._loop_config
             default_max_iter = 100 if node_spec.supports_direct_user_io() else 50
-            node = EventLoopNode(
+            node = AgentLoop(
                 event_bus=self._event_bus,
                 judge=None,  # implicit judge: accept when output_keys are filled
                 config=LoopConfig(
@@ -821,7 +821,7 @@ class GraphExecutor:
             # Cache so inject_event() is reachable for queen interaction and escalation routing
             self.node_registry[node_spec.id] = node
             logger.debug(
-                "[GraphExecutor._get_node_implementation]"
+                "[Orchestrator._get_node_implementation]"
                 " Cached node '%s' in node_registry,"
                 " registry now has keys: %s",
                 node_spec.id,
@@ -1007,10 +1007,10 @@ class GraphExecutor:
             branch_impl = self._get_node_implementation(node_spec, graph.cleanup_llm_model)
 
             effective_max_retries = node_spec.max_retries
-            # Only override for actual EventLoopNode instances, not custom NodeProtocol impls
-            from framework.graph.event_loop_node import EventLoopNode
+            # Only override for actual AgentLoop instances, not custom NodeProtocol impls
+            from framework.graph.event_loop_node import AgentLoop as _AgentLoop  # noqa: F811
 
-            if isinstance(branch_impl, EventLoopNode) and effective_max_retries > 1:
+            if isinstance(branch_impl, _AgentLoop) and effective_max_retries > 1:
                 self.logger.warning(
                     f"EventLoopNode '{node_spec.id}' has "
                     f"max_retries={effective_max_retries}. Overriding "
@@ -1305,7 +1305,7 @@ class GraphExecutor:
         from framework.graph.worker_agent import (
             Activation,
             FanOutTag,
-            WorkerAgent,
+            NodeWorker,
             WorkerCompletion,
             WorkerLifecycle,
         )
@@ -1352,9 +1352,9 @@ class GraphExecutor:
         )
 
         # Create one WorkerAgent per node
-        workers: dict[str, WorkerAgent] = {}
+        workers: dict[str, NodeWorker] = {}
         for node_spec in graph.nodes:
-            workers[node_spec.id] = WorkerAgent(node_spec=node_spec, graph_context=gc)
+            workers[node_spec.id] = NodeWorker(node_spec=node_spec, graph_context=gc)
 
         # Identify entry workers (graph entry node, not based on edge count)
         # A node can be the entry point AND have incoming feedback edges.
@@ -1455,7 +1455,7 @@ class GraphExecutor:
 
         def _route_activation(
             activation: Activation,
-            workers_map: dict[str, WorkerAgent],
+            workers_map: dict[str, NodeWorker],
             pending_tasks_map: dict[str, asyncio.Task],
             *,
             has_event_subscription: bool,

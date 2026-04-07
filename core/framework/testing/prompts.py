@@ -68,7 +68,7 @@ for _p in ["exports", "core"]:
         sys.path.insert(0, _path)
 
 import pytest
-from framework.runner.runner import AgentRunner
+from framework.runner.runner import AgentLoader
 from framework.runtime.event_bus import EventType
 
 AGENT_PATH = Path(__file__).resolve().parents[1]

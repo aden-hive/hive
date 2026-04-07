@@ -25,7 +25,7 @@ from framework.graph.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
 from framework.runner.preload_validation import run_preload_validation
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, create_agent_runtime
+from framework.runtime.agent_runtime import AgentHost, AgentRuntimeConfig, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.tools.flowchart_utils import generate_fallback_flowchart
@@ -881,6 +881,173 @@ class ValidationResult:
     missing_credentials: list[str] = field(default_factory=list)
 
 
+def _resolve_template_vars(text: str | None, variables: dict[str, str]) -> str | None:
+    """Resolve ``{{variable_name}}`` placeholders in *text*."""
+    if text is None or not variables:
+        return text
+    import re
+
+    def _replace(m: re.Match) -> str:
+        key = m.group(1).strip()
+        return variables.get(key, m.group(0))
+
+    return re.sub(r"\{\{(.+?)\}\}", _replace, text)
+
+
+def load_agent_config(data: str | dict) -> tuple[GraphSpec, Goal]:
+    """Load ``GraphSpec`` and ``Goal`` from a declarative :class:`AgentConfig`.
+
+    The declarative format uses a ``name`` key at the top level, unlike the
+    legacy export format which uses ``graph``/``goal`` keys.  The runner
+    auto-detects the format in :meth:`AgentLoader.load`.
+
+    Template variables in ``config.variables`` are resolved in all
+    ``system_prompt`` and ``identity_prompt`` fields via ``{{var_name}}``.
+
+    Returns:
+        Tuple of (GraphSpec, Goal)
+    """
+    from framework.graph.edge import EdgeCondition, EdgeSpec
+    from framework.graph.goal import Constraint, Goal as GoalModel, SuccessCriterion
+    from framework.schemas.agent_config import AgentConfig
+
+    if isinstance(data, str):
+        data = json.loads(data)
+
+    config = AgentConfig.model_validate(data)
+    tvars = config.variables
+
+    # Build Goal
+    success_criteria = [
+        SuccessCriterion(
+            id=f"sc-{i}",
+            description=sc,
+            metric="llm_judge",
+            target="",
+        )
+        for i, sc in enumerate(config.goal.success_criteria)
+    ]
+    constraints = [
+        Constraint(
+            id=f"c-{i}",
+            description=c,
+            constraint_type="hard",
+            category="general",
+        )
+        for i, c in enumerate(config.goal.constraints)
+    ]
+    goal = GoalModel(
+        id=f"{config.name}-goal",
+        name=config.name,
+        description=config.goal.description,
+        success_criteria=success_criteria,
+        constraints=constraints,
+    )
+
+    # Build nodes
+    condition_map = {
+        "always": EdgeCondition.ALWAYS,
+        "on_success": EdgeCondition.ON_SUCCESS,
+        "on_failure": EdgeCondition.ON_FAILURE,
+        "conditional": EdgeCondition.CONDITIONAL,
+        "llm_decide": EdgeCondition.LLM_DECIDE,
+    }
+
+    nodes = []
+    for nc in config.nodes:
+        # Resolve tool access: node-level config -> agent-level fallback
+        if nc.tools.policy == "explicit" and nc.tools.allowed:
+            tools_list = nc.tools.allowed
+            tool_policy = "explicit"
+        elif nc.tools.policy == "none":
+            tools_list = []
+            tool_policy = "none"
+        elif nc.tools.policy == "all":
+            tools_list = []
+            tool_policy = "all"
+        else:
+            # Inherit agent-level tool config
+            if config.tools.policy == "explicit" and config.tools.allowed:
+                tools_list = config.tools.allowed
+            else:
+                tools_list = []
+            tool_policy = config.tools.policy
+
+        node_kwargs: dict = {
+            "id": nc.id,
+            "name": nc.name or nc.id,
+            "description": nc.description or "",
+            "node_type": nc.node_type,
+            "system_prompt": _resolve_template_vars(nc.system_prompt, tvars),
+            "tools": tools_list,
+            "tool_access_policy": tool_policy,
+            "sub_agents": nc.sub_agents,
+            "model": nc.model,
+            "input_keys": nc.input_keys,
+            "output_keys": nc.output_keys,
+            "nullable_output_keys": nc.nullable_output_keys,
+            "max_iterations": nc.max_iterations,
+            "success_criteria": nc.success_criteria,
+            "skip_judge": nc.skip_judge,
+        }
+        # Optional fields -- only pass when set (avoids overriding defaults)
+        if nc.client_facing:
+            node_kwargs["client_facing"] = nc.client_facing
+        if nc.max_node_visits != 1:
+            node_kwargs["max_node_visits"] = nc.max_node_visits
+        if nc.failure_criteria:
+            node_kwargs["failure_criteria"] = nc.failure_criteria
+        if nc.max_retries is not None:
+            node_kwargs["max_retries"] = nc.max_retries
+
+        nodes.append(NodeSpec(**node_kwargs))
+
+    # Build edges
+    edges = []
+    for i, ec in enumerate(config.edges):
+        edges.append(
+            EdgeSpec(
+                id=f"e-{i}-{ec.from_node}-{ec.to_node}",
+                source=ec.from_node,
+                target=ec.to_node,
+                condition=condition_map.get(ec.condition, EdgeCondition.ON_SUCCESS),
+                condition_expr=ec.condition_expr,
+                priority=ec.priority,
+                input_mapping=ec.input_mapping,
+            )
+        )
+
+    # Build entry_points dict for GraphSpec
+    entry_points_dict: dict = {}
+    if config.entry_points:
+        for ep in config.entry_points:
+            entry_points_dict[ep.id] = ep.entry_node or config.entry_node
+    else:
+        entry_points_dict = {"default": config.entry_node}
+
+    # Build GraphSpec
+    graph_kwargs: dict = {
+        "id": f"{config.name}-graph",
+        "goal_id": goal.id,
+        "version": config.version,
+        "entry_node": config.entry_node,
+        "entry_points": entry_points_dict,
+        "terminal_nodes": config.terminal_nodes,
+        "pause_nodes": config.pause_nodes,
+        "nodes": nodes,
+        "edges": edges,
+        "max_tokens": config.max_tokens,
+        "loop_config": dict(config.loop_config),
+        "conversation_mode": config.conversation_mode,
+        "identity_prompt": _resolve_template_vars(
+            config.identity_prompt, tvars
+        ) or "",
+    }
+
+    graph = GraphSpec(**graph_kwargs)
+    return graph, goal
+
+
 def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     """
     Load GraphSpec and Goal from export_graph() output.
@@ -979,7 +1146,7 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     return graph, goal
 
 
-class AgentRunner:
+class AgentLoader:
     """
     Loads and runs exported agents with minimal boilerplate.
 
@@ -991,15 +1158,15 @@ class AgentRunner:
 
     Usage:
         # Simple usage
-        runner = AgentRunner.load("exports/outbound-sales-agent")
+        runner = AgentLoader.load("exports/outbound-sales-agent")
         result = await runner.run({"lead_id": "123"})
 
         # With context manager
-        async with AgentRunner.load("exports/outbound-sales-agent") as runner:
+        async with AgentLoader.load("exports/outbound-sales-agent") as runner:
             result = await runner.run({"lead_id": "123"})
 
         # With custom tools
-        runner = AgentRunner.load("exports/outbound-sales-agent")
+        runner = AgentLoader.load("exports/outbound-sales-agent")
         runner.register_tool("my_tool", my_tool_func)
         result = await runner.run({"lead_id": "123"})
     """
@@ -1027,7 +1194,7 @@ class AgentRunner:
         credential_store: Any | None = None,
     ):
         """
-        Initialize the runner (use AgentRunner.load() instead).
+        Initialize the runner (use AgentLoader.load() instead).
 
         Args:
             agent_path: Path to agent folder
@@ -1082,7 +1249,7 @@ class AgentRunner:
         self._approval_callback: Callable | None = None
 
         # AgentRuntime — unified execution path for all agents
-        self._agent_runtime: AgentRuntime | None = None
+        self._agent_runtime: AgentHost | None = None
         # Pre-load validation: structural checks + credentials.
         # Fails fast with actionable guidance — no MCP noise on screen.
         run_preload_validation(
@@ -1158,7 +1325,7 @@ class AgentRunner:
         interactive: bool = True,
         skip_credential_validation: bool | None = None,
         credential_store: Any | None = None,
-    ) -> "AgentRunner":
+    ) -> "AgentLoader":
         """
         Load an agent from an export folder.
 
@@ -1299,21 +1466,22 @@ class AgentRunner:
             runner._agent_skills = agent_skills
             return runner
 
-        # Fallback: load from agent.json (legacy JSON-based agents)
+        # Fallback: load from agent.json (declarative config)
         agent_json_path = agent_path / "agent.json"
+
         if not agent_json_path.is_file():
             raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
 
-        with open(agent_json_path, encoding="utf-8") as f:
-            export_data = f.read()
-
+        export_data = agent_json_path.read_text(encoding="utf-8")
         if not export_data.strip():
-            raise ValueError(f"Empty agent export file: {agent_json_path}")
+            raise ValueError(f"Empty agent.json: {agent_json_path}")
 
-        try:
-            graph, goal = load_agent_export(export_data)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid JSON in agent export file: {agent_json_path}") from exc
+        parsed = json.loads(export_data)
+        graph, goal = load_agent_config(parsed)
+        logger.info(
+            "Loaded declarative agent config from agent.json (name=%s)",
+            parsed.get("name"),
+        )
 
         # Generate flowchart.json if missing (for legacy JSON-based agents)
         generate_fallback_flowchart(graph, goal, agent_path)
@@ -2268,7 +2436,7 @@ class AgentRunner:
         # Run synchronous cleanup
         self.cleanup()
 
-    async def __aenter__(self) -> "AgentRunner":
+    async def __aenter__(self) -> "AgentLoader":
         """Context manager entry."""
         self._setup()
         if self._agent_runtime is not None:

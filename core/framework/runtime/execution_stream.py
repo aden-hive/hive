@@ -19,10 +19,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from framework.graph.checkpoint_config import CheckpointConfig
-from framework.graph.executor import ExecutionResult, GraphExecutor
+from framework.graph.executor import ExecutionResult, Orchestrator
 from framework.runtime.event_bus import EventBus
 from framework.runtime.shared_state import IsolationLevel, SharedBufferManager
-from framework.runtime.stream_runtime import StreamRuntime, StreamRuntimeAdapter
+from framework.runtime.stream_runtime import StreamDecisionTracker, StreamRuntimeAdapter
 
 if TYPE_CHECKING:
     from framework.graph.edge import GraphSpec
@@ -133,7 +133,7 @@ class ExecutionContext:
     status: str = "pending"  # pending, running, completed, failed, paused
 
 
-class ExecutionStream:
+class ExecutionManager:
     """
     Manages concurrent executions for a single entry point.
 
@@ -196,6 +196,7 @@ class ExecutionStream:
         colony_worker_sessions_dir: Any = None,
         colony_recall_cache: dict[str, str] | None = None,
         colony_reflect_llm: Any = None,
+        execution_middleware: list | None = None,
     ):
         """
         Initialize execution stream.
@@ -255,6 +256,7 @@ class ExecutionStream:
         self._colony_worker_sessions_dir = colony_worker_sessions_dir
         self._colony_recall_cache = colony_recall_cache
         self._colony_reflect_llm = colony_reflect_llm
+        self._execution_middleware = execution_middleware or []
 
         _es_logger = logging.getLogger(__name__)
         if protocols_prompt:
@@ -270,7 +272,7 @@ class ExecutionStream:
             )
 
         # Create stream-scoped runtime
-        self._runtime = StreamRuntime(
+        self._runtime = StreamDecisionTracker(
             stream_id=stream_id,
             storage=storage,
             outcome_aggregator=outcome_aggregator,
@@ -279,7 +281,7 @@ class ExecutionStream:
         # Execution tracking
         self._active_executions: dict[str, ExecutionContext] = {}
         self._execution_tasks: dict[str, asyncio.Task] = {}
-        self._active_executors: dict[str, GraphExecutor] = {}
+        self._active_executors: dict[str, Orchestrator] = {}
         self._cancel_reasons: dict[str, str] = {}
         self._execution_results: OrderedDict[str, ExecutionResult] = OrderedDict()
         self._execution_result_times: dict[str, float] = {}
@@ -704,13 +706,26 @@ class ExecutionStream:
                 # the executor's session_state (memory + resume_from) carries
                 # forward so the next attempt resumes at the failed node.
                 while True:
+                    # Run execution middleware (per-attempt, including resurrections)
+                    if self._execution_middleware:
+                        from framework.pipeline.execution_middleware import (
+                            ExecutionContext as _ExecMwCtx,
+                        )
+
+                        mw_ctx = _ExecMwCtx(
+                            execution_id=execution_id,
+                            stream_id=self.stream_id,
+                            run_id=ctx.run_id or "",
+                            input_data=_current_input_data or {},
+                            session_state=_current_session_state,
+                            attempt=_resurrection_count + 1,
+                        )
+                        for mw in self._execution_middleware:
+                            mw_ctx = await mw.on_execution_start(mw_ctx)
+                        _current_input_data = mw_ctx.input_data
+
                     # Create executor for this execution.
-                    # Each execution gets its own storage under sessions/{exec_id}/
-                    # so conversations, spillover, and data files are all scoped
-                    # to this execution.  The executor sets data_dir via execution
-                    # context (contextvars) so data tools and spillover share the
-                    # same session-scoped directory.
-                    executor = GraphExecutor(
+                    executor = Orchestrator(
                         runtime=runtime_adapter,
                         llm=self._llm,
                         tools=self._tools,

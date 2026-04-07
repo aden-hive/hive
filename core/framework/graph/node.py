@@ -25,7 +25,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from framework.llm.provider import LLMProvider, Tool
-from framework.runtime.core import Runtime
+from framework.runtime.core import DecisionTracker
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +144,15 @@ class NodeSpec(BaseModel):
     # For LLM nodes
     system_prompt: str | None = Field(default=None, description="System prompt for LLM nodes")
     tools: list[str] = Field(default_factory=list, description="Tool names this node can use")
+    tool_access_policy: str = Field(
+        default="explicit",
+        description=(
+            "Tool access policy for this node. "
+            "'all' = all tools from registry, "
+            "'explicit' = only tools listed in `tools` (default, recommended), "
+            "'none' = no tools at all."
+        ),
+    )
     model: str | None = Field(
         default=None, description="Specific model to use (defaults to graph default)"
     )
@@ -459,7 +468,7 @@ class NodeContext:
     """
 
     # Core runtime
-    runtime: Runtime
+    runtime: DecisionTracker
 
     # Node identity
     node_id: str

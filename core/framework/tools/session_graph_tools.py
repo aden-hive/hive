@@ -22,12 +22,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.agent_runtime import AgentRuntime
+    from framework.runtime.agent_runtime import AgentHost
 
 logger = logging.getLogger(__name__)
 
 
-def register_graph_tools(registry: ToolRegistry, runtime: AgentRuntime) -> int:
+def register_graph_tools(registry: ToolRegistry, runtime: AgentHost) -> int:
     """Register graph lifecycle tools bound to *runtime*.
 
     Returns the number of tools registered.
@@ -41,11 +41,12 @@ def register_graph_tools(registry: ToolRegistry, runtime: AgentRuntime) -> int:
     async def load_agent(agent_path: str) -> str:
         """Load an agent graph from disk into the running session.
 
-        The agent is imported from *agent_path* (a directory containing
-        ``agent.py``).  Its graph, goal, and entry points are registered
-        as a secondary graph on the runtime.  Returns a JSON summary.
+        The agent is loaded from *agent_path* (a directory containing
+        ``agent.json`` or ``agent.py``).  Its graph, goal, and entry points
+        are registered as a secondary graph on the runtime.  Returns a JSON
+        summary.
         """
-        from framework.runner.runner import AgentRunner
+        from framework.runner.runner import AgentLoader
         from framework.runtime.execution_stream import EntryPointSpec
         from framework.server.app import validate_agent_path
 
@@ -57,7 +58,7 @@ def register_graph_tools(registry: ToolRegistry, runtime: AgentRuntime) -> int:
             return json.dumps({"error": f"Agent path does not exist: {agent_path}"})
 
         try:
-            runner = AgentRunner.load(path)
+            runner = AgentLoader.load(path)
         except Exception as exc:
             return json.dumps({"error": f"Failed to load agent: {exc}"})
 
@@ -105,7 +106,7 @@ def register_graph_tools(registry: ToolRegistry, runtime: AgentRuntime) -> int:
             "properties": {
                 "agent_path": {
                     "type": "string",
-                    "description": "Path to the agent directory (containing agent.py)",
+                    "description": "Path to the agent directory",
                 },
             },
             "required": ["agent_path"],

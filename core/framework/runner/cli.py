@@ -19,7 +19,7 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     run_parser.add_argument(
         "agent_path",
         type=str,
-        help="Path to agent folder (containing agent.json)",
+        help="Path to agent folder (containing agent.json or agent.py)",
     )
     run_parser.add_argument(
         "--input",
@@ -87,7 +87,7 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     info_parser.add_argument(
         "agent_path",
         type=str,
-        help="Path to agent folder (containing agent.json)",
+        help="Path to agent folder (containing agent.json or agent.py)",
     )
     info_parser.add_argument(
         "--json",
@@ -105,7 +105,7 @@ def register_commands(subparsers: argparse._SubParsersAction) -> None:
     validate_parser.add_argument(
         "agent_path",
         type=str,
-        help="Path to agent folder (containing agent.json)",
+        help="Path to agent folder (containing agent.json or agent.py)",
     )
     validate_parser.set_defaults(func=cmd_validate)
 
@@ -310,7 +310,7 @@ def _prompt_before_start(agent_path: str, runner, model: str | None = None):
         Updated runner if user proceeds, None if user aborts.
     """
     from framework.credentials.setup import CredentialSetupSession
-    from framework.runner import AgentRunner
+    from framework.runner import AgentLoader
 
     while True:
         print()
@@ -328,7 +328,7 @@ def _prompt_before_start(agent_path: str, runner, model: str | None = None):
             if result.success:
                 # Reload runner with updated credentials
                 try:
-                    runner = AgentRunner.load(agent_path, model=model)
+                    runner = AgentLoader.load(agent_path, model=model)
                 except Exception as e:
                     print(f"Error reloading agent: {e}")
                     return None
@@ -342,7 +342,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     from framework.credentials.models import CredentialError
     from framework.observability import configure_logging
-    from framework.runner import AgentRunner
+    from framework.runner import AgentLoader
 
     # Set logging level (quiet by default for cleaner output)
     if args.quiet:
@@ -390,7 +390,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     # Standard execution
     # AgentRunner handles credential setup interactively when stdin is a TTY.
     try:
-        runner = AgentRunner.load(
+        runner = AgentLoader.load(
             args.agent_path,
             model=args.model,
         )
@@ -528,10 +528,10 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_info(args: argparse.Namespace) -> int:
     """Show agent information."""
     from framework.credentials.models import CredentialError
-    from framework.runner import AgentRunner
+    from framework.runner import AgentLoader
 
     try:
-        runner = AgentRunner.load(args.agent_path)
+        runner = AgentLoader.load(args.agent_path)
     except CredentialError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
@@ -595,10 +595,10 @@ def cmd_info(args: argparse.Namespace) -> int:
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate an exported agent."""
     from framework.credentials.models import CredentialError
-    from framework.runner import AgentRunner
+    from framework.runner import AgentLoader
 
     try:
-        runner = AgentRunner.load(args.agent_path)
+        runner = AgentLoader.load(args.agent_path)
     except CredentialError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
@@ -632,7 +632,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_list(args: argparse.Namespace) -> int:
     """List available agents."""
-    from framework.runner import AgentRunner
+    from framework.runner import AgentLoader
 
     directory = Path(args.directory)
     if not directory.exists():
@@ -644,7 +644,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     for path in directory.iterdir():
         if _is_valid_agent_dir(path):
             try:
-                runner = AgentRunner.load(path)
+                runner = AgentLoader.load(path)
                 info = runner.info()
                 agents.append(
                     {
@@ -775,7 +775,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
 
     from framework.credentials.models import CredentialError
     from framework.observability import configure_logging
-    from framework.runner import AgentRunner
+    from framework.runner import AgentLoader
 
     configure_logging(level="INFO")
 
@@ -789,7 +789,7 @@ def cmd_shell(args: argparse.Namespace) -> int:
             return 1
 
     try:
-        runner = AgentRunner.load(agent_path)
+        runner = AgentLoader.load(agent_path)
     except CredentialError as e:
         print(f"\n{e}", file=sys.stderr)
         return 1
@@ -1004,17 +1004,35 @@ def _get_framework_agents_dir() -> Path:
 
 
 def _extract_python_agent_metadata(agent_path: Path) -> tuple[str, str]:
-    """Extract name and description from a Python-based agent's config.py.
+    """Extract name and description from an agent directory.
 
-    Uses AST parsing to safely extract values without executing code.
+    Checks agent.json first (declarative), then falls back to config.py
+    (legacy Python). Uses AST parsing for Python to avoid executing code.
     Returns (name, description) tuple, with fallbacks if parsing fails.
     """
     import ast
 
-    config_path = agent_path / "config.py"
     fallback_name = agent_path.name.replace("_", " ").title()
     fallback_desc = "(Python-based agent)"
 
+    # Declarative agent: read from agent.json
+    agent_json = agent_path / "agent.json"
+    if agent_json.exists():
+        try:
+            import json
+
+            data = json.loads(agent_json.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                name = data.get("name", fallback_name)
+                # Convert kebab-case to Title Case for display
+                if "-" in name and " " not in name:
+                    name = name.replace("-", " ").title()
+                desc = data.get("description", fallback_desc)
+                return name, desc
+        except Exception:
+            pass
+
+    config_path = agent_path / "config.py"
     if not config_path.exists():
         return fallback_name, fallback_desc
 
@@ -1083,7 +1101,7 @@ def _is_valid_agent_dir(path: Path) -> bool:
 
 
 def _has_agents(directory: Path) -> bool:
-    """Check if a directory contains any valid agents (folders with agent.json or agent.py)."""
+    """Check if a directory contains any valid agents."""
     if not directory.exists():
         return False
     return any(_is_valid_agent_dir(p) for p in directory.iterdir())

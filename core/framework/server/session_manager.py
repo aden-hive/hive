@@ -280,7 +280,7 @@ class SessionManager:
         Sets up the runner, runtime, and session fields. Does NOT notify
         the queen — callers handle that step.
         """
-        from framework.runner import AgentRunner
+        from framework.runner import AgentLoader
 
         agent_path = Path(agent_path)
         resolved_graph_id = graph_id or agent_path.name
@@ -302,7 +302,7 @@ class SessionManager:
             resolved_model = model or session_model or self._model
             runner = await loop.run_in_executor(
                 None,
-                lambda: AgentRunner.load(
+                lambda: AgentLoader.load(
                     agent_path,
                     model=resolved_model,
                     interactive=False,

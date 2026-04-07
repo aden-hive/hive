@@ -109,7 +109,7 @@ class RetryState:
 # ---------------------------------------------------------------------------
 
 
-class WorkerAgent:
+class NodeWorker:
     """First-class autonomous worker for one node in the graph.
 
     Lifecycle:
@@ -359,7 +359,7 @@ class WorkerAgent:
         # Only skip retries for actual EventLoopNode instances (they handle
         # retries internally).  Custom NodeProtocol impls registered via
         # register_node should be retried by the executor.
-        from framework.graph.event_loop_node import EventLoopNode as _ELN
+        from framework.graph.event_loop_node import AgentLoop as _ELN
 
         if isinstance(node_impl, _ELN):
             max_retries = 0
@@ -609,7 +609,7 @@ class WorkerAgent:
         # Auto-create EventLoopNode
         if self.node_spec.node_type in ("event_loop", "gcu"):
             from framework.graph.event_loop.types import LoopConfig
-            from framework.graph.event_loop_node import EventLoopNode
+            from framework.graph.event_loop_node import AgentLoop
             from framework.graph.node import warn_if_deprecated_client_facing
 
             conv_store = None
@@ -623,7 +623,7 @@ class WorkerAgent:
             warn_if_deprecated_client_facing(self.node_spec)
             default_max_iter = 100 if self.node_spec.supports_direct_user_io() else 50
 
-            node = EventLoopNode(
+            node = AgentLoop(
                 event_bus=gc.event_bus,
                 judge=None,
                 config=LoopConfig(

@@ -68,6 +68,9 @@ class SkillsManager:
         self._protocols_prompt: str = ""
         self._allowlisted_dirs: list[str] = []
         self._default_mgr: object = None  # DefaultSkillManager, set after load()
+        # Hot-reload state
+        self._watched_dirs: list[str] = []
+        self._watcher_task: object = None  # asyncio.Task, set by start_watching()
 
     # ------------------------------------------------------------------
     # Factory for backwards-compat bridge
@@ -124,6 +127,7 @@ class SkillsManager:
 
             discovery = SkillDiscovery(DiscoveryConfig(project_root=self._config.project_root))
             discovered = discovery.discover()
+            self._watched_dirs = discovery.scanned_directories
 
             # Trust-gate project-scope skills (AS-13)
             discovered = TrustGate(interactive=self._config.interactive).filter_and_gate(
@@ -172,6 +176,94 @@ class SkillsManager:
             )
         else:
             logger.warning("Skill system produced empty protocols_prompt")
+
+    # ------------------------------------------------------------------
+    # Hot-reload: watch skill directories for SKILL.md changes.
+    # ------------------------------------------------------------------
+
+    async def start_watching(self) -> None:
+        """Start a background task watching skill directories for changes.
+
+        When a ``SKILL.md`` file is added/modified/removed, the cached
+        ``skills_catalog_prompt`` is rebuilt.  The next node iteration picks
+        up the new prompt automatically via the ``dynamic_prompt_provider``.
+
+        Silently no-ops when ``watchfiles`` is not installed or when no
+        directories are being watched (e.g. bare mode, no project_root).
+        """
+        import asyncio
+
+        try:
+            import watchfiles  # noqa: F401 -- optional dep check
+        except ImportError:
+            logger.debug("watchfiles not installed; skill hot-reload disabled")
+            return
+
+        if not self._watched_dirs:
+            logger.debug("No skill directories to watch; hot-reload skipped")
+            return
+
+        if self._watcher_task is not None:
+            return  # already watching
+
+        self._watcher_task = asyncio.create_task(
+            self._watch_loop(),
+            name="skills-hot-reload",
+        )
+        logger.info(
+            "Skill hot-reload enabled (watching %d directories)",
+            len(self._watched_dirs),
+        )
+
+    async def stop_watching(self) -> None:
+        """Cancel the background watcher task (if running)."""
+        import asyncio
+
+        task = self._watcher_task
+        if task is None:
+            return
+        self._watcher_task = None
+        if not task.done():  # type: ignore[attr-defined]
+            task.cancel()  # type: ignore[attr-defined]
+            try:
+                await task  # type: ignore[misc]
+            except asyncio.CancelledError:
+                pass
+
+    async def _watch_loop(self) -> None:
+        """Background coroutine that watches SKILL.md files and triggers reload."""
+        import asyncio
+
+        import watchfiles
+
+        def _filter(_change: object, path: str) -> bool:
+            return path.endswith("SKILL.md")
+
+        try:
+            async for changes in watchfiles.awatch(
+                *self._watched_dirs,
+                watch_filter=_filter,
+                debounce=1000,
+            ):
+                paths = [p for _, p in changes]
+                logger.info("SKILL.md changes detected: %s", paths)
+                try:
+                    self._reload()
+                except Exception:
+                    logger.exception("Skill reload failed; keeping previous prompts")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Skill watcher crashed; hot-reload disabled for this session")
+
+    def _reload(self) -> None:
+        """Re-run discovery and rebuild cached prompts."""
+        # Reset loaded flag so _do_load actually re-runs.
+        self._loaded = False
+        self._do_load()
+        self._loaded = True
+        logger.info("Skills reloaded: protocols=%d chars, catalog=%d chars",
+                    len(self._protocols_prompt), len(self._catalog_prompt))
 
     # ------------------------------------------------------------------
     # Prompt accessors (consumed by downstream layers)

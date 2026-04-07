@@ -56,6 +56,16 @@ class SkillDiscovery:
 
     def __init__(self, config: DiscoveryConfig | None = None):
         self._config = config or DiscoveryConfig()
+        self._scanned_dirs: list[Path] = []
+
+    @property
+    def scanned_directories(self) -> list[str]:
+        """Return the skill directories that were scanned during discovery.
+
+        Populated after :meth:`discover` runs.  Used by the hot-reload
+        watcher to know which directories to monitor for changes.
+        """
+        return [str(d) for d in self._scanned_dirs if d.exists()]
 
     def discover(self) -> list[ParsedSkill]:
         """Scan all scopes and return deduplicated skill list.
@@ -70,11 +80,13 @@ class SkillDiscovery:
         Later entries override earlier ones on name collision.
         """
         all_skills: list[ParsedSkill] = []
+        self._scanned_dirs = []
 
         # Framework scope (lowest precedence)
         if not self._config.skip_framework_scope:
             framework_dir = Path(__file__).parent / "_default_skills"
             if framework_dir.is_dir():
+                self._scanned_dirs.append(framework_dir)
                 all_skills.extend(self._scan_scope(framework_dir, "framework"))
 
         # User scope
@@ -84,11 +96,13 @@ class SkillDiscovery:
             # Cross-client (lower precedence within user scope)
             user_agents = home / ".agents" / "skills"
             if user_agents.is_dir():
+                self._scanned_dirs.append(user_agents)
                 all_skills.extend(self._scan_scope(user_agents, "user"))
 
             # Hive-specific (higher precedence within user scope)
             user_hive = home / ".hive" / "skills"
             if user_hive.is_dir():
+                self._scanned_dirs.append(user_hive)
                 all_skills.extend(self._scan_scope(user_hive, "user"))
 
         # Project scope (highest precedence)
@@ -98,11 +112,13 @@ class SkillDiscovery:
             # Cross-client
             project_agents = root / ".agents" / "skills"
             if project_agents.is_dir():
+                self._scanned_dirs.append(project_agents)
                 all_skills.extend(self._scan_scope(project_agents, "project"))
 
             # Hive-specific
             project_hive = root / ".hive" / "skills"
             if project_hive.is_dir():
+                self._scanned_dirs.append(project_hive)
                 all_skills.extend(self._scan_scope(project_hive, "project"))
 
         resolved = self._resolve_collisions(all_skills)

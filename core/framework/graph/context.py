@@ -16,7 +16,7 @@ from typing import Any
 from framework.graph.edge import GraphSpec
 from framework.graph.goal import Goal
 from framework.graph.node import DataBuffer, NodeContext, NodeProtocol, NodeSpec
-from framework.runtime.core import Runtime
+from framework.runtime.core import DecisionTracker
 
 
 @dataclass
@@ -26,7 +26,7 @@ class GraphContext:
     graph: GraphSpec
     goal: Goal
     buffer: DataBuffer
-    runtime: Runtime
+    runtime: DecisionTracker
     llm: Any  # LLMProvider
     tools: list[Any]  # list[Tool]
     tool_executor: Any  # Callable
@@ -131,11 +131,27 @@ def _resolve_available_tools(
     tools: list[Any],
     override_tools: list[Any] | None,
 ) -> list[Any]:
-    """Select tools available to the current node."""
+    """Select tools available to the current node.
+
+    Respects ``node_spec.tool_access_policy``:
+    - ``"all"``      -- all tools from the registry (no filtering).
+    - ``"explicit"``  -- only tools whose name appears in ``node_spec.tools``.
+                        If the list is empty, **no tools** are given (default-deny).
+    - ``"none"``     -- no tools at all.
+    """
 
     if override_tools is not None:
         return list(override_tools)
 
+    policy = getattr(node_spec, "tool_access_policy", "explicit")
+
+    if policy == "none":
+        return []
+
+    if policy == "all":
+        return list(tools)
+
+    # "explicit" (default): only tools named in node_spec.tools.
     if not node_spec.tools:
         return []
 
@@ -155,7 +171,7 @@ def _derive_input_data(buffer: DataBuffer, input_keys: list[str]) -> dict[str, A
 
 def build_node_context(
     *,
-    runtime: Runtime,
+    runtime: DecisionTracker,
     node_spec: NodeSpec,
     buffer: DataBuffer,
     goal: Goal,

@@ -20,7 +20,7 @@ from framework.graph import Goal
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.goal import Constraint, SuccessCriterion
 from framework.graph.node import NodeSpec
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
+from framework.runtime.agent_runtime import AgentHost, create_agent_runtime
 from framework.runtime.event_bus import AgentEvent, EventBus, EventType
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.outcome_aggregator import OutcomeAggregator
@@ -396,7 +396,7 @@ class TestAgentRuntime:
 
     def test_register_entry_point(self, sample_graph, sample_goal, temp_storage):
         """Test registering entry points."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -416,7 +416,7 @@ class TestAgentRuntime:
 
     def test_register_duplicate_entry_point_fails(self, sample_graph, sample_goal, temp_storage):
         """Test that duplicate entry point IDs fail."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -436,7 +436,7 @@ class TestAgentRuntime:
 
     def test_register_invalid_entry_node_fails(self, sample_graph, sample_goal, temp_storage):
         """Test that invalid entry nodes fail."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -455,7 +455,7 @@ class TestAgentRuntime:
     @pytest.mark.asyncio
     async def test_start_stop_lifecycle(self, sample_graph, sample_goal, temp_storage):
         """Test runtime start/stop lifecycle."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -485,7 +485,7 @@ class TestAgentRuntime:
     @pytest.mark.asyncio
     async def test_trigger_requires_running(self, sample_graph, sample_goal, temp_storage):
         """Test that trigger fails if runtime not running."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -551,7 +551,7 @@ class TestTimerEntryPoints:
     @pytest.mark.asyncio
     async def test_interval_timer_starts_task(self, sample_graph, sample_goal, temp_storage):
         """Test that interval_minutes timer creates an async task."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -581,7 +581,7 @@ class TestTimerEntryPoints:
     @pytest.mark.asyncio
     async def test_cron_timer_starts_task(self, sample_graph, sample_goal, temp_storage):
         """Test that cron expression timer creates an async task."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -611,7 +611,7 @@ class TestTimerEntryPoints:
         self, sample_graph, sample_goal, temp_storage, caplog
     ):
         """Test that an invalid cron expression logs a warning and skips."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -640,7 +640,7 @@ class TestTimerEntryPoints:
         """Test that when both cron and interval_minutes are set, cron wins."""
         import logging
 
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -667,7 +667,7 @@ class TestTimerEntryPoints:
     @pytest.mark.asyncio
     async def test_no_interval_or_cron_warns(self, sample_graph, sample_goal, temp_storage, caplog):
         """Test that timer with neither cron nor interval_minutes logs a warning."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -692,7 +692,7 @@ class TestTimerEntryPoints:
     @pytest.mark.asyncio
     async def test_cron_immediate_fires_first(self, sample_graph, sample_goal, temp_storage):
         """Test that run_immediately=True with cron doesn't set next_fire before first run."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -733,7 +733,7 @@ class TestCancelAllTasks:
         self, sample_graph, sample_goal, temp_storage
     ):
         """Test that cancel_all_tasks_async returns False with no running tasks."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -759,7 +759,7 @@ class TestCancelAllTasks:
         self, sample_graph, sample_goal, temp_storage
     ):
         """Test that cancel_all_tasks_async cancels a running task and returns True."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,
@@ -804,7 +804,7 @@ class TestCancelAllTasks:
         self, sample_graph, sample_goal, temp_storage
     ):
         """Test that cancel_all_tasks_async cancels tasks across multiple streams."""
-        runtime = AgentRuntime(
+        runtime = AgentHost(
             graph=sample_graph,
             goal=sample_goal,
             storage_path=temp_storage,

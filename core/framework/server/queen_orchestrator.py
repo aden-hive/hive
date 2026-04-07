@@ -66,10 +66,10 @@ async def create_queen(
     )
     from framework.agents.queen.nodes.thinking_hook import select_expert_persona
     from framework.graph.event_loop_node import HookContext, HookResult
-    from framework.graph.executor import GraphExecutor
+    from framework.graph.executor import Orchestrator
     from framework.runner.mcp_registry import MCPRegistry
     from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.core import Runtime
+    from framework.runtime.core import DecisionTracker  # noqa: F401
     from framework.runtime.event_bus import AgentEvent, EventType
     from framework.tools.queen_lifecycle_tools import (
         QueenPhaseState,
@@ -329,13 +329,13 @@ async def create_queen(
     )
 
     # ---- Queen event loop --------------------------------------------
-    queen_runtime = Runtime(hive_home / "queen")
+    queen_runtime = DecisionTracker(hive_home / "queen")
 
     async def _queen_loop():
         logger.debug("[_queen_loop] Starting queen loop for session %s", session.id)
         try:
-            logger.debug("[_queen_loop] Creating GraphExecutor...")
-            executor = GraphExecutor(
+            logger.debug("[_queen_loop] Creating Orchestrator...")
+            executor = Orchestrator(
                 runtime=queen_runtime,
                 llm=session.llm,
                 tools=queen_tools,
@@ -353,7 +353,7 @@ async def create_queen(
                 skills_catalog_prompt=phase_state.skills_catalog_prompt,
             )
             session.queen_executor = executor
-            logger.debug("[_queen_loop] GraphExecutor created and stored in session.queen_executor")
+            logger.debug("[_queen_loop] Orchestrator created and stored in session.queen_executor")
 
             # Wire inject_notification so phase switches notify the queen LLM
             async def _inject_phase_notification(content: str) -> None:

@@ -112,13 +112,33 @@ def _count_runs(agent_name: str) -> int:
 def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
     """Extract node count, tool count, and tags from an agent directory.
 
-    Prefers agent.py (AST-parsed) over agent.json for node/tool counts
-    since agent.json may be stale.  Tags are only available from agent.json.
+    Checks agent.json (declarative) first, then agent.py (legacy).
     """
     import ast
 
     node_count, tool_count, tags = 0, 0, []
 
+    # Declarative JSON agents (preferred)
+    agent_json = agent_path / "agent.json"
+    if agent_json.exists():
+        try:
+            data = json.loads(agent_json.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                json_nodes = data.get("nodes", [])
+                node_count = len(json_nodes)
+                tools: set[str] = set()
+                for n in json_nodes:
+                    node_tools = n.get("tools", {})
+                    if isinstance(node_tools, dict):
+                        tools.update(node_tools.get("allowed", []))
+                    elif isinstance(node_tools, list):
+                        tools.update(node_tools)
+                tool_count = len(tools)
+                return node_count, tool_count, tags
+        except Exception:
+            pass
+
+    # Legacy: agent.py (AST-parsed)
     agent_py = agent_path / "agent.py"
     if agent_py.exists():
         try:
@@ -129,21 +149,6 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
                         if isinstance(target, ast.Name) and target.id == "nodes":
                             if isinstance(node.value, ast.List):
                                 node_count = len(node.value.elts)
-        except Exception:
-            pass
-
-    agent_json = agent_path / "agent.json"
-    if agent_json.exists():
-        try:
-            data = json.loads(agent_json.read_text(encoding="utf-8"))
-            json_nodes = data.get("graph", {}).get("nodes", []) or data.get("nodes", [])
-            if node_count == 0:
-                node_count = len(json_nodes)
-            tools: set[str] = set()
-            for n in json_nodes:
-                tools.update(n.get("tools", []))
-            tool_count = len(tools)
-            tags = data.get("agent", {}).get("tags", [])
         except Exception:
             pass
 
@@ -179,13 +184,19 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
 
             node_count, tool_count, tags = _extract_agent_stats(path)
             if not used_config:
-                agent_json = path / "agent.json"
-                if agent_json.exists():
+                # Try agent.json (declarative) for metadata
+                agent_json_path = path / "agent.json"
+                if agent_json_path.exists():
                     try:
-                        data = json.loads(agent_json.read_text(encoding="utf-8"))
-                        meta = data.get("agent", {})
-                        name = meta.get("name", name)
-                        desc = meta.get("description", desc)
+                        data = json.loads(
+                            agent_json_path.read_text(encoding="utf-8"),
+                        )
+                        if isinstance(data, dict):
+                            raw_name = data.get("name", name)
+                            if "-" in raw_name and " " not in raw_name:
+                                raw_name = raw_name.replace("-", " ").title()
+                            name = raw_name
+                            desc = data.get("description", desc)
                     except Exception:
                         pass
 

@@ -22,7 +22,7 @@ from framework.runner.tool_registry import ToolRegistry
 from framework.runtime.event_bus import EventBus
 
 if TYPE_CHECKING:
-    from framework.graph.event_loop_node import EventLoopNode
+    from framework.graph.event_loop_node import AgentLoop
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def execute_subagent(
     task: str,
     *,
     config: LoopConfig,
-    event_loop_node_cls: type[EventLoopNode],
+    event_loop_node_cls: type[AgentLoop],
     escalation_receiver_cls: Callable[[], Any],
     accumulator: OutputAccumulator | None = None,
     event_bus: EventBus | None = None,
@@ -176,19 +176,35 @@ async def execute_subagent(
         finally:
             registry.pop(escalation_id, None)
 
-    # 3. Filter tools for subagent
+    # 3. Filter tools for subagent (respects tool_access_policy).
+    policy = getattr(subagent_spec, "tool_access_policy", "explicit")
     subagent_tool_names = set(subagent_spec.tools or [])
     tool_source = ctx.all_tools if ctx.all_tools else ctx.available_tools
 
-    # GCU auto-population
-    if subagent_spec.node_type == "gcu" and not subagent_tool_names:
+    if policy == "none":
+        subagent_tools: list = []
+    elif policy == "all":
+        # GCU auto-population (existing behavior) or "all" policy.
+        subagent_tools = [t for t in tool_source if t.name != "delegate_to_sub_agent"]
+    elif subagent_spec.node_type == "gcu" and not subagent_tool_names:
+        # GCU nodes without explicit tools get everything (backward compat).
         subagent_tools = [t for t in tool_source if t.name != "delegate_to_sub_agent"]
     else:
-        subagent_tools = [
-            t
-            for t in tool_source
-            if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
-        ]
+        # "explicit" (default): only tools named in subagent_spec.tools.
+        # Default-deny: empty list means zero tools.
+        if not subagent_tool_names:
+            logger.info(
+                "Subagent '%s' has tool_access_policy='explicit' with no tools declared "
+                "-- running with zero tools (default-deny).",
+                agent_id,
+            )
+            subagent_tools = []
+        else:
+            subagent_tools = [
+                t
+                for t in tool_source
+                if t.name in subagent_tool_names and t.name != "delegate_to_sub_agent"
+            ]
 
     missing = subagent_tool_names - {t.name for t in subagent_tools}
     if missing:

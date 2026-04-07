@@ -3,13 +3,13 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from framework.graph.executor import GraphExecutor
+from framework.graph.executor import Orchestrator
 from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.runtime.runtime_logger import RuntimeLogger
 
 
 def test_graph_executor_uses_custom_session_dir_name_for_runtime_logs():
-    executor = GraphExecutor(
+    executor = Orchestrator(
         runtime=MagicMock(),
         storage_path=Path("/tmp/test-agent/sessions/my-custom-session"),
     )

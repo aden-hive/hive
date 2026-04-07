@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class StreamRuntime:
+class StreamDecisionTracker:
     """
     Thread-safe runtime for a single execution stream.
 
@@ -431,7 +431,7 @@ class StreamRuntimeAdapter:
     by providing the same API as Runtime but routing to a specific execution.
     """
 
-    def __init__(self, stream_runtime: StreamRuntime, execution_id: str):
+    def __init__(self, stream_runtime: StreamDecisionTracker, execution_id: str):
         """
         Create adapter for a specific execution.
 

@@ -28,7 +28,7 @@ from framework.graph.executor import ExecutionResult
 from framework.llm import LiteLLMProvider
 from framework.runner.mcp_registry import MCPRegistry
 from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import AgentRuntime, create_agent_runtime
+from framework.runtime.agent_runtime import AgentHost, create_agent_runtime
 from framework.runtime.execution_stream import EntryPointSpec
 
 from .config import default_config
@@ -37,7 +37,7 @@ from .nodes import build_tester_node
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from framework.runner import AgentRunner
+    from framework.runner import AgentLoader
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +233,7 @@ requires_account_selection = True
 """Signal TUI to show account picker before starting the agent."""
 
 
-def configure_for_account(runner: AgentRunner, account: dict) -> None:
+def configure_for_account(runner: AgentLoader, account: dict) -> None:
     """Scope the tester node's tools to the selected provider.
 
     Handles both Aden accounts (account= routing) and local accounts
@@ -325,7 +325,7 @@ def _activate_local_account(credential_id: str, alias: str) -> None:
 
 
 def _configure_aden_node(
-    runner: AgentRunner,
+    runner: AgentLoader,
     provider: str,
     alias: str,
     detail: str,
@@ -368,7 +368,7 @@ or any other identifier — always use the alias exactly as shown.
 
 
 def _configure_local_node(
-    runner: AgentRunner,
+    runner: AgentLoader,
     provider: str,
     alias: str,
     identity: dict,
@@ -497,7 +497,7 @@ class CredentialTesterAgent:
     def __init__(self, config=None):
         self.config = config or default_config
         self._selected_account: dict | None = None
-        self._agent_runtime: AgentRuntime | None = None
+        self._agent_runtime: AgentHost | None = None
         self._tool_registry: ToolRegistry | None = None
         self._storage_path: Path | None = None
 

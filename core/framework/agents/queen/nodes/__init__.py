@@ -177,7 +177,7 @@ _shared_building_knowledge = (
 
 ## Paths (MANDATORY)
 **Always use RELATIVE paths** \
-(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
+(e.g. `exports/agent_name/agent.json`).
 **Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
 The project root is implicit.
 
@@ -485,40 +485,54 @@ When a user says "my agent is failing" or "debug this agent":
 in the planning phase. The draft metadata will pre-populate descriptions, \
 goals, success criteria, and node metadata in the generated files.**
 
-Call `initialize_and_build_agent(agent_name, nodes)` to generate all package \
-files. The agent_name must be snake_case (e.g., "my_agent"). Pass node names \
+Call `initialize_and_build_agent(agent_name, nodes)` to generate the agent. \
+The agent_name must be snake_case (e.g., "my_agent"). Pass node names \
 as comma-separated string (e.g., "gather,process,review").
-The tool creates: config.py, nodes/__init__.py, agent.py, \
-__init__.py, __main__.py, mcp_servers.json, tests/conftest.py.
 
-The generated files are **structurally complete** with correct imports, \
-class definition, `validate()` method, `default_agent` export, and \
-`__init__.py` re-exports. They pass validation as-is.
+The tool creates a **declarative** agent as two files:
+- `agent.json` — the entire agent definition (goal, nodes, edges, prompts, tools)
+- `mcp_servers.json` — tool server config (auto-generated)
 
-`mcp_servers.json` is auto-generated with hive-tools as the default. \
-Do NOT manually create or overwrite `mcp_servers.json`.
+**There are NO Python files.** No agent.py, config.py, nodes/__init__.py, \
+__init__.py, or __main__.py. The framework loads agent.json directly.
 
-### Customizing generated files
+### Customizing the generated agent
 
-**CRITICAL: Use `edit_file` to customize TODO placeholders. \
-NEVER use `write_file` to rewrite generated files from scratch. \
-Rewriting breaks imports, class structure, and causes validation failures.**
+Use `edit_file` on `exports/{name}/agent.json` to customize TODO placeholders:
+- System prompts (in each node's `system_prompt:` field)
+- Tool access (in each node's `tools:` field — use `policy: explicit` with `allowed: [...]`)
+- Input/output keys, success criteria, goal description
+- Identity prompt (top-level `identity_prompt:` field)
+- Edge conditions and routing
 
-Safe to edit with `edit_file`:
-- System prompts, tools, input_keys, output_keys, success_criteria in \
-nodes/__init__.py
-- Goal description, success criteria values, constraint values, edge \
-definitions, identity_prompt in agent.py
-- CLI options in __main__.py
-- For triggers (timers/webhooks), add entries to triggers.json in the \
-agent's export directory
+**Template variables:** Add a `variables:` section at the top of agent.json \
+and use `{{variable_name}}` in system prompts for config injection:
+```yaml
+variables:
+  spreadsheet_id: "1ZVx..."
+nodes:
+  - id: start
+    system_prompt: |
+      Use spreadsheet: {{spreadsheet_id}}
+```
 
-Do NOT modify or rewrite:
-- Import statements at top of agent.py (they are correct)
-- The agent class definition, `validate()`, `_build_graph()`, `_setup()`, \
-or lifecycle methods (start/stop/run)
-- `__init__.py` exports (all required variables are already re-exported)
-- `default_agent = ClassName()` at bottom of agent.py
+### Tool access in nodes
+
+Each node declares its tool access policy:
+```yaml
+# Explicit list (recommended)
+tools:
+  policy: explicit
+  allowed: [web_search, save_data]
+
+# All tools from registry (for GCU browser nodes)
+tools:
+  policy: all
+
+# No tools (for handoff/summary nodes)
+tools:
+  policy: none
+```
 
 ## 6. Verify and Load
 
@@ -999,12 +1013,12 @@ user says "replan", "go back", "let's redesign", "change the approach", \
 If you discover that the agent graph has structural problems — GCU nodes \
 in the linear flow, missing edges, wrong node connections, incorrect \
 sub-agent assignments — you MUST call replan_agent() and fix the draft. \
-Do NOT attempt to fix topology by editing agent.py directly. The graph \
+Do NOT attempt to fix topology by editing agent.json directly. The graph \
 structure is defined by the draft → dissolution → code-gen pipeline. \
-Editing code to rewire nodes bypasses the flowchart and creates drift \
-between what the user sees and what the code does.
+Editing the config to rewire nodes bypasses the flowchart and creates drift \
+between what the user sees and what the config does.
 
-**WRONG:** "Let me fix agent.py to remove GCU nodes from edges..."
+**WRONG:** "Let me fix agent.json to remove GCU nodes from edges..."
 **RIGHT:** Call replan_agent(), fix the draft with save_agent_draft(), \
 get user approval, then confirm_and_build() → the corrected code is \
 generated automatically.

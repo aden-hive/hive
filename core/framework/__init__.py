@@ -28,8 +28,8 @@ try:
     from framework.llm import AnthropicProvider  # noqa: F401
 except ImportError:
     pass
-from framework.runner import AgentRunner
-from framework.runtime.core import Runtime
+from framework.runner import AgentLoader
+from framework.runtime.core import DecisionTracker  # noqa: F401
 from framework.schemas.decision import Decision, DecisionEvaluation, Option, Outcome
 from framework.schemas.run import Problem, Run, RunSummary
 
@@ -59,7 +59,7 @@ __all__ = [
     "LLMProvider",
     "AnthropicProvider",
     # Runner
-    "AgentRunner",
+    "AgentLoader",
     # Testing
     "Test",
     "TestResult",
