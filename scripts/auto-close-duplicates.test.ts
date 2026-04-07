@@ -14,7 +14,74 @@ import {
   type GitHubComment,
   type GitHubIssue,
   type GitHubReaction,
+
 } from "./auto-close-duplicates";
+
+import { SharedMemory } from '../src/core/SharedMemory';
+import { describe, it, expect, vi } from 'vitest';
+import { ResearchAgent } from '../src/agents/ResearchAgent';
+import { RoboticsAgent } from '../src/agents/RoboticsAgent';
+import { ProcurementAgent } from '../src/agents/ProcurementAgent';
+
+describe('Hive Procurement Agent: B2B Discovery', () => {
+  const scout = new ProcurementAgent();
+
+  it('should filter SAP Ariba opportunities by tech-moat keywords', async () => {
+    const matches = await scout.searchAriba(['AI', 'Computer Vision', 'SaaS']);
+    
+    // Ensure the scout identifies the correct category
+    const topLead = matches[0];
+    expect(topLead.category).toBe('Information Technology');
+    expect(topLead.description).toMatch(/artificial intelligence/i);
+  });
+});
+
+describe('Hive Robotics Agent: VLA & Control', () => {
+  const robot = new RoboticsAgent();
+
+  it('should generate smooth s-domain trajectories from vision input', async () => {
+    const mockFrame = "base64_encoded_frame_data";
+    const action = await robot.visionLanguageAction(mockFrame, "pick up the sensor");
+
+    expect(action.status).toBe('success');
+    expect(action.metadata.control_mode).toBe('Laplace_s_domain');
+    // Ensure the trajectory isn't just a point, but a continuous chunk
+    expect(action.commands.length).toBeGreaterThan(10);
+  });
+});
+
+describe('Hive Research Agent: Academic Validation', () => {
+  const agent = new ResearchAgent();
+
+  it('should prioritize Web of Science over general web results', async () => {
+    const analysis = await agent.analyticalNode("Biometric Sensors in Robotics");
+    
+    // Assert citation weighting logic
+    expect(analysis.citations).toContain('Web of Science');
+    expect(analysis.citationWeights['Web of Science']).toBeGreaterThan(analysis.citationWeights['GeneralWeb']);
+    expect(analysis.conclusions).toMatch(/Industrial|Peer-Reviewed/);
+  });
+})
+
+describe('Hive Core: Memory Isolation & Bridging', () => {
+  it('should prevent cross-agent data corruption using Deep Copy', async () => {
+    const memory = new SharedMemory();
+    
+    // Robotics Agent writes a state
+    memory.write("arm_position", { x: 10, y: 20 });
+
+    // Business Agent reads and mistakenly tries to modify
+    const leakedData = memory.read("arm_position");
+    leakedData.x = 999; 
+
+    // Re-read from memory
+    const originalData = memory.read("arm_position");
+    
+    // ASSERT: Original remains unchanged
+    expect(originalData.x).toBe(10);
+  });
+});
+
 
 describe("extractDuplicateIssueNumber", () => {
   test("extracts #123 format", () => {
