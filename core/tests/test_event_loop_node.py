@@ -21,7 +21,7 @@ from framework.graph.event_loop_node import (
     LoopConfig,
     OutputAccumulator,
 )
-from framework.graph.node import NodeContext, NodeProtocol, NodeSpec, SharedMemory
+from framework.graph.node import DataBuffer, NodeContext, NodeProtocol, NodeSpec
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
     FinishEvent,
@@ -31,6 +31,7 @@ from framework.llm.stream_events import (
 )
 from framework.runtime.core import Runtime
 from framework.runtime.event_bus import EventBus, EventType
+from framework.server.session_manager import Session, SessionManager
 from framework.storage.conversation_store import FileConversationStore
 
 # ---------------------------------------------------------------------------
@@ -67,9 +68,6 @@ class MockStreamingLLM(LLMProvider):
 
     def complete(self, messages, system="", **kwargs) -> LLMResponse:
         return LLMResponse(content="Summary of conversation.", model="mock", stop_reason="stop")
-
-    def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs) -> LLMResponse:
-        return LLMResponse(content="", model="mock", stop_reason="stop")
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +112,7 @@ def tool_call_scenario(
 @pytest.fixture
 def runtime():
     rt = MagicMock(spec=Runtime)
-    rt.start_run = MagicMock(return_value="run_1")
+    rt.start_run = MagicMock(return_value="session_20250101_000000_eventlp01")
     rt.decide = MagicMock(return_value="dec_1")
     rt.record_outcome = MagicMock()
     rt.end_run = MagicMock()
@@ -136,21 +134,40 @@ def node_spec():
 
 
 @pytest.fixture
-def memory():
-    return SharedMemory()
+def buffer():
+    return DataBuffer()
 
 
-def build_ctx(runtime, node_spec, memory, llm, tools=None, input_data=None, goal_context=""):
-    """Build a NodeContext for testing."""
+def build_ctx(
+    runtime,
+    node_spec,
+    buffer,
+    llm,
+    tools=None,
+    input_data=None,
+    goal_context="",
+    stream_id=None,
+    is_subagent_mode=False,
+):
+    """Build a NodeContext for testing.
+
+    When EventLoopNode is constructed with event_bus, a non-queen/non-subagent
+    node is treated as a worker and auto-escalates to queen on text-only turns
+    (see event_loop_node.py:1277). Standalone tests with event_bus but no queen
+    should pass is_subagent_mode=True to opt out, otherwise the loop hangs
+    forever waiting for queen guidance that never arrives.
+    """
     return NodeContext(
         runtime=runtime,
         node_id=node_spec.id,
         node_spec=node_spec,
-        memory=memory,
+        buffer=buffer,
         input_data=input_data or {},
         llm=llm,
         available_tools=tools or [],
         goal_context=goal_context,
+        stream_id=stream_id,
+        is_subagent_mode=is_subagent_mode,
     )
 
 
@@ -181,12 +198,12 @@ class TestNodeProtocolConformance:
 
 class TestBasicLoop:
     @pytest.mark.asyncio
-    async def test_basic_text_only_implicit_accept(self, runtime, node_spec, memory):
+    async def test_basic_text_only_implicit_accept(self, runtime, node_spec, buffer):
         """No tools, no judge. LLM produces text, implicit accept on stop."""
         # Override to no output_keys so implicit judge accepts immediately
         node_spec.output_keys = []
         llm = MockStreamingLLM(scenarios=[text_scenario("Hello world")])
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
 
         node = EventLoopNode(config=LoopConfig(max_iterations=5))
         result = await node.execute(ctx)
@@ -195,9 +212,9 @@ class TestBasicLoop:
         assert result.tokens_used > 0
 
     @pytest.mark.asyncio
-    async def test_no_llm_returns_failure(self, runtime, node_spec, memory):
+    async def test_no_llm_returns_failure(self, runtime, node_spec, buffer):
         """ctx.llm=None should return failure immediately."""
-        ctx = build_ctx(runtime, node_spec, memory, llm=None)
+        ctx = build_ctx(runtime, node_spec, buffer, llm=None)
 
         node = EventLoopNode()
         result = await node.execute(ctx)
@@ -206,12 +223,12 @@ class TestBasicLoop:
         assert "LLM" in result.error
 
     @pytest.mark.asyncio
-    async def test_max_iterations_failure(self, runtime, node_spec, memory):
+    async def test_max_iterations_failure(self, runtime, node_spec, buffer):
         """When max_iterations is reached without acceptance, should fail."""
         # LLM always produces text but never calls set_output, so implicit
         # judge retries asking for missing keys
         llm = MockStreamingLLM(scenarios=[text_scenario("thinking...")])
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
 
         node = EventLoopNode(config=LoopConfig(max_iterations=2))
         result = await node.execute(ctx)
@@ -227,7 +244,7 @@ class TestBasicLoop:
 
 class TestJudgeIntegration:
     @pytest.mark.asyncio
-    async def test_judge_accept(self, runtime, node_spec, memory):
+    async def test_judge_accept(self, runtime, node_spec, buffer):
         """Mock judge ACCEPT -> success."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(scenarios=[text_scenario("Done!")])
@@ -235,7 +252,7 @@ class TestJudgeIntegration:
         judge = AsyncMock(spec=JudgeProtocol)
         judge.evaluate = AsyncMock(return_value=JudgeVerdict(action="ACCEPT"))
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(judge=judge, config=LoopConfig(max_iterations=5))
         result = await node.execute(ctx)
 
@@ -243,7 +260,7 @@ class TestJudgeIntegration:
         judge.evaluate.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_judge_escalate(self, runtime, node_spec, memory):
+    async def test_judge_escalate(self, runtime, node_spec, buffer):
         """Mock judge ESCALATE -> failure."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(scenarios=[text_scenario("Attempt")])
@@ -253,7 +270,7 @@ class TestJudgeIntegration:
             return_value=JudgeVerdict(action="ESCALATE", feedback="Tone violation")
         )
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(judge=judge, config=LoopConfig(max_iterations=5))
         result = await node.execute(ctx)
 
@@ -262,7 +279,7 @@ class TestJudgeIntegration:
         assert "Tone violation" in result.error
 
     @pytest.mark.asyncio
-    async def test_judge_retry_then_accept(self, runtime, node_spec, memory):
+    async def test_judge_retry_then_accept(self, runtime, node_spec, buffer):
         """RETRY twice, then ACCEPT. Should run 3 iterations."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(
@@ -285,7 +302,7 @@ class TestJudgeIntegration:
         judge = AsyncMock(spec=JudgeProtocol)
         judge.evaluate = AsyncMock(side_effect=evaluate_fn)
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(judge=judge, config=LoopConfig(max_iterations=10))
         result = await node.execute(ctx)
 
@@ -300,7 +317,7 @@ class TestJudgeIntegration:
 
 class TestSetOutput:
     @pytest.mark.asyncio
-    async def test_set_output_accumulates(self, runtime, node_spec, memory):
+    async def test_set_output_accumulates(self, runtime, node_spec, buffer):
         """LLM calls set_output -> values appear in NodeResult.output."""
         llm = MockStreamingLLM(
             scenarios=[
@@ -311,7 +328,7 @@ class TestSetOutput:
             ]
         )
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(config=LoopConfig(max_iterations=5))
         result = await node.execute(ctx)
 
@@ -319,7 +336,7 @@ class TestSetOutput:
         assert result.output["result"] == 42
 
     @pytest.mark.asyncio
-    async def test_set_output_rejects_invalid_key(self, runtime, node_spec, memory):
+    async def test_set_output_rejects_invalid_key(self, runtime, node_spec, buffer):
         """set_output with key not in output_keys -> is_error=True."""
         llm = MockStreamingLLM(
             scenarios=[
@@ -332,7 +349,7 @@ class TestSetOutput:
             ]
         )
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(config=LoopConfig(max_iterations=5))
         result = await node.execute(ctx)
 
@@ -341,7 +358,7 @@ class TestSetOutput:
         assert "bad_key" not in result.output
 
     @pytest.mark.asyncio
-    async def test_missing_keys_triggers_retry(self, runtime, node_spec, memory):
+    async def test_missing_keys_triggers_retry(self, runtime, node_spec, buffer):
         """Judge accepts but output keys are missing -> retry with hint."""
         judge = AsyncMock(spec=JudgeProtocol)
         judge.evaluate = AsyncMock(return_value=JudgeVerdict(action="ACCEPT"))
@@ -357,7 +374,7 @@ class TestSetOutput:
             ]
         )
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(judge=judge, config=LoopConfig(max_iterations=5))
         result = await node.execute(ctx)
 
@@ -372,7 +389,7 @@ class TestSetOutput:
 
 class TestStallDetection:
     @pytest.mark.asyncio
-    async def test_stall_detection(self, runtime, node_spec, memory):
+    async def test_stall_detection(self, runtime, node_spec, buffer):
         """3 identical responses should trigger stall detection."""
         node_spec.output_keys = []  # so implicit judge would accept
         # But we need the judge to RETRY so we actually get 3 identical responses
@@ -381,7 +398,7 @@ class TestStallDetection:
 
         llm = MockStreamingLLM(scenarios=[text_scenario("same answer")])
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(
             judge=judge,
             config=LoopConfig(max_iterations=10, stall_detection_threshold=3),
@@ -399,7 +416,7 @@ class TestStallDetection:
 
 class TestEventBusLifecycle:
     @pytest.mark.asyncio
-    async def test_lifecycle_events_published(self, runtime, node_spec, memory):
+    async def test_lifecycle_events_published(self, runtime, node_spec, buffer):
         """NODE_LOOP_STARTED, NODE_LOOP_ITERATION, NODE_LOOP_COMPLETED should be published."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(scenarios=[text_scenario("ok")])
@@ -415,7 +432,8 @@ class TestEventBusLifecycle:
             handler=lambda e: received_events.append(e.type),
         )
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        # Subagent mode opts out of worker auto-escalation (no queen in tests).
+        ctx = build_ctx(runtime, node_spec, buffer, llm, is_subagent_mode=True)
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
         result = await node.execute(ctx)
 
@@ -426,15 +444,14 @@ class TestEventBusLifecycle:
 
     @pytest.mark.asyncio
     @pytest.mark.skip(reason="Hangs in non-interactive shells (client-facing blocks on stdin)")
-    async def test_client_facing_uses_client_output_delta(self, runtime, memory):
-        """client_facing=True should emit CLIENT_OUTPUT_DELTA instead of LLM_TEXT_DELTA."""
+    async def test_queen_stream_uses_client_output_delta(self, runtime, buffer):
+        """Queen streams should emit CLIENT_OUTPUT_DELTA instead of LLM_TEXT_DELTA."""
         spec = NodeSpec(
             id="ui_node",
             name="UI Node",
             description="Streams to user",
             node_type="event_loop",
             output_keys=[],
-            client_facing=True,
         )
         llm = MockStreamingLLM(scenarios=[text_scenario("visible to user")])
         bus = EventBus()
@@ -445,7 +462,7 @@ class TestEventBusLifecycle:
             handler=lambda e: received_types.append(e.type),
         )
 
-        ctx = build_ctx(runtime, spec, memory, llm)
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
 
         # Text-only on client_facing no longer blocks (no ask_user), so
@@ -461,8 +478,8 @@ class TestEventBusLifecycle:
 # ===========================================================================
 
 
-class TestClientFacingBlocking:
-    """Tests for native client_facing input blocking in EventLoopNode."""
+class TestQueenInteractionBlocking:
+    """Tests for queen-native input blocking in EventLoopNode."""
 
     @pytest.fixture
     def client_spec(self):
@@ -472,12 +489,11 @@ class TestClientFacingBlocking:
             description="chat node",
             node_type="event_loop",
             output_keys=[],
-            client_facing=True,
         )
 
     @pytest.mark.asyncio
     @pytest.mark.skip(reason="Hangs in non-interactive shells (client-facing blocks on stdin)")
-    async def test_text_only_no_blocking(self, runtime, memory, client_spec):
+    async def test_text_only_no_blocking(self, runtime, buffer, client_spec):
         """client_facing + text-only (no ask_user) should NOT block."""
         llm = MockStreamingLLM(
             scenarios=[
@@ -486,7 +502,7 @@ class TestClientFacingBlocking:
         )
         bus = EventBus()
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
-        ctx = build_ctx(runtime, client_spec, memory, llm)
+        ctx = build_ctx(runtime, client_spec, buffer, llm, stream_id="queen")
 
         # Should complete without blocking — no ask_user called, no output_keys required
         result = await node.execute(ctx)
@@ -495,7 +511,7 @@ class TestClientFacingBlocking:
         assert llm._call_index >= 1
 
     @pytest.mark.asyncio
-    async def test_ask_user_triggers_blocking(self, runtime, memory, client_spec):
+    async def test_ask_user_triggers_blocking(self, runtime, buffer, client_spec):
         """client_facing + ask_user() blocks until inject_event."""
         # Give the node an output key so the judge doesn't auto-accept
         # after the user responds — it needs set_output first.
@@ -514,13 +530,15 @@ class TestClientFacingBlocking:
         )
         bus = EventBus()
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
-        ctx = build_ctx(runtime, client_spec, memory, llm)
+        ctx = build_ctx(runtime, client_spec, buffer, llm, stream_id="queen")
 
-        async def user_responds():
+        async def user_responds_then_shutdown():
             await asyncio.sleep(0.05)
             await node.inject_event("I need help")
+            await asyncio.sleep(0.1)
+            node.signal_shutdown()
 
-        user_task = asyncio.create_task(user_responds())
+        user_task = asyncio.create_task(user_responds_then_shutdown())
         result = await node.execute(ctx)
         await user_task
 
@@ -530,15 +548,14 @@ class TestClientFacingBlocking:
         assert result.output["answer"] == "help provided"
 
     @pytest.mark.asyncio
-    async def test_client_facing_does_not_block_on_tools(self, runtime, memory):
-        """client_facing + tool calls (no ask_user) should NOT block."""
+    async def test_queen_does_not_block_on_tools(self, runtime, buffer):
+        """Queen tool calls (without ask_user) should NOT block."""
         spec = NodeSpec(
             id="chat",
             name="Chat",
             description="chat node",
             node_type="event_loop",
             output_keys=["result"],
-            client_facing=True,
         )
         # Scenario 1: LLM calls set_output
         # Scenario 2: LLM produces text — implicit judge ACCEPTs (output key set)
@@ -550,16 +567,21 @@ class TestClientFacingBlocking:
             ]
         )
         node = EventLoopNode(config=LoopConfig(max_iterations=5))
-        ctx = build_ctx(runtime, spec, memory, llm)
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
 
-        # Should complete without blocking — no ask_user called
+        async def shutdown_after_presentation():
+            await asyncio.sleep(0.05)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(shutdown_after_presentation())
         result = await node.execute(ctx)
+        await task
 
         assert result.success is True
         assert result.output["result"] == "done"
 
     @pytest.mark.asyncio
-    async def test_non_client_facing_unchanged(self, runtime, memory):
+    async def test_non_client_facing_unchanged(self, runtime, buffer):
         """client_facing=False should not block — existing behavior."""
         spec = NodeSpec(
             id="internal",
@@ -570,23 +592,27 @@ class TestClientFacingBlocking:
         )
         llm = MockStreamingLLM(scenarios=[text_scenario("thinking...")])
         node = EventLoopNode(config=LoopConfig(max_iterations=2))
-        ctx = build_ctx(runtime, spec, memory, llm)
+        ctx = build_ctx(runtime, spec, buffer, llm)
 
         # Should complete without blocking (implicit judge ACCEPTs on no tools + no keys)
         result = await node.execute(ctx)
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_signal_shutdown_unblocks(self, runtime, memory, client_spec):
+    async def test_signal_shutdown_unblocks(self, runtime, buffer, client_spec):
         """signal_shutdown should unblock a waiting client_facing node."""
         llm = MockStreamingLLM(
             scenarios=[
-                tool_call_scenario("ask_user", {"question": "Waiting..."}, tool_use_id="ask_1"),
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "Waiting...", "options": ["Continue", "Stop"]},
+                    tool_use_id="ask_1",
+                ),
             ]
         )
         bus = EventBus()
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=10))
-        ctx = build_ctx(runtime, client_spec, memory, llm)
+        ctx = build_ctx(runtime, client_spec, buffer, llm, stream_id="queen")
 
         async def shutdown_after_delay():
             await asyncio.sleep(0.05)
@@ -599,11 +625,15 @@ class TestClientFacingBlocking:
         assert result.success is True
 
     @pytest.mark.asyncio
-    async def test_client_input_requested_event_published(self, runtime, memory, client_spec):
+    async def test_client_input_requested_event_published(self, runtime, buffer, client_spec):
         """CLIENT_INPUT_REQUESTED should be published when ask_user blocks."""
         llm = MockStreamingLLM(
             scenarios=[
-                tool_call_scenario("ask_user", {"question": "Hello!"}, tool_use_id="ask_1"),
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "Hello!", "options": ["Yes", "No"]},
+                    tool_use_id="ask_1",
+                ),
             ]
         )
         bus = EventBus()
@@ -618,7 +648,7 @@ class TestClientFacingBlocking:
         )
 
         node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
-        ctx = build_ctx(runtime, client_spec, memory, llm)
+        ctx = build_ctx(runtime, client_spec, buffer, llm, stream_id="queen")
 
         async def shutdown():
             await asyncio.sleep(0.05)
@@ -633,7 +663,7 @@ class TestClientFacingBlocking:
 
     @pytest.mark.asyncio
     @pytest.mark.skip(reason="Hangs in non-interactive shells (client-facing blocks on stdin)")
-    async def test_ask_user_with_real_tools(self, runtime, memory):
+    async def test_queen_ask_user_with_real_tools(self, runtime, buffer):
         """ask_user alongside real tool calls still triggers blocking."""
         spec = NodeSpec(
             id="chat",
@@ -641,7 +671,6 @@ class TestClientFacingBlocking:
             description="chat node",
             node_type="event_loop",
             output_keys=[],
-            client_facing=True,
         )
         # LLM calls a real tool AND ask_user in the same turn
         llm = MockStreamingLLM(
@@ -667,7 +696,12 @@ class TestClientFacingBlocking:
             config=LoopConfig(max_iterations=5),
         )
         ctx = build_ctx(
-            runtime, spec, memory, llm, tools=[Tool(name="search", description="", parameters={})]
+            runtime,
+            spec,
+            buffer,
+            llm,
+            tools=[Tool(name="search", description="", parameters={})],
+            stream_id="queen",
         )
 
         async def unblock():
@@ -682,8 +716,35 @@ class TestClientFacingBlocking:
         assert llm._call_index >= 2
 
     @pytest.mark.asyncio
-    async def test_ask_user_not_available_non_client_facing(self, runtime, memory):
-        """ask_user tool should NOT be injected for non-client-facing nodes."""
+    async def test_ask_user_not_available_for_workers_even_with_legacy_client_facing(
+        self, runtime, buffer
+    ):
+        """Workers should not receive ask_user even if legacy client_facing=True is set."""
+        spec = NodeSpec(
+            id="internal",
+            name="Internal",
+            description="internal node",
+            node_type="event_loop",
+            output_keys=[],
+            client_facing=True,
+        )
+        llm = MockStreamingLLM(scenarios=[text_scenario("thinking...")])
+        node = EventLoopNode(config=LoopConfig(max_iterations=2))
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="worker")
+
+        await node.execute(ctx)
+
+        # Verify ask_user was NOT in the tools passed to the LLM
+        assert llm._call_index >= 1
+        for call in llm.stream_calls:
+            tool_names = [t.name for t in (call["tools"] or [])]
+            assert "ask_user" not in tool_names
+            assert "ask_user_multiple" not in tool_names
+            assert "escalate" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_escalate_available_for_worker_stream(self, runtime, buffer):
+        """Workers should receive escalate synthetic tool."""
         spec = NodeSpec(
             id="internal",
             name="Internal",
@@ -693,15 +754,445 @@ class TestClientFacingBlocking:
         )
         llm = MockStreamingLLM(scenarios=[text_scenario("thinking...")])
         node = EventLoopNode(config=LoopConfig(max_iterations=2))
-        ctx = build_ctx(runtime, spec, memory, llm)
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="worker")
 
         await node.execute(ctx)
 
-        # Verify ask_user was NOT in the tools passed to the LLM
         assert llm._call_index >= 1
-        for call in llm.stream_calls:
-            tool_names = [t.name for t in (call["tools"] or [])]
-            assert "ask_user" not in tool_names
+        tool_names = [t.name for t in (llm.stream_calls[0]["tools"] or [])]
+        assert "escalate" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_escalate_not_available_for_queen_stream(self, runtime, buffer):
+        """Queen stream should not receive escalate tool."""
+        spec = NodeSpec(
+            id="queen",
+            name="Queen",
+            description="queen node",
+            node_type="event_loop",
+            output_keys=[],
+        )
+        llm = MockStreamingLLM(scenarios=[text_scenario("monitoring...")])
+        node = EventLoopNode(config=LoopConfig(max_iterations=2))
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
+
+        async def shutdown_after_turn():
+            await asyncio.sleep(0.05)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(shutdown_after_turn())
+        await node.execute(ctx)
+        await task
+
+        assert llm._call_index >= 1
+        tool_names = [t.name for t in (llm.stream_calls[0]["tools"] or [])]
+        assert "escalate" not in tool_names
+
+
+class TestEscalate:
+    @pytest.mark.asyncio
+    async def test_escalate_emits_event(self, runtime, node_spec, buffer):
+        """escalate() should publish ESCALATION_REQUESTED and block for queen guidance."""
+        node_spec.output_keys = []
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "escalate",
+                    {
+                        "reason": "tool failure",
+                        "context": "HTTP 401 from upstream",
+                    },
+                    tool_use_id="escalate_1",
+                ),
+                text_scenario("Escalated to queen."),
+            ]
+        )
+        bus = EventBus()
+        received = []
+
+        async def capture(event):
+            received.append(event)
+
+        bus.subscribe(event_types=[EventType.ESCALATION_REQUESTED], handler=capture)
+
+        # is_subagent_mode=True: test drives node.execute() directly, so this
+        # runs in subagent pattern (no queen). Opts out of worker auto-escalation
+        # that would otherwise fire extra ESCALATION_REQUESTED events on
+        # subsequent text-only turns.
+        ctx = build_ctx(runtime, node_spec, buffer, llm, stream_id="worker", is_subagent_mode=True)
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Acknowledged, proceed.")
+
+        task = asyncio.create_task(queen_reply())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert len(received) == 1
+        assert received[0].type == EventType.ESCALATION_REQUESTED
+        assert received[0].data["reason"] == "tool failure"
+        assert "HTTP 401" in received[0].data["context"]
+
+    @pytest.mark.asyncio
+    async def test_escalate_handoff_reaches_queen(self, runtime, node_spec, buffer):
+        """Worker escalation should be routed to queen via SessionManager handoff sub."""
+        node_spec.output_keys = []
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "escalate",
+                    {
+                        "reason": "blocked",
+                        "context": "dependency missing",
+                    },
+                    tool_use_id="escalate_1",
+                ),
+                text_scenario("Escalation sent."),
+            ]
+        )
+        bus = EventBus()
+
+        manager = SessionManager()
+        session = Session(id="handoff_test", event_bus=bus, llm=object(), loaded_at=0.0)
+        queen_node = MagicMock()
+        queen_node.inject_event = AsyncMock()
+        queen_executor = MagicMock()
+        queen_executor.node_registry = {"queen": queen_node}
+        manager._subscribe_worker_handoffs(session, queen_executor)
+
+        # is_subagent_mode=True opts out of worker auto-escalation.
+        # Standalone test without real queen loop, see other escalate tests.
+        ctx = build_ctx(runtime, node_spec, buffer, llm, stream_id="worker", is_subagent_mode=True)
+        node = EventLoopNode(event_bus=bus, config=LoopConfig(max_iterations=5))
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Queen acknowledges escalation.")
+
+        task = asyncio.create_task(queen_reply())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        queen_node.inject_event.assert_awaited_once()
+        injected = queen_node.inject_event.await_args.args[0]
+        kwargs = queen_node.inject_event.await_args.kwargs
+        assert "[WORKER_ESCALATION_REQUEST]" in injected
+        assert "stream_id: worker" in injected
+        assert "node_id: test_loop" in injected
+        assert "reason: blocked" in injected
+        assert "dependency missing" in injected
+        assert kwargs["is_client_input"] is False
+
+    @pytest.mark.asyncio
+    async def test_escalate_waits_for_queen_input_and_skips_judge(self, runtime, node_spec, buffer):
+        """escalate() should block for queen input before judge evaluation."""
+        node_spec.output_keys = ["result"]
+        llm = MockStreamingLLM(
+            scenarios=[
+                tool_call_scenario(
+                    "escalate",
+                    {
+                        "reason": "need direction",
+                        "context": "conflicting constraints",
+                    },
+                    tool_use_id="escalate_1",
+                ),
+                tool_call_scenario(
+                    "set_output",
+                    {"key": "result", "value": "resolved after queen guidance"},
+                    tool_use_id="set_1",
+                ),
+                text_scenario("Completed."),
+            ]
+        )
+        bus = EventBus()
+        client_input_events = []
+
+        async def capture_input(event):
+            client_input_events.append(event)
+
+        bus.subscribe(event_types=[EventType.CLIENT_INPUT_REQUESTED], handler=capture_input)
+
+        judge = AsyncMock(spec=JudgeProtocol)
+        judge.evaluate = AsyncMock(return_value=JudgeVerdict(action="ACCEPT"))
+
+        ctx = build_ctx(runtime, node_spec, buffer, llm, stream_id="worker")
+        node = EventLoopNode(judge=judge, event_bus=bus, config=LoopConfig(max_iterations=5))
+
+        async def queen_reply():
+            await asyncio.sleep(0.05)
+            assert judge.evaluate.await_count == 0
+            await node.inject_event("Use fallback mode and continue.")
+
+        task = asyncio.create_task(queen_reply())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["result"] == "resolved after queen guidance"
+        assert judge.evaluate.await_count >= 1
+        assert len(client_input_events) == 0
+
+
+# ===========================================================================
+# Client-facing: _cf_expecting_work state machine
+#
+# After user responds, text-only turns with missing required outputs should
+# go through judge (RETRY) instead of auto-blocking.  This prevents weak
+# models from stalling when they output "Understood" without calling tools.
+# ===========================================================================
+
+
+class TestClientFacingExpectingWork:
+    """Tests for _cf_expecting_work state machine in queen interactive turns."""
+
+    @pytest.mark.asyncio
+    async def test_text_after_user_input_goes_to_judge(self, runtime, buffer):
+        """After user responds, text-only with missing outputs gets judged (not auto-blocked).
+
+        Simulates: findings-review asks user, user says "generate report",
+        Codex replies "Understood" without tools -> judge should RETRY.
+        """
+        spec = NodeSpec(
+            id="findings",
+            name="Findings Review",
+            description="review findings",
+            node_type="event_loop",
+            output_keys=["decision"],
+        )
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user what to do
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "Continue or generate report?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: after user responds, LLM outputs text-only (lazy)
+                text_scenario("Understood, generating the report."),
+                # Turn 2: after judge RETRY, LLM sets output
+                tool_call_scenario(
+                    "set_output",
+                    {"key": "decision", "value": "generate"},
+                ),
+                # Turn 3: accept
+                text_scenario("Done."),
+            ]
+        )
+        node = EventLoopNode(config=LoopConfig(max_iterations=10))
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
+
+        async def user_responds_then_shutdown():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Generate the report")
+            await asyncio.sleep(0.1)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(user_responds_then_shutdown())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["decision"] == "generate"
+        # LLM should have been called at least 3 times (ask_user, text-only retried, set_output)
+        assert llm._call_index >= 3
+
+    @pytest.mark.asyncio
+    async def test_auto_block_without_missing_outputs(self, runtime, buffer):
+        """Text-only with no missing outputs should still auto-block (queen monitoring).
+
+        Simulates: queen node with no required outputs outputs "monitoring..."
+        -> should auto-block and wait for event, not spin in judge loop.
+        """
+        spec = NodeSpec(
+            id="queen",
+            name="Queen",
+            description="orchestrator",
+            node_type="event_loop",
+            output_keys=[],
+        )
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user for domain
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "What domain?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: after user input, outputs monitoring text
+                # No missing required outputs -> should auto-block
+                text_scenario("Monitoring workers..."),
+            ]
+        )
+        node = EventLoopNode(config=LoopConfig(max_iterations=10))
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
+
+        async def user_then_shutdown():
+            await asyncio.sleep(0.05)
+            await node.inject_event("furwise.app", is_client_input=True)
+            # Node should auto-block on "Monitoring..." text.
+            # Give it time to reach the block, then shutdown.
+            await asyncio.sleep(0.1)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(user_then_shutdown())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        # LLM called exactly 2 times: ask_user + monitoring text.
+        # If auto-block was skipped, judge would loop and call LLM more times.
+        assert llm._call_index == 2
+
+    @pytest.mark.asyncio
+    async def test_tool_calls_reset_expecting_work(self, runtime, buffer):
+        """After LLM calls tools, next text-only turn should auto-block again.
+
+        Simulates: user gives input -> LLM calls tools (work) -> LLM presents
+        results as text -> should auto-block (presenting, not lazy).
+        """
+        spec = NodeSpec(
+            id="report",
+            name="Report",
+            description="generate report",
+            node_type="event_loop",
+            output_keys=["status"],
+        )
+
+        def my_executor(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(tool_use_id=tool_use.id, content="saved", is_error=False)
+
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "Ready?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: after user responds, LLM does work (tool call)
+                tool_call_scenario(
+                    "save_data",
+                    {"content": "report.html"},
+                    tool_use_id="tool_1",
+                ),
+                # Turn 2: LLM presents results as text (no tools)
+                # Tool calls reset _cf_expecting_work -> should auto-block
+                text_scenario("Here is your report. Need changes?"),
+                # Turn 3: after user responds, set output
+                tool_call_scenario(
+                    "set_output",
+                    {"key": "status", "value": "complete"},
+                ),
+                # Turn 4: done
+                text_scenario("All done."),
+            ]
+        )
+        node = EventLoopNode(
+            tool_executor=my_executor,
+            config=LoopConfig(max_iterations=10),
+        )
+        ctx = build_ctx(
+            runtime,
+            spec,
+            buffer,
+            llm,
+            tools=[Tool(name="save_data", description="save", parameters={})],
+            stream_id="queen",
+        )
+
+        async def interactions():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Yes, go ahead")
+            # After tool calls + text presentation, node should auto-block again.
+            # Inject second user response.
+            await asyncio.sleep(0.2)
+            await node.inject_event("Looks good")
+            await asyncio.sleep(0.1)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(interactions())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["status"] == "complete"
+
+    @pytest.mark.asyncio
+    async def test_judge_retry_enables_expecting_work(self, runtime, buffer):
+        """After judge RETRY, text-only with missing outputs goes to judge again.
+
+        Simulates: LLM calls save_data but forgets set_output -> judge RETRY ->
+        LLM outputs text -> should go to judge (not auto-block).
+        """
+        spec = NodeSpec(
+            id="report",
+            name="Report",
+            description="generate report",
+            node_type="event_loop",
+            output_keys=["status"],
+        )
+
+        def my_executor(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(tool_use_id=tool_use.id, content="saved", is_error=False)
+
+        llm = MockStreamingLLM(
+            scenarios=[
+                # Turn 0: ask user
+                tool_call_scenario(
+                    "ask_user",
+                    {"question": "Generate?"},
+                    tool_use_id="ask_1",
+                ),
+                # Turn 1: LLM calls tool but doesn't set output
+                tool_call_scenario(
+                    "save_data",
+                    {"content": "report"},
+                    tool_use_id="tool_1",
+                ),
+                # Turn 2: judge RETRY (missing "status"). LLM outputs text.
+                # _cf_expecting_work should be True from RETRY -> goes to judge
+                text_scenario("Report generated successfully."),
+                # Turn 3: after second RETRY, LLM finally sets output
+                tool_call_scenario(
+                    "set_output",
+                    {"key": "status", "value": "done"},
+                ),
+                # Turn 4: accept
+                text_scenario("Complete."),
+            ]
+        )
+        node = EventLoopNode(
+            tool_executor=my_executor,
+            config=LoopConfig(max_iterations=10),
+        )
+        ctx = build_ctx(
+            runtime,
+            spec,
+            buffer,
+            llm,
+            tools=[Tool(name="save_data", description="save", parameters={})],
+            stream_id="queen",
+        )
+
+        async def user_responds_then_shutdown():
+            await asyncio.sleep(0.05)
+            await node.inject_event("Yes")
+            await asyncio.sleep(0.15)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(user_responds_then_shutdown())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert result.output["status"] == "done"
+        # LLM called at least 4 times: ask_user, save_data, text(retried), set_output
+        assert llm._call_index >= 4
 
 
 # ===========================================================================
@@ -711,7 +1202,7 @@ class TestClientFacingBlocking:
 
 class TestToolExecution:
     @pytest.mark.asyncio
-    async def test_tool_execution_feedback(self, runtime, node_spec, memory):
+    async def test_tool_execution_feedback(self, runtime, node_spec, buffer):
         """Tool call -> result fed back to conversation via stream loop."""
         node_spec.output_keys = []
 
@@ -734,7 +1225,7 @@ class TestToolExecution:
         ctx = build_ctx(
             runtime,
             node_spec,
-            memory,
+            buffer,
             llm,
             tools=[Tool(name="search", description="Search", parameters={})],
         )
@@ -756,13 +1247,13 @@ class TestToolExecution:
 
 class TestWriteThroughPersistence:
     @pytest.mark.asyncio
-    async def test_messages_written_to_store(self, tmp_path, runtime, node_spec, memory):
+    async def test_messages_written_to_store(self, tmp_path, runtime, node_spec, buffer):
         """Messages should be persisted immediately via write-through."""
         store = FileConversationStore(tmp_path / "conv")
         node_spec.output_keys = []
         llm = MockStreamingLLM(scenarios=[text_scenario("Hello")])
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(
             conversation_store=store,
             config=LoopConfig(max_iterations=5),
@@ -776,7 +1267,7 @@ class TestWriteThroughPersistence:
         assert len(parts) >= 2  # at least initial user msg + assistant msg
 
     @pytest.mark.asyncio
-    async def test_output_accumulator_write_through(self, tmp_path, runtime, node_spec, memory):
+    async def test_output_accumulator_write_through(self, tmp_path, runtime, node_spec, buffer):
         """set_output values should be persisted in cursor immediately."""
         store = FileConversationStore(tmp_path / "conv")
         llm = MockStreamingLLM(
@@ -786,7 +1277,7 @@ class TestWriteThroughPersistence:
             ]
         )
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(
             conversation_store=store,
             config=LoopConfig(max_iterations=5),
@@ -809,7 +1300,7 @@ class TestWriteThroughPersistence:
 
 class TestCrashRecovery:
     @pytest.mark.asyncio
-    async def test_restore_from_checkpoint(self, tmp_path, runtime, node_spec, memory):
+    async def test_restore_from_checkpoint(self, tmp_path, runtime, node_spec, buffer):
         """Populate a store with state, then verify EventLoopNode restores from it."""
         store = FileConversationStore(tmp_path / "conv")
 
@@ -819,6 +1310,9 @@ class TestCrashRecovery:
             output_keys=["result"],
             store=store,
         )
+        # Tag messages with phase_id matching the node so restore() finds them.
+        # Restore filters parts by phase_id=ctx.node_id in non-continuous mode.
+        conv.set_current_phase(node_spec.id)
         await conv.add_user_message("Initial input")
         await conv.add_assistant_message("Working on it...")
 
@@ -835,7 +1329,7 @@ class TestCrashRecovery:
         node_spec.output_keys = []  # no required keys so implicit accept works
         llm = MockStreamingLLM(scenarios=[text_scenario("Continuing...")])
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(
             conversation_store=store,
             config=LoopConfig(max_iterations=5),
@@ -846,6 +1340,83 @@ class TestCrashRecovery:
         # Should have the restored output
         assert result.output.get("result") == "partial_value"
 
+    @pytest.mark.asyncio
+    async def test_restore_reblocks_pending_user_input_instead_of_continuing(
+        self, tmp_path, runtime, buffer
+    ):
+        """A restored queen wait should re-emit the question, not self-continue."""
+        store = FileConversationStore(tmp_path / "conv")
+        conv = NodeConversation(
+            system_prompt="You are a test assistant.",
+            output_keys=[],
+            store=store,
+        )
+        conv.set_current_phase("queen")
+        await conv.add_user_message("Session started.")
+        await conv.add_assistant_message(
+            "",
+            tool_calls=[
+                {
+                    "id": "ask_1",
+                    "type": "function",
+                    "function": {
+                        "name": "ask_user",
+                        "arguments": '{"question":"What city?","options":["Seattle","Chicago"]}',
+                    },
+                }
+            ],
+        )
+        await conv.add_tool_result("ask_1", "Waiting for user input...")
+        await conv.add_assistant_message("What city should I target?")
+        await store.write_cursor(
+            {
+                "iteration": 4,
+                "next_seq": conv.next_seq,
+                "pending_input": {
+                    "prompt": "What city?",
+                    "options": ["Seattle", "Chicago"],
+                    "questions": None,
+                    "emit_client_request": True,
+                },
+            }
+        )
+
+        spec = NodeSpec(
+            id="queen",
+            name="Queen",
+            description="interactive queen",
+            node_type="event_loop",
+            output_keys=[],
+        )
+        llm = MockStreamingLLM(scenarios=[text_scenario("This should not run.")])
+        bus = EventBus()
+        input_events = []
+
+        async def capture(event):
+            input_events.append(event)
+
+        bus.subscribe(event_types=[EventType.CLIENT_INPUT_REQUESTED], handler=capture)
+
+        node = EventLoopNode(
+            event_bus=bus,
+            conversation_store=store,
+            config=LoopConfig(max_iterations=10),
+        )
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
+
+        async def shutdown_after_prompt():
+            await asyncio.sleep(0.05)
+            node.signal_shutdown()
+
+        task = asyncio.create_task(shutdown_after_prompt())
+        result = await node.execute(ctx)
+        await task
+
+        assert result.success is True
+        assert llm._call_index == 0
+        assert len(input_events) == 1
+        assert input_events[0].data["prompt"] == "What city?"
+
 
 # ===========================================================================
 # External event injection
@@ -854,7 +1425,7 @@ class TestCrashRecovery:
 
 class TestEventInjection:
     @pytest.mark.asyncio
-    async def test_inject_event(self, runtime, node_spec, memory):
+    async def test_inject_event(self, runtime, node_spec, buffer):
         """inject_event() content should appear as user message in next iteration."""
         node_spec.output_keys = []
 
@@ -876,7 +1447,7 @@ class TestEventInjection:
             ]
         )
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(
             judge=judge,
             config=LoopConfig(max_iterations=5),
@@ -903,7 +1474,7 @@ class TestEventInjection:
 
 class TestPauseResume:
     @pytest.mark.asyncio
-    async def test_pause_returns_early(self, runtime, node_spec, memory):
+    async def test_pause_returns_early(self, runtime, node_spec, buffer):
         """pause_requested in input_data should trigger early return."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(scenarios=[text_scenario("should not run")])
@@ -911,7 +1482,7 @@ class TestPauseResume:
         ctx = build_ctx(
             runtime,
             node_spec,
-            memory,
+            buffer,
             llm,
             input_data={"pause_requested": True},
         )
@@ -931,7 +1502,7 @@ class TestPauseResume:
 
 class TestStreamErrors:
     @pytest.mark.asyncio
-    async def test_non_recoverable_stream_error_raises(self, runtime, node_spec, memory):
+    async def test_non_recoverable_stream_error_raises(self, runtime, node_spec, buffer):
         """Non-recoverable StreamErrorEvent should raise RuntimeError."""
         node_spec.output_keys = []
         llm = MockStreamingLLM(
@@ -940,7 +1511,7 @@ class TestStreamErrors:
             ]
         )
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(config=LoopConfig(max_iterations=5))
 
         with pytest.raises(RuntimeError, match="Stream error"):
@@ -997,6 +1568,20 @@ class TestOutputAccumulator:
         assert acc.get("key2") == "val2"
         assert acc.has_all_keys(["key1", "key2"]) is True
 
+    @pytest.mark.asyncio
+    async def test_flat_cursor_state(self, tmp_path):
+        store = FileConversationStore(tmp_path / "acc_runs")
+        acc_a = OutputAccumulator(store=store, run_id="run-a")
+        acc_b = OutputAccumulator(store=store, run_id="run-b")
+
+        await acc_a.set("result", "alpha")
+        await acc_b.set("result", "beta")
+
+        restored = await OutputAccumulator.restore(store)
+
+        # Flat cursor: last write wins regardless of run_id
+        assert restored.get("result") == "beta"
+
 
 # ===========================================================================
 # Transient error retry (ITEM 2)
@@ -1026,15 +1611,12 @@ class ErrorThenSuccessLLM(LLMProvider):
     def complete(self, messages, system="", **kwargs) -> LLMResponse:
         return LLMResponse(content="ok", model="mock", stop_reason="stop")
 
-    def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs) -> LLMResponse:
-        return LLMResponse(content="", model="mock", stop_reason="stop")
-
 
 class TestTransientErrorRetry:
     """Test retry-with-backoff for transient LLM errors in EventLoopNode."""
 
     @pytest.mark.asyncio
-    async def test_transient_error_retries_then_succeeds(self, runtime, node_spec, memory):
+    async def test_transient_error_retries_then_succeeds(self, runtime, node_spec, buffer):
         """A transient error on the first try should retry and succeed."""
         node_spec.output_keys = []
         llm = ErrorThenSuccessLLM(
@@ -1042,7 +1624,7 @@ class TestTransientErrorRetry:
             fail_count=1,
             success_scenario=text_scenario("success"),
         )
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(
             config=LoopConfig(
                 max_iterations=5,
@@ -1055,7 +1637,7 @@ class TestTransientErrorRetry:
         assert llm._call_index == 2  # 1 failure + 1 success
 
     @pytest.mark.asyncio
-    async def test_permanent_error_no_retry(self, runtime, node_spec, memory):
+    async def test_permanent_error_no_retry(self, runtime, node_spec, buffer):
         """A permanent error (ValueError) should NOT be retried."""
         node_spec.output_keys = []
         llm = ErrorThenSuccessLLM(
@@ -1063,7 +1645,7 @@ class TestTransientErrorRetry:
             fail_count=1,
             success_scenario=text_scenario("success"),
         )
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(
             config=LoopConfig(
                 max_iterations=5,
@@ -1076,7 +1658,32 @@ class TestTransientErrorRetry:
         assert llm._call_index == 1  # only tried once
 
     @pytest.mark.asyncio
-    async def test_transient_error_exhausts_retries(self, runtime, node_spec, memory):
+    async def test_queen_non_transient_error_does_not_crash(self, runtime, node_spec, buffer):
+        """Queen non-transient errors should wait for input, not crash on token vars."""
+        node_spec.output_keys = []
+        llm = ErrorThenSuccessLLM(
+            error=ValueError("bad request: blocked by policy"),
+            fail_count=100,  # always fails
+            success_scenario=text_scenario("unreachable"),
+        )
+        ctx = build_ctx(runtime, node_spec, buffer, llm, stream_id="queen")
+        node = EventLoopNode(
+            config=LoopConfig(
+                max_iterations=1,
+                max_stream_retries=0,
+                stream_retry_backoff_base=0.01,
+            ),
+        )
+        node._await_user_input = AsyncMock(return_value=None)
+
+        result = await node.execute(ctx)
+
+        assert result.success is False
+        assert "Max iterations" in (result.error or "")
+        node._await_user_input.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_transient_error_exhausts_retries(self, runtime, node_spec, buffer):
         """Transient errors that exhaust retries should raise."""
         node_spec.output_keys = []
         llm = ErrorThenSuccessLLM(
@@ -1084,7 +1691,7 @@ class TestTransientErrorRetry:
             fail_count=100,  # always fails
             success_scenario=text_scenario("unreachable"),
         )
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(
             config=LoopConfig(
                 max_iterations=5,
@@ -1097,7 +1704,7 @@ class TestTransientErrorRetry:
         assert llm._call_index == 3  # 1 initial + 2 retries
 
     @pytest.mark.asyncio
-    async def test_stream_error_event_retried_as_runtime_error(self, runtime, node_spec, memory):
+    async def test_stream_error_event_retried_as_runtime_error(self, runtime, node_spec, buffer):
         """StreamErrorEvent(recoverable=False) raises RuntimeError caught by retry."""
         node_spec.output_keys = []
 
@@ -1131,22 +1738,8 @@ class TestTransientErrorRetry:
                     stop_reason="stop",
                 )
 
-            def complete_with_tools(
-                self,
-                messages,
-                system,
-                tools,
-                tool_executor,
-                **kwargs,
-            ):
-                return LLMResponse(
-                    content="",
-                    model="mock",
-                    stop_reason="stop",
-                )
-
         llm = StreamErrorThenSuccessLLM()
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(
             config=LoopConfig(
                 max_iterations=5,
@@ -1159,7 +1752,7 @@ class TestTransientErrorRetry:
         assert call_index == 2
 
     @pytest.mark.asyncio
-    async def test_retry_emits_event_bus_event(self, runtime, node_spec, memory):
+    async def test_retry_emits_event_bus_event(self, runtime, node_spec, buffer):
         """Retry should emit NODE_RETRY event on the event bus."""
         node_spec.output_keys = []
         llm = ErrorThenSuccessLLM(
@@ -1174,7 +1767,8 @@ class TestTransientErrorRetry:
             handler=lambda e: retry_events.append(e),
         )
 
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        # is_subagent_mode=True opts out of worker auto-escalation.
+        ctx = build_ctx(runtime, node_spec, buffer, llm, is_subagent_mode=True)
         node = EventLoopNode(
             event_bus=bus,
             config=LoopConfig(
@@ -1189,7 +1783,7 @@ class TestTransientErrorRetry:
         assert retry_events[0].data["retry_count"] == 1
 
     @pytest.mark.asyncio
-    async def test_recoverable_stream_error_retried_not_silent(self, runtime, node_spec, memory):
+    async def test_recoverable_stream_error_retried_not_silent(self, runtime, node_spec, buffer):
         """Recoverable StreamErrorEvent with empty response should raise ConnectionError.
 
         Previously, recoverable stream errors were silently swallowed,
@@ -1227,11 +1821,8 @@ class TestTransientErrorRetry:
             def complete(self, messages, system="", **kwargs):
                 return LLMResponse(content="ok", model="mock", stop_reason="stop")
 
-            def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs):
-                return LLMResponse(content="", model="mock", stop_reason="stop")
-
         llm = RecoverableErrorThenSuccessLLM()
-        ctx = build_ctx(runtime, node_spec, memory, llm)
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
         node = EventLoopNode(
             config=LoopConfig(
                 max_iterations=5,
@@ -1335,9 +1926,9 @@ class TestIsToolDoomLoop:
 
     def test_different_args_no_doom(self):
         node = EventLoopNode(config=LoopConfig(tool_doom_loop_threshold=3))
-        fp1 = [("search", '{"q": "a"}')]
-        fp2 = [("search", '{"q": "b"}')]
-        fp3 = [("search", '{"q": "c"}')]
+        fp1 = [("search", '{"q": "deploy kubernetes cluster to production"}')]
+        fp2 = [("read_file", '{"path": "/etc/nginx/nginx.conf"}')]
+        fp3 = [("execute", '{"command": "SELECT * FROM users WHERE active=true"}')]
         is_doom, _ = node._is_tool_doom_loop([fp1, fp2, fp3])
         assert is_doom is False
 
@@ -1412,20 +2003,6 @@ class ToolRepeatLLM(LLMProvider):
             stop_reason="stop",
         )
 
-    def complete_with_tools(
-        self,
-        messages,
-        system,
-        tools,
-        tool_executor,
-        **kwargs,
-    ) -> LLMResponse:
-        return LLMResponse(
-            content="",
-            model="mock",
-            stop_reason="stop",
-        )
-
 
 class TestToolDoomLoopIntegration:
     """Integration tests for doom loop detection in execute().
@@ -1440,7 +2017,7 @@ class TestToolDoomLoopIntegration:
         self,
         runtime,
         node_spec,
-        memory,
+        buffer,
     ):
         """3 identical tool call turns should inject a warning."""
         node_spec.output_keys = []
@@ -1469,7 +2046,7 @@ class TestToolDoomLoopIntegration:
         ctx = build_ctx(
             runtime,
             node_spec,
-            memory,
+            buffer,
             llm,
             tools=[Tool(name="search", description="s", parameters={})],
         )
@@ -1479,6 +2056,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
@@ -1489,7 +2067,7 @@ class TestToolDoomLoopIntegration:
         self,
         runtime,
         node_spec,
-        memory,
+        buffer,
     ):
         """Doom loop should emit NODE_TOOL_DOOM_LOOP event."""
         node_spec.output_keys = []
@@ -1520,12 +2098,14 @@ class TestToolDoomLoopIntegration:
                 is_error=False,
             )
 
+        # is_subagent_mode=True opts out of worker auto-escalation.
         ctx = build_ctx(
             runtime,
             node_spec,
-            memory,
+            buffer,
             llm,
             tools=[Tool(name="search", description="s", parameters={})],
+            is_subagent_mode=True,
         )
         node = EventLoopNode(
             judge=judge,
@@ -1534,6 +2114,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
@@ -1542,11 +2123,80 @@ class TestToolDoomLoopIntegration:
         assert "search" in doom_events[0].data["description"]
 
     @pytest.mark.asyncio
+    async def test_worker_doom_loop_escalates_to_queen(
+        self,
+        runtime,
+        buffer,
+    ):
+        """Worker doom loops should escalate instead of blocking for user input."""
+        spec = NodeSpec(
+            id="worker",
+            name="Worker",
+            description="worker node",
+            node_type="event_loop",
+            output_keys=[],
+        )
+        judge = AsyncMock(spec=JudgeProtocol)
+        eval_count = 0
+
+        async def judge_eval(*args, **kwargs):
+            nonlocal eval_count
+            eval_count += 1
+            if eval_count >= 4:
+                return JudgeVerdict(action="ACCEPT")
+            return JudgeVerdict(action="RETRY")
+
+        judge.evaluate = judge_eval
+
+        llm = ToolRepeatLLM("search", {"q": "hello"}, tool_turns=3)
+        bus = EventBus()
+        escalation_events: list = []
+        bus.subscribe(
+            event_types=[EventType.ESCALATION_REQUESTED],
+            handler=lambda e: escalation_events.append(e),
+        )
+
+        def tool_exec(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content="result",
+                is_error=False,
+            )
+
+        # is_subagent_mode=True opts out of worker auto-escalation. The
+        # test still exercises worker doom-loop escalation (a separate path)
+        # via the doom-loop detection at event_loop_node.py:1229.
+        ctx = build_ctx(
+            runtime,
+            spec,
+            buffer,
+            llm,
+            tools=[Tool(name="search", description="s", parameters={})],
+            stream_id="worker",
+            is_subagent_mode=True,
+        )
+        node = EventLoopNode(
+            judge=judge,
+            tool_executor=tool_exec,
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=10,
+                tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
+            ),
+        )
+        result = await node.execute(ctx)
+
+        assert result.success is True
+        assert len(escalation_events) >= 1
+        assert escalation_events[0].data["reason"] == "Tool doom loop detected"
+
+    @pytest.mark.asyncio
     async def test_doom_loop_disabled(
         self,
         runtime,
         node_spec,
-        memory,
+        buffer,
     ):
         """Disabled doom loop should not trigger with identical calls."""
         node_spec.output_keys = []
@@ -1574,7 +2224,7 @@ class TestToolDoomLoopIntegration:
         ctx = build_ctx(
             runtime,
             node_spec,
-            memory,
+            buffer,
             llm,
             tools=[Tool(name="search", description="s", parameters={})],
         )
@@ -1584,6 +2234,7 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_enabled=False,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
@@ -1594,7 +2245,7 @@ class TestToolDoomLoopIntegration:
         self,
         runtime,
         node_spec,
-        memory,
+        buffer,
     ):
         """Different tool args each turn should NOT trigger doom loop."""
         node_spec.output_keys = []
@@ -1650,20 +2301,6 @@ class TestToolDoomLoopIntegration:
                     stop_reason="stop",
                 )
 
-            def complete_with_tools(
-                self,
-                messages,
-                system,
-                tools,
-                tool_executor,
-                **kw,
-            ):
-                return LLMResponse(
-                    content="",
-                    model="mock",
-                    stop_reason="stop",
-                )
-
         llm = DiffArgsLLM()
 
         def tool_exec(tool_use: ToolUse) -> ToolResult:
@@ -1676,7 +2313,7 @@ class TestToolDoomLoopIntegration:
         ctx = build_ctx(
             runtime,
             node_spec,
-            memory,
+            buffer,
             llm,
             tools=[Tool(name="search", description="s", parameters={})],
         )
@@ -1686,7 +2323,168 @@ class TestToolDoomLoopIntegration:
             config=LoopConfig(
                 max_iterations=10,
                 tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
             ),
         )
         result = await node.execute(ctx)
         assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_doom_loop_detects_repeated_failing_tool(
+        self,
+        runtime,
+        node_spec,
+        buffer,
+    ):
+        """A tool that keeps failing with is_error=True should trigger doom loop.
+
+        Regression test: previously, errored tool calls were excluded from
+        doom loop fingerprinting (``not tc.get("is_error")``), so a tool like
+        a tool failing with the same error every turn
+        would never be detected.
+        """
+        node_spec.output_keys = []
+        judge = AsyncMock(spec=JudgeProtocol)
+        eval_count = 0
+
+        async def judge_eval(*args, **kwargs):
+            nonlocal eval_count
+            eval_count += 1
+            if eval_count >= 5:
+                return JudgeVerdict(action="ACCEPT")
+            return JudgeVerdict(action="RETRY")
+
+        judge.evaluate = judge_eval
+
+        # 4 turns of the same failing tool call, then text
+        llm = ToolRepeatLLM("failing_tool", {}, tool_turns=4)
+        bus = EventBus()
+        doom_events: list = []
+        bus.subscribe(
+            event_types=[EventType.NODE_TOOL_DOOM_LOOP],
+            handler=lambda e: doom_events.append(e),
+        )
+
+        def tool_exec(tool_use: ToolUse) -> ToolResult:
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content="Error: accessibility tree unavailable",
+                is_error=True,
+            )
+
+        # is_subagent_mode=True opts out of worker auto-escalation.
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            buffer,
+            llm,
+            tools=[Tool(name="failing_tool", description="s", parameters={})],
+            is_subagent_mode=True,
+        )
+        node = EventLoopNode(
+            judge=judge,
+            tool_executor=tool_exec,
+            event_bus=bus,
+            config=LoopConfig(
+                max_iterations=10,
+                tool_doom_loop_threshold=3,
+                stall_similarity_threshold=1.0,  # disable fuzzy stall detection
+            ),
+        )
+        result = await node.execute(ctx)
+        assert result.success is True
+        # Doom loop MUST fire for repeatedly-failing tool calls
+        assert len(doom_events) >= 1
+        assert "failing_tool" in doom_events[0].data["description"]
+
+
+# ===========================================================================
+# execution_id plumbing
+# ===========================================================================
+
+
+class TestExecutionId:
+    """Tests for execution_id on NodeContext and its wiring through the framework."""
+
+    def test_node_context_accepts_execution_id(self, runtime, node_spec, buffer):
+        """NodeContext stores execution_id when constructed with one."""
+        ctx = NodeContext(
+            runtime=runtime,
+            node_id=node_spec.id,
+            node_spec=node_spec,
+            buffer=buffer,
+            execution_id="exec_abc",
+        )
+        assert ctx.execution_id == "exec_abc"
+
+    def test_node_context_execution_id_defaults_to_empty(self, runtime, node_spec, buffer):
+        """build_ctx without execution_id gives ctx.execution_id == ''."""
+        llm = MockStreamingLLM()
+        ctx = build_ctx(runtime, node_spec, buffer, llm)
+        assert ctx.execution_id == ""
+
+    def test_stream_runtime_adapter_exposes_execution_id(self):
+        """StreamRuntimeAdapter.execution_id returns the value passed at construction."""
+        from framework.runtime.stream_runtime import StreamRuntimeAdapter
+
+        mock_stream_runtime = MagicMock()
+        adapter = StreamRuntimeAdapter(stream_runtime=mock_stream_runtime, execution_id="exec_456")
+        assert adapter.execution_id == "exec_456"
+
+
+# ---------------------------------------------------------------------------
+# Subagent data buffer snapshot includes accumulator outputs
+# ---------------------------------------------------------------------------
+
+
+class TestSubagentAccumulatorMemory:
+    """Verify that subagent data buffer construction merges accumulator outputs
+    and includes the subagent's input_keys in read permissions."""
+
+    def test_accumulator_values_merged_into_parent_data(self):
+        """Keys from OutputAccumulator should appear in subagent data buffer."""
+        # Simulate what _execute_subagent does internally:
+        # parent shared data buffer has user_request but NOT tweet_content
+        parent_buffer = DataBuffer()
+        parent_buffer.write("user_request", "post a joke")
+        parent_data = parent_buffer.read_all()  # {"user_request": "post a joke"}
+
+        # Accumulator has tweet_content (set via set_output before delegation)
+        acc = OutputAccumulator(values={"tweet_content": "Hello world!"})
+
+        # Merge accumulator outputs (the fix)
+        for key, value in acc.to_dict().items():
+            if key not in parent_data:
+                parent_data[key] = value
+
+        # Build subagent data buffer
+        subagent_buffer = DataBuffer()
+        for key, value in parent_data.items():
+            subagent_buffer.write(key, value, validate=False)
+
+        subagent_input_keys = ["tweet_content"]
+        read_keys = set(parent_data.keys()) | set(subagent_input_keys)
+        scoped = subagent_buffer.with_permissions(read_keys=list(read_keys), write_keys=[])
+
+        # This would have raised PermissionError before the fix
+        assert scoped.read("tweet_content") == "Hello world!"
+        assert scoped.read("user_request") == "post a joke"
+
+    def test_input_keys_allowed_even_if_not_in_data(self):
+        """Subagent input_keys should be in read permissions even if the
+        key doesn't exist in data buffer (returns None instead of PermissionError)."""
+        parent_buffer = DataBuffer()
+        parent_buffer.write("user_request", "hi")
+        parent_data = parent_buffer.read_all()
+
+        subagent_buffer = DataBuffer()
+        for key, value in parent_data.items():
+            subagent_buffer.write(key, value, validate=False)
+
+        # input_keys includes "tweet_content" which isn't in parent_data
+        read_keys = set(parent_data.keys()) | {"tweet_content"}
+        scoped = subagent_buffer.with_permissions(read_keys=list(read_keys), write_keys=[])
+
+        # Should return None (not raise PermissionError)
+        assert scoped.read("tweet_content") is None
+        assert scoped.read("user_request") == "hi"

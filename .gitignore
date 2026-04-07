@@ -13,6 +13,10 @@ out/
 .env
 .env.local
 .env.*.local
+.venv
+/venv
+tools/src/uv.lock
+
 
 # User configuration (copied from .example)
 config.yaml
@@ -46,6 +50,7 @@ coverage/
 
 # TypeScript
 *.tsbuildinfo
+vite.config.d.ts
 
 # Python
 __pycache__/
@@ -66,14 +71,11 @@ temp/
 
 exports/*
 
-.agent-builder-sessions/*
-
 .claude/settings.local.json
-
-.venv
 
 docs/github-issues/*
 core/tests/*dumps/*
 
 screenshots/*
 
+.gemini/*

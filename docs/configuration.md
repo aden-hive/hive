@@ -41,6 +41,12 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # OpenAI (optional, for GPT models via LiteLLM)
 export OPENAI_API_KEY="sk-..."
 
+# OpenRouter (optional, for OpenRouter-hosted models)
+export OPENROUTER_API_KEY="..."
+
+# Hive LLM (optional, for Hive-managed models)
+export HIVE_API_KEY="..."
+
 # Cerebras (optional, used by output cleaner and some nodes)
 export CEREBRAS_API_KEY="..."
 
@@ -49,6 +55,68 @@ export GROQ_API_KEY="..."
 ```
 
 The framework supports 100+ LLM providers through [LiteLLM](https://docs.litellm.ai/docs/providers). Set the corresponding environment variable for your provider.
+
+### Provider Examples
+
+Native Supported Providers (DeepSeek, Mistral, Together AI, xAI, Perplexity):
+
+```json
+{
+  "llm": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "max_tokens": 8192,
+    "api_key_env_var": "DEEPSEEK_API_KEY"
+  }
+}
+```
+
+Notes:
+
+- Set `provider` to `deepseek` (or `mistral`, `together`, `xai`, `perplexity`)
+- Use the standard model name in `model`, for example `deepseek-chat`
+- **No `api_base` is required** for these natively supported providers
+
+OpenRouter:
+
+```json
+{
+  "llm": {
+    "provider": "openrouter",
+    "model": "x-ai/grok-4.20-beta",
+    "max_tokens": 8192,
+    "api_key_env_var": "OPENROUTER_API_KEY",
+    "api_base": "https://openrouter.ai/api/v1"
+  }
+}
+```
+
+Notes:
+
+- Set `provider` to `openrouter`
+- Use the raw OpenRouter model ID in `model`, for example `x-ai/grok-4.20-beta`
+- `api_base` should be `https://openrouter.ai/api/v1`
+- If you paste a model that already starts with `openrouter/`, Hive tolerates and normalizes it
+
+Hive LLM:
+
+```json
+{
+  "llm": {
+    "provider": "hive",
+    "model": "queen",
+    "max_tokens": 32768,
+    "api_key_env_var": "HIVE_API_KEY",
+    "api_base": "https://api.adenhq.com"
+  }
+}
+```
+
+Notes:
+
+- Set `provider` to `hive`
+- Common Hive model values are `queen`, `kimi-2.5`, and `GLM-5`
+- Hive LLM requests use the Hive endpoint at `https://api.adenhq.com`
 
 ### Search & Tools (optional)
 
@@ -66,8 +134,8 @@ export EXA_API_KEY="..."
 # Run agents without LLM calls (structure-only validation)
 export MOCK_MODE=1
 
-# Custom credentials storage path (default: ~/.aden/credentials)
-export ADEN_CREDENTIALS_PATH="/custom/path"
+# Fernet encryption key for credential store at ~/.hive/credentials
+export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
 # Custom agent storage path (default: /tmp)
 export AGENT_STORAGE_PATH="/custom/storage"
@@ -116,10 +184,10 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 ```json
 {
   "mcpServers": {
-    "agent-builder": {
+    "coder-tools": {
       "command": "uv",
-      "args": ["run", "-m", "framework.mcp.agent_builder_server"],
-      "cwd": "core"
+      "args": ["run", "coder_tools_server.py", "--stdio"],
+      "cwd": "tools"
     },
     "tools": {
       "command": "uv",
@@ -130,7 +198,7 @@ MCP (Model Context Protocol) servers are configured in `.mcp.json` at the projec
 }
 ```
 
-The tools MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
+The `coder-tools` server provides agent scaffolding via `initialize_and_build_agent` and related tools. The `tools` MCP server exposes tools including web search, PDF reading, CSV processing, and file system operations.
 
 ## Storage
 
@@ -172,7 +240,7 @@ Add to `.vscode/settings.json`:
 ## Security Best Practices
 
 1. **Never commit API keys** - Use environment variables or `.env` files
-2. **`.env` is git-ignored** - Copy `.env.example` to `.env` at the project root and fill in your values
+2. **If you use a local `.env` file, keep it private** - This repository does not include a root `.env.example`; use your own local `.env` file or shell environment variables for secrets
 3. **Use real provider keys in non-production environments** - validate configuration with low-risk inputs before production rollout
 4. **Credential isolation** - Each tool validates its own credentials at runtime
 
@@ -191,13 +259,16 @@ cd core && uv pip install -e .
 Ensure the environment variable is set in your current shell session:
 
 ```bash
-echo $ANTHROPIC_API_KEY  # Should print your key
+echo $ANTHROPIC_API_KEY  # Or echo $OPENROUTER_API_KEY / echo $HIVE_API_KEY
 ```
 
 On Windows PowerShell:
 
 ```powershell
 $env:ANTHROPIC_API_KEY = "sk-ant-..."
+# Or:
+$env:OPENROUTER_API_KEY = "your-openrouter-key"
+$env:HIVE_API_KEY = "your-hive-key"
 ```
 
 ### Agent not found

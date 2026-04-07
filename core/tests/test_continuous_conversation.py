@@ -21,7 +21,7 @@ from framework.graph.conversation import NodeConversation
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
-from framework.graph.node import NodeResult, NodeSpec, SharedMemory
+from framework.graph.node import DataBuffer, NodeResult, NodeSpec
 from framework.graph.prompt_composer import (
     build_narrative,
     build_transition_marker,
@@ -61,9 +61,6 @@ class MockStreamingLLM(LLMProvider):
 
     def complete(self, messages, system="", **kwargs) -> LLMResponse:
         return LLMResponse(content="Summary.", model="mock", stop_reason="stop")
-
-    def complete_with_tools(self, messages, system, tools, tool_executor, **kwargs) -> LLMResponse:
-        return LLMResponse(content="", model="mock", stop_reason="stop")
 
 
 # ---------------------------------------------------------------------------
@@ -147,22 +144,24 @@ class TestComposeSystemPrompt:
 
     def test_identity_only(self):
         result = compose_system_prompt(identity_prompt="I am an agent.", focus_prompt=None)
-        assert result == "I am an agent."
+        assert result.startswith("I am an agent.")
+        assert "Current date and time:" in result
 
     def test_focus_only(self):
         result = compose_system_prompt(identity_prompt=None, focus_prompt="Do the thing.")
         assert "Current Focus" in result
         assert "Do the thing." in result
+        assert "Current date and time:" in result
 
     def test_empty(self):
         result = compose_system_prompt(identity_prompt=None, focus_prompt=None)
-        assert result == ""
+        assert "Current date and time:" in result
 
 
 class TestBuildNarrative:
     def test_with_execution_path(self):
-        memory = SharedMemory()
-        memory.write("findings", "some findings")
+        buffer = DataBuffer()
+        buffer.write("findings", "some findings")
 
         node_a = NodeSpec(
             id="a", name="Research", description="Research the topic", node_type="event_loop"
@@ -176,14 +175,14 @@ class TestBuildNarrative:
             edges=[],
         )
 
-        result = build_narrative(memory, ["a"], graph)
+        result = build_narrative(buffer, ["a"], graph)
         assert "Research" in result
         assert "findings" in result
 
     def test_empty_state(self):
-        memory = SharedMemory()
+        buffer = DataBuffer()
         graph = GraphSpec(id="g1", goal_id="g1", entry_node="a", nodes=[], edges=[])
-        result = build_narrative(memory, [], graph)
+        result = build_narrative(buffer, [], graph)
         assert result == ""
 
 
@@ -195,13 +194,13 @@ class TestBuildTransitionMarker:
         next_n = NodeSpec(
             id="report", name="Report", description="Write report", node_type="event_loop"
         )
-        memory = SharedMemory()
-        memory.write("findings", "important stuff")
+        buffer = DataBuffer()
+        buffer.write("findings", "important stuff")
 
         marker = build_transition_marker(
             previous_node=prev,
             next_node=next_n,
-            memory=memory,
+            buffer=buffer,
             cumulative_tool_names=["web_search", "save_data"],
         )
 

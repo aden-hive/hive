@@ -9,7 +9,10 @@
   },
   "license": "Apache-2.0",
   "scripts": {
-    "test:duplicates": "bun test scripts/auto-close-duplicates"
+    "test:duplicates": "bun test scripts/auto-close-duplicates",
+    "frontend:dev": "cd core/frontend && npm run dev",
+    "frontend:build": "cd core/frontend && npm run build",
+    "frontend:preview": "cd core/frontend && npm run preview"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

@@ -12,15 +12,13 @@ from aden_tools.tools.csv_tool.csv_tool import register_tools
 duckdb_available = importlib.util.find_spec("duckdb") is not None
 
 # Test IDs for sandbox
-TEST_WORKSPACE_ID = "test-workspace"
 TEST_AGENT_ID = "test-agent"
-TEST_SESSION_ID = "test-session"
 
 
 @pytest.fixture
 def csv_tools(mcp: FastMCP, tmp_path: Path):
     """Register all CSV tools and return them as a dict."""
-    with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+    with patch("aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)):
         register_tools(mcp)
         yield {
             "csv_read": mcp._tool_manager._tools["csv_read"].fn,
@@ -40,7 +38,7 @@ def csv_tool_fn(csv_tools):
 @pytest.fixture
 def session_dir(tmp_path: Path) -> Path:
     """Create and return the session directory within the sandbox."""
-    session_path = tmp_path / TEST_WORKSPACE_ID / TEST_AGENT_ID / TEST_SESSION_ID
+    session_path = tmp_path / TEST_AGENT_ID / "current"
     session_path.mkdir(parents=True, exist_ok=True)
     return session_path
 
@@ -49,7 +47,10 @@ def session_dir(tmp_path: Path) -> Path:
 def basic_csv(session_dir: Path) -> Path:
     """Create a basic CSV file for testing."""
     csv_file = session_dir / "basic.csv"
-    csv_file.write_text("name,age,city\nAlice,30,NYC\nBob,25,LA\nCharlie,35,Chicago\n")
+    csv_file.write_text(
+        "name,age,city\nAlice,30,NYC\nBob,25,LA\nCharlie,35,Chicago\n",
+        encoding="utf-8",
+    )
     return csv_file
 
 
@@ -60,7 +61,7 @@ def large_csv(session_dir: Path) -> Path:
     lines = ["id,value"]
     for i in range(100):
         lines.append(f"{i},{i * 10}")
-    csv_file.write_text("\n".join(lines) + "\n")
+    csv_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return csv_file
 
 
@@ -68,7 +69,7 @@ def large_csv(session_dir: Path) -> Path:
 def empty_csv(session_dir: Path) -> Path:
     """Create an empty CSV file (no content)."""
     csv_file = session_dir / "empty.csv"
-    csv_file.write_text("")
+    csv_file.write_text("", encoding="utf-8")
     return csv_file
 
 
@@ -76,7 +77,7 @@ def empty_csv(session_dir: Path) -> Path:
 def headers_only_csv(session_dir: Path) -> Path:
     """Create a CSV file with only headers."""
     csv_file = session_dir / "headers_only.csv"
-    csv_file.write_text("name,age,city\n")
+    csv_file.write_text("name,age,city\n", encoding="utf-8")
     return csv_file
 
 
@@ -85,12 +86,12 @@ class TestCsvRead:
 
     def test_read_basic_csv(self, csv_tool_fn, basic_csv, tmp_path):
         """Read a basic CSV file successfully."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert result["success"] is True
@@ -103,12 +104,12 @@ class TestCsvRead:
 
     def test_read_with_limit(self, csv_tool_fn, basic_csv, tmp_path):
         """Read CSV with row limit."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 limit=2,
             )
 
@@ -122,12 +123,12 @@ class TestCsvRead:
 
     def test_read_with_offset(self, csv_tool_fn, basic_csv, tmp_path):
         """Read CSV with row offset."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 offset=1,
             )
 
@@ -139,12 +140,12 @@ class TestCsvRead:
 
     def test_read_with_limit_and_offset(self, csv_tool_fn, large_csv, tmp_path):
         """Read CSV with both limit and offset (pagination)."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="large.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 limit=10,
                 offset=50,
             )
@@ -159,12 +160,12 @@ class TestCsvRead:
 
     def test_negative_limit(self, csv_tool_fn, basic_csv, tmp_path):
         """Return error for negative limit."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 limit=-1,
             )
 
@@ -173,12 +174,12 @@ class TestCsvRead:
 
     def test_negative_offset(self, csv_tool_fn, basic_csv, tmp_path):
         """Return error for negative offset."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 offset=-1,
             )
 
@@ -187,12 +188,12 @@ class TestCsvRead:
 
     def test_negative_limit_and_offset(self, csv_tool_fn, basic_csv, tmp_path):
         """Return error for both negative limit and offset."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 limit=-5,
                 offset=-10,
             )
@@ -202,12 +203,12 @@ class TestCsvRead:
 
     def test_file_not_found(self, csv_tool_fn, session_dir, tmp_path):
         """Return error for non-existent file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="nonexistent.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert "error" in result
@@ -217,14 +218,14 @@ class TestCsvRead:
         """Return error for non-CSV file extension."""
         # Create a text file
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name,age\nAlice,30\n")
+        txt_file.write_text("name,age\nAlice,30\n", encoding="utf-8")
 
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="data.txt",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert "error" in result
@@ -232,12 +233,12 @@ class TestCsvRead:
 
     def test_empty_csv_file(self, csv_tool_fn, empty_csv, tmp_path):
         """Return error for empty CSV file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="empty.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert "error" in result
@@ -245,12 +246,12 @@ class TestCsvRead:
 
     def test_headers_only_csv(self, csv_tool_fn, headers_only_csv, tmp_path):
         """Read CSV with only headers (no data rows)."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="headers_only.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert result["success"] is True
@@ -259,53 +260,17 @@ class TestCsvRead:
         assert result["total_rows"] == 0
         assert result["rows"] == []
 
-    def test_missing_workspace_id(self, csv_tool_fn, basic_csv, tmp_path):
-        """Return error when workspace_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
-            result = csv_tool_fn(
-                path="basic.csv",
-                workspace_id="",
-                agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
-            )
-
-        assert "error" in result
-
-    def test_missing_agent_id(self, csv_tool_fn, basic_csv, tmp_path):
-        """Return error when agent_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
-            result = csv_tool_fn(
-                path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
-                agent_id="",
-                session_id=TEST_SESSION_ID,
-            )
-
-        assert "error" in result
-
-    def test_missing_session_id(self, csv_tool_fn, basic_csv, tmp_path):
-        """Return error when session_id is missing."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
-            result = csv_tool_fn(
-                path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
-                agent_id=TEST_AGENT_ID,
-                session_id="",
-            )
-
-        assert "error" in result
-
     def test_unicode_content(self, csv_tool_fn, session_dir, tmp_path):
         """Read CSV with Unicode content."""
         csv_file = session_dir / "unicode.csv"
         csv_file.write_text("名前,年齢,都市\n太郎,30,東京\nAlice,25,北京\n", encoding="utf-8")
 
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="unicode.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert result["success"] is True
@@ -317,15 +282,16 @@ class TestCsvRead:
         """Read CSV with quoted fields containing commas."""
         csv_file = session_dir / "quoted.csv"
         csv_file.write_text(
-            'name,address,note\n"Smith, John","123 Main St, Apt 4","Hello, world"\n'
+            'name,address,note\n"Smith, John","123 Main St, Apt 4","Hello, world"\n',
+            encoding="utf-8",
         )
 
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="quoted.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert result["success"] is True
@@ -334,24 +300,24 @@ class TestCsvRead:
 
     def test_path_traversal_blocked(self, csv_tool_fn, session_dir, tmp_path):
         """Prevent path traversal attacks."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="../../../etc/passwd",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert "error" in result
 
     def test_offset_beyond_rows(self, csv_tool_fn, basic_csv, tmp_path):
         """Offset beyond available rows returns empty result."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tool_fn(
                 path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 offset=100,
             )
 
@@ -366,12 +332,12 @@ class TestCsvWrite:
 
     def test_write_new_csv(self, csv_tools, session_dir, tmp_path):
         """Write a new CSV file successfully."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_write"](
                 path="output.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 columns=["name", "age", "city"],
                 rows=[
                     {"name": "Alice", "age": "30", "city": "NYC"},
@@ -385,19 +351,19 @@ class TestCsvWrite:
         assert result["rows_written"] == 2
 
         # Verify file content
-        content = (session_dir / "output.csv").read_text()
+        content = (session_dir / "output.csv").read_text(encoding="utf-8")
         assert "name,age,city" in content
         assert "Alice,30,NYC" in content
         assert "Bob,25,LA" in content
 
     def test_write_creates_parent_directories(self, csv_tools, session_dir, tmp_path):
         """Write creates parent directories if needed."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_write"](
                 path="subdir/nested/output.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 columns=["id"],
                 rows=[{"id": "1"}],
             )
@@ -407,12 +373,12 @@ class TestCsvWrite:
 
     def test_write_empty_columns_error(self, csv_tools, session_dir, tmp_path):
         """Return error when columns is empty."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_write"](
                 path="output.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 columns=[],
                 rows=[],
             )
@@ -422,12 +388,12 @@ class TestCsvWrite:
 
     def test_write_non_csv_extension_error(self, csv_tools, session_dir, tmp_path):
         """Return error for non-CSV file extension."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_write"](
                 path="output.txt",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 columns=["id"],
                 rows=[],
             )
@@ -437,30 +403,30 @@ class TestCsvWrite:
 
     def test_write_filters_extra_columns(self, csv_tools, session_dir, tmp_path):
         """Extra columns in rows are filtered out."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_write"](
                 path="output.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 columns=["name"],
                 rows=[{"name": "Alice", "extra": "ignored"}],
             )
 
         assert result["success"] is True
 
-        content = (session_dir / "output.csv").read_text()
+        content = (session_dir / "output.csv").read_text(encoding="utf-8")
         assert "extra" not in content
         assert "ignored" not in content
 
     def test_write_empty_rows(self, csv_tools, session_dir, tmp_path):
         """Write CSV with headers but no rows."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_write"](
                 path="output.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 columns=["name", "age"],
                 rows=[],
             )
@@ -468,17 +434,17 @@ class TestCsvWrite:
         assert result["success"] is True
         assert result["rows_written"] == 0
 
-        content = (session_dir / "output.csv").read_text()
+        content = (session_dir / "output.csv").read_text(encoding="utf-8")
         assert "name,age" in content
 
     def test_write_unicode_content(self, csv_tools, session_dir, tmp_path):
         """Write CSV with Unicode content."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_write"](
                 path="unicode.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 columns=["名前", "都市"],
                 rows=[{"名前": "太郎", "都市": "東京"}],
             )
@@ -491,12 +457,12 @@ class TestCsvWrite:
 
     def test_write_no_parent_directory(self, csv_tools, session_dir, tmp_path):
         """Write CSV to root without parent directory (fixes #1843)."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_write"](
                 path="data.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 columns=["id", "value"],
                 rows=[
                     {"id": "1", "value": "test1"},
@@ -511,7 +477,7 @@ class TestCsvWrite:
         csv_file = session_dir / "data.csv"
         assert csv_file.exists()
 
-        content = csv_file.read_text()
+        content = csv_file.read_text(encoding="utf-8")
         assert "id,value" in content
         assert "1,test1" in content
         assert "2,test2" in content
@@ -522,12 +488,12 @@ class TestCsvAppend:
 
     def test_append_to_existing_csv(self, csv_tools, basic_csv, tmp_path):
         """Append rows to an existing CSV file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_append"](
                 path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 rows=[
                     {"name": "David", "age": "28", "city": "Seattle"},
                     {"name": "Eve", "age": "32", "city": "Boston"},
@@ -540,12 +506,12 @@ class TestCsvAppend:
 
     def test_append_file_not_found(self, csv_tools, session_dir, tmp_path):
         """Return error when file doesn't exist."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_append"](
                 path="nonexistent.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 rows=[{"name": "Alice"}],
             )
 
@@ -554,12 +520,12 @@ class TestCsvAppend:
 
     def test_append_empty_rows_error(self, csv_tools, basic_csv, tmp_path):
         """Return error when rows is empty."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_append"](
                 path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 rows=[],
             )
 
@@ -568,18 +534,18 @@ class TestCsvAppend:
 
     def test_append_filters_extra_columns(self, csv_tools, basic_csv, session_dir, tmp_path):
         """Extra columns in rows are filtered out based on existing headers."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_append"](
                 path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 rows=[{"name": "David", "age": "28", "city": "Seattle", "extra": "ignored"}],
             )
 
         assert result["success"] is True
 
-        content = (session_dir / "basic.csv").read_text()
+        content = (session_dir / "basic.csv").read_text(encoding="utf-8")
         assert "extra" not in content
         assert "ignored" not in content
         assert "David" in content
@@ -587,14 +553,14 @@ class TestCsvAppend:
     def test_append_non_csv_extension_error(self, csv_tools, session_dir, tmp_path):
         """Return error for non-CSV file extension."""
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name\nAlice\n")
+        txt_file.write_text("name\nAlice\n", encoding="utf-8")
 
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_append"](
                 path="data.txt",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 rows=[{"name": "Bob"}],
             )
 
@@ -607,12 +573,12 @@ class TestCsvInfo:
 
     def test_get_info_basic_csv(self, csv_tools, basic_csv, tmp_path):
         """Get info about a basic CSV file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_info"](
                 path="basic.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert result["success"] is True
@@ -624,12 +590,12 @@ class TestCsvInfo:
 
     def test_get_info_large_csv(self, csv_tools, large_csv, tmp_path):
         """Get info about a large CSV file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_info"](
                 path="large.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert result["success"] is True
@@ -638,12 +604,12 @@ class TestCsvInfo:
 
     def test_get_info_file_not_found(self, csv_tools, session_dir, tmp_path):
         """Return error when file doesn't exist."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_info"](
                 path="nonexistent.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert "error" in result
@@ -651,12 +617,12 @@ class TestCsvInfo:
 
     def test_get_info_empty_csv(self, csv_tools, empty_csv, tmp_path):
         """Return error for empty CSV file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_info"](
                 path="empty.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert "error" in result
@@ -664,12 +630,12 @@ class TestCsvInfo:
 
     def test_get_info_headers_only(self, csv_tools, headers_only_csv, tmp_path):
         """Get info about CSV with only headers."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_info"](
                 path="headers_only.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert result["success"] is True
@@ -679,14 +645,14 @@ class TestCsvInfo:
     def test_get_info_non_csv_extension_error(self, csv_tools, session_dir, tmp_path):
         """Return error for non-CSV file extension."""
         txt_file = session_dir / "data.txt"
-        txt_file.write_text("name\nAlice\n")
+        txt_file.write_text("name\nAlice\n", encoding="utf-8")
 
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_info"](
                 path="data.txt",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
             )
 
         assert "error" in result
@@ -707,18 +673,19 @@ class TestCsvSql:
             "2,MacBook,Electronics,1999,30\n"
             "3,Coffee Mug,Kitchen,15,200\n"
             "4,Headphones,Electronics,299,75\n"
-            "5,Water Bottle,Kitchen,25,150\n"
+            "5,Water Bottle,Kitchen,25,150\n",
+            encoding="utf-8",
         )
         return csv_file
 
     def test_basic_select(self, csv_tools, products_csv, tmp_path):
         """Execute basic SELECT query."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="products.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query="SELECT * FROM data",
             )
 
@@ -727,14 +694,108 @@ class TestCsvSql:
         assert "id" in result["columns"]
         assert "name" in result["columns"]
 
+    def test_path_with_single_quote(self, csv_tools, session_dir, tmp_path):
+        """Regression: CSV paths containing single quotes should work (parameter binding)."""
+        csv_file = session_dir / "O'Reilly.csv"
+        csv_file.write_text("name,age\nAlice,21\nBob,22\n", encoding="utf-8")
+
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
+            result = csv_tools["csv_sql"](
+                path="O'Reilly.csv",
+                agent_id=TEST_AGENT_ID,
+                query="SELECT * FROM data",
+            )
+
+        assert "error" not in result, result
+        assert result["success"] is True
+        assert result["row_count"] == 2
+        names = [row["name"] for row in result["rows"]]
+        assert "Alice" in names
+        assert "Bob" in names
+
+    # --- NEW: security regression tests required by Issue #1256 ---
+
+    def test_reject_non_select(self, csv_tools, products_csv, tmp_path):
+        """Reject any non-SELECT / non-WITH query."""
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
+            result = csv_tools["csv_sql"](
+                path=products_csv.name,
+                agent_id=TEST_AGENT_ID,
+                query="DROP TABLE data",
+            )
+        assert "error" in result
+
+    def test_reject_multi_statement(self, csv_tools, products_csv, tmp_path):
+        """Reject multi-statement queries with semicolons."""
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
+            result = csv_tools["csv_sql"](
+                path=products_csv.name,
+                agent_id=TEST_AGENT_ID,
+                query="SELECT * FROM data; DROP TABLE data",
+            )
+        assert "error" in result
+
+    def test_reject_sql_comment_dash(self, csv_tools, products_csv, tmp_path):
+        """Reject queries with SQL line comments."""
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
+            result = csv_tools["csv_sql"](
+                path=products_csv.name,
+                agent_id=TEST_AGENT_ID,
+                query="SELECT * FROM data -- WHERE id = 1",
+            )
+        assert "error" in result
+
+    def test_with_cte_allowed(self, csv_tools, products_csv, tmp_path):
+        """Allow valid WITH (CTE) queries."""
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
+            result = csv_tools["csv_sql"](
+                path=products_csv.name,
+                agent_id=TEST_AGENT_ID,
+                query=(
+                    "WITH electronics AS (SELECT * FROM data"
+                    " WHERE category = 'Electronics')"
+                    " SELECT * FROM electronics"
+                ),
+            )
+        assert result["success"] is True
+
+    def test_keyword_in_column_name_allowed(self, csv_tools, session_dir, tmp_path):
+        """Column names like created_at should not trigger keyword blocking."""
+        csv_file = session_dir / "timestamps.csv"
+        csv_file.write_text(
+            "created_at,updated_at,value\n2024-01-01,2024-01-02,100\n",
+            encoding="utf-8",
+        )
+
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
+            result = csv_tools["csv_sql"](
+                path="timestamps.csv",
+                agent_id=TEST_AGENT_ID,
+                query="SELECT created_at, updated_at FROM data",
+            )
+        assert "error" not in result, result
+        assert result["success"] is True
+
     def test_where_clause(self, csv_tools, products_csv, tmp_path):
         """Filter with WHERE clause."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="products.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query="SELECT name, price FROM data WHERE price > 500",
             )
 
@@ -746,12 +807,12 @@ class TestCsvSql:
 
     def test_aggregate_functions(self, csv_tools, products_csv, tmp_path):
         """Use aggregate functions."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="products.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query=(
                     "SELECT category, COUNT(*) as count, "
                     "AVG(price) as avg_price FROM data GROUP BY category"
@@ -763,12 +824,12 @@ class TestCsvSql:
 
     def test_order_by_and_limit(self, csv_tools, products_csv, tmp_path):
         """Sort and limit results."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="products.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query="SELECT name, price FROM data ORDER BY price DESC LIMIT 2",
             )
 
@@ -779,12 +840,12 @@ class TestCsvSql:
 
     def test_like_search(self, csv_tools, products_csv, tmp_path):
         """Search with LIKE operator."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="products.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query="SELECT * FROM data WHERE LOWER(name) LIKE '%book%'",
             )
 
@@ -794,12 +855,12 @@ class TestCsvSql:
 
     def test_file_not_found(self, csv_tools, session_dir, tmp_path):
         """Return error for non-existent file."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="nonexistent.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query="SELECT * FROM data",
             )
 
@@ -808,12 +869,12 @@ class TestCsvSql:
 
     def test_empty_query_error(self, csv_tools, products_csv, tmp_path):
         """Return error for empty query."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="products.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query="",
             )
 
@@ -822,12 +883,12 @@ class TestCsvSql:
 
     def test_non_select_blocked(self, csv_tools, products_csv, tmp_path):
         """Block non-SELECT queries for security."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="products.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query="DELETE FROM data WHERE id = 1",
             )
 
@@ -836,12 +897,12 @@ class TestCsvSql:
 
     def test_drop_blocked(self, csv_tools, products_csv, tmp_path):
         """Block DROP statements."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="products.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query="DROP TABLE data",
             )
 
@@ -849,12 +910,12 @@ class TestCsvSql:
 
     def test_insert_blocked(self, csv_tools, products_csv, tmp_path):
         """Block INSERT statements."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="products.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query="INSERT INTO data VALUES (6, 'Test', 'Test', 10, 10)",
             )
 
@@ -862,12 +923,12 @@ class TestCsvSql:
 
     def test_invalid_sql_syntax(self, csv_tools, products_csv, tmp_path):
         """Return error for invalid SQL syntax."""
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="products.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query="SELEKT * FORM data",
             )
 
@@ -878,12 +939,12 @@ class TestCsvSql:
         csv_file = session_dir / "unicode.csv"
         csv_file.write_text("名前,価格\n商品A,100\n商品B,200\n", encoding="utf-8")
 
-        with patch("aden_tools.tools.file_system_toolkits.security.WORKSPACES_DIR", str(tmp_path)):
+        with patch(
+            "aden_tools.tools.file_system_toolkits.security.AGENT_SANDBOXES_DIR", str(tmp_path)
+        ):
             result = csv_tools["csv_sql"](
                 path="unicode.csv",
-                workspace_id=TEST_WORKSPACE_ID,
                 agent_id=TEST_AGENT_ID,
-                session_id=TEST_SESSION_ID,
                 query="SELECT * FROM data WHERE 価格 > 150",
             )
 

@@ -70,6 +70,29 @@ class CredentialKey(BaseModel):
         return self.value.get_secret_value()
 
 
+class CredentialIdentity(BaseModel):
+    """Identity information for a credential (whose account is this?)."""
+
+    email: str | None = None
+    username: str | None = None
+    workspace: str | None = None
+    account_id: str | None = None
+
+    @property
+    def label(self) -> str:
+        """Best human-readable identifier for display."""
+        return self.email or self.username or self.workspace or self.account_id or "unknown"
+
+    @property
+    def is_known(self) -> bool:
+        """Whether any identity field is populated."""
+        return bool(self.email or self.username or self.workspace or self.account_id)
+
+    def to_dict(self) -> dict[str, str]:
+        """Return only non-None identity fields."""
+        return {k: v for k, v in self.model_dump().items() if v is not None}
+
+
 class CredentialObject(BaseModel):
     """
     A credential object containing one or more keys.
@@ -201,6 +224,35 @@ class CredentialObject(BaseModel):
             return self.get_key(first_key)
 
         return None
+
+    @property
+    def identity(self) -> CredentialIdentity:
+        """Extract identity from ``_identity_*`` keys in the vault."""
+        fields = {}
+        for key_name, key_obj in self.keys.items():
+            if key_name.startswith("_identity_"):
+                field_name = key_name[len("_identity_") :]
+                if field_name in CredentialIdentity.model_fields:
+                    fields[field_name] = key_obj.value.get_secret_value()
+        return CredentialIdentity(**fields)
+
+    @property
+    def provider_type(self) -> str | None:
+        """Return the integration/provider type (e.g. 'google', 'slack')."""
+        key = self.keys.get("_integration_type")
+        return key.value.get_secret_value() if key else None
+
+    @property
+    def alias(self) -> str | None:
+        """Return the user-set alias from the Aden platform."""
+        key = self.keys.get("_alias")
+        return key.value.get_secret_value() if key else None
+
+    def set_identity(self, **fields: str) -> None:
+        """Persist identity fields as ``_identity_*`` keys."""
+        for field_name, value in fields.items():
+            if value:
+                self.set_key(f"_identity_{field_name}", value)
 
 
 class CredentialUsageSpec(BaseModel):

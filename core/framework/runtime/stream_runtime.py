@@ -449,6 +449,10 @@ class StreamRuntimeAdapter:
         return self._runtime._storage
 
     @property
+    def execution_id(self) -> str:
+        return self._execution_id
+
+    @property
     def current_run(self) -> Run | None:
         return self._runtime.get_run(self._execution_id)
 

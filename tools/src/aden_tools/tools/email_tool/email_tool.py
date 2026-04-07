@@ -12,7 +12,6 @@ import os
 from typing import TYPE_CHECKING, Literal
 
 import httpx
-import resend
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
@@ -35,6 +34,15 @@ def register_tools(
         bcc: list[str] | None = None,
     ) -> dict:
         """Send email using Resend API."""
+        try:
+            import resend
+        except ImportError:
+            return {
+                "error": (
+                    "resend not installed. Install with: "
+                    "pip install resend  or  pip install tools[email]"
+                )
+            }
         resend.api_key = api_key
         try:
             payload: dict = {
@@ -114,10 +122,15 @@ def register_tools(
             "subject": subject,
         }
 
-    def _get_credential(provider: Literal["resend", "gmail"]) -> str | None:
+    def _get_credential(
+        provider: Literal["resend", "gmail"],
+        account: str = "",
+    ) -> str | None:
         """Get the credential for the requested provider."""
         if provider == "gmail":
             if credentials is not None:
+                if account:
+                    return credentials.get_by_alias("google", account)
                 return credentials.get("google")
             return os.getenv("GOOGLE_ACCESS_TOKEN")
         # resend
@@ -150,6 +163,7 @@ def register_tools(
         from_email: str | None = None,
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """Core email sending logic, callable by other tools."""
         from_email = _resolve_from_email(from_email)
@@ -182,7 +196,7 @@ def register_tools(
                 "help": "Pass from_email or set EMAIL_FROM environment variable",
             }
 
-        credential = _get_credential(provider)
+        credential = _get_credential(provider, account)
         if not credential:
             if provider == "gmail":
                 return {
@@ -215,6 +229,7 @@ def register_tools(
         from_email: str | None = None,
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Send an email.
@@ -232,22 +247,26 @@ def register_tools(
                         Optional for Gmail (defaults to authenticated user's address).
             cc: CC recipient(s). Single string or list of strings. Optional.
             bcc: BCC recipient(s). Single string or list of strings. Optional.
+            account: Account alias for multi-account routing (e.g. "timothy-home").
+                     Only used with Gmail provider. Optional.
 
         Returns:
             Dict with send result including provider used and message ID,
             or error dict with "error" and optional "help" keys.
         """
-        return _send_email_impl(to, subject, html, provider, from_email, cc, bcc)
+        return _send_email_impl(to, subject, html, provider, from_email, cc, bcc, account)
 
     def _fetch_original_message(access_token: str, message_id: str) -> dict:
-        """Fetch the original message to extract threading info."""
+        """Fetch the original message to extract threading info and body."""
+        import base64
+
         response = httpx.get(
             f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json",
             },
-            params={"format": "metadata", "metadataHeaders": ["Message-ID", "Subject", "From"]},
+            params={"format": "full"},
             timeout=30.0,
         )
 
@@ -264,13 +283,39 @@ def register_tools(
             }
 
         data = response.json()
-        headers = {h["name"]: h["value"] for h in data.get("payload", {}).get("headers", [])}
+        payload = data.get("payload", {})
+        headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+
+        def _extract_body(part: dict, mime_type: str) -> str | None:
+            """Recursively find and decode a body part by mime type."""
+            if part.get("mimeType") == mime_type:
+                body_data = part.get("body", {}).get("data", "")
+                if body_data:
+                    return base64.urlsafe_b64decode(body_data).decode("utf-8", errors="replace")
+            for sub in part.get("parts", []):
+                result = _extract_body(sub, mime_type)
+                if result:
+                    return result
+            return None
+
+        body_html = _extract_body(payload, "text/html")
+        body_text = _extract_body(payload, "text/plain") if not body_html else None
+
         return {
             "thread_id": data.get("threadId"),
             "message_id_header": headers.get("Message-ID", headers.get("Message-Id", "")),
             "subject": headers.get("Subject", ""),
             "from": headers.get("From", ""),
+            "date": headers.get("Date", ""),
+            "body_html": body_html,
+            "body_text": body_text,
         }
+
+    def _plain_to_html(text: str) -> str:
+        """Wrap plain text in a <pre> tag for safe HTML embedding."""
+        import html as html_module
+
+        return f"<pre>{html_module.escape(text)}</pre>"
 
     @mcp.tool()
     def gmail_reply_email(
@@ -278,6 +323,7 @@ def register_tools(
         html: str,
         cc: str | list[str] | None = None,
         bcc: str | list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Reply to a Gmail message, keeping it in the same thread.
@@ -291,6 +337,8 @@ def register_tools(
             html: Reply body as HTML string.
             cc: CC recipient(s). Single string or list of strings. Optional.
             bcc: BCC recipient(s). Single string or list of strings. Optional.
+            account: Account alias for multi-account routing (e.g. "timothy-home").
+                     Optional.
 
         Returns:
             Dict with send result including reply message ID and threadId,
@@ -305,7 +353,7 @@ def register_tools(
         if not html:
             return {"error": "Reply body (html) is required"}
 
-        credential = _get_credential("gmail")
+        credential = _get_credential("gmail", account)
         if not credential:
             return {
                 "error": "Gmail credentials not configured",
@@ -325,11 +373,25 @@ def register_tools(
         original_message_id = original["message_id_header"]
         original_subject = original["subject"]
         reply_to_address = original["from"]
+        original_date = original.get("date", "")
 
         # Build reply subject
         subject = original_subject
         if not subject.lower().startswith("re:"):
             subject = f"Re: {subject}"
+
+        # Append quoted original body so the thread is visible in the reply
+        original_body = original.get("body_html") or _plain_to_html(original.get("body_text") or "")
+        quoted_html = (
+            f"<br><br>"
+            f'<div class="gmail_quote">'
+            f"<div>On {original_date}, {reply_to_address} wrote:</div>"
+            f'<blockquote style="margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex">'
+            f"{original_body}"
+            f"</blockquote>"
+            f"</div>"
+        )
+        full_html = html + quoted_html
 
         # Build MIME message with threading headers
         msg = MIMEMultipart("alternative")
@@ -346,7 +408,7 @@ def register_tools(
         if bcc_list:
             msg["Bcc"] = ", ".join(bcc_list)
 
-        msg.attach(MIMEText(html, "html"))
+        msg.attach(MIMEText(full_html, "html"))
 
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
 

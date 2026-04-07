@@ -37,7 +37,7 @@ async def evaluate_phase_completion(
     phase_description: str,
     success_criteria: str,
     accumulator_state: dict[str, Any],
-    max_history_tokens: int = 8_196,
+    max_context_tokens: int = 8_196,
 ) -> PhaseVerdict:
     """Level 2 judge: read the conversation and evaluate quality.
 
@@ -50,7 +50,7 @@ async def evaluate_phase_completion(
         phase_description: Description of the phase
         success_criteria: Natural-language criteria for phase completion
         accumulator_state: Current output key values
-        max_history_tokens: Main conversation token budget (judge gets 20%)
+        max_context_tokens: Main conversation token budget (judge gets 20%)
 
     Returns:
         PhaseVerdict with action and optional feedback
@@ -89,7 +89,7 @@ FEEDBACK: (reason if RETRY, empty if ACCEPT)"""
         response = await llm.acomplete(
             messages=[{"role": "user", "content": user_prompt}],
             system=system_prompt,
-            max_tokens=max(1024, max_history_tokens // 5),
+            max_tokens=max(1024, max_context_tokens // 5),
             max_retries=1,
         )
         if not response.content or not response.content.strip():
@@ -103,7 +103,12 @@ FEEDBACK: (reason if RETRY, empty if ACCEPT)"""
 
 
 def _extract_recent_context(conversation: NodeConversation, max_messages: int = 10) -> str:
-    """Extract recent conversation messages for evaluation."""
+    """Extract recent conversation messages for evaluation.
+
+    Includes tool-call summaries from assistant messages so the judge
+    can see what tools were invoked (especially set_output values) even
+    when the assistant message body is empty.
+    """
     messages = conversation.messages
     recent = messages[-max_messages:] if len(messages) > max_messages else messages
 
@@ -112,8 +117,24 @@ def _extract_recent_context(conversation: NodeConversation, max_messages: int = 
         role = msg.role.upper()
         content = msg.content or ""
         # Truncate long tool results
-        if msg.role == "tool" and len(content) > 200:
-            content = content[:200] + "..."
+        if msg.role == "tool" and len(content) > 500:
+            content = content[:500] + "..."
+        # For assistant messages with empty content but tool_calls,
+        # summarise the tool calls so the judge knows what happened.
+        if msg.role == "assistant" and not content.strip():
+            tool_calls = getattr(msg, "tool_calls", None)
+            if tool_calls:
+                tc_parts = []
+                for tc in tool_calls:
+                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                    name = fn.get("name", "")
+                    args = fn.get("arguments", "")
+                    if name == "set_output":
+                        # Show the value so the judge can evaluate content quality
+                        tc_parts.append(f"  called {name}({args[:1000]})")
+                    else:
+                        tc_parts.append(f"  called {name}(...)")
+                content = "Tool calls:\n" + "\n".join(tc_parts)
         if content.strip():
             parts.append(f"[{role}]: {content.strip()}")
 
@@ -125,6 +146,10 @@ def _format_outputs(accumulator_state: dict[str, Any]) -> str:
 
     Lists and dicts get structural formatting so the judge can assess
     quantity and structure, not just a truncated stringification.
+
+    String values are given a generous limit (2000 chars) so the judge
+    can verify substantive content (e.g. a research brief with key
+    questions, scope boundaries, and deliverables).
     """
     if not accumulator_state:
         return "(none)"
@@ -144,12 +169,12 @@ def _format_outputs(accumulator_state: dict[str, Any]) -> str:
                 val_str += f"\n    ... and {len(value) - 8} more"
         elif isinstance(value, dict):
             val_str = str(value)
-            if len(val_str) > 400:
-                val_str = val_str[:400] + "..."
+            if len(val_str) > 2000:
+                val_str = val_str[:2000] + "..."
         else:
             val_str = str(value)
-            if len(val_str) > 300:
-                val_str = val_str[:300] + "..."
+            if len(val_str) > 2000:
+                val_str = val_str[:2000] + "..."
         parts.append(f"  {key}: {val_str}")
     return "\n".join(parts)
 

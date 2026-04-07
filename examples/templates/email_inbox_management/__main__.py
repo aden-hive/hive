@@ -46,7 +46,7 @@ def cli():
 @click.option("--verbose", "-v", is_flag=True, help="Show execution details")
 @click.option("--debug", is_flag=True, help="Show debug logging")
 def run(rules, max_emails, mock, quiet, verbose, debug):
-    """Execute inbox triage with the given rules."""
+    """Execute inbox management with the given rules."""
     if not quiet:
         setup_logging(verbose=verbose, debug=debug)
 
@@ -77,9 +77,7 @@ def tui(mock, verbose, debug):
     try:
         from framework.tui.app import AdenTUI
     except ImportError:
-        click.echo(
-            "TUI requires the 'textual' package. Install with: pip install textual"
-        )
+        click.echo("TUI requires the 'textual' package. Install with: pip install textual")
         sys.exit(1)
 
     from pathlib import Path
@@ -202,9 +200,7 @@ async def _interactive_shell(verbose=False):
     try:
         while True:
             try:
-                rules = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Rules> "
-                )
+                rules = await asyncio.get_event_loop().run_in_executor(None, input, "Rules> ")
                 if rules.lower() in ["quit", "exit", "q"]:
                     click.echo("Goodbye!")
                     break

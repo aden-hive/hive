@@ -1,22 +1,30 @@
 """Tests for ExecutionStream retention behavior."""
 
 import json
-from collections.abc import Callable
+from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
 from framework.graph import Goal, NodeSpec, SuccessCriterion
 from framework.graph.edge import GraphSpec
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
+from framework.llm.stream_events import FinishEvent, StreamEvent, TextDeltaEvent, ToolCallEvent
 from framework.runtime.event_bus import EventBus
 from framework.runtime.execution_stream import EntryPointSpec, ExecutionStream
 from framework.runtime.outcome_aggregator import OutcomeAggregator
-from framework.runtime.shared_state import SharedStateManager
+from framework.runtime.shared_state import SharedBufferManager
 from framework.storage.concurrent import ConcurrentStorage
 
 
 class DummyLLMProvider(LLMProvider):
-    """Deterministic LLM provider for execution stream tests."""
+    """Deterministic LLM provider for execution stream tests.
+
+    Uses set_output tool call to properly set outputs, avoiding stall detection.
+    """
+
+    def __init__(self):
+        self._call_count = 0
 
     def complete(
         self,
@@ -28,17 +36,32 @@ class DummyLLMProvider(LLMProvider):
         json_mode: bool = False,
         max_retries: int | None = None,
     ) -> LLMResponse:
-        return LLMResponse(content=json.dumps({"result": "ok"}), model="dummy")
+        return LLMResponse(content="Summary for compaction.", model="dummy")
 
-    def complete_with_tools(
+    async def stream(
         self,
-        messages: list[dict[str, object]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable,
-        max_iterations: int = 10,
-    ) -> LLMResponse:
-        return LLMResponse(content=json.dumps({"result": "ok"}), model="dummy")
+        messages: list[dict[str, Any]],
+        system: str = "",
+        tools: list[Tool] | None = None,
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[StreamEvent]:
+        self._call_count += 1
+
+        # Each execution takes 2 LLM calls:
+        # - Odd calls (1, 3, 5, ...): set output via tool call
+        # - Even calls (2, 4, 6, ...): finish with text
+        if self._call_count % 2 == 1:
+            # First call of each execution: set the output via tool call
+            yield ToolCallEvent(
+                tool_use_id=f"tc_{self._call_count}",
+                tool_name="set_output",
+                tool_input={"key": "result", "value": "ok"},
+            )
+            yield FinishEvent(stop_reason="tool_use", input_tokens=10, output_tokens=10)
+        else:
+            # Second call of each execution: finish with text
+            yield TextDeltaEvent(content="Done.", snapshot="Done.")
+            yield FinishEvent(stop_reason="end_turn", input_tokens=5, output_tokens=5)
 
 
 @pytest.mark.asyncio
@@ -62,7 +85,7 @@ async def test_execution_stream_retention(tmp_path):
         id="hello",
         name="Hello",
         description="Return a result",
-        node_type="llm_generate",
+        node_type="event_loop",
         input_keys=["user_name"],
         output_keys=["result"],
         system_prompt='Return JSON: {"result": "ok"}',
@@ -96,7 +119,7 @@ async def test_execution_stream_retention(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, EventBus()),
         event_bus=None,
@@ -149,7 +172,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
         id="hello",
         name="Hello",
         description="Return a result",
-        node_type="llm_generate",
+        node_type="event_loop",
         input_keys=["user_name"],
         output_keys=["result"],
         system_prompt='Return JSON: {"result": "ok"}',
@@ -188,7 +211,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, EventBus()),
         event_bus=None,
@@ -209,7 +232,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
     # Verify primary session's state.json exists and has the primary entry_point
     primary_state_path = tmp_path / "sessions" / primary_exec_id / "state.json"
     assert primary_state_path.exists()
-    primary_state = json.loads(primary_state_path.read_text())
+    primary_state = json.loads(primary_state_path.read_text(encoding="utf-8"))
     assert primary_state["entry_point"] == "primary"
 
     # Async stream — simulates a webhook entry point sharing the session
@@ -224,7 +247,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
         ),
         graph=graph,
         goal=goal,
-        state_manager=SharedStateManager(),
+        state_manager=SharedBufferManager(),
         storage=storage,
         outcome_aggregator=OutcomeAggregator(goal, EventBus()),
         event_bus=None,
@@ -239,7 +262,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
     # Run async execution with resume_session_id pointing to primary session
     session_state = {
         "resume_session_id": primary_exec_id,
-        "memory": {"rules": "star important emails"},
+        "data_buffer": {"rules": "star important emails"},
     }
     async_exec_id = await async_stream.execute({"event": "new_email"}, session_state=session_state)
 
@@ -252,7 +275,7 @@ async def test_shared_session_reuses_directory_and_memory(tmp_path):
 
     # State.json should NOT have been overwritten by the async execution
     # (it should still show the primary entry point)
-    final_state = json.loads(primary_state_path.read_text())
+    final_state = json.loads(primary_state_path.read_text(encoding="utf-8"))
     assert final_state["entry_point"] == "primary"
 
     # Verify only ONE session directory exists (not two)

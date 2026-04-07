@@ -4,12 +4,16 @@ Web Scrape Tool - Extract content from web pages.
 Uses Playwright with stealth for headless browser scraping,
 enabling JavaScript-rendered content and bot detection evasion.
 Uses BeautifulSoup for HTML parsing and content extraction.
+Validates URLs against internal network ranges to prevent SSRF attacks.
 """
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
+from urllib.robotparser import RobotFileParser
 
 from bs4 import BeautifulSoup
 from fastmcp import FastMCP
@@ -28,6 +32,49 @@ BROWSER_USER_AGENT = (
 )
 
 
+def _is_internal_address(raw_ip: str) -> bool:
+    """Check whether an IP address targets non-public infrastructure."""
+    ip_str = raw_ip.split("%")[0] if "%" in raw_ip else raw_ip
+    try:
+        addr = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # Unparseable — fail closed
+    return not addr.is_global or addr.is_multicast
+
+
+def _check_url_target(url: str) -> str | None:
+    """Resolve a URL's hostname and reject it if any address is non-public.
+
+    Returns an error message if blocked, None if safe.
+    """
+    hostname = urlparse(url).hostname
+    if not hostname:
+        return "Invalid URL: missing hostname"
+
+    # Fast-path for raw IP literals
+    try:
+        ipaddress.ip_address(hostname)
+        if _is_internal_address(hostname):
+            return f"Blocked: direct request to internal address ({hostname})"
+    except ValueError:
+        pass  # Not an IP literal, resolve below
+
+    try:
+        results = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror:
+        return f"DNS resolution failed for host: {hostname}"
+
+    if not results:
+        return f"No DNS records found for host: {hostname}"
+
+    for entry in results:
+        resolved_ip = str(entry[4][0])
+        if _is_internal_address(resolved_ip):
+            return f"Blocked: {hostname} resolves to internal address"
+
+    return None
+
+
 def register_tools(mcp: FastMCP) -> None:
     """Register web scrape tools with the MCP server."""
 
@@ -37,6 +84,7 @@ def register_tools(mcp: FastMCP) -> None:
         selector: str | None = None,
         include_links: bool = False,
         max_length: int = 50000,
+        respect_robots_txt: bool = True,
     ) -> dict:
         """
         Scrape and extract text content from a webpage.
@@ -50,6 +98,7 @@ def register_tools(mcp: FastMCP) -> None:
             selector: CSS selector to target specific content (e.g., 'article', '.main-content')
             include_links: Include extracted links in the response
             max_length: Maximum length of extracted text (1000-500000)
+            respect_robots_txt: Whether to respect robots.txt rules (default True)
 
         Returns:
             Dict with scraped content (url, title, description, content, length) or error dict
@@ -61,6 +110,29 @@ def register_tools(mcp: FastMCP) -> None:
 
             # Validate max_length
             max_length = max(1000, min(max_length, 500000))
+
+            # SSRF check: validate URL before making any request (must run
+            # before robots.txt fetch, which also makes a network request)
+            block_reason = _check_url_target(url)
+            if block_reason is not None:
+                return {"error": block_reason, "blocked_by_ssrf_protection": True, "url": url}
+
+            # Check robots.txt before launching browser
+            if respect_robots_txt:
+                try:
+                    parsed = urlparse(url)
+                    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+                    rp = RobotFileParser()
+                    rp.set_url(robots_url)
+                    rp.read()
+                    if not rp.can_fetch(BROWSER_USER_AGENT, url):
+                        return {
+                            "error": f"Blocked by robots.txt: {url}",
+                            "url": url,
+                            "skipped": True,
+                        }
+                except Exception:
+                    pass  # If robots.txt can't be fetched, proceed anyway
 
             # Launch headless browser with stealth
             async with async_playwright() as p:
@@ -82,22 +154,51 @@ def register_tools(mcp: FastMCP) -> None:
                     page = await context.new_page()
                     await Stealth().apply_stealth_async(page)
 
+                    # Intercept navigation requests to block SSRF via redirects.
+                    # Only check "document" requests (navigations), not
+                    # sub-resources (CSS/JS/images) to avoid false positives
+                    # and unnecessary DNS lookups.
+                    ssrf_blocked: dict[str, Any] | None = None
+
+                    async def _ssrf_route_handler(route):
+                        nonlocal ssrf_blocked
+                        req_url = route.request.url
+
+                        # Skip non-network schemes (data:, blob:, etc.)
+                        if urlparse(req_url).scheme not in {"http", "https"}:
+                            await route.continue_()
+                            return
+
+                        block = _check_url_target(req_url)
+                        if block is not None:
+                            ssrf_blocked = {
+                                "error": block,
+                                "blocked_by_ssrf_protection": True,
+                                "url": req_url,
+                            }
+                            await route.abort("blockedbyclient")
+                        else:
+                            await route.continue_()
+
+                    await page.route("**/*", _ssrf_route_handler)
+
                     response = await page.goto(
                         url,
                         wait_until="domcontentloaded",
                         timeout=60000,
                     )
 
-                    # Give JS a moment to render dynamic content
-                    await page.wait_for_timeout(2000)
+                    # Check if a redirect was blocked by SSRF protection
+                    if ssrf_blocked is not None:
+                        return ssrf_blocked
 
+                    # Validate response before waiting for JS render
                     if response is None:
                         return {"error": "Navigation failed: no response received"}
 
                     if response.status != 200:
                         return {"error": f"HTTP {response.status}: Failed to fetch URL"}
 
-                    # Validate Content-Type
                     content_type = response.headers.get("content-type", "").lower()
                     if not any(t in content_type for t in ["text/html", "application/xhtml+xml"]):
                         return {
@@ -105,6 +206,12 @@ def register_tools(mcp: FastMCP) -> None:
                             "url": url,
                             "skipped": True,
                         }
+
+                    # Wait for JS to finish rendering dynamic content
+                    try:
+                        await page.wait_for_load_state("networkidle", timeout=3000)
+                    except PlaywrightTimeout:
+                        pass  # Proceed with whatever has loaded
 
                     # Get fully rendered HTML
                     html_content = await page.content()

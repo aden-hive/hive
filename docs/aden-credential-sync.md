@@ -382,7 +382,7 @@ class AdenCachedStorage(CredentialStorage):
         storage = AdenCachedStorage(
             local_storage=EncryptedFileStorage(),
             aden_provider=provider,
-            cache_ttl_seconds=300,  # 5 minutes
+            cache_ttl_seconds=600,  # 5 minutes
         )
     """
 
@@ -448,7 +448,7 @@ from core.framework.credentials.aden import AdenCachedStorage
 storage = AdenCachedStorage(
     local_storage=EncryptedFileStorage(),
     aden_provider=provider,
-    cache_ttl_seconds=300,  # Re-check Aden every 5 min
+    cache_ttl_seconds=600,  # Re-check Aden every 5 min
 )
 
 store = CredentialStore(

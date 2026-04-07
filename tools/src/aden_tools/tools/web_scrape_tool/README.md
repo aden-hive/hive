@@ -35,7 +35,8 @@ Returns error dicts for common issues:
 - `HTTP <status>: Failed to fetch URL` - Server returned error status
 - `Navigation failed: no response received` - Browser could not navigate to URL
 - `No elements found matching selector: <selector>` - CSS selector matched nothing
-- `Request timed out` - Page load exceeded 30s timeout
+- `Request timed out` - Page load exceeded 60s timeout
+- `Blocked by robots.txt: <url>` - URL disallowed by site's robots.txt
 - `Browser error: <error>` - Playwright/Chromium error
 - `Scraping failed: <error>` - HTML parsing or other error
 
@@ -47,4 +48,4 @@ Returns error dicts for common issues:
 - Waits for `networkidle` before extracting content
 - Removes script, style, nav, footer, header, aside, noscript, and iframe elements
 - Auto-detects main content using article, main, or common content class selectors
-- Respects robots.txt by default (uses httpx for lightweight robots.txt fetching)
+- Respects robots.txt by default (set `respect_robots_txt=False` to disable)

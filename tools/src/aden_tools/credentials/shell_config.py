@@ -1,13 +1,15 @@
 """
 Shell configuration utilities for persisting environment variables.
 
-Supports both bash and zsh, detecting the user's default shell.
+Supports bash and zsh with platform-aware fallbacks for login-shell config
+files such as ``.bash_profile``, ``.zshenv``, and ``.profile``.
 Used primarily for persisting ADEN_API_KEY across sessions.
 """
 
 from __future__ import annotations
 
 import os
+import platform
 import re
 from pathlib import Path
 from typing import Literal
@@ -34,9 +36,9 @@ def detect_shell() -> ShellType:
     else:
         # Try to detect from config file existence
         home = Path.home()
-        if (home / ".zshrc").exists():
+        if (home / ".zshrc").exists() or (home / ".zshenv").exists():
             return "zsh"
-        elif (home / ".bashrc").exists():
+        elif (home / ".bashrc").exists() or (home / ".bash_profile").exists():
             return "bash"
         return "unknown"
 
@@ -55,14 +57,12 @@ def get_shell_config_path(shell_type: ShellType | None = None) -> Path:
         shell_type = detect_shell()
 
     home = Path.home()
+    candidates = _get_shell_config_candidates(home, shell_type)
 
-    if shell_type == "zsh":
-        return home / ".zshrc"
-    elif shell_type == "bash":
-        return home / ".bashrc"
-    else:
-        # Default to .bashrc for unknown shells
-        return home / ".bashrc"
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 
 def check_env_var_in_shell_config(
@@ -79,27 +79,45 @@ def check_env_var_in_shell_config(
     Returns:
         Tuple of (exists, current_value or None)
     """
-    config_path = get_shell_config_path(shell_type)
+    if shell_type is None:
+        shell_type = detect_shell()
 
-    if not config_path.exists():
-        return False, None
+    for config_path in _get_shell_config_candidates(Path.home(), shell_type):
+        if not config_path.exists():
+            continue
 
-    content = config_path.read_text()
+        content = config_path.read_text(encoding="utf-8")
 
-    # Look for export ENV_VAR=value or export ENV_VAR="value"
-    pattern = rf"^export\s+{re.escape(env_var)}=(.+)$"
-    match = re.search(pattern, content, re.MULTILINE)
+        # Look for export ENV_VAR=value or export ENV_VAR="value"
+        pattern = rf"^export\s+{re.escape(env_var)}=(.+)$"
+        match = re.search(pattern, content, re.MULTILINE)
 
-    if match:
-        value = match.group(1).strip()
-        # Remove surrounding quotes if present
-        if (value.startswith('"') and value.endswith('"')) or (
-            value.startswith("'") and value.endswith("'")
-        ):
-            value = value[1:-1]
-        return True, value
+        if match:
+            value = match.group(1).strip()
+            # Remove surrounding quotes if present
+            if (value.startswith('"') and value.endswith('"')) or (
+                value.startswith("'") and value.endswith("'")
+            ):
+                value = value[1:-1]
+            return True, value
 
     return False, None
+
+
+def _get_shell_config_candidates(home: Path, shell_type: ShellType) -> list[Path]:
+    """Return candidate config files in lookup order for the detected shell."""
+    if shell_type == "zsh":
+        return [home / ".zshrc", home / ".zshenv"]
+
+    if shell_type == "bash":
+        # Git Bash commonly launches login shells on Windows, so prefer
+        # ``.bash_profile`` there for writes, but keep ``.bashrc`` in the
+        # lookup list so older setups continue to work.
+        if platform.system() == "Windows":
+            return [home / ".bash_profile", home / ".bashrc", home / ".profile"]
+        return [home / ".bashrc", home / ".bash_profile", home / ".profile"]
+
+    return [home / ".profile", home / ".bashrc"]
 
 
 def add_env_var_to_shell_config(
@@ -130,7 +148,7 @@ def add_env_var_to_shell_config(
 
     try:
         if config_path.exists():
-            content = config_path.read_text()
+            content = config_path.read_text(encoding="utf-8")
 
             # Check if already exists
             pattern = rf"^export\s+{re.escape(env_var)}=.*$"
@@ -142,11 +160,11 @@ def add_env_var_to_shell_config(
                     content,
                     flags=re.MULTILINE,
                 )
-                config_path.write_text(new_content)
+                config_path.write_text(new_content, encoding="utf-8")
                 return True, str(config_path)
 
         # Append to file
-        with open(config_path, "a") as f:
+        with open(config_path, "a", encoding="utf-8") as f:
             f.write(f"\n# {comment}\n")
             f.write(f"{export_line}\n")
 
@@ -178,7 +196,7 @@ def remove_env_var_from_shell_config(
         return True, "Config file does not exist"
 
     try:
-        content = config_path.read_text()
+        content = config_path.read_text(encoding="utf-8")
         lines = content.split("\n")
 
         new_lines = []
@@ -206,7 +224,7 @@ def remove_env_var_from_shell_config(
 
             new_lines.append(line)
 
-        config_path.write_text("\n".join(new_lines))
+        config_path.write_text("\n".join(new_lines), encoding="utf-8")
         return True, str(config_path)
 
     except PermissionError:

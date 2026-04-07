@@ -1,11 +1,16 @@
 """Tests for web_scrape tool (FastMCP)."""
 
+import socket
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastmcp import FastMCP
 
 from aden_tools.tools.web_scrape_tool import register_tools
+from aden_tools.tools.web_scrape_tool.web_scrape_tool import (
+    _check_url_target,
+    _is_internal_address,
+)
 
 
 @pytest.fixture
@@ -26,7 +31,7 @@ def _make_playwright_mocks(html, status=200, final_url="https://example.com/page
     mock_page = AsyncMock()
     mock_page.goto.return_value = mock_response
     mock_page.content.return_value = html
-    mock_page.wait_for_timeout.return_value = None
+    mock_page.wait_for_load_state.return_value = None
 
     mock_context = AsyncMock()
     mock_context.new_page.return_value = mock_page
@@ -349,3 +354,181 @@ class TestWebScrapeToolLinkConversion:
         # Empty and whitespace-only text should be filtered
         assert "" not in texts
         assert len([t for t in texts if not t.strip()]) == 0
+
+
+class TestWebScrapeToolErrorHandling:
+    """Tests for error handling and early exit before JS wait."""
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    async def test_http_error_returns_without_waiting(self, mock_pw, mock_stealth, web_scrape_fn):
+        """HTTP errors return immediately without waiting for networkidle."""
+        html = "<html><body>Not Found</body></html>"
+        mock_cm, _, mock_page = _make_playwright_mocks(html, status=404)
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+
+        result = await web_scrape_fn(url="https://example.com/missing")
+        assert result == {"error": "HTTP 404: Failed to fetch URL"}
+        mock_page.wait_for_load_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    async def test_null_response_returns_error(self, mock_pw, mock_stealth, web_scrape_fn):
+        """Null navigation response returns error without waiting."""
+        mock_cm, _, mock_page = _make_playwright_mocks("<html></html>")
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+        mock_page.goto.return_value = None
+
+        result = await web_scrape_fn(url="https://example.com")
+        assert result == {"error": "Navigation failed: no response received"}
+        mock_page.wait_for_load_state.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    async def test_non_html_content_type_skipped(self, mock_pw, mock_stealth, web_scrape_fn):
+        """Non-HTML content types are skipped without waiting."""
+        mock_cm, mock_response, mock_page = _make_playwright_mocks("<html></html>")
+        mock_response.headers = {"content-type": "application/pdf"}
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+
+        result = await web_scrape_fn(url="https://example.com/file.pdf")
+        assert "error" in result
+        assert result["skipped"] is True
+        mock_page.wait_for_load_state.assert_not_called()
+
+
+class TestWebScrapeToolRobotsTxt:
+    """Tests for robots.txt respect."""
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.RobotFileParser")
+    async def test_blocked_by_robots_txt(self, mock_rp_cls, mock_pw, mock_stealth, web_scrape_fn):
+        """URLs disallowed by robots.txt are skipped."""
+        mock_rp = MagicMock()
+        mock_rp.can_fetch.return_value = False
+        mock_rp_cls.return_value = mock_rp
+
+        result = await web_scrape_fn(url="https://example.com/private")
+        assert "error" in result
+        assert "robots.txt" in result["error"]
+        assert result["skipped"] is True
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    @patch("aden_tools.tools.web_scrape_tool.web_scrape_tool.RobotFileParser")
+    async def test_robots_txt_disabled(self, mock_rp_cls, mock_pw, mock_stealth, web_scrape_fn):
+        """robots.txt check is skipped when respect_robots_txt=False."""
+        html = "<html><body>Content</body></html>"
+        mock_cm, _, _ = _make_playwright_mocks(html)
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+
+        result = await web_scrape_fn(url="https://example.com", respect_robots_txt=False)
+        assert "error" not in result
+        mock_rp_cls.assert_not_called()
+
+
+_MOD = "aden_tools.tools.web_scrape_tool.web_scrape_tool"
+
+
+class TestIsInternalAddress:
+    """Tests for _is_internal_address."""
+
+    def test_loopback_ipv4(self):
+        assert _is_internal_address("127.0.0.1") is True
+
+    def test_private_10_range(self):
+        assert _is_internal_address("10.0.0.1") is True
+
+    def test_private_192_168(self):
+        assert _is_internal_address("192.168.1.1") is True
+
+    def test_link_local_aws_metadata(self):
+        assert _is_internal_address("169.254.169.254") is True
+
+    def test_public_ipv4(self):
+        assert _is_internal_address("8.8.8.8") is False
+
+    def test_public_ipv6(self):
+        assert _is_internal_address("2607:f8b0:4004:800::200e") is False
+
+    def test_invalid_string_blocked(self):
+        assert _is_internal_address("not-an-ip") is True
+
+
+def _fake_addrinfo(ip: str, port: int = 443) -> list[tuple]:
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))]
+
+
+class TestCheckUrlTarget:
+    """Tests for _check_url_target."""
+
+    @patch(f"{_MOD}.socket.getaddrinfo")
+    def test_public_hostname_allowed(self, mock_dns):
+        mock_dns.return_value = _fake_addrinfo("93.184.216.34")
+        assert _check_url_target("https://example.com/page") is None
+
+    @patch(f"{_MOD}.socket.getaddrinfo")
+    def test_private_hostname_blocked(self, mock_dns):
+        mock_dns.return_value = _fake_addrinfo("10.0.0.1")
+        result = _check_url_target("https://evil.com/steal")
+        assert result is not None
+        assert "internal" in result.lower()
+
+    def test_raw_private_ip_blocked(self):
+        result = _check_url_target("http://127.0.0.1/admin")
+        assert result is not None
+
+    @patch(
+        f"{_MOD}.socket.getaddrinfo",
+        side_effect=socket.gaierror("NXDOMAIN"),
+    )
+    def test_dns_failure_returns_error(self, _mock_dns):
+        result = _check_url_target("https://nonexistent.invalid/")
+        assert result is not None
+        assert "DNS" in result
+
+
+class TestWebScrapeSSRF:
+    """SSRF protection through the web_scrape tool."""
+
+    @pytest.mark.asyncio
+    async def test_blocks_private_ip(self, web_scrape_fn):
+        result = await web_scrape_fn(url="http://192.168.1.1/admin")
+        assert "error" in result
+        assert result.get("blocked_by_ssrf_protection") is True
+
+    @pytest.mark.asyncio
+    async def test_blocks_localhost(self, web_scrape_fn):
+        result = await web_scrape_fn(url="http://127.0.0.1/secret")
+        assert "error" in result
+        assert result.get("blocked_by_ssrf_protection") is True
+
+    @pytest.mark.asyncio
+    async def test_blocks_metadata_endpoint(self, web_scrape_fn):
+        result = await web_scrape_fn(url="http://169.254.169.254/latest/meta-data/")
+        assert "error" in result
+        assert result.get("blocked_by_ssrf_protection") is True
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
+    @patch(f"{_MOD}._check_url_target", return_value=None)
+    async def test_allows_public_url(self, _mock_check, mock_pw, mock_stealth, web_scrape_fn):
+        html = "<html><body><p>Hello world</p></body></html>"
+        mock_cm, _, _ = _make_playwright_mocks(html)
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+
+        result = await web_scrape_fn(url="https://example.com/")
+        assert "error" not in result
+        assert "Hello world" in result["content"]

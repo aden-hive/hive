@@ -2,7 +2,7 @@
 
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
@@ -45,6 +45,8 @@ class ToolResult:
     tool_use_id: str
     content: str
     is_error: bool = False
+    image_content: list[dict[str, Any]] | None = None
+    is_skill_content: bool = False  # AS-10: marks activated skill body, protected from pruning
 
 
 class LLMProvider(ABC):
@@ -90,30 +92,6 @@ class LLMProvider(ABC):
         """
         pass
 
-    @abstractmethod
-    def complete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list[Tool],
-        tool_executor: Callable[["ToolUse"], "ToolResult"],
-        max_iterations: int = 10,
-    ) -> LLMResponse:
-        """
-        Run a tool-use loop until the LLM produces a final response.
-
-        Args:
-            messages: Initial conversation
-            system: System prompt
-            tools: Available tools
-            tool_executor: Function to execute tools: (ToolUse) -> ToolResult
-            max_iterations: Max tool calls before stopping
-
-        Returns:
-            Final LLMResponse after tool use completes
-        """
-        pass
-
     async def acomplete(
         self,
         messages: list[dict[str, Any]],
@@ -141,32 +119,6 @@ class LLMProvider(ABC):
                 response_format=response_format,
                 json_mode=json_mode,
                 max_retries=max_retries,
-            ),
-        )
-
-    async def acomplete_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        system: str,
-        tools: list["Tool"],
-        tool_executor: Callable[["ToolUse"], "ToolResult"],
-        max_iterations: int = 10,
-    ) -> "LLMResponse":
-        """Async version of complete_with_tools(). Non-blocking on the event loop.
-
-        Default implementation offloads the sync complete_with_tools() to a thread pool.
-        Subclasses SHOULD override for native async I/O.
-        """
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            partial(
-                self.complete_with_tools,
-                messages=messages,
-                system=system,
-                tools=tools,
-                tool_executor=tool_executor,
-                max_iterations=max_iterations,
             ),
         )
 

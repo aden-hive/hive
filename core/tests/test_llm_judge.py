@@ -52,9 +52,6 @@ class MockLLMProvider(LLMProvider):
             output_tokens=50,
         )
 
-    def complete_with_tools(self, messages, system, tools, tool_executor, max_iterations=10):
-        raise NotImplementedError("Tool use not needed for judge tests")
-
 
 # ============================================================================
 # LLMJudge Tests - Custom Provider
@@ -340,6 +337,69 @@ class TestLLMJudgeBackwardCompatibility:
         call_kwargs = mock_client.messages.create.call_args[1]
         assert call_kwargs["model"] == "claude-haiku-4-5-20251001"
         assert call_kwargs["max_tokens"] == 500
+
+    def test_openai_fallback_uses_litellm_provider(self, monkeypatch):
+        """When OPENAI_API_KEY is set, evaluate() should use a LiteLLM-based provider."""
+        # Force the OpenAI fallback path (no injected provider, no Anthropic key)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-openai")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        # Stub LiteLLMProvider so we don't call the real API; record what judge passes through
+        captured_calls: list[dict] = []
+
+        class DummyProvider:
+            def __init__(self, model: str = "gpt-4o-mini"):
+                self.model = model
+
+            def complete(
+                self,
+                messages,
+                system="",
+                tools=None,
+                max_tokens=1024,
+                response_format=None,
+                json_mode=False,
+                max_retries=None,
+            ):
+                captured_calls.append(
+                    {
+                        "messages": messages,
+                        "system": system,
+                        "max_tokens": max_tokens,
+                        "json_mode": json_mode,
+                        "model": self.model,
+                    }
+                )
+
+                class _Resp:
+                    def __init__(self, content: str):
+                        self.content = content
+
+                # Minimal response object with a content attribute
+                return _Resp('{"passes": true, "explanation": "OK"}')
+
+        monkeypatch.setattr(
+            "framework.llm.litellm.LiteLLMProvider",
+            DummyProvider,
+        )
+
+        judge = LLMJudge()
+        result = judge.evaluate(
+            constraint="no-hallucination",
+            source_document="The sky is blue.",
+            summary="The sky is blue.",
+            criteria="Summary must only contain facts from source",
+        )
+
+        # Judge should have used our stub once and returned the stub's JSON result
+        assert result["passes"] is True
+        assert result["explanation"] == "OK"
+        assert len(captured_calls) == 1
+
+        call = captured_calls[0]
+        assert call["model"] == "gpt-4o-mini"
+        assert call["max_tokens"] == 500
+        assert call["json_mode"] is True
 
 
 # ============================================================================

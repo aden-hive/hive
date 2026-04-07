@@ -6,7 +6,7 @@ This guide explains how to integrate Model Context Protocol (MCP) servers with t
 
 The framework provides built-in support for MCP servers, allowing you to:
 
-- **Register MCP servers** via STDIO or HTTP transport
+- **Register MCP servers** via STDIO, HTTP, Unix socket, or SSE transport
 - **Auto-discover tools** from registered servers
 - **Use MCP tools** seamlessly in your agents
 - **Manage multiple MCP servers** simultaneously
@@ -104,6 +104,48 @@ runner.register_mcp_server(
 - `url`: Base URL of the MCP server
 - `headers`: HTTP headers to include (optional)
 
+### Unix Socket Transport
+
+Best for same-host inter-process communication with lower overhead than TCP:
+
+```python
+runner.register_mcp_server(
+    name="local-ipc-tools",
+    transport="unix",
+    url="http://localhost",
+    socket_path="/tmp/mcp_server.sock",
+    headers={
+        "Authorization": "Bearer token"
+    }
+)
+```
+
+**Configuration:**
+
+- `url`: Base URL for HTTP requests over the socket (required, e.g., `"http://localhost"`)
+- `socket_path`: Absolute path to the Unix socket file (required, e.g., `"/tmp/mcp_server.sock"`)
+- `headers`: HTTP headers to include (optional)
+
+### SSE Transport
+
+Best for real-time, event-driven connections using the MCP SDK's SSE client:
+
+```python
+runner.register_mcp_server(
+    name="streaming-tools",
+    transport="sse",
+    url="http://localhost:8000/sse",
+    headers={
+        "Authorization": "Bearer token"
+    }
+)
+```
+
+**Configuration:**
+
+- `url`: SSE endpoint URL (required, e.g., `"http://localhost:8000/sse"`)
+- `headers`: HTTP headers for the SSE connection (optional)
+
 ## Using MCP Tools in Agents
 
 Once registered, MCP tools are available just like any other tool:
@@ -119,7 +161,7 @@ builder = WorkflowBuilder()
 builder.add_node(
     node_id="researcher",
     name="Web Researcher",
-    node_type="llm_tool_use",
+    node_type="event_loop",
     system_prompt="Research the topic using web_search",
     tools=["web_search"],  # Tool from tools MCP server
     input_keys=["topic"],
@@ -137,7 +179,7 @@ Tools from MCP servers can be referenced in your agent.json just like built-in t
     {
       "id": "searcher",
       "name": "Web Searcher",
-      "node_type": "llm_tool_use",
+      "node_type": "event_loop",
       "system_prompt": "Search for information about {topic}",
       "tools": ["web_search", "web_scrape"],
       "input_keys": ["topic"],
@@ -258,7 +300,32 @@ runner.register_mcp_server(
 )
 ```
 
-### 3. Handle Cleanup
+### 3. Use Unix Socket for Same-Host IPC
+
+When both the agent and MCP server run on the same machine, Unix sockets avoid TCP overhead:
+
+```python
+runner.register_mcp_server(
+    name="fast-local-tools",
+    transport="unix",
+    url="http://localhost",
+    socket_path="/tmp/mcp_server.sock"
+)
+```
+
+### 4. Use SSE for Streaming and Real-Time Tools
+
+SSE transport maintains a persistent connection, ideal for event-driven servers:
+
+```python
+runner.register_mcp_server(
+    name="realtime-tools",
+    transport="sse",
+    url="http://realtime-server:8000/sse"
+)
+```
+
+### 5. Handle Cleanup
 
 Always clean up MCP connections when done:
 
@@ -280,7 +347,7 @@ async with AgentRunner.load("exports/my-agent") as runner:
     # Automatic cleanup
 ```
 
-### 4. Tool Name Conflicts
+### 6. Tool Name Conflicts
 
 If multiple MCP servers provide tools with the same name, the last registered server wins. To avoid conflicts:
 
@@ -314,6 +381,24 @@ If HTTP transport fails:
 1. Verify the server is running: `curl http://localhost:4001/health`
 2. Check firewall settings
 3. Verify the URL and port are correct
+
+### Unix Socket Not Connecting
+
+If Unix socket transport fails:
+
+1. Verify the socket file exists: `ls -la /tmp/mcp_server.sock`
+2. Check file permissions on the socket
+3. Ensure no other process has locked the socket
+4. Verify the `url` field is set (e.g., `"http://localhost"`)
+
+### SSE Connection Issues
+
+If SSE transport fails:
+
+1. Verify the server supports SSE at the given URL
+2. Check that the `mcp` Python package is installed (`pip install mcp`)
+3. Ensure the SSE endpoint is accessible: `curl http://localhost:8000/sse`
+4. Check for firewall or proxy issues blocking long-lived connections
 
 ## Example: Full Agent with MCP Tools
 

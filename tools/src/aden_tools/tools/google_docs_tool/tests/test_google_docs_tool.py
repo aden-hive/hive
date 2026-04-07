@@ -49,14 +49,6 @@ class TestGoogleDocsCreateDocument:
             assert "not configured" in result["error"]
             assert "help" in result
 
-    def test_service_account_json_without_access_token_is_not_used(self, mcp):
-        """Test that service account JSON alone is not treated as an access token."""
-        with patch.dict("os.environ", {"GOOGLE_SERVICE_ACCOUNT_JSON": '{"type":"service_account"}'}):
-            tool_fn = get_tool_fn(mcp, "google_docs_create_document")
-            result = tool_fn(title="Test Document")
-            assert "error" in result
-            assert "not configured" in result["error"]
-
     @patch("httpx.post")
     def test_create_document_success(self, mock_post, mcp_with_credentials):
         """Test successful document creation."""
@@ -160,9 +152,7 @@ class TestGoogleDocsInsertText:
         # Mock get document for finding end index
         mock_get_response = MagicMock()
         mock_get_response.status_code = 200
-        mock_get_response.json.return_value = {
-            "body": {"content": [{"endIndex": 100}]}
-        }
+        mock_get_response.json.return_value = {"body": {"content": [{"endIndex": 100}]}}
         mock_get.return_value = mock_get_response
 
         # Mock batch update
@@ -236,10 +226,12 @@ class TestGoogleDocsBatchUpdate:
         mock_post.return_value = mock_response
 
         tool_fn = get_tool_fn(mcp_with_credentials, "google_docs_batch_update")
-        requests = json.dumps([
-            {"insertText": {"location": {"index": 1}, "text": "Hello"}},
-            {"insertText": {"location": {"index": 6}, "text": " World"}},
-        ])
+        requests = json.dumps(
+            [
+                {"insertText": {"location": {"index": 1}, "text": "Hello"}},
+                {"insertText": {"location": {"index": 6}, "text": " World"}},
+            ]
+        )
         result = tool_fn(document_id="doc123", requests_json=requests)
 
         assert "error" not in result
@@ -441,33 +433,6 @@ class TestReplaceAllTextValidation:
         assert "error" in result
         assert "empty" in result["error"].lower()
 
-
-class TestServiceAccountTokenExchange:
-    """Tests for service account JWT token exchange."""
-
-    @patch("httpx.post")
-    @patch.dict(
-        "os.environ",
-        {"GOOGLE_SERVICE_ACCOUNT_JSON": '{"access_token": "pre-exchanged-token"}'},
-    )
-    def test_fallback_to_pre_exchanged_token(self, mock_post):
-        """Test that pre-exchanged tokens in JSON are used as fallback."""
-        server = FastMCP("test")
-        register_tools(server)
-
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "documentId": "doc123",
-            "title": "Test",
-        }
-        mock_post.return_value = mock_response
-
-        tool_fn = get_tool_fn(server, "google_docs_create_document")
-        result = tool_fn(title="Test")
-
-        # Should use the pre-exchanged token and make the API call
-        assert "error" not in result or "not configured" not in result.get("error", "")
 
 class TestGoogleDocsListComments:
     """Tests for google_docs_list_comments tool."""

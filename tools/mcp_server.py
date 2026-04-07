@@ -15,9 +15,11 @@ Usage:
     python mcp_server.py --stdio
 
 Environment Variables:
-    MCP_PORT              - Server port (default: 4001)
-    ANTHROPIC_API_KEY     - Required at startup for testing/LLM nodes
-    BRAVE_SEARCH_API_KEY  - Required for web_search tool (validated at agent load time)
+    MCP_PORT                  - Server port (default: 4001)
+    INCLUDE_UNVERIFIED_TOOLS  - Set to "true", "1", or "yes" to also load
+                                unverified/community tool integrations (default: off)
+    ANTHROPIC_API_KEY         - Required at startup for testing/LLM nodes
+    BRAVE_SEARCH_API_KEY      - Required for web_search tool (validated at agent load time)
 
 Note:
     Two-tier credential validation:
@@ -81,7 +83,8 @@ except CredentialError as e:
 mcp = FastMCP("tools")
 
 # Register all tools with the MCP server, passing credential store
-tools = register_all_tools(mcp, credentials=credentials)
+include_unverified = os.getenv("INCLUDE_UNVERIFIED_TOOLS", "").lower() in ("true", "1", "yes")
+tools = register_all_tools(mcp, credentials=credentials, include_unverified=include_unverified)
 # Only print to stdout in HTTP mode (STDIO mode requires clean stdout for JSON-RPC)
 if "--stdio" not in sys.argv:
     logger.info(f"Registered {len(tools)} tools: {tools}")

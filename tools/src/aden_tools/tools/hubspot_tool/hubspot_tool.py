@@ -124,6 +124,72 @@ class _HubSpotClient:
         )
         return self._handle_response(response)
 
+    def delete_object(
+        self,
+        object_type: str,
+        object_id: str,
+    ) -> dict[str, Any]:
+        """Delete (archive) a CRM object by ID.
+
+        API ref: DELETE /crm/v3/objects/{objectType}/{objectId}
+        """
+        response = httpx.delete(
+            f"{HUBSPOT_API_BASE}/crm/v3/objects/{object_type}/{object_id}",
+            headers=self._headers,
+            timeout=30.0,
+        )
+        if response.status_code == 204:
+            return {"status": "deleted", "object_type": object_type, "object_id": object_id}
+        return self._handle_response(response)
+
+    def list_associations(
+        self,
+        from_object_type: str,
+        from_object_id: str,
+        to_object_type: str,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """List associations between CRM objects.
+
+        API ref: GET /crm/v4/objects/{fromObjectType}/{fromObjectId}/associations/{toObjectType}
+        """
+        params: dict[str, Any] = {"limit": min(limit, 500)}
+        response = httpx.get(
+            f"{HUBSPOT_API_BASE}/crm/v4/objects/{from_object_type}/{from_object_id}/associations/{to_object_type}",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
+    def create_association(
+        self,
+        from_object_type: str,
+        from_object_id: str,
+        to_object_type: str,
+        to_object_id: str,
+        association_category: str = "HUBSPOT_DEFINED",
+        association_type_id: int = 0,
+    ) -> dict[str, Any]:
+        """Create an association between two CRM objects.
+
+        API ref: PUT /crm/v4/objects/{fromObjectType}/{fromObjectId}/
+        associations/{toObjectType}/{toObjectId}
+        """
+        body = [
+            {
+                "associationCategory": association_category,
+                "associationTypeId": association_type_id,
+            }
+        ]
+        response = httpx.put(
+            f"{HUBSPOT_API_BASE}/crm/v4/objects/{from_object_type}/{from_object_id}/associations/{to_object_type}/{to_object_id}",
+            headers=self._headers,
+            json=body,
+            timeout=30.0,
+        )
+        return self._handle_response(response)
+
 
 def register_tools(
     mcp: FastMCP,
@@ -131,9 +197,11 @@ def register_tools(
 ) -> None:
     """Register HubSpot CRM tools with the MCP server."""
 
-    def _get_token() -> str | None:
+    def _get_token(account: str = "") -> str | None:
         """Get HubSpot access token from credential manager or environment."""
         if credentials is not None:
+            if account:
+                return credentials.get_by_alias("hubspot", account)
             token = credentials.get("hubspot")
             # Defensive check: ensure we get a string, not a complex object
             if token is not None and not isinstance(token, str):
@@ -143,9 +211,9 @@ def register_tools(
             return token
         return os.getenv("HUBSPOT_ACCESS_TOKEN")
 
-    def _get_client() -> _HubSpotClient | dict[str, str]:
+    def _get_client(account: str = "") -> _HubSpotClient | dict[str, str]:
         """Get a HubSpot client, or return an error dict if no credentials."""
-        token = _get_token()
+        token = _get_token(account)
         if not token:
             return {
                 "error": "HubSpot credentials not configured",
@@ -163,6 +231,7 @@ def register_tools(
         query: str = "",
         properties: list[str] | None = None,
         limit: int = 10,
+        account: str = "",
     ) -> dict:
         """
         Search HubSpot contacts.
@@ -176,7 +245,7 @@ def register_tools(
         Returns:
             Dict with search results or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -192,6 +261,7 @@ def register_tools(
     def hubspot_get_contact(
         contact_id: str,
         properties: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Get a HubSpot contact by ID.
@@ -204,7 +274,7 @@ def register_tools(
         Returns:
             Dict with contact data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -217,6 +287,7 @@ def register_tools(
     @mcp.tool()
     def hubspot_create_contact(
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Create a new HubSpot contact.
@@ -228,7 +299,7 @@ def register_tools(
         Returns:
             Dict with created contact data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -242,6 +313,7 @@ def register_tools(
     def hubspot_update_contact(
         contact_id: str,
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Update an existing HubSpot contact.
@@ -253,7 +325,7 @@ def register_tools(
         Returns:
             Dict with updated contact data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -270,6 +342,7 @@ def register_tools(
         query: str = "",
         properties: list[str] | None = None,
         limit: int = 10,
+        account: str = "",
     ) -> dict:
         """
         Search HubSpot companies.
@@ -282,7 +355,7 @@ def register_tools(
         Returns:
             Dict with search results or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -298,6 +371,7 @@ def register_tools(
     def hubspot_get_company(
         company_id: str,
         properties: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Get a HubSpot company by ID.
@@ -309,7 +383,7 @@ def register_tools(
         Returns:
             Dict with company data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -322,6 +396,7 @@ def register_tools(
     @mcp.tool()
     def hubspot_create_company(
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Create a new HubSpot company.
@@ -333,7 +408,7 @@ def register_tools(
         Returns:
             Dict with created company data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -347,6 +422,7 @@ def register_tools(
     def hubspot_update_company(
         company_id: str,
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Update an existing HubSpot company.
@@ -358,7 +434,7 @@ def register_tools(
         Returns:
             Dict with updated company data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -375,6 +451,7 @@ def register_tools(
         query: str = "",
         properties: list[str] | None = None,
         limit: int = 10,
+        account: str = "",
     ) -> dict:
         """
         Search HubSpot deals.
@@ -388,7 +465,7 @@ def register_tools(
         Returns:
             Dict with search results or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -404,6 +481,7 @@ def register_tools(
     def hubspot_get_deal(
         deal_id: str,
         properties: list[str] | None = None,
+        account: str = "",
     ) -> dict:
         """
         Get a HubSpot deal by ID.
@@ -416,7 +494,7 @@ def register_tools(
         Returns:
             Dict with deal data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -429,6 +507,7 @@ def register_tools(
     @mcp.tool()
     def hubspot_create_deal(
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Create a new HubSpot deal.
@@ -440,7 +519,7 @@ def register_tools(
         Returns:
             Dict with created deal data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -454,6 +533,7 @@ def register_tools(
     def hubspot_update_deal(
         deal_id: str,
         properties: dict[str, str],
+        account: str = "",
     ) -> dict:
         """
         Update an existing HubSpot deal.
@@ -466,11 +546,130 @@ def register_tools(
         Returns:
             Dict with updated deal data or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
             return client.update_object("deals", deal_id, properties)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Delete ---
+
+    @mcp.tool()
+    def hubspot_delete_object(
+        object_type: str,
+        object_id: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Delete (archive) a HubSpot CRM object.
+
+        Moves the object to the recycle bin. It can be restored from HubSpot UI
+        within 90 days.
+
+        Args:
+            object_type: CRM object type ("contacts", "companies", or "deals")
+            object_id: The HubSpot object ID to delete
+            account: Account alias for multi-account support
+
+        Returns:
+            Dict with deletion status or error
+        """
+        if object_type not in ("contacts", "companies", "deals"):
+            return {
+                "error": f"Unsupported object_type: {object_type!r}. "
+                "Use contacts, companies, or deals."
+            }
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.delete_object(object_type, object_id)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    # --- Associations ---
+
+    @mcp.tool()
+    def hubspot_list_associations(
+        from_object_type: str,
+        from_object_id: str,
+        to_object_type: str,
+        limit: int = 100,
+        account: str = "",
+    ) -> dict:
+        """
+        List associations between HubSpot CRM objects.
+
+        Retrieve objects associated with a given record, e.g. all deals
+        linked to a contact, or all contacts linked to a company.
+
+        Args:
+            from_object_type: Source object type ("contacts", "companies", or "deals")
+            from_object_id: ID of the source object
+            to_object_type: Target object type ("contacts", "companies", or "deals")
+            limit: Maximum associations to return (1-500, default 100)
+            account: Account alias for multi-account support
+
+        Returns:
+            Dict with associated object IDs and association types, or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_associations(from_object_type, from_object_id, to_object_type, limit)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def hubspot_create_association(
+        from_object_type: str,
+        from_object_id: str,
+        to_object_type: str,
+        to_object_id: str,
+        association_type_id: int = 0,
+        account: str = "",
+    ) -> dict:
+        """
+        Create an association between two HubSpot CRM objects.
+
+        Links two records together, e.g. associate a contact with a company
+        or a deal with a contact. Common association_type_id values:
+        - 1: Contact to Company (primary)
+        - 3: Deal to Contact
+        - 5: Deal to Company
+        Use 0 for the default/primary association type.
+
+        Args:
+            from_object_type: Source object type ("contacts", "companies", or "deals")
+            from_object_id: ID of the source object
+            to_object_type: Target object type ("contacts", "companies", or "deals")
+            to_object_id: ID of the target object
+            association_type_id: HubSpot association type ID (default 0 for primary)
+            account: Account alias for multi-account support
+
+        Returns:
+            Dict with association result or error
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.create_association(
+                from_object_type,
+                from_object_id,
+                to_object_type,
+                to_object_id,
+                association_type_id=association_type_id,
+            )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

@@ -1141,6 +1141,117 @@ class _SlackClient:
             "note": "For exact member count, paginate through users.list",
         }
 
+    def get_channel_info(self, channel: str) -> dict[str, Any]:
+        """Get detailed information about a channel."""
+        response = httpx.get(
+            f"{SLACK_API_BASE}/conversations.info",
+            headers=self._headers,
+            params={"channel": channel},
+            timeout=30.0,
+        )
+        data = self._handle_response(response)
+        if "error" in data:
+            return data
+
+        ch = data.get("channel", {})
+        return {
+            "id": ch.get("id"),
+            "name": ch.get("name"),
+            "is_channel": ch.get("is_channel"),
+            "is_private": ch.get("is_private"),
+            "is_archived": ch.get("is_archived"),
+            "is_general": ch.get("is_general"),
+            "topic": (ch.get("topic") or {}).get("value", ""),
+            "purpose": (ch.get("purpose") or {}).get("value", ""),
+            "num_members": ch.get("num_members"),
+            "creator": ch.get("creator"),
+            "created": ch.get("created"),
+        }
+
+    def list_files(
+        self,
+        channel: str | None = None,
+        user: str | None = None,
+        types: str | None = None,
+        count: int = 20,
+        page: int = 1,
+    ) -> dict[str, Any]:
+        """List files shared in the workspace."""
+        params: dict[str, Any] = {
+            "count": min(count, 100),
+            "page": page,
+        }
+        if channel:
+            params["channel"] = channel
+        if user:
+            params["user"] = user
+        if types:
+            params["types"] = types
+
+        response = httpx.get(
+            f"{SLACK_API_BASE}/files.list",
+            headers=self._headers,
+            params=params,
+            timeout=30.0,
+        )
+        data = self._handle_response(response)
+        if "error" in data:
+            return data
+
+        files = []
+        for f in data.get("files", []):
+            files.append(
+                {
+                    "id": f.get("id"),
+                    "name": f.get("name"),
+                    "title": f.get("title"),
+                    "mimetype": f.get("mimetype"),
+                    "filetype": f.get("filetype"),
+                    "size": f.get("size"),
+                    "user": f.get("user"),
+                    "created": f.get("created"),
+                    "permalink": f.get("permalink"),
+                }
+            )
+
+        paging = data.get("paging", {})
+        return {
+            "files": files,
+            "count": len(files),
+            "total": paging.get("total", len(files)),
+            "page": paging.get("page", 1),
+            "pages": paging.get("pages", 1),
+        }
+
+    def get_file_info(self, file_id: str) -> dict[str, Any]:
+        """Get detailed information about a file."""
+        response = httpx.get(
+            f"{SLACK_API_BASE}/files.info",
+            headers=self._headers,
+            params={"file": file_id},
+            timeout=30.0,
+        )
+        data = self._handle_response(response)
+        if "error" in data:
+            return data
+
+        f = data.get("file", {})
+        return {
+            "id": f.get("id"),
+            "name": f.get("name"),
+            "title": f.get("title"),
+            "mimetype": f.get("mimetype"),
+            "filetype": f.get("filetype"),
+            "size": f.get("size"),
+            "user": f.get("user"),
+            "created": f.get("created"),
+            "permalink": f.get("permalink"),
+            "url_private": f.get("url_private"),
+            "channels": f.get("channels", []),
+            "shares": list((f.get("shares") or {}).get("public", {}).keys())[:10],
+            "comments_count": f.get("comments_count", 0),
+        }
+
 
 def register_tools(
     mcp: FastMCP,
@@ -1148,9 +1259,11 @@ def register_tools(
 ) -> None:
     """Register Slack tools with the MCP server."""
 
-    def _get_token() -> str | None:
+    def _get_token(account: str = "") -> str | None:
         """Get Slack bot token from credential manager or environment."""
         if credentials is not None:
+            if account:
+                return credentials.get_by_alias("slack", account)
             token = credentials.get("slack")
             if token is not None and not isinstance(token, str):
                 raise TypeError(
@@ -1165,9 +1278,9 @@ def register_tools(
             return credentials.get("slack_user")
         return os.getenv("SLACK_USER_TOKEN")
 
-    def _get_client() -> _SlackClient | dict[str, str]:
+    def _get_client(account: str = "") -> _SlackClient | dict[str, str]:
         """Get a Slack client, or return an error dict if no credentials."""
-        token = _get_token()
+        token = _get_token(account)
         if not token:
             return {
                 "error": "Slack credentials not configured",
@@ -1185,6 +1298,7 @@ def register_tools(
         channel: str,
         text: str,
         thread_ts: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Send a message to a Slack channel.
@@ -1197,7 +1311,7 @@ def register_tools(
         Returns:
             Dict with message details (ts, channel) or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1221,6 +1335,7 @@ def register_tools(
     def slack_list_channels(
         types: str = "public_channel,private_channel",
         limit: int = 100,
+        account: str = "",
     ) -> dict:
         """
         List channels in the Slack workspace.
@@ -1233,7 +1348,7 @@ def register_tools(
         Returns:
             Dict with list of channels or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1266,6 +1381,7 @@ def register_tools(
     def slack_get_channel_history(
         channel: str,
         limit: int = 20,
+        account: str = "",
     ) -> dict:
         """
         Get recent messages from a Slack channel.
@@ -1277,7 +1393,7 @@ def register_tools(
         Returns:
             Dict with list of messages or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1311,6 +1427,7 @@ def register_tools(
         channel: str,
         timestamp: str,
         emoji: str,
+        account: str = "",
     ) -> dict:
         """
         Add an emoji reaction to a message.
@@ -1323,7 +1440,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1339,7 +1456,7 @@ def register_tools(
     # --- Users ---
 
     @mcp.tool()
-    def slack_get_user_info(user_id: str) -> dict:
+    def slack_get_user_info(user_id: str, account: str = "") -> dict:
         """
         Get information about a Slack user.
 
@@ -1349,7 +1466,7 @@ def register_tools(
         Returns:
             Dict with user profile information or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1383,6 +1500,7 @@ def register_tools(
         channel: str,
         ts: str,
         text: str,
+        account: str = "",
     ) -> dict:
         """
         Update an existing Slack message.
@@ -1395,7 +1513,7 @@ def register_tools(
         Returns:
             Dict with updated message details or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1413,7 +1531,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_delete_message(channel: str, ts: str) -> dict:
+    def slack_delete_message(channel: str, ts: str, account: str = "") -> dict:
         """
         Delete a Slack message.
 
@@ -1424,7 +1542,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1445,6 +1563,7 @@ def register_tools(
         text: str,
         post_at: int,
         thread_ts: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Schedule a message for future delivery.
@@ -1458,7 +1577,7 @@ def register_tools(
         Returns:
             Dict with scheduled message ID or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1481,6 +1600,7 @@ def register_tools(
     def slack_create_channel(
         name: str,
         is_private: bool = False,
+        account: str = "",
     ) -> dict:
         """
         Create a new Slack channel.
@@ -1492,7 +1612,7 @@ def register_tools(
         Returns:
             Dict with new channel details or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1514,7 +1634,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_archive_channel(channel: str) -> dict:
+    def slack_archive_channel(channel: str, account: str = "") -> dict:
         """
         Archive a Slack channel.
 
@@ -1524,7 +1644,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1538,7 +1658,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_invite_to_channel(channel: str, user_ids: str) -> dict:
+    def slack_invite_to_channel(channel: str, user_ids: str, account: str = "") -> dict:
         """
         Invite users to a Slack channel.
 
@@ -1549,7 +1669,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1563,7 +1683,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_set_channel_topic(channel: str, topic: str) -> dict:
+    def slack_set_channel_topic(channel: str, topic: str, account: str = "") -> dict:
         """
         Set the topic for a Slack channel.
 
@@ -1574,7 +1694,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1594,6 +1714,7 @@ def register_tools(
         channel: str,
         timestamp: str,
         emoji: str,
+        account: str = "",
     ) -> dict:
         """
         Remove an emoji reaction from a message.
@@ -1606,7 +1727,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1622,7 +1743,7 @@ def register_tools(
     # --- Users ---
 
     @mcp.tool()
-    def slack_list_users(limit: int = 100) -> dict:
+    def slack_list_users(limit: int = 100, account: str = "") -> dict:
         """
         List users in the Slack workspace.
 
@@ -1632,7 +1753,7 @@ def register_tools(
         Returns:
             Dict with list of users or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1669,6 +1790,7 @@ def register_tools(
         filename: str,
         title: str | None = None,
         comment: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Upload a text file to a Slack channel.
@@ -1683,7 +1805,7 @@ def register_tools(
         Returns:
             Dict with file details or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1711,6 +1833,7 @@ def register_tools(
     def slack_search_messages(
         query: str,
         count: int = 20,
+        account: str = "",
     ) -> dict:
         """
         Search for messages across the Slack workspace.
@@ -1722,7 +1845,7 @@ def register_tools(
         Returns:
             Dict with matching messages or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1757,6 +1880,7 @@ def register_tools(
         channel: str,
         thread_ts: str,
         limit: int = 50,
+        account: str = "",
     ) -> dict:
         """
         Get all replies in a message thread.
@@ -1769,7 +1893,7 @@ def register_tools(
         Returns:
             Dict with thread messages or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1797,7 +1921,7 @@ def register_tools(
     # --- Pins ---
 
     @mcp.tool()
-    def slack_pin_message(channel: str, timestamp: str) -> dict:
+    def slack_pin_message(channel: str, timestamp: str, account: str = "") -> dict:
         """
         Pin a message to a channel.
 
@@ -1808,7 +1932,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1822,7 +1946,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_unpin_message(channel: str, timestamp: str) -> dict:
+    def slack_unpin_message(channel: str, timestamp: str, account: str = "") -> dict:
         """
         Unpin a message from a channel.
 
@@ -1833,7 +1957,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1847,7 +1971,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_list_pins(channel: str) -> dict:
+    def slack_list_pins(channel: str, account: str = "") -> dict:
         """
         List all pinned items in a channel.
 
@@ -1857,7 +1981,7 @@ def register_tools(
         Returns:
             Dict with pinned items or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1890,6 +2014,7 @@ def register_tools(
         title: str,
         link: str,
         emoji: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Add a bookmark/link to a channel.
@@ -1903,7 +2028,7 @@ def register_tools(
         Returns:
             Dict with bookmark details or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1927,7 +2052,7 @@ def register_tools(
     # --- Scheduled Messages Management ---
 
     @mcp.tool()
-    def slack_list_scheduled_messages(channel: str | None = None) -> dict:
+    def slack_list_scheduled_messages(channel: str | None = None, account: str = "") -> dict:
         """
         List all scheduled messages.
 
@@ -1937,7 +2062,7 @@ def register_tools(
         Returns:
             Dict with scheduled messages or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1967,6 +2092,7 @@ def register_tools(
     def slack_delete_scheduled_message(
         channel: str,
         scheduled_message_id: str,
+        account: str = "",
     ) -> dict:
         """
         Delete/cancel a scheduled message.
@@ -1978,7 +2104,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -1994,7 +2120,7 @@ def register_tools(
     # --- Direct Messages ---
 
     @mcp.tool()
-    def slack_send_dm(user_id: str, text: str) -> dict:
+    def slack_send_dm(user_id: str, text: str, account: str = "") -> dict:
         """
         Send a direct message to a user.
 
@@ -2005,7 +2131,7 @@ def register_tools(
         Returns:
             Dict with message details or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2034,7 +2160,7 @@ def register_tools(
     # --- Message Utilities ---
 
     @mcp.tool()
-    def slack_get_permalink(channel: str, message_ts: str) -> dict:
+    def slack_get_permalink(channel: str, message_ts: str, account: str = "") -> dict:
         """
         Get a permanent link to a message.
 
@@ -2045,7 +2171,7 @@ def register_tools(
         Returns:
             Dict with permalink or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2066,6 +2192,7 @@ def register_tools(
         channel: str,
         user_id: str,
         text: str,
+        account: str = "",
     ) -> dict:
         """
         Send an ephemeral message visible only to one user.
@@ -2078,7 +2205,7 @@ def register_tools(
         Returns:
             Dict with message timestamp or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2104,6 +2231,7 @@ def register_tools(
         blocks: str,
         text: str = "Message with blocks",
         thread_ts: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Send a rich Block Kit message to a channel.
@@ -2122,7 +2250,7 @@ def register_tools(
         """
         import json as json_module
 
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2153,6 +2281,7 @@ def register_tools(
         submit_label: str = "Submit",
         close_label: str = "Cancel",
         callback_id: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Open a modal dialog. Requires a trigger_id from a slash command or button click.
@@ -2170,7 +2299,7 @@ def register_tools(
         """
         import json as json_module
 
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2205,6 +2334,7 @@ def register_tools(
     def slack_update_home_tab(
         user_id: str,
         blocks: str,
+        account: str = "",
     ) -> dict:
         """
         Publish/update a user's App Home tab.
@@ -2218,7 +2348,7 @@ def register_tools(
         """
         import json as json_module
 
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2253,6 +2383,7 @@ def register_tools(
         status_text: str,
         status_emoji: str | None = None,
         expiration_minutes: int | None = None,
+        account: str = "",
     ) -> dict:
         """
         Set the authenticated user's status message and emoji.
@@ -2265,7 +2396,7 @@ def register_tools(
         Returns:
             Dict with updated profile or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2289,7 +2420,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_set_presence(presence: str) -> dict:
+    def slack_set_presence(presence: str, account: str = "") -> dict:
         """
         Set the bot's presence status.
 
@@ -2299,7 +2430,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         if presence not in ("auto", "away"):
@@ -2315,7 +2446,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_get_presence(user_id: str) -> dict:
+    def slack_get_presence(user_id: str, account: str = "") -> dict:
         """
         Get a user's current presence status.
 
@@ -2325,7 +2456,7 @@ def register_tools(
         Returns:
             Dict with presence info (active, away) or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2352,6 +2483,7 @@ def register_tools(
         text: str,
         time: str,
         user_id: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Create a reminder for yourself or another user.
@@ -2364,7 +2496,7 @@ def register_tools(
         Returns:
             Dict with reminder details or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2384,14 +2516,14 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_list_reminders() -> dict:
+    def slack_list_reminders(account: str = "") -> dict:
         """
         List all pending reminders for the authenticated user.
 
         Returns:
             Dict with list of reminders or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2417,7 +2549,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_delete_reminder(reminder_id: str) -> dict:
+    def slack_delete_reminder(reminder_id: str, account: str = "") -> dict:
         """
         Delete/cancel a reminder.
 
@@ -2427,7 +2559,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2449,6 +2581,7 @@ def register_tools(
         name: str,
         handle: str | None = None,
         description: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Create a user group for @mentions.
@@ -2461,7 +2594,7 @@ def register_tools(
         Returns:
             Dict with usergroup details or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2484,6 +2617,7 @@ def register_tools(
     def slack_update_usergroup_members(
         usergroup_id: str,
         user_ids: str,
+        account: str = "",
     ) -> dict:
         """
         Set the members of a user group.
@@ -2495,7 +2629,7 @@ def register_tools(
         Returns:
             Dict with updated usergroup or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2514,14 +2648,14 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_list_usergroups() -> dict:
+    def slack_list_usergroups(account: str = "") -> dict:
         """
         List all user groups in the workspace.
 
         Returns:
             Dict with list of usergroups or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2551,14 +2685,14 @@ def register_tools(
     # =========================================================================
 
     @mcp.tool()
-    def slack_list_emoji() -> dict:
+    def slack_list_emoji(account: str = "") -> dict:
         """
         List all custom emoji in the workspace.
 
         Returns:
             Dict with emoji names and URLs or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2584,6 +2718,7 @@ def register_tools(
     def slack_create_canvas(
         title: str,
         markdown_content: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Create a new Slack Canvas (collaborative document).
@@ -2595,7 +2730,7 @@ def register_tools(
         Returns:
             Dict with canvas ID or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2624,6 +2759,7 @@ def register_tools(
         canvas_id: str,
         markdown_content: str,
         operation: str = "insert_at_end",
+        account: str = "",
     ) -> dict:
         """
         Edit a Slack Canvas document.
@@ -2636,7 +2772,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2677,6 +2813,7 @@ def register_tools(
         channel: str,
         limit: int = 100,
         include_threads: bool = True,
+        account: str = "",
     ) -> dict:
         """
         Fetch rich message data from a channel for AI-powered analysis.
@@ -2698,7 +2835,7 @@ def register_tools(
         Returns:
             Dict with messages including text, user, reactions, thread info
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2716,6 +2853,7 @@ def register_tools(
     def slack_trigger_workflow(
         webhook_url: str,
         payload: str | None = None,
+        account: str = "",
     ) -> dict:
         """
         Trigger a Slack Workflow via its webhook URL.
@@ -2729,7 +2867,7 @@ def register_tools(
         """
         import json as json_module
 
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2755,6 +2893,7 @@ def register_tools(
         channel: str,
         limit: int = 20,
         include_user_info: bool = True,
+        account: str = "",
     ) -> dict:
         """
         Get rich conversation context with user names resolved.
@@ -2770,7 +2909,7 @@ def register_tools(
         Returns:
             Dict with messages including user names and conversation summary
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2783,6 +2922,7 @@ def register_tools(
     @mcp.tool()
     def slack_find_user_by_email(
         email: str,
+        account: str = "",
     ) -> dict:
         """
         Find a Slack user by their email address.
@@ -2796,7 +2936,7 @@ def register_tools(
         Returns:
             Dict with user info including ID, name, etc.
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2810,6 +2950,7 @@ def register_tools(
     def slack_kick_user_from_channel(
         channel: str,
         user: str,
+        account: str = "",
     ) -> dict:
         """
         Remove a user from a channel.
@@ -2823,7 +2964,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2836,6 +2977,7 @@ def register_tools(
     @mcp.tool()
     def slack_delete_file(
         file_id: str,
+        account: str = "",
     ) -> dict:
         """
         Delete a file from Slack.
@@ -2848,7 +2990,7 @@ def register_tools(
         Returns:
             Dict with success status or error
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
@@ -2859,7 +3001,7 @@ def register_tools(
             return {"error": f"Network error: {e}"}
 
     @mcp.tool()
-    def slack_get_team_stats() -> dict:
+    def slack_get_team_stats(account: str = "") -> dict:
         """
         Get high-level workspace statistics.
 
@@ -2868,11 +3010,105 @@ def register_tools(
         Returns:
             Dict with team info and member statistics
         """
-        client = _get_client()
+        client = _get_client(account)
         if isinstance(client, dict):
             return client
         try:
             return client.get_team_stats()
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_get_channel_info(
+        channel: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Get detailed information about a Slack channel.
+
+        Args:
+            channel: Channel ID (e.g., "C1234567890")
+            account: Optional account alias for multi-workspace setups
+
+        Returns:
+            Dict with channel details including name, topic, purpose, member count
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        if not channel:
+            return {"error": "channel is required"}
+        try:
+            return client.get_channel_info(channel)
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_list_files(
+        channel: str = "",
+        user: str = "",
+        types: str = "",
+        count: int = 20,
+        page: int = 1,
+        account: str = "",
+    ) -> dict:
+        """
+        List files shared in the Slack workspace.
+
+        Args:
+            channel: Filter by channel ID (optional)
+            user: Filter by user ID (optional)
+            types: Filter by file type - comma-separated: spaces, snippets,
+                   images, gdocs, zips, pdfs (optional)
+            count: Number of files per page (1-100, default 20)
+            page: Page number (default 1)
+            account: Optional account alias for multi-workspace setups
+
+        Returns:
+            Dict with files list including name, type, size, and permalink
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        try:
+            return client.list_files(
+                channel=channel or None,
+                user=user or None,
+                types=types or None,
+                count=count,
+                page=page,
+            )
+        except httpx.TimeoutException:
+            return {"error": "Request timed out"}
+        except httpx.RequestError as e:
+            return {"error": f"Network error: {e}"}
+
+    @mcp.tool()
+    def slack_get_file_info(
+        file_id: str,
+        account: str = "",
+    ) -> dict:
+        """
+        Get detailed information about a Slack file.
+
+        Args:
+            file_id: The file ID (e.g., "F1234567890")
+            account: Optional account alias for multi-workspace setups
+
+        Returns:
+            Dict with file details including name, type, size, permalink, and sharing info
+        """
+        client = _get_client(account)
+        if isinstance(client, dict):
+            return client
+        if not file_id:
+            return {"error": "file_id is required"}
+        try:
+            return client.get_file_info(file_id)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

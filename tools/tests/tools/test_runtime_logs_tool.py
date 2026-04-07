@@ -47,7 +47,8 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
                 "duration_ms": 3000,
                 "execution_quality": "clean",
             }
-        )
+        ),
+        encoding="utf-8",
     )
     _write_jsonl(
         run1_dir / "details.jsonl",
@@ -68,7 +69,7 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
             {
                 "node_id": "node-2",
                 "node_name": "Format",
-                "node_type": "function",
+                "node_type": "event_loop",
                 "success": True,
                 "total_steps": 1,
                 "tokens_used": 0,
@@ -112,7 +113,7 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
             },
             {
                 "node_id": "node-2",
-                "node_type": "function",
+                "node_type": "event_loop",
                 "step_index": 0,
                 "llm_text": "",
                 "tool_calls": [],
@@ -143,7 +144,8 @@ def runtime_logs_dir(tmp_path: Path) -> Path:
                 "duration_ms": 60000,
                 "execution_quality": "failed",
             }
-        )
+        ),
+        encoding="utf-8",
     )
     _write_jsonl(
         run2_dir / "details.jsonl",

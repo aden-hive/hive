@@ -3,16 +3,22 @@ Tests for core GraphExecutor execution paths.
 Focused on minimal success and failure scenarios.
 """
 
+import json
+import logging
+
 import pytest
 
 from framework.graph.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.graph.executor import GraphExecutor
 from framework.graph.goal import Goal
 from framework.graph.node import NodeResult, NodeSpec
+from framework.utils.io import atomic_write
 
 
 # ---- Dummy runtime (no real logging) ----
 class DummyRuntime:
+    execution_id = ""
+
     def start_run(self, **kwargs):
         return "run-1"
 
@@ -21,6 +27,14 @@ class DummyRuntime:
 
     def report_problem(self, **kwargs):
         pass
+
+
+class DummyMemory:
+    def __init__(self, data):
+        self._data = data
+
+    def read_all(self):
+        return self._data
 
 
 # ---- Fake node that always succeeds ----
@@ -49,7 +63,7 @@ async def test_executor_single_node_success():
                 id="n1",
                 name="node1",
                 description="test node",
-                node_type="llm_generate",
+                node_type="event_loop",
                 input_keys=[],
                 output_keys=["result"],
                 max_retries=0,
@@ -57,6 +71,7 @@ async def test_executor_single_node_success():
         ],
         edges=[],
         entry_node="n1",
+        terminal_nodes=["n1"],
     )
 
     executor = GraphExecutor(
@@ -70,7 +85,7 @@ async def test_executor_single_node_success():
         description="simple test",
     )
 
-    result = await executor.execute(graph=graph, goal=goal)
+    result = await executor.execute(graph=graph, goal=goal, validate_graph=False)
 
     assert result.success is True
     assert result.path == ["n1"]
@@ -104,7 +119,7 @@ async def test_executor_single_node_failure():
                 id="n1",
                 name="node1",
                 description="failing node",
-                node_type="llm_generate",
+                node_type="event_loop",
                 input_keys=[],
                 output_keys=["result"],
                 max_retries=0,
@@ -112,6 +127,7 @@ async def test_executor_single_node_failure():
         ],
         edges=[],
         entry_node="n1",
+        terminal_nodes=["n1"],
     )
 
     executor = GraphExecutor(
@@ -125,7 +141,7 @@ async def test_executor_single_node_failure():
         description="failure test",
     )
 
-    result = await executor.execute(graph=graph, goal=goal)
+    result = await executor.execute(graph=graph, goal=goal, validate_graph=False)
 
     assert result.success is False
     assert result.error is not None
@@ -157,79 +173,6 @@ class FakeEventBus:
 
 
 @pytest.mark.asyncio
-async def test_executor_emits_node_events():
-    """Executor should emit NODE_LOOP_STARTED/COMPLETED for each non-event_loop node."""
-    runtime = DummyRuntime()
-    event_bus = FakeEventBus()
-
-    graph = GraphSpec(
-        id="graph-ev",
-        goal_id="g-ev",
-        nodes=[
-            NodeSpec(
-                id="n1",
-                name="first",
-                description="first node",
-                node_type="llm_generate",
-                input_keys=[],
-                output_keys=["result"],
-                max_retries=0,
-            ),
-            NodeSpec(
-                id="n2",
-                name="second",
-                description="second node",
-                node_type="llm_generate",
-                input_keys=["result"],
-                output_keys=["result"],
-                max_retries=0,
-            ),
-        ],
-        edges=[
-            EdgeSpec(
-                id="e1",
-                source="n1",
-                target="n2",
-                condition=EdgeCondition.ON_SUCCESS,
-            ),
-        ],
-        entry_node="n1",
-        terminal_nodes=["n2"],
-    )
-
-    executor = GraphExecutor(
-        runtime=runtime,
-        node_registry={
-            "n1": SuccessNode(),
-            "n2": SuccessNode(),
-        },
-        event_bus=event_bus,
-        stream_id="test-stream",
-    )
-
-    goal = Goal(id="g-ev", name="event-test", description="test events")
-    result = await executor.execute(graph=graph, goal=goal)
-
-    assert result.success is True
-    assert result.path == ["n1", "n2"]
-
-    # Should have 5 events: started/completed for n1, edge_traversed, then started/completed for n2
-    assert len(event_bus.events) == 5
-    assert event_bus.events[0] == ("started", {"stream_id": "test-stream", "node_id": "n1"})
-    assert event_bus.events[1] == (
-        "completed",
-        {"stream_id": "test-stream", "node_id": "n1", "iterations": 1},
-    )
-    assert event_bus.events[2] == (
-        "edge_traversed",
-        {"stream_id": "test-stream", "source_node": "n1", "target_node": "n2"},
-    )
-    assert event_bus.events[3] == ("started", {"stream_id": "test-stream", "node_id": "n2"})
-    assert event_bus.events[4] == (
-        "completed",
-        {"stream_id": "test-stream", "node_id": "n2", "iterations": 1},
-    )
-
 
 # ---- Fake event_loop node (registered, so executor won't emit for it) ----
 class FakeEventLoopNode:
@@ -262,6 +205,7 @@ async def test_executor_skips_events_for_event_loop_nodes():
         ],
         edges=[],
         entry_node="el1",
+        terminal_nodes=["el1"],
     )
 
     executor = GraphExecutor(
@@ -292,7 +236,7 @@ async def test_executor_no_events_without_event_bus():
                 id="n1",
                 name="node1",
                 description="test node",
-                node_type="llm_generate",
+                node_type="event_loop",
                 input_keys=[],
                 output_keys=["result"],
                 max_retries=0,
@@ -300,6 +244,7 @@ async def test_executor_no_events_without_event_bus():
         ],
         edges=[],
         entry_node="n1",
+        terminal_nodes=["n1"],
     )
 
     # No event_bus passed — should not crash
@@ -312,3 +257,112 @@ async def test_executor_no_events_without_event_bus():
     result = await executor.execute(graph=graph, goal=goal)
 
     assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_executor_fails_when_terminal_worker_is_never_reached():
+    """No-event-bus worker execution should fail clearly when no terminal completes."""
+    runtime = DummyRuntime()
+
+    graph = GraphSpec(
+        id="graph-missing-terminal",
+        goal_id="g-missing-terminal",
+        nodes=[
+            NodeSpec(
+                id="start",
+                name="start",
+                description="entry node",
+                node_type="event_loop",
+                output_keys=["result"],
+            ),
+            NodeSpec(
+                id="done",
+                name="done",
+                description="unreached terminal",
+                node_type="event_loop",
+                output_keys=["result"],
+            ),
+        ],
+        edges=[
+            EdgeSpec(
+                id="start-to-done",
+                source="start",
+                target="done",
+                condition=EdgeCondition.CONDITIONAL,
+                condition_expr="output.get('missing') == 'never'",
+            )
+        ],
+        entry_node="start",
+        terminal_nodes=["done"],
+    )
+
+    executor = GraphExecutor(
+        runtime=runtime,
+        node_registry={"start": SuccessNode(), "done": SuccessNode()},
+    )
+
+    goal = Goal(id="g-missing-terminal", name="missing-terminal", description="test")
+    result = await executor.execute(graph=graph, goal=goal)
+
+    assert result.success is False
+    assert result.path == ["start"]
+    assert result.error is not None
+    assert "terminal nodes completed" in result.error
+
+
+def test_write_progress_uses_atomic_write_and_updates_state(tmp_path, monkeypatch):
+    runtime = DummyRuntime()
+    executor = GraphExecutor(runtime=runtime, storage_path=tmp_path)
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps({"entry_point": "primary"}), encoding="utf-8")
+    memory = DummyMemory({"foo": "bar"})
+
+    called = {}
+
+    def recording_atomic_write(path, *args, **kwargs):
+        called["path"] = path
+        return atomic_write(path, *args, **kwargs)
+
+    monkeypatch.setattr("framework.graph.executor.atomic_write", recording_atomic_write)
+
+    executor._write_progress(
+        current_node="node-b",
+        path=["node-a", "node-b"],
+        buffer=memory,
+        node_visit_counts={"node-a": 1, "node-b": 1},
+    )
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert called["path"] == state_path
+    assert state["entry_point"] == "primary"
+    assert state["progress"]["current_node"] == "node-b"
+    assert state["progress"]["path"] == ["node-a", "node-b"]
+    assert state["progress"]["node_visit_counts"] == {"node-a": 1, "node-b": 1}
+    assert state["data_buffer"] == {"foo": "bar"}
+    assert state["progress"]["steps_executed"] == 2
+    assert state["buffer_keys"] == ["foo"]
+    assert "updated_at" in state["timestamps"]
+
+
+def test_write_progress_logs_warning_on_atomic_write_failure(tmp_path, monkeypatch, caplog):
+    runtime = DummyRuntime()
+    executor = GraphExecutor(runtime=runtime, storage_path=tmp_path)
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps({"entry_point": "primary"}), encoding="utf-8")
+    memory = DummyMemory({"foo": "bar"})
+
+    def failing_atomic_write(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("framework.graph.executor.atomic_write", failing_atomic_write)
+
+    with caplog.at_level(logging.WARNING):
+        executor._write_progress(
+            current_node="node-b",
+            path=["node-a", "node-b"],
+            buffer=memory,
+            node_visit_counts={"node-a": 1, "node-b": 1},
+        )
+
+    assert "Failed to persist progress state to" in caplog.text
+    assert str(state_path) in caplog.text

@@ -6,14 +6,13 @@ Usage:
     hive info exports/my-agent
     hive validate exports/my-agent
     hive list exports/
-    hive dispatch exports/ --input '{"key": "value"}'
     hive shell exports/my-agent
 
 Testing commands:
     hive test-run <agent_path> --goal <goal_id>
-    hive test-debug <goal_id> <test_id>
-    hive test-list <goal_id>
-    hive test-stats <goal_id>
+    hive test-debug <agent_path> <test_name>
+    hive test-list <agent_path>
+    hive test-stats <agent_path>
 """
 
 import argparse
@@ -56,6 +55,13 @@ def _configure_paths():
     if (project_root / "core").is_dir() and core_str not in sys.path:
         sys.path.insert(0, core_str)
 
+    # Add core/framework/agents/ so framework agents are importable as top-level packages
+    framework_agents_dir = project_root / "core" / "framework" / "agents"
+    if framework_agents_dir.is_dir():
+        fa_str = str(framework_agents_dir)
+        if fa_str not in sys.path:
+            sys.path.insert(0, fa_str)
+
 
 def main():
     _configure_paths()
@@ -72,7 +78,7 @@ def main():
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Register runner commands (run, info, validate, list, dispatch, shell)
+    # Register runner commands (run, info, validate, list, shell)
     from framework.runner.cli import register_commands
 
     register_commands(subparsers)
@@ -81,6 +87,21 @@ def main():
     from framework.testing.cli import register_testing_commands
 
     register_testing_commands(subparsers)
+
+    # Register skill commands (skill list, skill trust, ...)
+    from framework.skills.cli import register_skill_commands
+
+    register_skill_commands(subparsers)
+
+    # Register debugger commands (debugger)
+    from framework.debugger.cli import register_debugger_commands
+
+    register_debugger_commands(subparsers)
+
+    # Register MCP registry commands (mcp install, mcp add, ...)
+    from framework.runner.mcp_registry_cli import register_mcp_commands
+
+    register_mcp_commands(subparsers)
 
     args = parser.parse_args()
 

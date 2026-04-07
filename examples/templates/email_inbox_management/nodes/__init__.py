@@ -15,9 +15,14 @@ intake_node = NodeSpec(
     client_facing=True,
     max_node_visits=0,
     input_keys=["rules", "max_emails"],
-    output_keys=["rules", "max_emails"],
+    output_keys=["rules", "max_emails", "query"],
+    nullable_output_keys=["query"],
     system_prompt="""\
 You are an inbox management assistant. The user has provided rules for managing their emails.
+
+**RULES ARE ADDITIVE.** If existing rules are already present in context from a previous cycle,
+present ALL of them (old + new). The user can add, modify, or remove rules. When calling
+set_output("rules", ...), include ALL active rules — old and new combined.
 
 **STEP 1 — Respond to the user (text only, NO tool calls):**
 
@@ -30,19 +35,61 @@ The following Gmail actions are available — map the user's rules to whichever 
 - **Mark as read** / mark as unread
 - **Star** / unstar emails
 - **Add/remove Gmail labels** (INBOX, UNREAD, IMPORTANT, STARRED, SPAM, CATEGORY_PERSONAL, CATEGORY_SOCIAL, CATEGORY_PROMOTIONS, CATEGORY_UPDATES, CATEGORY_FORUMS)
+- **Draft replies** — create draft reply emails (never sent automatically)
+- **Create/apply custom labels** — create new Gmail labels and apply them to emails
 
 Present the rules back to the user in plain language. Do NOT refuse rules — if the user asks for any of the above actions, confirm you will do it.
 
-Also confirm the batch size (max_emails). If max_emails is not provided, default to 100.
+Also confirm the page size (max_emails). If max_emails is not provided, default to 100.
+Note: max_emails is the page size per fetch cycle. The agent will loop through ALL inbox emails
+by fetching max_emails at a time until no more remain.
 
 Ask the user to confirm: "Does this look right? I'll proceed once you confirm."
 
-**STEP 2 — After the user confirms, call set_output:**
+**STEP 2 — Show existing labels (tool call):**
 
-- set_output("rules", <the confirmed rules as a clear text description>)
+Call gmail_list_labels() to show the user their current Gmail labels. This helps them reference existing labels or decide whether new custom labels are needed for their rules.
+
+**STEP 3 — After the user confirms, call set_output:**
+
+- set_output("rules", <ALL active rules as a clear text description>)
 - set_output("max_emails", <the confirmed max_emails as a string number, e.g. "100">)
+- set_output("query", <Gmail search query if the user wants to target specific emails>)
+
+**TARGETED QUERY (optional):**
+
+If the user's rules target specific emails (e.g. "delete all emails from newsletters@example.com"),
+build a Gmail search query to fetch ONLY matching emails instead of the entire inbox. This is much
+faster and more efficient.
+
+Gmail search query syntax:
+- `from:sender@example.com` — from a specific sender
+- `to:recipient@example.com` — to a specific recipient
+- `subject:keyword` — subject contains keyword
+- `is:unread` / `is:read` — read status
+- `is:starred` / `is:important` — flags
+- `has:attachment` — has attachments
+- `filename:pdf` — attachment filename
+- `label:LABEL_NAME` — has a specific label
+- `category:promotions` / `category:social` / `category:updates` — Gmail categories
+- `newer_than:7d` / `older_than:30d` — relative time (d=days, m=months, y=years)
+- `after:2024/01/01` / `before:2024/12/31` — absolute dates
+- Combine with spaces (AND): `from:boss@co.com subject:urgent`
+- OR operator: `from:alice OR from:bob`
+- NOT / exclude: `-from:noreply@example.com` or `NOT from:noreply`
+- Grouping: `{from:alice from:bob}` (same as OR)
+
+Examples:
+- User says "trash all promotional emails" → query: `category:promotions`
+- User says "star emails from my boss jane@co.com" → query: `from:jane@co.com`
+- User says "mark unread emails older than a week as read" → query: `is:unread older_than:7d`
+- User says "apply rules to all inbox emails" → no query needed (default: `label:INBOX`)
+
+If the rules apply broadly to ALL emails, do NOT set a query — the default `label:INBOX` will be used.
+Only set a query when it would meaningfully narrow the search.
+
 """,
-    tools=[],
+    tools=["gmail_list_labels"],
 )
 
 # Node 2: Fetch Emails (event_loop — fetches emails with pagination support)
@@ -52,45 +99,43 @@ fetch_emails_node = NodeSpec(
     id="fetch-emails",
     name="Fetch Emails",
     description=(
-        "Fetch emails from the Gmail inbox up to the configured batch limit. "
-        "Supports pagination for continuous mode — can fetch the next batch "
-        "of emails beyond what was already processed."
+        "Fetch one page of emails from Gmail inbox. Returns emails filename "
+        "and next_page_token for pagination. The graph loops back here if "
+        "more pages remain."
     ),
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,
-    input_keys=["rules", "max_emails"],
-    output_keys=["emails"],
+    input_keys=[
+        "rules",
+        "max_emails",
+        "next_page_token",
+        "last_processed_timestamp",
+        "query",
+    ],
+    output_keys=["emails", "next_page_token"],
+    nullable_output_keys=["next_page_token"],
     system_prompt="""\
-You are a data pipeline step. Your job is to fetch emails from Gmail and write them to emails.jsonl.
+You are a data pipeline step. Your job is to fetch ONE PAGE of emails from Gmail.
 
-**FIRST-TIME FETCH (default path):**
-1. Read "max_emails" from input context.
-2. Call bulk_fetch_emails(max_emails=<value>).
-3. The tool returns {"filename": "emails.jsonl"}.
+**INSTRUCTIONS:**
+1. Read "max_emails", "next_page_token", "last_processed_timestamp", and "query" from input context.
+2. Call bulk_fetch_emails with:
+   - max_emails=<max_emails value, default "100">
+   - page_token=<next_page_token value, if present and non-empty>
+   - after_timestamp=<last_processed_timestamp value, if present and non-empty>
+   - query=<query value, if present and non-empty; omit to default to "label:INBOX">
+3. The tool returns {"filename": "emails.jsonl", "count": N, "next_page_token": "<token or null>"}.
 4. Call set_output("emails", "emails.jsonl").
+5. Call set_output("next_page_token", <the next_page_token from the tool result, or "" if null>).
 
-**NEXT-BATCH FETCH (when user asks for "the next N" emails):**
-The user wants emails BEYOND what was already fetched. Use pagination:
-1. Call gmail_list_messages(query="label:INBOX", max_results=<previous + new count>) to get message IDs. Use page_token if needed to paginate past already-fetched emails.
-2. Identify message IDs NOT in the previous batch (you remember them from continuous conversation).
-3. Call gmail_batch_get_messages(message_ids=<new_ids>, format="metadata") for full metadata.
-4. For each message in the result, call append_data(filename="emails.jsonl", data=<JSON: {id, subject, from, to, date, snippet, labels}>).
-5. Call set_output("emails", "emails.jsonl").
+**IMPORTANT:** The graph will automatically loop back to this node if next_page_token is non-empty.
+You only need to fetch ONE page per visit. Do NOT loop internally.
 
-**TOOLS:**
-- bulk_fetch_emails(max_emails) — Bulk fetch from inbox, writes emails.jsonl. Use for first fetch.
-- gmail_list_messages(query, max_results, page_token) — List message IDs with pagination. Returns {messages, next_page_token}.
-- gmail_batch_get_messages(message_ids, format) — Fetch metadata for specific IDs (max 50 per call).
-- append_data(filename, data) — Append a line to a JSONL file.
-
-Do NOT add commentary or explanation. Execute the appropriate path and call set_output when done.
+Do NOT add commentary or explanation. Execute the steps and call set_output when done.
 """,
     tools=[
         "bulk_fetch_emails",
-        "gmail_list_messages",
-        "gmail_batch_get_messages",
-        "append_data",
     ],
 )
 
@@ -99,10 +144,7 @@ Do NOT add commentary or explanation. Execute the appropriate path and call set_
 classify_and_act_node = NodeSpec(
     id="classify-and-act",
     name="Classify and Act",
-    description=(
-        "Apply the user's rules to each email and execute "
-        "the appropriate Gmail actions."
-    ),
+    description=("Apply the user's rules to each email and execute the appropriate Gmail actions."),
     node_type="event_loop",
     client_facing=False,
     max_node_visits=0,
@@ -112,54 +154,77 @@ classify_and_act_node = NodeSpec(
 You are an inbox management assistant. Apply the user's rules to their emails and execute Gmail actions.
 
 **YOUR TOOLS:**
-- load_data(filename, limit, offset) — Read emails from a local file. This is how you access the emails.
-- append_data(filename, data) — Append a line to a file. Use this to record actions taken.
-- gmail_batch_modify_messages(message_ids, add_labels, remove_labels) — Modify Gmail labels in batch. ALWAYS prefer this.
-- gmail_modify_message(message_id, add_labels, remove_labels) — Modify a single message's labels.
-- gmail_trash_message(message_id) — Move a message to trash. No batch version; call per email.
+- load_data(filename, limit, offset) — Read emails from a local file.
+- append_data(filename, data) — Append a line to a file. Record actions taken.
+- gmail_batch_modify_messages(message_ids, add_labels, remove_labels) — Modify labels in batch. ONLY call when BOTH add_labels AND remove_labels are non-empty lists. If only one type is needed, use gmail_modify_message instead.
+- gmail_modify_message(message_id, add_labels, remove_labels) — Modify a single message's labels. Use when you have only add_labels OR only remove_labels (not both).
+- gmail_trash_message(message_id) — Move a message to trash.
+- gmail_create_draft(to, subject, body) — Create a draft reply. NEVER sends automatically.
+- gmail_create_label(name) — Create a new Gmail label. Returns the label ID.
+- gmail_list_labels() — List all existing Gmail labels with their IDs.
 - set_output(key, value) — Set an output value. Call ONLY after all actions are executed.
 
 **CONTEXT:**
-- "rules" = the user's rule to apply (e.g. "mark all as unread")
-- "emails" = a filename (e.g. "emails.jsonl") containing the fetched emails as JSONL. Each line has: id, subject, from, to, date, snippet, labels.
+- "rules" = the user's rule to apply (e.g. "mark all as unread").
+- "emails" = a filename (e.g. "emails.jsonl") containing the fetched emails as JSONL.
+  Each line has: id, subject, from, to, date, snippet, labels.
 
-**STEP 1 — LOAD EMAILS (your first tool call MUST be load_data):**
-Call load_data(filename=<the "emails" value from context>) to read the email data.
-- If the result is empty, call set_output("actions_taken", "no emails to process") and stop.
-- If has_more=true, load more pages with load_data(filename=..., offset=...) until all emails are loaded.
+**PROCESS EMAILS ONE CHUNK AT A TIME (you will get multiple turns):**
 
-**STEP 2 — DETERMINE STRATEGY:**
-- **Blanket rule** (same action for ALL emails, e.g. "mark all as unread"): Collect all message IDs, then execute ONE gmail_batch_modify_messages call.
-- **Classification rule** (different actions for different emails): Classify each email, group by action, execute batch operations per group.
+Each turn, process exactly ONE chunk: load → classify → act → record. Then STOP and wait for your next turn to load the next chunk.
 
-**STEP 3 — EXECUTE ACTIONS:**
-Call the appropriate Gmail tool(s) with the real message IDs from the loaded emails. Then record each action:
-- append_data(filename="actions.jsonl", data=<JSON of {email_id, subject, from, action}>)
+1. Call load_data(filename=<emails value>, limit_bytes=7500).
+   - Parse the visible JSONL lines: split by \n, JSON.parse each complete line.
+   - Ignore the last line if it appears cut off (incomplete JSON).
+   - Note the next_offset_bytes value from the result.
 
-**STEP 4 — FINISH:**
-After ALL actions are executed, call set_output("actions_taken", "actions.jsonl").
+2. Classify the emails in THIS chunk against the rules. For each email, decide the action: trash, draft reply, label change, or no action.
+
+3. Execute Gmail actions for this chunk immediately:
+   - **Label changes:** gmail_batch_modify_messages for all IDs in this chunk that need the same label change.
+   - **Trash:** gmail_trash_message per email.
+   - **Drafts:** gmail_create_draft per email.
+   - Record each action: append_data(filename="actions.jsonl", data=<JSON of {email_id, subject, from, action}>)
+
+4. If has_more=true, STOP HERE. On your next turn, call load_data with offset_bytes=<next_offset_bytes> and repeat from step 2.
+   If has_more=false, you are done processing — call set_output("actions_taken", "actions.jsonl").
+
+**CRITICAL:** Only call load_data ONCE per turn. Do NOT pre-load multiple chunks. You must see the emails before you can act on them.
 
 **GMAIL LABEL REFERENCE:**
-- MARK AS UNREAD — add_labels=["UNREAD"]
-- MARK AS READ — remove_labels=["UNREAD"]
-- MARK IMPORTANT — add_labels=["IMPORTANT"]
-- REMOVE IMPORTANT — remove_labels=["IMPORTANT"]
-- STAR — add_labels=["STARRED"]
-- UNSTAR — remove_labels=["STARRED"]
-- ARCHIVE — remove_labels=["INBOX"]
-- MARK AS SPAM — add_labels=["SPAM"], remove_labels=["INBOX"]
+- MARK AS UNREAD — add_labels=["UNREAD"] via gmail_modify_message (single action)
+- MARK AS READ — remove_labels=["UNREAD"] via gmail_modify_message
+- MARK IMPORTANT — add_labels=["IMPORTANT"] via gmail_modify_message
+- REMOVE IMPORTANT — remove_labels=["IMPORTANT"] via gmail_modify_message
+- STAR — add_labels=["STARRED"] via gmail_modify_message
+- UNSTAR — remove_labels=["STARRED"] via gmail_modify_message
+- ARCHIVE — remove_labels=["INBOX"] via gmail_modify_message (single email) OR gmail_batch_modify_messages (multiple emails ALL need archive)
+- MARK AS SPAM — add_labels=["SPAM"], remove_labels=["INBOX"] — must use gmail_modify_message for single emails or gmail_batch_modify_messages for multiple
 - TRASH — use gmail_trash_message(message_id) per email
+- DRAFT REPLY — use gmail_create_draft(to=<sender>, subject="Re: <subject>", body=<contextual reply based on email content>). Creates a draft only, never sends.
+- CREATE CUSTOM LABEL — use gmail_create_label(name=<label_name>) to create, then apply via gmail_modify_message with add_labels=[<label_id>]
+- APPLY CUSTOM LABEL — add_labels=[<label_id>] using the ID from gmail_create_label or gmail_list_labels
+
+**KEY RULE:** When you have BOTH add_labels AND remove_labels (like marking as spam), use gmail_modify_message for single emails or gmail_batch_modify_messages for multiple. When you have ONLY add_labels OR ONLY remove_labels (like just archiving), you MUST use gmail_modify_message because gmail_batch_modify_messages will fail.
+
+**QUEEN RULE INJECTION:**
+If a new rule appears in the conversation mid-processing (injected by the queen),
+apply it to the remaining unprocessed emails alongside the existing rules.
 
 **CRITICAL RULES:**
 - Your FIRST tool call MUST be load_data. Do NOT skip this.
 - You MUST call Gmail tools to execute real actions. Do NOT just report what should be done.
 - Do NOT call set_output until all Gmail actions are executed.
 - Pass ONLY the filename "actions.jsonl" to set_output, NOT raw data.
+- NEVER send emails. Only create drafts via gmail_create_draft.
 """,
     tools=[
         "gmail_trash_message",
         "gmail_modify_message",
         "gmail_batch_modify_messages",
+        "gmail_create_draft",
+        "gmail_create_label",
+        "gmail_list_labels",
         "load_data",
         "append_data",
     ],
@@ -174,8 +239,8 @@ report_node = NodeSpec(
     node_type="event_loop",
     client_facing=True,
     max_node_visits=0,
-    input_keys=["actions_taken"],
-    output_keys=["summary_report"],
+    input_keys=["actions_taken", "rules"],
+    output_keys=["summary_report", "rules", "last_processed_timestamp"],
     system_prompt="""\
 You are an inbox management assistant. Your job is to generate a clear summary report of the actions taken on the user's emails, present it, and ask if they want to run another batch.
 
@@ -198,12 +263,16 @@ Present a clean, readable summary:
 
 3. **No Action Taken** — Any emails that didn't match any rules (if applicable).
 
-Then ask: "Would you like to run another inbox triage with new rules?"
+Then ask: "Would you like to run another inbox management cycle with new rules?"
 
-**STEP 3 — After the user responds, call set_output:**
+**STEP 3 — After the user responds, call set_output to persist state:**
 - set_output("summary_report", <the formatted report text>)
+- set_output("rules", <the current rules from context — pass them through unchanged so they persist for the next cycle>)
+- Call get_current_timestamp() and set_output("last_processed_timestamp", <the returned timestamp>)
+
+This ensures the next timer cycle knows when emails were last processed and which rules to apply.
 """,
-    tools=["load_data"],
+    tools=["load_data", "get_current_timestamp"],
 )
 
 __all__ = [
