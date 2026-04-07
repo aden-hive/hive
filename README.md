@@ -51,7 +51,7 @@ https://github.com/user-attachments/assets/bf10edc3-06ba-48b6-98ba-d069b15fb69d
 
 ## Who Is Hive For?
 
-Hive is the harness layer for teams moving AI agents from prototype to production. Models are getting better on their own — the bottleneck is the infrastructure around them: state management, failure recovery, cost control, and observability.
+Hive is the multi-agent harness layer for teams moving AI agents from prototype to production. Single agents like Openclaw and Cowork can finish personal jobs pretty well but lack the rigor to fulfil business processes. 
 
 Hive is a good fit if you:
 
@@ -193,18 +193,6 @@ flowchart LR
     style V5 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
     style V6 fill:#fff,stroke:#ed8c00,stroke-width:1px,color:#cc5d00
 ```
-
-### The Hive Advantage
-
-| Typical Agent Frameworks   | Hive                                   |
-| -------------------------- | -------------------------------------- |
-| Focus on model orchestration | **Production harness**: state, recovery, observability |
-| Hardcode agent workflows   | Describe goals in natural language     |
-| Manual graph definition    | Auto-generated agent graphs            |
-| Reactive error handling    | Outcome-evaluation and adaptiveness    |
-| Static tool configurations | Dynamic SDK-wrapped nodes              |
-| Separate monitoring setup  | Built-in real-time observability       |
-| DIY budget management      | Integrated cost controls & degradation |
 
 ### How It Works
 

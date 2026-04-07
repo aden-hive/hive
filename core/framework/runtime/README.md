@@ -1,6 +1,6 @@
 # Agent Runtime
 
-Unified execution system for all Hive agents. Every agent — single-entry or multi-entry, headless or TUI — runs through the same runtime stack.
+Unified execution system for all Hive agents. Every agent — single-entry or multi-entry, headless or dashboard — runs through the same runtime stack.
 
 ## Topology
 
@@ -153,7 +153,7 @@ The `EventBus` provides real-time execution visibility:
 | `CLIENT_INPUT_REQUESTED` | Agent needs user input |
 | `EXECUTION_COMPLETED` | Full execution finishes |
 
-In headless mode, `AgentRunner` subscribes to `CLIENT_OUTPUT_DELTA` and `CLIENT_INPUT_REQUESTED` to print output and read stdin. In TUI mode, `AdenTUI` subscribes to route events to UI widgets.
+In headless mode, `AgentRunner` subscribes to `CLIENT_OUTPUT_DELTA` and `CLIENT_INPUT_REQUESTED` to print output and read stdin. The web dashboard subscribes to route events to the frontend.
 
 ## Storage Layout
 
