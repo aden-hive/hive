@@ -84,7 +84,6 @@ _QUEEN_PLANNING_TOOLS = [
     "initialize_and_build_agent",
     # Load existing agent (after user confirms)
     "load_built_agent",
-    "save_global_memory",
 ]
 
 # Building phase: full coding + agent construction tools.
@@ -93,7 +92,6 @@ _QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
     "list_credentials",
     "replan_agent",
     "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
-    "save_global_memory",
 ]
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
@@ -113,7 +111,6 @@ _QUEEN_STAGING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-    "save_global_memory",
 ]
 
 # Running phase: worker is executing — monitor, control, or switch to editing.
@@ -137,7 +134,6 @@ _QUEEN_RUNNING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-    "save_global_memory",
 ]
 
 # Editing phase: worker done, still loaded — tweak config and re-run.
@@ -160,7 +156,6 @@ _QUEEN_EDITING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-    "save_global_memory",
 ]
 
 
@@ -646,8 +641,6 @@ to fix the currently loaded agent (no draft required).
 - load_built_agent(agent_path) — Load an existing agent and switch to STAGING \
 phase. Only use this when the user explicitly asks to work with an existing agent \
 (e.g. "load my_agent", "run the research agent"). Confirm with the user first.
-- save_global_memory(category, description, content, name?) — Save durable \
-cross-queen memory about the user only (profile, preferences, environment, feedback)
 
 ## Workflow summary
 1. Understand requirements → discover tools → design graph
@@ -679,8 +672,6 @@ updated flowchart immediately. Use this when you make structural changes \
 restored (with decision/browser nodes intact) so you can edit it. Use \
 when the user wants to change integrations, swap tools, rethink the \
 flow, or discuss any design changes before you build them.
-- save_global_memory(category, description, content, name?) — Save durable \
-cross-queen memory about the user only
 
 When you finish building an agent, call load_built_agent(path) to stage it.
 """
@@ -694,8 +685,6 @@ The agent is loaded and ready to run. You can inspect it and launch it:
 - get_graph_status(focus?) — Brief status
 - run_agent_with_input(task) — Start the worker and switch to RUNNING phase
 - set_trigger / remove_trigger / list_triggers — Timer management
-- save_global_memory(category, description, content, name?) — Save \
-durable cross-queen memory about the user only
 
 You do NOT have write tools or backward transition tools in staging. \
 To modify the agent, run it first — after it finishes you enter EDITING \
@@ -715,8 +704,6 @@ The worker is running. You have monitoring and lifecycle tools:
 for config tweaks, re-runs, or escalation to building/planning
 - run_agent_with_input(task) — Re-run the worker with new input
 - set_trigger / remove_trigger / list_triggers — Timer management
-- save_global_memory(category, description, content, name?) — Save \
-durable cross-queen memory about the user only
 
 When the worker finishes on its own, you automatically move to EDITING \
 phase. You can also call switch_to_editing() to stop early and tweak.
@@ -732,7 +719,6 @@ The worker has finished executing and is still loaded. You can tweak and re-run:
 - run_agent_with_input(task) — Re-run the worker with new input
 - get_worker_health_summary() — Review last run's health data
 - set_trigger / remove_trigger / list_triggers — Timer management
-- save_global_memory — Save durable cross-queen memory
 
 You do NOT have write/edit file tools or backward transition tools. \
 You can only re-run or tweak from this phase.
@@ -934,26 +920,10 @@ diagnosis mode — you already have a built agent, you just need to fix it.
 _queen_memory_instructions = """
 ## Your Memory
 
-Relevant colony memories from this queen session may appear in context under \
-"--- Colony Memories ---".  Relevant global user memories may appear under \
-"--- Global Memories ---".
-
-Colony memories are shared with the worker for this queen session. Use them \
-for continuity about what this user is trying to do, what has worked, and \
-what the colony has learned together.
-
-Global memories are shared across queens and are only for durable knowledge \
-about the user: who they are, their preferences, their environment, and \
-their feedback.
-
-Memories older than 1 day include a staleness warning. Treat these as \
-point-in-time observations — verify current details before asserting them \
-as fact.
-
-You do NOT need to manually save or recall colony memories. A background \
-reflection agent automatically extracts colony learnings from each \
-conversation turn. Use `save_global_memory` only when you learn something \
-durable about the user that should help future queens.
+Relevant global memories about the user may appear at the end of this prompt \
+under "--- Global Memories ---". These are automatically maintained across \
+sessions. Use them to inform your responses but verify stale claims before \
+asserting them as fact.
 """
 
 _queen_behavior_always = _queen_behavior_always + _queen_memory_instructions

@@ -1,21 +1,20 @@
-"""Reflect agent — background memory extraction for queen and worker memory.
+"""Reflection agent — background global memory extraction for the queen.
 
-A lightweight side agent that runs after each queen LLM turn.  It
-inspects recent conversation messages (cursor-based incremental
-processing) and extracts learnings into individual memory files.
+A lightweight side agent that runs after each queen LLM turn.  It inspects
+recent conversation messages and extracts durable user knowledge into
+individual memory files in ``~/.hive/queen/global_memory/``.
 
 Two reflection types:
-  - **Short reflection**: every queen turn. Distills learnings. Nudged
-    toward a 2-turn pattern (batch reads → batch writes).
-  - **Long reflection**: every 5 short reflections, on CONTEXT_COMPACTED,
-    and at session end.  Organises, deduplicates, trims holistically.
+  - **Short reflection**: after conversational queen turns.  Distills
+    learnings about the user (profile, preferences, environment, feedback).
+  - **Long reflection**: every 5 short reflections and on CONTEXT_COMPACTED.
+    Organises, deduplicates, trims the global memory directory.
 
-The agent has restricted tool access: it can only read/write/delete
-memory files in ``~/.hive/queen/memories/`` and list them.
+Concurrency: an ``asyncio.Lock`` prevents overlapping runs.  If a trigger
+fires while a reflection is already active the event is skipped.
 
-Concurrency: an ``asyncio.Lock`` prevents overlapping runs.  If a
-trigger fires while a reflection is already active the event is skipped
-(cursor hasn't advanced, so messages will be reconsidered next time).
+All reflections are fire-and-forget (spawned via ``asyncio.create_task``)
+so they never block the queen's event loop.
 """
 
 from __future__ import annotations
@@ -23,23 +22,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from framework.agents.queen.queen_memory_v2 import (
+    GLOBAL_MEMORY_CATEGORIES,
     MAX_FILE_SIZE_BYTES,
     MAX_FILES,
-    MEMORY_DIR,
-    MEMORY_FRONTMATTER_EXAMPLE,
-    MEMORY_TYPES,
-    build_diary_document,
-    diary_filename,
     format_memory_manifest,
+    global_memory_dir,
     parse_frontmatter,
-    read_conversation_parts,
     scan_memory_files,
 )
 from framework.llm.provider import LLMResponse, Tool
@@ -54,7 +48,7 @@ _REFLECTION_TOOLS: list[Tool] = [
     Tool(
         name="list_memory_files",
         description=(
-            "List all memory files with their type, name, age, and description. "
+            "List all memory files with their type, name, and description. "
             "Returns a text manifest — one line per file."
         ),
         parameters={
@@ -135,28 +129,7 @@ def _safe_memory_path(filename: str, memory_dir: Path) -> Path:
     return candidate
 
 
-# Memory types that workers are NOT allowed to write.
-_WORKER_BLOCKED_TYPES: frozenset[str] = frozenset(
-    {"environment", "technique", "reference", "diary", "goal"}
-)
-
-
-def _inject_last_modified_by(content: str, caller: str) -> str:
-    """Inject or update ``last_modified_by`` in frontmatter."""
-    m = re.match(r"^---\s*\n(.*?)\n---", content, re.DOTALL)
-    if not m:
-        return content
-    fm_body = m.group(1)
-    # Remove existing last_modified_by line if present.
-    fm_lines = [
-        ln for ln in fm_body.splitlines() if not ln.strip().lower().startswith("last_modified_by")
-    ]
-    fm_lines.append(f"last_modified_by: {caller}")
-    new_fm = "\n".join(fm_lines)
-    return f"---\n{new_fm}\n---{content[m.end() :]}"
-
-
-def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path, caller: str) -> str:
+def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
     """Execute a reflection tool synchronously.  Returns the result string."""
     if name == "list_memory_files":
         files = scan_memory_files(memory_dir)
@@ -183,16 +156,14 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path, caller: str
         content = args.get("content", "")
         if not filename.endswith(".md"):
             return "ERROR: Filename must end with .md"
-        # Enforce caller-based type restrictions.
+        # Enforce global memory type restrictions.
         fm = parse_frontmatter(content)
         mem_type = (fm.get("type") or "").strip().lower()
-        if caller == "worker" and mem_type in _WORKER_BLOCKED_TYPES:
+        if mem_type and mem_type not in GLOBAL_MEMORY_CATEGORIES:
             return (
-                f"ERROR: Workers cannot write memory type '{mem_type}'. "
-                f"Blocked types for workers: {', '.join(sorted(_WORKER_BLOCKED_TYPES))}."
+                f"ERROR: Invalid memory type '{mem_type}'. "
+                f"Allowed types: {', '.join(GLOBAL_MEMORY_CATEGORIES)}."
             )
-        # Inject last_modified_by into frontmatter.
-        content = _inject_last_modified_by(content, caller)
         # Enforce file size limit.
         if len(content.encode("utf-8")) > MAX_FILE_SIZE_BYTES:
             return f"ERROR: Content exceeds {MAX_FILE_SIZE_BYTES} byte limit."
@@ -207,9 +178,7 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path, caller: str
                 return f"ERROR: File cap reached ({MAX_FILES}).  Delete a file first."
         memory_dir.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        logger.debug(
-            "reflect: tool write_memory_file [%s] → %s (%d chars)", caller, filename, len(content)
-        )
+        logger.debug("reflect: tool write_memory_file → %s (%d chars)", filename, len(content))
         return f"Wrote {filename} ({len(content)} chars)."
 
     if name == "delete_memory_file":
@@ -221,7 +190,7 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path, caller: str
         if not path.exists():
             return f"ERROR: File not found: {filename}"
         path.unlink()
-        logger.debug("reflect: tool delete_memory_file [%s] → %s", caller, filename)
+        logger.debug("reflect: tool delete_memory_file → %s", filename)
         return f"Deleted {filename}."
 
     return f"ERROR: Unknown tool: {name}"
@@ -239,36 +208,18 @@ async def _reflection_loop(
     system: str,
     user_msg: str,
     memory_dir: Path,
-    caller: str,
     max_turns: int = _MAX_TURNS,
 ) -> tuple[bool, list[str], str]:
     """Run a mini tool-use loop: LLM → tool calls → repeat.
 
-    Hard cap of *max_turns* iterations.  Prompt nudges the LLM toward a
-    2-turn pattern (batch reads in turn 1, batch writes in turn 2).
-
-    Returns a tuple of (success, changed_files, last_text) where *success*
-    is ``True`` if the loop completed without LLM errors, *changed_files*
-    lists filenames that were written or deleted, and *last_text* is the
-    final assistant text (useful as a skip-reason when no files changed).
+    Returns (success, changed_files, last_text).
     """
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_msg}]
     changed_files: list[str] = []
     last_text: str = ""
-    logger.debug("reflect: starting loop (caller=%s, max %d turns)", caller, max_turns)
 
     for _turn in range(max_turns):
-        # Log what we're sending to the LLM.
-        user_content = messages[-1].get("content", "") if messages else ""
-        preview = user_content[:300] if isinstance(user_content, str) else str(user_content)[:300]
-        logger.debug(
-            "reflect: turn %d — sending %d messages to LLM, last msg role=%s, preview=%s",
-            _turn,
-            len(messages),
-            messages[-1].get("role", "?") if messages else "?",
-            preview,
-        )
-
+        logger.info("reflect: loop turn %d/%d (msgs=%d)", _turn + 1, max_turns, len(messages))
         try:
             resp: LLMResponse = await llm.acomplete(
                 messages=messages,
@@ -276,45 +227,49 @@ async def _reflection_loop(
                 tools=_REFLECTION_TOOLS,
                 max_tokens=2048,
             )
+        except asyncio.CancelledError:
+            logger.warning("reflect: LLM call cancelled (task cancelled)")
+            return False, changed_files, last_text
         except Exception:
             logger.warning("reflect: LLM call failed", exc_info=True)
             return False, changed_files, last_text
 
-        # Build assistant message.
+        # Extract tool calls from litellm/OpenAI response object.
         tool_calls_raw: list[dict[str, Any]] = []
-        if resp.raw_response and isinstance(resp.raw_response, dict):
-            tool_calls_raw = resp.raw_response.get("tool_calls", [])
+        raw = resp.raw_response
+        if raw is not None:
+            # litellm returns a ModelResponse object; tool calls live on
+            # choices[0].message.tool_calls as a list of ChatCompletionMessageToolCall.
+            try:
+                msg_obj = raw.choices[0].message
+                if hasattr(msg_obj, "tool_calls") and msg_obj.tool_calls:
+                    for tc in msg_obj.tool_calls:
+                        fn = tc.function
+                        try:
+                            args = json.loads(fn.arguments) if fn.arguments else {}
+                        except (json.JSONDecodeError, TypeError):
+                            args = {}
+                        tool_calls_raw.append(
+                            {
+                                "id": tc.id,
+                                "name": fn.name,
+                                "input": args,
+                            }
+                        )
+            except (AttributeError, IndexError):
+                pass
 
-        # Log the full LLM response for debugging.
-        raw_keys = (
-            list(resp.raw_response.keys())
-            if isinstance(resp.raw_response, dict)
-            else type(resp.raw_response).__name__
-        )
-        logger.debug(
-            "reflect: turn %d — LLM response: content=%r (len=%d), stop_reason=%s, "
-            "tool_calls=%d, model=%s, tokens=%d/%d, raw_keys=%s",
-            _turn,
-            (resp.content or "")[:200],
+        logger.info(
+            "reflect: LLM responded, text=%d chars, tool_calls=%d",
             len(resp.content or ""),
-            resp.stop_reason,
             len(tool_calls_raw),
-            resp.model,
-            resp.input_tokens,
-            resp.output_tokens,
-            raw_keys,
         )
-        # Accumulate non-empty text across turns so we don't lose a reason
-        # given alongside tool calls on an earlier turn.
+
         turn_text = resp.content or ""
         if turn_text:
             last_text = turn_text
-        assistant_msg: dict[str, Any] = {
-            "role": "assistant",
-            "content": turn_text,
-        }
+        assistant_msg: dict[str, Any] = {"role": "assistant", "content": turn_text}
         if tool_calls_raw:
-            # Convert to OpenAI format for the conversation.
             assistant_msg["tool_calls"] = [
                 {
                     "id": tc["id"],
@@ -328,32 +283,16 @@ async def _reflection_loop(
             ]
         messages.append(assistant_msg)
 
-        # No tool calls → agent is done.
         if not tool_calls_raw:
-            logger.debug("reflect: loop done after %d turn(s) (no tool calls)", _turn + 1)
             break
 
-        # Execute each tool call and append results.
-        logger.debug(
-            "reflect: turn %d — executing %d tool call(s): %s",
-            _turn + 1,
-            len(tool_calls_raw),
-            [tc["name"] for tc in tool_calls_raw],
-        )
         for tc in tool_calls_raw:
-            result = _execute_tool(tc["name"], tc.get("input", {}), memory_dir, caller)
-            # Track files that were written or deleted.
+            result = _execute_tool(tc["name"], tc.get("input", {}), memory_dir)
             if tc["name"] in ("write_memory_file", "delete_memory_file"):
                 fname = tc.get("input", {}).get("filename", "")
                 if fname and not result.startswith("ERROR"):
                     changed_files.append(fname)
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": result,
-                }
-            )
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
 
     return True, changed_files, last_text
 
@@ -362,51 +301,55 @@ async def _reflection_loop(
 # System prompts
 # ---------------------------------------------------------------------------
 
-_FRONTMATTER_EXAMPLE = "\n".join(MEMORY_FRONTMATTER_EXAMPLE)
+_CATEGORIES_STR = ", ".join(GLOBAL_MEMORY_CATEGORIES)
 
 _SHORT_REFLECT_SYSTEM = f"""\
-You are a reflection agent that distills learnings from a conversation into
-persistent memory files.  You run in the background after each assistant turn.
+You are a reflection agent that distills durable knowledge about the USER
+into persistent global memory files.  You run in the background after each
+assistant turn.
 
-Your goal: identify anything from the recent messages worth remembering across
-future sessions — user preferences, project context, techniques that worked,
-goals, environment details, reference pointers.
+Your goal: identify anything from the recent messages worth remembering
+about the user across ALL future sessions — their profile, preferences,
+environment setup, or feedback on assistant behavior.
 
-Memory types: {", ".join(MEMORY_TYPES)}
+Memory categories: {_CATEGORIES_STR}
 
 Expected format for each memory file:
-{_FRONTMATTER_EXAMPLE}
+```markdown
+---
+name: {{{{memory name}}}}
+description: {{{{one-line description — specific and search-friendly}}}}
+type: {{{{{_CATEGORIES_STR}}}}}
+---
+
+{{{{memory content}}}}
+```
 
 Workflow (aim for 2 turns):
-  Turn 1 — call list_memory_files to see what already exists, then
-            read_memory_file for any that might need updating.
+  Turn 1 — call list_memory_files to see what exists, then read_memory_file
+            for any that might need updating.
   Turn 2 — call write_memory_file for new/updated memories.
 
 Rules:
-- Only persist information that would be useful in a *future* conversation.
-  Skip ephemeral task details, routine tool output, and anything obvious
-  from the code or git history.
+- ONLY persist durable knowledge about the USER — who they are, how they
+  like to work, their tech environment, their feedback on your behavior.
+- Do NOT store task-specific details, code patterns, file paths, or
+  ephemeral session state.
 - Keep files concise.  Each file should cover ONE topic.
 - If an existing memory already covers the learning, UPDATE it rather than
   creating a duplicate.
-- If there is nothing worth remembering from these messages, do nothing
-  (respond with a brief reason why nothing was saved — no tool calls needed).
-- IMPORTANT: Always end with a text message (no tool calls) summarising what
-  you did or why you skipped.  Never end on an empty response.
+- If there is nothing worth remembering, do nothing (respond with a brief
+  reason — no tool calls needed).
 - File names should be kebab-case slugs ending in .md.
-- Include a specific, search-friendly description in the frontmatter.
 - Do NOT exceed {MAX_FILE_SIZE_BYTES} bytes per file or {MAX_FILES} total files.
 """
 
 _LONG_REFLECT_SYSTEM = f"""\
 You are a reflection agent performing a periodic housekeeping pass over the
-memory directory.  Your job is to organise, deduplicate, and trim noise from
-the accumulated memory files.
+global memory directory.  Your job is to organise, deduplicate, and trim
+noise from the accumulated memory files.
 
-Memory types: {", ".join(MEMORY_TYPES)}
-
-Expected format for each memory file:
-{_FRONTMATTER_EXAMPLE}
+Memory categories: {_CATEGORIES_STR}
 
 Workflow:
   1. list_memory_files to get the full manifest.
@@ -420,29 +363,6 @@ Rules:
 - Remove memories that are no longer relevant or are superseded.
 - Keep the total collection lean and high-signal.
 - Do NOT invent new information — only reorganise what exists.
-- Do NOT delete or merge MEMORY-*.md diary files. These are daily narratives
-  managed by a separate process. You may read them for context but should not
-  modify them.
-"""
-
-_DIARY_SYSTEM = """\
-You maintain a daily diary entry for an AI colony session. You receive:
-(1) Today's existing diary content (may be empty if this is the first entry).
-(2) A transcript of recent conversation messages.
-
-Write a cohesive 3-8 sentence narrative about what happened in this session today.
-Cover: what the user asked for, what was accomplished, key decisions or obstacles,
-and current status.
-
-Rules:
-- If an existing diary is provided, rewrite it as a unified narrative incorporating
-  the new developments. Merge and deduplicate — do not simply append.
-- Keep the total narrative under 3000 characters.
-- Focus on the story arc of the day, not individual tool calls or code details.
-- If the recent messages contain nothing substantive (greetings, routine
-  confirmations), return the existing diary text unchanged.
-- Output only the diary prose. No headings, no timestamps, no code fences, no
-  frontmatter.
 """
 
 
@@ -451,31 +371,33 @@ Rules:
 # ---------------------------------------------------------------------------
 
 
+async def _read_conversation_parts(session_dir: Path) -> list[dict[str, Any]]:
+    """Read conversation parts from the queen session directory."""
+    from framework.storage.conversation_store import FileConversationStore
+
+    store = FileConversationStore(session_dir / "conversations")
+    return await store.read_parts()
+
+
 async def run_short_reflection(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
-    *,
-    caller: str,
 ) -> None:
-    """Run a short reflection: extract learnings from conversation."""
-    mem_dir = memory_dir or MEMORY_DIR
+    """Run a short reflection: extract user knowledge from conversation."""
+    logger.info("reflect: starting short reflection for %s", session_dir)
+    mem_dir = memory_dir or global_memory_dir()
 
-    messages = await read_conversation_parts(session_dir)
+    messages = await _read_conversation_parts(session_dir)
     if not messages:
-        logger.debug("reflect: short [%s] — no conversation parts", caller)
+        logger.info("reflect: no conversation parts found in %s, skipping", session_dir)
         return
 
-    logger.debug("reflect: short [%s] — %d conversation parts", caller, len(messages))
-
-    # Build a readable transcript from recent messages.
     transcript_lines: list[str] = []
     for msg in messages[-50:]:
         role = msg.get("role", "")
         content = str(msg.get("content", "")).strip()
-        if role == "tool":
-            continue  # Skip verbose tool results.
-        if not content:
+        if role == "tool" or not content:
             continue
         label = "user" if role == "user" else "assistant"
         if len(content) > 800:
@@ -483,6 +405,7 @@ async def run_short_reflection(
         transcript_lines.append(f"[{label}]: {content}")
 
     if not transcript_lines:
+        logger.info("reflect: no transcript lines after filtering, skipping")
         return
 
     transcript = "\n".join(transcript_lines)
@@ -492,38 +415,26 @@ async def run_short_reflection(
         f"Timestamp: {datetime.now().isoformat(timespec='minutes')}"
     )
 
-    _, changed, reason = await _reflection_loop(
-        llm,
-        _SHORT_REFLECT_SYSTEM,
-        user_msg,
-        mem_dir,
-        caller=caller,
-    )
+    _, changed, reason = await _reflection_loop(llm, _SHORT_REFLECT_SYSTEM, user_msg, mem_dir)
     if changed:
-        logger.debug("reflect: short reflection done [%s], changed files: %s", caller, changed)
+        logger.info("reflect: short reflection done, changed files: %s", changed)
     else:
-        logger.debug(
-            "reflect: short reflection done [%s], no changes — %s",
-            caller,
-            reason or "no reason given",
-        )
+        logger.info("reflect: short reflection done, no changes — %s", reason or "no reason")
 
 
 async def run_long_reflection(
     llm: Any,
     memory_dir: Path | None = None,
-    *,
-    caller: str,
 ) -> None:
-    """Run a long reflection: organise and deduplicate all memories."""
-    mem_dir = memory_dir or MEMORY_DIR
+    """Run a long reflection: organise and deduplicate all global memories."""
+    logger.debug("reflect: starting long reflection")
+    mem_dir = memory_dir or global_memory_dir()
     files = scan_memory_files(mem_dir)
 
     if not files:
-        logger.debug("reflect: long [%s] — no memory files to organise", caller)
+        logger.debug("reflect: no memory files, skipping long reflection")
         return
 
-    logger.debug("reflect: long [%s] — organising %d memory files", caller, len(files))
     manifest = format_memory_manifest(files)
     user_msg = (
         f"## Current memory manifest ({len(files)} files)\n\n"
@@ -531,105 +442,43 @@ async def run_long_reflection(
         f"Timestamp: {datetime.now().isoformat(timespec='minutes')}"
     )
 
-    _, changed, reason = await _reflection_loop(
-        llm,
-        _LONG_REFLECT_SYSTEM,
-        user_msg,
-        mem_dir,
-        caller=caller,
-    )
+    _, changed, reason = await _reflection_loop(llm, _LONG_REFLECT_SYSTEM, user_msg, mem_dir)
     if changed:
-        logger.debug(
-            "reflect: long reflection done [%s] (%d files), changed files: %s",
-            caller,
-            len(files),
-            changed,
-        )
+        logger.debug("reflect: long reflection done (%d files), changed: %s", len(files), changed)
     else:
         logger.debug(
-            "reflect: long reflection done [%s] (%d files), no changes — %s",
-            caller,
+            "reflect: long reflection done (%d files), no changes — %s",
             len(files),
-            reason or "no reason given",
+            reason or "no reason",
         )
 
 
-async def run_diary_update(
+async def run_shutdown_reflection(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
 ) -> None:
-    """Update today's diary file with a narrative of recent activity."""
-    mem_dir = memory_dir or MEMORY_DIR
+    """Run a final short reflection on session shutdown.
 
-    fname = diary_filename()
-    diary_path = mem_dir / fname
-    today_str = datetime.now().strftime("%Y-%m-%d")
-
-    # Read existing diary body (strip frontmatter).
-    existing_body = ""
-    if diary_path.exists():
-        try:
-            raw = diary_path.read_text(encoding="utf-8")
-            m = re.match(r"^---\s*\n.*?\n---\s*\n?", raw, re.DOTALL)
-            existing_body = raw[m.end() :].strip() if m else raw.strip()
-        except OSError:
-            pass
-
-    # Read all conversation messages for context.
-    messages = await read_conversation_parts(session_dir)
-    transcript_lines: list[str] = []
-    for msg in messages[-40:]:
-        role = msg.get("role", "")
-        content = str(msg.get("content", "")).strip()
-        if role == "tool" or not content:
-            continue
-        label = "user" if role == "user" else "assistant"
-        if len(content) > 600:
-            content = content[:600] + "..."
-        transcript_lines.append(f"[{label}]: {content}")
-
-    if not transcript_lines:
-        return
-
-    transcript = "\n".join(transcript_lines)
-    user_msg = (
-        f"## Today's Diary So Far\n\n"
-        f"{existing_body or '(no entries yet)'}\n\n"
-        f"## Recent Conversation\n\n"
-        f"{transcript}\n\n"
-        f"Date: {today_str}"
-    )
-
+    Called during session teardown so recent conversation insights are
+    persisted before the session is destroyed.
+    """
+    logger.info("reflect: running shutdown reflection for %s", session_dir)
+    mem_dir = memory_dir or global_memory_dir()
     try:
-        from framework.agents.queen.config import default_config
-
-        resp = await llm.acomplete(
-            messages=[{"role": "user", "content": user_msg}],
-            system=_DIARY_SYSTEM,
-            max_tokens=min(default_config.max_tokens, 1024),
-        )
-        new_body = (resp.content or "").strip()
-        if not new_body:
-            return
-
-        doc = build_diary_document(date_str=today_str, body=new_body)
-        if len(doc.encode("utf-8")) > MAX_FILE_SIZE_BYTES:
-            new_body = new_body[:2800]
-            doc = build_diary_document(date_str=today_str, body=new_body)
-
-        mem_dir.mkdir(parents=True, exist_ok=True)
-        diary_path.write_text(doc, encoding="utf-8")
-        logger.debug("diary: updated %s (%d chars)", fname, len(doc))
+        await run_short_reflection(session_dir, llm, mem_dir)
+        logger.info("reflect: shutdown reflection completed for %s", session_dir)
+    except asyncio.CancelledError:
+        logger.warning("reflect: shutdown reflection cancelled for %s", session_dir)
     except Exception:
-        logger.warning("diary: update failed", exc_info=True)
+        logger.warning("reflect: shutdown reflection failed", exc_info=True)
+        _write_error("shutdown reflection")
 
 
 # ---------------------------------------------------------------------------
 # Event-bus integration
 # ---------------------------------------------------------------------------
 
-# Run a long reflection every N short reflections.
 _LONG_REFLECT_INTERVAL = 5
 
 
@@ -638,7 +487,6 @@ async def subscribe_reflection_triggers(
     session_dir: Path,
     llm: Any,
     memory_dir: Path | None = None,
-    phase_state: Any = None,
 ) -> list[str]:
     """Subscribe to queen turn events and return subscription IDs.
 
@@ -647,103 +495,74 @@ async def subscribe_reflection_triggers(
     """
     from framework.runtime.event_bus import EventType
 
-    mem_dir = memory_dir or MEMORY_DIR
+    mem_dir = memory_dir or global_memory_dir()
     _lock = asyncio.Lock()
     _short_count = 0
+    _background_tasks: set[asyncio.Task] = set()
+
+    async def _do_turn_reflect(is_interval: bool, count: int) -> None:
+        async with _lock:
+            try:
+                if is_interval:
+                    await run_short_reflection(session_dir, llm, mem_dir)
+                    await run_long_reflection(llm, mem_dir)
+                else:
+                    await run_short_reflection(session_dir, llm, mem_dir)
+            except Exception:
+                logger.warning("reflect: reflection failed", exc_info=True)
+                _write_error("short/long reflection")
+
+    async def _do_compaction_reflect() -> None:
+        async with _lock:
+            try:
+                await run_long_reflection(llm, mem_dir)
+            except Exception:
+                logger.warning("reflect: compaction-triggered reflection failed", exc_info=True)
+                _write_error("compaction reflection")
+
+    def _fire_and_forget(coro: Any) -> None:
+        """Spawn a background task and prevent GC before it finishes."""
+        task = asyncio.create_task(coro)
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
     async def _on_turn_complete(event: Any) -> None:
         nonlocal _short_count
 
-        # Only process queen turns.
         if getattr(event, "stream_id", None) != "queen":
             return
 
         _short_count += 1
 
-        # Decide whether to reflect: only when the LLM turn ended without
-        # tool calls (a conversational response) OR every _LONG_REFLECT_INTERVAL turns.
         event_data = getattr(event, "data", {}) or {}
         stop_reason = event_data.get("stop_reason", "")
         is_tool_turn = stop_reason in ("tool_use", "tool_calls")
         is_interval = _short_count % _LONG_REFLECT_INTERVAL == 0
 
         if is_tool_turn and not is_interval:
-            logger.debug(
-                "reflect: skipping turn %d (stop_reason=%s, next reflect at %d)",
-                _short_count,
-                stop_reason,
-                (_short_count // _LONG_REFLECT_INTERVAL + 1) * _LONG_REFLECT_INTERVAL,
-            )
+            logger.debug("reflect: skipping tool turn (count=%d)", _short_count)
             return
 
         if _lock.locked():
-            logger.debug("reflect: skipping — reflection already in progress")
+            logger.debug("reflect: skipping, already running (count=%d)", _short_count)
             return
 
-        async with _lock:
-            try:
-                logger.debug(
-                    "reflect: turn complete — count %d/%d (stop_reason=%s)",
-                    _short_count,
-                    _LONG_REFLECT_INTERVAL,
-                    stop_reason,
-                )
-                if is_interval:
-                    await run_short_reflection(session_dir, llm, mem_dir, caller="queen")
-                    await run_long_reflection(llm, mem_dir, caller="queen")
-                else:
-                    await run_short_reflection(session_dir, llm, mem_dir, caller="queen")
-            except Exception:
-                logger.warning("reflect: reflection failed", exc_info=True)
-                _write_error("short/long reflection")
-
-            # Update daily diary after reflection.
-            try:
-                await run_diary_update(session_dir, llm, mem_dir)
-            except Exception:
-                logger.warning("reflect: diary update failed", exc_info=True)
-
-            # Update recall cache after reflection completes, guaranteeing
-            # recall sees the current turn's extracted memories.
-            if phase_state is not None:
-                try:
-                    from framework.agents.queen.recall_selector import update_recall_cache
-
-                    await update_recall_cache(
-                        session_dir,
-                        llm,
-                        cache_setter=lambda block: (
-                            setattr(phase_state, "_cached_colony_recall_block", block),
-                            setattr(phase_state, "_cached_recall_block", block),
-                        ),
-                        memory_dir=mem_dir,
-                        heading="Colony Memories",
-                    )
-                    await update_recall_cache(
-                        session_dir,
-                        llm,
-                        cache_setter=lambda block: setattr(
-                            phase_state, "_cached_global_recall_block", block
-                        ),
-                        memory_dir=getattr(phase_state, "global_memory_dir", None),
-                        heading="Global Memories",
-                    )
-                except Exception:
-                    logger.debug("recall: cache update failed", exc_info=True)
+        logger.debug(
+            "reflect: triggered (count=%d, interval=%s, stop_reason=%s)",
+            _short_count,
+            is_interval,
+            stop_reason,
+        )
+        _fire_and_forget(_do_turn_reflect(is_interval, _short_count))
 
     async def _on_compaction(event: Any) -> None:
         if getattr(event, "stream_id", None) != "queen":
             return
-
         if _lock.locked():
+            logger.debug("reflect: skipping compaction trigger, already running")
             return
-
-        async with _lock:
-            try:
-                await run_long_reflection(llm, mem_dir, caller="queen")
-            except Exception:
-                logger.warning("reflect: compaction-triggered reflection failed", exc_info=True)
-                _write_error("compaction reflection")
+        logger.debug("reflect: compaction triggered long reflection")
+        _fire_and_forget(_do_compaction_reflect())
 
     sub_ids: list[str] = []
 
@@ -762,68 +581,10 @@ async def subscribe_reflection_triggers(
     return sub_ids
 
 
-async def subscribe_worker_memory_triggers(
-    event_bus: Any,
-    llm: Any,
-    *,
-    worker_sessions_dir: Path,
-    colony_memory_dir: Path,
-    recall_cache: dict[str, str],
-) -> list[str]:
-    """Subscribe colony memory lifecycle events for worker runs.
-
-    Short reflection is now handled synchronously at node handoff in
-    ``WorkerAgent._reflect_colony_memory()``.  This function only manages:
-    - Recall cache initialisation on execution start
-    - Final long reflection + cleanup on execution end
-    """
-    from framework.runtime.event_bus import EventType
-
-    _terminal_lock = asyncio.Lock()
-
-    def _is_worker_event(event: Any) -> bool:
-        return bool(
-            getattr(event, "execution_id", None)
-            and getattr(event, "stream_id", None) not in ("queen", "judge")
-        )
-
-    async def _on_execution_started(event: Any) -> None:
-        if not _is_worker_event(event):
-            return
-        if event.execution_id is not None:
-            recall_cache[event.execution_id] = ""
-
-    async def _on_execution_terminal(event: Any) -> None:
-        if not _is_worker_event(event):
-            return
-        execution_id = event.execution_id
-        if execution_id is None:
-            return
-        async with _terminal_lock:
-            try:
-                await run_long_reflection(llm, colony_memory_dir, caller="worker")
-            except Exception:
-                logger.warning("reflect: worker final reflection failed", exc_info=True)
-                _write_error("worker final reflection")
-            finally:
-                recall_cache.pop(execution_id, None)
-
-    return [
-        event_bus.subscribe(
-            event_types=[EventType.EXECUTION_STARTED],
-            handler=_on_execution_started,
-        ),
-        event_bus.subscribe(
-            event_types=[EventType.EXECUTION_COMPLETED, EventType.EXECUTION_FAILED],
-            handler=_on_execution_terminal,
-        ),
-    ]
-
-
 def _write_error(context: str) -> None:
     """Best-effort write of the last traceback to an error file."""
     try:
-        error_path = MEMORY_DIR / ".reflection_error.txt"
+        error_path = global_memory_dir() / ".reflection_error.txt"
         error_path.parent.mkdir(parents=True, exist_ok=True)
         error_path.write_text(
             f"context: {context}\ntime: {datetime.now().isoformat()}\n\n{traceback.format_exc()}",

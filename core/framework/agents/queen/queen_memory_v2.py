@@ -1,24 +1,17 @@
-"""Shared memory helpers for queen/worker recall and reflection.
+"""Queen global memory helpers.
 
-Each memory is an individual ``.md`` file in ``~/.hive/queen/memories/``
-with optional YAML frontmatter (name, type, description).  Frontmatter
-is a convention enforced by prompt instructions — parsing is lenient and
-malformed files degrade gracefully (appear in scans with ``None`` metadata).
-
-Cursor-based incremental processing tracks which conversation messages
-have already been processed by the reflection agent.
+Global memory lives in ``~/.hive/queen/global_memory/`` and stores durable
+cross-session knowledge about the user (profile, preferences, environment,
+feedback).  Each memory is an individual ``.md`` file with optional YAML
+frontmatter (name, type, description).
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import shutil
-import time
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -26,49 +19,15 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-MEMORY_TYPES: tuple[str, ...] = ("goal", "environment", "technique", "reference", "diary")
 GLOBAL_MEMORY_CATEGORIES: tuple[str, ...] = ("profile", "preference", "environment", "feedback")
 
 _HIVE_QUEEN_DIR = Path.home() / ".hive" / "queen"
-# Legacy shared v2 root.  Colony memory now lives under queen sessions.
-MEMORY_DIR: Path = _HIVE_QUEEN_DIR / "memories"
 
 MAX_FILES: int = 200
 MAX_FILE_SIZE_BYTES: int = 4096  # 4 KB hard limit per memory file
 
 # How many lines of a memory file to read for header scanning.
 _HEADER_LINE_LIMIT: int = 30
-_MIGRATION_MARKER = ".migrated-from-shared-memory"
-_GLOBAL_MEMORY_CODE_PATTERN = re.compile(
-    r"(/Users/|~/.hive|\.py\b|\.ts\b|\.tsx\b|\.js\b|"
-    r"\b(graph|node|runtime|session|execution|worker|queen|subagent|checkpoint|flowchart)\b)",
-    re.IGNORECASE,
-)
-
-# Frontmatter example provided to the reflection agent via prompt.
-MEMORY_FRONTMATTER_EXAMPLE: list[str] = [
-    "```markdown",
-    "---",
-    "name: {{memory name}}",
-    (
-        "description: {{one-line description — used to decide "
-        "relevance in future conversations, so be specific}}"
-    ),
-    f"type: {{{{{', '.join(MEMORY_TYPES)}}}}}",
-    "---",
-    "",
-    (
-        "{{memory content — for feedback/project types, "
-        "structure as: rule/fact, then **Why:** "
-        "and **How to apply:** lines}}"
-    ),
-    "```",
-]
-
-
-def colony_memory_dir(colony_id: str) -> Path:
-    """Return the colony memory directory for a queen session."""
-    return _HIVE_QUEEN_DIR / "session" / colony_id / "memory" / "colony"
 
 
 def global_memory_dir() -> Path:
@@ -105,15 +64,6 @@ def parse_frontmatter(text: str) -> dict[str, str]:
         if val:
             result[key] = val
     return result
-
-
-def parse_memory_type(raw: str | None) -> str | None:
-    """Validate *raw* against supported memory categories."""
-    if raw is None:
-        return None
-    normalized = raw.strip().lower()
-    allowed = set(MEMORY_TYPES) | set(GLOBAL_MEMORY_CATEGORIES)
-    return normalized if normalized in allowed else None
 
 
 def parse_global_memory_category(raw: str | None) -> str | None:
@@ -164,7 +114,7 @@ class MemoryFile:
             filename=path.name,
             path=path,
             name=fm.get("name"),
-            type=parse_memory_type(fm.get("type")),
+            type=parse_global_memory_category(fm.get("type")),
             description=fm.get("description"),
             header_lines=lines,
             mtime=mtime,
@@ -182,7 +132,7 @@ def scan_memory_files(memory_dir: Path | None = None) -> list[MemoryFile]:
     Files are sorted by modification time (newest first).  Dotfiles and
     subdirectories are ignored.
     """
-    d = memory_dir or MEMORY_DIR
+    d = memory_dir or global_memory_dir()
     if not d.is_dir():
         return []
 
@@ -235,307 +185,30 @@ def build_memory_document(
     )
 
 
-def diary_filename(d: date | None = None) -> str:
-    """Return the diary memory filename for date *d* (default: today)."""
-    d = d or date.today()
-    return f"MEMORY-{d.strftime('%Y-%m-%d')}.md"
-
-
-def build_diary_document(*, date_str: str, body: str) -> str:
-    """Build a diary memory file with frontmatter."""
-    return build_memory_document(
-        name=f"diary-{date_str}",
-        description=f"Daily session narrative for {date_str}",
-        mem_type="diary",
-        body=body,
-    )
-
-
-def validate_global_memory_payload(
-    *,
-    category: str,
-    description: str,
-    content: str,
-) -> str:
-    """Validate a queen-global memory save request."""
-    parsed = parse_global_memory_category(category)
-    if parsed is None:
-        raise ValueError(
-            "Invalid global memory category. Use one of: " + ", ".join(GLOBAL_MEMORY_CATEGORIES)
-        )
-    if not description.strip():
-        raise ValueError("Global memory description cannot be empty.")
-    if not content.strip():
-        raise ValueError("Global memory content cannot be empty.")
-
-    probe = f"{description}\n{content}"
-    if _GLOBAL_MEMORY_CODE_PATTERN.search(probe):
-        raise ValueError(
-            "Global memory is only for durable user profile, preferences, "
-            "environment, or feedback — not task/code/runtime details."
-        )
-    return parsed
-
-
-def save_global_memory(
-    *,
-    category: str,
-    description: str,
-    content: str,
-    name: str | None = None,
-    memory_dir: Path | None = None,
-) -> tuple[str, Path]:
-    """Persist one queen-global memory entry."""
-    parsed = validate_global_memory_payload(
-        category=category,
-        description=description,
-        content=content,
-    )
-    target_dir = memory_dir or global_memory_dir()
-    target_dir.mkdir(parents=True, exist_ok=True)
-    memory_name = (name or description).strip()
-    filename = allocate_memory_filename(target_dir, memory_name)
-    doc = build_memory_document(
-        name=memory_name,
-        description=description,
-        mem_type=parsed,
-        body=content,
-    )
-    if len(doc.encode("utf-8")) > MAX_FILE_SIZE_BYTES:
-        raise ValueError(f"Global memory entry exceeds the {MAX_FILE_SIZE_BYTES} byte limit.")
-    path = target_dir / filename
-    path.write_text(doc, encoding="utf-8")
-    return filename, path
-
-
 # ---------------------------------------------------------------------------
 # Manifest formatting
 # ---------------------------------------------------------------------------
 
 
-def _age_label(mtime: float) -> str:
-    """Human-readable age string from an mtime."""
-    age_days = memory_age_days(mtime)
-    if age_days <= 0:
-        return "today"
-    if age_days == 1:
-        return "1 day ago"
-    return f"{age_days} days ago"
-
-
 def format_memory_manifest(files: list[MemoryFile]) -> str:
-    """One-line-per-file text manifest for the recall selector / reflection agent.
+    """One-line-per-file text manifest.
 
-    Format: ``[type] filename (age): description``
+    Format: ``[type] filename: description``
     """
     lines: list[str] = []
     for mf in files:
         t = mf.type or "unknown"
         desc = mf.description or "(no description)"
-        age = _age_label(mf.mtime)
-        lines.append(f"[{t}] {mf.filename} ({age}): {desc}")
+        lines.append(f"[{t}] {mf.filename}: {desc}")
     return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
-# Freshness / staleness
-# ---------------------------------------------------------------------------
-
-_SECONDS_PER_DAY = 86_400
-
-
-def memory_age_days(mtime: float) -> int:
-    """Return the age of a memory file in whole days."""
-    if mtime <= 0:
-        return 0
-    return int((time.time() - mtime) / _SECONDS_PER_DAY)
-
-
-def memory_freshness_text(mtime: float) -> str:
-    """Return a staleness warning for injection, or empty string if fresh."""
-    d = memory_age_days(mtime)
-    if d <= 1:
-        return ""
-    return (
-        f"This memory is {d} days old. "
-        "Memories are point-in-time observations, not live state — "
-        "claims about code behavior or file:line citations may be outdated. "
-        "Verify against current code before asserting as fact."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Cursor-based incremental processing
+# Initialisation
 # ---------------------------------------------------------------------------
 
 
-async def read_conversation_parts(session_dir: Path) -> list[dict[str, Any]]:
-    """Read all conversation parts for a session using FileConversationStore.
-
-    Returns a list of raw message dicts in sequence order.
-    """
-    from framework.storage.conversation_store import FileConversationStore
-
-    store = FileConversationStore(session_dir / "conversations")
-    return await store.read_parts()
-
-
-# ---------------------------------------------------------------------------
-# Initialisation and legacy migration
-# ---------------------------------------------------------------------------
-
-
-def init_memory_dir(
-    memory_dir: Path | None = None,
-    *,
-    migrate_legacy: bool = False,
-) -> None:
-    """Create the memory directory if missing.
-
-    When ``migrate_legacy`` is true, migrate both v1 memory files and the
-    previous shared v2 queen memory store into this directory.
-    """
-    d = memory_dir or MEMORY_DIR
-    first_run = not d.exists()
+def init_memory_dir(memory_dir: Path | None = None) -> None:
+    """Create the memory directory if missing."""
+    d = memory_dir or global_memory_dir()
     d.mkdir(parents=True, exist_ok=True)
-    if migrate_legacy:
-        migrate_legacy_memories(d)
-        migrate_shared_v2_memories(d)
-    elif first_run and d == MEMORY_DIR:
-        migrate_legacy_memories(d)
-
-
-def migrate_legacy_memories(memory_dir: Path | None = None) -> None:
-    """Convert old MEMORY.md + MEMORY-YYYY-MM-DD.md files to individual memory files.
-
-    Originals are moved to ``{memory_dir}/.legacy/``.
-    """
-    d = memory_dir or MEMORY_DIR
-    queen_dir = _HIVE_QUEEN_DIR
-    legacy_archive = d / ".legacy"
-
-    migrated_any = False
-
-    # --- Semantic memory (MEMORY.md) ---
-    semantic = queen_dir / "MEMORY.md"
-    if semantic.exists():
-        content = semantic.read_text(encoding="utf-8").strip()
-        # Skip the blank seed template.
-        if content and not content.startswith("# My Understanding of the User\n\n*No sessions"):
-            _write_migration_file(
-                d,
-                filename="legacy-semantic-memory.md",
-                name="legacy-semantic-memory",
-                mem_type="reference",
-                description="Migrated semantic memory from previous memory system",
-                body=content,
-            )
-            migrated_any = True
-        # Archive original.
-        legacy_archive.mkdir(parents=True, exist_ok=True)
-        semantic.rename(legacy_archive / "MEMORY.md")
-
-    # --- Episodic memories (MEMORY-YYYY-MM-DD.md) ---
-    old_memories_dir = queen_dir / "memories"
-    if old_memories_dir.is_dir():
-        for ep_file in sorted(old_memories_dir.glob("MEMORY-*.md")):
-            content = ep_file.read_text(encoding="utf-8").strip()
-            if not content:
-                continue
-            date_part = ep_file.stem.replace("MEMORY-", "")
-            slug = f"legacy-diary-{date_part}.md"
-            _write_migration_file(
-                d,
-                filename=slug,
-                name=f"legacy-diary-{date_part}",
-                mem_type="diary",
-                description=f"Migrated diary entry from {date_part}",
-                body=content,
-            )
-            migrated_any = True
-            # Archive original.
-            legacy_archive.mkdir(parents=True, exist_ok=True)
-            ep_file.rename(legacy_archive / ep_file.name)
-
-    if migrated_any:
-        logger.info("queen_memory_v2: migrated legacy memory files to %s", d)
-
-
-def migrate_shared_v2_memories(
-    memory_dir: Path | None = None,
-    *,
-    source_dir: Path | None = None,
-) -> None:
-    """Move shared queen v2 memory files into a colony directory once."""
-    d = memory_dir or MEMORY_DIR
-    d.mkdir(parents=True, exist_ok=True)
-    src = source_dir or MEMORY_DIR
-    if d.resolve() == src.resolve():
-        return
-
-    marker = d / _MIGRATION_MARKER
-    if marker.exists():
-        return
-
-    if not src.is_dir():
-        return
-
-    md_files = sorted(f for f in src.glob("*.md") if f.is_file() and not f.name.startswith("."))
-    if not md_files:
-        marker.write_text("no shared memories found\n", encoding="utf-8")
-        return
-
-    archive = src / ".legacy_colony_migration"
-    archive.mkdir(parents=True, exist_ok=True)
-    migrated_any = False
-
-    for src_file in md_files:
-        target = d / src_file.name
-        if not target.exists():
-            try:
-                shutil.copy2(src_file, target)
-                migrated_any = True
-            except OSError:
-                logger.debug("shared memory migration copy failed for %s", src_file, exc_info=True)
-                continue
-
-        archived = archive / src_file.name
-        counter = 2
-        while archived.exists():
-            archived = archive / f"{src_file.stem}-{counter}{src_file.suffix}"
-            counter += 1
-        try:
-            src_file.rename(archived)
-        except OSError:
-            logger.debug("shared memory migration archive failed for %s", src_file, exc_info=True)
-
-    if migrated_any:
-        logger.info("queen_memory_v2: migrated shared queen memories to %s", d)
-    marker.write_text(
-        f"migrated_at={int(time.time())}\nsource={src}\n",
-        encoding="utf-8",
-    )
-
-
-def _write_migration_file(
-    memory_dir: Path,
-    filename: str,
-    name: str,
-    mem_type: str,
-    description: str,
-    body: str,
-) -> None:
-    """Write a single migrated memory file with frontmatter."""
-    # Truncate body to respect file size limit (leave room for frontmatter).
-    header = f"---\nname: {name}\ndescription: {description}\ntype: {mem_type}\n---\n\n"
-    max_body = MAX_FILE_SIZE_BYTES - len(header.encode("utf-8"))
-    if len(body.encode("utf-8")) > max_body:
-        # Rough truncation — cut at character level then trim to last newline.
-        body = body[: max_body - 20]
-        nl = body.rfind("\n")
-        if nl > 0:
-            body = body[:nl]
-        body += "\n\n...(truncated during migration)"
-
-    path = memory_dir / filename
-    path.write_text(header + body + "\n", encoding="utf-8")

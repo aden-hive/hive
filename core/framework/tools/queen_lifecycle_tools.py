@@ -133,10 +133,9 @@ class QueenPhaseState:
     persona_prefix: str = ""  # e.g. "You are a CFO. I am a CFO with 20 years..."
     style_directive: str = ""  # e.g. "## Communication Style: Peer\n\n..."
 
-    # Cached recall block — populated async by recall_selector after each turn.
-    _cached_recall_block: str = ""
-    _cached_colony_recall_block: str = ""
+    # Cached global recall block — populated async by recall_selector after each turn.
     _cached_global_recall_block: str = ""
+    # Global memory directory.
     global_memory_dir: Path | None = None
 
     def get_current_tools(self) -> list:
@@ -152,7 +151,7 @@ class QueenPhaseState:
         return list(self.building_tools)
 
     def get_current_prompt(self) -> str:
-        """Return the system prompt for the current phase, with fresh memory appended."""
+        """Return the system prompt for the current phase."""
         if self.phase == "planning":
             base = self.prompt_planning
         elif self.phase == "running":
@@ -164,9 +163,6 @@ class QueenPhaseState:
         else:
             base = self.prompt_building
 
-        from framework.agents.queen.queen_memory import format_for_injection
-
-        _memory = format_for_injection()  # noqa: F841
         parts = []
         if self.persona_prefix:
             parts.append(self.persona_prefix)
@@ -177,9 +173,6 @@ class QueenPhaseState:
             parts.append(self.skills_catalog_prompt)
         if self.protocols_prompt:
             parts.append(self.protocols_prompt)
-        colony_memory = self._cached_colony_recall_block or self._cached_recall_block
-        if colony_memory:
-            parts.append(colony_memory)
         if self._cached_global_recall_block:
             parts.append(self._cached_global_recall_block)
         return "\n\n".join(parts)
@@ -4074,89 +4067,6 @@ def register_queen_lifecycle_tools(
     )
     registry.register(
         "remove_trigger", _remove_trigger_tool, lambda inputs: remove_trigger(**inputs)
-    )
-    tools_registered += 1
-
-    # --- save_global_memory --------------------------------------------------
-
-    async def save_global_memory_entry(
-        category: str,
-        description: str,
-        content: str,
-        name: str | None = None,
-    ) -> str:
-        """Persist a queen-global memory entry about the user."""
-        from framework.agents.queen.queen_memory_v2 import (
-            global_memory_dir as _global_memory_dir,
-            init_memory_dir as _init_memory_dir,
-            save_global_memory as _save_global_memory,
-        )
-
-        target_dir = (
-            phase_state.global_memory_dir
-            if phase_state is not None and phase_state.global_memory_dir is not None
-            else _global_memory_dir()
-        )
-        _init_memory_dir(target_dir)
-
-        try:
-            filename, path = _save_global_memory(
-                category=category,
-                description=description,
-                content=content,
-                name=name,
-                memory_dir=target_dir,
-            )
-            return json.dumps(
-                {
-                    "status": "saved",
-                    "filename": filename,
-                    "path": str(path),
-                    "category": category,
-                }
-            )
-        except ValueError as exc:
-            return json.dumps({"error": str(exc)})
-
-    _save_global_memory_tool = Tool(
-        name="save_global_memory",
-        description=(
-            "Save durable global memory about the user. "
-            "Only use for user profile, preferences, environment, or feedback."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string",
-                    "enum": ["profile", "preference", "environment", "feedback"],
-                },
-                "description": {
-                    "type": "string",
-                    "description": "Specific one-line description for future recall selection.",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "Durable user-centric memory content.",
-                },
-                "name": {
-                    "type": "string",
-                    "description": "Optional short memory title.",
-                },
-            },
-            "required": ["category", "description", "content"],
-            "additionalProperties": False,
-        },
-    )
-    registry.register(
-        "save_global_memory",
-        _save_global_memory_tool,
-        lambda inputs: save_global_memory_entry(
-            inputs["category"],
-            inputs["description"],
-            inputs["content"],
-            inputs.get("name"),
-        ),
     )
     tools_registered += 1
 
