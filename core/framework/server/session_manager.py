@@ -649,7 +649,9 @@ class SessionManager:
                 task.add_done_callback(self._background_tasks.discard)
                 logger.info("Session '%s': shutdown reflection spawned", session_id)
             except Exception:
-                logger.warning("Session '%s': failed to spawn shutdown reflection", session_id, exc_info=True)
+                logger.warning(
+                    "Session '%s': failed to spawn shutdown reflection", session_id, exc_info=True
+                )
 
         if session.queen_task is not None:
             session.queen_task.cancel()

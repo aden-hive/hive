@@ -84,7 +84,6 @@ _QUEEN_PLANNING_TOOLS = [
     "initialize_and_build_agent",
     # Load existing agent (after user confirms)
     "load_built_agent",
-
 ]
 
 # Building phase: full coding + agent construction tools.
@@ -93,7 +92,6 @@ _QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
     "list_credentials",
     "replan_agent",
     "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
-
 ]
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
@@ -113,7 +111,6 @@ _QUEEN_STAGING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-
 ]
 
 # Running phase: worker is executing — monitor, control, or switch to editing.
@@ -137,7 +134,6 @@ _QUEEN_RUNNING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-
 ]
 
 # Editing phase: worker done, still loaded — tweak config and re-run.
@@ -160,7 +156,6 @@ _QUEEN_EDITING_TOOLS = [
     "set_trigger",
     "remove_trigger",
     "list_triggers",
-
 ]
 
 

@@ -196,5 +196,4 @@ async def test_load_worker_core_keeps_explicit_worker_model_override(monkeypatch
     assert session.runner is runner
     assert session.runner._llm is None
 
-
     assert session.worker_path == tmp_path / "worker_agent"

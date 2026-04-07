@@ -28,6 +28,8 @@ MAX_FILE_SIZE_BYTES: int = 4096  # 4 KB hard limit per memory file
 
 # How many lines of a memory file to read for header scanning.
 _HEADER_LINE_LIMIT: int = 30
+
+
 def global_memory_dir() -> Path:
     """Return the queen-global memory directory."""
     return _HIVE_QUEEN_DIR / "global_memory"

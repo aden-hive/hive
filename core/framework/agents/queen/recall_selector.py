@@ -85,7 +85,11 @@ async def select_memories(
         )
         raw = (resp.content or "").strip()
         if not raw:
-            logger.warning("recall: LLM returned empty response (model=%s, stop=%s)", resp.model, resp.stop_reason)
+            logger.warning(
+                "recall: LLM returned empty response (model=%s, stop=%s)",
+                resp.model,
+                resp.stop_reason,
+            )
             return []
         data = json.loads(raw)
         selected = data.get("selected_memories", [])

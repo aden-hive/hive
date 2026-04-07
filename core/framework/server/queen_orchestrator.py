@@ -292,9 +292,7 @@ async def create_queen(
 
             mem_dir = phase_state.global_memory_dir
             selected = await select_memories(content, _session_llm, mem_dir)
-            phase_state._cached_global_recall_block = format_recall_injection(
-                selected, mem_dir
-            )
+            phase_state._cached_global_recall_block = format_recall_injection(selected, mem_dir)
         except Exception:
             logger.debug("recall: user-turn cache update failed", exc_info=True)
 
@@ -306,9 +304,7 @@ async def create_queen(
 
     async def _persona_hook(ctx: HookContext) -> HookResult | None:
         trigger = ctx.trigger or ""
-        result = await select_expert_persona(
-            trigger, _session_llm, memory_context=""
-        )
+        result = await select_expert_persona(trigger, _session_llm, memory_context="")
         if not result:
             return None
         # Store on phase_state so persona/style persist across dynamic prompt refreshes
@@ -333,9 +329,7 @@ async def create_queen(
 
                 mem_dir = phase_state.global_memory_dir
                 selected = await select_memories(trigger, _session_llm, mem_dir)
-                phase_state._cached_global_recall_block = format_recall_injection(
-                    selected, mem_dir
-                )
+                phase_state._cached_global_recall_block = format_recall_injection(selected, mem_dir)
             except Exception:
                 logger.debug("recall: initial seeding failed", exc_info=True)
 

@@ -22,7 +22,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -250,17 +249,20 @@ async def _reflection_loop(
                             args = json.loads(fn.arguments) if fn.arguments else {}
                         except (json.JSONDecodeError, TypeError):
                             args = {}
-                        tool_calls_raw.append({
-                            "id": tc.id,
-                            "name": fn.name,
-                            "input": args,
-                        })
+                        tool_calls_raw.append(
+                            {
+                                "id": tc.id,
+                                "name": fn.name,
+                                "input": args,
+                            }
+                        )
             except (AttributeError, IndexError):
                 pass
 
         logger.info(
             "reflect: LLM responded, text=%d chars, tool_calls=%d",
-            len(resp.content or ""), len(tool_calls_raw),
+            len(resp.content or ""),
+            len(tool_calls_raw),
         )
 
         turn_text = resp.content or ""
@@ -510,7 +512,6 @@ async def subscribe_reflection_triggers(
                 logger.warning("reflect: reflection failed", exc_info=True)
                 _write_error("short/long reflection")
 
-
     async def _do_compaction_reflect() -> None:
         async with _lock:
             try:
@@ -548,7 +549,9 @@ async def subscribe_reflection_triggers(
 
         logger.debug(
             "reflect: triggered (count=%d, interval=%s, stop_reason=%s)",
-            _short_count, is_interval, stop_reason,
+            _short_count,
+            is_interval,
+            stop_reason,
         )
         _fire_and_forget(_do_turn_reflect(is_interval, _short_count))
 

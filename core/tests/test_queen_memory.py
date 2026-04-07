@@ -185,9 +185,7 @@ async def test_select_memories_empty_dir(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_select_memories_with_files(tmp_path: Path):
-    (tmp_path / "a.md").write_text(
-        "---\nname: a\ndescription: about A\ntype: profile\n---\nbody"
-    )
+    (tmp_path / "a.md").write_text("---\nname: a\ndescription: about A\ntype: profile\n---\nbody")
     (tmp_path / "b.md").write_text(
         "---\nname: b\ndescription: about B\ntype: preference\n---\nbody"
     )
