@@ -45,12 +45,8 @@ class Session:
     phase_state: Any = None  # QueenPhaseState
     # Worker handoff subscription
     worker_handoff_sub: str | None = None
-    # Memory reflection + recall subscriptions
+    # Memory reflection + recall subscriptions (global memory)
     memory_reflection_subs: list = field(default_factory=list)  # list[str]
-    # Worker colony memory subscriptions
-    worker_memory_subs: list = field(default_factory=list)  # list[str]
-    # Per-execution colony recall cache for worker prompts
-    worker_colony_recall_blocks: dict[str, str] = field(default_factory=dict)
     # Trigger definitions loaded from agent's triggers.json (available but inactive)
     available_triggers: dict[str, TriggerDefinition] = field(default_factory=dict)
     # Active trigger tracking (IDs currently firing + their asyncio tasks)
@@ -323,16 +319,6 @@ class SessionManager:
 
             runtime = runner._agent_runtime
 
-            if runtime is not None:
-                runtime._dynamic_memory_provider_factory = lambda execution_id, session=session: (
-                    lambda execution_id=execution_id, session=session: (
-                        session.worker_colony_recall_blocks.get(
-                            execution_id,
-                            "",
-                        )
-                    )
-                )
-
             # Load triggers from the agent's triggers.json definition file.
             from framework.tools.queen_lifecycle_tools import _read_agent_triggers_json
 
@@ -367,18 +353,6 @@ class SessionManager:
             session.runner = runner
             session.graph_runtime = runtime
             session.worker_info = info
-
-            # Colony memory is additive; worker loading should still succeed if
-            # that optional subscription path hits an import/runtime issue while
-            # restoring an older session.
-            try:
-                await self._subscribe_worker_colony_memory(session)
-            except Exception:
-                logger.warning(
-                    "Worker colony memory subscription failed for '%s'; continuing without it",
-                    resolved_graph_id,
-                    exc_info=True,
-                )
 
             async with self._lock:
                 self._loading.discard(session.id)
@@ -617,14 +591,6 @@ class SessionManager:
             await self._emit_trigger_events(session, "removed", session.available_triggers)
             session.available_triggers.clear()
 
-        for sub_id in session.worker_memory_subs:
-            try:
-                session.event_bus.unsubscribe(sub_id)
-            except Exception:
-                pass
-        session.worker_memory_subs.clear()
-        session.worker_colony_recall_blocks.clear()
-
         graph_id = session.graph_id
         session.graph_id = None
         session.worker_path = None
@@ -650,11 +616,6 @@ class SessionManager:
         if session is None:
             return False
 
-        # Capture session data for memory consolidation before teardown
-        _llm = getattr(session, "llm", None)
-        _storage_id = getattr(session, "queen_resume_from", None) or session_id
-        _session_dir = Path.home() / ".hive" / "queen" / "session" / _storage_id
-
         if session.worker_handoff_sub is not None:
             try:
                 session.event_bus.unsubscribe(session.worker_handoff_sub)
@@ -662,21 +623,14 @@ class SessionManager:
                 pass
             session.worker_handoff_sub = None
 
-        for sub_id in session.worker_memory_subs:
-            try:
-                session.event_bus.unsubscribe(sub_id)
-            except Exception:
-                pass
-        session.worker_memory_subs.clear()
-        session.worker_colony_recall_blocks.clear()
-
-        # Stop queen and memory reflection/recall subscriptions
+        # Stop memory reflection/recall subscriptions
         for sub_id in session.memory_reflection_subs:
             try:
                 session.event_bus.unsubscribe(sub_id)
             except Exception:
                 pass
         session.memory_reflection_subs.clear()
+
         if session.queen_task is not None:
             session.queen_task.cancel()
             session.queen_task = None
@@ -707,20 +661,6 @@ class SessionManager:
                 await session.runner.cleanup_async()
             except Exception as e:
                 logger.error("Error cleaning up worker: %s", e)
-
-        # Final long reflection — fire-and-forget so teardown isn't blocked.
-        if _llm is not None:
-            import asyncio
-
-            from framework.agents.queen.queen_memory_v2 import colony_memory_dir
-            from framework.agents.queen.reflection_agent import run_long_reflection
-
-            asyncio.create_task(
-                run_long_reflection(
-                    _llm, memory_dir=colony_memory_dir(_storage_id), caller="queen"
-                ),
-                name=f"queen-memory-long-reflection-{session_id}",
-            )
 
         # Close per-session event log
         session.event_bus.close_session_log()
@@ -756,54 +696,6 @@ class SessionManager:
             await node.inject_event(handoff, is_client_input=False)
         else:
             logger.warning("Worker handoff received but queen node not ready")
-
-    async def _subscribe_worker_colony_memory(self, session: Session) -> None:
-        """Subscribe shared colony reflection/recall for top-level worker runs."""
-        for sub_id in session.worker_memory_subs:
-            try:
-                session.event_bus.unsubscribe(sub_id)
-            except Exception:
-                pass
-        session.worker_memory_subs.clear()
-        session.worker_colony_recall_blocks.clear()
-
-        runtime = session.graph_runtime
-        if runtime is None:
-            return
-
-        worker_sessions_dir = getattr(runtime, "_session_store", None)
-        worker_sessions_dir = getattr(worker_sessions_dir, "sessions_dir", None)
-        if worker_sessions_dir is None:
-            return
-
-        from framework.agents.queen.queen_memory_v2 import colony_memory_dir, init_memory_dir
-        from framework.agents.queen.reflection_agent import subscribe_worker_memory_triggers
-
-        colony_dir = colony_memory_dir(session.id)
-        init_memory_dir(colony_dir, migrate_legacy=True)
-
-        runtime._dynamic_memory_provider_factory = lambda execution_id, session=session: (
-            lambda execution_id=execution_id, session=session: (
-                session.worker_colony_recall_blocks.get(
-                    execution_id,
-                    "",
-                )
-            )
-        )
-
-        # Colony memory config for reflection-at-handoff
-        runtime._colony_memory_dir = colony_dir
-        runtime._colony_worker_sessions_dir = worker_sessions_dir
-        runtime._colony_recall_cache = session.worker_colony_recall_blocks
-        runtime._colony_reflect_llm = session.llm
-
-        session.worker_memory_subs = await subscribe_worker_memory_triggers(
-            session.event_bus,
-            session.llm,
-            worker_sessions_dir=worker_sessions_dir,
-            colony_memory_dir=colony_dir,
-            recall_cache=session.worker_colony_recall_blocks,
-        )
 
     def _subscribe_worker_handoffs(self, session: Session, executor: Any) -> None:
         """Subscribe queen to worker/subagent escalation handoff events."""
@@ -969,10 +861,6 @@ class SessionManager:
                             logger.info("Cold restore: PLANNING phase for %s", _agent_path)
                 except Exception:
                     logger.warning("Cold restore: failed to auto-load worker", exc_info=True)
-
-        # Memory reflection/recall subscriptions are set up inside
-        # queen_orchestrator.create_queen() → _queen_loop() and stored
-        # on session.memory_reflection_subs for teardown.
 
     # ------------------------------------------------------------------
     # Queen notifications

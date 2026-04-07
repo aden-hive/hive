@@ -183,16 +183,13 @@ async def create_queen(
     phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
     phase_state.editing_tools = [t for t in queen_tools if t.name in editing_names]
 
-    # ---- Cross-session memory ----------------------------------------
+    # ---- Global memory -------------------------------------------------
     from framework.agents.queen.queen_memory_v2 import (
-        colony_memory_dir,
         global_memory_dir,
         init_memory_dir,
     )
 
-    colony_dir = colony_memory_dir(session.id)
     global_dir = global_memory_dir()
-    init_memory_dir(colony_dir, migrate_legacy=True)
     init_memory_dir(global_dir)
     phase_state.global_memory_dir = global_dir
 
@@ -282,11 +279,8 @@ async def create_queen(
     _session_event_bus = session.event_bus
 
     async def _persona_hook(ctx: HookContext) -> HookResult | None:
-        from framework.agents.queen.queen_memory import format_for_injection
-
-        memory_context = format_for_injection()
         result = await select_expert_persona(
-            ctx.trigger or "", _session_llm, memory_context=memory_context
+            ctx.trigger or "", _session_llm, memory_context=""
         )
         if not result:
             return None
@@ -410,18 +404,16 @@ async def create_queen(
             )
             session_manager._subscribe_worker_handoffs(session, executor)
 
-            # ---- Reflection + recall memory subscriptions ----------------
+            # ---- Global memory reflection + recall -------------------------
             from framework.agents.queen.reflection_agent import subscribe_reflection_triggers
 
             _reflection_subs = await subscribe_reflection_triggers(
                 session.event_bus,
                 queen_dir,
                 session.llm,
-                memory_dir=colony_dir,
+                memory_dir=global_dir,
                 phase_state=phase_state,
             )
-
-            # Store sub IDs on session for teardown.
             session.memory_reflection_subs = _reflection_subs
 
             logger.info(
