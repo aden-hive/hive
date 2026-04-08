@@ -443,10 +443,12 @@ async def create_queen(
                 [t.name for t in phase_state.get_current_tools()],
             )
 
-            # Set the first user message in the node's input_data
-            # so execute() sees it as the initial context.
+            # Set the first user message.
+            # When initial_prompt is None (user opens UI without ?prompt=),
+            # use a generic greeting so the queen has a user message to
+            # respond to.  The user's real first question arrives via /chat.
             ctx.input_data = {
-                "user_request": initial_prompt or "Session started.",
+                "user_request": initial_prompt or "Hello",
             }
 
             # Run the queen -- forever-alive conversation loop
