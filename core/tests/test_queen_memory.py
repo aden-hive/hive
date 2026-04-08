@@ -35,6 +35,7 @@ def _make_litellm_response(tool_calls: list[dict] | None = None, content: str = 
     raw = SimpleNamespace(choices=[SimpleNamespace(message=message)])
     return MagicMock(content=content, raw_response=raw)
 
+
 # ---------------------------------------------------------------------------
 # parse_frontmatter
 # ---------------------------------------------------------------------------
@@ -261,21 +262,23 @@ async def test_short_reflection(tmp_path: Path):
     llm = AsyncMock()
     llm.acomplete.side_effect = [
         # Turn 1: LLM writes a global memory file
-        _make_litellm_response(tool_calls=[
-            {
-                "id": "tc_1",
-                "name": "write_memory_file",
-                "input": {
-                    "filename": "user-likes-tests.md",
-                    "content": (
-                        "---\nname: user-likes-tests\n"
-                        "type: preference\n"
-                        "description: User values thorough testing\n"
-                        "---\nObserved emphasis on test coverage."
-                    ),
-                },
-            }
-        ]),
+        _make_litellm_response(
+            tool_calls=[
+                {
+                    "id": "tc_1",
+                    "name": "write_memory_file",
+                    "input": {
+                        "filename": "user-likes-tests.md",
+                        "content": (
+                            "---\nname: user-likes-tests\n"
+                            "type: preference\n"
+                            "description: User values thorough testing\n"
+                            "---\nObserved emphasis on test coverage."
+                        ),
+                    },
+                }
+            ]
+        ),
         # Turn 2: done
         _make_litellm_response(content="Done reflecting."),
     ]
@@ -324,28 +327,32 @@ async def test_long_reflection(tmp_path: Path):
 
     llm = AsyncMock()
     llm.acomplete.side_effect = [
-        _make_litellm_response(tool_calls=[
-            {"id": "tc_1", "name": "list_memory_files", "input": {}},
-        ]),
-        _make_litellm_response(tool_calls=[
-            {
-                "id": "tc_2",
-                "name": "write_memory_file",
-                "input": {
-                    "filename": "dup-a.md",
-                    "content": (
-                        "---\nname: dup-a\ntype: profile\n"
-                        "description: profile A (merged)\n"
-                        "---\nProfile A details. Also same profile A."
-                    ),
+        _make_litellm_response(
+            tool_calls=[
+                {"id": "tc_1", "name": "list_memory_files", "input": {}},
+            ]
+        ),
+        _make_litellm_response(
+            tool_calls=[
+                {
+                    "id": "tc_2",
+                    "name": "write_memory_file",
+                    "input": {
+                        "filename": "dup-a.md",
+                        "content": (
+                            "---\nname: dup-a\ntype: profile\n"
+                            "description: profile A (merged)\n"
+                            "---\nProfile A details. Also same profile A."
+                        ),
+                    },
                 },
-            },
-            {
-                "id": "tc_3",
-                "name": "delete_memory_file",
-                "input": {"filename": "dup-b.md"},
-            },
-        ]),
+                {
+                    "id": "tc_3",
+                    "name": "delete_memory_file",
+                    "input": {"filename": "dup-b.md"},
+                },
+            ]
+        ),
         _make_litellm_response(content="Housekeeping complete."),
     ]
 
