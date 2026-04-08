@@ -261,8 +261,10 @@ class OutputValidator:
         try:
             import jsonschema
         except ImportError:
-            logger.warning("jsonschema not installed, skipping schema validation")
-            return ValidationResult(success=True, errors=[])
+            return ValidationResult(
+                success=False,
+                errors=["jsonschema library not installed - cannot validate schema"],
+            )
 
         errors = []
         validator = jsonschema.Draft7Validator(schema)
