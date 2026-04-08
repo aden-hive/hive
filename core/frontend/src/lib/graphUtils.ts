@@ -34,12 +34,32 @@ export function buildTriggerColors(): TriggerColorSet {
   };
 }
 
-export const ACTIVE_TRIGGER_COLORS: TriggerColorSet = {
-  bg: "hsl(210,30%,18%)",
-  border: "hsl(210,50%,50%)",
-  text: "hsl(210,40%,75%)",
-  icon: "hsl(210,60%,65%)",
-};
+export function buildActiveTriggerColors(): TriggerColorSet {
+  const bg = cssVar("--trigger-active-bg") || "210 30% 90%";
+  const border = cssVar("--trigger-active-border") || "210 40% 60%";
+  const text = cssVar("--trigger-active-text") || "210 40% 30%";
+  const icon = cssVar("--trigger-active-icon") || "210 50% 45%";
+  return {
+    bg: `hsl(${bg})`,
+    border: `hsl(${border})`,
+    text: `hsl(${text})`,
+    icon: `hsl(${icon})`,
+  };
+}
+
+/** Theme-reactive hook for active trigger colors. */
+export function useActiveTriggerColors(): TriggerColorSet {
+  const [colors, setColors] = useState<TriggerColorSet>(buildActiveTriggerColors);
+
+  useEffect(() => {
+    const rebuild = () => setColors(buildActiveTriggerColors());
+    const obs = new MutationObserver(rebuild);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
+    return () => obs.disconnect();
+  }, []);
+
+  return colors;
+}
 
 export const TRIGGER_ICONS: Record<string, string> = {
   webhook: "\u26A1",  // lightning bolt
