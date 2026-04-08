@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # Load reference docs at import time so they're always in the system prompt.
 # No voluntary read_file() calls needed — the LLM gets everything upfront.
@@ -37,7 +37,7 @@ _appendices = _build_appendices()
 
 # GCU guide — shared between planning and building via _shared_building_knowledge.
 _gcu_section = (
-    ("\n\n# GCU Nodes — Browser Automation\n\n" + _gcu_guide)
+    ("\n\n# Browser Automation Nodes\n\n" + _gcu_guide)
     if _is_gcu_enabled() and _gcu_guide
     else ""
 )
@@ -81,7 +81,6 @@ _QUEEN_PLANNING_TOOLS = [
     "save_agent_draft",
     "confirm_and_build",
     # Scaffold + transition to building (requires confirm_and_build first)
-    "initialize_and_build_agent",
     # Load existing agent (after user confirms)
     "load_built_agent",
 ]
@@ -172,7 +171,7 @@ _shared_building_knowledge = (
 
 ## Paths (MANDATORY)
 **Always use RELATIVE paths** \
-(e.g. `exports/agent_name/config.py`, `exports/agent_name/nodes/__init__.py`).
+(e.g. `exports/agent_name/agent.json`).
 **Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
 The project root is implicit.
 
@@ -182,14 +181,18 @@ When designing worker nodes or writing worker system prompts, reference these \
 tool names — NOT the coder-tools names (read_file, write_file, etc.).
 
 Worker data tools (for large results and spillover):
-- save_data(filename, data, data_dir) — save data to a file for later retrieval
-- load_data(filename, data_dir, offset_bytes?, limit_bytes?) — load data \
-with byte-based pagination
-- list_data_files(data_dir) — list available data files
-- append_data(filename, data, data_dir) — append to a file incrementally
-- edit_data(filename, old_text, new_text, data_dir) — find-and-replace in a data file
-- serve_file_to_user(filename, data_dir, label?, open_in_browser?) — \
-generate a clickable file URI for the user
+Worker data tools (from files-tools MCP server):
+- read_file(path) — read a file
+- write_file(path, content) — write/create a file
+- list_files(path) — list directory contents
+- search_files(pattern, path) — regex search in files
+
+Worker data tools (from hive-tools MCP server):
+- csv_read, csv_write, csv_append — CSV operations
+- pdf_read — read PDF files
+
+All tools are registered in the global MCP registry (~/.hive/mcp_registry/). \
+Workers get tools from: hive-tools, gcu-tools, files-tools.
 
 IMPORTANT: Do NOT tell workers to use read_file, write_file, edit_file, \
 search_files, or list_directory — those are YOUR tools, not theirs.
@@ -204,7 +207,7 @@ _planning_knowledge = """\
 # Core Mandates (Planning)
 - **DO NOT propose a complete goal on your own.** Instead, \
 collaborate with the user to define it.
-- **NEVER call `initialize_and_build_agent` without explicit user approval.** \
+- **NEVER call `confirm_and_build` without explicit user approval.** \
 Present the full design first and wait for the user to confirm before building.
 - **Discover tools dynamically.** NEVER reference tools from static \
 docs. Always run list_agent_tools() to see what actually exists.
@@ -252,9 +255,9 @@ When the stakeholder describes what they want, mentally construct:
 
 **After the user responds, assess fit and gaps together.** Be honest and specific. \
 Reference tools from list_agent_tools() AND built-in capabilities:
-- **GCU browser automation** (`node_type="gcu"`) provides full Playwright-based \
+- **Browser automation provides full Playwright-based \
 browser control (navigation, clicking, typing, scrolling, JS-rendered pages, \
-multi-tab). Do NOT list browser automation as missing — use GCU nodes.
+multi-tab). Do NOT list browser automation as missing — use browser nodes with tools: {policy: "all"}.
 
 Present a short **Framework Fit Assessment**:
 - **Works well**: 2-4 strengths for this use case
@@ -306,14 +309,11 @@ explicitly on a node. Available types:
 - **io** (dusty purple, parallelogram): External data input/output
 - **document** (steel blue, wavy rect): Report or document generation
 - **database** (muted teal, cylinder): Database or data store
-- **subprocess** (dark cyan, subroutine): Delegated sub-agent / predefined process
-- **browser** (deep blue, hexagon): GCU browser automation / sub-agent \
-delegation. At build time, browser nodes are dissolved into the parent \
-node's sub_agents list. Use for any GCU or sub-agent leaf node.
+- **browser** (deep blue, hexagon): Browser automation node (uses gcu-tools).
 
 Auto-detection works well for most cases: first node → start, nodes with \
 no outgoing edges → terminal, nodes with multiple conditional outgoing \
-edges → decision, GCU nodes → browser, nodes mentioning "database" → \
+edges → decision, browser tool nodes → browser, nodes mentioning "database" → \
 database, nodes mentioning "report/document" → document, I/O tools like \
 send_email → io. Everything else defaults to process. Set flowchart_type \
 explicitly only when auto-detection would be wrong.
@@ -354,48 +354,19 @@ gather → [Valid data?] →Yes→ transform → deliver
 In the draft: the `[Valid data?]` node has `flowchart_type: "decision"`, \
 `decision_clause: "Data passes validation checks?"`, with labeled yes/no edges.
 
-## Sub-Agent Nodes — Planning-Only Delegation
+## Browser Automation Nodes
 
-Sub-agent nodes (dark teal subroutines) are **planning-only** visual elements \
-that show which nodes delegate to sub-agents. At `confirm_and_build()`, \
-sub-agent nodes are **dissolved** into their parent node:
-
-- The sub-agent node's ID is added to the predecessor's `sub_agents` list
-- The sub-agent node and its connecting edge are removed
-- At runtime, the parent node can invoke the sub-agent via `delegate_to_sub_agent`
-
-**Rules for sub-agent nodes (INCLUDING GCU nodes):**
-- GCU nodes are auto-detected as `flowchart_type: "browser"` (hexagon)
-- Connect from the managing parent node to the sub-agent node
-- Sub-agent nodes must be **leaf nodes** — NO outgoing edges to other nodes
-- At build time, browser/GCU nodes are dissolved into the parent's \
-`sub_agents` list, just like decision nodes are dissolved into criteria
-
-**CRITICAL: GCU nodes (`node_type: "gcu"`) are ALWAYS sub-agents.** \
-They MUST NOT appear in the linear flow. NEVER chain GCU nodes \
-sequentially (A → gcu1 → gcu2 → B is WRONG). Instead, attach them \
-as leaves to the parent that orchestrates them:
+Browser nodes are regular `event_loop` nodes with browser tools \
+(from the gcu-tools MCP server) in their tool list. They are wired \
+into the graph with edges like any other node:
 ```
-WRONG:  intake → gcu_find_prospect → gcu_scan_mutuals → check_results
-WRONG:  decision_node → gcu_node (as a yes/no branch)
-RIGHT:  intake (sub_agents: [gcu_find, gcu_scan]) → check_results
+research → browser_scan → analyze_results
 ```
-The parent node delegates to its GCU sub-agents and collects results. \
-The main flow continues from the parent, not from the GCU node. \
-GCU nodes MUST NOT be children of decision nodes — decision nodes \
-dissolve at build time, which would leave the GCU as a dangling \
-workflow step.
+Use `tools: {policy: "all"}` to give browser nodes access to all \
+browser tools, or list specific ones with `policy: "explicit"`.
 
-**How to show delegation in the flowchart:**
-```
-research → (deep_searcher)   ← browser/GCU node, leaf
-research → [Enough results?] ← decision node
-```
-After dissolution: `research` node gets `sub_agents: ["deep_searcher"]` \
-and `success_criteria: "Enough results?"`.
-
-If the worker agent start from some initial input it is okay. \
-The queen(you) owns intake: you gathers user requirements, then calls \
+If the worker agent starts from some initial input it is okay. \
+The queen(you) owns intake: you gather user requirements, then call \
 `run_agent_with_input(task)` with a structured task description. \
 When building the agent, design the entry node's `input_keys` to \
 match what the queen will provide at run time. Worker nodes should \
@@ -411,14 +382,14 @@ You MUST get explicit user approval before ANY code is generated.
 2. **WAIT for user response.** Do NOT proceed without it.
 3. Handle the response:
    - If **Approve / Proceed**: Call confirm_and_build(), then \
-   initialize_and_build_agent(agent_name, nodes)
+   confirm_and_build(agent_name)
    - If **Adjust scope**: Discuss changes, update the draft with \
    save_agent_draft() again, and re-ask
    - If **More questions**: Answer them honestly, then ask again
    - If **Reconsider**: Discuss alternatives. If they decide to proceed, \
    that's their informed choice
 
-**NEVER call initialize_and_build_agent without first calling \
+**NEVER call confirm_and_build without first calling \
 confirm_and_build().** The system will block the transition if you try.
 """
 
@@ -477,53 +448,75 @@ When a user says "my agent is failing" or "debug this agent":
 ## 5. Implement
 
 **You should only reach this step after the user has approved the draft design \
-in the planning phase. The draft metadata will pre-populate descriptions, \
-goals, success criteria, and node metadata in the generated files.**
+and you have called `confirm_and_build(agent_name="my_agent")`.**
 
-Call `initialize_and_build_agent(agent_name, nodes)` to generate all package \
-files. The agent_name must be snake_case (e.g., "my_agent"). Pass node names \
-as comma-separated string (e.g., "gather,process,review").
-The tool creates: config.py, nodes/__init__.py, agent.py, \
-__init__.py, __main__.py, mcp_servers.json, tests/conftest.py.
+`confirm_and_build` created the agent directory (returned in agent_path). \
+Now write the complete agent config directly:
 
-The generated files are **structurally complete** with correct imports, \
-class definition, `validate()` method, `default_agent` export, and \
-`__init__.py` re-exports. They pass validation as-is.
+```
+write_file("<colony_path>/agent.json", <complete JSON config>)
+```
 
-`mcp_servers.json` is auto-generated with hive-tools as the default. \
-Do NOT manually create or overwrite `mcp_servers.json`.
+The agent.json must include ALL of these in one write:
+- `name`, `version`, `description`
+- `goal` with `description`, `success_criteria`, `constraints`
+- `identity_prompt` (agent-level behavior)
+- `nodes` — each with `id`, `description`, `system_prompt`, `tools`, \
+`input_keys`, `output_keys`, `success_criteria`
+- `edges` — connecting all nodes with proper conditions
+- `entry_node`, `terminal_nodes`
+- `mcp_servers` — REQUIRED. Always include all three: \
+`[{"name": "hive-tools"}, {"name": "gcu-tools"}, {"name": "files-tools"}]`
+- `loop_config` — `max_iterations`, `max_context_tokens`
 
-### Customizing generated files
+**Write the COMPLETE config in one `write_file` call. No TODOs, no placeholders.** \
+The queen writes final production-ready system prompts directly.
 
-**CRITICAL: Use `edit_file` to customize TODO placeholders. \
-NEVER use `write_file` to rewrite generated files from scratch. \
-Rewriting breaks imports, class structure, and causes validation failures.**
+**There are NO Python files.** The framework loads agent.json directly.
 
-Safe to edit with `edit_file`:
-- System prompts, tools, input_keys, output_keys, success_criteria in \
-nodes/__init__.py
-- Goal description, success criteria values, constraint values, edge \
-definitions, identity_prompt in agent.py
-- CLI options in __main__.py
-- For triggers (timers/webhooks), add entries to triggers.json in the \
-agent's export directory
+MCP servers are loaded from the global registry by name. Available servers:
+- `hive-tools` — web search, email, CRM, calendar, 100+ integrations
+- `gcu-tools` — browser automation (click, type, navigate, screenshot)
+- `files-tools` — file I/O (read, write, edit, search, list)
 
-Do NOT modify or rewrite:
-- Import statements at top of agent.py (they are correct)
-- The agent class definition, `validate()`, `_build_graph()`, `_setup()`, \
-or lifecycle methods (start/stop/run)
-- `__init__.py` exports (all required variables are already re-exported)
-- `default_agent = ClassName()` at bottom of agent.py
+**Template variables:** Add a `variables:` section at the top of agent.json \
+and use `{{variable_name}}` in system prompts for config injection:
+```yaml
+variables:
+  spreadsheet_id: "1ZVx..."
+nodes:
+  - id: start
+    system_prompt: |
+      Use spreadsheet: {{spreadsheet_id}}
+```
+
+### Tool access in nodes
+
+Each node declares its tool access policy:
+```yaml
+# Explicit list (recommended)
+tools:
+  policy: explicit
+  allowed: [web_search, write_file]
+
+# All tools (for browser automation nodes)
+tools:
+  policy: all
+
+# No tools (for handoff/summary nodes)
+tools:
+  policy: none
+```
 
 ## 6. Verify and Load
 
 Call `validate_agent_package("{name}")` after initialization. \
 It runs structural checks (class validation, graph validation, tool \
 validation, tests) and returns a consolidated result. If anything \
-fails: read the error, fix with edit_file, re-validate. Up to 3x.
+fails: read the error, fix with read_file+write_file, re-validate. Up to 3x.
 
 When validation passes, immediately call \
-`load_built_agent("exports/{name}")` to load the agent into the \
+`load_built_agent("<agent_path>")` to load the agent into the \
 session. This switches to STAGING phase and shows the graph in the \
 visualizer. Do NOT wait for user input between validation and loading.
 """
@@ -625,13 +618,11 @@ document, database, subprocess, etc.) with unique shapes and colors. Set \
 flowchart_type on a node to override. Nodes need only an id. \
 Use decision nodes (flowchart_type: "decision", with decision_clause and \
 labeled yes/no edges) to make conditional branching explicit. \
-GCU/sub-agent nodes (node_type: "gcu") are auto-detected as browser \
 hexagons — connect them as leaf nodes to their parent.
 - confirm_and_build() — Record user confirmation of the draft. Dissolves \
 planning-only nodes (decision → predecessor criteria; browser/GCU → \
-predecessor sub_agents list). Call this ONLY after the user explicitly \
 approves via ask_user.
-- initialize_and_build_agent(agent_name?, nodes?) — Scaffold the agent package \
+- confirm_and_build(agent_name) — Scaffold the agent package \
 and transition to BUILDING phase. For new agents, this REQUIRES \
 save_agent_draft() + confirm_and_build() first. The draft metadata is used to \
 pre-populate the generated files. Without agent_name: transition to BUILDING \
@@ -647,8 +638,8 @@ phase. Only use this when the user explicitly asks to work with an existing agen
 2. Call save_agent_draft() to create visual draft → present to user
 3. Call ask_user() to get explicit approval
 4. Call confirm_and_build() to record approval
-5. Call initialize_and_build_agent() to scaffold and start building
-For diagnosis of existing agents, call initialize_and_build_agent() \
+5. Call confirm_and_build() to scaffold and start building
+For diagnosis of existing agents, call confirm_and_build() \
 (no args) after agreeing on a fix plan with the user.
 """
 
@@ -884,7 +875,7 @@ that changes the structure, call save_agent_draft() again so they see the \
 update in real-time. The flowchart is a live collaboration tool.
 8. When the design is stable, use ask_user to get explicit approval
 9. Call confirm_and_build() after the user approves
-10. Call initialize_and_build_agent(agent_name, nodes) to scaffold and start building
+10. Call confirm_and_build(agent_name) to scaffold and start building
 
 **The flowchart is your shared whiteboard.** Don't describe changes in text \
 and then ask "should I update the draft?" — just update it. If the user says \
@@ -895,7 +886,7 @@ see every structural change reflected in the visualizer as you discuss it.
 **CRITICAL: Planning → Building boundary.** You MUST get explicit user \
 confirmation before moving to building. The sequence is:
   save_agent_draft() → iterate with user → ask_user() → confirm_and_build() → \
-  initialize_and_build_agent()
+  confirm_and_build()
 Skipping any of these steps will be blocked by the system.
 
 Remember: DO NOT write or edit any files yet. This is a read-only exploration \
@@ -911,7 +902,7 @@ your priority is diagnosis, not new design:
 2. Summarize the root cause to the user
 3. Propose a fix plan (what to change, what behavior to adjust)
 4. Get user approval via ask_user
-5. Call initialize_and_build_agent() (no args) to transition to building and implement the fix
+5. Call confirm_and_build() (no args) to transition to building and implement the fix
 
 Do NOT start the full discovery workflow (tool discovery, gap analysis) in \
 diagnosis mode — you already have a built agent, you just need to fix it.
@@ -947,7 +938,7 @@ delegate agent construction to the worker, even as a "research" subtask.
 ## Keeping the flowchart in sync during building
 
 When you make structural changes to the agent (add/remove/rename nodes, \
-change edges, modify sub-agent assignments), call save_agent_draft() to \
+change edges, modify node connections), call save_agent_draft() to \
 update the flowchart. During building, this auto-dissolves planning-only \
 nodes without needing user re-confirmation. The user sees the updated \
 flowchart immediately.
@@ -966,15 +957,15 @@ user says "replan", "go back", "let's redesign", "change the approach", \
 
 ## CRITICAL — Graph topology errors require replanning, not code edits
 
-If you discover that the agent graph has structural problems — GCU nodes \
+If you discover that the agent graph has structural problems — browser nodes \
 in the linear flow, missing edges, wrong node connections, incorrect \
-sub-agent assignments — you MUST call replan_agent() and fix the draft. \
-Do NOT attempt to fix topology by editing agent.py directly. The graph \
+node connections — you MUST call replan_agent() and fix the draft. \
+Do NOT attempt to fix topology by editing agent.json directly. The graph \
 structure is defined by the draft → dissolution → code-gen pipeline. \
-Editing code to rewire nodes bypasses the flowchart and creates drift \
-between what the user sees and what the code does.
+Editing the config to rewire nodes bypasses the flowchart and creates drift \
+between what the user sees and what the config does.
 
-**WRONG:** "Let me fix agent.py to remove GCU nodes from edges..."
+**WRONG:** "Let me fix agent.json to remove browser nodes from edges..."
 **RIGHT:** Call replan_agent(), fix the draft with save_agent_draft(), \
 get user approval, then confirm_and_build() → the corrected code is \
 generated automatically.
@@ -1100,18 +1091,15 @@ You wake up when:
 If the user asks for progress, call get_graph_status() ONCE and report. \
 If the summary mentions issues, follow up with get_graph_status(focus="issues").
 
-## Subagent delegations (browser automation, GCU)
+## Browser automation nodes
 
-When the worker delegates to a subagent (e.g., GCU browser automation), expect it \
-to take 2-5 minutes. During this time:
-- Progress will show 0% — this is NORMAL. The subagent only calls set_output at the end.
-- Check get_graph_status(focus="full") for "subagent_activity" — this shows the \
-subagent's latest reasoning text and confirms it is making real progress.
-- Do NOT conclude the subagent is stuck just because progress is 0% or because \
-you see repeated browser_click/browser_snapshot calls — that is the expected \
-pattern for web scraping.
-- Only intervene if: the subagent has been running for 5+ minutes with no new \
-subagent_activity updates, OR the judge escalates.
+Browser nodes may take 2-5 minutes for web scraping tasks. During this time:
+- Progress will show 0% until the node calls set_output at the end.
+- Check get_graph_status(focus="full") for activity updates.
+- Do NOT conclude it is stuck just because you see repeated \
+browser_click/browser_snapshot calls — that is expected for web scraping.
+- Only intervene if: the node has been running for 5+ minutes with no new \
+activity updates, OR the judge escalates.
 
 ## Handling worker termination ([WORKER_TERMINAL])
 
@@ -1143,11 +1131,11 @@ escalations. If the user gave you instructions (e.g., "just retry on errors", \
 
 CRITICAL — escalation relay protocol:
 When an escalation requires user input (auth blocks, human review), the worker \
-or its subagent is BLOCKED and waiting for your response. You MUST follow this \
+or is BLOCKED and waiting for your response. You MUST follow this \
 exact two-step sequence:
   Step 1: call ask_user() to get the user's answer.
   Step 2: call inject_message() with the user's answer IMMEDIATELY after.
-If you skip Step 2, the worker/subagent stays blocked FOREVER and the task hangs. \
+If you skip Step 2, the worker stays blocked FOREVER and the task hangs. \
 NEVER respond to the user without also calling inject_message() to unblock \
 the worker. Even if the user says "skip" or "cancel", you must still relay that \
 decision via inject_message() so the worker can clean up.
@@ -1233,7 +1221,7 @@ _queen_tools_docs = (
     + "\n\n### Phase transitions\n"
     "- save_agent_draft(...) → creates visual-only draft graph (stays in PLANNING)\n"
     "- confirm_and_build() → records user approval of draft (stays in PLANNING)\n"
-    "- initialize_and_build_agent(agent_name?, nodes?) → scaffolds package + switches to "
+    "- confirm_and_build(agent_name) → scaffolds package + switches to "
     "BUILDING (requires draft + confirmation for new agents)\n"
     "- replan_agent() → switches back to PLANNING phase (only when user explicitly requests)\n"
     "- load_built_agent(path) → switches to STAGING phase\n"

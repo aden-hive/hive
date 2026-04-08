@@ -8,7 +8,7 @@ from typing import Any
 from aiohttp import web
 
 from framework.credentials.validation import validate_agent_credentials
-from framework.graph.conversation import LEGACY_RUN_ID
+from framework.agent_loop.conversation import LEGACY_RUN_ID
 from framework.server.app import resolve_session, safe_path_segment, sessions_dir
 from framework.server.routes_sessions import _credential_error_response
 
@@ -187,7 +187,7 @@ async def handle_chat(request: web.Request) -> web.Response:
         if node is not None and hasattr(node, "inject_event"):
             # Publish BEFORE inject_event so handlers (e.g. memory recall)
             # complete before the event loop unblocks and starts the LLM turn.
-            from framework.runtime.event_bus import AgentEvent, EventType
+            from framework.host.event_bus import AgentEvent, EventType
 
             await session.event_bus.publish(
                 AgentEvent(

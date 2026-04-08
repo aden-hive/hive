@@ -527,7 +527,7 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
     # Emit SSE event so the frontend updates the graph and detail panel
     bus = getattr(session, "event_bus", None)
     if bus:
-        from framework.runtime.event_bus import AgentEvent, EventType
+        from framework.host.event_bus import AgentEvent, EventType
 
         await bus.publish(
             AgentEvent(
@@ -583,7 +583,9 @@ async def handle_session_events_history(request: web.Request) -> web.Response:
     """
     session_id = request.match_info["session_id"]
 
-    queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
+    from framework.server.session_manager import _queen_session_dir
+
+    queen_dir = _queen_session_dir(session_id)
     events_path = queen_dir / "events.jsonl"
     if not events_path.exists():
         return web.json_response({"events": [], "session_id": session_id})
@@ -608,7 +610,7 @@ async def handle_session_events_history(request: web.Request) -> web.Response:
 async def handle_session_history(request: web.Request) -> web.Response:
     """GET /api/sessions/history — all queen sessions on disk (live + cold).
 
-    Returns every session directory under ~/.hive/queen/session/, newest first.
+    Returns every queen session directory on disk, newest first.
     Live sessions have ``live: true, cold: false``; sessions that survived a
     server restart have ``live: false, cold: true``.
     """
@@ -634,7 +636,7 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
     """DELETE /api/sessions/history/{session_id} — permanently remove a session.
 
     Stops the live session (if still running) and deletes the queen session
-    directory from disk at ~/.hive/queen/session/{session_id}/.
+    directory from disk.
     This is the frontend 'delete from history' action.
     """
     manager = _get_manager(request)
@@ -645,7 +647,9 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
         await manager.stop_session(session_id)
 
     # Delete the queen session directory from disk
-    queen_session_dir = Path.home() / ".hive" / "queen" / "session" / session_id
+    from framework.server.session_manager import _queen_session_dir
+
+    queen_session_dir = _queen_session_dir(session_id)
     if queen_session_dir.exists() and queen_session_dir.is_dir():
         try:
             shutil.rmtree(queen_session_dir)
@@ -743,7 +747,9 @@ async def handle_reveal_session_folder(request: web.Request) -> web.Response:
 
     session = manager.get_session(session_id)
     storage_session_id = (session.queen_resume_from or session.id) if session else session_id
-    folder = Path.home() / ".hive" / "queen" / "session" / storage_session_id
+    from framework.server.session_manager import _queen_session_dir
+
+    folder = _queen_session_dir(storage_session_id)
     folder.mkdir(parents=True, exist_ok=True)
 
     try:

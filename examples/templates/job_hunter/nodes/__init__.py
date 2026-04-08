@@ -1,6 +1,6 @@
 """Node definitions for Job Hunter Agent."""
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # Node 1: Intake (simple)
 # Collect resume and identify strongest role types.

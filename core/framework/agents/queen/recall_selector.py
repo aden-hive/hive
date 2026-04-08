@@ -91,7 +91,19 @@ async def select_memories(
                 resp.stop_reason,
             )
             return []
-        data = json.loads(raw)
+        # Some models wrap JSON in markdown fences or add preamble text.
+        # Try to extract the JSON object if raw parse fails.
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            import re
+
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            if m:
+                data = json.loads(m.group())
+            else:
+                logger.warning("recall: LLM returned non-JSON: %.200s", raw)
+                return []
         selected = data.get("selected_memories", [])
         valid_names = {f.filename for f in files}
         result = [s for s in selected if s in valid_names][:max_results]

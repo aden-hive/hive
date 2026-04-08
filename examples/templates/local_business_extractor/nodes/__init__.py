@@ -1,6 +1,6 @@
 """Node definitions for Local Business Extractor."""
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # GCU Subagent for Google Maps
 map_search_gcu = NodeSpec(

@@ -7,6 +7,8 @@ Groq, and local models.
 See: https://docs.litellm.ai/docs/providers
 """
 
+from __future__ import annotations
+
 import ast
 import asyncio
 import hashlib
@@ -18,7 +20,10 @@ import time
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from framework.llm.key_pool import KeyPool
 
 try:
     import litellm
@@ -561,6 +566,7 @@ class LiteLLMProvider(LLMProvider):
         model: str = "gpt-4o-mini",
         api_key: str | None = None,
         api_base: str | None = None,
+        api_keys: list[str] | None = None,
         **kwargs: Any,
     ):
         """
@@ -573,6 +579,9 @@ class LiteLLMProvider(LLMProvider):
                      look for the appropriate env var (OPENAI_API_KEY,
                      ANTHROPIC_API_KEY, etc.)
             api_base: Custom API base URL (for proxies or local deployments)
+            api_keys: Optional list of API keys for key-pool rotation. When
+                      provided with 2+ keys, a :class:`KeyPool` is created and
+                      keys are rotated on rate-limit errors.
             **kwargs: Additional arguments passed to litellm.completion()
         """
         # Kimi For Coding exposes an Anthropic-compatible endpoint at
@@ -594,11 +603,24 @@ class LiteLLMProvider(LLMProvider):
             if api_base and api_base.rstrip("/").endswith("/v1"):
                 api_base = api_base.rstrip("/")[:-3]
         self.model = model
-        self.api_key = api_key
+        # Key pool: when multiple keys are provided, enable rotation.
+        self._key_pool: KeyPool | None = None
+        if api_keys and len(api_keys) > 1:
+            from framework.llm.key_pool import KeyPool
+
+            self._key_pool = KeyPool(api_keys)
+            self.api_key = api_keys[0]  # default for OAuth detection below
+            logger.info(
+                "[litellm] Key pool enabled with %d keys for model %s",
+                len(api_keys),
+                model,
+            )
+        else:
+            self.api_key = api_key or (api_keys[0] if api_keys else None)
         self.api_base = api_base or self._default_api_base_for_model(_original_model)
         self.extra_kwargs = kwargs
         # Detect Claude Code OAuth subscription by checking the api_key prefix.
-        self._claude_code_oauth = bool(api_key and api_key.startswith("sk-ant-oat"))
+        self._claude_code_oauth = bool(self.api_key and self.api_key.startswith("sk-ant-oat"))
         if self._claude_code_oauth:
             # Anthropic requires a specific User-Agent for OAuth requests.
             eh = self.extra_kwargs.setdefault("extra_headers", {})
@@ -669,10 +691,20 @@ class LiteLLMProvider(LLMProvider):
     def _completion_with_rate_limit_retry(
         self, max_retries: int | None = None, **kwargs: Any
     ) -> Any:
-        """Call litellm.completion with retry on 429 rate limit errors and empty responses."""
+        """Call litellm.completion with retry on 429 rate limit errors and empty responses.
+
+        When a :class:`KeyPool` is configured, rate-limited keys are rotated
+        automatically so the next attempt uses a different key -- no sleep
+        needed between attempts.
+        """
         model = kwargs.get("model", self.model)
         retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
         for attempt in range(retries + 1):
+            # Rotate key from pool when available.
+            current_key: str | None = None
+            if self._key_pool:
+                current_key = self._key_pool.get_key()
+                kwargs["api_key"] = current_key
             try:
                 response = litellm.completion(**kwargs)  # type: ignore[union-attr]
 
@@ -747,8 +779,22 @@ class LiteLLMProvider(LLMProvider):
                     time.sleep(wait)
                     continue
 
+                if self._key_pool and current_key:
+                    self._key_pool.mark_success(current_key)
                 return response
             except RateLimitError as e:
+                # Key pool: mark the offending key and rotate immediately.
+                if self._key_pool and current_key:
+                    self._key_pool.mark_rate_limited(current_key, retry_after=60.0)
+                    # When we have other healthy keys, skip the sleep -- the
+                    # next iteration will pick a different key automatically.
+                    if attempt < retries:
+                        logger.info(
+                            "[retry] Key pool rotating away from ...%s on 429",
+                            current_key[-6:],
+                        )
+                        continue
+
                 # Dump full request to file for debugging
                 messages = kwargs.get("messages", [])
                 token_count, token_method = _estimate_tokens(model, messages)
@@ -761,7 +807,7 @@ class LiteLLMProvider(LLMProvider):
                 if attempt == retries:
                     logger.error(
                         f"[retry] GAVE UP on {model} after {retries + 1} "
-                        f"attempts — rate limit error: {e!s}. "
+                        f"attempts -- rate limit error: {e!s}. "
                         f"~{token_count} tokens ({token_method}). "
                         f"Full request dumped to: {dump_path}"
                     )
@@ -880,10 +926,16 @@ class LiteLLMProvider(LLMProvider):
         """Async version of _completion_with_rate_limit_retry.
 
         Uses litellm.acompletion and asyncio.sleep instead of blocking calls.
+        When a :class:`KeyPool` is configured, rate-limited keys are rotated.
         """
         model = kwargs.get("model", self.model)
         retries = max_retries if max_retries is not None else RATE_LIMIT_MAX_RETRIES
         for attempt in range(retries + 1):
+            # Rotate key from pool when available.
+            current_key: str | None = None
+            if self._key_pool:
+                current_key = self._key_pool.get_key()
+                kwargs["api_key"] = current_key
             try:
                 response = await litellm.acompletion(**kwargs)  # type: ignore[union-attr]
 
@@ -952,8 +1004,20 @@ class LiteLLMProvider(LLMProvider):
                     await asyncio.sleep(wait)
                     continue
 
+                if self._key_pool and current_key:
+                    self._key_pool.mark_success(current_key)
                 return response
             except RateLimitError as e:
+                # Key pool: mark the offending key and rotate immediately.
+                if self._key_pool and current_key:
+                    self._key_pool.mark_rate_limited(current_key, retry_after=60.0)
+                    if attempt < retries:
+                        logger.info(
+                            "[async-retry] Key pool rotating away from ...%s on 429",
+                            current_key[-6:],
+                        )
+                        continue
+
                 messages = kwargs.get("messages", [])
                 token_count, token_method = _estimate_tokens(model, messages)
                 dump_path = _dump_failed_request(
@@ -965,7 +1029,7 @@ class LiteLLMProvider(LLMProvider):
                 if attempt == retries:
                     logger.error(
                         f"[async-retry] GAVE UP on {model} after {retries + 1} "
-                        f"attempts — rate limit error: {e!s}. "
+                        f"attempts -- rate limit error: {e!s}. "
                         f"~{token_count} tokens ({token_method}). "
                         f"Full request dumped to: {dump_path}"
                     )

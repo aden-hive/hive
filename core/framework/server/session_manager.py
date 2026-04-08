@@ -19,9 +19,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from framework.runtime.triggers import TriggerDefinition
+from framework.config import QUEENS_DIR
+from framework.host.triggers import TriggerDefinition
 
 logger = logging.getLogger(__name__)
+
+
+def _queen_session_dir(session_id: str, queen_name: str = "default") -> Path:
+    """Return the on-disk directory for a queen session."""
+    return QUEENS_DIR / queen_name / "sessions" / session_id
 
 
 @dataclass
@@ -67,6 +73,10 @@ class Session:
     queen_resume_from: str | None = None
     # Queen session directory (set during _start_queen, used for shutdown reflection)
     queen_dir: Path | None = None
+    # Multi-queen support: which queen profile this session uses
+    queen_name: str = "default"
+    # Colony name: set when a worker is loaded from a colony
+    colony_name: str | None = None
 
 
 class SessionManager:
@@ -86,6 +96,14 @@ class SessionManager:
         # reflections) so they aren't garbage-collected before completion.
         self._background_tasks: set[asyncio.Task] = set()
 
+        # Run one-time v2 directory structure migration
+        from framework.storage.migrate_v2 import run_migration
+
+        try:
+            run_migration()
+        except Exception:
+            logger.warning("v2 migration failed (non-fatal)", exc_info=True)
+
     # ------------------------------------------------------------------
     # Session lifecycle
     # ------------------------------------------------------------------
@@ -100,7 +118,7 @@ class SessionManager:
         Internal helper — use create_session() or create_session_with_worker_graph().
         """
         from framework.config import RuntimeConfig, get_hive_config
-        from framework.runtime.event_bus import EventBus
+        from framework.host.event_bus import EventBus
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         resolved_id = session_id or f"session_{ts}_{uuid.uuid4().hex[:8]}"
@@ -194,9 +212,7 @@ class SessionManager:
         # is incomplete and will fail to import).
         if queen_resume_from:
             _resume_phase = None
-            _meta_path = (
-                Path.home() / ".hive" / "queen" / "session" / queen_resume_from / "meta.json"
-            )
+            _meta_path = _queen_session_dir(queen_resume_from) / "meta.json"
             if _meta_path.exists():
                 try:
                     _meta = json.loads(_meta_path.read_text(encoding="utf-8"))
@@ -281,7 +297,7 @@ class SessionManager:
         Sets up the runner, runtime, and session fields. Does NOT notify
         the queen — callers handle that step.
         """
-        from framework.runner import AgentRunner
+        from framework.loader import AgentLoader
 
         agent_path = Path(agent_path)
         resolved_graph_id = graph_id or agent_path.name
@@ -303,7 +319,7 @@ class SessionManager:
             resolved_model = model or session_model or self._model
             runner = await loop.run_in_executor(
                 None,
-                lambda: AgentRunner.load(
+                lambda: AgentLoader.load(
                     agent_path,
                     model=resolved_model,
                     interactive=False,
@@ -536,7 +552,7 @@ class SessionManager:
 
         # Update meta.json so cold-restore can discover this session by agent_path
         storage_session_id = session.queen_resume_from or session.id
-        meta_path = Path.home() / ".hive" / "queen" / "session" / storage_session_id / "meta.json"
+        meta_path = _queen_session_dir(storage_session_id, session.queen_name) / "meta.json"
         try:
             _agent_name = (
                 session.worker_info.name
@@ -644,10 +660,11 @@ class SessionManager:
 
                 task = asyncio.create_task(
                     asyncio.shield(run_shutdown_reflection(session.queen_dir, session.llm)),
+                    name=f"shutdown-reflect-{session_id}",
                 )
+                logger.info("Session '%s': shutdown reflection spawned", session_id)
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
-                logger.info("Session '%s': shutdown reflection spawned", session_id)
             except Exception:
                 logger.warning(
                     "Session '%s': failed to spawn shutdown reflection", session_id, exc_info=True
@@ -721,7 +738,7 @@ class SessionManager:
 
     def _subscribe_worker_handoffs(self, session: Session, executor: Any) -> None:
         """Subscribe queen to worker/subagent escalation handoff events."""
-        from framework.runtime.event_bus import EventType as _ET
+        from framework.host.event_bus import EventType as _ET
 
         if session.worker_handoff_sub is not None:
             session.event_bus.unsubscribe(session.worker_handoff_sub)
@@ -755,13 +772,11 @@ class SessionManager:
             session.queen_executor,
         )
 
-        hive_home = Path.home() / ".hive"
-
         # Determine which session directory to use for queen storage.
         # When queen_resume_from is set we write to the ORIGINAL session's
         # directory so that all messages accumulate in one place.
         storage_session_id = session.queen_resume_from or session.id
-        queen_dir = hive_home / "queen" / "session" / storage_session_id
+        queen_dir = _queen_session_dir(storage_session_id, session.queen_name)
         queen_dir.mkdir(parents=True, exist_ok=True)
         session.queen_dir = queen_dir
 
@@ -920,7 +935,7 @@ class SessionManager:
 
     async def _emit_graph_loaded(self, session: Session) -> None:
         """Publish a WORKER_GRAPH_LOADED event so the frontend can update."""
-        from framework.runtime.event_bus import AgentEvent, EventType
+        from framework.host.event_bus import AgentEvent, EventType
 
         info = session.worker_info
         await session.event_bus.publish(
@@ -939,7 +954,7 @@ class SessionManager:
 
     async def _emit_flowchart_on_restore(self, session: Session, agent_path: str | Path) -> None:
         """Emit FLOWCHART_MAP_UPDATED from persisted flowchart file on cold restore."""
-        from framework.runtime.event_bus import AgentEvent, EventType
+        from framework.host.event_bus import AgentEvent, EventType
         from framework.tools.flowchart_utils import load_flowchart_file
 
         original_draft, flowchart_map = load_flowchart_file(agent_path)
@@ -982,7 +997,7 @@ class SessionManager:
         triggers: dict[str, TriggerDefinition],
     ) -> None:
         """Emit TRIGGER_AVAILABLE or TRIGGER_REMOVED events for each trigger."""
-        from framework.runtime.event_bus import AgentEvent, EventType
+        from framework.host.event_bus import AgentEvent, EventType
 
         event_type = (
             EventType.TRIGGER_AVAILABLE if kind == "available" else EventType.TRIGGER_REMOVED
@@ -1076,10 +1091,10 @@ class SessionManager:
         """Return disk metadata for a session that is no longer live in memory.
 
         Checks whether queen conversation files exist at
-        ~/.hive/queen/session/{session_id}/conversations/.  Returns None when
+        ~/.hive/agents/queens/{name}/sessions/{session_id}/conversations/.  Returns None when
         no data is found so callers can fall through to a 404.
         """
-        queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
+        queen_dir = _queen_session_dir(session_id)
         convs_dir = queen_dir / "conversations"
         if not convs_dir.exists():
             return None
@@ -1134,7 +1149,7 @@ class SessionManager:
     @staticmethod
     def list_cold_sessions() -> list[dict]:
         """Return metadata for every queen session directory on disk, newest first."""
-        queen_sessions_dir = Path.home() / ".hive" / "queen" / "session"
+        queen_sessions_dir = QUEENS_DIR / "default" / "sessions"
         if not queen_sessions_dir.exists():
             return []
 

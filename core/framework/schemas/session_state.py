@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import AliasChoices, BaseModel, Field, computed_field
 
 if TYPE_CHECKING:
-    from framework.graph.executor import ExecutionResult
+    from framework.orchestrator.orchestrator import ExecutionResult
     from framework.schemas.run import Run
 
 

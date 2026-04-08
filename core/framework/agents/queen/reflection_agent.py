@@ -2,7 +2,7 @@
 
 A lightweight side agent that runs after each queen LLM turn.  It inspects
 recent conversation messages and extracts durable user knowledge into
-individual memory files in ``~/.hive/queen/global_memory/``.
+individual memory files in ``~/.hive/memories/global/``.
 
 Two reflection types:
   - **Short reflection**: after conversational queen turns.  Distills
@@ -493,7 +493,7 @@ async def subscribe_reflection_triggers(
     Call this once during queen setup.  Returns a list of event-bus
     subscription IDs for cleanup during session teardown.
     """
-    from framework.runtime.event_bus import EventType
+    from framework.host.event_bus import EventType
 
     mem_dir = memory_dir or global_memory_dir()
     _lock = asyncio.Lock()

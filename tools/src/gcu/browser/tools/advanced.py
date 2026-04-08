@@ -113,6 +113,28 @@ def register_advanced_tools(mcp: FastMCP) -> None:
             return {"ok": False, "error": "No active tab"}
 
         try:
+            # Show a brief toast in the browser so the user sees JS executing
+            snippet = script.strip().replace("'", "\\'")[:80]
+            toast_js = f"""
+            (function(){{
+              var old=document.getElementById('__hive_toast');if(old)old.remove();
+              var t=document.createElement('div');t.id='__hive_toast';
+              t.style.cssText='position:fixed;z-index:2147483647;top:12px;right:12px;'
+                +'background:rgba(30,30,30,0.9);color:#a5d6ff;font:12px/18px monospace;'
+                +'padding:8px 14px;border-radius:6px;max-width:420px;pointer-events:none;'
+                +'white-space:pre-wrap;word-break:break-all;transition:opacity 0.4s;opacity:1;'
+                +'border:1px solid rgba(59,130,246,0.4);box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+              t.textContent='\\u25b6 '+'{snippet}';
+              document.documentElement.appendChild(t);
+              setTimeout(function(){{t.style.opacity='0';}},2000);
+              setTimeout(function(){{t.remove();}},2500);
+            }})();
+            """
+            try:
+                await bridge.evaluate(target_tab, toast_js)
+            except Exception:
+                pass
+
             result = await bridge.evaluate(target_tab, script)
             return result
         except Exception as e:

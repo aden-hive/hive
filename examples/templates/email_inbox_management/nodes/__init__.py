@@ -1,6 +1,6 @@
 """Node definitions for Inbox Management Agent."""
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # Node 1: Intake (client-facing)
 # Receives user rules and max_emails, confirms understanding with user.

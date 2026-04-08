@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from framework.runtime.triggers import TriggerDefinition
+from framework.host.triggers import TriggerDefinition
 from framework.server.app import create_app
 from framework.server.session_manager import Session
 
@@ -1055,7 +1055,7 @@ class TestNodeCriteria:
         nodes, edges = nodes_and_edges
 
         # Create a real RuntimeLogStore pointed at the temp agent dir
-        from framework.runtime.runtime_log_store import RuntimeLogStore
+        from framework.tracker.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
 
@@ -1110,7 +1110,7 @@ class TestLogs:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        from framework.runtime.runtime_log_store import RuntimeLogStore
+        from framework.tracker.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
         session = _make_session(
@@ -1132,7 +1132,7 @@ class TestLogs:
         session_id, session_dir, state = custom_id_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        from framework.runtime.runtime_log_store import RuntimeLogStore
+        from framework.tracker.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
         session = _make_session(
@@ -1154,7 +1154,7 @@ class TestLogs:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        from framework.runtime.runtime_log_store import RuntimeLogStore
+        from framework.tracker.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
         session = _make_session(
@@ -1177,7 +1177,7 @@ class TestLogs:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        from framework.runtime.runtime_log_store import RuntimeLogStore
+        from framework.tracker.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
         session = _make_session(
@@ -1201,7 +1201,7 @@ class TestLogs:
         session_id, session_dir, state = sample_session
         tmp_path, agent_name, base = tmp_agent_dir
 
-        from framework.runtime.runtime_log_store import RuntimeLogStore
+        from framework.tracker.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
         session = _make_session(
@@ -1227,7 +1227,7 @@ class TestNodeLogs:
         tmp_path, agent_name, base = tmp_agent_dir
         nodes, edges = nodes_and_edges
 
-        from framework.runtime.runtime_log_store import RuntimeLogStore
+        from framework.tracker.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(base)
         session = _make_session(
@@ -1256,7 +1256,7 @@ class TestNodeLogs:
     @pytest.mark.asyncio
     async def test_node_logs_missing_session_id(self, nodes_and_edges):
         nodes, edges = nodes_and_edges
-        from framework.runtime.runtime_log_store import RuntimeLogStore
+        from framework.tracker.runtime_log_store import RuntimeLogStore
 
         log_store = RuntimeLogStore(Path("/tmp/dummy"))
         session = _make_session(nodes=nodes, edges=edges, log_store=log_store)

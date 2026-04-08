@@ -28,8 +28,11 @@ def _get_allowed_agent_roots() -> tuple[Path, ...]:
     """
     global _ALLOWED_AGENT_ROOTS
     if _ALLOWED_AGENT_ROOTS is None:
+        from framework.config import COLONIES_DIR
+
         _ALLOWED_AGENT_ROOTS = (
-            (_REPO_ROOT / "exports").resolve(),
+            COLONIES_DIR.resolve(),                     # ~/.hive/colonies/
+            (_REPO_ROOT / "exports").resolve(),         # compat fallback
             (_REPO_ROOT / "examples").resolve(),
             (Path.home() / ".hive" / "agents").resolve(),
         )
@@ -53,7 +56,8 @@ def validate_agent_path(agent_path: str | Path) -> Path:
         if resolved.is_relative_to(root) and resolved != root:
             return resolved
     raise ValueError(
-        "agent_path must be inside an allowed directory (exports/, examples/, or ~/.hive/agents/)"
+        "agent_path must be inside an allowed directory "
+        "(~/.hive/colonies/, exports/, examples/, or ~/.hive/agents/)"
     )
 
 

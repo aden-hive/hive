@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 
 from framework.llm.provider import Tool, ToolResult, ToolUse
-from framework.runner.tool_registry import _execution_context
+from framework.loader.tool_registry import _execution_context
 
 # ---------------------------------------------------------------------------
 # Tool definitions (auto-discovered by ToolRegistry.discover_from_module)
@@ -56,7 +56,7 @@ def _get_data_dir() -> str:
     ctx = _execution_context.get()
     if not ctx or "data_dir" not in ctx:
         raise RuntimeError(
-            "data_dir not set in execution context. Is the tool running inside a GraphExecutor?"
+            "data_dir not set in execution context. Is the tool running inside a Orchestrator?"
         )
     return ctx["data_dir"]
 

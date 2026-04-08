@@ -27,8 +27,8 @@ def _get_last_active(agent_path: Path) -> str | None:
     """Return the most recent updated_at timestamp across all sessions.
 
     Checks both worker sessions (``~/.hive/agents/{name}/sessions/``) and
-    queen sessions (``~/.hive/queen/session/``) whose ``meta.json`` references
-    the same *agent_path*.
+    queen sessions (``~/.hive/agents/queens/default/sessions/``) whose
+    ``meta.json`` references the same *agent_path*.
     """
     from datetime import datetime
 
@@ -53,7 +53,9 @@ def _get_last_active(agent_path: Path) -> str | None:
                 continue
 
     # 2. Queen sessions
-    queen_sessions_dir = Path.home() / ".hive" / "queen" / "session"
+    from framework.config import QUEENS_DIR
+
+    queen_sessions_dir = QUEENS_DIR / "default" / "sessions"
     if queen_sessions_dir.exists():
         resolved = agent_path.resolve()
         for d in queen_sessions_dir.iterdir():
@@ -112,13 +114,33 @@ def _count_runs(agent_name: str) -> int:
 def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
     """Extract node count, tool count, and tags from an agent directory.
 
-    Prefers agent.py (AST-parsed) over agent.json for node/tool counts
-    since agent.json may be stale.  Tags are only available from agent.json.
+    Checks agent.json (declarative) first, then agent.py (legacy).
     """
     import ast
 
     node_count, tool_count, tags = 0, 0, []
 
+    # Declarative JSON agents (preferred)
+    agent_json = agent_path / "agent.json"
+    if agent_json.exists():
+        try:
+            data = json.loads(agent_json.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                json_nodes = data.get("nodes", [])
+                node_count = len(json_nodes)
+                tools: set[str] = set()
+                for n in json_nodes:
+                    node_tools = n.get("tools", {})
+                    if isinstance(node_tools, dict):
+                        tools.update(node_tools.get("allowed", []))
+                    elif isinstance(node_tools, list):
+                        tools.update(node_tools)
+                tool_count = len(tools)
+                return node_count, tool_count, tags
+        except Exception:
+            pass
+
+    # Legacy: agent.py (AST-parsed)
     agent_py = agent_path / "agent.py"
     if agent_py.exists():
         try:
@@ -132,38 +154,30 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
         except Exception:
             pass
 
-    agent_json = agent_path / "agent.json"
-    if agent_json.exists():
-        try:
-            data = json.loads(agent_json.read_text(encoding="utf-8"))
-            json_nodes = data.get("graph", {}).get("nodes", []) or data.get("nodes", [])
-            if node_count == 0:
-                node_count = len(json_nodes)
-            tools: set[str] = set()
-            for n in json_nodes:
-                tools.update(n.get("tools", []))
-            tool_count = len(tools)
-            tags = data.get("agent", {}).get("tags", [])
-        except Exception:
-            pass
-
     return node_count, tool_count, tags
 
 
 def discover_agents() -> dict[str, list[AgentEntry]]:
     """Discover agents from all known sources grouped by category."""
-    from framework.runner.cli import (
+    from framework.loader.cli import (
         _extract_python_agent_metadata,
         _get_framework_agents_dir,
         _is_valid_agent_dir,
     )
 
+    from framework.config import COLONIES_DIR
+
     groups: dict[str, list[AgentEntry]] = {}
     sources = [
-        ("Your Agents", Path("exports")),
+        ("Your Agents", COLONIES_DIR),
+        ("Your Agents", Path("exports")),  # compat fallback
         ("Framework", _get_framework_agents_dir()),
         ("Examples", Path("examples/templates")),
     ]
+
+    # Track seen agent directory names to avoid duplicates when the same
+    # agent exists in both colonies/ and exports/ (colonies takes priority).
+    _seen_agent_names: set[str] = set()
 
     for category, base_dir in sources:
         if not base_dir.exists():
@@ -172,6 +186,9 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
         for path in sorted(base_dir.iterdir(), key=lambda p: p.name):
             if not _is_valid_agent_dir(path):
                 continue
+            if path.name in _seen_agent_names:
+                continue
+            _seen_agent_names.add(path.name)
 
             name, desc = _extract_python_agent_metadata(path)
             config_fallback_name = path.name.replace("_", " ").title()
@@ -179,13 +196,19 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
 
             node_count, tool_count, tags = _extract_agent_stats(path)
             if not used_config:
-                agent_json = path / "agent.json"
-                if agent_json.exists():
+                # Try agent.json (declarative) for metadata
+                agent_json_path = path / "agent.json"
+                if agent_json_path.exists():
                     try:
-                        data = json.loads(agent_json.read_text(encoding="utf-8"))
-                        meta = data.get("agent", {})
-                        name = meta.get("name", name)
-                        desc = meta.get("description", desc)
+                        data = json.loads(
+                            agent_json_path.read_text(encoding="utf-8"),
+                        )
+                        if isinstance(data, dict):
+                            raw_name = data.get("name", name)
+                            if "-" in raw_name and " " not in raw_name:
+                                raw_name = raw_name.replace("-", " ").title()
+                            name = raw_name
+                            desc = data.get("description", desc)
                     except Exception:
                         pass
 
@@ -204,6 +227,8 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                 )
             )
         if entries:
-            groups[category] = entries
+            existing = groups.get(category, [])
+            existing.extend(entries)
+            groups[category] = existing
 
     return groups

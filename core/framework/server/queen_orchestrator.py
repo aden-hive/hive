@@ -32,7 +32,7 @@ async def create_queen(
     """
     from framework.agents.queen.agent import (
         queen_goal,
-        queen_graph as _queen_graph,
+        queen_loop_config as _base_loop_config,
     )
     from framework.agents.queen.nodes import (
         _QUEEN_BUILDING_TOOLS,
@@ -65,18 +65,15 @@ async def create_queen(
         _shared_building_knowledge,
     )
     from framework.agents.queen.nodes.thinking_hook import select_expert_persona
-    from framework.graph.event_loop_node import HookContext, HookResult
-    from framework.graph.executor import GraphExecutor
-    from framework.runner.mcp_registry import MCPRegistry
-    from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.core import Runtime
-    from framework.runtime.event_bus import AgentEvent, EventType
+    from framework.agent_loop.agent_loop import HookContext, HookResult
+    from framework.loader.mcp_registry import MCPRegistry
+    from framework.loader.tool_registry import ToolRegistry
+    from framework.host.event_bus import AgentEvent, EventType
     from framework.tools.queen_lifecycle_tools import (
         QueenPhaseState,
         register_queen_lifecycle_tools,
     )
 
-    hive_home = Path.home() / ".hive"
 
     # ---- Tool registry ------------------------------------------------
     queen_registry = ToolRegistry()
@@ -194,7 +191,7 @@ async def create_queen(
     phase_state.global_memory_dir = global_dir
 
     # ---- Compose phase-specific prompts ------------------------------
-    _orig_node = _queen_graph.nodes[0]
+    from framework.agents.queen.nodes import queen_node as _orig_node
 
     if worker_identity is None:
         worker_identity = (
@@ -348,61 +345,81 @@ async def create_queen(
     if set(available_tools) != set(declared_tools):
         missing = sorted(set(declared_tools) - registered_tool_names)
         if missing:
-            logger.warning("Queen: tools not available: %s", missing)
+            logger.debug("Queen: tools not yet available (registered on worker load): %s", missing)
         node_updates["tools"] = available_tools
 
     adjusted_node = _orig_node.model_copy(update=node_updates)
     _queen_loop_config = {
-        **(_queen_graph.loop_config or {}),
+        **_base_loop_config,
         "hooks": {"session_start": [_persona_hook]},
     }
-    queen_graph = _queen_graph.model_copy(
-        update={"nodes": [adjusted_node], "loop_config": _queen_loop_config}
-    )
 
-    # ---- Queen event loop --------------------------------------------
-    queen_runtime = Runtime(hive_home / "queen")
+    # ---- Queen event loop (AgentLoop directly, no Orchestrator) -------
+    from types import SimpleNamespace
+
+    from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
+    from framework.storage.conversation_store import FileConversationStore
+    from framework.orchestrator.node import DataBuffer, NodeContext
 
     async def _queen_loop():
         logger.debug("[_queen_loop] Starting queen loop for session %s", session.id)
         try:
-            logger.debug("[_queen_loop] Creating GraphExecutor...")
-            executor = GraphExecutor(
-                runtime=queen_runtime,
-                llm=session.llm,
-                tools=queen_tools,
-                tool_executor=queen_tool_executor,
+            # Build LoopConfig from the queen graph's config + persona hook
+            lc = _queen_loop_config
+            queen_loop_config = LoopConfig(
+                max_iterations=lc.get("max_iterations", 999_999),
+                max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 30),
+                max_context_tokens=lc.get("max_context_tokens", 180_000),
+                hooks=lc.get("hooks", {}),
+            )
+
+            # Create AgentLoop directly -- no Orchestrator, no graph traversal
+            agent_loop = AgentLoop(
                 event_bus=session.event_bus,
+                config=queen_loop_config,
+                tool_executor=queen_tool_executor,
+                conversation_store=FileConversationStore(queen_dir / "conversations"),
+            )
+
+            # Build NodeContext manually
+            from framework.tracker.decision_tracker import DecisionTracker
+
+            ctx = NodeContext(
+                runtime=DecisionTracker(queen_dir),
+                node_id="queen",
+                node_spec=adjusted_node,
+                buffer=DataBuffer(),
+                llm=session.llm,
+                available_tools=queen_tools,
+                goal_context=queen_goal.description,
+                max_tokens=lc.get("max_tokens", 8192),
                 stream_id="queen",
-                storage_path=queen_dir,
-                loop_config=_queen_loop_config,
                 execution_id=session.id,
                 dynamic_tools_provider=phase_state.get_current_tools,
                 dynamic_prompt_provider=phase_state.get_current_prompt,
                 iteration_metadata_provider=lambda: {"phase": phase_state.phase},
-                skill_dirs=_queen_skill_dirs,
-                protocols_prompt=phase_state.protocols_prompt,
                 skills_catalog_prompt=phase_state.skills_catalog_prompt,
+                protocols_prompt=phase_state.protocols_prompt,
+                skill_dirs=_queen_skill_dirs,
             )
-            session.queen_executor = executor
-            logger.debug("[_queen_loop] GraphExecutor created and stored in session.queen_executor")
+
+            # Expose for chat handler injection (node_registry compat)
+            session.queen_executor = SimpleNamespace(
+                node_registry={"queen": agent_loop},
+            )
 
             # Wire inject_notification so phase switches notify the queen LLM
             async def _inject_phase_notification(content: str) -> None:
-                node = executor.node_registry.get("queen")
-                if node is not None and hasattr(node, "inject_event"):
-                    await node.inject_event(content)
+                await agent_loop.inject_event(content)
 
             phase_state.inject_notification = _inject_phase_notification
 
             # Auto-switch to editing when worker execution finishes.
-            # The worker stays loaded — queen can tweak config and re-run.
             async def _on_worker_done(event):
                 if event.stream_id == "queen":
                     return
                 if phase_state.phase == "running":
                     if event.type == EventType.EXECUTION_COMPLETED:
-                        # Mark worker as configured after first successful run
                         session.worker_configured = True
                         output = event.data.get("output", {})
                         output_summary = ""
@@ -420,7 +437,7 @@ async def create_queen(
                             "Ask if they want to re-run with different input "
                             "or tweak the configuration."
                         )
-                    else:  # EXECUTION_FAILED
+                    else:
                         error = event.data.get("error", "Unknown error")
                         notification = (
                             "[WORKER_TERMINAL] Worker failed.\n"
@@ -430,17 +447,14 @@ async def create_queen(
                             "building/planning if code changes are needed."
                         )
 
-                    node = executor.node_registry.get("queen")
-                    if node is not None and hasattr(node, "inject_event"):
-                        await node.inject_event(notification)
-
+                    await agent_loop.inject_event(notification)
                     await phase_state.switch_to_editing(source="auto")
 
             session.event_bus.subscribe(
                 event_types=[EventType.EXECUTION_COMPLETED, EventType.EXECUTION_FAILED],
                 handler=_on_worker_done,
             )
-            session_manager._subscribe_worker_handoffs(session, executor)
+            session_manager._subscribe_worker_handoffs(session, session.queen_executor)
 
             # ---- Global memory reflection + recall -------------------------
             from framework.agents.queen.reflection_agent import subscribe_reflection_triggers
@@ -459,23 +473,23 @@ async def create_queen(
                 len(phase_state.get_current_tools()),
                 [t.name for t in phase_state.get_current_tools()],
             )
-            logger.debug("[_queen_loop] Calling executor.execute()...")
-            result = await executor.execute(
-                graph=queen_graph,
-                goal=queen_goal,
-                input_data={"greeting": initial_prompt or "Session started."},
-                session_state={"resume_session_id": session.id},
-            )
-            logger.debug(
-                "[_queen_loop] executor.execute() returned with success=%s", result.success
-            )
-            if result.success:
-                logger.warning("Queen executor returned (should be forever-alive)")
-            else:
-                logger.error(
-                    "Queen executor failed: %s",
-                    result.error or "(no error message)",
-                )
+
+            # Set the first user message.
+            # When initial_prompt is None (user opens UI without ?prompt=),
+            # use a generic greeting so the queen has a user message to
+            # respond to.  The user's real first question arrives via /chat.
+            ctx.input_data = {
+                "user_request": initial_prompt or "Hello",
+            }
+
+            # Run the queen -- forever-alive conversation loop
+            result = await agent_loop.execute(ctx)
+
+            if result.stop_reason == "complete":
+                logger.warning("Queen returned (should be forever-alive)")
+            elif result.error:
+                logger.error("Queen failed: %s", result.error)
+
         except asyncio.CancelledError:
             logger.info("[_queen_loop] Queen loop cancelled (normal shutdown)")
             raise
@@ -484,7 +498,8 @@ async def create_queen(
             raise
         finally:
             logger.warning(
-                "[_queen_loop] Queen loop exiting — clearing queen_executor for session '%s'",
+                "[_queen_loop] Queen loop exiting — clearing queen_executor "
+                "for session '%s'",
                 session.id,
             )
             session.queen_executor = None
