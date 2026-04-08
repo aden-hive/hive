@@ -23,6 +23,7 @@ async def create_queen(
     worker_identity: str | None,
     queen_dir: Path,
     initial_prompt: str | None = None,
+    initial_phase: str | None = None,
 ) -> asyncio.Task:
     """Build the queen executor and return the running asyncio task.
 
@@ -37,6 +38,7 @@ async def create_queen(
     from framework.agents.queen.nodes import (
         _QUEEN_BUILDING_TOOLS,
         _QUEEN_EDITING_TOOLS,
+        _QUEEN_INDEPENDENT_TOOLS,
         _QUEEN_PLANNING_TOOLS,
         _QUEEN_RUNNING_TOOLS,
         _QUEEN_STAGING_TOOLS,
@@ -46,6 +48,7 @@ async def create_queen(
         _queen_behavior_always,
         _queen_behavior_building,
         _queen_behavior_editing,
+        _queen_behavior_independent,
         _queen_behavior_planning,
         _queen_behavior_running,
         _queen_behavior_staging,
@@ -53,12 +56,14 @@ async def create_queen(
         _queen_identity_editing,
         _queen_phase_7,
         _queen_role_building,
+        _queen_role_independent,
         _queen_role_planning,
         _queen_role_running,
         _queen_role_staging,
         _queen_style,
         _queen_tools_building,
         _queen_tools_editing,
+        _queen_tools_independent,
         _queen_tools_planning,
         _queen_tools_running,
         _queen_tools_staging,
@@ -111,8 +116,8 @@ async def create_queen(
         logger.warning("Queen: MCP registry config failed to load", exc_info=True)
 
     # ---- Phase state --------------------------------------------------
-    initial_phase = "staging" if worker_identity else "planning"
-    phase_state = QueenPhaseState(phase=initial_phase, event_bus=session.event_bus)
+    effective_phase = initial_phase or ("staging" if worker_identity else "planning")
+    phase_state = QueenPhaseState(phase=effective_phase, event_bus=session.event_bus)
     session.phase_state = phase_state
 
     # ---- Track ask rounds during planning ----------------------------
@@ -167,6 +172,7 @@ async def create_queen(
     staging_names = set(_QUEEN_STAGING_TOOLS)
     running_names = set(_QUEEN_RUNNING_TOOLS)
     editing_names = set(_QUEEN_EDITING_TOOLS)
+    independent_names = set(_QUEEN_INDEPENDENT_TOOLS)
 
     registered_names = {t.name for t in queen_tools}
     missing_building = building_names - registered_names
@@ -184,6 +190,18 @@ async def create_queen(
     phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
     phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
     phase_state.editing_tools = [t for t in queen_tools if t.name in editing_names]
+
+    # Independent phase gets core tools + all MCP tools not claimed by any
+    # other phase (coder-tools file I/O, gcu-tools browser, etc.).
+    all_phase_names = planning_names | building_names | staging_names | running_names | editing_names
+    mcp_tools = [t for t in queen_tools if t.name not in all_phase_names]
+    phase_state.independent_tools = (
+        [t for t in queen_tools if t.name in independent_names] + mcp_tools
+    )
+    logger.info(
+        "Queen: independent tools: %s",
+        sorted(t.name for t in phase_state.independent_tools),
+    )
 
     # ---- Global memory -------------------------------------------------
     from framework.agents.queen.queen_memory_v2 import (
@@ -258,6 +276,14 @@ async def create_queen(
         + _queen_behavior_always
         + _queen_behavior_editing
         + worker_identity
+    )
+    phase_state.prompt_independent = (
+        _queen_character_core
+        + _queen_role_independent
+        + _queen_style
+        + _queen_tools_independent
+        + _queen_behavior_always
+        + _queen_behavior_independent
     )
 
     # ---- Default skill protocols -------------------------------------
@@ -371,9 +397,15 @@ async def create_queen(
         node_updates["tools"] = available_tools
 
     adjusted_node = _orig_node.model_copy(update=node_updates)
+
+    # Determine session mode:
+    # - RESTORE: Resume cold session with history, no initial prompt -> wait for user
+    # - FRESH:   New session OR explicit initial prompt -> run identity hook + greeting
+    _is_restore_mode = bool(session.queen_resume_from) and initial_prompt is None
+
     _queen_loop_config = {
         **_base_loop_config,
-        "hooks": {"session_start": [_queen_identity_hook]},
+        "hooks": {"session_start": [_queen_identity_hook]} if not _is_restore_mode else {},
     }
 
     # ---- Queen event loop (AgentLoop directly, no Orchestrator) -------
@@ -386,7 +418,6 @@ async def create_queen(
     async def _queen_loop():
         logger.debug("[_queen_loop] Starting queen loop for session %s", session.id)
         try:
-            # Build LoopConfig from the queen graph's config + persona hook
             lc = _queen_loop_config
             queen_loop_config = LoopConfig(
                 max_iterations=lc.get("max_iterations", 999_999),
@@ -395,15 +426,15 @@ async def create_queen(
                 hooks=lc.get("hooks", {}),
             )
 
-            # Create AgentLoop directly -- no Orchestrator, no graph traversal
+            conversation_store = FileConversationStore(queen_dir / "conversations")
+
             agent_loop = AgentLoop(
                 event_bus=session.event_bus,
                 config=queen_loop_config,
                 tool_executor=queen_tool_executor,
-                conversation_store=FileConversationStore(queen_dir / "conversations"),
+                conversation_store=conversation_store,
             )
 
-            # Build NodeContext manually
             from framework.tracker.decision_tracker import DecisionTracker
 
             ctx = NodeContext(
@@ -413,7 +444,7 @@ async def create_queen(
                 buffer=DataBuffer(),
                 llm=session.llm,
                 available_tools=queen_tools,
-                goal_context=queen_goal.description,
+                goal_context=queen_goal.to_prompt_context(),
                 max_tokens=lc.get("max_tokens", 8192),
                 stream_id="queen",
                 execution_id=session.id,
@@ -425,18 +456,15 @@ async def create_queen(
                 skill_dirs=_queen_skill_dirs,
             )
 
-            # Expose for chat handler injection (node_registry compat)
             session.queen_executor = SimpleNamespace(
                 node_registry={"queen": agent_loop},
             )
 
-            # Wire inject_notification so phase switches notify the queen LLM
             async def _inject_phase_notification(content: str) -> None:
                 await agent_loop.inject_event(content)
 
             phase_state.inject_notification = _inject_phase_notification
 
-            # Auto-switch to editing when worker execution finishes.
             async def _on_worker_done(event):
                 if event.stream_id == "queen":
                     return
@@ -478,7 +506,6 @@ async def create_queen(
             )
             session_manager._subscribe_worker_handoffs(session, session.queen_executor)
 
-            # ---- Global memory reflection + recall -------------------------
             from framework.agents.queen.reflection_agent import subscribe_reflection_triggers
 
             _reflection_subs = await subscribe_reflection_triggers(
@@ -489,20 +516,18 @@ async def create_queen(
             )
             session.memory_reflection_subs = _reflection_subs
 
+            # Set initial user message based on mode:
+            # - RESTORE: Empty -> AgentLoop restores from disk, waits for /chat
+            # - FRESH:   "Hello" or explicit prompt -> queen responds immediately
+            ctx.input_data = {"user_request": None if _is_restore_mode else (initial_prompt or "Hello")}
+
             logger.info(
-                "Queen starting in %s phase with %d tools: %s",
+                "Queen %s in %s phase with %d tools: %s",
+                "restoring" if _is_restore_mode else "starting",
                 phase_state.phase,
                 len(phase_state.get_current_tools()),
                 [t.name for t in phase_state.get_current_tools()],
             )
-
-            # Set the first user message.
-            # When initial_prompt is None (user opens UI without ?prompt=),
-            # use a generic greeting so the queen has a user message to
-            # respond to.  The user's real first question arrives via /chat.
-            ctx.input_data = {
-                "user_request": initial_prompt or "Hello",
-            }
 
             # Run the queen -- forever-alive conversation loop
             result = await agent_loop.execute(ctx)

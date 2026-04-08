@@ -79,7 +79,8 @@ class WorkerSessionAdapter:
 class QueenPhaseState:
     """Mutable state container for queen operating phase.
 
-    Five phases: planning → building → staging → running → editing.
+    Six phases: independent, planning → building → staging → running → editing.
+    INDEPENDENT: queen acts as a standalone agent with MCP tools, no worker graph.
     EDITING is entered after worker execution completes. The worker
     stays loaded — queen can tweak config and re-run without rebuilding.
     RUNNING cannot go directly to BUILDING or PLANNING; it must pass
@@ -89,12 +90,13 @@ class QueenPhaseState:
     that trigger phase transitions.
     """
 
-    phase: str = "building"  # "planning", "building", "staging", "running", or "editing"
+    phase: str = "building"  # "independent", "planning", "building", "staging", "running", or "editing"
     planning_tools: list = field(default_factory=list)  # list[Tool]
     building_tools: list = field(default_factory=list)  # list[Tool]
     staging_tools: list = field(default_factory=list)  # list[Tool]
     running_tools: list = field(default_factory=list)  # list[Tool]
     editing_tools: list = field(default_factory=list)  # list[Tool]
+    independent_tools: list = field(default_factory=list)  # list[Tool]
     inject_notification: Any = None  # async (str) -> None
     event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
 
@@ -122,6 +124,7 @@ class QueenPhaseState:
     prompt_staging: str = ""
     prompt_running: str = ""
     prompt_editing: str = ""
+    prompt_independent: str = ""
 
     # Default skill operational protocols — appended to every phase prompt
     protocols_prompt: str = ""
@@ -141,6 +144,8 @@ class QueenPhaseState:
 
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
+        if self.phase == "independent":
+            return list(self.independent_tools)
         if self.phase == "planning":
             return list(self.planning_tools)
         if self.phase == "running":
@@ -153,7 +158,9 @@ class QueenPhaseState:
 
     def get_current_prompt(self) -> str:
         """Return the system prompt for the current phase."""
-        if self.phase == "planning":
+        if self.phase == "independent":
+            base = self.prompt_independent
+        elif self.phase == "planning":
             base = self.prompt_planning
         elif self.phase == "running":
             base = self.prompt_running
@@ -318,6 +325,25 @@ class QueenPhaseState:
             await self.inject_notification(
                 "[PHASE CHANGE] Switched to PLANNING phase. "
                 "Coding tools removed. Discuss goals and design with the user. "
+                "Available tools: " + ", ".join(tool_names) + "."
+            )
+
+    async def switch_to_independent(self, source: str = "tool") -> None:
+        """Switch to independent phase — queen acts as standalone agent.
+
+        Args:
+            source: Who triggered the switch — "tool", "frontend", or "auto".
+        """
+        if self.phase == "independent":
+            return
+        self.phase = "independent"
+        tool_names = [t.name for t in self.independent_tools]
+        logger.info("Queen phase → independent (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
+        if self.inject_notification and source != "tool":
+            await self.inject_notification(
+                "[PHASE CHANGE] Switched to INDEPENDENT mode. "
+                "You are the agent — execute the task directly. "
                 "Available tools: " + ", ".join(tool_names) + "."
             )
 

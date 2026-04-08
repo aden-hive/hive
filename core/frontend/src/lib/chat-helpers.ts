@@ -149,8 +149,8 @@ export function sseEventToChatMessage(
   }
 }
 
-type QueenPhase = "planning" | "building" | "staging" | "running";
-const VALID_PHASES = new Set<string>(["planning", "building", "staging", "running"]);
+type QueenPhase = "planning" | "building" | "staging" | "running" | "independent";
+const VALID_PHASES = new Set<string>(["planning", "building", "staging", "running", "independent"]);
 
 /**
  * Scan an array of persisted events and return the last queen phase seen,

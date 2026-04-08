@@ -32,8 +32,9 @@ export const queensApi = {
     api.patch<QueenProfile>(`/queen/${queenId}/profile`, updates),
 
   /** Get or create a persistent session for a queen. */
-  getOrCreateSession: (queenId: string, initialPrompt?: string) =>
+  getOrCreateSession: (queenId: string, initialPrompt?: string, initialPhase?: string) =>
     api.post<QueenSessionResult>(`/queen/${queenId}/session`, {
       initial_prompt: initialPrompt,
+      initial_phase: initialPhase || undefined,
     }),
 };

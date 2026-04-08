@@ -47,7 +47,7 @@ function truncate(s: string, max: number): string {
 
 type SessionRestoreResult = {
   messages: ChatMessage[];
-  restoredPhase: "planning" | "building" | "staging" | "running" | null;
+  restoredPhase: "planning" | "building" | "staging" | "running" | "independent" | null;
   flowchartMap: Record<string, string[]> | null;
   originalDraft: DraftGraphData | null;
 };
@@ -112,7 +112,7 @@ interface AgentState {
   awaitingInput: boolean;
   workerInputMessageId: string | null;
   queenBuilding: boolean;
-  queenPhase: "planning" | "building" | "staging" | "running";
+  queenPhase: "planning" | "building" | "staging" | "running" | "independent";
   designingDraft: boolean;
   draftGraph: DraftGraphData | null;
   originalDraft: DraftGraphData | null;
@@ -417,7 +417,7 @@ export default function ColonyChat() {
         }
       }
 
-      let restoredPhase: "planning" | "building" | "staging" | "running" | null = null;
+      let restoredPhase: "planning" | "building" | "staging" | "running" | "independent" | null = null;
       let restoredFlowchartMap: Record<string, string[]> | null = null;
       let restoredOriginalDraft: DraftGraphData | null = null;
 
@@ -958,7 +958,9 @@ export default function ColonyChat() {
           const rawPhase = event.data?.phase as string;
           const eventAgentPath = (event.data?.agent_path as string) || null;
           const newPhase: AgentState["queenPhase"] =
-            rawPhase === "running"
+            rawPhase === "independent"
+              ? "independent"
+              : rawPhase === "running"
               ? "running"
               : rawPhase === "staging"
               ? "staging"

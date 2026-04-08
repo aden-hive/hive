@@ -13,7 +13,7 @@ export interface LiveSession {
   uptime_seconds: number;
   intro_message?: string;
   /** Queen operating phase — "planning", "building", "staging", or "running" */
-  queen_phase?: "planning" | "building" | "staging" | "running";
+  queen_phase?: "planning" | "building" | "staging" | "running" | "independent";
   /** Whether the queen's LLM supports image content in messages */
   queen_supports_images?: boolean;
   /** Selected queen identity ID (e.g. "queen_technology") */

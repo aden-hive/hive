@@ -36,6 +36,7 @@ export default function QueenDM() {
 
   const turnCounterRef = useRef(0);
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
+  const [queenPhase, setQueenPhase] = useState<"planning" | "building" | "staging" | "running" | "independent">("independent");
 
   // Switch queen session when queenId changes
   useEffect(() => {
@@ -59,7 +60,7 @@ export default function QueenDM() {
 
     (async () => {
       try {
-        const result = await queensApi.getOrCreateSession(queenId);
+        const result = await queensApi.getOrCreateSession(queenId, undefined, "independent");
         if (cancelled) return;
 
         const sid = result.session_id;
@@ -196,6 +197,14 @@ export default function QueenDM() {
           break;
         }
 
+        case "queen_phase_changed": {
+          const rawPhase = event.data?.phase as string;
+          if (rawPhase === "independent" || rawPhase === "planning" || rawPhase === "building" || rawPhase === "staging" || rawPhase === "running") {
+            setQueenPhase(rawPhase);
+          }
+          break;
+        }
+
         default:
           break;
       }
@@ -299,7 +308,7 @@ export default function QueenDM() {
           isWaiting={isTyping && !isStreaming}
           isBusy={isTyping}
           disabled={loading || !queenReady}
-          queenPhase="planning"
+          queenPhase={queenPhase}
           pendingQuestion={awaitingInput ? pendingQuestion : null}
           pendingOptions={awaitingInput ? pendingOptions : null}
           pendingQuestions={awaitingInput ? pendingQuestions : null}

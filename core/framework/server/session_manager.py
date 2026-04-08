@@ -178,6 +178,7 @@ class SessionManager:
         initial_prompt: str | None = None,
         queen_resume_from: str | None = None,
         queen_name: str | None = None,
+        initial_phase: str | None = None,
     ) -> Session:
         """Create a new session with a queen but no worker.
 
@@ -196,7 +197,7 @@ class SessionManager:
             session.queen_name = queen_name
 
         # Start queen immediately (queen-only, no worker tools yet)
-        await self._start_queen(session, worker_identity=None, initial_prompt=initial_prompt)
+        await self._start_queen(session, worker_identity=None, initial_prompt=initial_prompt, initial_phase=initial_phase)
 
         logger.info(
             "Session '%s' created (queen-only, resume_from=%s)",
@@ -214,6 +215,7 @@ class SessionManager:
         initial_prompt: str | None = None,
         queen_resume_from: str | None = None,
         queen_name: str | None = None,
+        initial_phase: str | None = None,
     ) -> Session:
         """Create a session and load a worker in one step.
 
@@ -281,7 +283,7 @@ class SessionManager:
                 else None
             )
             await self._start_queen(
-                session, worker_identity=worker_identity, initial_prompt=initial_prompt
+                session, worker_identity=worker_identity, initial_prompt=initial_prompt, initial_phase=initial_phase
             )
 
         except Exception:
@@ -782,6 +784,7 @@ class SessionManager:
         session: Session,
         worker_identity: str | None,
         initial_prompt: str | None = None,
+        initial_phase: str | None = None,
     ) -> None:
         """Start the queen executor for a session.
 
@@ -889,6 +892,7 @@ class SessionManager:
             worker_identity=worker_identity,
             queen_dir=queen_dir,
             initial_prompt=initial_prompt,
+            initial_phase=initial_phase,
         )
         logger.debug(
             "[_start_queen] create_queen returned, queen_task=%s, queen_executor=%s",

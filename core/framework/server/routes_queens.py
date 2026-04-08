@@ -79,6 +79,7 @@ async def handle_queen_session(request: web.Request) -> web.Response:
 
     body = await request.json() if request.can_read_body else {}
     initial_prompt = body.get("initial_prompt")
+    initial_phase = body.get("initial_phase")
 
     # 1. Check for an existing live session bound to this queen.
     #    Stop any live sessions bound to a *different* queen so only one
@@ -136,24 +137,28 @@ async def handle_queen_session(request: web.Request) -> web.Response:
                     queen_resume_from=resume_from,
                     initial_prompt=initial_prompt,
                     queen_name=queen_id,
+                    initial_phase=initial_phase,
                 )
             except Exception:
                 session = await manager.create_session(
                     queen_resume_from=resume_from,
                     initial_prompt=initial_prompt,
                     queen_name=queen_id,
+                    initial_phase=initial_phase,
                 )
         else:
             session = await manager.create_session(
                 queen_resume_from=resume_from,
                 initial_prompt=initial_prompt,
                 queen_name=queen_id,
+                initial_phase=initial_phase,
             )
         status = "resumed"
     else:
         session = await manager.create_session(
             initial_prompt=initial_prompt,
             queen_name=queen_id,
+            initial_phase=initial_phase,
         )
         status = "created"
 

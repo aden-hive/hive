@@ -114,6 +114,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
         "session_id": "..." (optional — custom session ID),
         "model": "..." (optional),
         "initial_prompt": "..." (optional — first user message for the queen),
+        "initial_phase": "..." (optional — "independent" for standalone queen),
     }
 
     When agent_path is provided, creates a session with a graph in one step
@@ -130,6 +131,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
     # When set, the queen writes conversations to this existing session's directory
     # so the full history accumulates in one place across server restarts.
     queen_resume_from = body.get("queen_resume_from")
+    initial_phase = body.get("initial_phase")
 
     if agent_path:
         try:
@@ -147,6 +149,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 model=model,
                 initial_prompt=initial_prompt,
                 queen_resume_from=queen_resume_from,
+                initial_phase=initial_phase,
             )
         else:
             # Queen-only session
@@ -155,6 +158,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 model=model,
                 initial_prompt=initial_prompt,
                 queen_resume_from=queen_resume_from,
+                initial_phase=initial_phase,
             )
     except ValueError as e:
         msg = str(e)

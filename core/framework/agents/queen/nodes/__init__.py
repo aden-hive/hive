@@ -157,6 +157,22 @@ _QUEEN_EDITING_TOOLS = [
     "list_triggers",
 ]
 
+# Independent phase: queen operates as a standalone agent — no graph/worker.
+# Core tools are listed here; MCP tools (coder-tools, gcu-tools) are added
+# dynamically in queen_orchestrator.py because their tool names aren't known
+# at import time.
+_QUEEN_INDEPENDENT_TOOLS = [
+    # File I/O (full access)
+    "read_file",
+    "write_file",
+    "edit_file",
+    "hashline_edit",
+    "list_directory",
+    "search_files",
+    "run_command",
+    "undo_changes",
+]
+
 
 # ---------------------------------------------------------------------------
 # Shared agent-building knowledge: core mandates, tool docs, meta-agent
@@ -537,7 +553,7 @@ You are the advisor defined in <core_identity> above. Stay in character.
 Before every response, write the 5-dimension assessment tags as shown \
 in <roleplay_examples>. These tags are stripped from user view but kept \
 in conversation history -- you will see them on subsequent turns:
-  <social_distance> <context> <mood_filter> <physical_presence> <language_engine>
+  <relationship> <context> <sentiment> <physical_state> <tone>
 Then write your visible response. Direct, in character, no preamble.
 
 You remember people. When you've worked with someone before, build on \
@@ -580,6 +596,14 @@ You are in EDITING mode. The worker has finished executing and is still loaded. 
 You can tweak configuration, inject messages, and re-run with different input \
 without rebuilding. If a deeper change is needed (code edits, new tools), \
 escalate to BUILDING via stop_graph_and_edit or to PLANNING via stop_graph_and_plan.
+"""
+
+_queen_role_independent = """\
+You are in INDEPENDENT mode. No worker graph — you do the work yourself. \
+You have full coding tools (read/write/edit/search/run) and MCP tools \
+(file operations via coder-tools, browser automation via gcu-tools). \
+Execute the user's task directly using conversation and tools. \
+You are the agent.\
 """
 
 # -- Phase-specific tool docs --
@@ -707,6 +731,22 @@ You do NOT have write/edit file tools or backward transition tools. \
 You can only re-run or tweak from this phase.
 """
 
+_queen_tools_independent = """
+# Tools (INDEPENDENT mode)
+
+You are operating as a standalone agent — no worker graph. You do the work directly.
+
+## File I/O (coder-tools MCP)
+- read_file, write_file, edit_file, hashline_edit, list_directory, \
+search_files, run_command, undo_changes
+
+## Browser Automation (gcu-tools MCP)
+All browser tools are prefixed with `browser_` (browser_start, browser_navigate, \
+browser_click, browser_fill, browser_snapshot, browser_screenshot, browser_scroll, \
+browser_tabs, browser_close, browser_evaluate, etc.).
+Follow the browser-automation skill protocol — activate it before using browser tools.
+"""
+
 _queen_behavior_editing = """
 ## Editing — tweak and re-run
 
@@ -717,6 +757,20 @@ The worker finished. Review the results and decide:
 Do NOT suggest rebuilding. You cannot go back to building or planning \
 from this phase. Default to re-running with adjusted input.
 Report the last run's results to the user and ask what they want to do next.
+"""
+
+_queen_behavior_independent = """
+## Independent — do the work yourself
+
+You are the agent. No worker, no graph — you execute directly.
+1. Understand the task from the user
+2. Plan your approach briefly (no flowcharts or agent design)
+3. Execute using your tools: file I/O, shell commands, browser automation
+4. Report results, iterate if needed
+
+You have NO lifecycle tools (no start_graph, stop_graph, confirm_and_build, etc.).
+If the task requires building a dedicated agent, tell the user to start a \
+new session without independent mode.
 """
 
 # -- Behavior shared across all phases --
@@ -1090,9 +1144,11 @@ Never just say "it's removed" without actually calling the tool.
 
 _queen_tools_docs = (
     "\n\n## Queen Operating Phases\n\n"
-    "You operate in one of four phases. Your available tools change based on the "
+    "You operate in one of six phases. Your available tools change based on the "
     "phase. The system notifies you when a phase change occurs.\n\n"
-    "### PLANNING phase (default)\n"
+    "### INDEPENDENT phase (standalone agent)\n"
+    + _queen_tools_independent.strip()
+    + "\n\n### PLANNING phase\n"
     + _queen_tools_planning.strip()
     + "\n\n### BUILDING phase\n"
     + _queen_tools_building.strip()
@@ -1171,6 +1227,7 @@ queen_node = NodeSpec(
             + _QUEEN_STAGING_TOOLS
             + _QUEEN_RUNNING_TOOLS
             + _QUEEN_EDITING_TOOLS
+            + _QUEEN_INDEPENDENT_TOOLS
         )
     ),
     system_prompt=(
@@ -1192,6 +1249,7 @@ ALL_QUEEN_TOOLS = sorted(
         + _QUEEN_STAGING_TOOLS
         + _QUEEN_RUNNING_TOOLS
         + _QUEEN_EDITING_TOOLS
+        + _QUEEN_INDEPENDENT_TOOLS
     )
 )
 
@@ -1203,6 +1261,7 @@ __all__ = [
     "_QUEEN_STAGING_TOOLS",
     "_QUEEN_RUNNING_TOOLS",
     "_QUEEN_EDITING_TOOLS",
+    "_QUEEN_INDEPENDENT_TOOLS",
     # Character + phase-specific prompt segments (used by session_manager for dynamic prompts)
     "_queen_character_core",
     "_queen_role_planning",
@@ -1210,16 +1269,19 @@ __all__ = [
     "_queen_role_staging",
     "_queen_role_running",
     "_queen_identity_editing",
+    "_queen_role_independent",
     "_queen_tools_planning",
     "_queen_tools_building",
     "_queen_tools_staging",
     "_queen_tools_running",
     "_queen_tools_editing",
+    "_queen_tools_independent",
     "_queen_behavior_always",
     "_queen_behavior_building",
     "_queen_behavior_staging",
     "_queen_behavior_running",
     "_queen_behavior_editing",
+    "_queen_behavior_independent",
     "_queen_phase_7",
     "_queen_style",
     "_shared_building_knowledge",
