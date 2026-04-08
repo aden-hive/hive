@@ -54,7 +54,7 @@ export default function QueenDM() {
 
     (async () => {
       try {
-        const result = await queensApi.getOrCreateSession(queenId);
+        const result = await queensApi.getOrCreateSession(queenId, undefined, "independent");
         if (cancelled) return;
 
         const sid = result.session_id;
