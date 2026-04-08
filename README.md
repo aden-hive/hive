@@ -123,6 +123,14 @@ This sets up:
 
 > **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
 
+### Verify Installation
+
+Before building your own agent, run the included manual example to confirm your environment is set up correctly:
+
+```bash
+PYTHONPATH=core python core/examples/manual_agent.py
+```
+
 ### Build Your First Agent
 
 Type the agent you want to build in the home input box. The queen is going to ask you questions and work out a solution with you.
