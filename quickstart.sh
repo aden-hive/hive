@@ -2079,6 +2079,17 @@ fi
 echo ""
 
 # ============================================================
+# Initialize Queen Profiles
+# ============================================================
+
+echo -n "  ⬡ queen profiles... "
+if uv run python -c "from framework.agents.queen.queen_profiles import ensure_default_queens; ensure_default_queens()" > /dev/null 2>&1; then
+    echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}skipped${NC} ${DIM}(non-fatal)${NC}"
+fi
+
+# ============================================================
 # Success!
 # ============================================================
 
