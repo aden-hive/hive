@@ -124,7 +124,7 @@ async def cors_middleware(request: web.Request, handler):
 
     if _is_cors_allowed(origin):
         response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type"
         response.headers["Access-Control-Max-Age"] = "3600"
 
@@ -250,6 +250,7 @@ def create_app(model: str | None = None) -> web.Application:
     app.router.add_get("/api/browser/status", handle_browser_status)
 
     # Register route modules
+    from framework.server.routes_config import register_routes as register_config_routes
     from framework.server.routes_credentials import register_routes as register_credential_routes
     from framework.server.routes_events import register_routes as register_event_routes
     from framework.server.routes_execution import register_routes as register_execution_routes
@@ -257,6 +258,7 @@ def create_app(model: str | None = None) -> web.Application:
     from framework.server.routes_logs import register_routes as register_log_routes
     from framework.server.routes_sessions import register_routes as register_session_routes
 
+    register_config_routes(app)
     register_credential_routes(app)
     register_execution_routes(app)
     register_event_routes(app)

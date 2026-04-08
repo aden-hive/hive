@@ -612,6 +612,36 @@ class LiteLLMProvider(LLMProvider):
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
 
+    def reconfigure(self, model: str, api_key: str | None = None, api_base: str | None = None) -> None:
+        """Hot-swap the model, API key, and/or base URL on this provider instance.
+
+        Since the same LiteLLMProvider object is shared by reference across the
+        session, queen runner, agent runtime, and execution streams, mutating
+        these attributes in-place propagates to all callers on the next LLM call.
+        """
+        _original_model = model
+        if _is_ollama_model(model):
+            model = _ensure_ollama_chat_prefix(model)
+        elif model.lower().startswith("kimi/"):
+            model = "anthropic/" + model[len("kimi/"):]
+            if api_base and api_base.rstrip("/").endswith("/v1"):
+                api_base = api_base.rstrip("/")[:-3]
+        elif model.lower().startswith("hive/"):
+            model = "anthropic/" + model[len("hive/"):]
+            if api_base and api_base.rstrip("/").endswith("/v1"):
+                api_base = api_base.rstrip("/")[:-3]
+        self.model = model
+        self.api_key = api_key
+        self.api_base = api_base or self._default_api_base_for_model(_original_model)
+        self._claude_code_oauth = bool(api_key and api_key.startswith("sk-ant-oat"))
+        if self._claude_code_oauth:
+            eh = self.extra_kwargs.setdefault("extra_headers", {})
+            eh.setdefault("user-agent", CLAUDE_CODE_USER_AGENT)
+        self._codex_backend = bool(
+            self.api_base and "chatgpt.com/backend-api/codex" in self.api_base
+        )
+        self._antigravity = bool(self.api_base and "localhost:8069" in self.api_base)
+
         # Note: The Codex ChatGPT backend is a Responses API endpoint at
         # chatgpt.com/backend-api/codex/responses.  LiteLLM's model registry
         # correctly marks codex models with mode="responses", so we do NOT

@@ -43,6 +43,48 @@ def get_hive_config() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Credential store helpers (for BYOK keys)
+# ---------------------------------------------------------------------------
+
+# Provider name → credential store ID mapping
+_PROVIDER_CRED_MAP: dict[str, str] = {
+    "anthropic": "anthropic",
+    "openai": "openai",
+    "gemini": "gemini",
+    "google": "gemini",
+    "minimax": "minimax",
+    "groq": "groq",
+    "cerebras": "cerebras",
+    "openrouter": "openrouter",
+    "mistral": "mistral",
+    "together": "together",
+    "together_ai": "together",
+    "deepseek": "deepseek",
+    "kimi": "kimi",
+    "hive": "hive",
+}
+
+
+def _get_api_key_from_credential_store(provider: str) -> str | None:
+    """Look up a BYOK API key from the encrypted credential store.
+
+    Returns None if no key is found or the credential store is unavailable.
+    """
+    if not os.environ.get("HIVE_CREDENTIAL_KEY"):
+        return None
+    cred_id = _PROVIDER_CRED_MAP.get(provider.lower())
+    if not cred_id:
+        return None
+    try:
+        from framework.credentials import CredentialStore
+
+        store = CredentialStore.with_encrypted_storage()
+        return store.get(cred_id)
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Derived helpers
 # ---------------------------------------------------------------------------
 
@@ -280,8 +322,12 @@ def get_api_key() -> str | None:
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
-        return os.environ.get(api_key_env_var)
-    return None
+        key = os.environ.get(api_key_env_var)
+        if key:
+            return key
+
+    # Credential store fallback — BYOK keys stored via the UI
+    return _get_api_key_from_credential_store(llm.get("provider", ""))
 
 
 # OAuth credentials for Antigravity are fetched from the opencode-antigravity-auth project.
