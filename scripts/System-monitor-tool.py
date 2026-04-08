@@ -1,6 +1,3 @@
-from langfuse import Langfuse
-from prometheus_client import Counter, Histogram, start_http_server
-import time
 
 # --- Prometheus Metrics ---
 TOKEN_USAGE = Counter('hive_token_usage_total', 'Total tokens consumed', ['agent_type', 'model'])
