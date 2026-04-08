@@ -109,49 +109,45 @@ _INTERNAL_TAGS = frozenset({
     "physical_presence",
     "language_engine",
 })
-_INTERNAL_OPEN_RE = re.compile(r"<(" + "|".join(_INTERNAL_TAGS) + r")>")
-_INTERNAL_CLOSE_RE = re.compile(r"</(" + "|".join(_INTERNAL_TAGS) + r")>\s*")
+_STRIP_RE = re.compile(
+    r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>"
+    r".*?"
+    r"</(?:" + "|".join(_INTERNAL_TAGS) + r")>\s*",
+    re.DOTALL,
+)
 
 
-def _strip_internal_tags(content: str, snapshot: str) -> str:
-    """Strip internal reasoning tags from a streaming text chunk.
+_INTERNAL_OPEN_RE = re.compile(
+    r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>"
+)
+# Matches a trailing `<` that could be the start of an internal tag.
+# We build a pattern that matches `<` followed by any prefix of any
+# internal tag name (e.g. `<so`, `<contex`, `<think`).
+_PARTIAL_PREFIXES: set[str] = set()
+for _tag in _INTERNAL_TAGS:
+    for _i in range(1, len(_tag) + 1):
+        _PARTIAL_PREFIXES.add(_tag[:_i])
+_PARTIAL_OPEN_RE = re.compile(
+    r"<(?:" + "|".join(re.escape(p) for p in sorted(_PARTIAL_PREFIXES, key=len, reverse=True)) + r")$"
+)
 
-    Uses the *snapshot* (full accumulated text) to detect whether we
-    were inside an internal block BEFORE this chunk arrived, and
-    filters *content* accordingly.
+
+def _strip_internal_tags_from_snapshot(snapshot: str) -> str:
+    """Remove all internal tag blocks from the full accumulated text.
+
+    Also truncates at any unclosed or partially-opened internal tag
+    so partial tags never leak to the frontend during streaming.
     """
-    # Fast path: no angle brackets anywhere
-    if "<" not in snapshot:
-        return content
-
-    # Check state using the snapshot BEFORE this content was appended.
-    prior = snapshot[: len(snapshot) - len(content)] if len(snapshot) > len(content) else ""
-    _inside = False
-    for m in _INTERNAL_OPEN_RE.finditer(prior):
-        tag = m.group(1)
-        if prior.find(f"</{tag}>", m.end()) == -1:
-            _inside = True
-
-    if _inside:
-        # We were inside an internal block. Check if this chunk closes it.
-        close_m = _INTERNAL_CLOSE_RE.search(content)
-        if close_m:
-            # Emit only text after the closing tag
-            return content[close_m.end():]
-        return ""  # still inside, suppress
-
-    # We're outside. Strip any complete <tag>...</tag> pairs in this chunk,
-    # and suppress from an opening tag to end-of-chunk if unclosed.
-    result = content
-    for tag in _INTERNAL_TAGS:
-        result = re.sub(
-            rf"<{tag}>.*?</{tag}>\s*", "", result, flags=re.DOTALL
-        )
-    # If an internal tag opens but doesn't close in this chunk, truncate
-    open_m = _INTERNAL_OPEN_RE.search(result)
-    if open_m:
-        result = result[:open_m.start()]
-    return result
+    cleaned = _STRIP_RE.sub("", snapshot)
+    # Truncate at any fully-opened but unclosed internal tag
+    m = _INTERNAL_OPEN_RE.search(cleaned)
+    if m:
+        cleaned = cleaned[:m.start()]
+    # Truncate at any partial opening tag at the end (e.g. `<social` or `<co`)
+    m2 = _PARTIAL_OPEN_RE.search(cleaned)
+    if m2:
+        cleaned = cleaned[:m2.start()]
+    return cleaned
 
 
 async def _describe_images_as_text(image_content: list[dict[str, Any]]) -> str | None:
@@ -2207,6 +2203,7 @@ class AgentLoop(NodeProtocol):
                 inner_turn: int = inner_turn,
             ) -> None:
                 nonlocal accumulated_text, _stream_error
+                _clean_snapshot = ""  # visible-only text for the frontend
 
                 async for event in ctx.llm.stream(
                     messages=_msgs,
@@ -2216,19 +2213,20 @@ class AgentLoop(NodeProtocol):
                 ):
                     if isinstance(event, TextDeltaEvent):
                         accumulated_text = event.snapshot
-                        # Filter internal reasoning tags from client output.
-                        # Uses the snapshot (full text so far) to detect
-                        # whether we're inside an internal block, and only
-                        # emits text that falls outside all such blocks.
-                        _content = _strip_internal_tags(
-                            event.content, event.snapshot
+                        # Strip internal reasoning tags from the full
+                        # snapshot, then diff against what we already
+                        # emitted to get the new visible delta.
+                        _new_clean = _strip_internal_tags_from_snapshot(
+                            event.snapshot
                         )
-                        if _content:
+                        if len(_new_clean) > len(_clean_snapshot):
+                            _delta = _new_clean[len(_clean_snapshot):]
+                            _clean_snapshot = _new_clean
                             await self._publish_text_delta(
                                 stream_id,
                                 node_id,
-                                _content,
-                                event.snapshot,
+                                _delta,
+                                _clean_snapshot,
                                 ctx,
                                 execution_id,
                                 iteration=iteration,

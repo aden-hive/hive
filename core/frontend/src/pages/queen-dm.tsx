@@ -28,6 +28,9 @@ export default function QueenDM() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [pendingOptions, setPendingOptions] = useState<string[] | null>(null);
+  const [pendingQuestions, setPendingQuestions] = useState<
+    { id: string; prompt: string; options?: string[] }[] | null
+  >(null);
   const [awaitingInput, setAwaitingInput] = useState(false);
 
   const turnCounterRef = useRef(0);
@@ -46,6 +49,7 @@ export default function QueenDM() {
     setIsStreaming(false);
     setPendingQuestion(null);
     setPendingOptions(null);
+    setPendingQuestions(null);
     setAwaitingInput(false);
     turnCounterRef.current = 0;
     queenIterTextRef.current = {};
@@ -155,11 +159,16 @@ export default function QueenDM() {
           const prompt = (event.data?.prompt as string) || "";
           const rawOptions = event.data?.options;
           const options = Array.isArray(rawOptions) ? (rawOptions as string[]) : null;
+          const rawQuestions = event.data?.questions;
+          const questions = Array.isArray(rawQuestions)
+            ? (rawQuestions as { id: string; prompt: string; options?: string[] }[])
+            : null;
           setAwaitingInput(true);
           setIsTyping(false);
           setIsStreaming(false);
           setPendingQuestion(prompt || null);
           setPendingOptions(options);
+          setPendingQuestions(questions);
           break;
         }
 
@@ -243,6 +252,20 @@ export default function QueenDM() {
     [handleSend],
   );
 
+  const handleMultiQuestionAnswer = useCallback(
+    (answers: Record<string, string>) => {
+      setAwaitingInput(false);
+      setPendingQuestion(null);
+      setPendingOptions(null);
+      setPendingQuestions(null);
+      const formatted = Object.entries(answers)
+        .map(([id, val]) => `${id}: ${val}`)
+        .join("\n");
+      handleSend(formatted, "queen-dm");
+    },
+    [handleSend],
+  );
+
   const handleCancelQueen = useCallback(async () => {
     if (!sessionId) return;
     try {
@@ -278,7 +301,9 @@ export default function QueenDM() {
           queenPhase="planning"
           pendingQuestion={awaitingInput ? pendingQuestion : null}
           pendingOptions={awaitingInput ? pendingOptions : null}
+          pendingQuestions={awaitingInput ? pendingQuestions : null}
           onQuestionSubmit={handleQuestionAnswer}
+          onMultiQuestionSubmit={handleMultiQuestionAnswer}
           onQuestionDismiss={() => {
             setAwaitingInput(false);
             setPendingQuestion(null);
