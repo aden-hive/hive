@@ -23,6 +23,7 @@ async def create_queen(
     worker_identity: str | None,
     queen_dir: Path,
     initial_prompt: str | None = None,
+    initial_phase: str | None = None,
 ) -> asyncio.Task:
     """Build the queen executor and return the running asyncio task.
 
@@ -37,6 +38,7 @@ async def create_queen(
     from framework.agents.queen.nodes import (
         _QUEEN_BUILDING_TOOLS,
         _QUEEN_EDITING_TOOLS,
+        _QUEEN_INDEPENDENT_TOOLS,
         _QUEEN_PLANNING_TOOLS,
         _QUEEN_RUNNING_TOOLS,
         _QUEEN_STAGING_TOOLS,
@@ -46,6 +48,7 @@ async def create_queen(
         _queen_behavior_always,
         _queen_behavior_building,
         _queen_behavior_editing,
+        _queen_behavior_independent,
         _queen_behavior_planning,
         _queen_behavior_running,
         _queen_behavior_staging,
@@ -53,12 +56,14 @@ async def create_queen(
         _queen_identity_editing,
         _queen_phase_7,
         _queen_role_building,
+        _queen_role_independent,
         _queen_role_planning,
         _queen_role_running,
         _queen_role_staging,
         _queen_style,
         _queen_tools_building,
         _queen_tools_editing,
+        _queen_tools_independent,
         _queen_tools_planning,
         _queen_tools_running,
         _queen_tools_staging,
@@ -111,8 +116,8 @@ async def create_queen(
         logger.warning("Queen: MCP registry config failed to load", exc_info=True)
 
     # ---- Phase state --------------------------------------------------
-    initial_phase = "staging" if worker_identity else "planning"
-    phase_state = QueenPhaseState(phase=initial_phase, event_bus=session.event_bus)
+    effective_phase = initial_phase or ("staging" if worker_identity else "planning")
+    phase_state = QueenPhaseState(phase=effective_phase, event_bus=session.event_bus)
     session.phase_state = phase_state
 
     # ---- Track ask rounds during planning ----------------------------
@@ -167,6 +172,7 @@ async def create_queen(
     staging_names = set(_QUEEN_STAGING_TOOLS)
     running_names = set(_QUEEN_RUNNING_TOOLS)
     editing_names = set(_QUEEN_EDITING_TOOLS)
+    independent_names = set(_QUEEN_INDEPENDENT_TOOLS)
 
     registered_names = {t.name for t in queen_tools}
     missing_building = building_names - registered_names
@@ -184,6 +190,18 @@ async def create_queen(
     phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
     phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
     phase_state.editing_tools = [t for t in queen_tools if t.name in editing_names]
+
+    # Independent phase gets core tools + all MCP tools not claimed by any
+    # other phase (coder-tools file I/O, gcu-tools browser, etc.).
+    all_phase_names = planning_names | building_names | staging_names | running_names | editing_names
+    mcp_tools = [t for t in queen_tools if t.name not in all_phase_names]
+    phase_state.independent_tools = (
+        [t for t in queen_tools if t.name in independent_names] + mcp_tools
+    )
+    logger.info(
+        "Queen: independent tools: %s",
+        sorted(t.name for t in phase_state.independent_tools),
+    )
 
     # ---- Global memory -------------------------------------------------
     from framework.agents.queen.queen_memory_v2 import (
@@ -258,6 +276,14 @@ async def create_queen(
         + _queen_behavior_always
         + _queen_behavior_editing
         + worker_identity
+    )
+    phase_state.prompt_independent = (
+        _queen_character_core
+        + _queen_role_independent
+        + _queen_style
+        + _queen_tools_independent
+        + _queen_behavior_always
+        + _queen_behavior_independent
     )
 
     # ---- Default skill protocols -------------------------------------
