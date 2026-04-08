@@ -17,7 +17,9 @@ class TestDataBufferHallucinationDetection:
     def test_detects_code_at_start(self):
         """Code at the start of the string should be detected."""
         buffer = DataBuffer()
-        code_content = "```python\nimport os\nfrom pathlib import Path\ndef hack(): pass\n```" + "A" * 6000
+        code_content = (
+            "```python\nimport os\nfrom pathlib import Path\ndef hack(): pass\n```" + "A" * 6000
+        )
 
         with pytest.raises(DataBufferWriteError) as exc_info:
             buffer.write("output", code_content)
@@ -164,7 +166,11 @@ class TestOutputValidatorHallucinationDetection:
         # 50KB string with code at 75% position
         size = 50000
         code_position = int(size * 0.75)
-        content = "A" * code_position + "\nimport os\nclass HiddenClass:\n    pass\n" + "B" * (size - code_position - 38)
+        content = (
+            "A" * code_position
+            + "\nimport os\nclass HiddenClass:\n    pass\n"
+            + "B" * (size - code_position - 38)
+        )
 
         assert validator._contains_code_indicators(content) is True
 
