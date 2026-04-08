@@ -98,6 +98,57 @@ from framework.tracker.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
 
+# Tags whose content is internal reasoning and must be stripped from
+# the user-visible stream.  Covers <think> and the 5-pillar character
+# assessment tags.
+_INTERNAL_TAGS = frozenset({
+    "think",
+    "social_distance",
+    "context",
+    "mood_filter",
+    "physical_presence",
+    "language_engine",
+})
+_STRIP_RE = re.compile(
+    r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>"
+    r".*?"
+    r"</(?:" + "|".join(_INTERNAL_TAGS) + r")>\s*",
+    re.DOTALL,
+)
+
+
+_INTERNAL_OPEN_RE = re.compile(
+    r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>"
+)
+# Matches a trailing `<` that could be the start of an internal tag.
+# We build a pattern that matches `<` followed by any prefix of any
+# internal tag name (e.g. `<so`, `<contex`, `<think`).
+_PARTIAL_PREFIXES: set[str] = set()
+for _tag in _INTERNAL_TAGS:
+    for _i in range(1, len(_tag) + 1):
+        _PARTIAL_PREFIXES.add(_tag[:_i])
+_PARTIAL_OPEN_RE = re.compile(
+    r"<(?:" + "|".join(re.escape(p) for p in sorted(_PARTIAL_PREFIXES, key=len, reverse=True)) + r")$"
+)
+
+
+def _strip_internal_tags_from_snapshot(snapshot: str) -> str:
+    """Remove all internal tag blocks from the full accumulated text.
+
+    Also truncates at any unclosed or partially-opened internal tag
+    so partial tags never leak to the frontend during streaming.
+    """
+    cleaned = _STRIP_RE.sub("", snapshot)
+    # Truncate at any fully-opened but unclosed internal tag
+    m = _INTERNAL_OPEN_RE.search(cleaned)
+    if m:
+        cleaned = cleaned[:m.start()]
+    # Truncate at any partial opening tag at the end (e.g. `<social` or `<co`)
+    m2 = _PARTIAL_OPEN_RE.search(cleaned)
+    if m2:
+        cleaned = cleaned[:m2.start()]
+    return cleaned
+
 
 async def _describe_images_as_text(image_content: list[dict[str, Any]]) -> str | None:
     """Describe images using the best available vision model."""
@@ -2152,6 +2203,7 @@ class AgentLoop(NodeProtocol):
                 inner_turn: int = inner_turn,
             ) -> None:
                 nonlocal accumulated_text, _stream_error
+                _clean_snapshot = ""  # visible-only text for the frontend
 
                 async for event in ctx.llm.stream(
                     messages=_msgs,
@@ -2161,23 +2213,20 @@ class AgentLoop(NodeProtocol):
                 ):
                     if isinstance(event, TextDeltaEvent):
                         accumulated_text = event.snapshot
-                        # Filter <think>...</think> blocks from client output.
-                        # Content inside think tags is internal reasoning -- only
-                        # the text after </think> is shown to the user.
-                        _content = event.content
-                        if "<think>" in event.snapshot and "</think>" not in event.snapshot:
-                            _content = ""  # still inside think block
-                        elif "</think>" in _content:
-                            # End of think block -- emit only text after the tag
-                            _content = _content.split("</think>", 1)[-1]
-                        elif "<think>" in _content:
-                            _content = ""  # opening tag in this chunk
-                        if _content:
+                        # Strip internal reasoning tags from the full
+                        # snapshot, then diff against what we already
+                        # emitted to get the new visible delta.
+                        _new_clean = _strip_internal_tags_from_snapshot(
+                            event.snapshot
+                        )
+                        if len(_new_clean) > len(_clean_snapshot):
+                            _delta = _new_clean[len(_clean_snapshot):]
+                            _clean_snapshot = _new_clean
                             await self._publish_text_delta(
                                 stream_id,
                                 node_id,
-                                _content,
-                                event.snapshot,
+                                _delta,
+                                _clean_snapshot,
                                 ctx,
                                 execution_id,
                                 iteration=iteration,
