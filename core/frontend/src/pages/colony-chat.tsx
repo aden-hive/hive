@@ -328,7 +328,7 @@ export default function ColonyChat() {
     const onMouseMove = (e: MouseEvent) => {
       if (!resizing.current) return;
       const sidebarWidth = 240;
-      const pct = ((e.clientX - sidebarWidth) / (window.innerWidth - sidebarWidth)) * 100;
+      const pct = 100 - ((e.clientX - sidebarWidth) / (window.innerWidth - sidebarWidth)) * 100;
       setGraphPanelPct(Math.max(15, Math.min(50, pct)));
     };
     const onMouseUp = () => {

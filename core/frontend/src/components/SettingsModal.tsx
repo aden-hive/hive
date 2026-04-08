@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Eye, EyeOff, Check, Trash2, ChevronDown, Zap } from "lucide-react";
 import { useColony } from "@/context/ColonyContext";
 import { useTheme } from "@/context/ThemeContext";
@@ -42,6 +42,21 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
 
   // Model selection state
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+
+  // Theme dropdown state
+  const [themeDropdownOpen, setThemeDropdownOpen] = useState(false);
+  const themeDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!themeDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (themeDropdownRef.current && !themeDropdownRef.current.contains(e.target as Node)) {
+        setThemeDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [themeDropdownOpen]);
 
   // Sync form fields when modal opens
   useEffect(() => {
@@ -150,7 +165,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
       />
 
       {/* Modal */}
-      <div className="relative bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-[720px] max-h-[80vh] flex overflow-hidden">
+      <div className="relative bg-card border border-border/60 rounded-2xl shadow-2xl w-full max-w-[720px] h-[520px] max-h-[80vh] flex overflow-hidden">
         {/* Sidebar nav */}
         <div className="w-[180px] flex-shrink-0 border-r border-border/40 py-6 px-3 flex flex-col gap-6">
           <h2 className="text-sm font-semibold text-foreground px-3">
@@ -200,7 +215,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
             <X className="w-4 h-4" />
           </button>
 
-          <div className="flex-1 overflow-y-auto px-8 py-6 flex flex-col gap-6">
+          <div className="flex-1 overflow-y-auto scrollbar-hide px-8 py-6 flex flex-col gap-6">
             {activeSection === "profile" && (
               <>
                 {/* Display name */}
@@ -243,16 +258,43 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                   <label className="text-sm font-medium text-foreground">
                     Theme
                   </label>
-                  <select
-                    value={theme}
-                    onChange={(e) =>
-                      setTheme(e.target.value as "light" | "dark")
-                    }
-                    className="bg-muted/30 border border-border/50 rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-                  >
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                  </select>
+                  <div className="relative" ref={themeDropdownRef}>
+                    <button
+                      onClick={() => setThemeDropdownOpen(!themeDropdownOpen)}
+                      className="flex items-center gap-2 bg-muted/30 border border-border/50 rounded-lg px-3 py-1.5 text-sm text-foreground hover:bg-muted/40 transition-colors"
+                    >
+                      {theme === "light" ? "Light" : "Dark"}
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${
+                          themeDropdownOpen ? "rotate-180" : ""
+                        }`}
+                      />
+                    </button>
+
+                    {themeDropdownOpen && (
+                      <div className="absolute right-0 top-full mt-1 bg-card border border-border/60 rounded-lg shadow-xl z-10 min-w-[120px]">
+                        {(["light", "dark"] as const).map((option) => (
+                          <button
+                            key={option}
+                            onClick={() => {
+                              setTheme(option);
+                              setThemeDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-4 py-2 text-sm flex items-center gap-2 transition-colors first:rounded-t-lg last:rounded-b-lg ${
+                              theme === option
+                                ? "bg-primary/10 text-primary"
+                                : "text-foreground hover:bg-muted/30"
+                            }`}
+                          >
+                            {theme === option && <Check className="w-3 h-3 flex-shrink-0" />}
+                            <span className={theme === option ? "" : "ml-5"}>
+                              {option === "light" ? "Light" : "Dark"}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Save button */}
