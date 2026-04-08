@@ -8,14 +8,14 @@ import {
   type ReactNode,
 } from "react";
 import type { Colony, QueenBee, UserProfile } from "@/types/colony";
-import type { DiscoverEntry } from "@/api/types";
+import type { DiscoverEntry, LiveSession } from "@/api/types";
 import { agentsApi } from "@/api/agents";
 import { sessionsApi } from "@/api/sessions";
+import { queensApi } from "@/api/queens";
 import {
   agentSlug,
   slugToColonyId,
   slugToDisplayName,
-  getQueenForAgent,
 } from "@/lib/colony-registry";
 
 // ── localStorage keys ────────────────────────────────────────────────────────
@@ -118,9 +118,10 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
   // Only called on mount, visibility change, and after create/delete.
   const fetchColonies = useCallback(async () => {
     try {
-      const [discoverResult, sessionsResult] = await Promise.all([
+      const [discoverResult, sessionsResult, queenProfilesResult] = await Promise.all([
         agentsApi.discover(),
-        sessionsApi.list().catch(() => ({ sessions: [] as { session_id: string; agent_path: string }[] })),
+        sessionsApi.list().catch(() => ({ sessions: [] as LiveSession[] })),
+        queensApi.list().catch(() => ({ queens: [] as { id: string; name: string; title: string }[] })),
       ]);
 
       // Skip "Framework" agents — those are internal to the hive runtime
@@ -156,16 +157,19 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
         };
       });
 
-      const newQueens: QueenBee[] = newColonies.map((colony) => {
-        const qi = getQueenForAgent(colony.queenId);
-        return {
-          id: colony.queenId,
-          name: qi.name,
-          role: qi.role,
-          colonyId: colony.id,
-          status: colony.status === "running" ? "online" : "offline",
-        };
-      });
+      // Build queens from backend profiles (not derived from colonies)
+      const liveQueenIds = new Set(
+        sessionsResult.sessions
+          .filter((s) => s.queen_id)
+          .map((s) => s.queen_id as string),
+      );
+
+      const newQueens: QueenBee[] = queenProfilesResult.queens.map((qp) => ({
+        id: qp.id,
+        name: qp.name,
+        role: qp.title,
+        status: liveQueenIds.has(qp.id) ? "online" : "offline",
+      }));
 
       setColonies(newColonies);
       setQueens(newQueens);

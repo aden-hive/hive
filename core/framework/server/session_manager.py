@@ -177,17 +177,23 @@ class SessionManager:
         model: str | None = None,
         initial_prompt: str | None = None,
         queen_resume_from: str | None = None,
+        queen_name: str | None = None,
     ) -> Session:
         """Create a new session with a queen but no worker.
 
         When ``queen_resume_from`` is set the queen writes conversation messages
         to that existing session's directory instead of creating a new one.
         This preserves full conversation history across server restarts.
+
+        When ``queen_name`` is set the session is pre-bound to that queen
+        identity, skipping LLM auto-selection in the identity hook.
         """
         # Reuse the original session ID when cold-restoring
         resolved_session_id = queen_resume_from or session_id
         session = await self._create_session_core(session_id=resolved_session_id, model=model)
         session.queen_resume_from = queen_resume_from
+        if queen_name:
+            session.queen_name = queen_name
 
         # Start queen immediately (queen-only, no worker tools yet)
         await self._start_queen(session, worker_identity=None, initial_prompt=initial_prompt)
@@ -207,6 +213,7 @@ class SessionManager:
         model: str | None = None,
         initial_prompt: str | None = None,
         queen_resume_from: str | None = None,
+        queen_name: str | None = None,
     ) -> Session:
         """Create a session and load a worker in one step.
 
@@ -251,7 +258,9 @@ class SessionManager:
             model=model,
         )
         session.queen_resume_from = queen_resume_from
-        if _resume_queen_id:
+        if queen_name:
+            session.queen_name = queen_name
+        elif _resume_queen_id:
             session.queen_name = _resume_queen_id
         try:
             # Load the graph FIRST (before queen) so queen gets full tools

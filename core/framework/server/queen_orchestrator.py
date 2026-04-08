@@ -307,7 +307,12 @@ async def create_queen(
     async def _queen_identity_hook(ctx: HookContext) -> HookResult | None:
         ensure_default_queens()
         trigger = ctx.trigger or ""
-        queen_id = await select_queen(trigger, _session_llm)
+        # If the session was pre-bound to a queen (user clicked a specific
+        # queen in the UI), use that identity instead of LLM auto-selection.
+        if session.queen_name and session.queen_name != "default":
+            queen_id = session.queen_name
+        else:
+            queen_id = await select_queen(trigger, _session_llm)
         try:
             profile = load_queen_profile(queen_id)
         except FileNotFoundError:
