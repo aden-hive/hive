@@ -10,7 +10,9 @@ class SystemMonitor:
         # Start Prometheus metrics server on 8000
         start_http_server(8000)
 
-    def trace_node(self, node_name, agent_type, input_data):
+    def trace_node(
+        self, node_name: str, agent_type: str, input_data: dict
+    ) -> object:
         """Creates a trace for an agent's execution step."""
         return self.langfuse.trace(
             name=node_name,
@@ -18,7 +20,14 @@ class SystemMonitor:
             input=input_data
         )
 
-    def log_metrics(self, agent_type, model, tokens, duration, node_name):
+    def log_metrics(
+        self,
+        agent_type: str,
+        model: str,
+        tokens: int,
+        duration: float,
+        node_name: str,
+    ) -> None:
         """Updates Prometheus with real-time performance data."""
         TOKEN_USAGE.labels(agent_type=agent_type, model=model).inc(tokens)
         LATENCY.labels(node_name=node_name).observe(duration)
