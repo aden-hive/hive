@@ -18,7 +18,8 @@ export interface QueenBee {
   id: string;
   name: string;
   role: string;
-  colonyId: string;
+  /** Colony this queen is currently managing (if any). */
+  colonyId?: string;
   status: "online" | "offline";
 }
 

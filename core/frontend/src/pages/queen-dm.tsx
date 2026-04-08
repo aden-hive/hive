@@ -4,8 +4,9 @@ import { Loader2 } from "lucide-react";
 import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
 import { executionApi } from "@/api/execution";
 import { sessionsApi } from "@/api/sessions";
+import { queensApi } from "@/api/queens";
 import { useMultiSSE } from "@/hooks/use-sse";
-import type { LiveSession, AgentEvent } from "@/api/types";
+import type { AgentEvent } from "@/api/types";
 import { sseEventToChatMessage } from "@/lib/chat-helpers";
 import { useColony } from "@/context/ColonyContext";
 import { getQueenForAgent } from "@/lib/colony-registry";
@@ -31,56 +32,70 @@ export default function QueenDM() {
 
   const turnCounterRef = useRef(0);
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
-  const loadingRef = useRef(false);
 
-  // Create queen-only session
+  // Switch queen session when queenId changes
   useEffect(() => {
-    if (!queenId || loadingRef.current) return;
-    loadingRef.current = true;
-    setLoading(true);
-    setMessages([]);
+    if (!queenId) return;
+
+    // Immediately reset UI for the new queen
     setSessionId(null);
+    setMessages([]);
     setQueenReady(false);
+    setLoading(true);
+    setIsTyping(false);
+    setIsStreaming(false);
+    setPendingQuestion(null);
+    setPendingOptions(null);
+    setAwaitingInput(false);
+    turnCounterRef.current = 0;
+    queenIterTextRef.current = {};
+
+    let cancelled = false;
 
     (async () => {
       try {
-        // Check for existing queen-only sessions
-        const { sessions: allLive } = await sessionsApi.list();
-        let session: LiveSession | undefined = allLive.find(
-          (s) => !s.has_worker && !s.agent_path,
-        );
+        const result = await queensApi.getOrCreateSession(queenId);
+        if (cancelled) return;
 
-        if (!session) {
-          session = await sessionsApi.create(undefined, undefined, undefined, undefined, undefined);
-        }
-
-        setSessionId(session.session_id);
-        setLoading(false);
+        const sid = result.session_id;
+        setSessionId(sid);
         setQueenReady(true);
+        // Show typing indicator while the queen initializes (identity hook + first turn)
+        setIsTyping(true);
 
-        // Restore messages
-        try {
-          const { events } = await sessionsApi.eventsHistory(session.session_id);
-          const restored: ChatMessage[] = [];
-          for (const evt of events) {
-            const msg = sseEventToChatMessage(evt, "queen-dm", queenName);
-            if (!msg) continue;
-            if (evt.stream_id === "queen") msg.role = "queen";
-            restored.push(msg);
+        // Restore messages from history
+        if (result.status === "live" || result.status === "resumed") {
+          try {
+            const { events } = await sessionsApi.eventsHistory(sid);
+            if (cancelled) return;
+            const restored: ChatMessage[] = [];
+            for (const evt of events) {
+              const msg = sseEventToChatMessage(evt, "queen-dm", queenName);
+              if (!msg) continue;
+              if (evt.stream_id === "queen") msg.role = "queen";
+              restored.push(msg);
+            }
+            if (restored.length > 0) {
+              restored.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+              if (!cancelled) {
+                setMessages(restored);
+                setIsTyping(false);
+              }
+            }
+          } catch {
+            // No history
           }
-          if (restored.length > 0) {
-            restored.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-            setMessages(restored);
-          }
-        } catch {
-          // No history
         }
-      } catch (err) {
-        setLoading(false);
+      } catch {
+        // Session creation failed
       } finally {
-        loadingRef.current = false;
+        if (!cancelled) setLoading(false);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [queenId, queenName]);
 
   // SSE handler

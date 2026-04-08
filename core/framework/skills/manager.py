@@ -164,7 +164,10 @@ class SkillsManager:
         self._protocols_prompt = ""  # all skills use progressive disclosure now
 
         if catalog_prompt:
-            logger.warning("Skill system produced empty protocols_prompt")
+            logger.info(
+                "Skill system ready: catalog=%d chars",
+                len(catalog_prompt),
+            )
 
     # ------------------------------------------------------------------
     # Hot-reload: watch skill directories for SKILL.md changes.

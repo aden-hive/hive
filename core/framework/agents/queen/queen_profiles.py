@@ -401,7 +401,7 @@ async def select_queen(user_message: str, llm: LLMProvider) -> str:
         response = await llm.acomplete(
             messages=[{"role": "user", "content": user_message}],
             system=_QUEEN_SELECTOR_SYSTEM_PROMPT,
-            max_tokens=64,
+            max_tokens=2048,
             json_mode=True,
         )
         raw = response.content.strip()
