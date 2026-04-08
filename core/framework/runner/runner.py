@@ -1568,8 +1568,8 @@ class AgentRunner:
 
                 provider = AntigravityProvider(model=self.model)
                 if not provider.has_credentials():
-                    print(
-                        "Warning: Antigravity credentials not found. "
+                    logger.warning(
+                        "Antigravity credentials not found. "
                         "Run: uv run python core/antigravity_auth.py auth account add"
                     )
                 self._llm = provider
