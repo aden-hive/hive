@@ -142,17 +142,43 @@ Connect two nodes with an edge to define execution flow.
 - `edge_id` (string, required): Unique edge identifier
 - `source` (string, required): Source node ID
 - `target` (string, required): Target node ID
-- `condition` (string, optional): When to traverse: `on_success` (default) or `on_failure`
-- `condition_expr` (string, optional): Python expression for conditional routing
-- `priority` (integer, optional): Edge priority (default: 0)
+- `condition` (string, optional): Basic routing condition. Use `on_success` (default) to traverse when source node succeeds, or `on_failure` to traverse on failure.
+- `condition_expr` (string, optional): Python expression for advanced conditional routing based on source node output.
+- `priority` (integer, optional): Edge priority when multiple edges match (higher priority executes first). (Default: 0)
 
-**Example:**
+**Difference between `condition` and `condition_expr`:**
+- **`condition`**: Simple, predefined routing (`on_success` or `on_failure`)
+- **`condition_expr`**: Complex, custom logic based on actual output data from source node
+
+**Examples:**
+
+*Simple success routing with `condition`:*
 ```json
 {
   "edge_id": "search_to_extract",
   "source": "search_sources",
   "target": "extract_content",
   "condition": "on_success"
+}
+```
+
+*Failure handling with `condition`:*
+```json
+{
+  "edge_id": "search_failed_retry",
+  "source": "search_sources",
+  "target": "search_retry",
+  "condition": "on_failure"
+}
+```
+
+*Advanced routing with `condition_expr`:*
+```json
+{
+  "edge_id": "check_status",
+  "source": "process_data",
+  "target": "extract_results",
+  "condition_expr": "result.get('status') == 'completed'"
 }
 ```
 
