@@ -446,7 +446,7 @@ Quickstart also supports selecting OpenRouter and Hive LLM interactively. See [c
 # Fernet encryption key for credential store at ~/.hive/credentials
 export HIVE_CREDENTIAL_KEY="your-fernet-key"
 
-# Agent storage location (default: /tmp)
+# Agent storage location (default: ~/.hive/agents/{agent_name}/)
 export AGENT_STORAGE_PATH="/custom/storage"
 ```
 

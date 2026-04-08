@@ -342,34 +342,38 @@ def _dump_failed_request(
     attempt: int,
 ) -> str:
     """Dump failed request to a file for debugging. Returns the file path."""
-    FAILED_REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        FAILED_REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    filename = f"{error_type}_{model.replace('/', '_')}_{timestamp}.json"
-    filepath = FAILED_REQUESTS_DIR / filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"{error_type}_{model.replace('/', '_')}_{timestamp}.json"
+        filepath = FAILED_REQUESTS_DIR / filename
 
-    # Build dump data
-    messages = kwargs.get("messages", [])
-    dump_data = {
-        "timestamp": datetime.now().isoformat(),
-        "model": model,
-        "error_type": error_type,
-        "attempt": attempt,
-        "estimated_tokens": _estimate_tokens(model, messages),
-        "num_messages": len(messages),
-        "messages": messages,
-        "tools": kwargs.get("tools"),
-        "max_tokens": kwargs.get("max_tokens"),
-        "temperature": kwargs.get("temperature"),
-    }
+        # Build dump data
+        messages = kwargs.get("messages", [])
+        dump_data = {
+            "timestamp": datetime.now().isoformat(),
+            "model": model,
+            "error_type": error_type,
+            "attempt": attempt,
+            "estimated_tokens": _estimate_tokens(model, messages),
+            "num_messages": len(messages),
+            "messages": messages,
+            "tools": kwargs.get("tools"),
+            "max_tokens": kwargs.get("max_tokens"),
+            "temperature": kwargs.get("temperature"),
+        }
 
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(dump_data, f, indent=2, default=str)
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(dump_data, f, indent=2, default=str)
 
-    # Prune old dumps to prevent unbounded disk growth
-    _prune_failed_request_dumps()
+        # Prune old dumps to prevent unbounded disk growth
+        _prune_failed_request_dumps()
 
-    return str(filepath)
+        return str(filepath)
+    except OSError as e:
+        logger.warning(f"Failed to dump request debug log to {FAILED_REQUESTS_DIR}: {e}")
+        return "log_write_failed"
 
 
 def _compute_retry_delay(

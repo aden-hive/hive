@@ -18,6 +18,24 @@ from framework.agents.queen.recall_selector import (
 from framework.graph.prompting import build_system_prompt_for_node_context
 from framework.tools.queen_lifecycle_tools import QueenPhaseState
 
+
+def _make_litellm_response(tool_calls: list[dict] | None = None, content: str = ""):
+    """Build a mock that mirrors litellm ModelResponse structure."""
+    if tool_calls:
+        tc_objects = []
+        for tc in tool_calls:
+            fn = SimpleNamespace(
+                name=tc["name"],
+                arguments=json.dumps(tc.get("input", {})),
+            )
+            tc_objects.append(SimpleNamespace(id=tc["id"], function=fn))
+        message = SimpleNamespace(tool_calls=tc_objects)
+    else:
+        message = SimpleNamespace(tool_calls=None)
+    raw = SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    return MagicMock(content=content, raw_response=raw)
+
+
 # ---------------------------------------------------------------------------
 # parse_frontmatter
 # ---------------------------------------------------------------------------
@@ -244,28 +262,25 @@ async def test_short_reflection(tmp_path: Path):
     llm = AsyncMock()
     llm.acomplete.side_effect = [
         # Turn 1: LLM writes a global memory file
-        MagicMock(
-            content="",
-            raw_response={
-                "tool_calls": [
-                    {
-                        "id": "tc_1",
-                        "name": "write_memory_file",
-                        "input": {
-                            "filename": "user-likes-tests.md",
-                            "content": (
-                                "---\nname: user-likes-tests\n"
-                                "type: preference\n"
-                                "description: User values thorough testing\n"
-                                "---\nObserved emphasis on test coverage."
-                            ),
-                        },
-                    }
-                ]
-            },
+        _make_litellm_response(
+            tool_calls=[
+                {
+                    "id": "tc_1",
+                    "name": "write_memory_file",
+                    "input": {
+                        "filename": "user-likes-tests.md",
+                        "content": (
+                            "---\nname: user-likes-tests\n"
+                            "type: preference\n"
+                            "description: User values thorough testing\n"
+                            "---\nObserved emphasis on test coverage."
+                        ),
+                    },
+                }
+            ]
         ),
         # Turn 2: done
-        MagicMock(content="Done reflecting.", raw_response={}),
+        _make_litellm_response(content="Done reflecting."),
     ]
 
     session_dir = tmp_path / "session"
@@ -312,39 +327,33 @@ async def test_long_reflection(tmp_path: Path):
 
     llm = AsyncMock()
     llm.acomplete.side_effect = [
-        MagicMock(
-            content="",
-            raw_response={
-                "tool_calls": [
-                    {"id": "tc_1", "name": "list_memory_files", "input": {}},
-                ]
-            },
+        _make_litellm_response(
+            tool_calls=[
+                {"id": "tc_1", "name": "list_memory_files", "input": {}},
+            ]
         ),
-        MagicMock(
-            content="",
-            raw_response={
-                "tool_calls": [
-                    {
-                        "id": "tc_2",
-                        "name": "write_memory_file",
-                        "input": {
-                            "filename": "dup-a.md",
-                            "content": (
-                                "---\nname: dup-a\ntype: profile\n"
-                                "description: profile A (merged)\n"
-                                "---\nProfile A details. Also same profile A."
-                            ),
-                        },
+        _make_litellm_response(
+            tool_calls=[
+                {
+                    "id": "tc_2",
+                    "name": "write_memory_file",
+                    "input": {
+                        "filename": "dup-a.md",
+                        "content": (
+                            "---\nname: dup-a\ntype: profile\n"
+                            "description: profile A (merged)\n"
+                            "---\nProfile A details. Also same profile A."
+                        ),
                     },
-                    {
-                        "id": "tc_3",
-                        "name": "delete_memory_file",
-                        "input": {"filename": "dup-b.md"},
-                    },
-                ]
-            },
+                },
+                {
+                    "id": "tc_3",
+                    "name": "delete_memory_file",
+                    "input": {"filename": "dup-b.md"},
+                },
+            ]
         ),
-        MagicMock(content="Housekeeping complete.", raw_response={}),
+        _make_litellm_response(content="Housekeeping complete."),
     ]
 
     await run_long_reflection(llm, memory_dir=mem_dir)
