@@ -8,7 +8,7 @@ from framework.orchestrator.edge import AsyncEntryPointSpec, GraphSpec
 from framework.orchestrator.orchestrator import ExecutionResult
 from framework.llm import LiteLLMProvider
 from framework.loader.tool_registry import ToolRegistry
-from framework.host.agent_host import AgentHost, create_agent_runtime
+from framework.host.agent_host import AgentHost
 from framework.host.execution_manager import EntryPointSpec
 
 from .config import default_config, metadata
@@ -265,7 +265,7 @@ class SDRAgent:
             ),
         ]
 
-        self._agent_runtime = create_agent_runtime(
+        self._agent_runtime = AgentHost(
             graph=self._graph,
             goal=self.goal,
             storage_path=self._storage_path,

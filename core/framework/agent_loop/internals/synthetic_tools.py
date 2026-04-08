@@ -204,66 +204,6 @@ def build_escalate_tool() -> Tool:
         },
     )
 
-
-def build_report_to_parent_tool() -> Tool:
-    """Build the synthetic report_to_parent tool for sub-agent progress reports.
-
-    Sub-agents call this to send one-way progress updates, partial findings,
-    or status reports to the parent node (and external observers via event bus)
-    without blocking execution.
-
-    When ``wait_for_response`` is True, the sub-agent blocks until the parent
-    relays the user's response — used for escalation (e.g. login pages, CAPTCHAs).
-
-    When ``mark_complete`` is True, the sub-agent terminates immediately after
-    sending the report — no need to call set_output for each output key.
-    """
-    return Tool(
-        name="report_to_parent",
-        description=(
-            "Send a report to the parent agent. By default this is fire-and-forget: "
-            "the parent receives the report but does not respond. "
-            "Set wait_for_response=true to BLOCK until the user replies — use this "
-            "when you need human intervention (e.g. login pages, CAPTCHAs, "
-            "authentication walls). The user's response is returned as the tool result. "
-            "Set mark_complete=true to finish your task and terminate immediately "
-            "after sending the report — use this when your findings are in the "
-            "message/data fields and you don't need to call set_output."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "description": "A human-readable status or progress message.",
-                },
-                "data": {
-                    "type": "object",
-                    "description": "Optional structured data to include with the report.",
-                },
-                "wait_for_response": {
-                    "type": "boolean",
-                    "description": (
-                        "If true, block execution until the user responds. "
-                        "Use for escalation scenarios requiring human intervention."
-                    ),
-                    "default": False,
-                },
-                "mark_complete": {
-                    "type": "boolean",
-                    "description": (
-                        "If true, terminate the sub-agent immediately after sending "
-                        "this report. The report message and data are delivered to the "
-                        "parent as the final result. No set_output calls are needed."
-                    ),
-                    "default": False,
-                },
-            },
-            "required": ["message"],
-        },
-    )
-
-
 def handle_set_output(
     tool_input: dict[str, Any],
     output_keys: list[str] | None,

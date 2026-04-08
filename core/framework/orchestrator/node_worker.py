@@ -607,7 +607,7 @@ class NodeWorker:
             return self._node_impl
 
         # Auto-create EventLoopNode
-        if self.node_spec.node_type in ("event_loop", "gcu"):
+        if self.node_spec.node_type == "event_loop":
             from framework.agent_loop.internals.types import LoopConfig
             from framework.agent_loop.agent_loop import AgentLoop
             from framework.orchestrator.node import warn_if_deprecated_client_facing

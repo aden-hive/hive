@@ -52,7 +52,7 @@ def tui():
     from framework.tui.app import AdenTUI
     from framework.llm import LiteLLMProvider
     from framework.loader.tool_registry import ToolRegistry
-    from framework.host.agent_host import create_agent_runtime
+    from framework.host.agent_host import AgentHost
     from framework.host.execution_manager import EntryPointSpec
 
     async def run_tui():
@@ -68,7 +68,7 @@ def tui():
             api_key=agent.config.api_key,
             api_base=agent.config.api_base,
         )
-        runtime = create_agent_runtime(
+        runtime = AgentHost(
             graph=agent._build_graph(),
             goal=agent.goal,
             storage_path=storage,

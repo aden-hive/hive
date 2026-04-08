@@ -727,7 +727,6 @@ class Orchestrator:
 
     VALID_NODE_TYPES = {
         "event_loop",
-        "gcu",
     }
     # Node types removed in v0.5 — provide migration guidance
     REMOVED_NODE_TYPES = {
@@ -773,7 +772,7 @@ class Orchestrator:
             )
 
         # Create based on type
-        if node_spec.node_type in ("event_loop", "gcu"):
+        if node_spec.node_type == "event_loop":
             # Auto-create EventLoopNode with sensible defaults.
             # Custom configs can still be pre-registered via node_registry.
             from framework.agent_loop.agent_loop import AgentLoop, LoopConfig

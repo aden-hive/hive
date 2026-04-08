@@ -122,7 +122,7 @@ def tui(verbose: bool, debug: bool) -> None:
 
     from framework.llm import LiteLLMProvider
     from framework.loader.tool_registry import ToolRegistry
-    from framework.host.agent_host import create_agent_runtime
+    from framework.host.agent_host import AgentHost
     from framework.host.event_bus import EventBus
     from framework.host.execution_manager import EntryPointSpec
 
@@ -150,7 +150,7 @@ def tui(verbose: bool, debug: bool) -> None:
         tool_executor = agent._tool_registry.get_executor()
         graph = agent._build_graph()
 
-        runtime = create_agent_runtime(
+        runtime = AgentHost(
             graph=graph,
             goal=agent.goal,
             storage_path=storage_path,

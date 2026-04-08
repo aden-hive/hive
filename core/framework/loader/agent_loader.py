@@ -25,9 +25,8 @@ from framework.orchestrator.node import NodeSpec
 from framework.llm.provider import LLMProvider, Tool
 from framework.loader.preload_validation import run_preload_validation
 from framework.loader.tool_registry import ToolRegistry
-from framework.host.agent_host import AgentHost, AgentRuntimeConfig, create_agent_runtime
+from framework.host.agent_host import AgentHost, AgentRuntimeConfig
 from framework.host.execution_manager import EntryPointSpec
-from framework.tracker.runtime_log_store import RuntimeLogStore
 from framework.tools.flowchart_utils import generate_fallback_flowchart
 
 logger = logging.getLogger(__name__)
@@ -1556,60 +1555,6 @@ class AgentLoader:
         }
         return self._tool_registry.register_mcp_server(server_config)
 
-    def _load_mcp_servers_from_config(self, config_path: Path) -> None:
-        """Load and register MCP servers from a configuration file."""
-        self._tool_registry.load_mcp_config(config_path)
-
-    def _load_registry_mcp_servers(self, agent_path: Path) -> None:
-        """Load and register MCP servers selected via ``mcp_registry.json``."""
-        registry_json = agent_path / "mcp_registry.json"
-        if registry_json.is_file():
-            self._tool_registry.set_mcp_registry_agent_path(agent_path)
-        else:
-            self._tool_registry.set_mcp_registry_agent_path(None)
-
-        from framework.loader.mcp_registry import MCPRegistry
-
-        try:
-            registry = MCPRegistry()
-            registry.initialize()
-            server_configs, selection_max_tools = registry.load_agent_selection(agent_path)
-        except Exception as exc:
-            logger.warning(
-                "Failed to load MCP registry servers for '%s': %s",
-                agent_path.name,
-                exc,
-            )
-            return
-
-        if not server_configs:
-            return
-
-        results = self._tool_registry.load_registry_servers(
-            server_configs,
-            preserve_existing_tools=True,
-            log_collisions=True,
-            max_tools=selection_max_tools,
-        )
-        loaded = [result for result in results if result["status"] == "loaded"]
-        skipped = [result for result in results if result["status"] != "loaded"]
-
-        logger.info(
-            "Loaded %d/%d MCP registry server(s) for agent '%s'",
-            len(loaded),
-            len(results),
-            agent_path.name,
-        )
-        if skipped:
-            logger.info(
-                "Skipped MCP registry servers for agent '%s': %s",
-                agent_path.name,
-                [
-                    {"server": result["server"], "reason": result["skipped_reason"]}
-                    for result in skipped
-                ],
-            )
-
     def set_approval_callback(self, callback: Callable) -> None:
         """
         Set a callback for human-in-the-loop approval during execution.
@@ -1701,65 +1646,36 @@ class AgentLoader:
             except Exception:
                 pass
 
-        self._setup_agent_runtime_with_pipeline(
-            pipeline_stages=pipeline_stages,
-            event_bus=event_bus,
-        )
-
-    def _setup_agent_runtime_with_pipeline(
-        self,
-        pipeline_stages: list,
-        event_bus=None,
-    ) -> None:
-        """Create AgentHost with pipeline stages."""
+        # Create AgentHost directly (no wrapper)
         from framework.host.execution_manager import EntryPointSpec
         from framework.orchestrator.checkpoint_config import CheckpointConfig
+        from framework.tracker.runtime_log_store import RuntimeLogStore
 
-        entry_points = []
-        if self.graph.entry_node:
-            entry_points.append(
-                EntryPointSpec(
-                    id="default",
-                    name="Default",
-                    entry_node=self.graph.entry_node,
-                    trigger_type="manual",
-                    isolation_level="shared",
-                ),
-            )
-
-        log_store = RuntimeLogStore(
-            base_path=self._storage_path / "runtime_logs",
-        )
-        checkpoint_config = CheckpointConfig(
-            enabled=True,
-            checkpoint_on_node_start=False,
-            checkpoint_on_node_complete=True,
-            checkpoint_max_age_days=7,
-            async_checkpoint=True,
-        )
-
-        runtime_config = None
-        if self.runtime_config is not None:
-            from framework.host.agent_host import AgentRuntimeConfig
-
-            if isinstance(self.runtime_config, AgentRuntimeConfig):
-                runtime_config = self.runtime_config
-
-
-        self._agent_runtime = create_agent_runtime(
+        self._agent_runtime = AgentHost(
             graph=self.graph,
             goal=self.goal,
             storage_path=self._storage_path,
-            entry_points=entry_points,
-            llm=None,  # Injected by LlmProviderStage
-            tools=[],  # Injected by McpRegistryStage
-            tool_executor=None,  # Injected by McpRegistryStage
-            runtime_log_store=log_store,
-            checkpoint_config=checkpoint_config,
-            config=runtime_config,
+            runtime_log_store=RuntimeLogStore(
+                base_path=self._storage_path / "runtime_logs",
+            ),
+            checkpoint_config=CheckpointConfig(
+                enabled=True,
+                checkpoint_on_node_complete=True,
+                checkpoint_max_age_days=7,
+                async_checkpoint=True,
+            ),
             graph_id=self.graph.id or self.agent_path.name,
             event_bus=event_bus,
             pipeline_stages=pipeline_stages,
+        )
+        self._agent_runtime.register_entry_point(
+            EntryPointSpec(
+                id="default",
+                name="Default",
+                entry_node=self.graph.entry_node,
+                trigger_type="manual",
+                isolation_level="shared",
+            ),
         )
         self._agent_runtime.intro_message = self.intro_message
 
@@ -2190,7 +2106,7 @@ class AgentLoader:
         except ImportError:
             # aden_tools not installed - fall back to direct check
             has_llm_nodes = any(
-                node.node_type in ("event_loop", "gcu") for node in self.graph.nodes
+                node.node_type == "event_loop" for node in self.graph.nodes
             )
             if has_llm_nodes:
                 api_key_env = self._get_api_key_env_var(self.model)

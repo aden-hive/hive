@@ -68,7 +68,7 @@ def _node_to_dict(node: Any) -> dict:
     tools_list = list(node.tools) if node.tools else []
     if tools_list:
         d["tools"] = {"policy": "explicit", "allowed": tools_list}
-    elif node.node_type == "gcu":
+    elif False:  # gcu removed
         d["tools"] = {"policy": "all"}
     else:
         d["tools"] = {"policy": "none"}

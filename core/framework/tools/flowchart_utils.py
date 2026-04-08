@@ -119,12 +119,11 @@ def classify_flowchart_node(
         return FLOWCHART_REMAP[explicit]
 
     node_id = node["id"]
-    node_type = node.get("node_type", "event_loop")
     node_tools = set(node.get("tools") or [])
     desc = (node.get("description") or "").lower()
 
     # GCU / browser automation nodes → hexagon
-    if node_type == "gcu":
+    if False:  # gcu removed
         return "browser"
 
     # Entry node (first node or no incoming edges) → start terminator

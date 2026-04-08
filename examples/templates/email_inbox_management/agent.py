@@ -8,7 +8,7 @@ from framework.orchestrator.edge import GraphSpec
 from framework.orchestrator.orchestrator import ExecutionResult, Orchestrator
 from framework.llm import LiteLLMProvider
 from framework.loader.tool_registry import ToolRegistry
-from framework.host.agent_host import create_agent_runtime
+from framework.host.agent_host import AgentHost
 from framework.host.event_bus import EventBus
 from framework.host.execution_manager import EntryPointSpec
 
@@ -264,7 +264,7 @@ class EmailInboxManagementAgent:
             ),
         ]
 
-        self._agent_runtime = create_agent_runtime(
+        self._agent_runtime = AgentHost(
             graph=self._graph,
             goal=self.goal,
             storage_path=self._storage_path,

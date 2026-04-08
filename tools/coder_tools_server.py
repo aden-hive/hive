@@ -1478,13 +1478,11 @@ def run_agent_tests(
 def validate_agent_package(agent_name: str) -> str:
     """Run structural validation checks on a built agent package in one call.
 
-    Executes 5 steps and reports all results (does not stop on first failure):
-      1. Class validation — checks graph structure and entry_points contract
-      2. Node completeness — every NodeSpec in nodes/ must be in the nodes list,
-         and GCU nodes must be referenced in a parent's sub_agents
-      3. Graph validation — loads the agent graph without credential checks
-      4. Tool validation — checks declared tools exist in MCP servers
-      5. Tests — runs the agent's pytest suite
+    Executes validation steps and reports all results:
+      1. Schema validation — loads agent.json via load_agent_config
+      2. Graph validation — loads the agent graph via AgentLoader
+      3. Tool validation — checks declared tools exist in MCP servers
+      4. Tests — runs the agent's pytest suite (skipped if no tests/)
 
     Note: Credential validation is intentionally skipped here (building phase).
     Credentials are validated at run time by run_agent_with_input() preflight.
@@ -1522,19 +1520,8 @@ def validate_agent_package(agent_name: str) -> str:
                     pathlib.Path('exports/{agent_name}/agent.json').read_text()
                 )
                 g, goal = load_agent_config(data)
-                # Check GCU sub_agent references
-                sub_refs = set()
-                for n in g.nodes:
-                    for sa in getattr(n, 'sub_agents', []) or []:
-                        sub_refs.add(sa)
-                errors = []
-                for n in g.nodes:
-                    if n.node_type == 'gcu' and n.id not in sub_refs:
-                        errors.append(
-                            f"GCU node '{{n.id}}' not in any node's sub_agents"
-                        )
                 print(json.dumps({{
-                    'valid': len(errors) == 0,
+                    'valid': True,
                     'nodes': len(g.nodes),
                     'edges': len(g.edges),
                     'entry': g.entry_node,

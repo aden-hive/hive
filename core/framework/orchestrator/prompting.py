@@ -193,13 +193,10 @@ def build_system_prompt(spec: NodePromptSpec) -> str:
     if spec.narrative:
         parts.append(f"\n--- Context (what has happened so far) ---\n{spec.narrative}")
 
-    if not False and spec.node_type in ("event_loop", "gcu") and spec.output_keys:
+    if not False and spec.node_type == "event_loop" and spec.output_keys:
         parts.append(f"\n{EXECUTION_SCOPE_PREAMBLE}")
 
-    if spec.node_type == "gcu":
-        from framework.orchestrator.gcu import GCU_BROWSER_SYSTEM_PROMPT
 
-        parts.append(f"\n{GCU_BROWSER_SYSTEM_PROMPT}")
 
     if spec.focus_prompt:
         parts.append(f"\n--- Current Focus ---\n{spec.focus_prompt}")
