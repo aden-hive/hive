@@ -39,6 +39,7 @@ dependencies = [
     "requests>=2.31.0",
     "websockets>=12.0",
     "psycopg2-binary>=2.9.0",
+    "duckduckgo-search>=8.1.1",
 ]
 
 [project.optional-dependencies]
