@@ -63,7 +63,7 @@ API_KEY_PROVIDERS = [
 def _detect_claude_code_token() -> str | None:
     """Check if Claude Code subscription credentials are available."""
     try:
-        from framework.runner.runner import get_claude_code_token
+        from framework.loader.agent_loader import get_claude_code_token
 
         return get_claude_code_token()
     except Exception:
@@ -73,7 +73,7 @@ def _detect_claude_code_token() -> str | None:
 def _detect_codex_token() -> str | None:
     """Check if Codex subscription credentials are available."""
     try:
-        from framework.runner.runner import get_codex_token
+        from framework.loader.agent_loader import get_codex_token
 
         return get_codex_token()
     except Exception:
@@ -83,7 +83,7 @@ def _detect_codex_token() -> str | None:
 def _detect_kimi_code_token() -> str | None:
     """Check if Kimi Code subscription credentials are available."""
     try:
-        from framework.runner.runner import get_kimi_code_token
+        from framework.loader.agent_loader import get_kimi_code_token
 
         return get_kimi_code_token()
     except Exception:

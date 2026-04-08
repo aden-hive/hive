@@ -209,7 +209,7 @@ def _detect_subscriptions() -> list[str]:
 
     # Claude Code subscription
     try:
-        from framework.runner.runner import get_claude_code_token
+        from framework.loader.agent_loader import get_claude_code_token
         if get_claude_code_token():
             detected.append("claude_code")
     except Exception:
@@ -217,7 +217,7 @@ def _detect_subscriptions() -> list[str]:
 
     # Codex subscription
     try:
-        from framework.runner.runner import get_codex_token
+        from framework.loader.agent_loader import get_codex_token
         if get_codex_token():
             detected.append("codex")
     except Exception:
@@ -225,7 +225,7 @@ def _detect_subscriptions() -> list[str]:
 
     # Kimi Code subscription
     try:
-        from framework.runner.runner import get_kimi_code_token
+        from framework.loader.agent_loader import get_kimi_code_token
         if get_kimi_code_token():
             detected.append("kimi_code")
     except Exception:
@@ -233,7 +233,7 @@ def _detect_subscriptions() -> list[str]:
 
     # Antigravity subscription
     try:
-        from framework.runner.runner import get_antigravity_token
+        from framework.loader.agent_loader import get_antigravity_token
         if get_antigravity_token():
             detected.append("antigravity")
     except Exception:
@@ -253,16 +253,16 @@ def _get_active_subscription(llm_config: dict) -> str | None:
 def _get_subscription_token(sub_id: str) -> str | None:
     """Get the token for a subscription."""
     if sub_id == "claude_code":
-        from framework.runner.runner import get_claude_code_token
+        from framework.loader.agent_loader import get_claude_code_token
         return get_claude_code_token()
     elif sub_id == "codex":
-        from framework.runner.runner import get_codex_token
+        from framework.loader.agent_loader import get_codex_token
         return get_codex_token()
     elif sub_id == "kimi_code":
-        from framework.runner.runner import get_kimi_code_token
+        from framework.loader.agent_loader import get_kimi_code_token
         return get_kimi_code_token()
     elif sub_id == "antigravity":
-        from framework.runner.runner import get_antigravity_token
+        from framework.loader.agent_loader import get_antigravity_token
         return get_antigravity_token()
     return None
 
@@ -457,6 +457,42 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
         })
 
 
+async def handle_get_profile(request: web.Request) -> web.Response:
+    """GET /api/config/profile — user display name and about."""
+    profile = get_hive_config().get("user_profile", {})
+    return web.json_response({
+        "displayName": profile.get("displayName", ""),
+        "about": profile.get("about", ""),
+        "theme": profile.get("theme", ""),
+    })
+
+
+async def handle_update_profile(request: web.Request) -> web.Response:
+    """PUT /api/config/profile — persist user display name and about."""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    config = get_hive_config()
+    profile = config.get("user_profile", {})
+    if "displayName" in body:
+        profile["displayName"] = str(body["displayName"]).strip()
+    if "about" in body:
+        profile["about"] = str(body["about"]).strip()
+    if body.get("theme") in ("light", "dark"):
+        profile["theme"] = body["theme"]
+    config["user_profile"] = profile
+    _write_config_atomic(config)
+
+    logger.info("User profile updated: displayName=%s", profile.get("displayName", ""))
+    return web.json_response({
+        "displayName": profile.get("displayName", ""),
+        "about": profile.get("about", ""),
+        "theme": profile.get("theme", ""),
+    })
+
+
 async def handle_get_models(request: web.Request) -> web.Response:
     """GET /api/config/models — curated provider→models list."""
     return web.json_response({"models": MODELS_CATALOGUE})
@@ -472,3 +508,5 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/config/llm", handle_get_llm_config)
     app.router.add_put("/api/config/llm", handle_update_llm_config)
     app.router.add_get("/api/config/models", handle_get_models)
+    app.router.add_get("/api/config/profile", handle_get_profile)
+    app.router.add_put("/api/config/profile", handle_update_profile)
