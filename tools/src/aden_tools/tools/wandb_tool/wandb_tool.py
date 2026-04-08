@@ -44,7 +44,11 @@ def _get_creds(
     return (api_key,)
 
 
-def _graphql(api_key: str, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+def _graphql(
+    api_key: str,
+    query: str,
+    variables: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Execute a GraphQL query and return the parsed response."""
     try:
         resp = httpx.post(
@@ -148,9 +152,10 @@ def register_tools(
         Returns:
             Dict containing the list of runs in the project.
         """
+        parsed_filters = None
         if filters:
             try:
-                json.loads(filters)
+                parsed_filters = json.loads(filters)
             except json.JSONDecodeError:
                 return {"error": "filters must be a valid JSON string"}
 
@@ -160,9 +165,9 @@ def register_tools(
         (api_key,) = creds
 
         query = """
-        query ListRuns($project: String!, $entity: String!, $perPage: Int!) {
+        query ListRuns($project: String!, $entity: String!, $perPage: Int!, $filters: JSONString) {
           project(name: $project, entityName: $entity) {
-            runs(first: $perPage) {
+            runs(first: $perPage, filters: $filters) {
               edges {
                 node {
                   name
@@ -177,7 +182,10 @@ def register_tools(
           }
         }
         """
-        data = _graphql(api_key, query, {"project": project, "entity": entity, "perPage": per_page})
+        variables: dict[str, Any] = {"project": project, "entity": entity, "perPage": per_page}
+        if parsed_filters is not None:
+            variables["filters"] = parsed_filters
+        data = _graphql(api_key, query, variables)
         if "error" in data:
             return data
 
@@ -296,6 +304,8 @@ def register_tools(
         (api_key,) = creds
 
         keys = [k.strip() for k in metric_keys.split(",") if k.strip()]
+        if not keys:
+            return {"error": "metric_keys must include at least one non-empty key"}
         specs = json.dumps([{"key": k} for k in keys])
 
         query = f"""

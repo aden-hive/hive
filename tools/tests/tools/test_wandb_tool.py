@@ -126,14 +126,20 @@ class TestWandbTool:
             patch.dict("os.environ", ENV),
             patch(_PATCH_POST, return_value=_gql_ok(gql_data)) as mock_post,
         ):
-            result = tool_fns["wandb_list_runs"](entity="e", project="p", per_page=10)
+            result = tool_fns["wandb_list_runs"](
+                entity="testentity",
+                project="testproject",
+                filters='{"key": "value"}',
+                per_page=50,
+            )
 
-        assert result["project"] == "p"
+        assert result["project"] == "testproject"
         assert len(result["runs"]) == 1
         assert result["runs"][0]["id"] == "w854ckuu"
-        # Verify per_page was passed in variables
+        # Verify filters and per_page were forwarded in GraphQL variables
         call_json = mock_post.call_args[1]["json"]
-        assert call_json["variables"]["perPage"] == 10
+        assert call_json["variables"]["perPage"] == 50
+        assert call_json["variables"]["filters"] == {"key": "value"}
 
     def test_wandb_list_runs_invalid_filters_json(self, tool_fns: dict[str, Any]) -> None:
         """wandb_list_runs returns error for invalid JSON filters before any HTTP call."""
