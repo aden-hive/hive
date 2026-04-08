@@ -1,64 +1,31 @@
-"""Tests for wandb_tool - Weights & Biases integration (SDK-based)."""
+"""Tests for wandb_tool - Weights & Biases integration (GraphQL/httpx)."""
 
 from __future__ import annotations
 
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from fastmcp import FastMCP
 
 from aden_tools.tools.wandb_tool.wandb_tool import register_tools
 
-ENV = {
-    "WANDB_API_KEY": "test-key",
-}
+ENV = {"WANDB_API_KEY": "test-key-abcdefghij"}
+_PATCH_POST = "aden_tools.tools.wandb_tool.wandb_tool.httpx.post"
 
 
-def _mock_project(name: str = "my-project") -> MagicMock:
-    p = MagicMock()
-    p.name = name
-    p.id = f"id-{name}"
-    p.description = ""
-    p.url = f"https://wandb.ai/entity/{name}"
-    return p
+def _mock_resp(data: Any, status_code: int = 200) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = data
+    resp.text = str(data)
+    return resp
 
 
-def _mock_run(
-    run_id: str = "abc123",
-    name: str = "test-run",
-    state: str = "finished",
-) -> MagicMock:
-    r = MagicMock()
-    r.id = run_id
-    r.name = name
-    r.state = state
-    r.url = f"https://wandb.ai/entity/project/runs/{run_id}"
-    r.created_at = "2024-01-01T00:00:00"
-    r.config = {"lr": 0.001}
-    r.tags = ["v1"]
-    r.notes = "test notes"
-    # summary mock with items()
-    summary_mock = MagicMock()
-    summary_mock.items.return_value = [("accuracy", 0.9), ("loss", 0.1), ("_step", 5)]
-    r.summary = summary_mock
-    return r
-
-
-def _mock_history(*rows: dict[str, Any]) -> MagicMock:
-    """Return a mock DataFrame-like object for run.history()."""
-    df = MagicMock()
-    df.to_dict.return_value = list(rows)
-    return df
-
-
-def _mock_artifact(name: str = "model:v0", atype: str = "model") -> MagicMock:
-    a = MagicMock()
-    a.name = name
-    a.type = atype
-    a.version = "v0"
-    a.size = 1024
-    return a
+def _gql_ok(data: dict[str, Any]) -> MagicMock:
+    """Wrap data in the GraphQL envelope: {"data": {...}}."""
+    return _mock_resp({"data": data})
 
 
 @pytest.fixture
@@ -72,7 +39,7 @@ class TestWandbTool:
     # --- Credential tests ---
 
     def test_missing_credentials_returns_error(self, tool_fns: dict[str, Any]) -> None:
-        """Missing WANDB_API_KEY must return a descriptive error dict."""
+        """Missing WANDB_API_KEY must return a descriptive error dict with help."""
         with patch.dict("os.environ", {}, clear=True):
             result = tool_fns["wandb_list_projects"](entity="test-entity")
         assert "error" in result
@@ -82,75 +49,94 @@ class TestWandbTool:
     # --- wandb_list_projects ---
 
     def test_wandb_list_projects_success(self, tool_fns: dict[str, Any]) -> None:
-        """wandb_list_projects returns projects list from the SDK."""
-        mock_api = MagicMock()
-        mock_api.projects.return_value = [_mock_project("proj-a"), _mock_project("proj-b")]
-
+        """wandb_list_projects returns projects list from GraphQL."""
+        gql_data = {
+            "projects": {
+                "edges": [
+                    {
+                        "node": {
+                            "name": "proj-a",
+                            "description": "Desc A",
+                            "createdAt": "2024-01-01",
+                        }
+                    },
+                    {
+                        "node": {
+                            "name": "proj-b",
+                            "description": "",
+                            "createdAt": "2024-02-01",
+                        }
+                    },
+                ]
+            }
+        }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.wandb_tool.wandb_tool._make_api", return_value=mock_api),
+            patch(_PATCH_POST, return_value=_gql_ok(gql_data)),
         ):
             result = tool_fns["wandb_list_projects"](entity="test-entity")
 
         assert result["entity"] == "test-entity"
         assert len(result["projects"]) == 2
         assert result["projects"][0]["name"] == "proj-a"
-        mock_api.projects.assert_called_once_with(entity="test-entity")
 
-    def test_wandb_list_projects_sdk_error(self, tool_fns: dict[str, Any]) -> None:
-        """SDK exceptions are caught and returned as error dicts."""
-        mock_api = MagicMock()
-        mock_api.projects.side_effect = Exception("network failure")
-
+    def test_wandb_list_projects_http_401(self, tool_fns: dict[str, Any]) -> None:
+        """HTTP 401 returns an invalid key error."""
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.wandb_tool.wandb_tool._make_api", return_value=mock_api),
+            patch(_PATCH_POST, return_value=_mock_resp({}, status_code=401)),
         ):
-            result = tool_fns["wandb_list_projects"](entity="test-entity")
+            result = tool_fns["wandb_list_projects"](entity="e")
+        assert result["error"] == "Invalid Weights & Biases API key"
 
+    def test_wandb_list_projects_graphql_error(self, tool_fns: dict[str, Any]) -> None:
+        """GraphQL error block is surfaced as an error dict."""
+        gql_err = {"errors": [{"message": "entity not found"}]}
+        with (
+            patch.dict("os.environ", ENV),
+            patch(_PATCH_POST, return_value=_mock_resp(gql_err)),
+        ):
+            result = tool_fns["wandb_list_projects"](entity="e")
         assert "error" in result
-        assert "network failure" in result["error"]
+        assert "entity not found" in result["error"]
 
     # --- wandb_list_runs ---
 
     def test_wandb_list_runs_success(self, tool_fns: dict[str, Any]) -> None:
         """wandb_list_runs returns runs list."""
-        mock_api = MagicMock()
-        mock_api.runs.return_value = [_mock_run("r1", "run-one"), _mock_run("r2", "run-two")]
-
+        gql_data = {
+            "project": {
+                "runs": {
+                    "edges": [
+                        {
+                            "node": {
+                                "name": "w854ckuu",
+                                "id": "ferengi-directive-1",
+                                "state": "finished",
+                                "createdAt": "2024-01-01",
+                                "config": "{}",
+                                "summaryMetrics": "{}",
+                            }
+                        }
+                    ]
+                }
+            }
+        }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.wandb_tool.wandb_tool._make_api", return_value=mock_api),
+            patch(_PATCH_POST, return_value=_gql_ok(gql_data)) as mock_post,
         ):
-            result = tool_fns["wandb_list_runs"](
-                entity="test-entity", project="test-project", per_page=25
-            )
+            result = tool_fns["wandb_list_runs"](entity="e", project="p", per_page=10)
 
-        assert result["project"] == "test-project"
-        assert len(result["runs"]) == 2
-        assert result["runs"][0]["id"] == "r1"
-        mock_api.runs.assert_called_once_with(path="test-entity/test-project", per_page=25)
-
-    def test_wandb_list_runs_with_valid_filters(self, tool_fns: dict[str, Any]) -> None:
-        """wandb_list_runs passes parsed filters dict to SDK."""
-        mock_api = MagicMock()
-        mock_api.runs.return_value = []
-
-        with (
-            patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.wandb_tool.wandb_tool._make_api", return_value=mock_api),
-        ):
-            result = tool_fns["wandb_list_runs"](
-                entity="e", project="p", filters='{"state": "finished"}'
-            )
-
-        mock_api.runs.assert_called_once_with(
-            path="e/p", per_page=50, filters={"state": "finished"}
-        )
-        assert "runs" in result
+        assert result["project"] == "p"
+        assert len(result["runs"]) == 1
+        assert result["runs"][0]["id"] == "w854ckuu"
+        # Verify per_page was passed in variables
+        call_json = mock_post.call_args[1]["json"]
+        assert call_json["variables"]["perPage"] == 10
 
     def test_wandb_list_runs_invalid_filters_json(self, tool_fns: dict[str, Any]) -> None:
-        """wandb_list_runs returns error for invalid JSON filters."""
+        """wandb_list_runs returns error for invalid JSON filters before any HTTP call."""
         with patch.dict("os.environ", ENV):
             result = tool_fns["wandb_list_runs"](entity="e", project="p", filters="not-json")
         assert "error" in result
@@ -159,64 +145,70 @@ class TestWandbTool:
     # --- wandb_get_run ---
 
     def test_wandb_get_run_success(self, tool_fns: dict[str, Any]) -> None:
-        """wandb_get_run returns full run details."""
-        mock_api = MagicMock()
-        mock_api.run.return_value = _mock_run("run-123", "my-run")
-
+        """wandb_get_run returns run details."""
+        gql_data = {
+            "project": {
+                "run": {
+                    "name": "run-123",
+                    "id": "my-run",
+                    "state": "finished",
+                    "createdAt": "2024-01-01",
+                    "config": '{"lr": 0.001}',
+                    "summaryMetrics": '{"accuracy": 0.9}',
+                    "tags": ["v1"],
+                    "notes": "test",
+                }
+            }
+        }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.wandb_tool.wandb_tool._make_api", return_value=mock_api),
+            patch(_PATCH_POST, return_value=_gql_ok(gql_data)),
         ):
             result = tool_fns["wandb_get_run"](entity="e", project="p", run_id="run-123")
 
         assert result["id"] == "run-123"
-        assert result["name"] == "my-run"
         assert result["config"] == {"lr": 0.001}
-        mock_api.run.assert_called_once_with("e/p/run-123")
+        assert result["summary"] == {"accuracy": 0.9}
 
     def test_wandb_get_run_missing_id(self, tool_fns: dict[str, Any]) -> None:
-        """wandb_get_run with empty run_id returns error before any API call."""
+        """wandb_get_run with empty run_id returns error before HTTP call."""
         result = tool_fns["wandb_get_run"](entity="e", project="p", run_id="")
         assert "error" in result
         assert result["error"] == "run_id is required"
 
+    def test_wandb_get_run_not_found(self, tool_fns: dict[str, Any]) -> None:
+        """wandb_get_run returns not-found error when run is null."""
+        gql_data = {"project": {"run": None}}
+        with (
+            patch.dict("os.environ", ENV),
+            patch(_PATCH_POST, return_value=_gql_ok(gql_data)),
+        ):
+            result = tool_fns["wandb_get_run"](entity="e", project="p", run_id="nope")
+        assert "error" in result
+        assert "not found" in result["error"]
+
     # --- wandb_get_run_metrics ---
 
     def test_wandb_get_run_metrics_success(self, tool_fns: dict[str, Any]) -> None:
-        """wandb_get_run_metrics returns history steps."""
-        mock_api = MagicMock()
-        run = _mock_run()
-        run.history.return_value = _mock_history(
-            {"loss": 0.5, "_step": 0}, {"loss": 0.3, "_step": 1}
-        )
-        mock_api.run.return_value = run
-
+        """wandb_get_run_metrics returns sampled history."""
+        gql_data = {
+            "project": {
+                "run": {
+                    "sampledHistory": [{"loss": 0.5}, {"loss": 0.3}],
+                }
+            }
+        }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.wandb_tool.wandb_tool._make_api", return_value=mock_api),
+            patch(_PATCH_POST, return_value=_gql_ok(gql_data)),
         ):
-            result = tool_fns["wandb_get_run_metrics"](entity="e", project="p", run_id="abc123")
-
-        assert result["run_id"] == "abc123"
-        assert len(result["steps"]) == 2
-        assert result["steps"][0]["loss"] == 0.5
-
-    def test_wandb_get_run_metrics_with_keys(self, tool_fns: dict[str, Any]) -> None:
-        """wandb_get_run_metrics passes parsed keys list to history()."""
-        mock_api = MagicMock()
-        run = _mock_run()
-        run.history.return_value = _mock_history({"loss": 0.5})
-        mock_api.run.return_value = run
-
-        with (
-            patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.wandb_tool.wandb_tool._make_api", return_value=mock_api),
-        ):
-            tool_fns["wandb_get_run_metrics"](
-                entity="e", project="p", run_id="abc123", metric_keys="loss,accuracy"
+            result = tool_fns["wandb_get_run_metrics"](
+                entity="e", project="p", run_id="r1", metric_keys="loss"
             )
 
-        run.history.assert_called_once_with(samples=500, keys=["loss", "accuracy"])
+        assert result["run_id"] == "r1"
+        assert result["metric_keys"] == ["loss"]
+        assert result["history"] == [{"loss": 0.5}, {"loss": 0.3}]
 
     def test_wandb_get_run_metrics_missing_id(self, tool_fns: dict[str, Any]) -> None:
         """wandb_get_run_metrics with empty run_id returns error."""
@@ -224,28 +216,42 @@ class TestWandbTool:
         assert "error" in result
         assert result["error"] == "run_id is required"
 
+    def test_wandb_get_run_metrics_missing_keys(self, tool_fns: dict[str, Any]) -> None:
+        """wandb_get_run_metrics with no metric_keys returns error."""
+        result = tool_fns["wandb_get_run_metrics"](entity="e", project="p", run_id="r1")
+        assert "error" in result
+        assert "metric_keys is required" in result["error"]
+
     # --- wandb_list_artifacts ---
 
     def test_wandb_list_artifacts_success(self, tool_fns: dict[str, Any]) -> None:
         """wandb_list_artifacts returns artifact list."""
-        mock_api = MagicMock()
-        run = _mock_run()
-        run.logged_artifacts.return_value = [
-            _mock_artifact("model:v0", "model"),
-            _mock_artifact("dataset:v1", "dataset"),
-        ]
-        mock_api.run.return_value = run
-
+        gql_data = {
+            "project": {
+                "run": {
+                    "outputArtifacts": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "name": "model:v0",
+                                    "type": "model",
+                                    "description": "",
+                                    "createdAt": "2024-01-01",
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.wandb_tool.wandb_tool._make_api", return_value=mock_api),
+            patch(_PATCH_POST, return_value=_gql_ok(gql_data)),
         ):
-            result = tool_fns["wandb_list_artifacts"](entity="e", project="p", run_id="abc123")
+            result = tool_fns["wandb_list_artifacts"](entity="e", project="p", run_id="r1")
 
-        assert result["run_id"] == "abc123"
-        assert len(result["artifacts"]) == 2
+        assert result["run_id"] == "r1"
         assert result["artifacts"][0]["name"] == "model:v0"
-        assert result["artifacts"][0]["type"] == "model"
 
     def test_wandb_list_artifacts_missing_id(self, tool_fns: dict[str, Any]) -> None:
         """wandb_list_artifacts with empty run_id returns error."""
@@ -256,24 +262,48 @@ class TestWandbTool:
     # --- wandb_get_summary ---
 
     def test_wandb_get_summary_success(self, tool_fns: dict[str, Any]) -> None:
-        """wandb_get_summary returns non-internal summary keys."""
-        mock_api = MagicMock()
-        mock_api.run.return_value = _mock_run()
-
+        """wandb_get_summary returns summary filtering out _-prefixed keys."""
+        gql_data = {
+            "project": {"run": {"summaryMetrics": '{"accuracy": 0.9, "loss": 0.1, "_step": 5}'}}
+        }
         with (
             patch.dict("os.environ", ENV),
-            patch("aden_tools.tools.wandb_tool.wandb_tool._make_api", return_value=mock_api),
+            patch(_PATCH_POST, return_value=_gql_ok(gql_data)),
         ):
-            result = tool_fns["wandb_get_summary"](entity="e", project="p", run_id="abc123")
+            result = tool_fns["wandb_get_summary"](entity="e", project="p", run_id="r1")
 
-        assert result["run_id"] == "abc123"
-        # Internal keys (_step) should be filtered out
-        assert "_step" not in result["summary"]
+        assert result["run_id"] == "r1"
         assert result["summary"]["accuracy"] == 0.9
-        assert result["summary"]["loss"] == 0.1
+        assert "_step" not in result["summary"]
 
     def test_wandb_get_summary_missing_id(self, tool_fns: dict[str, Any]) -> None:
         """wandb_get_summary with empty run_id returns error."""
         result = tool_fns["wandb_get_summary"](entity="e", project="p", run_id="")
         assert "error" in result
         assert result["error"] == "run_id is required"
+
+    # --- Network/timeout errors ---
+
+    def test_timeout_returns_error(self, tool_fns: dict[str, Any]) -> None:
+        """httpx.TimeoutException is caught and returns a timeout message."""
+        with (
+            patch.dict("os.environ", ENV),
+            patch(
+                "aden_tools.tools.wandb_tool.wandb_tool.httpx.post",
+                side_effect=httpx.TimeoutException("timeout"),
+            ),
+        ):
+            result = tool_fns["wandb_list_projects"](entity="e")
+        assert result["error"] == "Request timed out"
+
+    def test_network_error_returns_error(self, tool_fns: dict[str, Any]) -> None:
+        """httpx.RequestError is caught and returns a network error message."""
+        with (
+            patch.dict("os.environ", ENV),
+            patch(
+                "aden_tools.tools.wandb_tool.wandb_tool.httpx.post",
+                side_effect=httpx.RequestError("Connection refused"),
+            ),
+        ):
+            result = tool_fns["wandb_list_projects"](entity="e")
+        assert "Network error" in result["error"]

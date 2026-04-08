@@ -1,9 +1,8 @@
 """
 Weights & Biases integration credentials.
 
-Contains credentials for the Weights & Biases REST API.
-Requires WANDB_API_KEY.
-Optional WANDB_HOST for self-hosted instances.
+Contains credentials for the W&B GraphQL API.
+Requires WANDB_API_KEY only — no host configuration needed.
 """
 
 from __future__ import annotations
@@ -23,16 +22,15 @@ WANDB_CREDENTIALS = {
         ],
         required=True,
         startup_required=False,
-        help_url="https://docs.wandb.ai/guides/integrations/rest-api",
+        help_url="https://wandb.ai/authorize",
         description="Weights & Biases API Key",
         direct_api_key_supported=True,
         api_key_instructions="""To set up W&B API access:
 1. Create a W&B account at https://wandb.ai
-2. Go to Settings > API keys
+2. Go to https://wandb.ai/authorize
 3. Copy your API key
 4. Set environment variable:
-   export WANDB_API_KEY=your-api-key
-   export WANDB_HOST=https://api.wandb.ai (optional, for self-hosted)""",
+   export WANDB_API_KEY=your-api-key""",
         health_check_endpoint="",
         credential_id="wandb_api_key",
         credential_key="api_key",

@@ -1,22 +1,27 @@
 """
 Weights & Biases ML experiment tracking tool.
 
-Uses the official W&B Python SDK (wandb.Api) — no undocumented REST endpoints.
+Uses the W&B GraphQL API via httpx — no SDK dependency.
 
-Supports:
-- Credential store via wandb_api_key
-- Environment variable WANDB_API_KEY
+Authentication: Bearer token (WANDB_API_KEY)
+GraphQL endpoint: https://api.wandb.ai/graphql
 
-SDK reference: https://docs.wandb.ai/guides/track/public-api-guide
+API Reference: https://github.com/wandb/wandb/blob/main/wandb/proto/wandb_internal.proto
 """
 
 from __future__ import annotations
 
+import json
 import os
 from typing import TYPE_CHECKING, Any
 
+import httpx
+from fastmcp import FastMCP
+
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
+
+GRAPHQL_URL = "https://api.wandb.ai/graphql"
 
 
 def _get_creds(
@@ -25,31 +30,55 @@ def _get_creds(
     """Return (api_key,) or an error dict."""
     if credentials is not None:
         api_key = credentials.get("wandb_api_key")
-        try:
-            # wandb_host is optional; SDK doesn't need it for cloud
-            _ = credentials.get("wandb_host")
-        except KeyError:
-            pass
     else:
         api_key = os.getenv("WANDB_API_KEY")
 
     if not api_key:
         return {
             "error": "Weights & Biases credentials not configured",
-            "help": ("Set WANDB_API_KEY environment variable or configure via credential store"),
+            "help": (
+                "Set WANDB_API_KEY environment variable or configure via credential store. "
+                "Get your API key at https://wandb.ai/authorize"
+            ),
         }
     return (api_key,)
 
 
-def _make_api(api_key: str) -> Any:
-    """Create a wandb.Api instance with the given key."""
-    import wandb
+def _graphql(api_key: str, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Execute a GraphQL query and return the parsed response."""
+    try:
+        resp = httpx.post(
+            GRAPHQL_URL,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"query": query, "variables": variables or {}},
+            timeout=30.0,
+        )
+    except httpx.TimeoutException:
+        return {"error": "Request timed out"}
+    except httpx.RequestError as e:
+        return {"error": f"Network error: {e}"}
 
-    return wandb.Api(api_key=api_key)
+    if resp.status_code == 401:
+        return {"error": "Invalid Weights & Biases API key"}
+    if resp.status_code == 403:
+        return {"error": "Insufficient permissions for this Weights & Biases resource"}
+    if resp.status_code >= 400:
+        try:
+            detail = resp.json().get("errors", [{}])[0].get("message", resp.text)
+        except Exception:
+            detail = resp.text
+        return {"error": f"Weights & Biases API error (HTTP {resp.status_code}): {detail}"}
+
+    payload = resp.json()
+    if "errors" in payload:
+        msg = payload["errors"][0].get("message", str(payload["errors"]))
+        return {"error": f"Weights & Biases GraphQL error: {msg}"}
+
+    return payload.get("data", {})
 
 
 def register_tools(
-    mcp: Any,
+    mcp: FastMCP,
     credentials: CredentialStoreAdapter | None = None,
 ) -> None:
     """Register Weights & Biases experiment tracking tools with the MCP server."""
@@ -70,23 +99,35 @@ def register_tools(
             return creds
         (api_key,) = creds
 
-        try:
-            api = _make_api(api_key)
-            projects = api.projects(entity=entity)
-            return {
-                "entity": entity,
-                "projects": [
-                    {
-                        "name": p.name,
-                        "id": p.id,
-                        "description": getattr(p, "description", ""),
-                        "url": getattr(p, "url", ""),
-                    }
-                    for p in projects
-                ],
+        query = """
+        query ListProjects($entity: String!) {
+          projects(entityName: $entity) {
+            edges {
+              node {
+                name
+                description
+                createdAt
+              }
             }
-        except Exception as e:
-            return {"error": f"Weights & Biases error: {e}"}
+          }
+        }
+        """
+        data = _graphql(api_key, query, {"entity": entity})
+        if "error" in data:
+            return data
+
+        edges = data.get("projects", {}).get("edges", [])
+        return {
+            "entity": entity,
+            "projects": [
+                {
+                    "name": e["node"]["name"],
+                    "description": e["node"].get("description", ""),
+                    "created_at": e["node"].get("createdAt", ""),
+                }
+                for e in edges
+            ],
+        }
 
     @mcp.tool()
     def wandb_list_runs(
@@ -102,50 +143,62 @@ def register_tools(
             entity: The W&B entity name (username or organization).
             project: The project name.
             filters: Optional JSON filter string to narrow results.
-            per_page: Number of runs per page (default 50).
+            per_page: Number of runs to return (default 50).
 
         Returns:
             Dict containing the list of runs in the project.
         """
+        if filters:
+            try:
+                json.loads(filters)
+            except json.JSONDecodeError:
+                return {"error": "filters must be a valid JSON string"}
+
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
             return creds
         (api_key,) = creds
 
-        try:
-            import json as _json
-
-            # Validate filters JSON before touching the API
-            parsed_filters: dict[str, Any] | None = None
-            if filters:
-                try:
-                    parsed_filters = _json.loads(filters)
-                except _json.JSONDecodeError:
-                    return {"error": "filters must be a valid JSON string"}
-
-            api = _make_api(api_key)
-            kwargs: dict[str, Any] = {"per_page": per_page}
-            if parsed_filters is not None:
-                kwargs["filters"] = parsed_filters
-
-            runs = api.runs(path=f"{entity}/{project}", **kwargs)
-            return {
-                "entity": entity,
-                "project": project,
-                "runs": [
-                    {
-                        "id": r.id,
-                        "name": r.name,
-                        "state": r.state,
-                        "url": r.url,
-                        "created_at": str(r.created_at),
-                        "config": dict(r.config),
-                    }
-                    for r in runs
-                ],
+        query = """
+        query ListRuns($project: String!, $entity: String!, $perPage: Int!) {
+          project(name: $project, entityName: $entity) {
+            runs(first: $perPage) {
+              edges {
+                node {
+                  name
+                  id
+                  state
+                  createdAt
+                  config
+                  summaryMetrics
+                }
+              }
             }
-        except Exception as e:
-            return {"error": f"Weights & Biases error: {e}"}
+          }
+        }
+        """
+        data = _graphql(api_key, query, {"project": project, "entity": entity, "perPage": per_page})
+        if "error" in data:
+            return data
+
+        edges = data.get("project", {}).get("runs", {}).get("edges", [])
+        runs = []
+        for e in edges:
+            node = e["node"]
+            try:
+                config = json.loads(node.get("config") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                config = {}
+            runs.append(
+                {
+                    "id": node.get("name"),
+                    "display_name": node.get("id"),
+                    "state": node.get("state"),
+                    "created_at": node.get("createdAt"),
+                    "config": config,
+                }
+            )
+        return {"entity": entity, "project": project, "runs": runs}
 
     @mcp.tool()
     def wandb_get_run(entity: str, project: str, run_id: str) -> dict:
@@ -168,21 +221,49 @@ def register_tools(
             return creds
         (api_key,) = creds
 
-        try:
-            api = _make_api(api_key)
-            run = api.run(f"{entity}/{project}/{run_id}")
-            return {
-                "id": run.id,
-                "name": run.name,
-                "state": run.state,
-                "url": run.url,
-                "created_at": str(run.created_at),
-                "config": dict(run.config),
-                "tags": list(run.tags),
-                "notes": run.notes or "",
+        query = """
+        query GetRun($project: String!, $entity: String!, $run: String!) {
+          project(name: $project, entityName: $entity) {
+            run(name: $run) {
+              name
+              id
+              state
+              createdAt
+              config
+              summaryMetrics
+              tags
+              notes
             }
-        except Exception as e:
-            return {"error": f"Weights & Biases error: {e}"}
+          }
+        }
+        """
+        data = _graphql(api_key, query, {"project": project, "entity": entity, "run": run_id})
+        if "error" in data:
+            return data
+
+        node = data.get("project", {}).get("run")
+        if not node:
+            return {"error": "Weights & Biases resource not found"}
+
+        try:
+            config = json.loads(node.get("config") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            config = {}
+        try:
+            summary = json.loads(node.get("summaryMetrics") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            summary = {}
+
+        return {
+            "id": node.get("name"),
+            "display_name": node.get("id"),
+            "state": node.get("state"),
+            "created_at": node.get("createdAt"),
+            "config": config,
+            "summary": summary,
+            "tags": node.get("tags") or [],
+            "notes": node.get("notes") or "",
+        }
 
     @mcp.tool()
     def wandb_get_run_metrics(
@@ -192,38 +273,53 @@ def register_tools(
         metric_keys: str = "",
     ) -> dict:
         """
-        Get metrics history for a specific Weights & Biases run.
+        Get sampled metrics history for a specific Weights & Biases run.
 
         Args:
             entity: The W&B entity name (username or organization).
             project: The project name.
             run_id: The run ID.
-            metric_keys: Optional comma-separated list of metric keys to filter.
+            metric_keys: Comma-separated metric keys to sample (e.g. "loss,accuracy").
+                         At least one key is required.
 
         Returns:
-            Dict containing the run's metric history as a list of step dicts.
+            Dict containing sampled metric history per key.
         """
         if not run_id:
             return {"error": "run_id is required"}
+        if not metric_keys:
+            return {"error": "metric_keys is required (comma-separated, e.g. 'loss,accuracy')"}
 
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
             return creds
         (api_key,) = creds
 
-        try:
-            api = _make_api(api_key)
-            run = api.run(f"{entity}/{project}/{run_id}")
+        keys = [k.strip() for k in metric_keys.split(",") if k.strip()]
+        specs = json.dumps([{"key": k} for k in keys])
 
-            keys = [k.strip() for k in metric_keys.split(",") if k.strip()] if metric_keys else None
-            history = run.history(samples=500, keys=keys)
+        query = f"""
+        query GetRunMetrics($project: String!, $entity: String!, $run: String!) {{
+          project(name: $project, entityName: $entity) {{
+            run(name: $run) {{
+              sampledHistory(specs: {specs})
+            }}
+          }}
+        }}
+        """
+        data = _graphql(api_key, query, {"project": project, "entity": entity, "run": run_id})
+        if "error" in data:
+            return data
 
-            return {
-                "run_id": run_id,
-                "steps": history.to_dict(orient="records"),
-            }
-        except Exception as e:
-            return {"error": f"Weights & Biases error: {e}"}
+        node = data.get("project", {}).get("run")
+        if not node:
+            return {"error": "Weights & Biases resource not found"}
+
+        return {
+            "run_id": run_id,
+            "metric_keys": keys,
+            "history": node.get("sampledHistory", []),
+        }
 
     @mcp.tool()
     def wandb_list_artifacts(entity: str, project: str, run_id: str) -> dict:
@@ -236,7 +332,7 @@ def register_tools(
             run_id: The run ID.
 
         Returns:
-            Dict containing the list of artifacts logged by the run.
+            Dict containing the list of output artifacts for the run.
         """
         if not run_id:
             return {"error": "run_id is required"}
@@ -246,24 +342,45 @@ def register_tools(
             return creds
         (api_key,) = creds
 
-        try:
-            api = _make_api(api_key)
-            run = api.run(f"{entity}/{project}/{run_id}")
-            artifacts = run.logged_artifacts()
-            return {
-                "run_id": run_id,
-                "artifacts": [
-                    {
-                        "name": a.name,
-                        "type": a.type,
-                        "version": getattr(a, "version", ""),
-                        "size": getattr(a, "size", 0),
-                    }
-                    for a in artifacts
-                ],
+        query = """
+        query ListArtifacts($project: String!, $entity: String!, $run: String!) {
+          project(name: $project, entityName: $entity) {
+            run(name: $run) {
+              outputArtifacts {
+                edges {
+                  node {
+                    name
+                    type
+                    description
+                    createdAt
+                  }
+                }
+              }
             }
-        except Exception as e:
-            return {"error": f"Weights & Biases error: {e}"}
+          }
+        }
+        """
+        data = _graphql(api_key, query, {"project": project, "entity": entity, "run": run_id})
+        if "error" in data:
+            return data
+
+        node = data.get("project", {}).get("run")
+        if not node:
+            return {"error": "Weights & Biases resource not found"}
+
+        edges = node.get("outputArtifacts", {}).get("edges", [])
+        return {
+            "run_id": run_id,
+            "artifacts": [
+                {
+                    "name": e["node"]["name"],
+                    "type": e["node"]["type"],
+                    "description": e["node"].get("description", ""),
+                    "created_at": e["node"].get("createdAt", ""),
+                }
+                for e in edges
+            ],
+        }
 
     @mcp.tool()
     def wandb_get_summary(entity: str, project: str, run_id: str) -> dict:
@@ -286,14 +403,28 @@ def register_tools(
             return creds
         (api_key,) = creds
 
-        try:
-            api = _make_api(api_key)
-            run = api.run(f"{entity}/{project}/{run_id}")
-            # Filter out internal W&B keys (prefixed with _)
-            summary = {k: v for k, v in run.summary.items() if not k.startswith("_")}
-            return {
-                "run_id": run_id,
-                "summary": summary,
+        query = """
+        query GetSummary($project: String!, $entity: String!, $run: String!) {
+          project(name: $project, entityName: $entity) {
+            run(name: $run) {
+              summaryMetrics
             }
-        except Exception as e:
-            return {"error": f"Weights & Biases error: {e}"}
+          }
+        }
+        """
+        data = _graphql(api_key, query, {"project": project, "entity": entity, "run": run_id})
+        if "error" in data:
+            return data
+
+        node = data.get("project", {}).get("run")
+        if not node:
+            return {"error": "Weights & Biases resource not found"}
+
+        try:
+            summary = json.loads(node.get("summaryMetrics") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            summary = {}
+
+        # Filter out internal W&B keys
+        summary = {k: v for k, v in summary.items() if not k.startswith("_")}
+        return {"run_id": run_id, "summary": summary}

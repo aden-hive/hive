@@ -39,7 +39,6 @@ dependencies = [
     "requests>=2.31.0",
     "websockets>=12.0",
     "psycopg2-binary>=2.9.0",
-    "wandb>=0.25.0",
 ]
 
 [project.optional-dependencies]
