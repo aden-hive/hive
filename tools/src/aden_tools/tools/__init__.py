@@ -91,6 +91,7 @@ from .langfuse_tool import register_tools as register_langfuse
 from .linear_tool import register_tools as register_linear
 from .lusha_tool import register_tools as register_lusha
 from .mattermost_tool import register_tools as register_mattermost
+from .mailchimp_tool import register_tools as register_mailchimp
 from .microsoft_graph_tool import register_tools as register_microsoft_graph
 from .mongodb_tool import register_tools as register_mongodb
 from .n8n_tool import register_tools as register_n8n
@@ -278,6 +279,7 @@ def _register_unverified(
     register_lusha(mcp, credentials=credentials)
     register_mattermost(mcp, credentials=credentials)
     register_microsoft_graph(mcp, credentials=credentials)
+    register_mailchimp(mcp, credentials=credentials)
     register_mongodb(mcp, credentials=credentials)
     register_n8n(mcp, credentials=credentials)
     register_obsidian(mcp, credentials=credentials)
