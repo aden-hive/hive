@@ -131,7 +131,10 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
 
       const liveSessionMap = new Map<string, string>();
       for (const s of sessionsResult.sessions) {
-        liveSessionMap.set(s.agent_path.replace(/\/$/, ""), s.session_id);
+        // Match by slug (last path segment) so sessions created from
+        // exports/ or ~/.hive/colonies/ both resolve to the same colony.
+        const slug = agentSlug(s.agent_path);
+        if (slug) liveSessionMap.set(slug, s.session_id);
       }
 
       const unreadCounts = loadJson<Record<string, number>>(UNREAD_KEY, {});
@@ -139,8 +142,7 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
       const newColonies: Colony[] = allAgents.map((agent) => {
         const slug = agentSlug(agent.path);
         const colonyId = slugToColonyId(slug);
-        const normalizedPath = agent.path.replace(/\/$/, "");
-        const sessionId = liveSessionMap.get(normalizedPath) ?? null;
+        const sessionId = liveSessionMap.get(slug) ?? null;
         const isRunning = sessionId !== null;
 
         return {
@@ -185,27 +187,23 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
   const fetchStatus = useCallback(async () => {
     try {
       const { sessions } = await sessionsApi.list();
-      const livePathSet = new Set(
-        sessions.map((s) => s.agent_path.replace(/\/$/, "")),
-      );
+      const liveSlugMap = new Map<string, string>();
+      for (const s of sessions) {
+        const slug = agentSlug(s.agent_path);
+        if (slug) liveSlugMap.set(slug, s.session_id);
+      }
       setColonies((prev) =>
         prev.map((c) => {
-          const normalizedPath = c.agentPath.replace(/\/$/, "");
-          const isRunning = livePathSet.has(normalizedPath);
-          const sessionId =
-            sessions.find((s) => s.agent_path.replace(/\/$/, "") === normalizedPath)
-              ?.session_id ?? null;
-          return { ...c, status: isRunning ? "running" : "idle", sessionId };
+          const slug = agentSlug(c.agentPath);
+          const sessionId = liveSlugMap.get(slug) ?? null;
+          return { ...c, status: sessionId ? "running" : "idle", sessionId };
         }),
       );
       setQueens((prev) =>
-        prev.map((q) => {
-          const colony = coloniesRef.current.find((c) => c.queenId === q.id);
-          if (!colony) return q;
-          const normalizedPath = colony.agentPath.replace(/\/$/, "");
-          const isRunning = livePathSet.has(normalizedPath);
-          return { ...q, status: isRunning ? "online" : "offline" };
-        }),
+        prev.map((q) => ({
+          ...q,
+          status: liveSlugMap.has(q.id) ? "online" : "offline",
+        })),
       );
     } catch {
       // Silently fail

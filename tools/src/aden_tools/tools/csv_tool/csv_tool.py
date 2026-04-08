@@ -1,4 +1,4 @@
-"""CSV Tool - Read and manipulate CSV files."""
+"""CSV Tool - Read and manipulate CSV files using absolute paths."""
 
 import csv
 import os
@@ -6,7 +6,7 @@ import re
 
 from fastmcp import FastMCP
 
-from ..file_system_toolkits.security import get_sandboxed_path
+from ..file_system_toolkits.security import resolve_safe_path
 
 
 def register_tools(mcp: FastMCP) -> None:
@@ -15,7 +15,6 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def csv_read(
         path: str,
-        agent_id: str,
         limit: int | None = None,
         offset: int = 0,
     ) -> dict:
@@ -23,8 +22,7 @@ def register_tools(mcp: FastMCP) -> None:
         Read a CSV file and return its contents.
 
         Args:
-            path: Path to the CSV file (relative to agent sandbox)
-            agent_id: Agent identifier
+            path: Absolute path to the CSV file
             limit: Maximum number of rows to return (None = all rows)
             offset: Number of rows to skip from the beginning
 
@@ -34,7 +32,7 @@ def register_tools(mcp: FastMCP) -> None:
         if offset < 0 or (limit is not None and limit < 0):
             return {"error": "offset and limit must be non-negative"}
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -42,7 +40,6 @@ def register_tools(mcp: FastMCP) -> None:
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
 
-            # Read CSV
             with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
 
@@ -51,7 +48,6 @@ def register_tools(mcp: FastMCP) -> None:
 
                 columns = list(reader.fieldnames)
 
-                # Apply offset and limit
                 rows = []
                 for i, row in enumerate(reader):
                     if i < offset:
@@ -60,7 +56,6 @@ def register_tools(mcp: FastMCP) -> None:
                         break
                     rows.append(row)
 
-            # Get total row count (re-read for accurate count)
             with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.reader(f)
                 total_rows = sum(1 for row in reader if any(row)) - 1
@@ -79,6 +74,8 @@ def register_tools(mcp: FastMCP) -> None:
 
         except csv.Error as e:
             return {"error": f"CSV parsing error: {str(e)}"}
+        except ValueError as e:
+            return {"error": str(e)}
         except UnicodeDecodeError:
             return {"error": "File encoding error: unable to decode as UTF-8"}
         except Exception as e:
@@ -87,7 +84,6 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def csv_write(
         path: str,
-        agent_id: str,
         columns: list[str],
         rows: list[dict],
     ) -> dict:
@@ -95,8 +91,7 @@ def register_tools(mcp: FastMCP) -> None:
         Write data to a new CSV file.
 
         Args:
-            path: Path to the CSV file (relative to agent sandbox)
-            agent_id: Agent identifier
+            path: Absolute path to the CSV file
             columns: List of column names for the header
             rows: List of dictionaries, each representing a row
 
@@ -104,7 +99,7 @@ def register_tools(mcp: FastMCP) -> None:
             dict with success status and metadata
         """
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
@@ -112,17 +107,14 @@ def register_tools(mcp: FastMCP) -> None:
             if not columns:
                 return {"error": "columns cannot be empty"}
 
-            # Create parent directories if needed
             parent_dir = os.path.dirname(secure_path)
             if parent_dir:
                 os.makedirs(parent_dir, exist_ok=True)
 
-            # Write CSV
             with open(secure_path, "w", encoding="utf-8", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=columns)
                 writer.writeheader()
                 for row in rows:
-                    # Only write columns that exist in fieldnames
                     filtered_row = {k: v for k, v in row.items() if k in columns}
                     writer.writerow(filtered_row)
 
@@ -134,28 +126,28 @@ def register_tools(mcp: FastMCP) -> None:
                 "rows_written": len(rows),
             }
 
+        except ValueError as e:
+            return {"error": str(e)}
         except Exception as e:
             return {"error": f"Failed to write CSV: {str(e)}"}
 
     @mcp.tool()
     def csv_append(
         path: str,
-        agent_id: str,
         rows: list[dict],
     ) -> dict:
         """
         Append rows to an existing CSV file.
 
         Args:
-            path: Path to the CSV file (relative to agent sandbox)
-            agent_id: Agent identifier
+            path: Absolute path to the CSV file
             rows: List of dictionaries to append, keys should match existing columns
 
         Returns:
             dict with success status and metadata
         """
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}. Use csv_write to create a new file."}
@@ -166,25 +158,21 @@ def register_tools(mcp: FastMCP) -> None:
             if not rows:
                 return {"error": "rows cannot be empty"}
 
-            # Read existing columns
             with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
                 if reader.fieldnames is None:
                     return {"error": "CSV file is empty or has no headers"}
                 columns = list(reader.fieldnames)
 
-            # Append rows
             with open(secure_path, "a", encoding="utf-8", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=columns)
                 for row in rows:
-                    # Only write columns that exist in fieldnames
                     filtered_row = {k: v for k, v in row.items() if k in columns}
                     writer.writerow(filtered_row)
 
-            # Get new total row count
             with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.reader(f)
-                total_rows = sum(1 for row in reader if any(row)) - 1  # Subtract header
+                total_rows = sum(1 for row in reader if any(row)) - 1
 
             return {
                 "success": True,
@@ -195,6 +183,8 @@ def register_tools(mcp: FastMCP) -> None:
 
         except csv.Error as e:
             return {"error": f"CSV parsing error: {str(e)}"}
+        except ValueError as e:
+            return {"error": str(e)}
         except UnicodeDecodeError:
             return {"error": "File encoding error: unable to decode as UTF-8"}
         except Exception as e:
@@ -203,20 +193,18 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def csv_info(
         path: str,
-        agent_id: str,
     ) -> dict:
         """
         Get metadata about a CSV file without reading all data.
 
         Args:
-            path: Path to the CSV file (relative to agent sandbox)
-            agent_id: Agent identifier
+            path: Absolute path to the CSV file
 
         Returns:
             dict with file metadata (columns, row count, file size)
         """
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -224,10 +212,8 @@ def register_tools(mcp: FastMCP) -> None:
             if not path.lower().endswith(".csv"):
                 return {"error": "File must have .csv extension"}
 
-            # Get file size
             file_size = os.path.getsize(secure_path)
 
-            # Read headers and count rows
             with open(secure_path, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
 
@@ -235,8 +221,6 @@ def register_tools(mcp: FastMCP) -> None:
                     return {"error": "CSV file is empty or has no headers"}
 
                 columns = list(reader.fieldnames)
-
-                # Count rows
                 total_rows = sum(1 for _ in reader)
 
             return {
@@ -250,6 +234,8 @@ def register_tools(mcp: FastMCP) -> None:
 
         except csv.Error as e:
             return {"error": f"CSV parsing error: {str(e)}"}
+        except ValueError as e:
+            return {"error": str(e)}
         except UnicodeDecodeError:
             return {"error": "File encoding error: unable to decode as UTF-8"}
         except Exception as e:
@@ -258,7 +244,6 @@ def register_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def csv_sql(
         path: str,
-        agent_id: str,
         query: str,
     ) -> dict:
         """
@@ -267,27 +252,12 @@ def register_tools(mcp: FastMCP) -> None:
         The CSV file is loaded as a table named 'data'. Use standard SQL syntax.
 
         Args:
-            path: Path to the CSV file (relative to agent sandbox)
-            agent_id: Agent identifier
+            path: Absolute path to the CSV file
             query: SQL query to execute. The CSV is available as table 'data'.
                    Example: "SELECT * FROM data WHERE price > 100 ORDER BY name LIMIT 10"
 
         Returns:
             dict with query results, columns, and row count
-
-        Examples:
-            # Filter rows
-            query="SELECT * FROM data WHERE status = 'pending'"
-
-            # Aggregate data
-            query="SELECT category, COUNT(*) as count, "
-                  "AVG(price) as avg_price FROM data GROUP BY category"
-
-            # Sort and limit
-            query="SELECT name, price FROM data ORDER BY price DESC LIMIT 5"
-
-            # Search text (case-insensitive)
-            query="SELECT * FROM data WHERE LOWER(name) LIKE '%phone%'"
         """
         try:
             import duckdb
@@ -300,7 +270,7 @@ def register_tools(mcp: FastMCP) -> None:
             }
 
         try:
-            secure_path = get_sandboxed_path(path, agent_id)
+            secure_path = resolve_safe_path(path)
 
             if not os.path.exists(secure_path):
                 return {"error": f"File not found: {path}"}
@@ -311,13 +281,10 @@ def register_tools(mcp: FastMCP) -> None:
             if not query or not query.strip():
                 return {"error": "query cannot be empty"}
 
-            # Security: allow SELECT/WITH only
             query_upper = query.lstrip().upper()
             if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
                 return {"error": "Only SELECT queries are allowed for security reasons"}
 
-            # Disallowed keywords for security (word-boundary match to avoid
-            # false positives on column names like created_at, updated_at, etc.)
             _WRITE_PATTERN = re.compile(
                 r"\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|EXEC|EXECUTE)\b",
                 re.IGNORECASE,
@@ -326,7 +293,6 @@ def register_tools(mcp: FastMCP) -> None:
             if match:
                 return {"error": f"'{match.group().upper()}' is not allowed in queries"}
 
-            # Block obvious multi-statement / injection attempts
             q_lower = query.lower()
             for token in [";", "--", "/*", "*/"]:
                 if token in q_lower:
@@ -334,7 +300,6 @@ def register_tools(mcp: FastMCP) -> None:
 
             con = duckdb.connect(":memory:")
             try:
-                # SAFE: parameter binding (no string interpolation)
                 con.execute(
                     "CREATE TABLE data AS SELECT * FROM read_csv_auto(?)",
                     [str(secure_path)],
@@ -359,6 +324,8 @@ def register_tools(mcp: FastMCP) -> None:
             finally:
                 con.close()
 
+        except ValueError as e:
+            return {"error": str(e)}
         except Exception as e:
             error_msg = str(e)
             if "Catalog Error" in error_msg:

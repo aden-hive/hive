@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import { Loader2, WifiOff, KeyRound, FolderOpen, X } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import DraftGraph from "@/components/DraftGraph";
@@ -190,12 +190,20 @@ function defaultAgentState(): AgentState {
 
 export default function ColonyChat() {
   const { colonyId } = useParams<{ colonyId: string }>();
+  const location = useLocation();
   const { colonies, markVisited } = useColony();
   const { setActions } = useHeaderActions();
 
+  // Route state from home page (new chat flow)
+  const routeState = (location.state || {}) as {
+    prompt?: string;
+    agentPath?: string;
+  };
+  const isNewChat = colonyId?.startsWith("new-") ?? false;
+
   // Find the colony matching this route
   const colony = colonies.find((c) => c.id === colonyId);
-  const agentPath = colony?.agentPath ?? "";
+  const agentPath = colony?.agentPath ?? routeState.agentPath ?? "";
   const slug = agentPath ? agentSlug(agentPath) : "";
   const queenInfo = getQueenForAgent(slug);
   const colonyName = colony?.name ?? colonyId ?? "Colony";
@@ -365,6 +373,13 @@ export default function ColonyChat() {
       try {
         let graphId = knownGraphId;
         if (!graphId) {
+          // Try session detail first (graph_id is always set when worker is loaded)
+          try {
+            const detail = await sessionsApi.get(sessionId);
+            graphId = detail.graph_id ?? undefined;
+          } catch { /* fall through */ }
+        }
+        if (!graphId) {
           const { graphs } = await sessionsApi.graphs(sessionId);
           if (!graphs.length) return;
           graphId = graphs[0];
@@ -383,7 +398,31 @@ export default function ColonyChat() {
   // ── Session loading ────────────────────────────────────────────────────
 
   const loadSession = useCallback(async () => {
-    if (!agentPath || loadingRef.current) return;
+    if (loadingRef.current) return;
+    // For new chats without an agent, create a queen-only session
+    if (!agentPath && isNewChat) {
+      loadingRef.current = true;
+      updateState({ loading: true, error: null, ready: false, sessionId: null });
+      try {
+        const session = await sessionsApi.create(
+          undefined, undefined, undefined,
+          routeState.prompt || undefined,
+        );
+        updateState({
+          sessionId: session.session_id,
+          displayName: "New Chat",
+          queenPhase: "planning",
+          loading: false,
+          ready: true,
+        });
+      } catch (err: unknown) {
+        updateState({ loading: false, error: String(err) });
+      } finally {
+        loadingRef.current = false;
+      }
+      return;
+    }
+    if (!agentPath) return;
     loadingRef.current = true;
     updateState({ loading: true, error: null, ready: false, sessionId: null });
 
@@ -505,11 +544,11 @@ export default function ColonyChat() {
     } finally {
       loadingRef.current = false;
     }
-  }, [agentPath, updateState]);
+  }, [agentPath, isNewChat, routeState.prompt, updateState]);
 
   // Load session on mount or when agent path changes
   useEffect(() => {
-    if (agentPath) {
+    if (agentPath || isNewChat) {
       // Reset state for new colony
       setMessages([]);
       setGraphNodes([]);
@@ -521,7 +560,7 @@ export default function ColonyChat() {
       loadingRef.current = false;
       loadSession();
     }
-  }, [agentPath]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [agentPath, isNewChat]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch graph when session becomes ready
   useEffect(() => {
@@ -1278,7 +1317,7 @@ export default function ColonyChat() {
 
   // ── Render ─────────────────────────────────────────────────────────────
 
-  if (!colony && !agentState.loading) {
+  if (!colony && !isNewChat && !agentState.loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <p className="text-sm text-muted-foreground">Colony not found: {colonyId}</p>
