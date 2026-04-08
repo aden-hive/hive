@@ -52,28 +52,33 @@ def _get_last_active(agent_path: Path) -> str | None:
             except Exception:
                 continue
 
-    # 2. Queen sessions
+    # 2. Queen sessions (scan all queen identity directories)
     from framework.config import QUEENS_DIR
 
-    queen_sessions_dir = QUEENS_DIR / "default" / "sessions"
-    if queen_sessions_dir.exists():
+    if QUEENS_DIR.exists():
         resolved = agent_path.resolve()
-        for d in queen_sessions_dir.iterdir():
-            if not d.is_dir():
+        for queen_dir in QUEENS_DIR.iterdir():
+            if not queen_dir.is_dir():
                 continue
-            meta_file = d / "meta.json"
-            if not meta_file.exists():
+            sessions_dir = queen_dir / "sessions"
+            if not sessions_dir.exists():
                 continue
-            try:
-                meta = json.loads(meta_file.read_text(encoding="utf-8"))
-                stored = meta.get("agent_path")
-                if not stored or Path(stored).resolve() != resolved:
+            for d in sessions_dir.iterdir():
+                if not d.is_dir():
                     continue
-                ts = datetime.fromtimestamp(d.stat().st_mtime).isoformat()
-                if latest is None or ts > latest:
-                    latest = ts
-            except Exception:
-                continue
+                meta_file = d / "meta.json"
+                if not meta_file.exists():
+                    continue
+                try:
+                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                    stored = meta.get("agent_path")
+                    if not stored or Path(stored).resolve() != resolved:
+                        continue
+                    ts = datetime.fromtimestamp(d.stat().st_mtime).isoformat()
+                    if latest is None or ts > latest:
+                        latest = ts
+                except Exception:
+                    continue
 
     return latest
 

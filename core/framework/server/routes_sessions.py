@@ -63,6 +63,8 @@ def _session_to_live_dict(session) -> dict:
         if phase_state
         else ("staging" if session.graph_runtime else "planning"),
         "queen_supports_images": supports_image_tool_results(queen_model) if queen_model else True,
+        "queen_id": getattr(phase_state, "queen_id", None) if phase_state else None,
+        "queen_name": (phase_state.queen_profile or {}).get("name") if phase_state else None,
     }
 
 
@@ -583,9 +585,9 @@ async def handle_session_events_history(request: web.Request) -> web.Response:
     """
     session_id = request.match_info["session_id"]
 
-    from framework.server.session_manager import _queen_session_dir
+    from framework.server.session_manager import _find_queen_session_dir
 
-    queen_dir = _queen_session_dir(session_id)
+    queen_dir = _find_queen_session_dir(session_id)
     events_path = queen_dir / "events.jsonl"
     if not events_path.exists():
         return web.json_response({"events": [], "session_id": session_id})
@@ -647,9 +649,9 @@ async def handle_delete_history_session(request: web.Request) -> web.Response:
         await manager.stop_session(session_id)
 
     # Delete the queen session directory from disk
-    from framework.server.session_manager import _queen_session_dir
+    from framework.server.session_manager import _find_queen_session_dir
 
-    queen_session_dir = _queen_session_dir(session_id)
+    queen_session_dir = _find_queen_session_dir(session_id)
     if queen_session_dir.exists() and queen_session_dir.is_dir():
         try:
             shutil.rmtree(queen_session_dir)
@@ -747,9 +749,12 @@ async def handle_reveal_session_folder(request: web.Request) -> web.Response:
 
     session = manager.get_session(session_id)
     storage_session_id = (session.queen_resume_from or session.id) if session else session_id
-    from framework.server.session_manager import _queen_session_dir
-
-    folder = _queen_session_dir(storage_session_id)
+    if session:
+        from framework.server.session_manager import _queen_session_dir
+        folder = _queen_session_dir(storage_session_id, session.queen_name)
+    else:
+        from framework.server.session_manager import _find_queen_session_dir
+        folder = _find_queen_session_dir(storage_session_id)
     folder.mkdir(parents=True, exist_ok=True)
 
     try:

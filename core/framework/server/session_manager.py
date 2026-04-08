@@ -30,6 +30,18 @@ def _queen_session_dir(session_id: str, queen_name: str = "default") -> Path:
     return QUEENS_DIR / queen_name / "sessions" / session_id
 
 
+def _find_queen_session_dir(session_id: str) -> Path:
+    """Search all queen directories for a session. Falls back to default."""
+    if QUEENS_DIR.exists():
+        for queen_dir in QUEENS_DIR.iterdir():
+            if not queen_dir.is_dir():
+                continue
+            candidate = queen_dir / "sessions" / session_id
+            if candidate.exists():
+                return candidate
+    return _queen_session_dir(session_id)
+
+
 @dataclass
 class Session:
     """A live session with a queen and optional worker."""
@@ -210,13 +222,15 @@ class SessionManager:
         # When cold-restoring, check meta.json for the phase — if the agent
         # was still being built we must NOT try to load the worker (the code
         # is incomplete and will fail to import).
+        _resume_queen_id: str | None = None
         if queen_resume_from:
             _resume_phase = None
-            _meta_path = _queen_session_dir(queen_resume_from) / "meta.json"
+            _meta_path = _find_queen_session_dir(queen_resume_from) / "meta.json"
             if _meta_path.exists():
                 try:
                     _meta = json.loads(_meta_path.read_text(encoding="utf-8"))
                     _resume_phase = _meta.get("phase")
+                    _resume_queen_id = _meta.get("queen_id")
                 except (json.JSONDecodeError, OSError):
                     pass
             if _resume_phase in ("building", "planning"):
@@ -237,6 +251,8 @@ class SessionManager:
             model=model,
         )
         session.queen_resume_from = queen_resume_from
+        if _resume_queen_id:
+            session.queen_name = _resume_queen_id
         try:
             # Load the graph FIRST (before queen) so queen gets full tools
             await self._load_worker_core(
@@ -802,7 +818,10 @@ class SessionManager:
                     _existing_meta = json.loads(_meta_path.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, OSError):
                     pass
-            _new_meta: dict = {"created_at": time.time()}
+            _new_meta: dict = {
+                "created_at": time.time(),
+                "queen_id": session.queen_name,
+            }
             if _agent_name is not None:
                 _new_meta["agent_name"] = _agent_name
             if session.worker_path is not None:
@@ -1094,7 +1113,7 @@ class SessionManager:
         ~/.hive/agents/queens/{name}/sessions/{session_id}/conversations/.  Returns None when
         no data is found so callers can fall through to a 404.
         """
-        queen_dir = _queen_session_dir(session_id)
+        queen_dir = _find_queen_session_dir(session_id)
         convs_dir = queen_dir / "conversations"
         if not convs_dir.exists():
             return None
@@ -1149,21 +1168,28 @@ class SessionManager:
     @staticmethod
     def list_cold_sessions() -> list[dict]:
         """Return metadata for every queen session directory on disk, newest first."""
-        queen_sessions_dir = QUEENS_DIR / "default" / "sessions"
-        if not queen_sessions_dir.exists():
+        if not QUEENS_DIR.exists():
             return []
 
-        results: list[dict] = []
+        # Collect session dirs from all queen identities
+        all_session_dirs: list[Path] = []
         try:
-            entries = sorted(
-                queen_sessions_dir.iterdir(),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
+            for queen_dir in QUEENS_DIR.iterdir():
+                if not queen_dir.is_dir():
+                    continue
+                sessions_dir = queen_dir / "sessions"
+                if sessions_dir.exists():
+                    for d in sessions_dir.iterdir():
+                        if d.is_dir():
+                            all_session_dirs.append(d)
         except OSError:
             return []
 
-        for d in entries:
+        # Sort all sessions by mtime, newest first
+        all_session_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+        results: list[dict] = []
+        for d in all_session_dirs:
             if not d.is_dir():
                 continue
             try:
@@ -1238,6 +1264,9 @@ class SessionManager:
                 except OSError:
                     pass
 
+            # Derive queen_id from directory structure: queens/{queen_id}/sessions/{session_id}
+            queen_id = d.parent.parent.name if d.parent.name == "sessions" else None
+
             results.append(
                 {
                     "session_id": d.name,
@@ -1249,6 +1278,7 @@ class SessionManager:
                     "agent_path": agent_path,
                     "last_message": last_message,
                     "message_count": message_count,
+                    "queen_id": queen_id,
                 }
             )
 
