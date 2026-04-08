@@ -1733,13 +1733,28 @@ class AgentLoader:
         cred_id = None
         if model_lower.startswith("anthropic/") or model_lower.startswith("claude"):
             cred_id = "anthropic"
+        elif model_lower.startswith("openai/") or model_lower.startswith("gpt"):
+            cred_id = "openai"
+        elif model_lower.startswith("gemini/") or model_lower.startswith("gemini"):
+            cred_id = "gemini"
         elif model_lower.startswith("minimax/") or model_lower.startswith("minimax-"):
             cred_id = "minimax"
+        elif model_lower.startswith("groq/"):
+            cred_id = "groq"
+        elif model_lower.startswith("cerebras/"):
+            cred_id = "cerebras"
+        elif model_lower.startswith("openrouter/"):
+            cred_id = "openrouter"
+        elif model_lower.startswith("mistral/"):
+            cred_id = "mistral"
+        elif model_lower.startswith("together_ai/") or model_lower.startswith("together/"):
+            cred_id = "together"
+        elif model_lower.startswith("deepseek/"):
+            cred_id = "deepseek"
         elif model_lower.startswith("kimi/"):
             cred_id = "kimi"
         elif model_lower.startswith("hive/"):
             cred_id = "hive"
-        # Add more mappings as providers are added to LLM_CREDENTIALS
 
         if cred_id is None:
             return None

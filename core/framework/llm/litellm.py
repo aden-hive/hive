@@ -347,34 +347,38 @@ def _dump_failed_request(
     attempt: int,
 ) -> str:
     """Dump failed request to a file for debugging. Returns the file path."""
-    FAILED_REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        FAILED_REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    filename = f"{error_type}_{model.replace('/', '_')}_{timestamp}.json"
-    filepath = FAILED_REQUESTS_DIR / filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        filename = f"{error_type}_{model.replace('/', '_')}_{timestamp}.json"
+        filepath = FAILED_REQUESTS_DIR / filename
 
-    # Build dump data
-    messages = kwargs.get("messages", [])
-    dump_data = {
-        "timestamp": datetime.now().isoformat(),
-        "model": model,
-        "error_type": error_type,
-        "attempt": attempt,
-        "estimated_tokens": _estimate_tokens(model, messages),
-        "num_messages": len(messages),
-        "messages": messages,
-        "tools": kwargs.get("tools"),
-        "max_tokens": kwargs.get("max_tokens"),
-        "temperature": kwargs.get("temperature"),
-    }
+        # Build dump data
+        messages = kwargs.get("messages", [])
+        dump_data = {
+            "timestamp": datetime.now().isoformat(),
+            "model": model,
+            "error_type": error_type,
+            "attempt": attempt,
+            "estimated_tokens": _estimate_tokens(model, messages),
+            "num_messages": len(messages),
+            "messages": messages,
+            "tools": kwargs.get("tools"),
+            "max_tokens": kwargs.get("max_tokens"),
+            "temperature": kwargs.get("temperature"),
+        }
 
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(dump_data, f, indent=2, default=str)
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(dump_data, f, indent=2, default=str)
 
-    # Prune old dumps to prevent unbounded disk growth
-    _prune_failed_request_dumps()
+        # Prune old dumps to prevent unbounded disk growth
+        _prune_failed_request_dumps()
 
-    return str(filepath)
+        return str(filepath)
+    except OSError as e:
+        logger.warning(f"Failed to dump request debug log to {FAILED_REQUESTS_DIR}: {e}")
+        return "log_write_failed"
 
 
 def _compute_retry_delay(
@@ -633,6 +637,36 @@ class LiteLLMProvider(LLMProvider):
             raise ImportError(
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
+
+    def reconfigure(self, model: str, api_key: str | None = None, api_base: str | None = None) -> None:
+        """Hot-swap the model, API key, and/or base URL on this provider instance.
+
+        Since the same LiteLLMProvider object is shared by reference across the
+        session, queen runner, agent runtime, and execution streams, mutating
+        these attributes in-place propagates to all callers on the next LLM call.
+        """
+        _original_model = model
+        if _is_ollama_model(model):
+            model = _ensure_ollama_chat_prefix(model)
+        elif model.lower().startswith("kimi/"):
+            model = "anthropic/" + model[len("kimi/"):]
+            if api_base and api_base.rstrip("/").endswith("/v1"):
+                api_base = api_base.rstrip("/")[:-3]
+        elif model.lower().startswith("hive/"):
+            model = "anthropic/" + model[len("hive/"):]
+            if api_base and api_base.rstrip("/").endswith("/v1"):
+                api_base = api_base.rstrip("/")[:-3]
+        self.model = model
+        self.api_key = api_key
+        self.api_base = api_base or self._default_api_base_for_model(_original_model)
+        self._claude_code_oauth = bool(api_key and api_key.startswith("sk-ant-oat"))
+        if self._claude_code_oauth:
+            eh = self.extra_kwargs.setdefault("extra_headers", {})
+            eh.setdefault("user-agent", CLAUDE_CODE_USER_AGENT)
+        self._codex_backend = bool(
+            self.api_base and "chatgpt.com/backend-api/codex" in self.api_base
+        )
+        self._antigravity = bool(self.api_base and "localhost:8069" in self.api_base)
 
         # Note: The Codex ChatGPT backend is a Responses API endpoint at
         # chatgpt.com/backend-api/codex/responses.  LiteLLM's model registry

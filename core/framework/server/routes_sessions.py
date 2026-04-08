@@ -679,7 +679,7 @@ async def handle_discover(request: web.Request) -> web.Response:
     for category, entries in groups.items():
         result[category] = [
             {
-                "path": str(entry.path),
+                "path": str(entry.path.resolve()),
                 "name": entry.name,
                 "description": entry.description,
                 "category": entry.category,
@@ -689,11 +689,57 @@ async def handle_discover(request: web.Request) -> web.Response:
                 "tool_count": entry.tool_count,
                 "tags": entry.tags,
                 "last_active": entry.last_active,
-                "is_loaded": str(entry.path) in loaded_paths,
+                "is_loaded": str(entry.path.resolve()) in loaded_paths,
             }
             for entry in entries
         ]
     return web.json_response(result)
+
+
+async def handle_delete_agent(request: web.Request) -> web.Response:
+    """DELETE /api/agents — permanently remove an agent from disk.
+
+    Body: {"agent_path": "exports/my_agent"}
+
+    Stops any live sessions for this agent, then deletes the agent
+    directory so it no longer appears in /discover.
+    """
+    manager = _get_manager(request)
+    body = await request.json()
+    agent_path = body.get("agent_path")
+    if not agent_path:
+        return web.json_response({"error": "agent_path is required"}, status=400)
+
+    try:
+        resolved = validate_agent_path(agent_path)
+    except ValueError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+
+    # Reject deletion of framework agents (~/.hive/agents/) — those are internal
+    hive_agents_dir = Path.home() / ".hive" / "agents"
+    if resolved.is_relative_to(hive_agents_dir):
+        return web.json_response(
+            {"error": "Cannot delete framework agents"}, status=403
+        )
+
+    # Stop any live sessions that use this agent
+    for session in list(manager.list_sessions()):
+        if session.worker_path and str(session.worker_path) == str(resolved):
+            try:
+                await manager.stop_session(session.id)
+            except Exception:
+                pass
+
+    # Delete the agent directory from disk
+    if resolved.exists() and resolved.is_dir():
+        try:
+            shutil.rmtree(resolved)
+        except OSError as e:
+            return web.json_response(
+                {"error": f"Failed to delete agent directory: {e}"}, status=500
+            )
+
+    return web.json_response({"deleted": str(resolved)})
 
 
 async def handle_reveal_session_folder(request: web.Request) -> web.Response:
@@ -731,8 +777,9 @@ async def handle_reveal_session_folder(request: web.Request) -> web.Response:
 
 def register_routes(app: web.Application) -> None:
     """Register session routes."""
-    # Discovery
+    # Discovery & agent management
     app.router.add_get("/api/discover", handle_discover)
+    app.router.add_delete("/api/agents", handle_delete_agent)
 
     # Session lifecycle
     app.router.add_post("/api/sessions", handle_create_session)

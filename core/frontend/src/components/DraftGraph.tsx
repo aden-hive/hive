@@ -7,7 +7,7 @@ import {
   cssVar,
   truncateLabel,
   TRIGGER_ICONS,
-  ACTIVE_TRIGGER_COLORS,
+  useActiveTriggerColors,
   useTriggerColors,
 } from "@/lib/graphUtils";
 
@@ -246,6 +246,7 @@ export default function DraftGraph({ draft, originalDraft, onNodeClick, flowchar
   const [containerW, setContainerW] = useState(484);
   const chrome = useDraftChromeColors();
   const triggerColors = useTriggerColors();
+  const activeTriggerColors = useActiveTriggerColors();
 
   // Extract trigger nodes from runtimeNodes
   const triggerNodes = useMemo(
@@ -877,7 +878,7 @@ export default function DraftGraph({ draft, originalDraft, onNodeClick, flowchar
   const renderTriggerNode = (node: GraphNode, triggerIdx: number) => {
     const icon = TRIGGER_ICONS[node.triggerType || ""] || "\u26A1";
     const isActive = node.status === "running" || node.status === "complete";
-    const colors = isActive ? ACTIVE_TRIGGER_COLORS : triggerColors;
+    const colors = isActive ? activeTriggerColors : triggerColors;
     const nextFireIn = node.triggerConfig?.next_fire_in as number | undefined;
 
     const tx = triggerPillX(triggerIdx);
@@ -898,7 +899,9 @@ export default function DraftGraph({ draft, originalDraft, onNodeClick, flowchar
     }
 
     const statusLabel = isActive ? "active" : "inactive";
-    const statusColor = isActive ? "hsl(140,40%,50%)" : "hsl(210,20%,40%)";
+    const statusActive = cssVar("--trigger-status-active") || "142 40% 45%";
+    const statusInactive = cssVar("--trigger-status-inactive") || "210 20% 55%";
+    const statusColor = isActive ? `hsl(${statusActive})` : `hsl(${statusInactive})`;
 
     return (
       <g

@@ -1,0 +1,1447 @@
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useParams } from "react-router-dom";
+import { Loader2, WifiOff, KeyRound, FolderOpen, X } from "lucide-react";
+import type { GraphNode, NodeStatus } from "@/components/graph-types";
+import DraftGraph from "@/components/DraftGraph";
+import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
+import NodeDetailPanel from "@/components/NodeDetailPanel";
+import CredentialsModal, {
+  type Credential,
+  clearCredentialCache,
+} from "@/components/CredentialsModal";
+import { executionApi } from "@/api/execution";
+import { graphsApi } from "@/api/graphs";
+import { sessionsApi } from "@/api/sessions";
+import { useMultiSSE } from "@/hooks/use-sse";
+import type {
+  LiveSession,
+  AgentEvent,
+  NodeSpec,
+  DraftGraph as DraftGraphData,
+} from "@/api/types";
+import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
+import { topologyToGraphNodes } from "@/lib/graph-converter";
+import { cronToLabel } from "@/lib/graphUtils";
+import { ApiError } from "@/api/client";
+import { useColony } from "@/context/ColonyContext";
+import { useHeaderActions } from "@/context/HeaderActionsContext";
+import { agentSlug, getQueenForAgent } from "@/lib/colony-registry";
+import BrowserStatusBadge from "@/components/BrowserStatusBadge";
+
+const makeId = () => Math.random().toString(36).slice(2, 9);
+
+function fmtLogTs(ts: string): string {
+  try {
+    const d = new Date(ts);
+    return `[${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}]`;
+  } catch {
+    return "[--:--:--]";
+  }
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max) + "..." : s;
+}
+
+// ── Session restore ──────────────────────────────────────────────────────────
+
+type SessionRestoreResult = {
+  messages: ChatMessage[];
+  restoredPhase: "planning" | "building" | "staging" | "running" | null;
+  flowchartMap: Record<string, string[]> | null;
+  originalDraft: DraftGraphData | null;
+};
+
+async function restoreSessionMessages(
+  sessionId: string,
+  thread: string,
+  agentDisplayName: string,
+): Promise<SessionRestoreResult> {
+  try {
+    const { events } = await sessionsApi.eventsHistory(sessionId);
+    if (events.length > 0) {
+      const messages: ChatMessage[] = [];
+      let runningPhase: ChatMessage["phase"] = undefined;
+      let flowchartMap: Record<string, string[]> | null = null;
+      let originalDraft: DraftGraphData | null = null;
+      for (const evt of events) {
+        const p =
+          evt.type === "queen_phase_changed"
+            ? (evt.data?.phase as string)
+            : evt.type === "node_loop_iteration"
+            ? (evt.data?.phase as string | undefined)
+            : undefined;
+        if (p && ["planning", "building", "staging", "running"].includes(p)) {
+          runningPhase = p as ChatMessage["phase"];
+        }
+        if (evt.type === "flowchart_map_updated" && evt.data) {
+          const mapData = evt.data as {
+            map?: Record<string, string[]>;
+            original_draft?: DraftGraphData;
+          };
+          flowchartMap = mapData.map ?? null;
+          originalDraft = mapData.original_draft ?? null;
+        }
+        const msg = sseEventToChatMessage(evt, thread, agentDisplayName);
+        if (!msg) continue;
+        if (evt.stream_id === "queen") {
+          msg.role = "queen";
+          msg.phase = runningPhase;
+        }
+        messages.push(msg);
+      }
+      return { messages, restoredPhase: runningPhase ?? null, flowchartMap, originalDraft };
+    }
+  } catch {
+    // Event log not available
+  }
+  return { messages: [], restoredPhase: null, flowchartMap: null, originalDraft: null };
+}
+
+// ── Agent backend state ──────────────────────────────────────────────────────
+
+interface AgentState {
+  sessionId: string | null;
+  loading: boolean;
+  ready: boolean;
+  queenReady: boolean;
+  error: string | null;
+  displayName: string | null;
+  graphId: string | null;
+  nodeSpecs: NodeSpec[];
+  awaitingInput: boolean;
+  workerInputMessageId: string | null;
+  queenBuilding: boolean;
+  queenPhase: "planning" | "building" | "staging" | "running";
+  designingDraft: boolean;
+  draftGraph: DraftGraphData | null;
+  originalDraft: DraftGraphData | null;
+  flowchartMap: Record<string, string[]> | null;
+  agentPath: string | null;
+  workerRunState: "idle" | "deploying" | "running";
+  currentExecutionId: string | null;
+  currentRunId: string | null;
+  nodeLogs: Record<string, string[]>;
+  nodeActionPlans: Record<string, string>;
+  subagentReports: {
+    subagent_id: string;
+    message: string;
+    data?: Record<string, unknown>;
+    timestamp: string;
+  }[];
+  isTyping: boolean;
+  isStreaming: boolean;
+  queenIsTyping: boolean;
+  workerIsTyping: boolean;
+  llmSnapshots: Record<string, string>;
+  activeToolCalls: Record<string, { name: string; done: boolean; streamId: string }>;
+  pendingQuestion: string | null;
+  pendingOptions: string[] | null;
+  pendingQuestions: { id: string; prompt: string; options?: string[] }[] | null;
+  pendingQuestionSource: "queen" | null;
+  contextUsage: Record<
+    string,
+    { usagePct: number; messageCount: number; estimatedTokens: number; maxTokens: number }
+  >;
+  queenSupportsImages: boolean;
+}
+
+function defaultAgentState(): AgentState {
+  return {
+    sessionId: null,
+    loading: true,
+    ready: false,
+    queenReady: false,
+    error: null,
+    displayName: null,
+    graphId: null,
+    nodeSpecs: [],
+    awaitingInput: false,
+    workerInputMessageId: null,
+    queenBuilding: false,
+    queenPhase: "planning",
+    designingDraft: false,
+    draftGraph: null,
+    originalDraft: null,
+    flowchartMap: null,
+    agentPath: null,
+    workerRunState: "idle",
+    currentExecutionId: null,
+    currentRunId: null,
+    nodeLogs: {},
+    nodeActionPlans: {},
+    subagentReports: [],
+    isTyping: false,
+    isStreaming: false,
+    queenIsTyping: false,
+    workerIsTyping: false,
+    llmSnapshots: {},
+    activeToolCalls: {},
+    pendingQuestion: null,
+    pendingOptions: null,
+    pendingQuestions: null,
+    pendingQuestionSource: null,
+    contextUsage: {},
+    queenSupportsImages: true,
+  };
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
+
+export default function ColonyChat() {
+  const { colonyId } = useParams<{ colonyId: string }>();
+  const { colonies, markVisited } = useColony();
+  const { setActions } = useHeaderActions();
+
+  // Find the colony matching this route
+  const colony = colonies.find((c) => c.id === colonyId);
+  const agentPath = colony?.agentPath ?? "";
+  const slug = agentPath ? agentSlug(agentPath) : "";
+  const queenInfo = getQueenForAgent(slug);
+  const colonyName = colony?.name ?? colonyId ?? "Colony";
+
+  // Mark colony as visited when navigating to it
+  useEffect(() => {
+    if (colonyId) markVisited(colonyId);
+  }, [colonyId, markVisited]);
+
+  // ── Core state ───────────────────────────────────────────────────────────
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [graphNodes, setGraphNodes] = useState<GraphNode[]>([]);
+  const [credentials] = useState<Credential[]>([]);
+  const [agentState, setAgentState] = useState<AgentState>(defaultAgentState);
+  const [credentialsOpen, setCredentialsOpen] = useState(false);
+  const [credentialAgentPath, setCredentialAgentPath] = useState<string | null>(null);
+  const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [graphPanelPct, setGraphPanelPct] = useState(30);
+  const savedGraphPanelPct = useRef(30);
+  const resizing = useRef(false);
+
+  // ── Header actions (Credentials, Data, Browser) ─────────────────────────
+  useEffect(() => {
+    setActions(
+      <>
+        <button
+          onClick={() => setCredentialsOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
+        >
+          <KeyRound className="w-3.5 h-3.5" />
+          Credentials
+        </button>
+        {agentState.sessionId && (
+          <button
+            onClick={() => sessionsApi.revealFolder(agentState.sessionId!).catch(() => {})}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0"
+            title="Open session data folder"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            Data
+          </button>
+        )}
+        <BrowserStatusBadge />
+      </>,
+    );
+    return () => setActions(null);
+  }, [agentState.sessionId, setActions]);
+
+  // Refs for SSE callback stability
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const agentStateRef = useRef(agentState);
+  agentStateRef.current = agentState;
+
+  const turnCounterRef = useRef<Record<string, number>>({});
+  const queenPhaseRef = useRef<string>("planning");
+  const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
+  const suppressIntroRef = useRef(false);
+  const loadingRef = useRef(false);
+  const designingDraftSinceRef = useRef(0);
+  const designingDraftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  const updateState = useCallback((patch: Partial<AgentState>) => {
+    setAgentState((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const upsertMessage = useCallback(
+    (chatMsg: ChatMessage, options?: { reconcileOptimisticUser?: boolean }) => {
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === chatMsg.id);
+        if (idx >= 0) {
+          return prev.map((m, i) =>
+            i === idx ? { ...chatMsg, createdAt: m.createdAt ?? chatMsg.createdAt } : m,
+          );
+        }
+        if (options?.reconcileOptimisticUser && chatMsg.type === "user" && prev.length > 0) {
+          const lastIdx = prev.length - 1;
+          const lastMsg = prev[lastIdx];
+          const incomingTs = chatMsg.createdAt ?? Date.now();
+          const lastTs = lastMsg.createdAt ?? incomingTs;
+          if (
+            lastMsg.type === "user" &&
+            lastMsg.content === chatMsg.content &&
+            Math.abs(incomingTs - lastTs) <= 15000
+          ) {
+            return prev.map((m, i) => (i === lastIdx ? { ...m, id: chatMsg.id } : m));
+          }
+        }
+        return [...prev, chatMsg];
+      });
+    },
+    [],
+  );
+
+  const updateGraphNodeStatus = useCallback(
+    (nodeId: string, status: NodeStatus, extra?: Partial<GraphNode>) => {
+      setGraphNodes((prev) =>
+        prev.map((n) => (n.id === nodeId ? { ...n, status, ...extra } : n)),
+      );
+    },
+    [],
+  );
+
+  const markAllNodesAs = useCallback(
+    (fromStatuses: NodeStatus[], toStatus: NodeStatus) => {
+      setGraphNodes((prev) =>
+        prev.map((n) => (fromStatuses.includes(n.status) ? { ...n, status: toStatus } : n)),
+      );
+    },
+    [],
+  );
+
+  const appendNodeLog = useCallback((nodeId: string, line: string) => {
+    setAgentState((prev) => ({
+      ...prev,
+      nodeLogs: {
+        ...prev.nodeLogs,
+        [nodeId]: [...(prev.nodeLogs[nodeId] || []), line].slice(-200),
+      },
+    }));
+  }, []);
+
+  // ── Drag-to-resize graph panel ──────────────────────────────────────────
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!resizing.current) return;
+      const sidebarWidth = 240;
+      const pct = 100 - ((e.clientX - sidebarWidth) / (window.innerWidth - sidebarWidth)) * 100;
+      setGraphPanelPct(Math.max(15, Math.min(50, pct)));
+    };
+    const onMouseUp = () => {
+      resizing.current = false;
+      document.body.style.cursor = "";
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  const nodeIsSelected = selectedNode !== null;
+  useEffect(() => {
+    if (nodeIsSelected) {
+      savedGraphPanelPct.current = graphPanelPct;
+      setGraphPanelPct((prev) => Math.min(prev, 30));
+    } else {
+      setGraphPanelPct(savedGraphPanelPct.current);
+    }
+  }, [nodeIsSelected]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset dismissed banner when the error clears
+  useEffect(() => {
+    if (!agentState.error) setDismissedBanner(null);
+  }, [agentState.error]);
+
+  // ── Graph fetching ─────────────────────────────────────────────────────
+
+  const fetchGraph = useCallback(
+    async (sessionId: string, knownGraphId?: string) => {
+      try {
+        let graphId = knownGraphId;
+        if (!graphId) {
+          const { graphs } = await sessionsApi.graphs(sessionId);
+          if (!graphs.length) return;
+          graphId = graphs[0];
+        }
+        const topology = await graphsApi.nodes(sessionId, graphId);
+        updateState({ graphId, nodeSpecs: topology.nodes });
+        const nodes = topologyToGraphNodes(topology);
+        if (nodes.length > 0) setGraphNodes(nodes);
+      } catch {
+        // Graph fetch failed
+      }
+    },
+    [updateState],
+  );
+
+  // ── Session loading ────────────────────────────────────────────────────
+
+  const loadSession = useCallback(async () => {
+    if (!agentPath || loadingRef.current) return;
+    loadingRef.current = true;
+    updateState({ loading: true, error: null, ready: false, sessionId: null });
+
+    try {
+      let liveSession: LiveSession | undefined;
+      let isResumedSession = false;
+      let coldRestoreId: string | undefined;
+
+      // Check for existing live session for this agent
+      try {
+        const { sessions: allLive } = await sessionsApi.list();
+        const existing = allLive.find((s) => s.agent_path.endsWith(agentSlug(agentPath)));
+        if (existing) {
+          liveSession = existing;
+          isResumedSession = true;
+        }
+      } catch {
+        // proceed
+      }
+
+      // Check cold history if no live session
+      if (!liveSession) {
+        try {
+          const { sessions: allHistory } = await sessionsApi.history();
+          const coldMatch = allHistory.find(
+            (s) => s.agent_path?.endsWith(agentSlug(agentPath)) && s.has_messages,
+          );
+          if (coldMatch) coldRestoreId = coldMatch.session_id;
+        } catch {
+          // proceed
+        }
+      }
+
+      let restoredPhase: "planning" | "building" | "staging" | "running" | null = null;
+      let restoredFlowchartMap: Record<string, string[]> | null = null;
+      let restoredOriginalDraft: DraftGraphData | null = null;
+
+      if (!liveSession) {
+        // Pre-fetch messages from cold session
+        let preRestoredMsgs: ChatMessage[] = [];
+        if (coldRestoreId) {
+          const displayName = formatAgentDisplayName(agentPath);
+          const restored = await restoreSessionMessages(coldRestoreId, agentPath, displayName);
+          preRestoredMsgs = restored.messages;
+          restoredPhase = restored.restoredPhase;
+          restoredFlowchartMap = restored.flowchartMap;
+          restoredOriginalDraft = restored.originalDraft;
+        }
+
+        if (coldRestoreId || preRestoredMsgs.length > 0) {
+          suppressIntroRef.current = true;
+        }
+
+        // Create new session (pass coldRestoreId for resume)
+        liveSession = await sessionsApi.create(agentPath, undefined, undefined, undefined, coldRestoreId ?? undefined);
+
+        if (preRestoredMsgs.length > 0) {
+          preRestoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+          setMessages(preRestoredMsgs);
+        }
+      }
+
+      const session = liveSession!;
+      const displayName = formatAgentDisplayName(session.graph_name || agentPath);
+      const initialPhase =
+        restoredPhase || session.queen_phase || (session.has_worker ? "staging" : "planning");
+      queenPhaseRef.current = initialPhase;
+
+      updateState({
+        sessionId: session.session_id,
+        displayName,
+        queenPhase: initialPhase,
+        queenBuilding: initialPhase === "building",
+        queenSupportsImages: session.queen_supports_images !== false,
+        ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
+        ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
+      });
+
+      // Restore messages for live resume
+      if (isResumedSession) {
+        const restored = await restoreSessionMessages(
+          session.session_id,
+          agentPath,
+          displayName,
+        );
+        if (restored.messages.length > 0) {
+          restored.messages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+          setMessages(restored.messages);
+        }
+        if (restored.flowchartMap && !restoredFlowchartMap) {
+          restoredFlowchartMap = restored.flowchartMap;
+          restoredOriginalDraft = restored.originalDraft;
+        }
+      }
+
+      const hasRestoredContent = isResumedSession || !!coldRestoreId;
+      if (!hasRestoredContent) suppressIntroRef.current = false;
+
+      updateState({
+        sessionId: session.session_id,
+        displayName,
+        ready: true,
+        loading: false,
+        queenReady: hasRestoredContent,
+        ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
+        ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 424) {
+        const errBody = err.body as Record<string, unknown>;
+        const credPath = (errBody.agent_path as string) || null;
+        if (credPath) setCredentialAgentPath(credPath);
+        updateState({ loading: false, error: "credentials_required" });
+        setCredentialsOpen(true);
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        updateState({ error: msg, loading: false });
+      }
+    } finally {
+      loadingRef.current = false;
+    }
+  }, [agentPath, updateState]);
+
+  // Load session on mount or when agent path changes
+  useEffect(() => {
+    if (agentPath) {
+      // Reset state for new colony
+      setMessages([]);
+      setGraphNodes([]);
+      setAgentState(defaultAgentState());
+      turnCounterRef.current = {};
+      queenPhaseRef.current = "planning";
+      queenIterTextRef.current = {};
+      suppressIntroRef.current = false;
+      loadingRef.current = false;
+      loadSession();
+    }
+  }, [agentPath]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch graph when session becomes ready
+  useEffect(() => {
+    if (agentState.sessionId && agentState.ready && !agentState.graphId) {
+      fetchGraph(agentState.sessionId);
+    }
+  }, [agentState.sessionId, agentState.ready, agentState.graphId, fetchGraph]);
+
+  // ── SSE event handler ──────────────────────────────────────────────────
+
+  const handleSSEEvent = useCallback(
+    (_agentType: string, event: AgentEvent) => {
+      const streamId = event.stream_id;
+      const isQueen = streamId === "queen";
+      const suppressQueenMessages = isQueen && suppressIntroRef.current;
+      const state = agentStateRef.current;
+      const agentDisplayName = state.displayName;
+      const displayName = isQueen ? queenInfo.name : agentDisplayName || undefined;
+      const role = isQueen ? ("queen" as const) : ("worker" as const);
+      const ts = fmtLogTs(event.timestamp);
+      const turnKey = streamId;
+      const currentTurn = turnCounterRef.current[turnKey] ?? 0;
+      const eventCreatedAt = event.timestamp
+        ? new Date(event.timestamp).getTime()
+        : Date.now();
+      const shouldMarkQueenReady = isQueen && !state.queenReady;
+
+      switch (event.type) {
+        case "execution_started":
+          if (isQueen) {
+            turnCounterRef.current[turnKey] = currentTurn + 1;
+            updateState({
+              isTyping: true,
+              queenIsTyping: true,
+              ...(shouldMarkQueenReady && { queenReady: true }),
+            });
+          } else {
+            const incomingRunId = event.run_id || null;
+            const prevRunId = state.currentRunId;
+            if (incomingRunId && incomingRunId !== prevRunId) {
+              upsertMessage({
+                id: `run-divider-${incomingRunId}`,
+                agent: "",
+                agentColor: "",
+                content: prevRunId ? "New Run" : "Run Started",
+                timestamp: ts,
+                type: "run_divider",
+                role: "worker",
+                thread: agentPath,
+                createdAt: eventCreatedAt,
+              });
+            }
+            turnCounterRef.current[turnKey] = currentTurn + 1;
+            updateState({
+              isTyping: true,
+              isStreaming: false,
+              workerIsTyping: true,
+              awaitingInput: false,
+              workerRunState: "running",
+              currentExecutionId: event.execution_id || state.currentExecutionId || null,
+              currentRunId: incomingRunId,
+              nodeLogs: {},
+              subagentReports: [],
+              llmSnapshots: {},
+              activeToolCalls: {},
+              pendingQuestion: null,
+              pendingOptions: null,
+              pendingQuestions: null,
+              pendingQuestionSource: null,
+            });
+            markAllNodesAs(["running", "looping", "complete", "error"], "pending");
+          }
+          break;
+
+        case "execution_completed":
+          if (isQueen) {
+            suppressIntroRef.current = false;
+            updateState({ isTyping: false, queenIsTyping: false });
+          } else {
+            updateState({
+              isTyping: false,
+              isStreaming: false,
+              workerIsTyping: false,
+              awaitingInput: false,
+              workerInputMessageId: null,
+              workerRunState: "idle",
+              currentExecutionId: null,
+              llmSnapshots: {},
+              pendingQuestion: null,
+              pendingOptions: null,
+              pendingQuestions: null,
+              pendingQuestionSource: null,
+            });
+            markAllNodesAs(["running", "looping"], "complete");
+            if (state.sessionId) fetchGraph(state.sessionId, state.graphId || undefined);
+          }
+          break;
+
+        case "execution_paused":
+        case "execution_failed":
+        case "client_output_delta":
+        case "client_input_received":
+        case "client_input_requested":
+        case "llm_text_delta": {
+          const chatMsg = sseEventToChatMessage(event, agentPath, displayName, currentTurn);
+          if (chatMsg && !suppressQueenMessages) {
+            // Merge queen inner_turns within same iteration
+            if (
+              isQueen &&
+              (event.type === "client_output_delta" || event.type === "llm_text_delta") &&
+              event.execution_id
+            ) {
+              const iter = event.data?.iteration ?? 0;
+              const inner = (event.data?.inner_turn as number) ?? 0;
+              const iterKey = `${event.execution_id}:${iter}`;
+              if (!queenIterTextRef.current[iterKey]) {
+                queenIterTextRef.current[iterKey] = {};
+              }
+              const snapshot =
+                (event.data?.snapshot as string) || (event.data?.content as string) || "";
+              queenIterTextRef.current[iterKey][inner] = snapshot;
+              const parts = queenIterTextRef.current[iterKey];
+              const sorted = Object.keys(parts)
+                .map(Number)
+                .sort((a, b) => a - b);
+              chatMsg.content = sorted.map((k) => parts[k]).join("\n");
+              chatMsg.id = `queen-stream-${event.execution_id}-${iter}`;
+            }
+            if (isQueen) {
+              chatMsg.role = role;
+              chatMsg.phase = queenPhaseRef.current as ChatMessage["phase"];
+            }
+            upsertMessage(chatMsg, {
+              reconcileOptimisticUser: event.type === "client_input_received",
+            });
+          }
+
+          if (event.type === "llm_text_delta" || event.type === "client_output_delta") {
+            updateState({
+              isStreaming: true,
+              ...(isQueen ? {} : { workerIsTyping: false }),
+            });
+          }
+
+          if (event.type === "llm_text_delta" && !isQueen && event.node_id) {
+            const snapshot = (event.data?.snapshot as string) || "";
+            if (snapshot) {
+              setAgentState((prev) => ({
+                ...prev,
+                llmSnapshots: { ...prev.llmSnapshots, [event.node_id!]: snapshot },
+              }));
+            }
+          }
+
+          if (event.type === "client_input_requested") {
+            const rawOptions = event.data?.options;
+            const options = Array.isArray(rawOptions) ? (rawOptions as string[]) : null;
+            const rawQuestions = event.data?.questions;
+            const questions = Array.isArray(rawQuestions)
+              ? (rawQuestions as { id: string; prompt: string; options?: string[] }[])
+              : null;
+            if (isQueen) {
+              const prompt = (event.data?.prompt as string) || "";
+              updateState({
+                awaitingInput: true,
+                isTyping: false,
+                isStreaming: false,
+                queenIsTyping: false,
+                queenBuilding: false,
+                pendingQuestion: prompt || null,
+                pendingOptions: options,
+                pendingQuestions: questions,
+                pendingQuestionSource: "queen",
+              });
+            }
+          }
+
+          if (event.type === "execution_paused") {
+            updateState({
+              isTyping: false,
+              isStreaming: false,
+              queenIsTyping: false,
+              workerIsTyping: false,
+              awaitingInput: false,
+              pendingQuestion: null,
+              pendingOptions: null,
+              pendingQuestions: null,
+              pendingQuestionSource: null,
+            });
+            if (!isQueen) {
+              updateState({ workerRunState: "idle", currentExecutionId: null });
+              markAllNodesAs(["running", "looping"], "pending");
+            }
+          }
+
+          if (event.type === "execution_failed") {
+            updateState({
+              isTyping: false,
+              isStreaming: false,
+              queenIsTyping: false,
+              workerIsTyping: false,
+              awaitingInput: false,
+              pendingQuestion: null,
+              pendingOptions: null,
+              pendingQuestions: null,
+              pendingQuestionSource: null,
+            });
+            if (!isQueen) {
+              updateState({ workerRunState: "idle", currentExecutionId: null });
+              if (event.node_id) {
+                updateGraphNodeStatus(event.node_id, "error");
+                const errMsg = (event.data?.error as string) || "unknown error";
+                appendNodeLog(event.node_id, `${ts} ERROR Execution failed: ${errMsg}`);
+              }
+              markAllNodesAs(["running", "looping"], "pending");
+            }
+          }
+          break;
+        }
+
+        case "node_loop_started":
+          turnCounterRef.current[turnKey] = currentTurn + 1;
+          updateState({ isTyping: true, activeToolCalls: {} });
+          if (!isQueen && event.node_id) {
+            const existing = graphNodes.find((n) => n.id === event.node_id);
+            const isRevisit = existing?.status === "complete";
+            updateGraphNodeStatus(event.node_id, isRevisit ? "looping" : "running", {
+              maxIterations: (event.data?.max_iterations as number) ?? undefined,
+            });
+            appendNodeLog(event.node_id, `${ts} INFO  Node started`);
+          }
+          break;
+
+        case "node_loop_iteration":
+          turnCounterRef.current[turnKey] = currentTurn + 1;
+          if (isQueen) {
+            updateState({
+              isStreaming: false,
+              activeToolCalls: {},
+              awaitingInput: false,
+              pendingQuestion: null,
+              pendingOptions: null,
+              pendingQuestions: null,
+              pendingQuestionSource: null,
+            });
+          } else {
+            updateState({
+              isStreaming: false,
+              workerIsTyping: true,
+              activeToolCalls: {},
+              awaitingInput: false,
+              pendingQuestion: null,
+              pendingOptions: null,
+              pendingQuestions: null,
+              pendingQuestionSource: null,
+            });
+          }
+          if (!isQueen && event.node_id) {
+            const pendingText = state.llmSnapshots[event.node_id];
+            if (pendingText?.trim()) {
+              appendNodeLog(event.node_id, `${ts} INFO  LLM: ${truncate(pendingText.trim(), 300)}`);
+              setAgentState((prev) => {
+                const { [event.node_id!]: _, ...rest } = prev.llmSnapshots;
+                return { ...prev, llmSnapshots: rest };
+              });
+            }
+            const iter = (event.data?.iteration as number) ?? undefined;
+            updateGraphNodeStatus(event.node_id, "looping", { iterations: iter });
+            appendNodeLog(event.node_id, `${ts} INFO  Iteration ${iter ?? "?"}`);
+          }
+          break;
+
+        case "node_loop_completed":
+          if (!isQueen && event.node_id) {
+            const pendingText = state.llmSnapshots[event.node_id];
+            if (pendingText?.trim()) {
+              appendNodeLog(event.node_id, `${ts} INFO  LLM: ${truncate(pendingText.trim(), 300)}`);
+              setAgentState((prev) => {
+                const { [event.node_id!]: _, ...rest } = prev.llmSnapshots;
+                return { ...prev, llmSnapshots: rest };
+              });
+            }
+            updateGraphNodeStatus(event.node_id, "complete");
+            appendNodeLog(event.node_id, `${ts} INFO  Node completed`);
+          }
+          break;
+
+        case "edge_traversed":
+          if (!isQueen) {
+            const sourceNode = event.data?.source_node as string | undefined;
+            const targetNode = event.data?.target_node as string | undefined;
+            if (sourceNode) updateGraphNodeStatus(sourceNode, "complete");
+            if (targetNode) updateGraphNodeStatus(targetNode, "running");
+          }
+          break;
+
+        case "tool_call_started": {
+          if (event.node_id) {
+            if (!isQueen) {
+              const pendingText = state.llmSnapshots[event.node_id];
+              if (pendingText?.trim()) {
+                appendNodeLog(
+                  event.node_id,
+                  `${ts} INFO  LLM: ${truncate(pendingText.trim(), 300)}`,
+                );
+                setAgentState((prev) => {
+                  const { [event.node_id!]: _, ...rest } = prev.llmSnapshots;
+                  return { ...prev, llmSnapshots: rest };
+                });
+              }
+              appendNodeLog(
+                event.node_id,
+                `${ts} INFO  Calling ${(event.data?.tool_name as string) || "unknown"}(${
+                  event.data?.tool_input ? truncate(JSON.stringify(event.data.tool_input), 200) : ""
+                })`,
+              );
+            }
+
+            const toolName = (event.data?.tool_name as string) || "unknown";
+            const toolUseId = (event.data?.tool_use_id as string) || "";
+
+            if (isQueen && toolName === "save_agent_draft") {
+              designingDraftSinceRef.current = Date.now();
+              if (designingDraftTimerRef.current) clearTimeout(designingDraftTimerRef.current);
+              updateState({ designingDraft: true });
+            }
+
+            const sid = event.stream_id;
+            setAgentState((prev) => {
+              const newActive = {
+                ...prev.activeToolCalls,
+                [toolUseId]: { name: toolName, done: false, streamId: sid },
+              };
+              const tools = Object.values(newActive)
+                .filter((t) => t.streamId === sid)
+                .map((t) => ({ name: t.name, done: t.done }));
+              const allDone = tools.length > 0 && tools.every((t) => t.done);
+              upsertMessage({
+                id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
+                agent: agentDisplayName || event.node_id || "Agent",
+                agentColor: "",
+                content: JSON.stringify({ tools, allDone }),
+                timestamp: "",
+                type: "tool_status",
+                role,
+                thread: agentPath,
+                createdAt: eventCreatedAt,
+                nodeId: event.node_id || undefined,
+                executionId: event.execution_id || undefined,
+              });
+              return { ...prev, isStreaming: false, activeToolCalls: newActive };
+            });
+          }
+          break;
+        }
+
+        case "tool_call_completed": {
+          if (event.node_id) {
+            const toolName = (event.data?.tool_name as string) || "unknown";
+            const toolUseId = (event.data?.tool_use_id as string) || "";
+            const isError = event.data?.is_error as boolean | undefined;
+            const result = event.data?.result as string | undefined;
+            if (isError) {
+              appendNodeLog(
+                event.node_id,
+                `${ts} ERROR ${toolName} failed: ${truncate(result || "unknown error", 200)}`,
+              );
+            } else {
+              const resultStr = result ? ` (${truncate(result, 200)})` : "";
+              appendNodeLog(event.node_id, `${ts} INFO  ${toolName} done${resultStr}`);
+            }
+
+            const sid = event.stream_id;
+            setAgentState((prev) => {
+              const updated = { ...prev.activeToolCalls };
+              if (updated[toolUseId]) {
+                updated[toolUseId] = { ...updated[toolUseId], done: true };
+              }
+              const tools = Object.values(updated)
+                .filter((t) => t.streamId === sid)
+                .map((t) => ({ name: t.name, done: t.done }));
+              const allDone = tools.length > 0 && tools.every((t) => t.done);
+              upsertMessage({
+                id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
+                agent: agentDisplayName || event.node_id || "Agent",
+                agentColor: "",
+                content: JSON.stringify({ tools, allDone }),
+                timestamp: "",
+                type: "tool_status",
+                role,
+                thread: agentPath,
+                createdAt: eventCreatedAt,
+                nodeId: event.node_id || undefined,
+                executionId: event.execution_id || undefined,
+              });
+              return { ...prev, activeToolCalls: updated };
+            });
+          }
+          break;
+        }
+
+        case "node_internal_output":
+          if (!isQueen && event.node_id) {
+            const content = (event.data?.content as string) || "";
+            if (content.trim()) appendNodeLog(event.node_id, `${ts} INFO  ${content}`);
+          }
+          break;
+
+        case "context_usage_updated": {
+          const streamKey = isQueen ? "__queen__" : event.node_id || streamId;
+          const usagePct = (event.data?.usage_pct as number) ?? 0;
+          const messageCount = (event.data?.message_count as number) ?? 0;
+          const estimatedTokens = (event.data?.estimated_tokens as number) ?? 0;
+          const maxTokens = (event.data?.max_context_tokens as number) ?? 0;
+          setAgentState((prev) => ({
+            ...prev,
+            contextUsage: {
+              ...prev.contextUsage,
+              [streamKey]: { usagePct, messageCount, estimatedTokens, maxTokens },
+            },
+          }));
+          break;
+        }
+
+        case "credentials_required": {
+          updateState({ workerRunState: "idle", error: "credentials_required" });
+          const credAgentPath = event.data?.agent_path as string | undefined;
+          if (credAgentPath) setCredentialAgentPath(credAgentPath);
+          setCredentialsOpen(true);
+          break;
+        }
+
+        case "queen_phase_changed": {
+          const rawPhase = event.data?.phase as string;
+          const eventAgentPath = (event.data?.agent_path as string) || null;
+          const newPhase: AgentState["queenPhase"] =
+            rawPhase === "running"
+              ? "running"
+              : rawPhase === "staging"
+              ? "staging"
+              : rawPhase === "planning"
+              ? "planning"
+              : "building";
+          queenPhaseRef.current = newPhase;
+          updateState({
+            queenPhase: newPhase,
+            queenBuilding: newPhase === "building",
+            workerRunState: newPhase === "running" ? "running" : "idle",
+            ...(newPhase === "planning" ? { originalDraft: null, flowchartMap: null } : {}),
+            ...(eventAgentPath ? { agentPath: eventAgentPath } : {}),
+          });
+          const sid = state.sessionId;
+          if (sid && newPhase !== "planning" && newPhase !== "building") {
+            graphsApi
+              .flowchartMap(sid)
+              .then(({ map, original_draft }) => {
+                updateState({ flowchartMap: map, originalDraft: original_draft });
+              })
+              .catch(() => {});
+          }
+          break;
+        }
+
+        case "draft_graph_updated": {
+          const draft = event.data as unknown as DraftGraphData | undefined;
+          if (draft?.nodes) {
+            const MIN_SPINNER_MS = 600;
+            const since = designingDraftSinceRef.current;
+            const elapsed = Date.now() - since;
+            const remaining = Math.max(0, MIN_SPINNER_MS - elapsed);
+            if (remaining > 0 && since > 0) {
+              updateState({ draftGraph: draft });
+              designingDraftTimerRef.current = setTimeout(() => {
+                updateState({ designingDraft: false });
+              }, remaining);
+            } else {
+              updateState({ draftGraph: draft, designingDraft: false });
+            }
+          }
+          break;
+        }
+
+        case "flowchart_map_updated": {
+          const mapData = event.data as {
+            map?: Record<string, string[]>;
+            original_draft?: DraftGraphData;
+          } | undefined;
+          if (mapData) {
+            updateState({
+              flowchartMap: mapData.map ?? null,
+              originalDraft: mapData.original_draft ?? null,
+              draftGraph: null,
+            });
+          }
+          break;
+        }
+
+        case "worker_graph_loaded": {
+          const graphName = event.data?.graph_name as string | undefined;
+          const agentPathFromEvent = event.data?.agent_path as string | undefined;
+          const dn = formatAgentDisplayName(graphName || agentSlug(agentPath));
+          clearCredentialCache(agentPathFromEvent);
+          updateState({
+            displayName: dn,
+            queenBuilding: false,
+            workerRunState: "idle",
+            graphId: null,
+            nodeSpecs: [],
+          });
+          setGraphNodes([]);
+          // Remove old worker messages
+          setMessages((prev) => prev.filter((m) => m.role !== "worker"));
+          if (state.sessionId) fetchGraph(state.sessionId);
+          break;
+        }
+
+        case "trigger_activated": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            const nodeId = `__trigger_${triggerId}`;
+            setGraphNodes((prev) => {
+              const exists = prev.some((n) => n.id === nodeId);
+              if (exists) {
+                return prev.map((n) =>
+                  n.id === nodeId ? { ...n, status: "running" as NodeStatus } : n,
+                );
+              }
+              const triggerType = (event.data?.trigger_type as string) || "timer";
+              const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
+              const entryNode =
+                (event.data?.entry_node as string) ||
+                prev.find((n) => n.nodeType !== "trigger")?.id;
+              const triggerName = (event.data?.name as string) || triggerId;
+              const _cron = triggerConfig.cron as string | undefined;
+              const _interval = triggerConfig.interval_minutes as number | undefined;
+              const computedLabel = _cron
+                ? cronToLabel(_cron)
+                : _interval
+                ? `Every ${_interval >= 60 ? `${_interval / 60}h` : `${_interval}m`}`
+                : triggerName;
+              const newNode: GraphNode = {
+                id: nodeId,
+                label: computedLabel,
+                status: "running",
+                nodeType: "trigger",
+                triggerType,
+                triggerConfig,
+                ...(entryNode ? { next: [entryNode] } : {}),
+              };
+              return [newNode, ...prev];
+            });
+          }
+          break;
+        }
+
+        case "trigger_deactivated": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            setGraphNodes((prev) =>
+              prev.map((n) => {
+                if (n.id !== `__trigger_${triggerId}`) return n;
+                const { next_fire_in: _, ...restConfig } = (n.triggerConfig || {}) as Record<
+                  string,
+                  unknown
+                > & { next_fire_in?: unknown };
+                return { ...n, status: "pending" as NodeStatus, triggerConfig: restConfig };
+              }),
+            );
+          }
+          break;
+        }
+
+        case "trigger_fired": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            const nodeId = `__trigger_${triggerId}`;
+            updateGraphNodeStatus(nodeId, "complete");
+            setTimeout(() => updateGraphNodeStatus(nodeId, "running"), 1500);
+          }
+          break;
+        }
+
+        case "trigger_removed": {
+          const triggerId = event.data?.trigger_id as string;
+          if (triggerId) {
+            setGraphNodes((prev) => prev.filter((n) => n.id !== `__trigger_${triggerId}`));
+          }
+          break;
+        }
+
+        default:
+          if (shouldMarkQueenReady) updateState({ queenReady: true });
+          break;
+      }
+    },
+    [agentPath, queenInfo.name, updateState, upsertMessage, updateGraphNodeStatus, markAllNodesAs, appendNodeLog, fetchGraph, graphNodes],
+  );
+
+  // ── SSE subscription ───────────────────────────────────────────────────
+
+  const sseSessions = useMemo(() => {
+    if (agentState.sessionId && agentState.ready) {
+      return { [agentPath]: agentState.sessionId };
+    }
+    return {};
+  }, [agentPath, agentState.sessionId, agentState.ready]);
+
+  useMultiSSE({ sessions: sseSessions, onEvent: handleSSEEvent });
+
+  // ── Action handlers ────────────────────────────────────────────────────
+
+  const handleRun = useCallback(async () => {
+    if (!agentState.sessionId || !agentState.ready) return;
+    setDismissedBanner(null);
+    try {
+      updateState({ workerRunState: "deploying" });
+      const result = await executionApi.trigger(agentState.sessionId, "default", {});
+      updateState({ currentExecutionId: result.execution_id });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 424) {
+        const errBody = (err as ApiError).body as Record<string, unknown>;
+        const credPath = (errBody?.agent_path as string) || null;
+        if (credPath) setCredentialAgentPath(credPath);
+        updateState({ workerRunState: "idle", error: "credentials_required" });
+        setCredentialsOpen(true);
+        return;
+      }
+      const errMsg = err instanceof Error ? err.message : String(err);
+      upsertMessage({
+        id: makeId(),
+        agent: "System",
+        agentColor: "",
+        content: `Failed to trigger run: ${errMsg}`,
+        timestamp: "",
+        type: "system",
+        thread: agentPath,
+        createdAt: Date.now(),
+      });
+      updateState({ workerRunState: "idle" });
+    }
+  }, [agentState.sessionId, agentState.ready, agentPath, updateState, upsertMessage]);
+
+  const handlePause = useCallback(async () => {
+    if (!agentState.sessionId || !agentState.currentExecutionId) return;
+    try {
+      await executionApi.pause(agentState.sessionId, agentState.currentExecutionId);
+    } catch {
+      // fire-and-forget
+    }
+  }, [agentState.sessionId, agentState.currentExecutionId]);
+
+  const handleCancelQueen = useCallback(async () => {
+    if (!agentState.sessionId) return;
+    try {
+      await executionApi.cancelQueen(agentState.sessionId);
+      updateState({ isTyping: false, isStreaming: false, queenIsTyping: false });
+    } catch {
+      // fire-and-forget
+    }
+  }, [agentState.sessionId, updateState]);
+
+  const handleSend = useCallback(
+    (text: string, _thread: string, images?: ImageContent[]) => {
+      if (agentState.pendingQuestionSource === "queen") {
+        updateState({
+          pendingQuestion: null,
+          pendingOptions: null,
+          pendingQuestions: null,
+          pendingQuestionSource: null,
+        });
+      }
+
+      const userMsg: ChatMessage = {
+        id: makeId(),
+        agent: "You",
+        agentColor: "",
+        content: text,
+        timestamp: "",
+        type: "user",
+        thread: agentPath,
+        createdAt: Date.now(),
+        images,
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      suppressIntroRef.current = false;
+      updateState({ isTyping: true, queenIsTyping: true });
+
+      if (agentState.sessionId && agentState.ready) {
+        executionApi.chat(agentState.sessionId, text, images).catch((err: unknown) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          upsertMessage({
+            id: makeId(),
+            agent: "System",
+            agentColor: "",
+            content: `Failed to send message: ${errMsg}`,
+            timestamp: "",
+            type: "system",
+            thread: agentPath,
+            createdAt: Date.now(),
+          });
+          updateState({ isTyping: false, isStreaming: false, queenIsTyping: false });
+        });
+      }
+    },
+    [agentPath, agentState.sessionId, agentState.ready, agentState.pendingQuestionSource, updateState, upsertMessage],
+  );
+
+  const handleQueenQuestionAnswer = useCallback(
+    (answer: string) => {
+      updateState({
+        pendingQuestion: null,
+        pendingOptions: null,
+        pendingQuestions: null,
+        pendingQuestionSource: null,
+      });
+      handleSend(answer, agentPath);
+    },
+    [agentPath, handleSend, updateState],
+  );
+
+  const handleMultiQuestionAnswer = useCallback(
+    (answers: Record<string, string>) => {
+      updateState({
+        pendingQuestion: null,
+        pendingOptions: null,
+        pendingQuestions: null,
+        pendingQuestionSource: null,
+      });
+      const lines = Object.entries(answers).map(([id, answer]) => `[${id}]: ${answer}`);
+      handleSend(lines.join("\n"), agentPath);
+    },
+    [agentPath, handleSend, updateState],
+  );
+
+  const handleQuestionDismiss = useCallback(() => {
+    if (!agentState.sessionId) return;
+    const question = agentState.pendingQuestion || "";
+    updateState({
+      pendingQuestion: null,
+      pendingOptions: null,
+      pendingQuestions: null,
+      pendingQuestionSource: null,
+      awaitingInput: false,
+    });
+    executionApi
+      .chat(agentState.sessionId, `[User dismissed the question: "${question}"]`)
+      .catch(() => {});
+  }, [agentState.sessionId, agentState.pendingQuestion, updateState]);
+
+  // ── Resolved selected node (sync with live graph updates) ──────────────
+
+  const liveSelectedNode = selectedNode && graphNodes.find((n) => n.id === selectedNode.id);
+  const resolvedSelectedNode = liveSelectedNode || selectedNode;
+
+  // ── Render ─────────────────────────────────────────────────────────────
+
+  if (!colony && !agentState.loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">Colony not found: {colonyId}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex flex-1 min-h-0">
+        {/* Chat panel */}
+        <div className="flex-1 min-w-0 relative">
+          {/* Loading overlay */}
+          {agentState.loading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+              <div className="flex items-center gap-3 text-muted-foreground">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span className="text-sm">Connecting to agent...</span>
+              </div>
+            </div>
+          )}
+
+          {/* Queen connecting overlay */}
+          {!agentState.loading && agentState.ready && !agentState.queenReady && (
+            <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-background border-b border-primary/20 flex items-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-primary/60" />
+              <span className="text-xs text-primary/80">Connecting to {queenInfo.name}...</span>
+            </div>
+          )}
+
+          {/* Error banner */}
+          {agentState.error &&
+            !agentState.loading &&
+            dismissedBanner !== agentState.error &&
+            (agentState.error === "credentials_required" ? (
+              <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-background border-b border-amber-500/30 flex items-center gap-2">
+                <KeyRound className="w-4 h-4 text-amber-600" />
+                <span className="text-xs text-amber-700">
+                  Missing credentials — configure them to continue
+                </span>
+                <button
+                  onClick={() => setCredentialsOpen(true)}
+                  className="ml-auto text-xs font-medium text-primary hover:underline"
+                >
+                  Open Credentials
+                </button>
+                <button
+                  onClick={() => setDismissedBanner(agentState.error!)}
+                  className="p-0.5 rounded text-amber-600 hover:text-amber-800 hover:bg-amber-500/20 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-background border-b border-destructive/30 flex items-center gap-2">
+                <WifiOff className="w-4 h-4 text-destructive" />
+                <span className="text-xs text-destructive">
+                  Backend unavailable: {agentState.error}
+                </span>
+                <button
+                  onClick={() => setDismissedBanner(agentState.error!)}
+                  className="ml-auto p-0.5 rounded text-destructive hover:bg-destructive/20 transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+
+          <ChatPanel
+            messages={messages}
+            onSend={handleSend}
+            onCancel={handleCancelQueen}
+            activeThread={agentPath}
+            isWaiting={(agentState.queenIsTyping && !agentState.isStreaming) ?? false}
+            isWorkerWaiting={(agentState.workerIsTyping && !agentState.isStreaming) ?? false}
+            isBusy={agentState.queenIsTyping ?? false}
+            disabled={agentState.loading || !agentState.queenReady}
+            queenPhase={agentState.queenPhase}
+            pendingQuestion={agentState.awaitingInput ? agentState.pendingQuestion : null}
+            pendingOptions={agentState.awaitingInput ? agentState.pendingOptions : null}
+            pendingQuestions={agentState.awaitingInput ? agentState.pendingQuestions : null}
+            onQuestionSubmit={handleQueenQuestionAnswer}
+            onMultiQuestionSubmit={handleMultiQuestionAnswer}
+            onQuestionDismiss={handleQuestionDismiss}
+            contextUsage={agentState.contextUsage}
+            supportsImages={agentState.queenSupportsImages}
+          />
+        </div>
+
+        {/* Pipeline graph panel */}
+        <div
+          className="bg-card/30 flex flex-col border-l border-border/30 relative"
+          style={{ width: `${graphPanelPct}%`, minWidth: 240, flexShrink: 0 }}
+        >
+          <div className="flex-1 min-h-0">
+            <DraftGraph
+              key={colonyId}
+              draft={agentState.originalDraft ?? agentState.draftGraph ?? null}
+              originalDraft={agentState.originalDraft ?? null}
+              loadingMessage={
+                agentState.designingDraft
+                  ? "Designing flowchart..."
+                  : !agentState.originalDraft &&
+                    !agentState.draftGraph &&
+                    agentState.queenPhase !== "planning"
+                  ? "Loading flowchart..."
+                  : null
+              }
+              building={agentState.queenBuilding}
+              onRun={handleRun}
+              onPause={handlePause}
+              runState={agentState.workerRunState}
+              flowchartMap={agentState.flowchartMap ?? undefined}
+              runtimeNodes={graphNodes}
+              onRuntimeNodeClick={(runtimeNodeId) => {
+                const node = graphNodes.find((n) => n.id === runtimeNodeId);
+                if (node) setSelectedNode((prev) => (prev?.id === node.id ? null : node));
+              }}
+            />
+          </div>
+          {/* Resize handle */}
+          <div
+            className="absolute top-0 left-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/40 transition-colors z-10"
+            onMouseDown={() => {
+              resizing.current = true;
+              document.body.style.cursor = "col-resize";
+            }}
+          />
+        </div>
+
+        {/* Node detail panel */}
+        {resolvedSelectedNode && (
+          <div className="w-[480px] min-w-[400px] flex-shrink-0">
+            <NodeDetailPanel
+              node={resolvedSelectedNode}
+              sessionId={agentState.sessionId || ""}
+              graphId={agentState.graphId || ""}
+              nodeLogs={agentState.nodeLogs[resolvedSelectedNode.id] || []}
+              actionPlan={agentState.nodeActionPlans[resolvedSelectedNode.id]}
+              onClose={() => setSelectedNode(null)}
+            />
+          </div>
+        )}
+      </div>
+
+      <CredentialsModal
+        agentType={agentPath}
+        agentLabel={colonyName}
+        agentPath={credentialAgentPath || agentState.agentPath || agentPath}
+        open={credentialsOpen}
+        onClose={() => {
+          setCredentialsOpen(false);
+          setCredentialAgentPath(null);
+        }}
+        credentials={credentials}
+        onCredentialChange={() => {
+          if (agentState.error === "credentials_required") {
+            updateState({ error: null });
+            // Retry session loading
+            loadSession();
+          }
+        }}
+      />
+    </div>
+  );
+}
