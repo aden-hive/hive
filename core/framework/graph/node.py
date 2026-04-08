@@ -251,8 +251,6 @@ def warn_if_deprecated_client_facing(node_spec: NodeSpec) -> None:
 class DataBufferWriteError(Exception):
     """Raised when an invalid value is written to the data buffer."""
 
-    pass
-
 
 @dataclass
 class DataBuffer:
