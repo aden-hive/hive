@@ -103,11 +103,11 @@ logger = logging.getLogger(__name__)
 # assessment tags.
 _INTERNAL_TAGS = frozenset({
     "think",
-    "social_distance",
+    "relationship",
     "context",
-    "mood_filter",
-    "physical_presence",
-    "language_engine",
+    "sentiment",
+    "physical_state",
+    "tone",
 })
 _STRIP_RE = re.compile(
     r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>"
