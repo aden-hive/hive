@@ -4,6 +4,8 @@ Validates subscription management, event publishing, filtering,
 concurrency handling, history operations, and convenience publishers.
 """
 
+from __future__ import annotations
+
 import asyncio
 from datetime import datetime
 
@@ -849,6 +851,12 @@ class TestConveniencePublishers:
             node_id="node_1",
             plan="1. Search for data\n2. Analyze results\n3. Generate report",
             execution_id="exec_1",
+        )
+
+        assert len(received) == 1
+        assert received[0].type == EventType.NODE_ACTION_PLAN
+        assert (
+            received[0].data["plan"] == "1. Search for data\n2. Analyze results\n3. Generate report"
         )
 
     @pytest.mark.asyncio
