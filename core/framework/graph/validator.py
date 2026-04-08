@@ -33,9 +33,58 @@ class OutputValidator:
     Used by the executor to catch bad outputs before they pollute memory.
     """
 
+    # Indicators that are unambiguous — a single match means code.
+    _STRONG_CODE_INDICATORS: tuple[str, ...] = (
+        "if __name__",
+        "async def ",
+        "=> {",
+        "require(",
+        "<script",
+        "<?php",
+        "<%",
+        "try:",
+        "except:",
+    )
+
+    # Indicators that commonly appear in natural language.
+    # We only count them when anchored at a line start (\n prefix) so that
+    # "We need to import data from the server" does NOT match, but a real
+    # code line like "\nimport os" does.
+    _WEAK_CODE_INDICATORS: tuple[str, ...] = (
+        # Python — anchored to line start
+        "\ndef ",
+        "\nclass ",
+        "\nimport ",
+        "\nfrom ",
+        "\nawait ",
+        # JavaScript/TypeScript — anchored to line start
+        "\nfunction ",
+        "\nconst ",
+        "\nlet ",
+        "\nexport ",
+        # SQL — anchored to line start
+        "\nSELECT ",
+        "\nINSERT ",
+        "\nUPDATE ",
+        "\nDELETE ",
+        "\nDROP ",
+    )
+
+    # Minimum number of *weak* hits required before we flag the value.
+    _WEAK_INDICATOR_THRESHOLD: int = 2
+
     def _contains_code_indicators(self, value: str) -> bool:
         """
         Check for code patterns in a string using sampling for efficiency.
+
+        Uses two tiers of indicators to reduce false positives on natural
+        language text:
+        - **Strong** indicators (e.g. ``<script``, ``try:``) trigger
+          immediately on a single match.
+        - **Weak** indicators (e.g. ``import``, ``class``) are common in
+          everyday English, so they must appear anchored at a line start
+          *and* at least ``_WEAK_INDICATOR_THRESHOLD`` of them must
+          co-occur before the value is flagged.
 
         For strings under 10KB, checks the entire content.
         For longer strings, samples at strategic positions to balance
@@ -47,41 +96,22 @@ class OutputValidator:
         Returns:
             True if code indicators are found, False otherwise
         """
-        code_indicators = [
-            # Python
-            "def ",
-            "class ",
-            "import ",
-            "from ",
-            "if __name__",
-            "async def ",
-            "await ",
-            "try:",
-            "except:",
-            # JavaScript/TypeScript
-            "function ",
-            "const ",
-            "let ",
-            "=> {",
-            "require(",
-            "export ",
-            # SQL
-            "SELECT ",
-            "INSERT ",
-            "UPDATE ",
-            "DELETE ",
-            "DROP ",
-            # HTML/Script injection
-            "<script",
-            "<?php",
-            "<%",
-        ]
-
-        # For strings under 10KB, check the entire content
         if len(value) < 10000:
-            return any(indicator in value for indicator in code_indicators)
+            return self._check_chunk_for_code(value)
+        return self._check_sampled(value)
 
-        # For longer strings, sample at strategic positions
+    def _check_chunk_for_code(self, chunk: str) -> bool:
+        """Check a single chunk for code indicators."""
+        # Any strong indicator is a definitive match
+        if any(indicator in chunk for indicator in self._STRONG_CODE_INDICATORS):
+            return True
+
+        # Require multiple weak (line-anchored) indicators to co-occur
+        hits = sum(1 for indicator in self._WEAK_CODE_INDICATORS if indicator in chunk)
+        return hits >= self._WEAK_INDICATOR_THRESHOLD
+
+    def _check_sampled(self, value: str) -> bool:
+        """Sample strategic positions in large strings."""
         sample_positions = [
             0,  # Start
             len(value) // 4,  # 25%
@@ -92,7 +122,7 @@ class OutputValidator:
 
         for pos in sample_positions:
             chunk = value[pos : pos + 2000]
-            if any(indicator in chunk for indicator in code_indicators):
+            if self._check_chunk_for_code(chunk):
                 return True
 
         return False

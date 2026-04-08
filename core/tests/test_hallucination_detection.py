@@ -17,7 +17,7 @@ class TestDataBufferHallucinationDetection:
     def test_detects_code_at_start(self):
         """Code at the start of the string should be detected."""
         buffer = DataBuffer()
-        code_content = "```python\nimport os\ndef hack(): pass\n```" + "A" * 6000
+        code_content = "```python\nimport os\nfrom pathlib import Path\ndef hack(): pass\n```" + "A" * 6000
 
         with pytest.raises(DataBufferWriteError) as exc_info:
             buffer.write("output", code_content)
@@ -29,7 +29,7 @@ class TestDataBufferHallucinationDetection:
         buffer = DataBuffer()
         # 600 chars of padding, then code, then more padding to exceed 5000 chars
         padding_start = "A" * 600
-        code = "\n```python\nimport os\ndef malicious(): pass\n```\n"
+        code = "\n```python\nimport os\nfrom pathlib import Path\ndef malicious(): pass\n```\n"
         padding_end = "B" * 5000
         content = padding_start + code + padding_end
 
@@ -42,7 +42,7 @@ class TestDataBufferHallucinationDetection:
         """Code at the end of the string should be detected (was previously missed)."""
         buffer = DataBuffer()
         padding = "A" * 5500
-        code = "\n```python\nclass Exploit:\n    pass\n```"
+        code = "\n```python\nimport os\nfrom x import y\nclass Exploit:\n    pass\n```"
         content = padding + code
 
         with pytest.raises(DataBufferWriteError) as exc_info:
@@ -54,7 +54,7 @@ class TestDataBufferHallucinationDetection:
         """JavaScript code patterns should be detected."""
         buffer = DataBuffer()
         padding = "A" * 600
-        code = "\nfunction malicious() { require('child_process'); }\n"
+        code = "\nconst x = require('child_process');\nfunction malicious() { return x; }\n"
         padding_end = "B" * 5000
         content = padding + code + padding_end
 
@@ -67,7 +67,7 @@ class TestDataBufferHallucinationDetection:
         """SQL patterns should be detected."""
         buffer = DataBuffer()
         padding = "A" * 600
-        code = "\nDROP TABLE users; SELECT * FROM passwords;\n"
+        code = "\nDROP TABLE users;\nSELECT * FROM passwords;\n"
         padding_end = "B" * 5000
         content = padding + code + padding_end
 
@@ -109,7 +109,7 @@ class TestDataBufferHallucinationDetection:
     def test_validate_false_bypasses_check(self):
         """Using validate=False should bypass the check."""
         buffer = DataBuffer()
-        code_content = "```python\nimport os\n```" + "A" * 6000
+        code_content = "```python\nimport os\nfrom x import y\n```" + "A" * 6000
 
         # Should not raise when validate=False
         buffer.write("output", code_content, validate=False)
@@ -138,7 +138,7 @@ class TestOutputValidatorHallucinationDetection:
         """Code anywhere in the output value should trigger a warning."""
         validator = OutputValidator()
         padding = "Normal text content. " * 50
-        code = "\ndef suspicious_function():\n    pass\n"
+        code = "\nimport os\nfrom module import *\ndef suspicious_function():\n    pass\n"
         output = {"result": padding + code}
 
         # The method logs a warning but doesn't fail
@@ -152,7 +152,7 @@ class TestOutputValidatorHallucinationDetection:
 
         # Code at position 600 (was previously missed with [:500] check)
         padding = "A" * 600
-        code = "import os"
+        code = "\nimport os\nfrom module import path"
         content = padding + code
 
         assert validator._contains_code_indicators(content) is True
@@ -164,7 +164,7 @@ class TestOutputValidatorHallucinationDetection:
         # 50KB string with code at 75% position
         size = 50000
         code_position = int(size * 0.75)
-        content = "A" * code_position + "class HiddenClass:" + "B" * (size - code_position - 18)
+        content = "A" * code_position + "\nimport os\nclass HiddenClass:\n    pass\n" + "B" * (size - code_position - 38)
 
         assert validator._contains_code_indicators(content) is True
 
@@ -182,12 +182,11 @@ class TestOutputValidatorHallucinationDetection:
         validator = OutputValidator()
 
         test_cases = [
-            "function test() {}",  # JavaScript
-            "const x = 5;",  # JavaScript
-            "SELECT * FROM users",  # SQL
-            "DROP TABLE data",  # SQL
-            "<script>",  # HTML
-            "<?php",  # PHP
+            "\nfunction test() {}\nconst x = 5;",  # JavaScript
+            "\nconst x = 5;\nlet y = 10;",  # JavaScript
+            "\nSELECT * FROM users;\nDROP TABLE data;",  # SQL
+            "<script>alert(1)</script>",  # HTML
+            "<?php echo 'hello'; ?>",  # PHP
         ]
 
         for code in test_cases:
