@@ -15,10 +15,11 @@ const makeId = () => Math.random().toString(36).slice(2, 9);
 
 export default function QueenDM() {
   const { queenId } = useParams<{ queenId: string }>();
-  const { queens } = useColony();
-  const queen = queens.find((q) => q.id === queenId);
+  const { queens, queenProfiles } = useColony();
+  const profileQueen = queenProfiles.find((q) => q.id === queenId);
+  const colonyQueen = queens.find((q) => q.id === queenId);
   const queenInfo = getQueenForAgent(queenId || "");
-  const queenName = queen?.name || queenInfo.name;
+  const queenName = profileQueen?.name ?? colonyQueen?.name ?? queenInfo.name;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);

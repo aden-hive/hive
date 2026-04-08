@@ -57,4 +57,14 @@ export const configApi = {
     }),
 
   getModels: () => api.get<ModelsCatalogue>("/config/models"),
+
+  getProfile: () =>
+    api.get<{ displayName: string; about: string; theme: string }>("/config/profile"),
+
+  setProfile: (displayName: string, about: string, theme?: string) =>
+    api.put<{ displayName: string; about: string; theme: string }>("/config/profile", {
+      displayName,
+      about,
+      ...(theme ? { theme } : {}),
+    }),
 };

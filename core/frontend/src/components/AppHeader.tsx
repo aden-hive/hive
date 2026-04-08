@@ -9,7 +9,7 @@ import ModelSwitcher from "@/components/ModelSwitcher";
 
 export default function AppHeader() {
   const location = useLocation();
-  const { colonies, queens, userProfile } = useColony();
+  const { colonies, queens, queenProfiles, userProfile } = useColony();
   const { actions } = useHeaderActions();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<"profile" | "byok">("profile");
@@ -27,9 +27,10 @@ export default function AppHeader() {
     title = colony?.name ?? colonyId;
   } else if (queenMatch) {
     const queenId = queenMatch[1];
+    const profile = queenProfiles.find((q) => q.id === queenId);
     const queen = queens.find((q) => q.id === queenId);
     const queenInfo = getQueenForAgent(queenId);
-    title = queen?.name ?? queenInfo.name;
+    title = profile?.name ?? queen?.name ?? queenInfo.name;
     icon = <Crown className="w-4 h-4 text-primary" />;
   } else if (location.pathname === "/org-chart") {
     title = "Org Chart";

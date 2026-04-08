@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { configApi } from "@/api/config";
 
 type Theme = "light" | "dark";
 
@@ -22,6 +23,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       : "light";
   });
 
+  // Load theme from server on mount
+  useEffect(() => {
+    configApi.getProfile().then((p) => {
+      if (p.theme === "light" || p.theme === "dark") {
+        setTheme(p.theme);
+      }
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const root = document.documentElement;
 
@@ -31,8 +41,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("theme", theme);
   }, [theme]);
 
+  const handleSetTheme = useCallback((t: Theme) => {
+    setTheme(t);
+    configApi.setProfile("", "", t).catch(() => {});
+  }, []);
+
   return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
+    <ThemeContext.Provider value={{ theme, setTheme: handleSetTheme }}>
       {children}
     </ThemeContext.Provider>
   );

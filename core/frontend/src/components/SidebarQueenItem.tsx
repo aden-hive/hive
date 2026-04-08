@@ -1,8 +1,8 @@
 import { NavLink } from "react-router-dom";
-import type { QueenBee } from "@/types/colony";
+import type { QueenProfileSummary } from "@/types/colony";
 
 interface SidebarQueenItemProps {
-  queen: QueenBee;
+  queen: QueenProfileSummary;
 }
 
 export default function SidebarQueenItem({ queen }: SidebarQueenItemProps) {
@@ -17,14 +17,12 @@ export default function SidebarQueenItem({ queen }: SidebarQueenItemProps) {
         }`
       }
     >
-      <span
-        className={`flex-shrink-0 w-2 h-2 rounded-full ${
-          queen.status === "online" ? "bg-status-online" : "bg-status-offline"
-        }`}
-      />
+      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/15 flex items-center justify-center text-[10px] font-bold text-primary">
+        {queen.name.charAt(0)}
+      </span>
       <div className="min-w-0 flex-1 flex items-center gap-2">
         <span className="font-medium truncate">{queen.name}</span>
-        <span className="text-xs text-sidebar-muted truncate">{queen.role}</span>
+        <span className="text-xs text-sidebar-muted truncate">{queen.title}</span>
       </div>
     </NavLink>
   );

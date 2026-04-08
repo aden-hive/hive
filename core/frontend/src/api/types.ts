@@ -296,7 +296,8 @@ export type EventTypeName =
   | "trigger_deactivated"
   | "trigger_fired"
   | "trigger_removed"
-  | "trigger_updated";
+  | "trigger_updated"
+  | "queen_identity_selected";
 
 export interface AgentEvent {
   type: EventTypeName;

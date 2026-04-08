@@ -14,7 +14,7 @@ import { useColony } from "@/context/ColonyContext";
 
 export default function Sidebar() {
   const navigate = useNavigate();
-  const { colonies, queens, sidebarCollapsed, setSidebarCollapsed } = useColony();
+  const { colonies, queenProfiles, sidebarCollapsed, setSidebarCollapsed } = useColony();
   const [coloniesExpanded, setColoniesExpanded] = useState(true);
   const [queensExpanded, setQueensExpanded] = useState(true);
 
@@ -139,12 +139,12 @@ export default function Sidebar() {
           </button>
           {queensExpanded && (
             <div className="flex flex-col gap-0.5 mt-0.5">
-              {queens.map((queen) => (
+              {queenProfiles.map((queen) => (
                 <SidebarQueenItem key={queen.id} queen={queen} />
               ))}
-              {queens.length === 0 && (
+              {queenProfiles.length === 0 && (
                 <p className="px-5 py-2 text-xs text-sidebar-muted">
-                  No queens assigned
+                  Loading queens...
                 </p>
               )}
             </div>

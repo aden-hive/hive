@@ -7,11 +7,12 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import type { Colony, QueenBee, UserProfile } from "@/types/colony";
+import type { Colony, QueenBee, QueenProfileSummary, UserProfile } from "@/types/colony";
 import type { DiscoverEntry, LiveSession } from "@/api/types";
 import { agentsApi } from "@/api/agents";
 import { sessionsApi } from "@/api/sessions";
 import { queensApi } from "@/api/queens";
+import { configApi } from "@/api/config";
 import {
   agentSlug,
   slugToColonyId,
@@ -48,6 +49,7 @@ function loadJson<T>(key: string, fallback: T): T {
 interface ColonyContextValue {
   colonies: Colony[];
   queens: QueenBee[];
+  queenProfiles: QueenProfileSummary[];
   loading: boolean;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (v: boolean) => void;
@@ -74,6 +76,7 @@ export function useColony(): ColonyContextValue {
 export function ColonyProvider({ children }: { children: ReactNode }) {
   const [colonies, setColonies] = useState<Colony[]>([]);
   const [queens, setQueens] = useState<QueenBee[]>([]);
+  const [queenProfiles, setQueenProfiles] = useState<QueenProfileSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, _setSidebarCollapsed] = useState(() =>
     loadBool(SIDEBAR_KEY, false),
@@ -98,7 +101,9 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
   const setUserProfile = useCallback((p: UserProfile) => {
     _setUserProfile(p);
     localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+    configApi.setProfile(p.displayName, p.about).catch(() => {});
   }, []);
+
 
   const markVisited = useCallback((colonyId: string) => {
     setLastVisit((prev) => {
@@ -118,10 +123,11 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
   // Only called on mount, visibility change, and after create/delete.
   const fetchColonies = useCallback(async () => {
     try {
-      const [discoverResult, sessionsResult, queenProfilesResult] = await Promise.all([
+      const [discoverResult, sessionsResult, queenProfilesResult, historyResult] = await Promise.all([
         agentsApi.discover(),
         sessionsApi.list().catch(() => ({ sessions: [] as LiveSession[] })),
-        queensApi.list().catch(() => ({ queens: [] as { id: string; name: string; title: string }[] })),
+        queensApi.list().catch(() => ({ queens: [] as QueenProfileSummary[] })),
+        sessionsApi.history().catch(() => ({ sessions: [] as { agent_path?: string | null; queen_id?: string | null }[] })),
       ]);
 
       // Skip "Framework" agents — those are internal to the hive runtime
@@ -129,9 +135,24 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
         .filter(([category]) => category !== "Framework")
         .flatMap(([, entries]) => entries);
 
-      const liveSessionMap = new Map<string, string>();
+      // Map agent_path → session_id + queen_id from live sessions
+      const liveSessionMap = new Map<string, { sessionId: string; queenId: string | null }>();
       for (const s of sessionsResult.sessions) {
-        liveSessionMap.set(s.agent_path.replace(/\/$/, ""), s.session_id);
+        liveSessionMap.set(s.agent_path.replace(/\/$/, ""), {
+          sessionId: s.session_id,
+          queenId: s.queen_id ?? null,
+        });
+      }
+
+      // Map agent_path → queen_id from history (most recent session wins)
+      const historyQueenMap = new Map<string, string>();
+      for (const s of historyResult.sessions) {
+        if (s.agent_path && s.queen_id) {
+          const normalized = s.agent_path.replace(/\/$/, "");
+          if (!historyQueenMap.has(normalized)) {
+            historyQueenMap.set(normalized, s.queen_id);
+          }
+        }
       }
 
       const unreadCounts = loadJson<Record<string, number>>(UNREAD_KEY, {});
@@ -140,8 +161,10 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
         const slug = agentSlug(agent.path);
         const colonyId = slugToColonyId(slug);
         const normalizedPath = agent.path.replace(/\/$/, "");
-        const sessionId = liveSessionMap.get(normalizedPath) ?? null;
+        const liveInfo = liveSessionMap.get(normalizedPath);
+        const sessionId = liveInfo?.sessionId ?? null;
         const isRunning = sessionId !== null;
+        const queenProfileId = liveInfo?.queenId ?? historyQueenMap.get(normalizedPath) ?? null;
 
         return {
           id: colonyId,
@@ -151,6 +174,7 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
           status: isRunning ? "running" : "idle",
           unreadCount: unreadCounts[colonyId] ?? 0,
           queenId: slug,
+          queenProfileId,
           sessionId,
           sessionCount: agent.session_count,
           runCount: agent.run_count,
@@ -173,6 +197,7 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
 
       setColonies(newColonies);
       setQueens(newQueens);
+      setQueenProfiles(queenProfilesResult.queens);
     } catch {
       // Silently fail — colonies will be empty
     } finally {
@@ -198,14 +223,14 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
           return { ...c, status: isRunning ? "running" : "idle", sessionId };
         }),
       );
+      const liveQueenIds = new Set(
+        sessions.filter((s) => s.queen_id).map((s) => s.queen_id as string),
+      );
       setQueens((prev) =>
-        prev.map((q) => {
-          const colony = coloniesRef.current.find((c) => c.queenId === q.id);
-          if (!colony) return q;
-          const normalizedPath = colony.agentPath.replace(/\/$/, "");
-          const isRunning = livePathSet.has(normalizedPath);
-          return { ...q, status: isRunning ? "online" : "offline" };
-        }),
+        prev.map((q) => ({
+          ...q,
+          status: liveQueenIds.has(q.id) ? "online" : "offline",
+        })),
       );
     } catch {
       // Silently fail
@@ -229,6 +254,12 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
   // Full fetch on mount
   useEffect(() => {
     fetchColonies();
+    configApi.getProfile().then((p) => {
+      if (p.displayName || p.about) {
+        _setUserProfile(p);
+        localStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+      }
+    }).catch(() => {});
   }, [fetchColonies]);
 
   // Lightweight status poll every 30s
@@ -251,6 +282,7 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
       value={{
         colonies,
         queens,
+        queenProfiles,
         loading,
         sidebarCollapsed,
         setSidebarCollapsed,

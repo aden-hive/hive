@@ -5,7 +5,7 @@ export interface QueenProfile {
   name: string;
   title: string;
   summary?: string;
-  experience?: Array<{ role: string; details: string }>;
+  experience?: Array<{ role: string; details: string[] }>;
   skills?: string;
   signature_achievement?: string;
 }

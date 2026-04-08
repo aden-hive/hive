@@ -59,7 +59,7 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
         "signature_achievement": "Built MVP and scaled to 500k users without major rewrite",
     },
     "queen_growth": {
-        "name": "Marcus",
+        "name": "Victoria",
         "title": "Head of Growth",
         "summary": (
             "Growth strategist who has taken three B2B SaaS products from "
@@ -87,7 +87,7 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
         "signature_achievement": "Built self-serve acquisition engine that drove 70% of revenue with zero sales team",
     },
     "queen_product_strategy": {
-        "name": "Sophia",
+        "name": "Isabella",
         "title": "Head of Product Strategy",
         "summary": (
             "Product leader with a track record of defining and executing "
@@ -115,7 +115,7 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
         "signature_achievement": "Pivoted failing product into market leader within 9 months by redefining ICP and value proposition",
     },
     "queen_finance_fundraising": {
-        "name": "Daniel",
+        "name": "Charlotte",
         "title": "Head of Finance & Fundraising",
         "summary": (
             "Finance executive who has raised over $150M across seed to Series C "
@@ -143,7 +143,7 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
         "signature_achievement": "Closed oversubscribed Series A in 3 weeks with 40+ inbound investor inquiries",
     },
     "queen_legal": {
-        "name": "Catherine",
+        "name": "Eleanor",
         "title": "Head of Legal",
         "summary": (
             "Startup legal counsel with deep expertise in corporate governance, "
@@ -171,7 +171,7 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
         "signature_achievement": "Saved client $3M by identifying and resolving IP ownership dispute before Series B close",
     },
     "queen_brand_design": {
-        "name": "Elena",
+        "name": "Sophia",
         "title": "Head of Brand & Design",
         "summary": (
             "Creative director who builds brand identities that drive business "
@@ -199,7 +199,7 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
         "signature_achievement": "Created brand identity for pre-launch startup that became recognizable industry name within 6 months",
     },
     "queen_talent": {
-        "name": "James",
+        "name": "Amelia",
         "title": "Head of Talent",
         "summary": (
             "People leader who has built high-performing teams from founding "
@@ -227,8 +227,8 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
         "signature_achievement": "Built engineering team of 50 in 6 months with zero external agency spend",
     },
     "queen_operations": {
-        "name": "Rachel",
-        "title": "Head of Operations",
+        "name": "Catherine",
+        "title": "Head of Founder Success",
         "summary": (
             "Operations leader who builds the systems that let startups scale "
             "without chaos. Expert in process design, vendor management, and "
@@ -269,8 +269,6 @@ def ensure_default_queens() -> None:
     for queen_id, profile in DEFAULT_QUEENS.items():
         queen_dir = QUEENS_DIR / queen_id
         profile_path = queen_dir / "profile.yaml"
-        if profile_path.exists():
-            continue
         queen_dir.mkdir(parents=True, exist_ok=True)
         profile_path.write_text(yaml.safe_dump(profile, sort_keys=False, allow_unicode=True))
     logger.info("Queen profiles ensured at %s", QUEENS_DIR)
@@ -373,7 +371,7 @@ Queens:
 - queen_legal: Contracts, IP, compliance, corporate governance, employment law, regulatory matters
 - queen_brand_design: Brand identity, visual design, UX, design systems, creative direction, messaging
 - queen_talent: Hiring, recruiting, team building, culture, compensation, organizational design
-- queen_operations: Process optimization, vendor management, cross-functional coordination, project management
+- queen_operations: Founder coaching, strategic decisions, leadership challenges, company growth, pivots
 
 Reply with ONLY a valid JSON object — no markdown, no prose:
 {"queen_id": "<one of the IDs above>"}
