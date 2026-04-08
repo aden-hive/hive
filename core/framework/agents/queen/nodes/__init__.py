@@ -450,11 +450,11 @@ When a user says "my agent is failing" or "debug this agent":
 **You should only reach this step after the user has approved the draft design \
 and you have called `confirm_and_build(agent_name="my_agent")`.**
 
-`confirm_and_build` created the agent directory at `exports/{name}/`. \
+`confirm_and_build` created the agent directory (returned in agent_path). \
 Now write the complete agent config directly:
 
 ```
-write_file("exports/{name}/agent.json", <complete JSON config>)
+write_file("<colony_path>/agent.json", <complete JSON config>)
 ```
 
 The agent.json must include ALL of these in one write:
@@ -516,7 +516,7 @@ validation, tests) and returns a consolidated result. If anything \
 fails: read the error, fix with read_file+write_file, re-validate. Up to 3x.
 
 When validation passes, immediately call \
-`load_built_agent("exports/{name}")` to load the agent into the \
+`load_built_agent("<agent_path>")` to load the agent into the \
 session. This switches to STAGING phase and shows the graph in the \
 visualizer. Do NOT wait for user input between validation and loading.
 """

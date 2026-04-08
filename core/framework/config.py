@@ -15,10 +15,44 @@ from typing import Any
 from framework.orchestrator.edge import DEFAULT_MAX_TOKENS
 
 # ---------------------------------------------------------------------------
+# Hive home directory structure
+# ---------------------------------------------------------------------------
+
+HIVE_HOME = Path.home() / ".hive"
+QUEENS_DIR = HIVE_HOME / "agents" / "queens"
+COLONIES_DIR = HIVE_HOME / "colonies"
+MEMORIES_DIR = HIVE_HOME / "memories"
+
+
+def queen_dir(queen_name: str = "default") -> Path:
+    """Return the storage directory for a named queen agent."""
+    return QUEENS_DIR / queen_name
+
+
+def colony_dir(colony_name: str) -> Path:
+    """Return the directory for a named colony."""
+    return COLONIES_DIR / colony_name
+
+
+def memory_dir(scope: str, name: str | None = None) -> Path:
+    """Return memory dir for a scope.
+
+    Examples::
+
+        memory_dir("global")                  -> ~/.hive/memories/global
+        memory_dir("colonies", "my_agent")    -> ~/.hive/memories/colonies/my_agent
+        memory_dir("agents/queens", "default")-> ~/.hive/memories/agents/queens/default
+        memory_dir("agents", "worker_name")   -> ~/.hive/memories/agents/worker_name
+    """
+    base = MEMORIES_DIR / scope
+    return base / name if name else base
+
+
+# ---------------------------------------------------------------------------
 # Low-level config file access
 # ---------------------------------------------------------------------------
 
-HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
+HIVE_CONFIG_FILE = HIVE_HOME / "configuration.json"
 
 # Hive LLM router endpoint (Anthropic-compatible).
 # litellm's Anthropic handler appends /v1/messages, so this is just the base host.

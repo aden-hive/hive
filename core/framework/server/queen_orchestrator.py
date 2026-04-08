@@ -345,7 +345,7 @@ async def create_queen(
     if set(available_tools) != set(declared_tools):
         missing = sorted(set(declared_tools) - registered_tool_names)
         if missing:
-            logger.warning("Queen: tools not available: %s", missing)
+            logger.debug("Queen: tools not yet available (registered on worker load): %s", missing)
         node_updates["tools"] = available_tools
 
     adjusted_node = _orig_node.model_copy(update=node_updates)

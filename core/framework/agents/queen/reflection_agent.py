@@ -2,7 +2,7 @@
 
 A lightweight side agent that runs after each queen LLM turn.  It inspects
 recent conversation messages and extracts durable user knowledge into
-individual memory files in ``~/.hive/queen/global_memory/``.
+individual memory files in ``~/.hive/memories/global/``.
 
 Two reflection types:
   - **Short reflection**: after conversational queen turns.  Distills

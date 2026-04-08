@@ -751,8 +751,11 @@ def _update_meta_json(session_manager, manager_session_id, updates: dict) -> Non
     srv_session = session_manager.get_session(manager_session_id)
     if not srv_session:
         return
+    from framework.config import QUEENS_DIR
+
     storage_sid = getattr(srv_session, "queen_resume_from", None) or srv_session.id
-    meta_path = Path.home() / ".hive" / "queen" / "session" / storage_sid / "meta.json"
+    queen_name = getattr(srv_session, "queen_name", "default")
+    meta_path = QUEENS_DIR / queen_name / "sessions" / storage_sid / "meta.json"
     try:
         existing = {}
         if meta_path.exists():
@@ -1587,7 +1590,9 @@ def register_queen_lifecycle_tools(
                     # Worker not loaded yet — resolve from draft name
                     draft_name = draft.get("agent_name", "")
                     if draft_name:
-                        candidate = Path("exports") / draft_name
+                        from framework.config import COLONIES_DIR
+
+                        candidate = COLONIES_DIR / draft_name
                         if candidate.is_dir():
                             save_path = candidate
                 _save_flowchart_file(
@@ -1902,7 +1907,9 @@ def register_queen_lifecycle_tools(
             or phase_state.draft_graph.get("agent_name", "").strip()
         )
         if _agent_name:
-            _agent_folder = Path("exports") / _agent_name
+            from framework.config import COLONIES_DIR
+
+            _agent_folder = COLONIES_DIR / _agent_name
             _agent_folder.mkdir(parents=True, exist_ok=True)
             _save_flowchart_file(_agent_folder, original_copy, fmap)
             phase_state.agent_path = str(_agent_folder)
@@ -1949,13 +1956,13 @@ def register_queen_lifecycle_tools(
                 "status": "confirmed",
                 "phase": "building",
                 "agent_name": _agent_name,
-                "agent_path": f"exports/{_agent_name}",
+                "agent_path": str(_agent_folder),
                 "planning_nodes_dissolved": dissolved_count,
                 "flowchart_map": fmap,
                 "message": (
                     "Design confirmed and directory created. "
                     + ("; ".join(dissolution_parts) + ". " if dissolution_parts else "")
-                    + f"Now write the complete agent config to exports/{_agent_name}/agent.json "
+                    + f"Now write the complete agent config to {_agent_folder}/agent.json "
                     "using write_file(). Include all system prompts, tools, edges, and goal."
                 ),
             }
@@ -3166,7 +3173,7 @@ def register_queen_lifecycle_tools(
             description=(
                 "Load a newly built agent as the worker in this session. "
                 "After building and validating an agent, call this with the agent's "
-                "path (e.g. 'exports/my_agent') to make it available immediately. "
+                "path (e.g. '~/.hive/colonies/my_agent') to make it available immediately. "
                 "The user will see the agent's graph and can interact with it."
             ),
             parameters={
@@ -3174,7 +3181,7 @@ def register_queen_lifecycle_tools(
                 "properties": {
                     "agent_path": {
                         "type": "string",
-                        "description": ("Path to the agent directory (e.g. 'exports/my_agent')"),
+                        "description": ("Path to the agent directory (e.g. '~/.hive/colonies/my_agent')"),
                     },
                 },
                 "required": ["agent_path"],

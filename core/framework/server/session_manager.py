@@ -19,9 +19,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from framework.config import QUEENS_DIR
 from framework.host.triggers import TriggerDefinition
 
 logger = logging.getLogger(__name__)
+
+
+def _queen_session_dir(session_id: str, queen_name: str = "default") -> Path:
+    """Return the on-disk directory for a queen session."""
+    return QUEENS_DIR / queen_name / "sessions" / session_id
 
 
 @dataclass
@@ -67,6 +73,10 @@ class Session:
     queen_resume_from: str | None = None
     # Queen session directory (set during _start_queen, used for shutdown reflection)
     queen_dir: Path | None = None
+    # Multi-queen support: which queen profile this session uses
+    queen_name: str = "default"
+    # Colony name: set when a worker is loaded from a colony
+    colony_name: str | None = None
 
 
 class SessionManager:
@@ -85,6 +95,14 @@ class SessionManager:
         # Strong references for fire-and-forget background tasks (e.g. shutdown
         # reflections) so they aren't garbage-collected before completion.
         self._background_tasks: set[asyncio.Task] = set()
+
+        # Run one-time v2 directory structure migration
+        from framework.storage.migrate_v2 import run_migration
+
+        try:
+            run_migration()
+        except Exception:
+            logger.warning("v2 migration failed (non-fatal)", exc_info=True)
 
     # ------------------------------------------------------------------
     # Session lifecycle
@@ -194,9 +212,7 @@ class SessionManager:
         # is incomplete and will fail to import).
         if queen_resume_from:
             _resume_phase = None
-            _meta_path = (
-                Path.home() / ".hive" / "queen" / "session" / queen_resume_from / "meta.json"
-            )
+            _meta_path = _queen_session_dir(queen_resume_from) / "meta.json"
             if _meta_path.exists():
                 try:
                     _meta = json.loads(_meta_path.read_text(encoding="utf-8"))
@@ -536,7 +552,7 @@ class SessionManager:
 
         # Update meta.json so cold-restore can discover this session by agent_path
         storage_session_id = session.queen_resume_from or session.id
-        meta_path = Path.home() / ".hive" / "queen" / "session" / storage_session_id / "meta.json"
+        meta_path = _queen_session_dir(storage_session_id, session.queen_name) / "meta.json"
         try:
             _agent_name = (
                 session.worker_info.name
@@ -755,13 +771,11 @@ class SessionManager:
             session.queen_executor,
         )
 
-        hive_home = Path.home() / ".hive"
-
         # Determine which session directory to use for queen storage.
         # When queen_resume_from is set we write to the ORIGINAL session's
         # directory so that all messages accumulate in one place.
         storage_session_id = session.queen_resume_from or session.id
-        queen_dir = hive_home / "queen" / "session" / storage_session_id
+        queen_dir = _queen_session_dir(storage_session_id, session.queen_name)
         queen_dir.mkdir(parents=True, exist_ok=True)
         session.queen_dir = queen_dir
 
@@ -1076,10 +1090,10 @@ class SessionManager:
         """Return disk metadata for a session that is no longer live in memory.
 
         Checks whether queen conversation files exist at
-        ~/.hive/queen/session/{session_id}/conversations/.  Returns None when
+        ~/.hive/agents/queens/{name}/sessions/{session_id}/conversations/.  Returns None when
         no data is found so callers can fall through to a 404.
         """
-        queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
+        queen_dir = _queen_session_dir(session_id)
         convs_dir = queen_dir / "conversations"
         if not convs_dir.exists():
             return None
@@ -1134,7 +1148,7 @@ class SessionManager:
     @staticmethod
     def list_cold_sessions() -> list[dict]:
         """Return metadata for every queen session directory on disk, newest first."""
-        queen_sessions_dir = Path.home() / ".hive" / "queen" / "session"
+        queen_sessions_dir = QUEENS_DIR / "default" / "sessions"
         if not queen_sessions_dir.exists():
             return []
 

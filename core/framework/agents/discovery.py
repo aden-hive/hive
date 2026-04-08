@@ -27,8 +27,8 @@ def _get_last_active(agent_path: Path) -> str | None:
     """Return the most recent updated_at timestamp across all sessions.
 
     Checks both worker sessions (``~/.hive/agents/{name}/sessions/``) and
-    queen sessions (``~/.hive/queen/session/``) whose ``meta.json`` references
-    the same *agent_path*.
+    queen sessions (``~/.hive/agents/queens/default/sessions/``) whose
+    ``meta.json`` references the same *agent_path*.
     """
     from datetime import datetime
 
@@ -53,7 +53,9 @@ def _get_last_active(agent_path: Path) -> str | None:
                 continue
 
     # 2. Queen sessions
-    queen_sessions_dir = Path.home() / ".hive" / "queen" / "session"
+    from framework.config import QUEENS_DIR
+
+    queen_sessions_dir = QUEENS_DIR / "default" / "sessions"
     if queen_sessions_dir.exists():
         resolved = agent_path.resolve()
         for d in queen_sessions_dir.iterdir():
@@ -163,12 +165,19 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
         _is_valid_agent_dir,
     )
 
+    from framework.config import COLONIES_DIR
+
     groups: dict[str, list[AgentEntry]] = {}
     sources = [
-        ("Your Agents", Path("exports")),
+        ("Your Agents", COLONIES_DIR),
+        ("Your Agents", Path("exports")),  # compat fallback
         ("Framework", _get_framework_agents_dir()),
         ("Examples", Path("examples/templates")),
     ]
+
+    # Track seen agent directory names to avoid duplicates when the same
+    # agent exists in both colonies/ and exports/ (colonies takes priority).
+    _seen_agent_names: set[str] = set()
 
     for category, base_dir in sources:
         if not base_dir.exists():
@@ -177,6 +186,9 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
         for path in sorted(base_dir.iterdir(), key=lambda p: p.name):
             if not _is_valid_agent_dir(path):
                 continue
+            if path.name in _seen_agent_names:
+                continue
+            _seen_agent_names.add(path.name)
 
             name, desc = _extract_python_agent_metadata(path)
             config_fallback_name = path.name.replace("_", " ").title()
@@ -215,6 +227,8 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                 )
             )
         if entries:
-            groups[category] = entries
+            existing = groups.get(category, [])
+            existing.extend(entries)
+            groups[category] = existing
 
     return groups
