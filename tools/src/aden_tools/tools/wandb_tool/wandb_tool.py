@@ -293,15 +293,15 @@ def register_tools(
         Returns:
             Dict containing sampled metric history per key.
         """
-        if not run_id:
-            return {"error": "run_id is required"}
-        if not metric_keys:
-            return {"error": "metric_keys is required (comma-separated, e.g. 'loss,accuracy')"}
-
         creds = _get_creds(credentials)
         if isinstance(creds, dict):
             return creds
         (api_key,) = creds
+
+        if not run_id:
+            return {"error": "run_id is required"}
+        if not metric_keys:
+            return {"error": "metric_keys is required (comma-separated, e.g. 'loss,accuracy')"}
 
         keys = [k.strip() for k in metric_keys.split(",") if k.strip()]
         if not keys:

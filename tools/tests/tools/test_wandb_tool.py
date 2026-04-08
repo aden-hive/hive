@@ -218,13 +218,15 @@ class TestWandbTool:
 
     def test_wandb_get_run_metrics_missing_id(self, tool_fns: dict[str, Any]) -> None:
         """wandb_get_run_metrics with empty run_id returns error."""
-        result = tool_fns["wandb_get_run_metrics"](entity="e", project="p", run_id="")
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["wandb_get_run_metrics"](entity="e", project="p", run_id="")
         assert "error" in result
         assert result["error"] == "run_id is required"
 
     def test_wandb_get_run_metrics_missing_keys(self, tool_fns: dict[str, Any]) -> None:
         """wandb_get_run_metrics with no metric_keys returns error."""
-        result = tool_fns["wandb_get_run_metrics"](entity="e", project="p", run_id="r1")
+        with patch.dict("os.environ", ENV):
+            result = tool_fns["wandb_get_run_metrics"](entity="e", project="p", run_id="r1")
         assert "error" in result
         assert "metric_keys is required" in result["error"]
 
