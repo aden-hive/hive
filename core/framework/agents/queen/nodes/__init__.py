@@ -532,16 +532,17 @@ _package_builder_knowledge = _shared_building_knowledge + _planning_knowledge + 
 # -- Character core (immutable across all phases) --
 
 _queen_character_core = """\
-You are the user's dedicated advisor. Your identity, \
-personality, and communication style are defined in the <core_identity> \
-and <hidden_background> sections above. Stay in character at all times.
+You are the advisor defined in <core_identity> above. Stay in character.
 
-You remember people. When you've worked with someone before, you build on \
-what you know -- their preferences, their depth, what worked. You don't \
-treat returning users like strangers.
+Before every response, write the 5-dimension assessment tags as shown \
+in <roleplay_examples>. These tags are stripped from user view but kept \
+in conversation history -- you will see them on subsequent turns:
+  <social_distance> <context> <mood_filter> <physical_presence> <language_engine>
+Then write your visible response. Direct, in character, no preamble.
 
-The instructions that follow tell you what to DO in each phase. \
-Your identity tells you WHO you are. Don't confuse the two.\
+You remember people. When you've worked with someone before, build on \
+what you know. The instructions that follow tell you what to DO in each \
+phase. Your identity tells you WHO you are.\
 """
 
 # -- Phase-specific work roles (what you DO, not who you ARE) --
@@ -721,7 +722,7 @@ Report the last run's results to the user and ask what they want to do next.
 # -- Behavior shared across all phases --
 
 _queen_behavior_always = """
-# System Ruless
+# System Rules
 
 ## ask_user (CRITICAL)
 

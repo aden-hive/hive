@@ -98,6 +98,61 @@ from framework.tracker.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
 
+# Tags whose content is internal reasoning and must be stripped from
+# the user-visible stream.  Covers <think> and the 5-pillar character
+# assessment tags.
+_INTERNAL_TAGS = frozenset({
+    "think",
+    "social_distance",
+    "context",
+    "mood_filter",
+    "physical_presence",
+    "language_engine",
+})
+_INTERNAL_OPEN_RE = re.compile(r"<(" + "|".join(_INTERNAL_TAGS) + r")>")
+_INTERNAL_CLOSE_RE = re.compile(r"</(" + "|".join(_INTERNAL_TAGS) + r")>\s*")
+
+
+def _strip_internal_tags(content: str, snapshot: str) -> str:
+    """Strip internal reasoning tags from a streaming text chunk.
+
+    Uses the *snapshot* (full accumulated text) to detect whether we
+    were inside an internal block BEFORE this chunk arrived, and
+    filters *content* accordingly.
+    """
+    # Fast path: no angle brackets anywhere
+    if "<" not in snapshot:
+        return content
+
+    # Check state using the snapshot BEFORE this content was appended.
+    prior = snapshot[: len(snapshot) - len(content)] if len(snapshot) > len(content) else ""
+    _inside = False
+    for m in _INTERNAL_OPEN_RE.finditer(prior):
+        tag = m.group(1)
+        if prior.find(f"</{tag}>", m.end()) == -1:
+            _inside = True
+
+    if _inside:
+        # We were inside an internal block. Check if this chunk closes it.
+        close_m = _INTERNAL_CLOSE_RE.search(content)
+        if close_m:
+            # Emit only text after the closing tag
+            return content[close_m.end():]
+        return ""  # still inside, suppress
+
+    # We're outside. Strip any complete <tag>...</tag> pairs in this chunk,
+    # and suppress from an opening tag to end-of-chunk if unclosed.
+    result = content
+    for tag in _INTERNAL_TAGS:
+        result = re.sub(
+            rf"<{tag}>.*?</{tag}>\s*", "", result, flags=re.DOTALL
+        )
+    # If an internal tag opens but doesn't close in this chunk, truncate
+    open_m = _INTERNAL_OPEN_RE.search(result)
+    if open_m:
+        result = result[:open_m.start()]
+    return result
+
 
 async def _describe_images_as_text(image_content: list[dict[str, Any]]) -> str | None:
     """Describe images using the best available vision model."""
@@ -2161,17 +2216,13 @@ class AgentLoop(NodeProtocol):
                 ):
                     if isinstance(event, TextDeltaEvent):
                         accumulated_text = event.snapshot
-                        # Filter <think>...</think> blocks from client output.
-                        # Content inside think tags is internal reasoning -- only
-                        # the text after </think> is shown to the user.
-                        _content = event.content
-                        if "<think>" in event.snapshot and "</think>" not in event.snapshot:
-                            _content = ""  # still inside think block
-                        elif "</think>" in _content:
-                            # End of think block -- emit only text after the tag
-                            _content = _content.split("</think>", 1)[-1]
-                        elif "<think>" in _content:
-                            _content = ""  # opening tag in this chunk
+                        # Filter internal reasoning tags from client output.
+                        # Uses the snapshot (full text so far) to detect
+                        # whether we're inside an internal block, and only
+                        # emits text that falls outside all such blocks.
+                        _content = _strip_internal_tags(
+                            event.content, event.snapshot
+                        )
                         if _content:
                             await self._publish_text_delta(
                                 stream_id,
