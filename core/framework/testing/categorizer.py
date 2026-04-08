@@ -159,6 +159,28 @@ class ErrorCategorizer:
         confidence = edge_matches / total_matches if total_matches > 0 else 0.5
         return ErrorCategory.EDGE_CASE, min(0.9, 0.5 + confidence * 0.4)
 
+    def categorize_text(self, text: str) -> ErrorCategory:
+        """
+        Categorize a raw error / failure-summary string.
+
+        Used by OutcomeAggregator to tag a FailureReport with an
+        ErrorCategory without needing a TestResult. Same priority order as
+        ``categorize``: logic > implementation > edge case.
+        """
+        if not text:
+            return ErrorCategory.IMPLEMENTATION_ERROR
+
+        for pattern in self._logic_patterns:
+            if pattern.search(text):
+                return ErrorCategory.LOGIC_ERROR
+        for pattern in self._impl_patterns:
+            if pattern.search(text):
+                return ErrorCategory.IMPLEMENTATION_ERROR
+        for pattern in self._edge_patterns:
+            if pattern.search(text):
+                return ErrorCategory.EDGE_CASE
+        return ErrorCategory.IMPLEMENTATION_ERROR
+
     def _get_error_text(self, result: TestResult) -> str:
         """Extract all error text from a result for analysis."""
         parts = []

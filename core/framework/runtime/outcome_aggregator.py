@@ -9,13 +9,21 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from framework.schemas.decision import Decision, Outcome
+from framework.schemas.failure_report import (
+    FailureReport,
+    UnmetCriterion,
+    ViolatedConstraint,
+)
 
 if TYPE_CHECKING:
-    from framework.graph.goal import Goal
+    from framework.graph.goal import Goal, SuccessCriterion
+    from framework.llm.provider import LLMProvider
     from framework.runtime.event_bus import EventBus
+    from framework.runtime.notifications import DeveloperNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +90,9 @@ class OutcomeAggregator:
         self,
         goal: "Goal",
         event_bus: "EventBus | None" = None,
+        llm_provider: "LLMProvider | None" = None,
+        storage_path: "str | Path | None" = None,
+        notifier: "DeveloperNotifier | None" = None,
     ):
         """
         Initialize outcome aggregator.
@@ -89,9 +100,14 @@ class OutcomeAggregator:
         Args:
             goal: The goal to evaluate progress against
             event_bus: Optional event bus for publishing progress events
+            llm_provider: Optional LLM provider for llm_judge criteria
+            storage_path: Optional path for persisting failure reports
         """
         self.goal = goal
         self._event_bus = event_bus
+        self._llm_provider = llm_provider
+        self._storage_path = Path(storage_path) if storage_path else None
+        self._notifier = notifier
 
         # Decision tracking
         self._decisions: list[DecisionRecord] = []
@@ -109,6 +125,9 @@ class OutcomeAggregator:
         self._total_decisions = 0
         self._successful_outcomes = 0
         self._failed_outcomes = 0
+
+        # Last failure report (populated when goal fails)
+        self._last_failure_report: FailureReport | None = None
 
     def _initialize_criteria(self) -> None:
         """Initialize criterion status from goal."""
@@ -220,6 +239,314 @@ class OutcomeAggregator:
                 )
             )
 
+    # === CRITERION EVALUATION ===
+
+    async def evaluate_criterion(
+        self,
+        criterion: "SuccessCriterion",
+        execution_output: Any,
+    ) -> bool:
+        """Evaluate a single criterion against an execution output.
+
+        Dispatches based on criterion.metric:
+        - 'output_contains': checks target substring in str(output)
+        - 'output_equals': checks str(output) == str(target)
+        - 'llm_judge': uses LLM to evaluate (requires llm_provider)
+        - 'custom': evaluates target as a safe expression with output in scope
+
+        Args:
+            criterion: The success criterion to evaluate.
+            execution_output: The output from an execution run.
+
+        Returns:
+            True if the criterion is met.
+        """
+        metric = criterion.metric
+        target = criterion.target
+
+        try:
+            if metric == "output_contains":
+                return self._eval_output_contains(target, execution_output)
+            elif metric == "output_equals":
+                return self._eval_output_equals(target, execution_output)
+            elif metric == "llm_judge":
+                return await self._eval_llm_judge(criterion, execution_output)
+            elif metric == "custom":
+                return self._eval_custom(target, execution_output)
+            else:
+                # Unknown metric — fall back to success_rate heuristic
+                logger.debug(
+                    f"Unknown metric '{metric}' for criterion {criterion.id}, "
+                    "skipping output-based evaluation"
+                )
+                return False
+        except Exception as e:
+            logger.warning(f"Error evaluating criterion {criterion.id}: {e}")
+            return False
+
+    async def evaluate_output(self, execution_output: Any) -> bool:
+        """Evaluate all goal criteria against an execution output.
+
+        Sets criterion.met on each SuccessCriterion and returns
+        goal.is_success(). When the goal is not achieved, automatically
+        generates a FailureReport and persists it to disk (if storage_path
+        is configured).
+
+        Args:
+            execution_output: The output from an execution run.
+
+        Returns:
+            True if the goal is achieved (via goal.is_success()).
+        """
+        for criterion in self.goal.success_criteria:
+            met = await self.evaluate_criterion(criterion, execution_output)
+            criterion.met = met
+
+            status = self._criterion_status.get(criterion.id)
+            if status:
+                status.met = met
+                status.progress = 1.0 if met else status.progress
+                if met:
+                    status.evidence.append(
+                        f"criterion met via {criterion.metric} evaluation"
+                    )
+
+        success = self.goal.is_success()
+        if not success:
+            report = self.generate_failure_report()
+            # Append to the goal's failure history with a monotonic version
+            # so callers (e.g. evolution) can iterate the full history.
+            report.version = len(self.goal.failure_history) + 1
+            self.goal.failure_history.append(report)
+            self._last_failure_report = report
+            self.save_failure_report(report)
+
+            # Phase 4: developer notification on failure (best-effort)
+            if self._notifier is not None:
+                try:
+                    self._notifier.notify_failure(report)
+                except Exception as e:
+                    logger.warning(f"Notifier.notify_failure failed: {e}")
+
+        return success
+
+    # === FAILURE REPORTING ===
+
+    @property
+    def last_failure_report(self) -> FailureReport | None:
+        """The most recent failure report, or None if the goal succeeded."""
+        return self._last_failure_report
+
+    def generate_failure_report(self) -> FailureReport:
+        """Build a FailureReport from current aggregator state.
+
+        Synthesizes unmet criteria, violated constraints, relevant node IDs
+        from the execution trace, and a human-readable summary.
+        """
+        # Collect unmet criteria
+        unmet = [
+            UnmetCriterion(
+                criterion_id=c.id,
+                description=c.description,
+                metric=c.metric,
+                target=c.target,
+                weight=c.weight,
+            )
+            for c in self.goal.success_criteria
+            if not c.met
+        ]
+
+        # Collect violated constraints
+        violated = [
+            ViolatedConstraint(
+                constraint_id=v.constraint_id,
+                description=v.description,
+                constraint_type=self._constraint_type_for(v.constraint_id),
+                violation_details=v.violation_details or "",
+                stream_id=v.stream_id,
+                execution_id=v.execution_id,
+            )
+            for v in self._constraint_violations
+            if v.violated
+        ]
+
+        # Collect node IDs from decisions whose outcomes failed
+        node_ids: list[str] = []
+        seen: set[str] = set()
+        for rec in self._decisions:
+            nid = rec.decision.node_id
+            if nid in seen:
+                continue
+            # Include nodes with failed outcomes, or nodes related to
+            # unmet criteria (by keyword overlap)
+            if rec.outcome and not rec.outcome.success:
+                node_ids.append(nid)
+                seen.add(nid)
+            elif any(
+                self._is_related_to_criterion(rec.decision, c)
+                for c in self.goal.success_criteria
+                if not c.met
+            ):
+                node_ids.append(nid)
+                seen.add(nid)
+
+        # Derive edge IDs from consecutive decisions in the trace.
+        # An edge "src->dst" is included when either endpoint is a node
+        # already flagged as failure-relevant, so evolution can target the
+        # transitions that led into/out of failing nodes.
+        edge_ids: list[str] = []
+        edge_seen: set[str] = set()
+        flagged = set(node_ids)
+        for prev, curr in zip(self._decisions, self._decisions[1:]):
+            src = prev.decision.node_id
+            dst = curr.decision.node_id
+            if src == dst:
+                continue
+            if src not in flagged and dst not in flagged:
+                continue
+            edge_id = f"{src}->{dst}"
+            if edge_id in edge_seen:
+                continue
+            edge_ids.append(edge_id)
+            edge_seen.add(edge_id)
+
+        summary = self._build_failure_summary(unmet, violated, node_ids)
+
+        # Tag the report with an ErrorCategory derived from the summary +
+        # any constraint violation details. Best-effort: failures here are
+        # non-fatal because the categorizer is only an evolution hint.
+        error_category: str | None = None
+        try:
+            from framework.testing.categorizer import ErrorCategorizer
+
+            cat_text_parts = [summary] + [v.violation_details for v in violated]
+            cat_text = " ".join(p for p in cat_text_parts if p)
+            error_category = str(ErrorCategorizer().categorize_text(cat_text))
+        except Exception as e:
+            logger.debug(f"Skipping error categorization: {e}")
+
+        return FailureReport(
+            goal_id=self.goal.id,
+            goal_name=self.goal.name,
+            unmet_criteria=unmet,
+            violated_constraints=violated,
+            node_ids=node_ids,
+            edge_ids=edge_ids,
+            error_category=error_category,
+            summary=summary,
+            total_decisions=self._total_decisions,
+            successful_outcomes=self._successful_outcomes,
+            failed_outcomes=self._failed_outcomes,
+        )
+
+    def save_failure_report(self, report: FailureReport) -> Path | None:
+        """Persist a failure report to disk.
+
+        Writes to ``{storage_path}/failure_reports/{goal_id}_{timestamp}.json``.
+        Returns the path written, or None if no storage_path is configured.
+        """
+        if self._storage_path is None:
+            return None
+
+        reports_dir = self._storage_path / "failure_reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = report.timestamp.strftime("%Y%m%d_%H%M%S")
+        filename = f"{report.goal_id}_{timestamp}.json"
+        report_path = reports_dir / filename
+
+        try:
+            from framework.utils.io import atomic_write
+
+            with atomic_write(report_path) as f:
+                f.write(report.model_dump_json(indent=2))
+            logger.info(f"Saved failure report to {report_path}")
+            return report_path
+        except Exception as e:
+            logger.error(f"Failed to save failure report: {e}")
+            return None
+
+    def _constraint_type_for(self, constraint_id: str) -> str:
+        """Look up constraint_type from the goal's constraint list."""
+        for c in self.goal.constraints:
+            if c.id == constraint_id:
+                return c.constraint_type
+        return "unknown"
+
+    @staticmethod
+    def _build_failure_summary(
+        unmet: list[UnmetCriterion],
+        violated: list[ViolatedConstraint],
+        node_ids: list[str],
+    ) -> str:
+        parts: list[str] = []
+
+        if unmet:
+            criteria_desc = "; ".join(c.description for c in unmet)
+            parts.append(f"{len(unmet)} unmet criteria: {criteria_desc}")
+
+        if violated:
+            hard = [v for v in violated if v.constraint_type == "hard"]
+            soft = [v for v in violated if v.constraint_type != "hard"]
+            if hard:
+                parts.append(
+                    f"{len(hard)} hard constraint violation(s): "
+                    + "; ".join(v.violation_details for v in hard)
+                )
+            if soft:
+                parts.append(f"{len(soft)} soft constraint violation(s)")
+
+        if node_ids:
+            parts.append(f"Relevant nodes: {', '.join(node_ids)}")
+
+        if not parts:
+            return "Goal not achieved (no specific failure details available)."
+        return "Goal not achieved. " + ". ".join(parts) + "."
+
+    # --- metric dispatch helpers ---
+
+    @staticmethod
+    def _eval_output_contains(target: Any, output: Any) -> bool:
+        output_str = str(output)
+        target_str = str(target)
+        return target_str in output_str
+
+    @staticmethod
+    def _eval_output_equals(target: Any, output: Any) -> bool:
+        # Try exact match first, then string comparison
+        if output == target:
+            return True
+        return str(output).strip() == str(target).strip()
+
+    async def _eval_llm_judge(
+        self,
+        criterion: "SuccessCriterion",
+        output: Any,
+    ) -> bool:
+        if self._llm_provider is None:
+            logger.warning(
+                f"llm_judge requested for criterion {criterion.id} "
+                "but no LLM provider configured — skipping"
+            )
+            return False
+
+        from framework.graph.judge import judge_criterion
+
+        return await judge_criterion(self._llm_provider, criterion, output)
+
+    @staticmethod
+    def _eval_custom(target: Any, output: Any) -> bool:
+        """Evaluate a custom expression using safe_eval.
+
+        The target is treated as a Python expression string.
+        The variable 'output' is available in the expression scope.
+        """
+        from framework.graph.safe_eval import safe_eval
+
+        expr = str(target)
+        result = safe_eval(expr, {"output": output})
+        return bool(result)
+
     # === GOAL EVALUATION ===
 
     async def evaluate_goal_progress(self) -> dict[str, Any]:
@@ -313,29 +640,39 @@ class OutcomeAggregator:
     async def _evaluate_criterion(self, criterion: Any) -> CriterionStatus:
         """
         Evaluate a single success criterion.
-        This is a heuristic evaluation based on decision outcomes.
-        More sophisticated evaluation can be added per criterion type.
+
+        For metric-based criteria (output_contains/equals/llm_judge/custom),
+        this returns the cached criterion.met set by ``evaluate_output``. The
+        legacy keyword-heuristic path was removed in favor of
+        ``evaluate_criterion`` which dispatches on the actual metric type
+        (issue #3900, Phase 1).
+
+        For success_rate criteria, decision outcomes are still used — but
+        without the brittle description-keyword filter; we instead consider
+        all decisions whose ``active_constraints`` reference this criterion.
         """
         status = CriterionStatus(
             criterion_id=criterion.id,
             description=criterion.description,
-            met=False,
-            progress=0.0,
+            met=bool(getattr(criterion, "met", False)),
+            progress=1.0 if getattr(criterion, "met", False) else 0.0,
             evidence=[],
         )
 
-        # Guard: only apply this heuristic to success-rate criteria
         criterion_type = getattr(criterion, "type", "success_rate")
         if criterion_type != "success_rate":
+            # Metric-based criterion: trust the value set by evaluate_output.
             return status
 
-        # Get relevant decisions (those mentioning this criterion or related intents)
-        relevant_decisions = [
+        # Success-rate criterion: aggregate from decisions whose
+        # active_constraints reference this criterion id. Falls back to all
+        # decisions if no constraint-tagging is in use.
+        tagged_decisions = [
             d
             for d in self._decisions
             if criterion.id in str(d.decision.active_constraints)
-            or self._is_related_to_criterion(d.decision, criterion)
         ]
+        relevant_decisions = tagged_decisions or list(self._decisions)
 
         if not relevant_decisions:
             # No evidence yet
@@ -455,5 +792,6 @@ class OutcomeAggregator:
         self._total_decisions = 0
         self._successful_outcomes = 0
         self._failed_outcomes = 0
+        self._last_failure_report = None
         self._initialize_criteria()
         logger.info("OutcomeAggregator reset")

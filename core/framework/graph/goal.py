@@ -17,6 +17,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from framework.schemas.failure_report import FailureReport
+
 
 class GoalStatus(StrEnum):
     """Lifecycle status of a goal."""
@@ -150,6 +152,11 @@ class Goal(BaseModel):
     version: str = "1.0.0"
     parent_version: str | None = None
     evolution_reason: str | None = None
+
+    # Failure history (Phase 2): each entry is a versioned FailureReport
+    # appended by OutcomeAggregator.evaluate_output() when the goal is not
+    # achieved. The newest report is failure_history[-1].
+    failure_history: list[FailureReport] = Field(default_factory=list)
 
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.now)

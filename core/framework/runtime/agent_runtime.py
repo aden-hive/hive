@@ -231,7 +231,9 @@ class AgentRuntime:
         # Initialize shared components
         self._state_manager = SharedBufferManager()
         self._event_bus = event_bus or EventBus(max_history=self._config.max_history)
-        self._outcome_aggregator = OutcomeAggregator(goal, self._event_bus)
+        self._outcome_aggregator = OutcomeAggregator(
+            goal, self._event_bus, llm_provider=llm, storage_path=storage_path_obj,
+        )
 
         # LLM and tools
         self._llm = llm

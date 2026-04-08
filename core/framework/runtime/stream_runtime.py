@@ -172,6 +172,29 @@ class StreamRuntime:
         run.output_data = output_data or {}
         run.complete(status, narrative)
 
+        # Evaluate goal criteria against the execution output.
+        # end_run is sync, so we schedule evaluation as a task — but attach a
+        # done-callback so exceptions surface in logs instead of being silently
+        # swallowed by the event loop.
+        if self._outcome_aggregator and output_data:
+            eval_task = asyncio.create_task(
+                self._outcome_aggregator.evaluate_output(output_data)
+            )
+
+            def _log_eval_exception(task: "asyncio.Task[Any]") -> None:
+                try:
+                    exc = task.exception()
+                except asyncio.CancelledError:
+                    return
+                if exc is not None:
+                    logger.error(
+                        "OutcomeAggregator.evaluate_output failed for "
+                        f"execution {execution_id}: {exc}",
+                        exc_info=exc,
+                    )
+
+            eval_task.add_done_callback(_log_eval_exception)
+
         # Save to storage asynchronously
         asyncio.create_task(self._save_run(execution_id, run))
 

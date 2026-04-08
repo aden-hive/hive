@@ -388,6 +388,442 @@ class TestOutcomeAggregator:
         assert aggregator._constraint_violations[0].constraint_id == "c-1"
 
 
+class TestEvaluateCriterion:
+    """Tests for OutcomeAggregator.evaluate_criterion dispatch."""
+
+    def _make_goal(self, criteria):
+        return Goal(
+            id="eval-goal",
+            name="Eval Goal",
+            description="Test evaluation",
+            success_criteria=criteria,
+        )
+
+    @pytest.mark.asyncio
+    async def test_output_contains_met(self):
+        criterion = SuccessCriterion(
+            id="c1",
+            description="Output contains greeting",
+            metric="output_contains",
+            target="hello",
+        )
+        goal = self._make_goal([criterion])
+        agg = OutcomeAggregator(goal)
+        assert await agg.evaluate_criterion(criterion, "say hello world") is True
+
+    @pytest.mark.asyncio
+    async def test_output_contains_not_met(self):
+        criterion = SuccessCriterion(
+            id="c1",
+            description="Output contains greeting",
+            metric="output_contains",
+            target="hello",
+        )
+        goal = self._make_goal([criterion])
+        agg = OutcomeAggregator(goal)
+        assert await agg.evaluate_criterion(criterion, "goodbye") is False
+
+    @pytest.mark.asyncio
+    async def test_output_equals_exact(self):
+        criterion = SuccessCriterion(
+            id="c1",
+            description="Output equals 42",
+            metric="output_equals",
+            target=42,
+        )
+        goal = self._make_goal([criterion])
+        agg = OutcomeAggregator(goal)
+        assert await agg.evaluate_criterion(criterion, 42) is True
+
+    @pytest.mark.asyncio
+    async def test_output_equals_string_strip(self):
+        criterion = SuccessCriterion(
+            id="c1",
+            description="Output equals result",
+            metric="output_equals",
+            target="result",
+        )
+        goal = self._make_goal([criterion])
+        agg = OutcomeAggregator(goal)
+        assert await agg.evaluate_criterion(criterion, "  result  ") is True
+
+    @pytest.mark.asyncio
+    async def test_output_equals_not_met(self):
+        criterion = SuccessCriterion(
+            id="c1",
+            description="Output equals result",
+            metric="output_equals",
+            target="expected",
+        )
+        goal = self._make_goal([criterion])
+        agg = OutcomeAggregator(goal)
+        assert await agg.evaluate_criterion(criterion, "actual") is False
+
+    @pytest.mark.asyncio
+    async def test_custom_expression(self):
+        criterion = SuccessCriterion(
+            id="c1",
+            description="Output length > 5",
+            metric="custom",
+            target="len(str(output)) > 5",
+        )
+        goal = self._make_goal([criterion])
+        agg = OutcomeAggregator(goal)
+        assert await agg.evaluate_criterion(criterion, "long enough") is True
+        assert await agg.evaluate_criterion(criterion, "hi") is False
+
+    @pytest.mark.asyncio
+    async def test_custom_dict_access(self):
+        criterion = SuccessCriterion(
+            id="c1",
+            description="Output has status ok",
+            metric="custom",
+            target='output.get("status") == "ok"',
+        )
+        goal = self._make_goal([criterion])
+        agg = OutcomeAggregator(goal)
+        assert await agg.evaluate_criterion(criterion, {"status": "ok"}) is True
+        assert await agg.evaluate_criterion(criterion, {"status": "error"}) is False
+
+    @pytest.mark.asyncio
+    async def test_llm_judge_no_provider_returns_false(self):
+        criterion = SuccessCriterion(
+            id="c1",
+            description="Semantically correct",
+            metric="llm_judge",
+            target="Answer is factually accurate",
+        )
+        goal = self._make_goal([criterion])
+        agg = OutcomeAggregator(goal)  # no llm_provider
+        assert await agg.evaluate_criterion(criterion, "some output") is False
+
+    @pytest.mark.asyncio
+    async def test_unknown_metric_returns_false(self):
+        criterion = SuccessCriterion(
+            id="c1",
+            description="Some criterion",
+            metric="unknown_metric_xyz",
+            target="whatever",
+        )
+        goal = self._make_goal([criterion])
+        agg = OutcomeAggregator(goal)
+        assert await agg.evaluate_criterion(criterion, "output") is False
+
+
+class TestEvaluateOutput:
+    """Tests for OutcomeAggregator.evaluate_output and goal.is_success wiring."""
+
+    @pytest.mark.asyncio
+    async def test_all_criteria_met(self):
+        criteria = [
+            SuccessCriterion(
+                id="c1",
+                description="Contains hello",
+                metric="output_contains",
+                target="hello",
+                weight=1.0,
+            ),
+            SuccessCriterion(
+                id="c2",
+                description="Contains world",
+                metric="output_contains",
+                target="world",
+                weight=1.0,
+            ),
+        ]
+        goal = Goal(
+            id="g1", name="G", description="test", success_criteria=criteria
+        )
+        agg = OutcomeAggregator(goal)
+
+        result = await agg.evaluate_output("hello world")
+
+        assert result is True
+        assert goal.is_success() is True
+        assert criteria[0].met is True
+        assert criteria[1].met is True
+
+    @pytest.mark.asyncio
+    async def test_partial_criteria_met_below_threshold(self):
+        criteria = [
+            SuccessCriterion(
+                id="c1",
+                description="Contains hello",
+                metric="output_contains",
+                target="hello",
+                weight=1.0,
+            ),
+            SuccessCriterion(
+                id="c2",
+                description="Contains xyz",
+                metric="output_contains",
+                target="xyz",
+                weight=1.0,
+            ),
+        ]
+        goal = Goal(
+            id="g1", name="G", description="test", success_criteria=criteria
+        )
+        agg = OutcomeAggregator(goal)
+
+        result = await agg.evaluate_output("hello world")
+
+        # 50% met, below 90% threshold
+        assert result is False
+        assert goal.is_success() is False
+        assert criteria[0].met is True
+        assert criteria[1].met is False
+
+    @pytest.mark.asyncio
+    async def test_criterion_status_updated(self):
+        criteria = [
+            SuccessCriterion(
+                id="c1",
+                description="Equals 42",
+                metric="output_equals",
+                target=42,
+                weight=1.0,
+            ),
+        ]
+        goal = Goal(
+            id="g1", name="G", description="test", success_criteria=criteria
+        )
+        agg = OutcomeAggregator(goal)
+
+        await agg.evaluate_output(42)
+
+        status = agg.get_criterion_status("c1")
+        assert status is not None
+        assert status.met is True
+        assert status.progress == 1.0
+        assert len(status.evidence) > 0
+
+
+class TestFailureReport:
+    """Tests for FailureReport generation and persistence."""
+
+    def _make_goal(self, criteria, constraints=None):
+        return Goal(
+            id="fr-goal",
+            name="Failure Report Goal",
+            description="Test failure reporting",
+            success_criteria=criteria,
+            constraints=constraints or [],
+        )
+
+    @pytest.mark.asyncio
+    async def test_failure_report_generated_on_failure(self):
+        """evaluate_output sets last_failure_report when goal fails."""
+        criteria = [
+            SuccessCriterion(
+                id="c1",
+                description="Contains magic",
+                metric="output_contains",
+                target="magic",
+                weight=1.0,
+            ),
+        ]
+        goal = self._make_goal(criteria)
+        agg = OutcomeAggregator(goal)
+
+        result = await agg.evaluate_output("no match here")
+
+        assert result is False
+        report = agg.last_failure_report
+        assert report is not None
+        assert report.goal_id == "fr-goal"
+        assert len(report.unmet_criteria) == 1
+        assert report.unmet_criteria[0].criterion_id == "c1"
+        assert "1 unmet criteria" in report.summary
+
+    @pytest.mark.asyncio
+    async def test_no_failure_report_on_success(self):
+        """evaluate_output does not set last_failure_report on success."""
+        criteria = [
+            SuccessCriterion(
+                id="c1",
+                description="Contains hello",
+                metric="output_contains",
+                target="hello",
+                weight=1.0,
+            ),
+        ]
+        goal = self._make_goal(criteria)
+        agg = OutcomeAggregator(goal)
+
+        result = await agg.evaluate_output("hello world")
+
+        assert result is True
+        assert agg.last_failure_report is None
+
+    @pytest.mark.asyncio
+    async def test_failure_report_includes_constraint_violations(self):
+        """Constraint violations appear in the failure report."""
+        criteria = [
+            SuccessCriterion(
+                id="c1",
+                description="Always fails",
+                metric="output_equals",
+                target="impossible",
+                weight=1.0,
+            ),
+        ]
+        constraints = [
+            Constraint(
+                id="rate-limit",
+                description="Must not exceed rate limits",
+                constraint_type="hard",
+            ),
+        ]
+        goal = self._make_goal(criteria, constraints)
+        agg = OutcomeAggregator(goal)
+
+        agg.record_constraint_violation(
+            constraint_id="rate-limit",
+            description="Must not exceed rate limits",
+            violation_details="100 requests/min exceeded",
+            stream_id="s1",
+            execution_id="e1",
+        )
+
+        await agg.evaluate_output("nope")
+
+        report = agg.last_failure_report
+        assert report is not None
+        assert len(report.violated_constraints) == 1
+        vc = report.violated_constraints[0]
+        assert vc.constraint_id == "rate-limit"
+        assert vc.constraint_type == "hard"
+        assert "100 requests/min" in vc.violation_details
+        assert "hard constraint violation" in report.summary
+
+    @pytest.mark.asyncio
+    async def test_failure_report_includes_node_ids(self):
+        """Node IDs from failed decisions appear in the report."""
+        from framework.schemas.decision import Decision, DecisionType, Outcome
+
+        criteria = [
+            SuccessCriterion(
+                id="c1",
+                description="Always fails",
+                metric="output_equals",
+                target="impossible",
+                weight=1.0,
+            ),
+        ]
+        goal = self._make_goal(criteria)
+        agg = OutcomeAggregator(goal)
+
+        decision = Decision(
+            id="d1",
+            node_id="process-node",
+            intent="Process data",
+            decision_type=DecisionType.TOOL_SELECTION,
+        )
+        agg.record_decision("s1", "e1", decision)
+        agg.record_outcome(
+            "s1", "e1", "d1",
+            Outcome(success=False, error="Something broke"),
+        )
+
+        await agg.evaluate_output("nope")
+
+        report = agg.last_failure_report
+        assert report is not None
+        assert "process-node" in report.node_ids
+        assert report.failed_outcomes == 1
+
+    @pytest.mark.asyncio
+    async def test_failure_report_saved_to_disk(self, tmp_path):
+        """Failure report is persisted when storage_path is set."""
+        criteria = [
+            SuccessCriterion(
+                id="c1",
+                description="Always fails",
+                metric="output_equals",
+                target="impossible",
+                weight=1.0,
+            ),
+        ]
+        goal = self._make_goal(criteria)
+        agg = OutcomeAggregator(goal, storage_path=tmp_path)
+
+        await agg.evaluate_output("nope")
+
+        reports_dir = tmp_path / "failure_reports"
+        assert reports_dir.exists()
+        report_files = list(reports_dir.glob("fr-goal_*.json"))
+        assert len(report_files) == 1
+
+        # Verify the file is valid JSON and round-trips
+        import json
+
+        content = json.loads(report_files[0].read_text())
+        assert content["goal_id"] == "fr-goal"
+        assert len(content["unmet_criteria"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_failure_report_not_saved_without_storage(self):
+        """No crash when storage_path is None."""
+        criteria = [
+            SuccessCriterion(
+                id="c1",
+                description="Always fails",
+                metric="output_equals",
+                target="impossible",
+                weight=1.0,
+            ),
+        ]
+        goal = self._make_goal(criteria)
+        agg = OutcomeAggregator(goal)  # no storage_path
+
+        await agg.evaluate_output("nope")
+
+        # Should still have the in-memory report
+        assert agg.last_failure_report is not None
+
+    def test_generate_failure_report_directly(self):
+        """generate_failure_report works as a standalone call."""
+        criteria = [
+            SuccessCriterion(
+                id="c1",
+                description="Check A",
+                metric="output_contains",
+                target="A",
+                weight=0.5,
+                met=False,
+            ),
+            SuccessCriterion(
+                id="c2",
+                description="Check B",
+                metric="output_contains",
+                target="B",
+                weight=0.5,
+                met=True,
+            ),
+        ]
+        goal = self._make_goal(criteria)
+        agg = OutcomeAggregator(goal)
+
+        report = agg.generate_failure_report()
+
+        assert len(report.unmet_criteria) == 1
+        assert report.unmet_criteria[0].criterion_id == "c1"
+        assert report.unmet_criteria[0].weight == 0.5
+        assert "Check A" in report.summary
+
+    def test_reset_clears_failure_report(self):
+        """reset() clears last_failure_report."""
+        goal = self._make_goal([])
+        agg = OutcomeAggregator(goal)
+        # Manually set a report
+        from framework.schemas.failure_report import FailureReport
+
+        agg._last_failure_report = FailureReport(goal_id="x", goal_name="x")
+        agg.reset()
+        assert agg.last_failure_report is None
+
+
 # === AgentRuntime Tests ===
 
 
