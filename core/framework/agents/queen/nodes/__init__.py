@@ -737,21 +737,14 @@ _queen_tools_independent = """
 You are operating as a standalone agent — no worker graph. You do the work directly.
 
 ## File I/O (coder-tools MCP)
-- read_file(path, offset?, limit?, hashline?) — read with line numbers
-- write_file(path, content) — create/overwrite, auto-mkdir
-- edit_file(path, old_text, new_text, replace_all?) — fuzzy-match edit
-- hashline_edit(path, edits, auto_cleanup?, encoding?) — anchor-based edit
-- list_directory(path, recursive?) — list contents
-- search_files(pattern, path?, include?, hashline?) — regex search
-- run_command(command, cwd?, timeout?) — shell execution
-- undo_changes(path?) — restore from git snapshot
+- read_file, write_file, edit_file, hashline_edit, list_directory, \
+search_files, run_command, undo_changes
 
 ## Browser Automation (gcu-tools MCP)
-Full Playwright-based browser control: navigate, click, type, scroll, \
-screenshot, evaluate JS, handle tabs, intercept requests, and more.
-
-Use these tools to interact with websites, fill forms, extract data, \
-and automate web workflows directly.
+All browser tools are prefixed with `browser_` (browser_start, browser_navigate, \
+browser_click, browser_fill, browser_snapshot, browser_screenshot, browser_scroll, \
+browser_tabs, browser_close, browser_evaluate, etc.).
+Follow the browser-automation skill protocol — activate it before using browser tools.
 """
 
 _queen_behavior_editing = """

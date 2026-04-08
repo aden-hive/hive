@@ -5,5 +5,12 @@
     "args": ["run", "python", "coder_tools_server.py", "--stdio"],
     "cwd": "../../../../tools",
     "description": "Unsandboxed file system tools for code generation and validation"
+  },
+  "gcu-tools": {
+    "transport": "stdio",
+    "command": "uv",
+    "args": ["run", "python", "-m", "gcu.server", "--stdio", "--capabilities", "browser"],
+    "cwd": "../../../../tools",
+    "description": "Browser automation tools (Playwright-based)"
   }
 }
