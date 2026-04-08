@@ -2293,7 +2293,24 @@ class AgentLoop(NodeProtocol):
                     False,
                 )
 
-            # Execute tool calls — framework tools (set_output, ask_user)
+            # Priority drain: if user sent a message while the LLM was
+            # streaming, inject it into the conversation NOW -- before tool
+            # execution.  The LLM will see it on the next inner turn.
+            if not self._injection_queue.empty():
+                while not self._injection_queue.empty():
+                    _inj_content, _inj_client, _inj_images = (
+                        self._injection_queue.get_nowait()
+                    )
+                    if _inj_client:
+                        await conversation.add_user_message(_inj_content)
+                        logger.info(
+                            "[%s] Priority-injected user message mid-turn (%d chars)",
+                            node_id, len(_inj_content),
+                        )
+                    else:
+                        await conversation.add_user_message(_inj_content)
+
+            # Execute tool calls -- framework tools (set_output, ask_user)
             # run inline; real MCP tools run in parallel.
             real_tool_results: list[dict] = []
             limit_hit = False
