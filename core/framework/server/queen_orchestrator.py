@@ -444,7 +444,7 @@ async def create_queen(
                 buffer=DataBuffer(),
                 llm=session.llm,
                 available_tools=queen_tools,
-                goal_context=queen_goal.description,
+                goal_context=queen_goal.to_prompt_context(),
                 max_tokens=lc.get("max_tokens", 8192),
                 stream_id="queen",
                 execution_id=session.id,
