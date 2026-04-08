@@ -89,13 +89,14 @@ class StreamRuntime:
         self._storage = storage
         self._outcome_aggregator = outcome_aggregator
 
-        # Track runs by execution_id (thread-safe via lock)
+        # Track runs by execution_id
         self._runs: dict[str, Run] = {}
-        self._run_locks: dict[str, asyncio.Lock] = {}
-        self._global_lock = asyncio.Lock()
 
         # Track current node per execution (for decision context)
         self._current_nodes: dict[str, str] = {}
+
+        # Background save tasks keyed by execution_id
+        self._pending_saves: dict[str, asyncio.Task] = {}
 
     # === RUN LIFECYCLE ===
 
@@ -139,7 +140,6 @@ class StreamRuntime:
         )
 
         self._runs[execution_id] = run
-        self._run_locks[execution_id] = asyncio.Lock()
         self._current_nodes[execution_id] = "unknown"
 
         logger.debug(
@@ -172,22 +172,34 @@ class StreamRuntime:
         run.output_data = output_data or {}
         run.complete(status, narrative)
 
-        # Save to storage asynchronously
-        asyncio.create_task(self._save_run(execution_id, run))
+        # Remove from active tracking before async persist
+        self._runs.pop(execution_id, None)
+        self._current_nodes.pop(execution_id, None)
+
+        # Persist in background; track task so shutdown can wait for it
+        task = asyncio.create_task(self._save_run(execution_id, run))
+        self._pending_saves[execution_id] = task
+        task.add_done_callback(lambda _t: self._pending_saves.pop(execution_id, None))
 
         logger.debug(f"Ended run {run.id} for execution {execution_id}: {status.value}")
 
     async def _save_run(self, execution_id: str, run: Run) -> None:
-        """Save run to storage and clean up."""
+        """Save run to storage."""
         try:
             await self._storage.save_run(run)
         except Exception as e:
             logger.error(f"Failed to save run {run.id}: {e}")
-        finally:
-            # Clean up
-            self._runs.pop(execution_id, None)
-            self._run_locks.pop(execution_id, None)
-            self._current_nodes.pop(execution_id, None)
+
+    async def await_pending_saves(self) -> None:
+        if not self._pending_saves:
+            return
+
+        tasks = list(self._pending_saves.values())
+        if tasks:
+            logger.debug(
+                f"Waiting for {len(tasks)} pending saves in stream {self.stream_id}"
+            )
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def set_node(self, execution_id: str, node_id: str) -> None:
         """Set the current node context for an execution."""
