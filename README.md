@@ -124,6 +124,16 @@ This sets up:
 > **Tip:** To reopen the dashboard later, run `hive open` from the project directory.
 
 ### Build Your First Agent
+#### What Does `quickstart.sh` Do?
+
+The `quickstart.sh` script prepares your local environment for building agents with Hive.
+
+Specifically, it:
+- Installs required Claude Code skills (one-time setup)
+- Configures tooling needed for agent generation
+- Prepares the environment for interactive `claude>` commands
+
+The script is safe to re-run if your environment changes or setup needs to be refreshed.
 
 Type the agent you want to build in the home input box. The queen is going to ask you questions and work out a solution with you.
 
