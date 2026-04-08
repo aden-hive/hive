@@ -15,6 +15,35 @@ import {
   type GitHubIssue,
   type GitHubReaction,
 } from "./auto-close-duplicates";
+import { describe, it, expect, vi } from 'vitest';
+import { JobHunterAgent } from '../src/agents/JobHunterAgent';
+import { SharedMemory } from '../src/core/SharedMemory';
+
+describe('Hive Cluster: Cross-Domain Integrity', () => {
+
+  describe('ATS Alignment & Resume Parsing', () => {
+    it('should extract hard skills from disorganized PDF strings', async () => {
+      const agent = new JobHunterAgent();
+      const report = await agent.align("Disorganized Text...", "JD: Kubernetes Specialist");
+      
+      expect(report.match_score).toBeDefined();
+      expect(report.missing_keywords).toContain('Kubernetes');
+    });
+  });
+
+  describe('Bug #804: Data Isolation', () => {
+    it('should maintain state integrity under attempted mutation', async () => {
+      const memory = new SharedMemory();
+      memory.write("state", { list: [1, 2] });
+      
+      const leaked = memory.read("state");
+      leaked.list.push(3); // Mutation attempt
+      
+      const original = memory.read("state");
+      expect(original.list).toHaveLength(2); // Success: Isolated
+    });
+  });
+});
 
 describe("extractDuplicateIssueNumber", () => {
   test("extracts #123 format", () => {
