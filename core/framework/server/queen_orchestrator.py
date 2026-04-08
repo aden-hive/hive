@@ -397,9 +397,15 @@ async def create_queen(
         node_updates["tools"] = available_tools
 
     adjusted_node = _orig_node.model_copy(update=node_updates)
+
+    # Determine session mode:
+    # - RESTORE: Resume cold session with history, no initial prompt -> wait for user
+    # - FRESH:   New session OR explicit initial prompt -> run identity hook + greeting
+    _is_restore_mode = bool(session.queen_resume_from) and initial_prompt is None
+
     _queen_loop_config = {
         **_base_loop_config,
-        "hooks": {"session_start": [_queen_identity_hook]},
+        "hooks": {"session_start": [_queen_identity_hook]} if not _is_restore_mode else {},
     }
 
     # ---- Queen event loop (AgentLoop directly, no Orchestrator) -------
@@ -412,7 +418,6 @@ async def create_queen(
     async def _queen_loop():
         logger.debug("[_queen_loop] Starting queen loop for session %s", session.id)
         try:
-            # Build LoopConfig from the queen graph's config + persona hook
             lc = _queen_loop_config
             queen_loop_config = LoopConfig(
                 max_iterations=lc.get("max_iterations", 999_999),
@@ -421,15 +426,15 @@ async def create_queen(
                 hooks=lc.get("hooks", {}),
             )
 
-            # Create AgentLoop directly -- no Orchestrator, no graph traversal
+            conversation_store = FileConversationStore(queen_dir / "conversations")
+
             agent_loop = AgentLoop(
                 event_bus=session.event_bus,
                 config=queen_loop_config,
                 tool_executor=queen_tool_executor,
-                conversation_store=FileConversationStore(queen_dir / "conversations"),
+                conversation_store=conversation_store,
             )
 
-            # Build NodeContext manually
             from framework.tracker.decision_tracker import DecisionTracker
 
             ctx = NodeContext(
@@ -451,18 +456,15 @@ async def create_queen(
                 skill_dirs=_queen_skill_dirs,
             )
 
-            # Expose for chat handler injection (node_registry compat)
             session.queen_executor = SimpleNamespace(
                 node_registry={"queen": agent_loop},
             )
 
-            # Wire inject_notification so phase switches notify the queen LLM
             async def _inject_phase_notification(content: str) -> None:
                 await agent_loop.inject_event(content)
 
             phase_state.inject_notification = _inject_phase_notification
 
-            # Auto-switch to editing when worker execution finishes.
             async def _on_worker_done(event):
                 if event.stream_id == "queen":
                     return
@@ -504,7 +506,6 @@ async def create_queen(
             )
             session_manager._subscribe_worker_handoffs(session, session.queen_executor)
 
-            # ---- Global memory reflection + recall -------------------------
             from framework.agents.queen.reflection_agent import subscribe_reflection_triggers
 
             _reflection_subs = await subscribe_reflection_triggers(
@@ -515,20 +516,18 @@ async def create_queen(
             )
             session.memory_reflection_subs = _reflection_subs
 
+            # Set initial user message based on mode:
+            # - RESTORE: Empty -> AgentLoop restores from disk, waits for /chat
+            # - FRESH:   "Hello" or explicit prompt -> queen responds immediately
+            ctx.input_data = {"user_request": None if _is_restore_mode else (initial_prompt or "Hello")}
+
             logger.info(
-                "Queen starting in %s phase with %d tools: %s",
+                "Queen %s in %s phase with %d tools: %s",
+                "restoring" if _is_restore_mode else "starting",
                 phase_state.phase,
                 len(phase_state.get_current_tools()),
                 [t.name for t in phase_state.get_current_tools()],
             )
-
-            # Set the first user message.
-            # When initial_prompt is None (user opens UI without ?prompt=),
-            # use a generic greeting so the queen has a user message to
-            # respond to.  The user's real first question arrives via /chat.
-            ctx.input_data = {
-                "user_request": initial_prompt or "Hello",
-            }
 
             # Run the queen -- forever-alive conversation loop
             result = await agent_loop.execute(ctx)
