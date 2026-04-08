@@ -68,7 +68,7 @@ class LoopConfig:
     max_output_value_chars: int = 2_000
 
     # Stream retry.
-    max_stream_retries: int = 3
+    max_stream_retries: int = 5
     stream_retry_backoff_base: float = 2.0
     stream_retry_max_delay: float = 60.0
 

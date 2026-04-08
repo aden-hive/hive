@@ -696,24 +696,6 @@ class ExecutionManager:
                 # the executor's session_state (memory + resume_from) carries
                 # forward so the next attempt resumes at the failed node.
                 while True:
-                    # Run execution middleware (per-attempt, including resurrections)
-                    if self._execution_middleware:
-                        from framework.pipeline.execution_middleware import (
-                            ExecutionContext as _ExecMwCtx,
-                        )
-
-                        mw_ctx = _ExecMwCtx(
-                            execution_id=execution_id,
-                            stream_id=self.stream_id,
-                            run_id=ctx.run_id or "",
-                            input_data=_current_input_data or {},
-                            session_state=_current_session_state,
-                            attempt=_resurrection_count + 1,
-                        )
-                        for mw in self._execution_middleware:
-                            mw_ctx = await mw.on_execution_start(mw_ctx)
-                        _current_input_data = mw_ctx.input_data
-
                     # Create executor for this execution.
                     executor = Orchestrator(
                         runtime=runtime_adapter,

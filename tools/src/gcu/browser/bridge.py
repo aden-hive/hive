@@ -1026,6 +1026,9 @@ class BeelineBridge:
         await self.highlight_point(tab_id, x, y, label=f"{key} ({x},{y})")
         return {"ok": True, "action": "press_at", "x": x, "y": y, "key": key}
 
+    # Duration (ms) that injected highlights stay visible before fading out.
+    _HIGHLIGHT_DURATION_MS = 1500
+
     async def highlight_rect(
         self,
         tab_id: int,
@@ -1036,61 +1039,112 @@ class BeelineBridge:
         label: str = "",
         color: dict | None = None,
     ) -> None:
-        """Draw a CDP Overlay highlight box in the live browser window.
+        """Inject a visible highlight overlay into the page DOM.
 
-        Visible in the next screenshot. Automatically cleared on the next
-        interaction or by calling clear_highlight().
+        Creates a fixed-position div with border, background tint, and an
+        optional label tag.  The element fades out after ``_HIGHLIGHT_DURATION_MS``
+        and removes itself.  Much more visible than the CDP Overlay API.
         """
-        await self.cdp_attach(tab_id)
-        await self._try_enable_domain(tab_id, "Overlay")
-        fill = color or {"r": 59, "g": 130, "b": 246, "a": 0.35}  # blue-500 @ 35%
-        outline = {"r": fill["r"], "g": fill["g"], "b": fill["b"], "a": 1.0}
-        await self._cdp(
-            tab_id,
-            "Overlay.highlightRect",
-            {
-                "x": int(x),
-                "y": int(y),
-                "width": max(1, int(w)),
-                "height": max(1, int(h)),
-                "color": fill,
-                "outlineColor": outline,
-            },
-        )
+        fill = color or {"r": 59, "g": 130, "b": 246, "a": 0.18}
+        border_rgb = f"rgb({fill['r']},{fill['g']},{fill['b']})"
+        bg_rgba = f"rgba({fill['r']},{fill['g']},{fill['b']},{fill.get('a', 0.18)})"
+        duration = self._HIGHLIGHT_DURATION_MS
+
+        # Escape label for safe injection
+        safe_label = json.dumps(label[:60]) if label else '""'
+
+        js = f"""
+        (function() {{
+          // Remove any previous hive highlight
+          var old = document.getElementById('__hive_hl');
+          if (old) old.remove();
+
+          var box = document.createElement('div');
+          box.id = '__hive_hl';
+          box.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;'
+            + 'left:{int(x)}px;top:{int(y)}px;width:{max(1,int(w))}px;height:{max(1,int(h))}px;'
+            + 'border:2px solid {border_rgb};background:{bg_rgba};'
+            + 'border-radius:3px;transition:opacity 0.4s ease;opacity:1;'
+            + 'box-shadow:0 0 8px {bg_rgba};';
+
+          var lbl = {safe_label};
+          if (lbl) {{
+            var tag = document.createElement('span');
+            tag.textContent = lbl;
+            tag.style.cssText = 'position:absolute;left:0;top:-20px;'
+              + 'background:{border_rgb};color:#fff;font:bold 11px/16px system-ui;'
+              + 'padding:1px 6px;border-radius:3px;white-space:nowrap;max-width:200px;'
+              + 'overflow:hidden;text-overflow:ellipsis;';
+            box.appendChild(tag);
+          }}
+
+          document.documentElement.appendChild(box);
+          setTimeout(function() {{ box.style.opacity = '0'; }}, {duration});
+          setTimeout(function() {{ box.remove(); }}, {duration + 500});
+        }})();
+        """
+        try:
+            await self.cdp_attach(tab_id)
+            await self.evaluate(tab_id, js)
+        except Exception:
+            pass  # best-effort visual feedback
+
         _interaction_highlights[tab_id] = {
-            "x": x,
-            "y": y,
-            "w": w,
-            "h": h,
-            "label": label,
-            "kind": "rect",
+            "x": x, "y": y, "w": w, "h": h,
+            "label": label, "kind": "rect",
         }
 
     async def highlight_point(self, tab_id: int, x: float, y: float, label: str = "") -> None:
-        """Highlight a coordinate as a small crosshair box in the browser."""
-        r = 12  # half-size of the crosshair box in CSS px
-        await self.highlight_rect(
-            tab_id,
-            x - r,
-            y - r,
-            r * 2,
-            r * 2,
-            label=label,
-            color={"r": 239, "g": 68, "b": 68, "a": 0.45},  # red-500 @ 45%
-        )
+        """Highlight a coordinate with a pulsing dot and crosshair."""
+        duration = self._HIGHLIGHT_DURATION_MS
+        safe_label = json.dumps(label[:60]) if label else '""'
+
+        js = f"""
+        (function() {{
+          var old = document.getElementById('__hive_hl');
+          if (old) old.remove();
+
+          var dot = document.createElement('div');
+          dot.id = '__hive_hl';
+          dot.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;'
+            + 'left:{int(x)-8}px;top:{int(y)-8}px;width:16px;height:16px;'
+            + 'border-radius:50%;background:rgba(239,68,68,0.7);'
+            + 'box-shadow:0 0 0 4px rgba(239,68,68,0.25),0 0 12px rgba(239,68,68,0.4);'
+            + 'transition:opacity 0.4s ease;opacity:1;';
+
+          var lbl = {safe_label};
+          if (lbl) {{
+            var tag = document.createElement('span');
+            tag.textContent = lbl;
+            tag.style.cssText = 'position:absolute;left:20px;top:-4px;'
+              + 'background:rgba(239,68,68,0.9);color:#fff;font:bold 11px/16px system-ui;'
+              + 'padding:1px 6px;border-radius:3px;white-space:nowrap;';
+            dot.appendChild(tag);
+          }}
+
+          document.documentElement.appendChild(dot);
+          setTimeout(function() {{ dot.style.opacity = '0'; }}, {duration});
+          setTimeout(function() {{ dot.remove(); }}, {duration + 500});
+        }})();
+        """
+        try:
+            await self.cdp_attach(tab_id)
+            await self.evaluate(tab_id, js)
+        except Exception:
+            pass
+
         _interaction_highlights[tab_id] = {
-            "x": x,
-            "y": y,
-            "w": 0,
-            "h": 0,
-            "label": label,
-            "kind": "point",
+            "x": x, "y": y, "w": 0, "h": 0,
+            "label": label, "kind": "point",
         }
 
     async def clear_highlight(self, tab_id: int) -> None:
-        """Remove the CDP Overlay highlight from the browser."""
+        """Remove the injected highlight from the page."""
         try:
-            await self._cdp(tab_id, "Overlay.hideHighlight")
+            await self.evaluate(tab_id, """
+                var el = document.getElementById('__hive_hl');
+                if (el) el.remove();
+            """)
         except Exception:
             pass
         _interaction_highlights.pop(tab_id, None)
@@ -1198,6 +1252,20 @@ class BeelineBridge:
                 "returnByValue": True,
             },
         )
+
+        # Highlight the select element
+        rect_result = await self.evaluate(
+            tab_id,
+            f"(function(){{const el=document.querySelector("
+            f"{json.dumps(selector)});if(!el)return null;"
+            f"const r=el.getBoundingClientRect();"
+            f"return{{x:r.left,y:r.top,w:r.width,h:r.height}};}})()",
+        )
+        rect = (rect_result or {}).get("result")
+        if rect:
+            await self.highlight_rect(
+                tab_id, rect["x"], rect["y"], rect["w"], rect["h"], label=selector
+            )
 
         return {"ok": True, "action": "select", "selector": selector, "selected": values}
 

@@ -64,15 +64,14 @@ class SkillCatalog:
         Returns empty string if no community/user skills are discovered
         (default skills are handled separately by DefaultSkillManager).
         """
-        # Filter out framework-scope skills (default skills) — they're
-        # injected via the protocols prompt, not the catalog
-        community_skills = [s for s in self._skills.values() if s.source_scope != "framework"]
+        # All skills go through the catalog for progressive disclosure.
+        all_skills = list(self._skills.values())
 
-        if not community_skills:
+        if not all_skills:
             return ""
 
         lines = ["<available_skills>"]
-        for skill in sorted(community_skills, key=lambda s: s.name):
+        for skill in sorted(all_skills, key=lambda s: s.name):
             lines.append("  <skill>")
             lines.append(f"    <name>{escape(skill.name)}</name>")
             lines.append(f"    <description>{escape(skill.description)}</description>")

@@ -660,10 +660,11 @@ class SessionManager:
 
                 task = asyncio.create_task(
                     asyncio.shield(run_shutdown_reflection(session.queen_dir, session.llm)),
+                    name=f"shutdown-reflect-{session_id}",
                 )
+                logger.info("Session '%s': shutdown reflection spawned", session_id)
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
-                logger.info("Session '%s': shutdown reflection spawned", session_id)
             except Exception:
                 logger.warning(
                     "Session '%s': failed to spawn shutdown reflection", session_id, exc_info=True
