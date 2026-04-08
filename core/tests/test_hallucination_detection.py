@@ -152,7 +152,7 @@ class TestOutputValidatorHallucinationDetection:
 
         # Code at position 600 (was previously missed with [:500] check)
         padding = "A" * 600
-        code = "import os"
+        code = "\nimport os"
         content = padding + code
 
         assert validator._contains_code_indicators(content) is True
@@ -176,6 +176,34 @@ class TestOutputValidatorHallucinationDetection:
         content = "This is a perfectly normal document. " * 300
 
         assert validator._contains_code_indicators(content) is False
+
+    def test_no_false_positive_for_natural_language_keywords(self):
+        """Natural language use of programming keywords should not trigger."""
+        validator = OutputValidator()
+
+        # These are natural language sentences, not code
+        sentences = [
+            "Let me update the class schedule for next week",
+            "We need to import all data from the database",
+            "The function of this device is to measure temperature",
+            "Please select your preferred option",
+            "We export goods to many countries",
+        ]
+        for sentence in sentences:
+            assert validator._contains_code_indicators(sentence) is False, (
+                f"False positive: {sentence}"
+            )
+
+        # But actual code lines should still be detected
+        code_lines = [
+            "\nimport os\n",
+            "\ndef hello():\n",
+            "\nclass MyClass:\n",
+        ]
+        for code in code_lines:
+            assert validator._contains_code_indicators(code) is True, (
+                f"False negative: {code}"
+            )
 
     def test_detects_multiple_languages(self):
         """Should detect code patterns from multiple programming languages."""

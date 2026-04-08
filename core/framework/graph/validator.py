@@ -35,11 +35,13 @@ class OutputValidator:
 
     def _contains_code_indicators(self, value: str) -> bool:
         """
-        Check for code patterns in a string using sampling for efficiency.
+        Check for code patterns in a string using a two-tier system.
 
-        For strings under 10KB, checks the entire content.
-        For longer strings, samples at strategic positions to balance
-        performance with detection accuracy.
+        Strong indicators (e.g. "<script", "try:") flag immediately.
+        Weak indicators (e.g. "class ", "import ") only flag when they appear
+        at the start of a line (\n prefix) AND occur at least twice in the
+        string segment. This prevents false positives from natural language
+        like "Let me update the class schedule".
 
         Args:
             value: The string to check for code indicators
@@ -47,17 +49,25 @@ class OutputValidator:
         Returns:
             True if code indicators are found, False otherwise
         """
-        code_indicators = [
-            # Python
+        strong_indicators = [
+            # Python — structural syntax that rarely appears in prose
+            "if __name__",
+            "async def ",
+            "try:",
+            "except:",
+            # HTML/Script injection — always suspicious
+            "<script",
+            "<?php",
+            "<%",
+        ]
+
+        weak_indicators = [
+            # Python — common in natural language ("import goods", "class schedule")
             "def ",
             "class ",
             "import ",
             "from ",
-            "if __name__",
-            "async def ",
             "await ",
-            "try:",
-            "except:",
             # JavaScript/TypeScript
             "function ",
             "const ",
@@ -65,21 +75,45 @@ class OutputValidator:
             "=> {",
             "require(",
             "export ",
-            # SQL
+            # SQL — can appear in business prose
             "SELECT ",
             "INSERT ",
             "UPDATE ",
             "DELETE ",
             "DROP ",
-            # HTML/Script injection
-            "<script",
-            "<?php",
-            "<%",
         ]
+
+        def _check_segment(segment: str) -> bool:
+            # Strong indicators: immediate match
+            if any(indicator in segment for indicator in strong_indicators):
+                return True
+
+            # Weak indicators: require line-anchor OR code-context confirmation.
+            # A weak indicator at the start of a line is always treated as code.
+            # A weak indicator mid-line requires additional code context (e.g.
+            # parentheses, braces, colons, equals) to disambiguate from
+            # natural language usage like "class schedule" or "import goods".
+            code_context_chars = set("(){}[]:;=<>+-*/\\@#")
+            for indicator in weak_indicators:
+                idx = segment.find(indicator)
+                while idx != -1:
+                    at_line_start = idx == 0 or segment[idx - 1] == "\n"
+                    if at_line_start:
+                        return True
+                    # Mid-line: check if code context follows the indicator
+                    after = segment[idx + len(indicator):]
+                    if after and after[0] in code_context_chars:
+                        return True
+                    # Also check if the indicator is preceded by non-alpha (not a word part)
+                    before_char = segment[idx - 1] if idx > 0 else ""
+                    if before_char and not before_char.isalpha():
+                        return True
+                    idx = segment.find(indicator, idx + 1)
+            return False
 
         # For strings under 10KB, check the entire content
         if len(value) < 10000:
-            return any(indicator in value for indicator in code_indicators)
+            return _check_segment(value)
 
         # For longer strings, sample at strategic positions
         sample_positions = [
@@ -92,7 +126,7 @@ class OutputValidator:
 
         for pos in sample_positions:
             chunk = value[pos : pos + 2000]
-            if any(indicator in chunk for indicator in code_indicators):
+            if _check_segment(chunk):
                 return True
 
         return False
