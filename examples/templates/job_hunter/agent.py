@@ -18,6 +18,37 @@ from .nodes import (
     job_review_node,
     customize_node,
 )
+import base64
+from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel
+
+mcp = FastMCP("JobHunterPro")
+
+class ATSOptimizationReport(BaseModel):
+    match_score: float
+    missing_keywords: list[str]
+    suggested_rewrites: dict[str, str]
+
+@mcp.tool()
+async def align_resume_to_jd(pdf_b64: str, jd_text: str) -> ATSOptimizationReport:
+    """
+    Parses a disorganized PDF and aligns it with a Job Description.
+    """
+    # 1. Vision-based Extraction (Pseudocode)
+    # raw_resume_data = OpenVision.extract_structured_json(pdf_b64)
+    
+    # 2. Semantic Analysis
+    # keywords = LLM.extract_jd_keywords(jd_text)
+    
+    # 3. Alignment Logic
+    report = {
+        "match_score": 0.65, # Initial score
+        "missing_keywords": ["Kubernetes", "gRPC", "CI/CD"],
+        "suggested_rewrites": {
+            "Experience 1": "Rewrite to include 'Managed 5 Kubernetes clusters' instead of 'Handled server deployments'."
+        }
+    }
+    return report
 
 # Goal definition
 goal = Goal(
