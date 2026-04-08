@@ -333,6 +333,22 @@ make test-live     # Run live API integration tests (requires credentials)
 - **WebSocket** for real-time updates
 - **Tailwind CSS** for styling
 
+### Frontend Dev Workflow
+
+> **Note:** `./quickstart.sh` handles the full setup including the web UI.
+> The commands below are for contributors iterating on the frontend code after
+> initial setup is complete.
+
+```bash
+# Start the backend server
+hive serve
+
+# In a separate terminal, run the frontend dev server with hot-reload
+cd core/frontend
+npm install   # only needed after dependency changes
+npm run dev
+```
+
 ### Useful Development Commands
 
 ```bash

@@ -192,11 +192,6 @@ class ExecutionManager:
         context_warn_ratio: float | None = None,
         batch_init_nudge: str | None = None,
         dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = None,
-        colony_memory_dir: Any = None,
-        colony_worker_sessions_dir: Any = None,
-        colony_recall_cache: dict[str, str] | None = None,
-        colony_reflect_llm: Any = None,
-        execution_middleware: list | None = None,
     ):
         """
         Initialize execution stream.
@@ -252,11 +247,6 @@ class ExecutionManager:
         self._context_warn_ratio: float | None = context_warn_ratio
         self._batch_init_nudge: str | None = batch_init_nudge
         self._dynamic_memory_provider_factory = dynamic_memory_provider_factory
-        self._colony_memory_dir = colony_memory_dir
-        self._colony_worker_sessions_dir = colony_worker_sessions_dir
-        self._colony_recall_cache = colony_recall_cache
-        self._colony_reflect_llm = colony_reflect_llm
-        self._execution_middleware = execution_middleware or []
 
         _es_logger = logging.getLogger(__name__)
         if protocols_prompt:
@@ -750,10 +740,6 @@ class ExecutionManager:
                             if self._dynamic_memory_provider_factory is not None
                             else None
                         ),
-                        colony_memory_dir=self._colony_memory_dir,
-                        colony_worker_sessions_dir=self._colony_worker_sessions_dir,
-                        colony_recall_cache=self._colony_recall_cache,
-                        colony_reflect_llm=self._colony_reflect_llm,
                     )
                     # Track executor so inject_input() can reach EventLoopNode instances
                     self._active_executors[execution_id] = executor

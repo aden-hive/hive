@@ -147,8 +147,6 @@ async def test_load_worker_core_defaults_to_session_llm_model(monkeypatch, tmp_p
 
     monkeypatch.setattr("framework.runner.AgentRunner.load", fake_load)
     monkeypatch.setattr(manager, "_cleanup_stale_active_sessions", lambda *_args: None)
-    monkeypatch.setattr(manager, "_subscribe_worker_digest", lambda *_args: None)
-    monkeypatch.setattr(manager, "_subscribe_worker_colony_memory", AsyncMock())
     monkeypatch.setattr(
         "framework.tools.queen_lifecycle_tools._read_agent_triggers_json",
         lambda *_args: [],
@@ -159,7 +157,6 @@ async def test_load_worker_core_defaults_to_session_llm_model(monkeypatch, tmp_p
     assert load_calls[0]["model"] == "queen-shared-model"
     assert session.runner is runner
     assert session.runner._llm is session_llm
-    assert runtime._dynamic_memory_provider_factory is not None
 
 
 @pytest.mark.asyncio
@@ -184,8 +181,6 @@ async def test_load_worker_core_keeps_explicit_worker_model_override(monkeypatch
 
     monkeypatch.setattr("framework.runner.AgentRunner.load", fake_load)
     monkeypatch.setattr(manager, "_cleanup_stale_active_sessions", lambda *_args: None)
-    monkeypatch.setattr(manager, "_subscribe_worker_digest", lambda *_args: None)
-    monkeypatch.setattr(manager, "_subscribe_worker_colony_memory", AsyncMock())
     monkeypatch.setattr(
         "framework.tools.queen_lifecycle_tools._read_agent_triggers_json",
         lambda *_args: [],
@@ -201,38 +196,4 @@ async def test_load_worker_core_keeps_explicit_worker_model_override(monkeypatch
     assert session.runner is runner
     assert session.runner._llm is None
 
-
-@pytest.mark.asyncio
-async def test_load_worker_core_continues_when_colony_memory_subscription_fails(
-    monkeypatch, tmp_path
-) -> None:
-    bus = EventBus()
-    manager = SessionManager(model="manager-default")
-    session_llm = SimpleNamespace(model="queen-shared-model")
-    session = Session(id="session_memory_warning", event_bus=bus, llm=session_llm, loaded_at=0.0)
-
-    runtime = SimpleNamespace(is_running=True)
-    runner = SimpleNamespace(
-        _llm=None,
-        _agent_runtime=runtime,
-        info=MagicMock(return_value={"id": "worker"}),
-    )
-
-    monkeypatch.setattr("framework.runner.AgentRunner.load", lambda *args, **kwargs: runner)
-    monkeypatch.setattr(manager, "_cleanup_stale_active_sessions", lambda *_args: None)
-    monkeypatch.setattr(manager, "_subscribe_worker_digest", lambda *_args: None)
-    monkeypatch.setattr(
-        manager,
-        "_subscribe_worker_colony_memory",
-        AsyncMock(side_effect=ImportError("optional memory hook unavailable")),
-    )
-    monkeypatch.setattr(
-        "framework.tools.queen_lifecycle_tools._read_agent_triggers_json",
-        lambda *_args: [],
-    )
-
-    await manager._load_worker_core(session, tmp_path / "worker_agent")
-
-    assert session.runner is runner
-    assert session.graph_runtime is runtime
     assert session.worker_path == tmp_path / "worker_agent"

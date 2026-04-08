@@ -3498,6 +3498,8 @@ dependencies = [
     { name = "jsonpath-ng" },
     { name = "litellm" },
     { name = "pandas" },
+    { name = "playwright" },
+    { name = "playwright-stealth" },
     { name = "psycopg2-binary" },
     { name = "pydantic" },
     { name = "pypdf" },
@@ -3516,8 +3518,6 @@ all = [
     { name = "google-cloud-bigquery" },
     { name = "openpyxl" },
     { name = "pillow" },
-    { name = "playwright" },
-    { name = "playwright-stealth" },
     { name = "pytesseract" },
     { name = "restrictedpython" },
 ]
@@ -3526,8 +3526,6 @@ bigquery = [
 ]
 browser = [
     { name = "pillow" },
-    { name = "playwright" },
-    { name = "playwright-stealth" },
 ]
 databricks = [
     { name = "databricks-mcp" },
@@ -3585,10 +3583,8 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'all'", specifier = ">=10.0.0" },
     { name = "pillow", marker = "extra == 'browser'", specifier = ">=10.0.0" },
     { name = "pillow", marker = "extra == 'ocr'", specifier = ">=10.0.0" },
-    { name = "playwright", marker = "extra == 'all'", specifier = ">=1.40.0" },
-    { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.40.0" },
-    { name = "playwright-stealth", marker = "extra == 'all'", specifier = ">=2.0.0" },
-    { name = "playwright-stealth", marker = "extra == 'browser'", specifier = ">=2.0.0" },
+    { name = "playwright", specifier = ">=1.40.0" },
+    { name = "playwright-stealth", specifier = ">=2.0.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pypdf", specifier = ">=4.0.0" },

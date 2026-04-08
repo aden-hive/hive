@@ -252,11 +252,6 @@ class AgentHost:
         self._dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = (
             None
         )
-        # Colony memory config for reflection-at-handoff (set by session_manager)
-        self._colony_memory_dir: Any = None
-        self._colony_worker_sessions_dir: Any = None
-        self._colony_recall_cache: dict[str, str] | None = None
-        self._colony_reflect_llm: Any = None
         self._accounts_data = accounts_data
         self._tool_provider_map = tool_provider_map
 
@@ -385,10 +380,6 @@ class AgentHost:
                     context_warn_ratio=self.context_warn_ratio,
                     batch_init_nudge=self.batch_init_nudge,
                     dynamic_memory_provider_factory=self._dynamic_memory_provider_factory,
-                    colony_memory_dir=self._colony_memory_dir,
-                    colony_worker_sessions_dir=self._colony_worker_sessions_dir,
-                    colony_recall_cache=self._colony_recall_cache,
-                    colony_reflect_llm=self._colony_reflect_llm,
                 )
                 await stream.start()
                 self._streams[ep_id] = stream

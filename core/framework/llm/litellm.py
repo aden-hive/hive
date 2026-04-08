@@ -2051,9 +2051,13 @@ class LiteLLMProvider(LLMProvider):
                 if accumulated_text and "<tool_code>" in accumulated_text:
                     extracted, cleaned = _extract_text_tool_calls(accumulated_text)
                     if extracted:
+                        tool_names = [tc.tool_name for tc in extracted]
                         logger.info(
-                            "[stream] extracted %d hallucinated tool call(s) from text",
+                            "[stream] Model emitted %d tool call(s) as <tool_code> text "
+                            "instead of structured function calls; converting to "
+                            "synthetic ToolCallEvents: %s",
                             len(extracted),
+                            tool_names,
                         )
                         accumulated_text = cleaned
                         # Emit a corrected TextDeltaEvent so the caller's

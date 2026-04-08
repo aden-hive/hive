@@ -320,8 +320,6 @@ class NodeWorker:
                 self.lifecycle = WorkerLifecycle.COMPLETED
                 self._last_result = result
                 self._last_activations = activations
-                # Colony memory reflection — runs before downstream activation
-                await self._reflect_colony_memory()
                 completion = WorkerCompletion(
                     worker_id=node_spec.id,
                     success=True,
@@ -342,8 +340,6 @@ class NodeWorker:
                 self.lifecycle = WorkerLifecycle.FAILED
                 self._last_result = result
                 self._last_activations = activations
-                # Colony memory reflection — capture learnings even on failure
-                await self._reflect_colony_memory()
                 await self._publish_failure(result.error or "Unknown error")
         except Exception as exc:
             error = str(exc) or type(exc).__name__
@@ -657,61 +653,6 @@ class NodeWorker:
             node_spec=self.node_spec,
             pause_event=self._pause_requested,
         )
-
-    async def _reflect_colony_memory(self) -> None:
-        """Run colony memory reflection at node handoff.
-
-        Awaits the shared colony lock so parallel workers queue (never skip).
-        """
-        gc = self._gc
-        if gc.colony_memory_dir is None or gc.colony_reflect_llm is None:
-            return
-        if gc.worker_sessions_dir is None:
-            return
-
-        from pathlib import Path
-
-        session_dir = Path(gc.worker_sessions_dir) / gc.execution_id
-        if not session_dir.exists():
-            return
-
-        # Await lock — serializes reflection but never skips
-        async with gc._colony_reflect_lock:
-            try:
-                from framework.agents.queen.reflection_agent import run_short_reflection
-
-                await run_short_reflection(
-                    session_dir,
-                    gc.colony_reflect_llm,
-                    gc.colony_memory_dir,
-                    caller="worker",
-                )
-            except Exception:
-                logger.warning(
-                    "Worker %s: colony reflection failed",
-                    self.node_spec.id,
-                    exc_info=True,
-                )
-
-        # Update recall cache outside lock (per-execution key, no write races)
-        try:
-            from framework.agents.queen.recall_selector import update_recall_cache
-
-            await update_recall_cache(
-                session_dir,
-                gc.colony_reflect_llm,
-                memory_dir=gc.colony_memory_dir,
-                cache_setter=lambda block: gc.colony_recall_cache.__setitem__(
-                    gc.execution_id, block
-                ),
-                heading="Colony Memories",
-            )
-        except Exception:
-            logger.warning(
-                "Worker %s: recall cache update failed",
-                self.node_spec.id,
-                exc_info=True,
-            )
 
     # ------------------------------------------------------------------
     # Event publishing

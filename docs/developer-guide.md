@@ -99,7 +99,6 @@ hive/                                    # Repository root
 │   │   ├── storage/                     # File-based persistence
 │   │   ├── testing/                     # Testing utilities
 │   │   ├── tools/                       # Built-in tool implementations
-│   │   ├── tui/                         # Terminal UI dashboard
 │   │   └── utils/                       # Shared utilities
 │   ├── tests/                           # Unit and E2E tests (including dummy agents)
 │   ├── pyproject.toml                   # Package metadata and dependencies
