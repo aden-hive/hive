@@ -703,5 +703,208 @@ class TestOAuth2Module:
             )
 
 
+class TestEncryptedFileStorageRaceConditionFix:
+    """Tests for race condition fix in _update_index."""
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create a temporary directory for tests."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+
+    @pytest.fixture
+    def storage(self, temp_dir):
+        """Create EncryptedFileStorage for tests."""
+        return EncryptedFileStorage(temp_dir)
+
+    def test_concurrent_saves_no_credential_loss(self, temp_dir):
+        """Test that concurrent saves do not lose credentials."""
+        import threading
+
+        storage = EncryptedFileStorage(temp_dir)
+        num_threads = 20
+        results = {"saved": [], "errors": []}
+
+        def save_credential(thread_id):
+            try:
+                cred = CredentialObject(
+                    id=f"cred_{thread_id}",
+                    credential_type=CredentialType.API_KEY,
+                    keys={
+                        "api_key": CredentialKey(
+                            name="api_key", value=SecretStr(f"key_{thread_id}")
+                        )
+                    },
+                )
+                storage.save(cred)
+                results["saved"].append(thread_id)
+            except Exception as e:
+                results["errors"].append((thread_id, str(e)))
+
+        threads = [threading.Thread(target=save_credential, args=(i,)) for i in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(results["errors"]) == 0
+        assert len(results["saved"]) == num_threads
+        assert len(storage.list_all()) == num_threads
+
+    def test_concurrent_save_and_delete_consistency(self, temp_dir):
+        """Test that concurrent save and delete operations remain consistent."""
+        import threading
+
+        storage = EncryptedFileStorage(temp_dir)
+
+        for i in range(10):
+            cred = CredentialObject(
+                id=f"cred_{i}",
+                credential_type=CredentialType.API_KEY,
+                keys={"api_key": CredentialKey(name="api_key", value=SecretStr(f"key_{i}"))},
+            )
+            storage.save(cred)
+
+        results = {"saves": 0, "deletes": 0}
+        lock = threading.Lock()
+
+        def save_new(thread_id):
+            cred = CredentialObject(
+                id=f"new_cred_{thread_id}",
+                credential_type=CredentialType.API_KEY,
+                keys={
+                    "api_key": CredentialKey(
+                        name="api_key", value=SecretStr(f"new_key_{thread_id}")
+                    )
+                },
+            )
+            storage.save(cred)
+            with lock:
+                results["saves"] += 1
+
+        def delete_existing(cred_id):
+            storage.delete(cred_id)
+            with lock:
+                results["deletes"] += 1
+
+        threads = []
+        for i in range(5):
+            threads.append(threading.Thread(target=save_new, args=(i,)))
+            threads.append(threading.Thread(target=delete_existing, args=(f"cred_{i}",)))
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert results["saves"] == 5
+        assert results["deletes"] == 5
+        assert len(storage.list_all()) == 10
+
+    def test_lock_file_created(self, storage, temp_dir):
+        """Test that lock file is created during index update."""
+        cred = CredentialObject(
+            id="test_cred",
+            credential_type=CredentialType.API_KEY,
+            keys={"api_key": CredentialKey(name="api_key", value=SecretStr("test_key"))},
+        )
+        storage.save(cred)
+
+        lock_path = temp_dir / "metadata" / ".index.lock"
+        assert lock_path.exists()
+
+    def test_high_concurrency_stress(self, temp_dir):
+        """Test with high concurrency to verify robustness."""
+        import threading
+
+        storage = EncryptedFileStorage(temp_dir)
+        num_threads = 50
+        saved = []
+        lock = threading.Lock()
+
+        def save_credential(thread_id):
+            cred = CredentialObject(
+                id=f"stress_cred_{thread_id}",
+                credential_type=CredentialType.API_KEY,
+                keys={
+                    "api_key": CredentialKey(name="api_key", value=SecretStr(f"key_{thread_id}"))
+                },
+            )
+            storage.save(cred)
+            with lock:
+                saved.append(thread_id)
+
+        threads = [threading.Thread(target=save_credential, args=(i,)) for i in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(saved) == num_threads
+        assert len(storage.list_all()) == num_threads
+
+    def test_end_to_end_concurrent_workflow(self, temp_dir):
+        """Test full concurrent workflow with saves and deletes."""
+        import threading
+
+        storage = EncryptedFileStorage(temp_dir)
+        num_credentials = 30
+        save_results = []
+        save_lock = threading.Lock()
+
+        def save_cred(i):
+            cred = CredentialObject(
+                id=f"e2e_cred_{i}",
+                credential_type=CredentialType.API_KEY,
+                keys={"api_key": CredentialKey(name="api_key", value=SecretStr(f"secret_{i}"))},
+            )
+            storage.save(cred)
+            with save_lock:
+                save_results.append(i)
+
+        save_threads = [
+            threading.Thread(target=save_cred, args=(i,)) for i in range(num_credentials)
+        ]
+        for t in save_threads:
+            t.start()
+        for t in save_threads:
+            t.join()
+
+        assert len(save_results) == num_credentials
+        assert len(storage.list_all()) == num_credentials
+
+        for i in range(num_credentials):
+            loaded = storage.load(f"e2e_cred_{i}")
+            assert loaded is not None
+            assert loaded.get_key("api_key") == f"secret_{i}"
+
+        delete_count = num_credentials // 2
+        delete_results = []
+        delete_lock = threading.Lock()
+
+        def delete_cred(i):
+            storage.delete(f"e2e_cred_{i}")
+            with delete_lock:
+                delete_results.append(i)
+
+        delete_threads = [
+            threading.Thread(target=delete_cred, args=(i,)) for i in range(delete_count)
+        ]
+        for t in delete_threads:
+            t.start()
+        for t in delete_threads:
+            t.join()
+
+        assert len(delete_results) == delete_count
+        assert len(storage.list_all()) == num_credentials - delete_count
+
+        for i in range(delete_count):
+            assert storage.load(f"e2e_cred_{i}") is None
+        for i in range(delete_count, num_credentials):
+            loaded = storage.load(f"e2e_cred_{i}")
+            assert loaded is not None
+            assert loaded.get_key("api_key") == f"secret_{i}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
