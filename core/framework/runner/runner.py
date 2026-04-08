@@ -29,6 +29,7 @@ from framework.runtime.agent_runtime import AgentRuntime, AgentRuntimeConfig, cr
 from framework.runtime.execution_stream import EntryPointSpec
 from framework.runtime.runtime_log_store import RuntimeLogStore
 from framework.tools.flowchart_utils import generate_fallback_flowchart
+from framework.utils.io import atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ def _save_refreshed_credentials(token_data: dict) -> None:
             return
 
         if CLAUDE_CREDENTIALS_FILE.exists():
-            with open(CLAUDE_CREDENTIALS_FILE, "w", encoding="utf-8") as f:
+            with atomic_write(CLAUDE_CREDENTIALS_FILE, chmod=0o600) as f:
                 json.dump(creds, f, indent=2)
             logger.debug("Claude Code credentials refreshed in file")
     except (json.JSONDecodeError, OSError, KeyError) as exc:
