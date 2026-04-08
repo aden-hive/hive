@@ -10,6 +10,7 @@ API Reference: https://developers.hubspot.com/docs/api/crm
 
 from __future__ import annotations
 
+import json
 import os
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +19,35 @@ from fastmcp import FastMCP
 
 if TYPE_CHECKING:
     from aden_tools.credentials import CredentialStoreAdapter
+
+
+def _parse_list_param(value: str | list[str] | None) -> list[str] | None:
+    """Parse a parameter that can be a list or a JSON string representation of a list.
+
+    Accepts:
+    - list[str]: direct list (already correct format)
+    - str: JSON string like '["dealname", "dealstage"]' (LLM may send this)
+    - None: no value specified
+
+    Returns:
+        Parsed list of strings, or None if input is None/invalid
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return None
+
 
 HUBSPOT_API_BASE = "https://api.hubapi.com"
 
@@ -81,11 +111,14 @@ class _HubSpotClient:
         object_type: str,
         object_id: str,
         properties: list[str] | None = None,
+        associations: list[str] | None = None,
     ) -> dict[str, Any]:
         """Get a single CRM object by ID."""
-        params: dict[str, str] = {}
+        params: dict[str, Any] = {}
         if properties:
             params["properties"] = ",".join(properties)
+        if associations:
+            params["associations"] = ",".join(associations)
 
         response = httpx.get(
             f"{HUBSPOT_API_BASE}/crm/v3/objects/{object_type}/{object_id}",
@@ -229,7 +262,7 @@ def register_tools(
     @mcp.tool()
     def hubspot_search_contacts(
         query: str = "",
-        properties: list[str] | None = None,
+        properties: str | list[str] | None = None,
         limit: int = 10,
         account: str = "",
     ) -> dict:
@@ -248,9 +281,10 @@ def register_tools(
         client = _get_client(account)
         if isinstance(client, dict):
             return client
+        parsed_properties = _parse_list_param(properties)
         try:
             return client.search_objects(
-                "contacts", query, properties or ["email", "firstname", "lastname"], limit
+                "contacts", query, parsed_properties or ["email", "firstname", "lastname"], limit
             )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -260,7 +294,7 @@ def register_tools(
     @mcp.tool()
     def hubspot_get_contact(
         contact_id: str,
-        properties: list[str] | None = None,
+        properties: str | list[str] | None = None,
         account: str = "",
     ) -> dict:
         """
@@ -277,8 +311,9 @@ def register_tools(
         client = _get_client(account)
         if isinstance(client, dict):
             return client
+        parsed_properties = _parse_list_param(properties)
         try:
-            return client.get_object("contacts", contact_id, properties)
+            return client.get_object("contacts", contact_id, parsed_properties)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -340,7 +375,7 @@ def register_tools(
     @mcp.tool()
     def hubspot_search_companies(
         query: str = "",
-        properties: list[str] | None = None,
+        properties: str | list[str] | None = None,
         limit: int = 10,
         account: str = "",
     ) -> dict:
@@ -358,9 +393,10 @@ def register_tools(
         client = _get_client(account)
         if isinstance(client, dict):
             return client
+        parsed_properties = _parse_list_param(properties)
         try:
             return client.search_objects(
-                "companies", query, properties or ["name", "domain", "industry"], limit
+                "companies", query, parsed_properties or ["name", "domain", "industry"], limit
             )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -370,7 +406,7 @@ def register_tools(
     @mcp.tool()
     def hubspot_get_company(
         company_id: str,
-        properties: list[str] | None = None,
+        properties: str | list[str] | None = None,
         account: str = "",
     ) -> dict:
         """
@@ -386,8 +422,9 @@ def register_tools(
         client = _get_client(account)
         if isinstance(client, dict):
             return client
+        parsed_properties = _parse_list_param(properties)
         try:
-            return client.get_object("companies", company_id, properties)
+            return client.get_object("companies", company_id, parsed_properties)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
@@ -449,7 +486,7 @@ def register_tools(
     @mcp.tool()
     def hubspot_search_deals(
         query: str = "",
-        properties: list[str] | None = None,
+        properties: str | list[str] | None = None,
         limit: int = 10,
         account: str = "",
     ) -> dict:
@@ -468,9 +505,20 @@ def register_tools(
         client = _get_client(account)
         if isinstance(client, dict):
             return client
+        parsed_properties = _parse_list_param(properties)
         try:
             return client.search_objects(
-                "deals", query, properties or ["dealname", "amount", "dealstage"], limit
+                "deals",
+                query,
+                parsed_properties
+                or [
+                    "dealname",
+                    "amount",
+                    "dealstage",
+                    "hs_lastmodifieddate",
+                    "notes_last_contacted",
+                ],
+                limit,
             )
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
@@ -480,7 +528,8 @@ def register_tools(
     @mcp.tool()
     def hubspot_get_deal(
         deal_id: str,
-        properties: list[str] | None = None,
+        properties: str | list[str] | None = None,
+        include_associations: str | list[str] | None = None,
         account: str = "",
     ) -> dict:
         """
@@ -490,6 +539,9 @@ def register_tools(
             deal_id: The HubSpot deal ID
             properties: List of properties to return
                 (e.g., ["dealname", "amount", "dealstage"])
+            include_associations: Object types to include associations for
+                (e.g., ["contacts"] returns associated contact IDs under
+                result.associations.contacts.results)
 
         Returns:
             Dict with deal data or error
@@ -497,8 +549,10 @@ def register_tools(
         client = _get_client(account)
         if isinstance(client, dict):
             return client
+        parsed_properties = _parse_list_param(properties)
+        parsed_associations = _parse_list_param(include_associations)
         try:
-            return client.get_object("deals", deal_id, properties)
+            return client.get_object("deals", deal_id, parsed_properties, parsed_associations)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:
