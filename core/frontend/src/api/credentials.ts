@@ -8,6 +8,21 @@ export interface CredentialInfo {
   updated_at: string | null;
 }
 
+export interface CredentialSpec {
+  credential_name: string;
+  credential_id: string;
+  env_var: string;
+  description: string;
+  help_url: string;
+  api_key_instructions: string;
+  tools: string[];
+  aden_supported: boolean;
+  direct_api_key_supported: boolean;
+  credential_key: string;
+  credential_group: string;
+  available: boolean;
+}
+
 export interface AgentCredentialRequirement {
   credential_name: string;
   credential_id: string;
@@ -26,6 +41,9 @@ export interface AgentCredentialRequirement {
 }
 
 export const credentialsApi = {
+  listSpecs: () =>
+    api.get<{ specs: CredentialSpec[]; has_aden_key: boolean }>("/credentials/specs"),
+
   list: () =>
     api.get<{ credentials: CredentialInfo[] }>("/credentials"),
 
