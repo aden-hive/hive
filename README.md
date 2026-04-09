@@ -139,6 +139,48 @@ Now you can run an agent by selecting the agent (either an existing agent or exa
 
 <img width="2549" height="1174" alt="Screenshot 2026-03-12 at 9 27 36 PM" src="https://github.com/user-attachments/assets/7c7d30fa-9ceb-4c23-95af-b1caa405547d" />
 
+## 🚀 Quick Start for Contributors (5 min)
+
+If you're new and want to make your first contribution quickly:
+
+### 1. Setup
+
+```bash
+git clone https://github.com/aden-hive/hive.git
+cd hive
+./quickstart.sh
+```
+
+### 2. Run the project
+
+```bash
+hive open
+```
+
+### 3. First Contributions (No assignment needed)
+
+* Fix typos in docs
+* Improve unclear instructions
+* Add missing steps
+* Improve formatting
+
+### 4. Run checks before PR
+
+```bash
+make check
+make test
+```
+
+### 5. Create PR
+
+Use:
+
+```
+docs: improve README clarity
+```
+
+💡 Tip: Documentation improvements do NOT require issue assignment.
+
 ## Features
 
 - **Browser-Use** - Control the browser on your computer to achieve hard tasks
