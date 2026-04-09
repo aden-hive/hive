@@ -1,4 +1,4 @@
-.PHONY: lint format check test install-hooks help
+.PHONY: lint format check test test-core test-tools install-hooks help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -20,8 +20,13 @@ check: ## Run all checks without modifying files (CI-safe)
 	cd core && ruff format --check .
 	cd tools && ruff format --check .
 
-test: ## Run all tests
+test: test-core test-tools ## Run all Python test suites
+
+test-core: ## Run core framework tests
 	cd core && uv run python -m pytest tests/ -v
+
+test-tools: ## Run tools package tests
+	cd tools && uv run pytest tests/ -v
 
 install-hooks: ## Install pre-commit hooks
 	uv pip install pre-commit
