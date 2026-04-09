@@ -31,6 +31,19 @@ export interface LiveSessionDetail extends LiveSession {
   cold?: boolean;
 }
 
+export interface HistorySession {
+  session_id: string;
+  cold: boolean;
+  live: boolean;
+  has_messages: boolean;
+  created_at: number;
+  agent_name?: string | null;
+  agent_path?: string | null;
+  queen_id?: string | null;
+  last_message?: string | null;
+  message_count?: number;
+}
+
 export interface EntryPoint {
   id: string;
   name: string;

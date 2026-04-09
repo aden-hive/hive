@@ -1,25 +1,30 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
+import QueenSessionSwitcher from "@/components/QueenSessionSwitcher";
 import { executionApi } from "@/api/execution";
 import { sessionsApi } from "@/api/sessions";
 import { queensApi } from "@/api/queens";
 import { useMultiSSE } from "@/hooks/use-sse";
-import type { AgentEvent } from "@/api/types";
+import type { AgentEvent, HistorySession } from "@/api/types";
 import { sseEventToChatMessage } from "@/lib/chat-helpers";
 import { useColony } from "@/context/ColonyContext";
+import { useHeaderActions } from "@/context/HeaderActionsContext";
 import { getQueenForAgent } from "@/lib/colony-registry";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
 export default function QueenDM() {
   const { queenId } = useParams<{ queenId: string }>();
-  const { queens, queenProfiles } = useColony();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { queens, queenProfiles, refresh } = useColony();
+  const { setActions } = useHeaderActions();
   const profileQueen = queenProfiles.find((q) => q.id === queenId);
   const colonyQueen = queens.find((q) => q.id === queenId);
   const queenInfo = getQueenForAgent(queenId || "");
   const queenName = profileQueen?.name ?? colonyQueen?.name ?? queenInfo.name;
+  const selectedSessionParam = searchParams.get("session");
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -34,34 +39,67 @@ export default function QueenDM() {
   >(null);
   const [awaitingInput, setAwaitingInput] = useState(false);
   const [, setActiveToolCalls] = useState<Record<string, { name: string; done: boolean }>>({});
+  const [historySessions, setHistorySessions] = useState<HistorySession[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [switchingSessionId, setSwitchingSessionId] = useState<string | null>(null);
 
   const turnCounterRef = useRef(0);
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
   const [queenPhase, setQueenPhase] = useState<"planning" | "building" | "staging" | "running" | "independent">("independent");
 
-  // Switch queen session when queenId changes
-  useEffect(() => {
-    if (!queenId) return;
-
-    // Immediately reset UI for the new queen
+  const resetViewState = useCallback(() => {
     setSessionId(null);
     setMessages([]);
     setQueenReady(false);
-    setLoading(true);
     setIsTyping(false);
     setIsStreaming(false);
     setPendingQuestion(null);
     setPendingOptions(null);
     setPendingQuestions(null);
     setAwaitingInput(false);
+    setActiveToolCalls({});
+    setQueenPhase("independent");
     turnCounterRef.current = 0;
     queenIterTextRef.current = {};
+  }, []);
+
+  const restoreMessages = useCallback(
+    async (sid: string, cancelled: () => boolean) => {
+      try {
+        const { events } = await sessionsApi.eventsHistory(sid);
+        if (cancelled()) return;
+        const restored: ChatMessage[] = [];
+        for (const evt of events) {
+          const msg = sseEventToChatMessage(evt, "queen-dm", queenName);
+          if (!msg) continue;
+          if (evt.stream_id === "queen") msg.role = "queen";
+          restored.push(msg);
+        }
+        if (restored.length > 0 && !cancelled()) {
+          restored.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+          setMessages(restored);
+          setIsTyping(false);
+        }
+      } catch {
+        // No history
+      }
+    },
+    [queenName],
+  );
+
+  useEffect(() => {
+    if (!queenId) return;
+
+    resetViewState();
+    setLoading(true);
 
     let cancelled = false;
 
     (async () => {
       try {
-        const result = await queensApi.getOrCreateSession(queenId, undefined, "independent");
+        const result = selectedSessionParam
+          ? await queensApi.selectSession(queenId, selectedSessionParam)
+          : await queensApi.getOrCreateSession(queenId, undefined, "independent");
         if (cancelled) return;
 
         const sid = result.session_id;
@@ -70,40 +108,82 @@ export default function QueenDM() {
         // Show typing indicator while the queen initializes (identity hook + first turn)
         setIsTyping(true);
 
-        // Restore messages from history
-        if (result.status === "live" || result.status === "resumed") {
-          try {
-            const { events } = await sessionsApi.eventsHistory(sid);
-            if (cancelled) return;
-            const restored: ChatMessage[] = [];
-            for (const evt of events) {
-              const msg = sseEventToChatMessage(evt, "queen-dm", queenName);
-              if (!msg) continue;
-              if (evt.stream_id === "queen") msg.role = "queen";
-              restored.push(msg);
-            }
-            if (restored.length > 0) {
-              restored.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-              if (!cancelled) {
-                setMessages(restored);
-                setIsTyping(false);
-              }
-            }
-          } catch {
-            // No history
-          }
+        if (selectedSessionParam && selectedSessionParam !== sid) {
+          setSearchParams({ session: sid }, { replace: true });
         }
+        await restoreMessages(sid, () => cancelled);
+        refresh();
       } catch {
         // Session creation failed
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setSwitchingSessionId(null);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [queenId, queenName]);
+  }, [queenId, selectedSessionParam, restoreMessages, refresh, resetViewState, setSearchParams]);
+
+  useEffect(() => {
+    if (!queenId) return;
+    let cancelled = false;
+    setHistoryLoading(true);
+
+    sessionsApi
+      .history()
+      .then(({ sessions }) => {
+        if (cancelled) return;
+        const filtered = sessions
+          .filter((session) => session.queen_id === queenId)
+          .sort((a, b) => b.created_at - a.created_at);
+        setHistorySessions(filtered);
+      })
+      .catch(() => {
+        if (!cancelled) setHistorySessions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [queenId, sessionId]);
+
+  const handleSelectHistoricalSession = useCallback(
+    (nextSessionId: string) => {
+      if (!nextSessionId || nextSessionId === sessionId) return;
+      setSwitchingSessionId(nextSessionId);
+      setSearchParams({ session: nextSessionId });
+    },
+    [sessionId, setSearchParams],
+  );
+
+  useEffect(() => {
+    if (!queenId) return;
+    setActions(
+      <QueenSessionSwitcher
+        sessions={historySessions}
+        currentSessionId={sessionId}
+        loading={historyLoading}
+        switchingSessionId={switchingSessionId}
+        onSelect={handleSelectHistoricalSession}
+      />
+    );
+    return () => setActions(null);
+  }, [
+    handleSelectHistoricalSession,
+    historyLoading,
+    historySessions,
+    queenId,
+    sessionId,
+    setActions,
+    switchingSessionId,
+  ]);
 
   // SSE handler
   const handleSSEEvent = useCallback(

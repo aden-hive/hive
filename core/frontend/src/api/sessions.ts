@@ -1,6 +1,7 @@
 import { api } from "./client";
 import type {
   AgentEvent,
+  HistorySession,
   LiveSession,
   LiveSessionDetail,
   EntryPoint,
@@ -85,7 +86,7 @@ export const sessionsApi = {
 
   /** List all queen sessions on disk — live + cold (post-restart). */
   history: () =>
-    api.get<{ sessions: Array<{ session_id: string; cold: boolean; live: boolean; has_messages: boolean; created_at: number; agent_name?: string | null; agent_path?: string | null; queen_id?: string | null }> }>("/sessions/history"),
+    api.get<{ sessions: HistorySession[] }>("/sessions/history"),
 
   /** Permanently delete a history session (stops live session + removes disk files). */
   deleteHistory: (sessionId: string) =>

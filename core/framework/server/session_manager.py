@@ -116,6 +116,26 @@ class SessionManager:
         except Exception:
             logger.warning("v2 migration failed (non-fatal)", exc_info=True)
 
+    def build_llm(self, model: str | None = None):
+        """Construct an LLM provider using the server's configured defaults."""
+        from framework.config import RuntimeConfig, get_hive_config
+
+        rc = RuntimeConfig(model=model or self._model or RuntimeConfig().model)
+        llm_config = get_hive_config().get("llm", {})
+        if llm_config.get("use_antigravity_subscription"):
+            from framework.llm.antigravity import AntigravityProvider
+
+            return AntigravityProvider(model=rc.model)
+
+        from framework.llm.litellm import LiteLLMProvider
+
+        return LiteLLMProvider(
+            model=rc.model,
+            api_key=rc.api_key,
+            api_base=rc.api_base,
+            **rc.extra_kwargs,
+        )
+
     # ------------------------------------------------------------------
     # Session lifecycle
     # ------------------------------------------------------------------
@@ -129,7 +149,6 @@ class SessionManager:
 
         Internal helper — use create_session() or create_session_with_worker_graph().
         """
-        from framework.config import RuntimeConfig, get_hive_config
         from framework.host.event_bus import EventBus
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -139,24 +158,8 @@ class SessionManager:
             if resolved_id in self._sessions:
                 raise ValueError(f"Session '{resolved_id}' already exists")
 
-        # Load LLM config from ~/.hive/configuration.json
-        rc = RuntimeConfig(model=model or self._model or RuntimeConfig().model)
-
         # Session owns these — shared with queen and worker
-        llm_config = get_hive_config().get("llm", {})
-        if llm_config.get("use_antigravity_subscription"):
-            from framework.llm.antigravity import AntigravityProvider
-
-            llm = AntigravityProvider(model=rc.model)
-        else:
-            from framework.llm.litellm import LiteLLMProvider
-
-            llm = LiteLLMProvider(
-                model=rc.model,
-                api_key=rc.api_key,
-                api_base=rc.api_base,
-                **rc.extra_kwargs,
-            )
+        llm = self.build_llm(model=model)
         event_bus = EventBus()
 
         session = Session(

@@ -4,6 +4,7 @@
 - GET    /api/queen/{queen_id}/profile      -- get full queen profile
 - PATCH  /api/queen/{queen_id}/profile      -- update queen profile fields
 - POST   /api/queen/{queen_id}/session      -- get or create a persistent session for a queen
+- POST   /api/queen/{queen_id}/session/select -- resume a specific session for a queen
 """
 
 import json
@@ -21,6 +22,91 @@ from framework.agents.queen.queen_profiles import (
 from framework.config import QUEENS_DIR
 
 logger = logging.getLogger(__name__)
+
+
+async def _stop_live_sessions(manager, keep_session_id: str | None = None) -> None:
+    """Stop live sessions so only the selected queen session remains active."""
+    for session in list(manager.list_sessions()):
+        if keep_session_id and session.id == keep_session_id:
+            continue
+        try:
+            await manager.stop_session(session.id)
+        except Exception:
+            logger.debug("Failed to stop session %s during queen switch", session.id)
+
+
+def _read_queen_session_meta(queen_id: str, session_id: str) -> dict[str, Any]:
+    """Return persisted metadata for a queen session when available."""
+    session_dir = QUEENS_DIR / queen_id / "sessions" / session_id
+    meta_path = session_dir / "meta.json"
+    if not meta_path.exists():
+        return {}
+    try:
+        raw = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _session_belongs_to_queen(manager, session_id: str, queen_id: str) -> bool:
+    """Check live or persisted ownership for a queen session."""
+    live_session = manager.get_session(session_id)
+    if live_session is not None:
+        return live_session.queen_name == queen_id
+
+    from framework.server.session_manager import _find_queen_session_dir
+
+    session_dir = _find_queen_session_dir(session_id)
+    return (
+        session_dir.exists()
+        and session_dir.is_dir()
+        and session_dir.parent.name == "sessions"
+        and session_dir.parent.parent.name == queen_id
+    )
+
+
+async def _create_bound_queen_session(
+    manager,
+    queen_id: str,
+    *,
+    initial_prompt: str | None = None,
+    initial_phase: str | None = None,
+    resume_from: str | None = None,
+):
+    """Create or resume a session that is explicitly bound to a queen."""
+    agent_path = None
+    if resume_from:
+        meta = _read_queen_session_meta(queen_id, resume_from)
+        candidate = meta.get("agent_path")
+        if isinstance(candidate, str) and candidate:
+            agent_path = candidate
+
+    if agent_path:
+        try:
+            from framework.server.app import validate_agent_path
+
+            resolved_agent_path = str(validate_agent_path(agent_path))
+            return await manager.create_session_with_worker_graph(
+                resolved_agent_path,
+                queen_resume_from=resume_from,
+                initial_prompt=initial_prompt,
+                queen_name=queen_id,
+                initial_phase=initial_phase,
+            )
+        except Exception:
+            logger.debug(
+                "Failed to restore worker-backed queen session %s for %s; falling back to queen-only",
+                resume_from,
+                queen_id,
+                exc_info=True,
+            )
+
+    return await manager.create_session(
+        queen_resume_from=resume_from,
+        initial_prompt=initial_prompt,
+        queen_name=queen_id,
+        initial_phase=initial_phase,
+    )
 
 
 async def handle_list_profiles(request: web.Request) -> web.Response:
@@ -135,9 +221,6 @@ async def handle_queen_session(request: web.Request) -> web.Response:
     initial_phase = body.get("initial_phase")
 
     # 1. Check for an existing live session bound to this queen.
-    #    Stop any live sessions bound to a *different* queen so only one
-    #    queen is active at a time.
-    other_sessions: list[str] = []
     for session in manager.list_sessions():
         if session.queen_name == queen_id:
             return web.json_response({
@@ -145,13 +228,10 @@ async def handle_queen_session(request: web.Request) -> web.Response:
                 "queen_id": queen_id,
                 "status": "live",
             })
-        other_sessions.append(session.id)
 
-    for sid in other_sessions:
-        try:
-            await manager.stop_session(sid)
-        except Exception:
-            logger.debug("Failed to stop session %s during queen switch", sid)
+    # Stop any live sessions bound to a different queen so only one queen
+    # is active at a time.
+    await _stop_live_sessions(manager)
 
     # 2. Find the most recent cold session for this queen and resume it
     queen_sessions_dir = QUEENS_DIR / queen_id / "sessions"
@@ -170,42 +250,13 @@ async def handle_queen_session(request: web.Request) -> web.Response:
 
     # 3. Create (or resume) the session, pre-bound to this queen
     if resume_from:
-        # Check if the cold session had a worker loaded
-        meta_path = queen_sessions_dir / resume_from / "meta.json"
-        agent_path = None
-        if meta_path.exists():
-            try:
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                agent_path = meta.get("agent_path")
-            except (json.JSONDecodeError, OSError):
-                pass
-
-        if agent_path:
-            try:
-                from framework.server.app import validate_agent_path
-
-                agent_path = str(validate_agent_path(agent_path))
-                session = await manager.create_session_with_worker_graph(
-                    agent_path,
-                    queen_resume_from=resume_from,
-                    initial_prompt=initial_prompt,
-                    queen_name=queen_id,
-                    initial_phase=initial_phase,
-                )
-            except Exception:
-                session = await manager.create_session(
-                    queen_resume_from=resume_from,
-                    initial_prompt=initial_prompt,
-                    queen_name=queen_id,
-                    initial_phase=initial_phase,
-                )
-        else:
-            session = await manager.create_session(
-                queen_resume_from=resume_from,
-                initial_prompt=initial_prompt,
-                queen_name=queen_id,
-                initial_phase=initial_phase,
-            )
+        session = await _create_bound_queen_session(
+            manager,
+            queen_id,
+            initial_prompt=initial_prompt,
+            initial_phase=initial_phase,
+            resume_from=resume_from,
+        )
         status = "resumed"
     else:
         session = await manager.create_session(
@@ -222,9 +273,64 @@ async def handle_queen_session(request: web.Request) -> web.Response:
     })
 
 
+async def handle_select_queen_session(request: web.Request) -> web.Response:
+    """POST /api/queen/{queen_id}/session/select -- resume a specific queen session."""
+    queen_id = request.match_info["queen_id"]
+    manager = request.app["manager"]
+
+    ensure_default_queens()
+    try:
+        load_queen_profile(queen_id)
+    except FileNotFoundError:
+        return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
+
+    body = await request.json() if request.can_read_body else {}
+    target_session_id = body.get("session_id")
+    if not isinstance(target_session_id, str) or not target_session_id.strip():
+        return web.json_response({"error": "session_id is required"}, status=400)
+    target_session_id = target_session_id.strip()
+
+    if not _session_belongs_to_queen(manager, target_session_id, queen_id):
+        return web.json_response(
+            {"error": f"Session '{target_session_id}' does not belong to queen '{queen_id}'"},
+            status=404,
+        )
+
+    live_session = manager.get_session(target_session_id)
+    if live_session is not None:
+        await _stop_live_sessions(manager, keep_session_id=target_session_id)
+        return web.json_response(
+            {
+                "session_id": live_session.id,
+                "queen_id": queen_id,
+                "status": "live",
+            }
+        )
+
+    await _stop_live_sessions(manager)
+
+    meta = _read_queen_session_meta(queen_id, target_session_id)
+    agent_path = meta.get("agent_path")
+    initial_phase = None if agent_path else "independent"
+    session = await _create_bound_queen_session(
+        manager,
+        queen_id,
+        initial_phase=initial_phase,
+        resume_from=target_session_id,
+    )
+    return web.json_response(
+        {
+            "session_id": session.id,
+            "queen_id": queen_id,
+            "status": "resumed",
+        }
+    )
+
+
 def register_routes(app: web.Application) -> None:
     """Register queen profile routes."""
     app.router.add_get("/api/queen/profiles", handle_list_profiles)
     app.router.add_get("/api/queen/{queen_id}/profile", handle_get_profile)
     app.router.add_patch("/api/queen/{queen_id}/profile", handle_update_profile)
     app.router.add_post("/api/queen/{queen_id}/session", handle_queen_session)
+    app.router.add_post("/api/queen/{queen_id}/session/select", handle_select_queen_session)
