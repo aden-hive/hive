@@ -84,7 +84,17 @@ class OutputValidator:
             "DROP ",
         ]
 
-        def _check_segment(segment: str) -> bool:
+        def _check_segment(segment: str, before_char: str = "") -> bool:
+            """Check a segment for code indicators.
+
+            Args:
+                segment: The text segment to check.
+                before_char: The character immediately preceding this segment in
+                    the original string (empty string if this segment starts at
+                    position 0 of the original).  Used so that idx==0 inside a
+                    sampled chunk is not incorrectly treated as a true line-start
+                    when the chunk was taken from the middle of a larger string.
+            """
             # Strong indicators: immediate match
             if any(indicator in segment for indicator in strong_indicators):
                 return True
@@ -98,7 +108,15 @@ class OutputValidator:
             for indicator in weak_indicators:
                 idx = segment.find(indicator)
                 while idx != -1:
-                    at_line_start = idx == 0 or segment[idx - 1] == "\n"
+                    # True line-start: either we're at position 0 of the
+                    # original string (before_char is empty) or the preceding
+                    # character — either inside the segment or the carried-in
+                    # before_char — is a newline.
+                    if idx == 0:
+                        prev_char = before_char
+                    else:
+                        prev_char = segment[idx - 1]
+                    at_line_start = prev_char == "" or prev_char == "\n"
                     if at_line_start:
                         return True
                     # Mid-line: check if code context follows the indicator
@@ -109,17 +127,19 @@ class OutputValidator:
                     # non-whitespace character (true punctuation / syntax context).
                     # Whitespace alone (e.g. "update the class schedule") is NOT
                     # treated as code context to avoid false positives.
-                    before_char = segment[idx - 1] if idx > 0 else ""
-                    if before_char and not before_char.isalpha() and not before_char.isspace():
+                    if prev_char and not prev_char.isalpha() and not prev_char.isspace():
                         return True
                     idx = segment.find(indicator, idx + 1)
             return False
 
-        # For strings under 10KB, check the entire content
+        # For strings under 10KB, check the entire content (before_char="" since
+        # we're checking from position 0 of the original string).
         if len(value) < 10000:
             return _check_segment(value)
 
-        # For longer strings, sample at strategic positions
+        # For longer strings, sample at strategic positions.  Pass the character
+        # immediately before each chunk so _check_segment can correctly determine
+        # whether the very first character of the chunk is a true line-start.
         sample_positions = [
             0,  # Start
             len(value) // 4,  # 25%
@@ -130,7 +150,10 @@ class OutputValidator:
 
         for pos in sample_positions:
             chunk = value[pos : pos + 2000]
-            if _check_segment(chunk):
+            # The character just before the chunk in the original string.
+            # Empty string when the chunk starts at the very beginning.
+            chunk_before_char = value[pos - 1] if pos > 0 else ""
+            if _check_segment(chunk, before_char=chunk_before_char):
                 return True
 
         return False
