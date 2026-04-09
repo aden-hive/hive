@@ -45,6 +45,122 @@ def test_anthropic_curated_limits_track_documented_caps_with_safe_input_budget()
     assert opus_46["max_context_tokens"] == 872000
 
 
+def test_groq_catalog_tracks_current_production_models():
+    groq_default = model_catalog.get_default_models()["groq"]
+    groq_models = model_catalog.get_models_catalogue()["groq"]
+
+    assert groq_default == "openai/gpt-oss-120b"
+    assert [model["id"] for model in groq_models] == [
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+    ]
+    assert groq_models[0]["max_tokens"] == 65536
+    assert groq_models[0]["max_context_tokens"] == 131072
+
+
+def test_cerebras_catalog_tracks_public_models_endpoint():
+    cerebras_default = model_catalog.get_default_models()["cerebras"]
+    cerebras_models = model_catalog.get_models_catalogue()["cerebras"]
+
+    assert cerebras_default == "gpt-oss-120b"
+    assert [model["id"] for model in cerebras_models] == [
+        "gpt-oss-120b",
+        "llama3.1-8b",
+        "zai-glm-4.7",
+        "qwen-3-235b-a22b-instruct-2507",
+    ]
+    assert cerebras_models[0]["max_tokens"] == 40960
+    assert cerebras_models[0]["max_context_tokens"] == 131072
+    assert cerebras_models[1]["max_tokens"] == 8192
+    assert cerebras_models[1]["max_context_tokens"] == 32768
+
+
+def test_minimax_catalog_tracks_current_non_legacy_text_models():
+    minimax_default = model_catalog.get_default_models()["minimax"]
+    minimax_models = model_catalog.get_models_catalogue()["minimax"]
+
+    assert minimax_default == "MiniMax-M2.7"
+    assert [model["id"] for model in minimax_models] == [
+        "MiniMax-M2.7",
+        "MiniMax-M2.7-highspeed",
+        "MiniMax-M2.5",
+        "MiniMax-M2.5-highspeed",
+    ]
+    assert all(model["max_context_tokens"] == 204800 for model in minimax_models)
+    assert all(model["max_tokens"] == 32768 for model in minimax_models)
+
+
+def test_mistral_catalog_tracks_current_curated_models():
+    mistral_default = model_catalog.get_default_models()["mistral"]
+    mistral_models = model_catalog.get_models_catalogue()["mistral"]
+
+    assert mistral_default == "mistral-large-2512"
+    assert [model["id"] for model in mistral_models] == [
+        "mistral-large-2512",
+        "mistral-medium-2508",
+        "mistral-small-2603",
+        "codestral-2508",
+    ]
+    assert mistral_models[0]["max_context_tokens"] == 256000
+    assert mistral_models[1]["max_context_tokens"] == 128000
+    assert mistral_models[2]["max_context_tokens"] == 256000
+    assert mistral_models[3]["max_context_tokens"] == 128000
+
+
+def test_together_catalog_tracks_current_serverless_recommendations():
+    together_default = model_catalog.get_default_models()["together"]
+    together_models = model_catalog.get_models_catalogue()["together"]
+
+    assert together_default == "deepseek-ai/DeepSeek-V3.1"
+    assert [model["id"] for model in together_models] == [
+        "deepseek-ai/DeepSeek-V3.1",
+        "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",
+        "openai/gpt-oss-120b",
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    ]
+    assert together_models[0]["max_context_tokens"] == 128000
+    assert together_models[1]["max_context_tokens"] == 262144
+    assert together_models[2]["max_context_tokens"] == 128000
+    assert together_models[3]["max_context_tokens"] == 131072
+
+
+def test_deepseek_catalog_tracks_current_api_models():
+    deepseek_default = model_catalog.get_default_models()["deepseek"]
+    deepseek_models = model_catalog.get_models_catalogue()["deepseek"]
+
+    assert deepseek_default == "deepseek-chat"
+    assert [model["id"] for model in deepseek_models] == [
+        "deepseek-chat",
+        "deepseek-reasoner",
+    ]
+    assert deepseek_models[0]["max_tokens"] == 8192
+    assert deepseek_models[0]["max_context_tokens"] == 128000
+    assert deepseek_models[1]["max_tokens"] == 64000
+    assert deepseek_models[1]["max_context_tokens"] == 128000
+
+
+def test_openrouter_catalog_tracks_current_frontier_set():
+    openrouter_default = model_catalog.get_default_models()["openrouter"]
+    openrouter_models = model_catalog.get_models_catalogue()["openrouter"]
+
+    assert openrouter_default == "openai/gpt-5.4"
+    assert [model["id"] for model in openrouter_models] == [
+        "openai/gpt-5.4",
+        "anthropic/claude-sonnet-4.6",
+        "anthropic/claude-opus-4.6",
+        "google/gemini-3.1-pro-preview",
+        "deepseek/deepseek-v3.2",
+    ]
+    assert openrouter_models[0]["max_tokens"] == 128000
+    assert openrouter_models[0]["max_context_tokens"] == 922000
+    assert openrouter_models[1]["max_context_tokens"] == 936000
+    assert openrouter_models[2]["max_context_tokens"] == 872000
+    assert openrouter_models[3]["max_context_tokens"] == 1048576
+    assert openrouter_models[4]["max_context_tokens"] == 163840
+
+
 def test_find_model_any_provider_returns_provider_and_model():
     provider_id, model = model_catalog.find_model_any_provider("google/gemini-2.5-pro")
 
@@ -61,6 +177,15 @@ def test_get_preset_returns_subscription_specific_limits():
     assert preset["max_tokens"] == 32768
     assert preset["max_context_tokens"] == 240000
     assert preset["api_base"] == "https://api.kimi.com/coding"
+
+
+def test_minimax_preset_uses_current_default_model():
+    preset = model_catalog.get_preset("minimax_code")
+
+    assert preset is not None
+    assert preset["model"] == "MiniMax-M2.7"
+    assert preset["max_tokens"] == 32768
+    assert preset["max_context_tokens"] == 204800
 
 
 def test_load_model_catalog_rejects_duplicate_model_ids(tmp_path, monkeypatch):

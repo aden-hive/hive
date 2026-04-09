@@ -1369,7 +1369,7 @@ switch ($num) {
         Apply-Preset "minimax_code"
         Write-Host ""
         Write-Ok "Using MiniMax coding key"
-        Write-Color -Text "  Model: MiniMax-M2.5 | API: api.minimax.io" -Color DarkGray
+        Write-Color -Text "  Model: MiniMax-M2.7 | API: api.minimax.io" -Color DarkGray
     }
     5 {
         # Kimi Code Subscription

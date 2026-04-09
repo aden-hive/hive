@@ -43,19 +43,19 @@ API_KEY_PROVIDERS = [
     (
         "GROQ_API_KEY",
         "Groq",
-        "moonshotai/kimi-k2-instruct-0905",
-        "moonshotai/kimi-k2-instruct-0905",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-120b",
     ),
-    ("MISTRAL_API_KEY", "Mistral", "mistral-large-latest", "mistral-large-latest"),
-    ("CEREBRAS_API_KEY", "Cerebras", "cerebras/zai-glm-4.7", "cerebras/zai-glm-4.7"),
+    ("MISTRAL_API_KEY", "Mistral", "mistral-large-2512", "mistral-large-2512"),
+    ("CEREBRAS_API_KEY", "Cerebras", "cerebras/gpt-oss-120b", "cerebras/gpt-oss-120b"),
     (
         "TOGETHER_API_KEY",
         "Together AI",
-        "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo",
-        "together_ai/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "together_ai/deepseek-ai/DeepSeek-V3.1",
+        "together_ai/deepseek-ai/DeepSeek-V3.1",
     ),
     ("DEEPSEEK_API_KEY", "DeepSeek", "deepseek-chat", "deepseek-chat"),
-    ("MINIMAX_API_KEY", "MiniMax", "MiniMax-M2.5", "MiniMax-M2.5"),
+    ("MINIMAX_API_KEY", "MiniMax", "MiniMax-M2.7", "MiniMax-M2.7"),
     ("HIVE_API_KEY", "Hive LLM", "hive/queen", "hive/queen"),
 ]
 

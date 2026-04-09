@@ -1370,7 +1370,7 @@ case $choice in
         SIGNUP_URL="https://platform.minimax.io/user-center/basic-information/interface-key"
         echo ""
         echo -e "${GREEN}⬢${NC} Using MiniMax coding key"
-        echo -e "  ${DIM}Model: MiniMax-M2.5 | API: api.minimax.io${NC}"
+        echo -e "  ${DIM}Model: MiniMax-M2.7 | API: api.minimax.io${NC}"
         ;;
     5)
         # Kimi Code Subscription
