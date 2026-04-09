@@ -27,6 +27,10 @@ class Tool:
     name: str
     description: str
     parameters: dict[str, Any] = field(default_factory=dict)
+    # Economic mode: marks tools that make paid external API calls.
+    # Set by tool authors via MCP annotations or directly on Tool(..., is_paid=True).
+    # Never sent to the LLM API — purely internal to the framework.
+    is_paid: bool = False
 
 
 @dataclass

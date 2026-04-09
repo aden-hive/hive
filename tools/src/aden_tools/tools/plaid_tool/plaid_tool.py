@@ -79,7 +79,7 @@ def register_tools(
 ) -> None:
     """Register Plaid tools with the MCP server."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def plaid_get_accounts(access_token: str) -> dict[str, Any]:
         """
         Get all accounts linked to a Plaid Item.
@@ -118,7 +118,7 @@ def register_tools(
             )
         return {"accounts": accounts, "count": len(accounts)}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def plaid_get_balance(access_token: str) -> dict[str, Any]:
         """
         Get real-time balance for all accounts linked to a Plaid Item.
@@ -155,7 +155,7 @@ def register_tools(
             )
         return {"accounts": accounts}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def plaid_sync_transactions(
         access_token: str,
         cursor: str = "",
@@ -214,7 +214,7 @@ def register_tools(
             "has_more": data.get("has_more", False),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def plaid_get_transactions(
         access_token: str,
         start_date: str,
@@ -275,7 +275,7 @@ def register_tools(
             "total_transactions": data.get("total_transactions", 0),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def plaid_get_institution(
         institution_id: str,
         country_codes: list[str] | None = None,
@@ -316,7 +316,7 @@ def register_tools(
             "oauth": inst.get("oauth", False),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def plaid_search_institutions(
         query: str,
         country_codes: list[str] | None = None,

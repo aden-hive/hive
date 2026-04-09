@@ -277,6 +277,19 @@ The following tools require credentials that are not set:
 Set these environment variables and re-run the agent.
 ```
 
+## Economic Mode — Marking Paid Tools
+
+If your tool makes external API calls that incur a cost (e.g. web search, data enrichment, SMS), mark it with `is_paid: True` in the MCP annotations. This lets the framework enforce `--node-budget` limits at runtime.
+
+```python
+@mcp.tool(annotations={"is_paid": True})
+def web_search(query: str, num_results: int = 10) -> dict:
+    """Search the web. Counts against the node's paid tool budget."""
+    ...
+```
+
+Tools **without** this annotation are treated as free and are never blocked by the budget. Only annotate tools that genuinely cost money per call — the framework uses this to decide what to hide from the LLM when the budget is exhausted.
+
 ## Best Practices
 
 ### Error Handling

@@ -81,7 +81,7 @@ def register_tools(
 
         return response.json()
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def exa_search(
         query: str,
         num_results: int = 10,
@@ -185,7 +185,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Exa search failed: {str(e)}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def exa_find_similar(
         url: str,
         num_results: int = 10,
@@ -265,7 +265,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Exa find similar failed: {str(e)}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def exa_get_contents(
         urls: list[str],
         include_text: bool = True,
@@ -337,7 +337,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Exa content extraction failed: {str(e)}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def exa_answer(
         query: str,
         include_citations: bool = True,
@@ -401,7 +401,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Exa answer failed: {str(e)}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def exa_search_news(
         query: str,
         num_results: int = 10,
@@ -484,7 +484,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Exa news search failed: {str(e)}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def exa_search_papers(
         query: str,
         num_results: int = 10,
@@ -560,7 +560,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"Exa paper search failed: {str(e)}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def exa_search_companies(
         query: str,
         num_results: int = 10,

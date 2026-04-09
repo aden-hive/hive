@@ -52,6 +52,7 @@ class RuntimeLogger:
         self._started_at = ""
         self._logged_node_ids: set[str] = set()
         self._lock = threading.Lock()
+        self._node_budget: int = -1  # -1 = economic mode off
 
     def start_run(self, goal_id: str = "", session_id: str = "") -> str:
         """Start a new run. Called by GraphExecutor at graph start. Returns run_id.
@@ -76,7 +77,12 @@ class RuntimeLogger:
         self._goal_id = goal_id
         self._started_at = datetime.now(UTC).isoformat()
         self._logged_node_ids = set()
+        self._node_budget = -1
         return self._run_id
+
+    def set_node_budget(self, node_budget: int) -> None:
+        """Record the per-node paid tool call budget for this run (-1 = off)."""
+        self._node_budget = node_budget
 
     def log_step(
         self,
@@ -117,6 +123,7 @@ class RuntimeLogger:
                     is_error=tc.get("is_error", False),
                     start_timestamp=tc.get("start_timestamp", ""),
                     duration_s=tc.get("duration_s", 0.0),
+                    is_paid=tc.get("is_paid", False),
                 )
             )
 
@@ -168,6 +175,8 @@ class RuntimeLogger:
         retry_count: int = 0,
         escalate_count: int = 0,
         continue_count: int = 0,
+        paid_tool_calls_used: int = 0,
+        budget_blocked_calls: int = 0,
     ) -> None:
         """Record completion of a node.
 
@@ -224,6 +233,8 @@ class RuntimeLogger:
             retry_count=retry_count,
             escalate_count=escalate_count,
             continue_count=continue_count,
+            paid_tool_calls_used=paid_tool_calls_used,
+            budget_blocked_calls=budget_blocked_calls,
             needs_attention=needs_attention,
             attention_reasons=attention_reasons,
             trace_id=trace_id,
@@ -292,6 +303,11 @@ class RuntimeLogger:
             for nd in node_details:
                 attention_reasons.extend(nd.attention_reasons)
 
+            # Economic mode aggregation
+            total_paid = sum(nd.paid_tool_calls_used for nd in node_details)
+            total_blocked = sum(nd.budget_blocked_calls for nd in node_details)
+            eco_active = self._node_budget >= 0
+
             # OTel / trace context for L1 correlation
             ctx = get_trace_context()
             trace_id = ctx.get("trace_id", "")
@@ -311,6 +327,10 @@ class RuntimeLogger:
                 started_at=self._started_at,
                 duration_ms=duration_ms,
                 execution_quality=execution_quality,
+                economic_mode=eco_active,
+                node_budget=self._node_budget if eco_active else 0,
+                total_paid_tool_calls=total_paid,
+                budget_blocked_calls=total_blocked,
                 trace_id=trace_id,
                 execution_id=execution_id,
             )

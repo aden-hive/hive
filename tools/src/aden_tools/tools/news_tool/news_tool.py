@@ -301,7 +301,7 @@ def register_tools(
             "providers": {"primary": primary, "fallback": fallback},
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def news_search(
         query: str,
         from_date: str | None = None,
@@ -359,7 +359,7 @@ def register_tools(
         result["query"] = query
         return result
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def news_headlines(
         category: str,
         country: str,
@@ -410,7 +410,7 @@ def register_tools(
         result["country"] = country
         return result
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def news_by_company(
         company_name: str,
         days_back: int = 7,
@@ -466,7 +466,7 @@ def register_tools(
         result["days_back"] = days_back
         return result
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def news_sentiment(
         query: str,
         from_date: str | None = None,
@@ -521,7 +521,7 @@ def register_tools(
         except Exception as e:
             return {"error": f"News sentiment failed: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def news_latest(
         language: str = "en",
         country: str | None = None,
@@ -595,7 +595,7 @@ def register_tools(
         )
         return result
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def news_by_source(
         sources: str,
         query: str | None = None,
@@ -651,7 +651,7 @@ def register_tools(
             result["query"] = query
         return result
 
-    @mcp.tool()
+    @mcp.tool(annotations={"is_paid": True})
     def news_by_topic(
         topic: str,
         days_back: int = 3,
