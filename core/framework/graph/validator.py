@@ -39,9 +39,10 @@ class OutputValidator:
 
         Strong indicators (e.g. "<script", "try:") flag immediately.
         Weak indicators (e.g. "class ", "import ") only flag when they appear
-        at the start of a line (\n prefix) AND occur at least twice in the
-        string segment. This prevents false positives from natural language
-        like "Let me update the class schedule".
+        at the start of a line, or are preceded by non-whitespace punctuation /
+        syntax characters, or are immediately followed by code-context characters
+        (parentheses, braces, colons, etc.). This prevents false positives from
+        natural language like "Let me update the class schedule".
 
         Args:
             value: The string to check for code indicators
@@ -104,9 +105,12 @@ class OutputValidator:
                     after = segment[idx + len(indicator):]
                     if after and after[0] in code_context_chars:
                         return True
-                    # Also check if the indicator is preceded by non-alpha (not a word part)
+                    # Also check if the indicator is preceded by a non-alpha,
+                    # non-whitespace character (true punctuation / syntax context).
+                    # Whitespace alone (e.g. "update the class schedule") is NOT
+                    # treated as code context to avoid false positives.
                     before_char = segment[idx - 1] if idx > 0 else ""
-                    if before_char and not before_char.isalpha():
+                    if before_char and not before_char.isalpha() and not before_char.isspace():
                         return True
                     idx = segment.find(indicator, idx + 1)
             return False

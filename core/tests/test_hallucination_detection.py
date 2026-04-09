@@ -177,7 +177,7 @@ class TestOutputValidatorHallucinationDetection:
 
         assert validator._contains_code_indicators(content) is False
 
-    def test_no_false_positive_for_natural_language_keywords(self):
+    def test_no_false_positive_for_natural_language_keywords(self) -> None:
         """Natural language use of programming keywords should not trigger."""
         validator = OutputValidator()
 
