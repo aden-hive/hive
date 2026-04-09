@@ -834,10 +834,11 @@ $DefaultModels = @{
     openai      = "gpt-5-mini"
     minimax     = "MiniMax-M2.5"
     gemini      = "gemini-3-flash-preview"
+    google      = "gemini-3-flash-preview"
     groq        = "moonshotai/kimi-k2-instruct-0905"
     cerebras    = "zai-glm-4.7"
     mistral     = "mistral-large-latest"
-    together_ai = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+    together    = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
     deepseek    = "deepseek-chat"
 }
 
