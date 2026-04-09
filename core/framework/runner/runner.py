@@ -894,6 +894,14 @@ def load_agent_export(data: str | dict) -> tuple[GraphSpec, Goal]:
     if isinstance(data, str):
         data = json.loads(data)
 
+    # Validate required keys
+    if "graph" not in data:
+        raise ValueError("Invalid agent.json: missing 'graph' key")
+    if not data["graph"].get("entry_node"):
+        raise ValueError("Invalid agent.json: missing 'entry_node'")
+    if not data["graph"].get("nodes"):
+        raise ValueError("Invalid agent.json: 'nodes' cannot be empty")
+
     # Extract graph and goal
     graph_data = data.get("graph", {})
     goal_data = data.get("goal", {})
