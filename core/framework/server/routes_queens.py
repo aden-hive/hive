@@ -5,6 +5,7 @@
 - PATCH  /api/queen/{queen_id}/profile      -- update queen profile fields
 - POST   /api/queen/{queen_id}/session      -- get or create a persistent session for a queen
 - POST   /api/queen/{queen_id}/session/select -- resume a specific session for a queen
+- POST   /api/queen/{queen_id}/session/new  -- create a fresh session for a queen
 """
 
 import json
@@ -327,6 +328,36 @@ async def handle_select_queen_session(request: web.Request) -> web.Response:
     )
 
 
+async def handle_new_queen_session(request: web.Request) -> web.Response:
+    """POST /api/queen/{queen_id}/session/new -- create a fresh queen session."""
+    queen_id = request.match_info["queen_id"]
+    manager = request.app["manager"]
+
+    ensure_default_queens()
+    try:
+        load_queen_profile(queen_id)
+    except FileNotFoundError:
+        return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
+
+    body = await request.json() if request.can_read_body else {}
+    initial_prompt = body.get("initial_prompt")
+    initial_phase = body.get("initial_phase") or "independent"
+
+    await _stop_live_sessions(manager)
+    session = await manager.create_session(
+        initial_prompt=initial_prompt,
+        queen_name=queen_id,
+        initial_phase=initial_phase,
+    )
+    return web.json_response(
+        {
+            "session_id": session.id,
+            "queen_id": queen_id,
+            "status": "created",
+        }
+    )
+
+
 def register_routes(app: web.Application) -> None:
     """Register queen profile routes."""
     app.router.add_get("/api/queen/profiles", handle_list_profiles)
@@ -334,3 +365,4 @@ def register_routes(app: web.Application) -> None:
     app.router.add_patch("/api/queen/{queen_id}/profile", handle_update_profile)
     app.router.add_post("/api/queen/{queen_id}/session", handle_queen_session)
     app.router.add_post("/api/queen/{queen_id}/session/select", handle_select_queen_session)
+    app.router.add_post("/api/queen/{queen_id}/session/new", handle_new_queen_session)

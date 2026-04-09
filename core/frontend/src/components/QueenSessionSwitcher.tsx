@@ -7,7 +7,9 @@ interface QueenSessionSwitcherProps {
   currentSessionId: string | null;
   loading?: boolean;
   switchingSessionId?: string | null;
+  creatingNew?: boolean;
   onSelect: (sessionId: string) => void;
+  onCreateNew: () => void;
 }
 
 function formatSessionDate(createdAt: number): string {
@@ -33,7 +35,9 @@ export default function QueenSessionSwitcher({
   currentSessionId,
   loading = false,
   switchingSessionId = null,
+  creatingNew = false,
   onSelect,
+  onCreateNew,
 }: QueenSessionSwitcherProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -58,7 +62,7 @@ export default function QueenSessionSwitcher({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((prev) => !prev)}
-        disabled={loading || sessions.length === 0}
+        disabled={loading}
         className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors border border-transparent hover:border-border/40 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <span className="max-w-[160px] truncate">
@@ -70,6 +74,21 @@ export default function QueenSessionSwitcher({
       {open && (
         <div className="absolute right-0 top-full mt-1.5 w-[320px] bg-card border border-border/60 rounded-lg shadow-xl z-50 overflow-hidden">
           <div className="max-h-[360px] overflow-y-auto">
+            <div className="p-2 border-b border-border/30">
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onCreateNew();
+                }}
+                disabled={creatingNew}
+                className="w-full rounded-md px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-muted/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span className="flex items-center gap-2">
+                  {creatingNew ? <Loader2 className="w-3 h-3 animate-spin" /> : <span className="w-3 h-3 rounded-full border border-current" />}
+                  New Session
+                </span>
+              </button>
+            </div>
             {sessions.map((session) => {
               const isActive = session.session_id === currentSessionId;
               const isSwitching = session.session_id === switchingSessionId;

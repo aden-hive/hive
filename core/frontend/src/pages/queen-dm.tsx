@@ -42,6 +42,7 @@ export default function QueenDM() {
   const [historySessions, setHistorySessions] = useState<HistorySession[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [switchingSessionId, setSwitchingSessionId] = useState<string | null>(null);
+  const [creatingNewSession, setCreatingNewSession] = useState(false);
 
   const turnCounterRef = useRef(0);
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
@@ -119,6 +120,7 @@ export default function QueenDM() {
         if (!cancelled) {
           setLoading(false);
           setSwitchingSessionId(null);
+          setCreatingNewSession(false);
         }
       }
     })();
@@ -163,6 +165,19 @@ export default function QueenDM() {
     [sessionId, setSearchParams],
   );
 
+  const handleCreateNewSession = useCallback(() => {
+    if (!queenId) return;
+    setCreatingNewSession(true);
+    const request = queensApi.createNewSession(queenId, undefined, "independent");
+    request
+      .then((result) => {
+        setSearchParams({ session: result.session_id });
+      })
+      .catch(() => {
+        setCreatingNewSession(false);
+      });
+  }, [queenId, setSearchParams]);
+
   useEffect(() => {
     if (!queenId) return;
     setActions(
@@ -171,11 +186,15 @@ export default function QueenDM() {
         currentSessionId={sessionId}
         loading={historyLoading}
         switchingSessionId={switchingSessionId}
+        creatingNew={creatingNewSession}
         onSelect={handleSelectHistoricalSession}
+        onCreateNew={handleCreateNewSession}
       />
     );
     return () => setActions(null);
   }, [
+    creatingNewSession,
+    handleCreateNewSession,
     handleSelectHistoricalSession,
     historyLoading,
     historySessions,

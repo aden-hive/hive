@@ -741,6 +741,38 @@ class TestQueenSessionSelection:
         )
         manager.create_session.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_new_queen_session_creates_fresh_thread(self):
+        app = create_app()
+        manager = app["manager"]
+        existing = _make_session(agent_id="old_live")
+        existing.queen_name = "queen_growth"
+        manager._sessions[existing.id] = existing
+        manager.stop_session = AsyncMock(side_effect=lambda sid: manager._sessions.pop(sid, None))
+        created = _make_session(agent_id="fresh_thread", with_queen=False)
+        created.queen_name = "queen_technology"
+        manager.create_session = AsyncMock(return_value=created)
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.post(
+                "/api/queen/queen_technology/session/new",
+                json={"initial_phase": "independent"},
+            )
+            assert resp.status == 200
+            data = await resp.json()
+
+        assert data == {
+            "session_id": "fresh_thread",
+            "queen_id": "queen_technology",
+            "status": "created",
+        }
+        manager.stop_session.assert_awaited_once_with("old_live")
+        manager.create_session.assert_awaited_once_with(
+            initial_prompt=None,
+            queen_name="queen_technology",
+            initial_phase="independent",
+        )
+
 
 class TestExecution:
     @pytest.mark.asyncio
