@@ -1505,7 +1505,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
         site = web.TCPSite(runner, args.host, args.port)
-        await site.start()
+        try:
+            await site.start()
+        except OSError as e:
+            if "already in use" in str(e) or getattr(e, "errno", None) in (48, 98):
+                print(f"\nError: Port {args.port} is already in use. Kill the existing process with:\n")
+                print(f"  lsof -ti:{args.port} | xargs kill -9\n")
+            raise
 
         # Check if frontend is being served
         dist_candidates = [
@@ -1541,6 +1547,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
         asyncio.run(run_server())
     except KeyboardInterrupt:
         print("\nServer stopped.")
+    except OSError:
+        return 1
 
     return 0
 
