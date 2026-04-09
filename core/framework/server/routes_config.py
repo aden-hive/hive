@@ -66,7 +66,7 @@ SUBSCRIPTIONS: list[dict] = [
         "description": "Use your Codex/ChatGPT Plus plan",
         "provider": "openai",
         "flag": "use_codex_subscription",
-        "default_model": "gpt-5-mini",
+        "default_model": "gpt-5.4",
         "api_base": "https://chatgpt.com/backend-api/codex",
     },
     {
@@ -96,18 +96,19 @@ _SUBSCRIPTION_MAP = {s["id"]: s for s in SUBSCRIPTIONS}
 # Model catalogue — mirrors quickstart.sh MODEL_CHOICES_*
 MODELS_CATALOGUE: dict[str, list[dict]] = {
     "anthropic": [
-        {"id": "claude-haiku-4-5-20251001", "label": "Haiku 4.5 - Fast + cheap", "recommended": True, "max_tokens": 8192, "max_context_tokens": 180000},
+        {"id": "claude-haiku-4-5-20251001", "label": "Haiku 4.5 - Fast + cheap", "recommended": False, "max_tokens": 8192, "max_context_tokens": 180000},
         {"id": "claude-sonnet-4-20250514", "label": "Sonnet 4 - Fast + capable", "recommended": False, "max_tokens": 8192, "max_context_tokens": 180000},
         {"id": "claude-sonnet-4-5-20250929", "label": "Sonnet 4.5 - Best balance", "recommended": False, "max_tokens": 16384, "max_context_tokens": 180000},
-        {"id": "claude-opus-4-6", "label": "Opus 4.6 - Most capable", "recommended": False, "max_tokens": 32768, "max_context_tokens": 180000},
+        {"id": "claude-opus-4-6", "label": "Opus 4.6 - Most capable", "recommended": True, "max_tokens": 32768, "max_context_tokens": 180000},
     ],
     "openai": [
-        {"id": "gpt-5-mini", "label": "GPT-5 Mini - Fast + cheap", "recommended": True, "max_tokens": 16384, "max_context_tokens": 120000},
-        {"id": "gpt-5.2", "label": "GPT-5.2 - Most capable", "recommended": False, "max_tokens": 16384, "max_context_tokens": 120000},
+        {"id": "gpt-5.4", "label": "GPT-5.4 - Best intelligence", "recommended": True, "max_tokens": 128000, "max_context_tokens": 960000},
+        {"id": "gpt-5.4-mini", "label": "GPT-5.4 Mini - Faster + cheaper", "recommended": False, "max_tokens": 128000, "max_context_tokens": 400000},
+        {"id": "gpt-5.4-nano", "label": "GPT-5.4 Nano - Cheapest high-volume", "recommended": False, "max_tokens": 128000, "max_context_tokens": 400000},
     ],
     "gemini": [
-        {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash - Fast", "recommended": True, "max_tokens": 8192, "max_context_tokens": 900000},
-        {"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro - Best quality", "recommended": False, "max_tokens": 8192, "max_context_tokens": 900000},
+        {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash - Fast", "recommended": False, "max_tokens": 8192, "max_context_tokens": 900000},
+        {"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro - Best quality", "recommended": True, "max_tokens": 8192, "max_context_tokens": 900000},
     ],
     "groq": [
         {"id": "moonshotai/kimi-k2-instruct-0905", "label": "Kimi K2 - Best quality", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
@@ -124,10 +125,10 @@ MODELS_CATALOGUE: dict[str, list[dict]] = {
         {"id": "mistral-large-latest", "label": "Mistral Large", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
     ],
     "together": [
-        {"id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "label": "Llama 3.3 70B Turbo", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
+        {"id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "label": "Llama 3.3 70B Turbo", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
     ],
     "deepseek": [
-        {"id": "deepseek-chat", "label": "DeepSeek Chat", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
+        {"id": "deepseek-chat", "label": "DeepSeek Chat", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
     ],
     "openrouter": [
         {"id": "google/gemini-2.5-pro", "label": "Gemini 2.5 Pro", "recommended": True, "max_tokens": 8192, "max_context_tokens": 900000},
@@ -140,7 +141,7 @@ MODELS_CATALOGUE: dict[str, list[dict]] = {
 # Default model per provider (matches quickstart DEFAULT_MODELS)
 DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "claude-haiku-4-5-20251001",
-    "openai": "gpt-5-mini",
+    "openai": "gpt-5.4",
     "minimax": "MiniMax-M2.5",
     "gemini": "gemini-3-flash-preview",
     "groq": "moonshotai/kimi-k2-instruct-0905",

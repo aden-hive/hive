@@ -20,7 +20,7 @@ export interface ProviderInfo {
 
 export const LLM_PROVIDERS: ProviderInfo[] = [
   { id: "anthropic", name: "Anthropic (Claude)", description: "Claude 4, Claude 3.5 Sonnet", envVar: "ANTHROPIC_API_KEY", initial: "A" },
-  { id: "openai", name: "OpenAI (GPT)", description: "GPT-5, GPT-5 Mini", envVar: "OPENAI_API_KEY", initial: "O" },
+  { id: "openai", name: "OpenAI (GPT)", description: "GPT-5.4, GPT-5.4 Mini, GPT-5.4 Nano", envVar: "OPENAI_API_KEY", initial: "O" },
   { id: "gemini", name: "Google Gemini", description: "Gemini 3, Gemini 2.5", envVar: "GEMINI_API_KEY", initial: "G" },
   { id: "minimax", name: "MiniMax", description: "MiniMax-M2.5", envVar: "MINIMAX_API_KEY", initial: "M" },
   { id: "groq", name: "Groq", description: "Ultra-fast inference, Kimi K2", envVar: "GROQ_API_KEY", initial: "G" },

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, Check, Settings } from "lucide-react";
+import { ChevronDown, Check, Settings, ThumbsUp } from "lucide-react";
 import { useModel, LLM_PROVIDERS } from "@/context/ModelContext";
 import type { ModelOption } from "@/api/config";
 
@@ -77,6 +77,18 @@ export default function ModelSwitcher({ onOpenSettings }: ModelSwitcherProps) {
     }
   };
 
+  const recommendedIcon = (
+    <span
+      className="group/recommend ml-auto relative inline-flex items-center justify-center rounded bg-primary/10 text-primary p-1 flex-shrink-0"
+      aria-label="Recommended model"
+    >
+      <ThumbsUp className="w-3 h-3" />
+      <span className="pointer-events-none absolute right-full mr-2 top-1/2 -translate-y-1/2 whitespace-nowrap rounded border border-border/60 bg-card px-2 py-1 text-[10px] font-medium text-foreground opacity-0 invisible group-hover/recommend:opacity-100 group-hover/recommend:visible transition-none shadow-sm">
+        Recommended model
+      </span>
+    </span>
+  );
+
   return (
     <div className="relative" ref={ref}>
       <button
@@ -117,9 +129,7 @@ export default function ModelSwitcher({ onOpenSettings }: ModelSwitcherProps) {
                           <span className="w-3" />
                         )}
                         <span className="truncate">{model.label.split(" - ")[0]}</span>
-                        {model.recommended && (
-                          <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary font-medium flex-shrink-0">rec</span>
-                        )}
+                        {model.recommended && recommendedIcon}
                       </button>
                     );
                   },
@@ -162,11 +172,7 @@ export default function ModelSwitcher({ onOpenSettings }: ModelSwitcherProps) {
                           <span className="truncate">
                             {model.label.split(" - ")[0]}
                           </span>
-                          {model.recommended && (
-                            <span className="ml-auto text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary font-medium flex-shrink-0">
-                              rec
-                            </span>
-                          )}
+                          {model.recommended && recommendedIcon}
                         </button>
                       );
                     },

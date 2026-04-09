@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Eye, EyeOff, Check, Trash2, ChevronDown, Zap } from "lucide-react";
+import { X, Eye, EyeOff, Check, Trash2, ChevronDown, Zap, ThumbsUp } from "lucide-react";
 import { useColony } from "@/context/ColonyContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useModel, LLM_PROVIDERS } from "@/context/ModelContext";
@@ -134,6 +134,18 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
     }
     return LLM_PROVIDERS.find((p) => p.id === currentProvider)?.name || currentProvider;
   })();
+
+  const recommendedIcon = (
+    <span
+      className="group/recommend ml-auto relative inline-flex items-center justify-center rounded bg-primary/10 text-primary p-1 flex-shrink-0"
+      aria-label="Recommended model"
+    >
+      <ThumbsUp className="w-3 h-3" />
+      <span className="pointer-events-none absolute right-full mr-2 top-1/2 -translate-y-1/2 whitespace-nowrap rounded border border-border/60 bg-card px-2 py-1 text-[10px] font-medium text-foreground opacity-0 invisible group-hover/recommend:opacity-100 group-hover/recommend:visible transition-none shadow-sm">
+        Recommended model
+      </span>
+    </span>
+  );
 
   // Models available for selection (from connected API key providers + active subscription's provider)
   const selectableProviders = LLM_PROVIDERS.filter(
@@ -542,9 +554,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                                   >
                                     {isActive && <Check className="w-3 h-3 flex-shrink-0" />}
                                     <span className={isActive ? "" : "ml-5"}>{model.label}</span>
-                                    {model.recommended && (
-                                      <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">recommended</span>
-                                    )}
+                                    {model.recommended && recommendedIcon}
                                   </button>
                                 );
                               },
@@ -588,11 +598,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                                       >
                                         {model.label}
                                       </span>
-                                      {model.recommended && (
-                                        <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                                          recommended
-                                        </span>
-                                      )}
+                                      {model.recommended && recommendedIcon}
                                     </button>
                                   );
                                 },
