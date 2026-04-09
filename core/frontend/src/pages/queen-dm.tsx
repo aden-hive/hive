@@ -489,6 +489,7 @@ export default function QueenDM() {
           isBusy={isTyping}
           disabled={loading || !queenReady}
           queenPhase={queenPhase}
+          showQueenPhaseBadge={false}
           pendingQuestion={awaitingInput ? pendingQuestion : null}
           pendingOptions={awaitingInput ? pendingOptions : null}
           pendingQuestions={awaitingInput ? pendingQuestions : null}

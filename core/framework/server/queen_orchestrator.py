@@ -17,19 +17,54 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+async def materialize_queen_identity(
+    session: Session,
+    phase_state: Any,
+    queen_profile: dict,
+    event_bus: Any,
+) -> None:
+    """Format the queen identity prompt and set phase state.
+
+    Called after SessionManager has resolved and loaded the profile.
+    This function does no I/O — it only formats and caches.
+    """
+    from framework.agents.queen.queen_profiles import format_queen_identity_prompt
+    from framework.host.event_bus import AgentEvent, EventType
+
+    queen_id = session.queen_name
+
+    phase_state.queen_id = queen_id
+    phase_state.queen_profile = queen_profile
+    phase_state.queen_identity_prompt = format_queen_identity_prompt(queen_profile)
+
+    if event_bus is not None:
+        await event_bus.publish(
+            AgentEvent(
+                type=EventType.QUEEN_IDENTITY_SELECTED,
+                stream_id="queen",
+                data={
+                    "queen_id": queen_id,
+                    "name": queen_profile.get("name", ""),
+                    "title": queen_profile.get("title", ""),
+                },
+            )
+        )
+
+
 async def create_queen(
     session: Session,
     session_manager: Any,
     worker_identity: str | None,
     queen_dir: Path,
+    queen_profile: dict,
     initial_prompt: str | None = None,
     initial_phase: str | None = None,
 ) -> asyncio.Task:
     """Build the queen executor and return the running asyncio task.
 
     Handles tool registration, phase-state initialization, prompt
-    composition, persona hook setup, graph preparation, and the queen
-    event loop.
+    composition, queen identity materialization, graph preparation,
+    and the queen event loop.
     """
     from framework.agents.queen.agent import (
         queen_goal,
@@ -69,13 +104,6 @@ async def create_queen(
         _queen_tools_staging,
         _shared_building_knowledge,
     )
-    from framework.agents.queen.queen_profiles import (
-        ensure_default_queens,
-        format_queen_identity_prompt,
-        load_queen_profile,
-        select_queen,
-    )
-    from framework.agent_loop.agent_loop import HookContext, HookResult
     from framework.loader.mcp_registry import MCPRegistry
     from framework.loader.tool_registry import ToolRegistry
     from framework.host.event_bus import AgentEvent, EventType
@@ -302,15 +330,13 @@ async def create_queen(
     except Exception:
         logger.debug("Queen skill loading failed (non-fatal)", exc_info=True)
 
-    # ---- Queen identity hook -----------------------------------------
+    # ---- Queen identity + recall -------------------------------------
     _session_llm = session.llm
     _session_event_bus = session.event_bus
 
-    # ---- Recall on each real user turn --------------------------------
-    async def _recall_on_user_input(event: AgentEvent) -> None:
-        """Re-select memories when real user input arrives."""
-        content = (event.data or {}).get("content", "")
-        if not content or not isinstance(content, str):
+    async def _refresh_recall_cache(query: str) -> None:
+        """Populate the cached recall block for the next queen prompt."""
+        if not query or not isinstance(query, str):
             return
         try:
             from framework.agents.queen.recall_selector import (
@@ -319,10 +345,15 @@ async def create_queen(
             )
 
             mem_dir = phase_state.global_memory_dir
-            selected = await select_memories(content, _session_llm, mem_dir)
+            selected = await select_memories(query, _session_llm, mem_dir)
             phase_state._cached_global_recall_block = format_recall_injection(selected, mem_dir)
         except Exception:
-            logger.debug("recall: user-turn cache update failed", exc_info=True)
+            logger.debug("recall: cache update failed", exc_info=True)
+
+    # ---- Recall on each real user turn --------------------------------
+    async def _recall_on_user_input(event: AgentEvent) -> None:
+        """Re-select memories when real user input arrives."""
+        await _refresh_recall_cache((event.data or {}).get("content", ""))
 
     session.event_bus.subscribe(
         [EventType.CLIENT_INPUT_RECEIVED],
@@ -330,55 +361,14 @@ async def create_queen(
         filter_stream="queen",
     )
 
-    async def _queen_identity_hook(ctx: HookContext) -> HookResult | None:
-        ensure_default_queens()
-        trigger = ctx.trigger or ""
-        # If the session was pre-bound to a queen (user clicked a specific
-        # queen in the UI), use that identity instead of LLM auto-selection.
-        if session.queen_name and session.queen_name != "default":
-            queen_id = session.queen_name
-        else:
-            queen_id = await select_queen(trigger, _session_llm)
-        try:
-            profile = load_queen_profile(queen_id)
-        except FileNotFoundError:
-            logger.warning("Queen profile %s not found after selection", queen_id)
-            return None
-        identity_prompt = format_queen_identity_prompt(profile)
-        # Store on phase_state so identity persists across dynamic prompt refreshes
-        phase_state.queen_id = queen_id
-        phase_state.queen_profile = profile
-        phase_state.queen_identity_prompt = identity_prompt
-        # Route session storage to ~/.hive/agents/queens/{queen_id}/sessions/
-        session.queen_name = queen_id
-        if _session_event_bus is not None:
-            await _session_event_bus.publish(
-                AgentEvent(
-                    type=EventType.QUEEN_IDENTITY_SELECTED,
-                    stream_id="queen",
-                    data={
-                        "queen_id": queen_id,
-                        "name": profile.get("name", ""),
-                        "title": profile.get("title", ""),
-                    },
-                )
-            )
-
-        # Seed recall cache so the first turn has relevant memories.
-        if trigger:
-            try:
-                from framework.agents.queen.recall_selector import (
-                    format_recall_injection,
-                    select_memories,
-                )
-
-                mem_dir = phase_state.global_memory_dir
-                selected = await select_memories(trigger, _session_llm, mem_dir)
-                phase_state._cached_global_recall_block = format_recall_injection(selected, mem_dir)
-            except Exception:
-                logger.debug("recall: initial seeding failed", exc_info=True)
-
-        return HookResult(system_prompt=phase_state.get_current_prompt())
+    await materialize_queen_identity(
+        session,
+        phase_state,
+        queen_profile,
+        _session_event_bus,
+    )
+    if initial_prompt:
+        await _refresh_recall_cache(initial_prompt)
 
     # ---- Graph preparation -------------------------------------------
     initial_prompt_text = phase_state.get_current_prompt()
@@ -400,13 +390,10 @@ async def create_queen(
 
     # Determine session mode:
     # - RESTORE: Resume cold session with history, no initial prompt -> wait for user
-    # - FRESH:   New session OR explicit initial prompt -> run identity hook + greeting
+    # - FRESH:   New session OR explicit initial prompt -> greet immediately
     _is_restore_mode = bool(session.queen_resume_from) and initial_prompt is None
 
-    _queen_loop_config = {
-        **_base_loop_config,
-        "hooks": {"session_start": [_queen_identity_hook]} if not _is_restore_mode else {},
-    }
+    _queen_loop_config = {**_base_loop_config}
 
     # ---- Queen event loop (AgentLoop directly, no Orchestrator) -------
     from types import SimpleNamespace

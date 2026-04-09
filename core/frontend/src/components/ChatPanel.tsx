@@ -87,6 +87,8 @@ interface ChatPanelProps {
   onQuestionDismiss?: () => void;
   /** Queen operating phase — shown as a tag on queen messages */
   queenPhase?: "planning" | "building" | "staging" | "running" | "independent";
+  /** When false, queen messages omit the phase badge */
+  showQueenPhaseBadge?: boolean;
   /** Context window usage for queen and workers */
   contextUsage?: Record<string, ContextUsageEntry>;
 }
@@ -208,9 +210,11 @@ const MessageBubble = memo(
   function MessageBubble({
     msg,
     queenPhase,
+    showQueenPhaseBadge = true,
   }: {
     msg: ChatMessage;
     queenPhase?: "planning" | "building" | "staging" | "running" | "independent";
+    showQueenPhaseBadge?: boolean;
   }) {
     const isUser = msg.type === "user";
     const isQueen = msg.role === "queen";
@@ -292,25 +296,27 @@ const MessageBubble = memo(
             >
               {msg.agent}
             </span>
-            <span
-              className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
-                isQueen
-                  ? "bg-primary/15 text-primary"
-                  : "bg-muted text-muted-foreground"
-              }`}
-            >
-              {isQueen
-                ? (msg.phase ?? queenPhase) === "independent"
-                  ? "independent"
-                  : (msg.phase ?? queenPhase) === "running"
-                    ? "running"
-                    : (msg.phase ?? queenPhase) === "staging"
-                      ? "staging"
-                      : (msg.phase ?? queenPhase) === "planning"
-                        ? "planning"
-                        : "building"
-                : "Worker"}
-            </span>
+            {(!isQueen || showQueenPhaseBadge) && (
+              <span
+                className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
+                  isQueen
+                    ? "bg-primary/15 text-primary"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {isQueen
+                  ? (msg.phase ?? queenPhase) === "independent"
+                    ? "independent"
+                    : (msg.phase ?? queenPhase) === "running"
+                      ? "running"
+                      : (msg.phase ?? queenPhase) === "staging"
+                        ? "staging"
+                        : (msg.phase ?? queenPhase) === "planning"
+                          ? "planning"
+                          : "building"
+                  : "Worker"}
+              </span>
+            )}
           </div>
           <div
             className={`text-sm leading-relaxed rounded-2xl rounded-tl-md px-4 py-3 ${
@@ -327,7 +333,8 @@ const MessageBubble = memo(
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
     prev.msg.phase === next.msg.phase &&
-    prev.queenPhase === next.queenPhase,
+    prev.queenPhase === next.queenPhase &&
+    prev.showQueenPhaseBadge === next.showQueenPhaseBadge,
 );
 
 export default function ChatPanel({
@@ -346,6 +353,7 @@ export default function ChatPanel({
   onMultiQuestionSubmit,
   onQuestionDismiss,
   queenPhase,
+  showQueenPhaseBadge = true,
   contextUsage,
   supportsImages = true,
 }: ChatPanelProps) {
@@ -533,7 +541,11 @@ export default function ChatPanel({
             </div>
           ) : (
             <div key={item.msg.id}>
-              <MessageBubble msg={item.msg} queenPhase={queenPhase} />
+              <MessageBubble
+                msg={item.msg}
+                queenPhase={queenPhase}
+                showQueenPhaseBadge={showQueenPhaseBadge}
+              />
             </div>
           ),
         )}
