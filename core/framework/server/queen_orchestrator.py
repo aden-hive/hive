@@ -84,7 +84,6 @@ async def create_queen(
         register_queen_lifecycle_tools,
     )
 
-
     # ---- Tool registry ------------------------------------------------
     queen_registry = ToolRegistry()
     import framework.agents.queen as _queen_pkg
@@ -193,11 +192,13 @@ async def create_queen(
 
     # Independent phase gets core tools + all MCP tools not claimed by any
     # other phase (coder-tools file I/O, gcu-tools browser, etc.).
-    all_phase_names = planning_names | building_names | staging_names | running_names | editing_names
-    mcp_tools = [t for t in queen_tools if t.name not in all_phase_names]
-    phase_state.independent_tools = (
-        [t for t in queen_tools if t.name in independent_names] + mcp_tools
+    all_phase_names = (
+        planning_names | building_names | staging_names | running_names | editing_names
     )
+    mcp_tools = [t for t in queen_tools if t.name not in all_phase_names]
+    phase_state.independent_tools = [
+        t for t in queen_tools if t.name in independent_names
+    ] + mcp_tools
     logger.info(
         "Queen: independent tools: %s",
         sorted(t.name for t in phase_state.independent_tools),
@@ -423,6 +424,8 @@ async def create_queen(
                 max_iterations=lc.get("max_iterations", 999_999),
                 max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 30),
                 max_context_tokens=lc.get("max_context_tokens", 180_000),
+                max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
+                spillover_dir=str(queen_dir / "data"),
                 hooks=lc.get("hooks", {}),
             )
 
@@ -519,7 +522,9 @@ async def create_queen(
             # Set initial user message based on mode:
             # - RESTORE: Empty -> AgentLoop restores from disk, waits for /chat
             # - FRESH:   "Hello" or explicit prompt -> queen responds immediately
-            ctx.input_data = {"user_request": None if _is_restore_mode else (initial_prompt or "Hello")}
+            ctx.input_data = {
+                "user_request": None if _is_restore_mode else (initial_prompt or "Hello")
+            }
 
             logger.info(
                 "Queen %s in %s phase with %d tools: %s",
@@ -545,8 +550,7 @@ async def create_queen(
             raise
         finally:
             logger.warning(
-                "[_queen_loop] Queen loop exiting — clearing queen_executor "
-                "for session '%s'",
+                "[_queen_loop] Queen loop exiting — clearing queen_executor for session '%s'",
                 session.id,
             )
             session.queen_executor = None

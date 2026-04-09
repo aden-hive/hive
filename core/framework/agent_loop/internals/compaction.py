@@ -104,7 +104,7 @@ def microcompact(
             placeholder = (
                 f"[Old tool result cleared: {orig_len} chars. "
                 f"Full data in '{spillover}'. "
-                f"Use load_data('{spillover}') to retrieve.]"
+                f"Use read_file('{spillover}') to retrieve.]"
             )
         else:
             placeholder = f"[Old tool result cleared: {orig_len} chars.]"
@@ -823,13 +823,13 @@ def build_emergency_summary(
                     )
                     parts.append(
                         "CONVERSATION HISTORY (freeform messages saved during compaction — "
-                        "use load_data('<filename>') to review earlier dialogue):\n" + conv_list
+                        "use read_file('<filename>') to review earlier dialogue):\n" + conv_list
                     )
                 if data_files:
                     file_list = "\n".join(
                         f"  - {f}  (full path: {data_dir / f})" for f in data_files[:30]
                     )
-                    parts.append("DATA FILES (use load_data('<filename>') to read):\n" + file_list)
+                    parts.append("DATA FILES (use read_file('<filename>') to read):\n" + file_list)
                 if not all_files:
                     parts.append(
                         "NOTE: Large tool results may have been saved to files. "

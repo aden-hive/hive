@@ -222,7 +222,7 @@ def truncate_tool_result(
     - Small results (≤ limit): full content kept + file annotation
     - Large results (> limit): preview + file reference
     - Errors: pass through unchanged
-    - read_file/load_data results: truncate with pagination hint (no re-spill)
+    - read_file results: truncate with pagination hint (no re-spill)
     """
     limit = max_tool_result_chars
 
@@ -230,9 +230,9 @@ def truncate_tool_result(
     if result.is_error:
         return result
 
-    # read_file/load_data reads FROM spilled files — never re-spill (circular).
+    # read_file reads FROM spilled files — never re-spill (circular).
     # Just truncate with a pagination hint if the result is too large.
-    if tool_name in ("load_data", "read_file"):
+    if tool_name == "read_file":
         if limit <= 0 or len(result.content) <= limit:
             return result  # Small result — pass through as-is
         # Large result — truncate with smart preview
@@ -423,7 +423,7 @@ async def execute_tool(
         )
 
     skill_dirs = skill_dirs or []
-    skill_read_tools = {"view_file", "load_data", "read_file"}
+    skill_read_tools = {"view_file", "read_file"}
     if tc.tool_name in skill_read_tools and skill_dirs:
         raw_path = tc.tool_input.get("path", "")
         if raw_path:

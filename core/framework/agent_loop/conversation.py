@@ -233,8 +233,8 @@ def extract_tool_call_history(messages: list[Message], max_entries: int = 30) ->
             return args.get("query", "")
         if name == "web_scrape":
             return args.get("url", "")
-        if name in ("load_data", "save_data"):
-            return args.get("filename", "")
+        if name == "read_file":
+            return args.get("path", "")
         return ""
 
     for msg in messages:
@@ -250,8 +250,8 @@ def extract_tool_call_history(messages: list[Message], max_entries: int = 30) ->
                 summary = _summarize_input(name, args)
                 tool_calls_detail.setdefault(name, []).append(summary)
 
-                if name == "save_data" and args.get("filename"):
-                    files_saved.append(args["filename"])
+                if name == "read_file" and args.get("path"):
+                    files_saved.append(args["path"])
                 if name == "set_output" and args.get("key"):
                     outputs_set.append(args["key"])
 
@@ -733,7 +733,7 @@ class NodeConversation:
                 placeholder = (
                     f"[Pruned tool result: {orig_len} chars. "
                     f"Full data in '{spillover}'. "
-                    f"Use load_data('{spillover}') to retrieve.]"
+                    f"Use read_file('{spillover}') to retrieve.]"
                 )
             else:
                 placeholder = f"[Pruned tool result: {orig_len} chars cleared from context.]"
@@ -1024,7 +1024,7 @@ class NodeConversation:
             full_path = str((spill_path / conv_filename).resolve())
             ref_parts.append(
                 f"[Previous conversation saved to '{full_path}'. "
-                f"Use load_data('{conv_filename}') to review if needed.]"
+                f"Use read_file('{conv_filename}') to review if needed.]"
             )
         elif not collapsed_msgs:
             ref_parts.append("[Previous freeform messages compacted.]")

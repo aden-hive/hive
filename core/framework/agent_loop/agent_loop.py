@@ -101,14 +101,16 @@ logger = logging.getLogger(__name__)
 # Tags whose content is internal reasoning and must be stripped from
 # the user-visible stream.  Covers <think> and the 5-pillar character
 # assessment tags.
-_INTERNAL_TAGS = frozenset({
-    "think",
-    "relationship",
-    "context",
-    "sentiment",
-    "physical_state",
-    "tone",
-})
+_INTERNAL_TAGS = frozenset(
+    {
+        "think",
+        "relationship",
+        "context",
+        "sentiment",
+        "physical_state",
+        "tone",
+    }
+)
 _STRIP_RE = re.compile(
     r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>"
     r".*?"
@@ -3089,7 +3091,7 @@ class AgentLoop(NodeProtocol):
         - Small results (≤ limit): full content kept + file annotation
         - Large results (> limit): preview + file reference
         - Errors: pass through unchanged
-        - load_data results: truncate with pagination hint (no re-spill)
+        - read_file results: truncate with pagination hint (no re-spill)
         """
         return truncate_tool_result(
             result=result,

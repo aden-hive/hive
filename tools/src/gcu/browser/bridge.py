@@ -513,7 +513,9 @@ class BeelineBridge:
             # Check if the element might be inside a Shadow DOM container
             shadow_hint = ""
             try:
-                shadow_check = await self.evaluate(tab_id, """
+                shadow_check = await self.evaluate(
+                    tab_id,
+                    """
                     (function() {
                         var hosts = document.querySelectorAll('[id]');
                         for (var h of hosts) {
@@ -521,7 +523,8 @@ class BeelineBridge:
                         }
                         return null;
                     })()
-                """)
+                """,
+                )
                 shadow_host = (shadow_check or {}).get("result")
                 if shadow_host:
                     shadow_hint = (
@@ -718,6 +721,20 @@ class BeelineBridge:
 
         button_map = {"left": "left", "right": "right", "middle": "middle"}
         cdp_button = button_map.get(button, "left")
+
+        from .tools.inspection import _screenshot_scales, _screenshot_css_scales
+
+        phys_scale = _screenshot_scales.get(tab_id, "unset")
+        css_scale = _screenshot_css_scales.get(tab_id, "unset")
+        logger.info(
+            "click_coordinate tab=%d: x=%.1f, y=%.1f → CDP Input.dispatchMouseEvent. "
+            "stored_scales: physicalScale=%s, cssScale=%s",
+            tab_id,
+            x,
+            y,
+            phys_scale,
+            css_scale,
+        )
 
         await self._cdp(
             tab_id,
@@ -1083,7 +1100,7 @@ class BeelineBridge:
           var box = document.createElement('div');
           box.id = '__hive_hl';
           box.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;'
-            + 'left:{int(x)}px;top:{int(y)}px;width:{max(1,int(w))}px;height:{max(1,int(h))}px;'
+            + 'left:{int(x)}px;top:{int(y)}px;width:{max(1, int(w))}px;height:{max(1, int(h))}px;'
             + 'border:2px solid {border_rgb};background:{bg_rgba};'
             + 'border-radius:3px;transition:opacity 0.4s ease;opacity:1;'
             + 'box-shadow:0 0 8px {bg_rgba};';
@@ -1111,8 +1128,12 @@ class BeelineBridge:
             pass  # best-effort visual feedback
 
         _interaction_highlights[tab_id] = {
-            "x": x, "y": y, "w": w, "h": h,
-            "label": label, "kind": "rect",
+            "x": x,
+            "y": y,
+            "w": w,
+            "h": h,
+            "label": label,
+            "kind": "rect",
         }
 
     async def highlight_point(self, tab_id: int, x: float, y: float, label: str = "") -> None:
@@ -1128,7 +1149,7 @@ class BeelineBridge:
           var dot = document.createElement('div');
           dot.id = '__hive_hl';
           dot.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;'
-            + 'left:{int(x)-8}px;top:{int(y)-8}px;width:16px;height:16px;'
+            + 'left:{int(x) - 8}px;top:{int(y) - 8}px;width:16px;height:16px;'
             + 'border-radius:50%;background:rgba(239,68,68,0.7);'
             + 'box-shadow:0 0 0 4px rgba(239,68,68,0.25),0 0 12px rgba(239,68,68,0.4);'
             + 'transition:opacity 0.4s ease;opacity:1;';
@@ -1155,17 +1176,24 @@ class BeelineBridge:
             pass
 
         _interaction_highlights[tab_id] = {
-            "x": x, "y": y, "w": 0, "h": 0,
-            "label": label, "kind": "point",
+            "x": x,
+            "y": y,
+            "w": 0,
+            "h": 0,
+            "label": label,
+            "kind": "point",
         }
 
     async def clear_highlight(self, tab_id: int) -> None:
         """Remove the injected highlight from the page."""
         try:
-            await self.evaluate(tab_id, """
+            await self.evaluate(
+                tab_id,
+                """
                 var el = document.getElementById('__hive_hl');
                 if (el) el.remove();
-            """)
+            """,
+            )
         except Exception:
             pass
         _interaction_highlights.pop(tab_id, None)
@@ -1767,13 +1795,32 @@ class BeelineBridge:
                 )
                 meta = (meta_result or {}).get("result", {}).get("result", {}).get("value") or {}
 
+                dpr = meta.get("dpr", 1.0)
+                css_w = meta.get("cssWidth", 0)
+                css_h = meta.get("cssHeight", 0)
+
+                import struct as _struct
+
+                raw_bytes = base64.b64decode(data) if data else b""
+                png_w = _struct.unpack(">I", raw_bytes[16:20])[0] if len(raw_bytes) >= 24 else 0
+                png_h = _struct.unpack(">I", raw_bytes[20:24])[0] if len(raw_bytes) >= 24 else 0
+                logger.info(
+                    "CDP screenshot raw: png=%dx%d, css=%dx%d, dpr=%s, implied_dpr=%.2f",
+                    png_w,
+                    png_h,
+                    css_w,
+                    css_h,
+                    dpr,
+                    (png_w / css_w) if css_w else 0.0,
+                )
+
                 return {
                     "ok": True,
                     "tabId": tab_id,
                     "url": meta.get("url", ""),
-                    "devicePixelRatio": meta.get("dpr", 1.0),
-                    "cssWidth": meta.get("cssWidth", 0),
-                    "cssHeight": meta.get("cssHeight", 0),
+                    "devicePixelRatio": dpr,
+                    "cssWidth": css_w,
+                    "cssHeight": css_h,
                     "data": data,
                     "mimeType": "image/png",
                 }

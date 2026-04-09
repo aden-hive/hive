@@ -800,7 +800,7 @@ class NodeWorker:
                     file_size = file_path.stat().st_size
                     buffer_items[key] = (
                         f"[Saved to '{filename}' ({file_size:,} bytes). "
-                        f"Use load_data(filename='{filename}') to access.]"
+                        f"Use read_file(path='{filename}') to access.]"
                     )
                     continue
                 except Exception:

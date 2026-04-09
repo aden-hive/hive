@@ -686,8 +686,8 @@ class Orchestrator:
         self.logger.info(f"   Goal: {goal.description}")
         self.logger.info(f"   Entry node: {graph.entry_node}")
 
-        # Set per-execution data_dir so data tools (save_data, load_data, etc.)
-        # and spillover files share the same session-scoped directory.
+        # Set per-execution data_dir so data tools and spillover files
+        # share the same session-scoped directory.
         _ctx_token = None
         if self._storage_path:
             from framework.loader.tool_registry import ToolRegistry
@@ -779,7 +779,7 @@ class Orchestrator:
             # Auto-configure spillover directory for large tool results.
             # When a tool result exceeds max_tool_result_chars, the full
             # content is written to spillover_dir and the agent gets a
-            # truncated preview with instructions to use load_data().
+            # truncated preview with instructions to use read_file().
             # Uses storage_path/data which is session-scoped, matching the
             # data_dir set via execution context for data tools.
             spillover = None

@@ -196,8 +196,6 @@ def build_system_prompt(spec: NodePromptSpec) -> str:
     if not False and spec.node_type == "event_loop" and spec.output_keys:
         parts.append(f"\n{EXECUTION_SCOPE_PREAMBLE}")
 
-
-
     if spec.focus_prompt:
         parts.append(f"\n--- Current Focus ---\n{spec.focus_prompt}")
 
@@ -269,7 +267,7 @@ def build_transition_message(spec: TransitionSpec) -> str:
 
     if spec.data_files:
         sections.append(
-            "\nData files (use load_data to access):\n"
+            "\nData files (use read_file to access):\n"
             + "\n".join(f"  {entry}" for entry in spec.data_files)
         )
 
