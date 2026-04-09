@@ -37,6 +37,7 @@ from framework.agents.queen.queen_memory_v2 import (
     scan_memory_files,
 )
 from framework.llm.provider import LLMResponse, Tool
+from framework.tracker.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,37 @@ def _execute_tool(name: str, args: dict[str, Any], memory_dir: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Reflection logging helper
+# ---------------------------------------------------------------------------
+
+
+def _log_reflection_turn(
+    *,
+    reflection_id: str,
+    iteration: int,
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    assistant_text: str,
+    tool_calls: list[dict[str, Any]],
+    tool_results: list[dict[str, Any]],
+    token_counts: dict[str, Any],
+) -> None:
+    """Log a reflection turn using the same JSONL format as the main agent loop."""
+    log_llm_turn(
+        node_id="reflection",
+        stream_id=reflection_id,
+        execution_id=reflection_id,
+        iteration=iteration,
+        system_prompt=system_prompt,
+        messages=messages,
+        assistant_text=assistant_text,
+        tool_calls=tool_calls,
+        tool_results=tool_results,
+        token_counts=token_counts,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Mini event loop
 # ---------------------------------------------------------------------------
 
@@ -217,6 +249,8 @@ async def _reflection_loop(
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_msg}]
     changed_files: list[str] = []
     last_text: str = ""
+    reflection_id = f"reflection_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    token_counts: dict[str, Any] = {}
 
     for _turn in range(max_turns):
         logger.info("reflect: loop turn %d/%d (msgs=%d)", _turn + 1, max_turns, len(messages))
@@ -265,6 +299,23 @@ async def _reflection_loop(
             len(tool_calls_raw),
         )
 
+        # Capture token counts from the LLM response.
+        try:
+            raw_usage = getattr(raw, "usage", None) if raw else None
+            if raw_usage:
+                token_counts = {
+                    "model": getattr(raw, "model", ""),
+                    "input": getattr(raw_usage, "prompt_tokens", 0) or 0,
+                    "output": getattr(raw_usage, "completion_tokens", 0) or 0,
+                    "cached": getattr(raw_usage, "prompt_tokens_details", None)
+                    and getattr(raw_usage.prompt_tokens_details, "cached_tokens", 0),
+                    "stop_reason": getattr(
+                        raw.choices[0], "finish_reason", ""
+                    ) if raw else "",
+                }
+        except Exception:
+            token_counts = {}
+
         turn_text = resp.content or ""
         if turn_text:
             last_text = turn_text
@@ -286,6 +337,7 @@ async def _reflection_loop(
         if not tool_calls_raw:
             break
 
+        tool_results: list[dict[str, Any]] = []
         for tc in tool_calls_raw:
             result = _execute_tool(tc["name"], tc.get("input", {}), memory_dir)
             if tc["name"] in ("write_memory_file", "delete_memory_file"):
@@ -293,6 +345,19 @@ async def _reflection_loop(
                 if fname and not result.startswith("ERROR"):
                     changed_files.append(fname)
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+            tool_results.append({"tool_call_id": tc["id"], "name": tc["name"], "result": result})
+
+        # Log the reflection turn in the same JSONL format as the main agent loop.
+        _log_reflection_turn(
+            reflection_id=reflection_id,
+            iteration=_turn,
+            system_prompt=system,
+            messages=messages,
+            assistant_text=turn_text,
+            tool_calls=tool_calls_raw,
+            tool_results=tool_results,
+            token_counts=token_counts,
+        )
 
     return True, changed_files, last_text
 

@@ -149,22 +149,8 @@
           "max_context_tokens": 204800
         },
         {
-          "id": "MiniMax-M2.7-highspeed",
-          "label": "MiniMax M2.7 Highspeed - Faster",
-          "recommended": false,
-          "max_tokens": 32768,
-          "max_context_tokens": 204800
-        },
-        {
           "id": "MiniMax-M2.5",
           "label": "MiniMax M2.5 - Strong value",
-          "recommended": false,
-          "max_tokens": 32768,
-          "max_context_tokens": 204800
-        },
-        {
-          "id": "MiniMax-M2.5-highspeed",
-          "label": "MiniMax M2.5 Highspeed - Faster",
           "recommended": false,
           "max_tokens": 32768,
           "max_context_tokens": 204800
