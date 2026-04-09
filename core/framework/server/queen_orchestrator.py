@@ -59,6 +59,7 @@ async def create_queen(
     queen_profile: dict,
     initial_prompt: str | None = None,
     initial_phase: str | None = None,
+    tool_registry: "ToolRegistry | None" = None,
 ) -> asyncio.Task:
     """Build the queen executor and return the running asyncio task.
 
@@ -114,34 +115,40 @@ async def create_queen(
 
 
     # ---- Tool registry ------------------------------------------------
-    queen_registry = ToolRegistry()
-    import framework.agents.queen as _queen_pkg
+    # Use pre-loaded cached registry if available (fast path)
+    if tool_registry is not None:
+        queen_registry = tool_registry
+        logger.info("Queen: using pre-loaded tool registry with %d tools", len(queen_registry.get_tools()))
+    else:
+        # Build fresh (slow path - for backwards compatibility)
+        queen_registry = ToolRegistry()
+        import framework.agents.queen as _queen_pkg
 
-    queen_pkg_dir = Path(_queen_pkg.__file__).parent
-    mcp_config = queen_pkg_dir / "mcp_servers.json"
-    if mcp_config.exists():
+        queen_pkg_dir = Path(_queen_pkg.__file__).parent
+        mcp_config = queen_pkg_dir / "mcp_servers.json"
+        if mcp_config.exists():
+            try:
+                queen_registry.load_mcp_config(mcp_config)
+                logger.info("Queen: loaded MCP tools from %s", mcp_config)
+            except Exception:
+                logger.warning("Queen: MCP config failed to load", exc_info=True)
+
         try:
-            queen_registry.load_mcp_config(mcp_config)
-            logger.info("Queen: loaded MCP tools from %s", mcp_config)
+            registry = MCPRegistry()
+            registry.initialize()
+            if (queen_pkg_dir / "mcp_registry.json").is_file():
+                queen_registry.set_mcp_registry_agent_path(queen_pkg_dir)
+            registry_configs, selection_max_tools = registry.load_agent_selection(queen_pkg_dir)
+            if registry_configs:
+                results = queen_registry.load_registry_servers(
+                    registry_configs,
+                    preserve_existing_tools=True,
+                    log_collisions=True,
+                    max_tools=selection_max_tools,
+                )
+                logger.info("Queen: loaded MCP registry servers: %s", results)
         except Exception:
-            logger.warning("Queen: MCP config failed to load", exc_info=True)
-
-    try:
-        registry = MCPRegistry()
-        registry.initialize()
-        if (queen_pkg_dir / "mcp_registry.json").is_file():
-            queen_registry.set_mcp_registry_agent_path(queen_pkg_dir)
-        registry_configs, selection_max_tools = registry.load_agent_selection(queen_pkg_dir)
-        if registry_configs:
-            results = queen_registry.load_registry_servers(
-                registry_configs,
-                preserve_existing_tools=True,
-                log_collisions=True,
-                max_tools=selection_max_tools,
-            )
-            logger.info("Queen: loaded MCP registry servers: %s", results)
-    except Exception:
-        logger.warning("Queen: MCP registry config failed to load", exc_info=True)
+            logger.warning("Queen: MCP registry config failed to load", exc_info=True)
 
     # ---- Phase state --------------------------------------------------
     effective_phase = initial_phase or ("staging" if worker_identity else "planning")
@@ -361,14 +368,67 @@ async def create_queen(
         filter_stream="queen",
     )
 
-    await materialize_queen_identity(
-        session,
-        phase_state,
-        queen_profile,
-        _session_event_bus,
-    )
-    if initial_prompt:
-        await _refresh_recall_cache(initial_prompt)
+    async def _queen_identity_hook(ctx: HookContext) -> HookResult | None:
+        ensure_default_queens()
+        trigger = ctx.trigger or ""
+        # If the session was pre-bound to a queen (user clicked a specific
+        # queen in the UI), use that identity instead of LLM auto-selection.
+        # Also skip LLM auto-selection if queen was already selected during
+        # session creation (e.g., from home screen classification).
+        if session.queen_name and session.queen_name != "default":
+            queen_id = session.queen_name
+            logger.info("Using pre-selected queen: %s", queen_id)
+        else:
+            # This should rarely happen now - queen is selected at session creation
+            logger.warning("No pre-selected queen, falling back to LLM classification")
+            queen_id = await select_queen(trigger, _session_llm)
+        try:
+            profile = load_queen_profile(queen_id)
+        except FileNotFoundError:
+            logger.warning("Queen profile %s not found after selection", queen_id)
+            return None
+        identity_prompt = format_queen_identity_prompt(profile)
+        # Store on phase_state so identity persists across dynamic prompt refreshes
+        phase_state.queen_id = queen_id
+        phase_state.queen_profile = profile
+        phase_state.queen_identity_prompt = identity_prompt
+        # Route session storage to ~/.hive/agents/queens/{queen_id}/sessions/
+        session.queen_name = queen_id
+        if _session_event_bus is not None:
+            await _session_event_bus.publish(
+                AgentEvent(
+                    type=EventType.QUEEN_IDENTITY_SELECTED,
+                    stream_id="queen",
+                    data={
+                        "queen_id": queen_id,
+                        "name": profile.get("name", ""),
+                        "title": profile.get("title", ""),
+                    },
+                )
+            )
+
+        # Seed recall cache so the first turn has relevant memories.
+        # Use a short timeout to avoid blocking the first turn on slow models.
+        if trigger:
+            try:
+                import asyncio
+                from framework.agents.queen.recall_selector import (
+                    format_recall_injection,
+                    select_memories,
+                )
+
+                mem_dir = phase_state.global_memory_dir
+                selected = await asyncio.wait_for(
+                    select_memories(trigger, _session_llm, mem_dir),
+                    timeout=3.0,
+                )
+                phase_state._cached_global_recall_block = format_recall_injection(selected, mem_dir)
+            except asyncio.TimeoutError:
+                logger.debug("recall: initial seeding timed out, will retry on first turn")
+            except Exception:
+                logger.debug("recall: initial seeding failed", exc_info=True)
+
+        return HookResult(system_prompt=phase_state.get_current_prompt())
 
     # ---- Graph preparation -------------------------------------------
     initial_prompt_text = phase_state.get_current_prompt()
