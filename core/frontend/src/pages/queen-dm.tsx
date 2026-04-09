@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useParams } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { useParams, useNavigate } from "react-router-dom";
+import { Loader2, ArrowRight, Hexagon } from "lucide-react";
 import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
 import { executionApi } from "@/api/execution";
 import { sessionsApi } from "@/api/sessions";
@@ -15,6 +15,7 @@ const makeId = () => Math.random().toString(36).slice(2, 9);
 
 export default function QueenDM() {
   const { queenId } = useParams<{ queenId: string }>();
+  const navigate = useNavigate();
   const { queens, queenProfiles } = useColony();
   const profileQueen = queenProfiles.find((q) => q.id === queenId);
   const colonyQueen = queens.find((q) => q.id === queenId);
@@ -33,6 +34,7 @@ export default function QueenDM() {
     { id: string; prompt: string; options?: string[] }[] | null
   >(null);
   const [awaitingInput, setAwaitingInput] = useState(false);
+  const [transitioningToColony, setTransitioningToColony] = useState<string | null>(null);
   const [, setActiveToolCalls] = useState<Record<string, { name: string; done: boolean }>>({});
 
   const turnCounterRef = useRef(0);
@@ -119,10 +121,47 @@ export default function QueenDM() {
           setActiveToolCalls({});
           break;
 
-        case "execution_completed":
+        case "execution_completed": {
           setIsTyping(false);
           setIsStreaming(false);
+          // Flush any remaining LLM text
+          const executionId = event.execution_id;
+          if (executionId) {
+            const prefix = `${executionId}:`;
+            const matchingKeys = Object.keys(queenIterTextRef.current).filter(k => k.startsWith(prefix));
+            
+            for (const iterKey of matchingKeys) {
+              const parts = queenIterTextRef.current[iterKey];
+              const sorted = Object.keys(parts)
+                .map(Number)
+                .sort((a, b) => a - b);
+              const content = sorted.map((k) => parts[k]).join("\n");
+              if (content.trim()) {
+                const chatMsg: ChatMessage = {
+                  id: `queen-stream-${iterKey}-final`,
+                  agent: queenName,
+                  agentColor: "",
+                  content: content,
+                  timestamp: "",
+                  type: "agent",
+                  thread: "queen-dm",
+                  createdAt: Date.now(),
+                  role: "queen",
+                };
+                setMessages((prev) => {
+                  const idx = prev.findIndex((m) => m.id === chatMsg.id);
+                  if (idx >= 0) {
+                    return prev.map((m, i) => (i === idx ? chatMsg : m));
+                  }
+                  return [...prev, chatMsg];
+                });
+              }
+              delete queenIterTextRef.current[iterKey];
+            }
+          }
+          setActiveToolCalls({});
           break;
+        }
 
         case "llm_turn_complete":
           turnCounterRef.current++;
@@ -213,76 +252,129 @@ export default function QueenDM() {
         }
 
         case "tool_call_started": {
-          const toolName = (event.data?.tool_name as string) || "unknown";
-          const toolUseId = (event.data?.tool_use_id as string) || "";
-          const sid = event.stream_id;
-          const execId = event.execution_id || "exec";
-
-          setActiveToolCalls((prev) => {
-            const newActive = { ...prev, [toolUseId]: { name: toolName, done: false } };
-            const tools = Object.entries(newActive).map(([, t]) => ({ name: t.name, done: t.done }));
-            const allDone = tools.length > 0 && tools.every((t) => t.done);
-            const msgId = `tool-pill-${sid}-${execId}-${turnCounterRef.current}`;
-            const toolMsg: ChatMessage = {
-              id: msgId,
-              agent: queenName,
-              agentColor: "",
-              content: JSON.stringify({ tools, allDone }),
-              timestamp: "",
-              type: "tool_status",
-              role: "queen",
-              thread: "queen-dm",
-              createdAt: Date.now(),
-              nodeId: event.node_id || undefined,
-              executionId: event.execution_id || undefined,
-            };
-            setMessages((prevMsgs) => {
-              const idx = prevMsgs.findIndex((m) => m.id === msgId);
-              if (idx >= 0) {
-                return prevMsgs.map((m, i) => (i === idx ? toolMsg : m));
+          // Flush any pending LLM text before showing tool call
+          // The ref is keyed by "${execution_id}:${iteration}", find all matching entries
+          const executionId = event.execution_id;
+          if (executionId) {
+            const prefix = `${executionId}:`;
+            const matchingKeys = Object.keys(queenIterTextRef.current).filter(k => k.startsWith(prefix));
+            
+            for (const iterKey of matchingKeys) {
+              const parts = queenIterTextRef.current[iterKey];
+              const sorted = Object.keys(parts)
+                .map(Number)
+                .sort((a, b) => a - b);
+              const content = sorted.map((k) => parts[k]).join("\n");
+              if (content.trim()) {
+                const chatMsg: ChatMessage = {
+                  id: `queen-stream-${iterKey}-final`,
+                  agent: queenName,
+                  agentColor: "",
+                  content: content,
+                  timestamp: "",
+                  type: "agent",
+                  thread: "queen-dm",
+                  createdAt: Date.now(),
+                  role: "queen",
+                };
+                setMessages((prev) => {
+                  const idx = prev.findIndex((m) => m.id === chatMsg.id);
+                  if (idx >= 0) {
+                    return prev.map((m, i) => (i === idx ? chatMsg : m));
+                  }
+                  return [...prev, chatMsg];
+                });
               }
-              return [...prevMsgs, toolMsg];
-            });
-            return newActive;
-          });
+              // Clear the ref after flushing
+              delete queenIterTextRef.current[iterKey];
+            }
+          }
+          setActiveToolCalls((prev) => ({
+            ...prev,
+            [event.timestamp || Date.now().toString()]: { name: (event.data?.tool_name as string) || "tool", done: false }
+          }));
           break;
         }
 
         case "tool_call_completed": {
-          const toolUseId = (event.data?.tool_use_id as string) || "";
-          const sid = event.stream_id;
-          const execId = event.execution_id || "exec";
-
-          setActiveToolCalls((prev) => {
-            const updated = { ...prev };
-            if (updated[toolUseId]) {
-              updated[toolUseId] = { ...updated[toolUseId], done: true };
-            }
-            const tools = Object.entries(updated).map(([, t]) => ({ name: t.name, done: t.done }));
-            const allDone = tools.length > 0 && tools.every((t) => t.done);
-            const msgId = `tool-pill-${sid}-${execId}-${turnCounterRef.current}`;
-            const toolMsg: ChatMessage = {
-              id: msgId,
-              agent: queenName,
-              agentColor: "",
-              content: JSON.stringify({ tools, allDone }),
-              timestamp: "",
-              type: "tool_status",
-              role: "queen",
-              thread: "queen-dm",
-              createdAt: Date.now(),
-              nodeId: event.node_id || undefined,
-              executionId: event.execution_id || undefined,
-            };
-            setMessages((prevMsgs) => {
-              const idx = prevMsgs.findIndex((m) => m.id === msgId);
-              if (idx >= 0) {
-                return prevMsgs.map((m, i) => (i === idx ? toolMsg : m));
+          // Suppress ask_user/ask_user_multiple tool results from appearing in chat
+          // They should only show as question modals via client_input_requested
+          const toolName = (event.data?.tool_name as string) || "";
+          if (toolName === "ask_user" || toolName === "ask_user_multiple") {
+            // Don't add to chat - the question modal will handle this
+            break;
+          }
+          // For other tools, show the result
+          const result = event.data?.result as string | undefined;
+          if (result) {
+            try {
+              // Try to parse as JSON to see if it's a structured result
+              const parsed = JSON.parse(result);
+              // If it's a simple success message, show it
+              if (parsed.message && typeof parsed.message === "string") {
+                const chatMsg: ChatMessage = {
+                  id: `tool-result-${event.timestamp || Date.now()}`,
+                  agent: queenName,
+                  agentColor: "",
+                  content: parsed.message,
+                  timestamp: "",
+                  type: "agent",
+                  thread: "queen-dm",
+                  createdAt: Date.now(),
+                  role: "queen",
+                };
+                setMessages((prev) => [...prev, chatMsg]);
               }
-              return [...prevMsgs, toolMsg];
-            });
-            return updated;
+            } catch {
+              // Not JSON, show raw result (truncated)
+              const chatMsg: ChatMessage = {
+                id: `tool-result-${event.timestamp || Date.now()}`,
+                agent: queenName,
+                agentColor: "",
+                content: result.slice(0, 500),
+                timestamp: "",
+                type: "agent",
+                thread: "queen-dm",
+                createdAt: Date.now(),
+                role: "queen",
+              };
+              setMessages((prev) => [...prev, chatMsg]);
+            }
+          }
+          setActiveToolCalls((prev) => {
+            const key = Object.keys(prev).find(k => !prev[k].done);
+            if (key) {
+              return { ...prev, [key]: { ...prev[key], done: true } };
+            }
+            return prev;
           });
+          break;
+        }
+
+        case "colony_creation_requested": {
+          // Queen in DM mode requested to create a colony for the agent
+          const agentPath = event.data?.agent_path as string | undefined;
+          const agentName = event.data?.agent_name as string | undefined;
+          if (agentPath) {
+            // Extract colony ID from agent path (e.g., "founder_twitter_agent" → "founder-twitter-agent")
+            const slug = agentPath.replace(/\/$/, "").split("/").pop() || "";
+            const colonyId = slug.replace(/_/g, "-");
+            
+            // Show transition state
+            setTransitioningToColony(agentName || colonyId);
+            setIsTyping(false);
+            
+            // Pass the DM session ID so colony can resume from it
+            // This preserves conversation history when transitioning to colony
+            const dmSessionId = sessionId;
+            
+            // Delay navigation to let user see the queen's message
+            setTimeout(() => {
+              navigate(`/colony/${colonyId}`, { 
+                state: { queenResumeFrom: dmSessionId } 
+              });
+            }, 2000);
+          }
           break;
         }
 
@@ -290,7 +382,7 @@ export default function QueenDM() {
           break;
       }
     },
-    [queenName],
+    [queenName, navigate, sessionId],
   );
 
   const sseSessions = useMemo((): Record<string, string> => {
@@ -381,6 +473,26 @@ export default function QueenDM() {
           </div>
         )}
 
+        {transitioningToColony && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-4 text-foreground">
+              <div className="flex items-center gap-3">
+                <Hexagon className="w-8 h-8 text-primary animate-pulse" />
+                <ArrowRight className="w-5 h-5 text-muted-foreground" />
+                <Loader2 className="w-8 h-8 text-primary animate-spin" />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium">
+                  Design approved! Moving to colony...
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {transitioningToColony.replace(/_/g, " ")}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <ChatPanel
           messages={messages}
           onSend={handleSend}
@@ -388,7 +500,7 @@ export default function QueenDM() {
           activeThread="queen-dm"
           isWaiting={isTyping && !isStreaming}
           isBusy={isTyping}
-          disabled={loading || !queenReady}
+          disabled={loading || !queenReady || !!transitioningToColony}
           queenPhase={queenPhase}
           pendingQuestion={awaitingInput ? pendingQuestion : null}
           pendingOptions={awaitingInput ? pendingOptions : null}

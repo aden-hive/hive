@@ -1094,10 +1094,14 @@ def _eval_string_binop(node) -> str | None:
 
 
 def _is_valid_agent_dir(path: Path) -> bool:
-    """Check if a directory contains a valid agent (agent.json or agent.py)."""
+    """Check if a directory contains a valid agent (agent.json, agent.py, or flowchart.json)."""
     if not path.is_dir():
         return False
-    return (path / "agent.json").exists() or (path / "agent.py").exists()
+    return (
+        (path / "agent.json").exists()
+        or (path / "agent.py").exists()
+        or (path / "flowchart.json").exists()
+    )
 
 
 def _has_agents(directory: Path) -> bool:

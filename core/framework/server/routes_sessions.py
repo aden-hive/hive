@@ -115,6 +115,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
         "model": "..." (optional),
         "initial_prompt": "..." (optional — first user message for the queen),
         "initial_phase": "..." (optional — "independent" for standalone queen),
+        "copy_history_from": "..." (optional — copy events from this session ID),
     }
 
     When agent_path is provided, creates a session with a graph in one step
@@ -132,6 +133,8 @@ async def handle_create_session(request: web.Request) -> web.Response:
     # so the full history accumulates in one place across server restarts.
     queen_resume_from = body.get("queen_resume_from")
     initial_phase = body.get("initial_phase")
+    # When set, copy conversation history from this session to the new one (DM → colony transition)
+    copy_history_from = body.get("copy_history_from")
 
     if agent_path:
         try:
@@ -150,6 +153,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 initial_prompt=initial_prompt,
                 queen_resume_from=queen_resume_from,
                 initial_phase=initial_phase,
+                copy_history_from=copy_history_from,
             )
         else:
             # Queen-only session
@@ -159,6 +163,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 initial_prompt=initial_prompt,
                 queen_resume_from=queen_resume_from,
                 initial_phase=initial_phase,
+                copy_history_from=copy_history_from,
             )
     except ValueError as e:
         msg = str(e)
@@ -308,6 +313,26 @@ async def handle_load_graph(request: web.Request) -> web.Response:
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=409)
     except FileNotFoundError:
+        # Agent folder exists but no agent.json yet (DM → colony transition)
+        # Set the agent_path on the session so queen knows where to build
+        session = manager.get_session(session_id)
+        if session is not None:
+            from pathlib import Path
+            session.worker_path = Path(agent_path)
+            # Update meta.json with agent_path for cold-restore
+            from framework.server.session_manager import _queen_session_dir
+            storage_session_id = session.queen_resume_from or session.id
+            meta_path = _queen_session_dir(storage_session_id, session.queen_name) / "meta.json"
+            try:
+                existing_meta = {}
+                if meta_path.exists():
+                    existing_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                existing_meta["agent_path"] = str(agent_path)
+                existing_meta["phase"] = "building"
+                meta_path.write_text(json.dumps(existing_meta), encoding="utf-8")
+            except OSError:
+                pass
+            return web.json_response(_session_to_live_dict(session))
         return web.json_response({"error": f"Agent not found: {agent_path}"}, status=404)
     except Exception as e:
         resp = _credential_error_response(e, agent_path)

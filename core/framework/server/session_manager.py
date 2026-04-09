@@ -89,6 +89,8 @@ class Session:
     queen_name: str = "default"
     # Colony name: set when a worker is loaded from a colony
     colony_name: str | None = None
+    # DM mode: True for queen-only sessions (not in a colony context)
+    is_dm_mode: bool = False
 
 
 class SessionManager:
@@ -179,6 +181,7 @@ class SessionManager:
         queen_resume_from: str | None = None,
         queen_name: str | None = None,
         initial_phase: str | None = None,
+        copy_history_from: str | None = None,
     ) -> Session:
         """Create a new session with a queen but no worker.
 
@@ -188,21 +191,30 @@ class SessionManager:
 
         When ``queen_name`` is set the session is pre-bound to that queen
         identity, skipping LLM auto-selection in the identity hook.
+
+        When ``copy_history_from`` is set, conversation history is copied from
+        that session to the new one (used for DM → colony transition).
         """
         # Reuse the original session ID when cold-restoring
         resolved_session_id = queen_resume_from or session_id
         session = await self._create_session_core(session_id=resolved_session_id, model=model)
         session.queen_resume_from = queen_resume_from
+        session.is_dm_mode = True  # Queen-only session, not in a colony context
         if queen_name:
             session.queen_name = queen_name
+
+        # Copy conversation history if requested (DM → colony transition)
+        if copy_history_from:
+            await self._copy_session_history(copy_history_from, session.id)
 
         # Start queen immediately (queen-only, no worker tools yet)
         await self._start_queen(session, worker_identity=None, initial_prompt=initial_prompt, initial_phase=initial_phase)
 
         logger.info(
-            "Session '%s' created (queen-only, resume_from=%s)",
+            "Session '%s' created (queen-only, resume_from=%s, copy_from=%s)",
             session.id,
             queen_resume_from,
+            copy_history_from,
         )
         return session
 
@@ -216,12 +228,16 @@ class SessionManager:
         queen_resume_from: str | None = None,
         queen_name: str | None = None,
         initial_phase: str | None = None,
+        copy_history_from: str | None = None,
     ) -> Session:
         """Create a session and load a worker in one step.
 
         When ``queen_resume_from`` is set the session reuses the original session
         ID so the frontend sees a single continuous session.  The queen writes
         conversation messages to that existing directory, preserving full history.
+
+        When ``copy_history_from`` is set, conversation history is copied from
+        that session to the new one (used for DM → colony transition).
         """
         from framework.tools.queen_lifecycle_tools import build_worker_profile
 
@@ -264,6 +280,11 @@ class SessionManager:
             session.queen_name = queen_name
         elif _resume_queen_id:
             session.queen_name = _resume_queen_id
+
+        # Copy conversation history if requested (DM → colony transition)
+        if copy_history_from:
+            await self._copy_session_history(copy_history_from, session.id)
+
         try:
             # Load the graph FIRST (before queen) so queen gets full tools
             await self._load_worker_core(
@@ -924,6 +945,10 @@ class SessionManager:
                             if session.phase_state:
                                 session.phase_state.agent_path = _agent_path
                                 await session.phase_state.switch_to_building(source="auto")
+                            # Emit flowchart so frontend can display the design
+                            await self._emit_flowchart_on_restore(session, _agent_path)
+                            # Notify queen about the transition from DM mode
+                            await self._notify_queen_building_resumed(session, _agent_path)
                             logger.info("Cold restore: resumed BUILDING phase for %s", _agent_path)
                         elif _phase == "planning":
                             if session.phase_state:
@@ -964,6 +989,23 @@ class SessionManager:
             )
 
         await node.inject_event(f"[SYSTEM] Graph loaded.{profile}{trigger_lines}")
+
+    async def _notify_queen_building_resumed(self, session: Session, agent_path: str | Path) -> None:
+        """Notify queen that she's resuming in BUILDING phase after DM mode transition."""
+        executor = session.queen_executor
+        if executor is None:
+            return
+        node = executor.node_registry.get("queen")
+        if node is None or not hasattr(node, "inject_event"):
+            return
+
+        agent_name = Path(agent_path).name.replace("_", " ").title()
+        await node.inject_event(
+            f"[SYSTEM] Resuming BUILDING phase for '{agent_name}'. "
+            f"The design from our DM conversation has been saved to {agent_path}/flowchart.json. "
+            f"You can read this file to review the agreed-upon design. "
+            f"Continue building the agent by creating the agent.json file."
+        )
 
     async def _emit_graph_loaded(self, session: Session) -> None:
         """Publish a WORKER_GRAPH_LOADED event so the frontend can update."""
@@ -1083,6 +1125,39 @@ class SessionManager:
             session.id,
             session.queen_executor,
         )
+
+    async def _copy_session_history(self, from_session_id: str, to_session_id: str) -> None:
+        """Copy conversation history from one session to another (DM → colony transition).
+        
+        Copies events.jsonl from the source session directory to the target session directory.
+        This preserves conversation history without sharing the same session.
+        """
+        from_dir = _find_queen_session_dir(from_session_id)
+        to_dir = _find_queen_session_dir(to_session_id)
+        
+        if not from_dir.exists():
+            logger.warning("Cannot copy history: source session '%s' not found", from_session_id)
+            return
+        
+        # Ensure target directory exists
+        to_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Copy events.jsonl if it exists
+        source_events = from_dir / "events.jsonl"
+        if source_events.exists():
+            try:
+                import shutil
+                target_events = to_dir / "events.jsonl"
+                shutil.copy2(source_events, target_events)
+                logger.info(
+                    "Copied conversation history from '%s' to '%s'",
+                    from_session_id,
+                    to_session_id,
+                )
+            except Exception as e:
+                logger.warning("Failed to copy events.jsonl: %s", e)
+        else:
+            logger.debug("No events.jsonl to copy from '%s'", from_session_id)
 
     # ------------------------------------------------------------------
     # Lookups

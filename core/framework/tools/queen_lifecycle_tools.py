@@ -142,6 +142,9 @@ class QueenPhaseState:
     # Global memory directory.
     global_memory_dir: Path | None = None
 
+    # DM mode: track if we've already triggered colony navigation (prevents duplicate events)
+    _colony_navigated: bool = False
+
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
         if self.phase == "independent":
@@ -1890,11 +1893,14 @@ def register_queen_lifecycle_tools(
         This tool should ONLY be called after the user has explicitly approved
         the draft graph design via ask_user. It creates the agent directory and
         transitions to BUILDING phase. The queen then writes agent.json directly.
+
+        In DM mode (queen-only session), this emits a COLONY_CREATION_REQUESTED
+        event instead of building, signaling the frontend to navigate to a colony.
         """
         if phase_state is None:
             return json.dumps({"error": "Phase state not available."})
 
-        if phase_state.phase != "planning":
+        if phase_state.phase not in ("planning", "independent"):
             return json.dumps(
                 {"error": f"Cannot confirm_and_build: currently in {phase_state.phase} phase."}
             )
@@ -1906,6 +1912,104 @@ def register_queen_lifecycle_tools(
                         "No draft graph saved. Call save_agent_draft() first to create "
                         "a draft, present it to the user, and get their approval."
                     )
+                }
+            )
+
+        # Check if we're in DM mode (queen-only session, not in a colony)
+        is_dm_mode = getattr(session, "is_dm_mode", False)
+        _agent_name = (
+            agent_name
+            or phase_state.draft_graph.get("agent_name", "").strip()
+        )
+
+        # Preserve original draft for flowchart display during runtime,
+        # then dissolve planning-only nodes (decision + browser/GCU) into
+        # runtime-compatible structures.
+        import copy as _copy
+
+        original_nodes = phase_state.draft_graph.get("nodes", [])
+        # Compute dissolution first, then assign all three atomically so that
+        # a failure in _dissolve_planning_nodes doesn't leave partial state.
+        original_copy = _copy.deepcopy(phase_state.draft_graph)
+        converted, fmap = _dissolve_planning_nodes(phase_state.draft_graph)
+        phase_state.original_draft_graph = original_copy
+        phase_state.draft_graph = converted
+        phase_state.flowchart_map = fmap
+
+        # Create agent folder early so flowchart and agent_path are available
+        # throughout the entire BUILDING phase (or for colony navigation in DM mode)
+        _agent_folder = None
+        if _agent_name:
+            from framework.config import COLONIES_DIR
+
+            _agent_folder = COLONIES_DIR / _agent_name
+            _agent_folder.mkdir(parents=True, exist_ok=True)
+            _save_flowchart_file(_agent_folder, original_copy, fmap)
+            phase_state.agent_path = str(_agent_folder)
+            _update_meta_json(
+                session_manager,
+                manager_session_id,
+                {
+                    "agent_path": str(_agent_folder),
+                    "agent_name": _agent_name.replace("_", " ").title(),
+                },
+            )
+
+        if is_dm_mode:
+            # In DM mode: emit event for frontend to navigate to colony
+            # The agent folder is already created above with the draft
+            
+            # Guard against duplicate calls - check if we already emitted the event in this session
+            _colony_navigated = getattr(phase_state, "_colony_navigated", False)
+            if _colony_navigated:
+                # Already navigated in this session - don't emit duplicate event
+                existing_path = getattr(phase_state, "agent_path", None)
+                logger.info(
+                    "Colony navigation already triggered for '%s', skipping duplicate",
+                    existing_path,
+                )
+                return json.dumps(
+                    {
+                        "status": "colony_creation_requested",
+                        "agent_name": _agent_name or getattr(phase_state, "draft_graph", {}).get("agent_name", "colony"),
+                        "agent_path": existing_path or str(_agent_folder),
+                        "message": "Colony navigation already in progress.",
+                    }
+                )
+            
+            # Mark that we're navigating so subsequent calls don't re-emit
+            phase_state._colony_navigated = True
+            
+            bus = getattr(session, "event_bus", None)
+            if bus is not None:
+                logger.info(
+                    "Emitting COLONY_CREATION_REQUESTED for agent '%s' at '%s'",
+                    _agent_name,
+                    _agent_folder,
+                )
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.COLONY_CREATION_REQUESTED,
+                        stream_id="queen",
+                        data={
+                            "agent_name": _agent_name,
+                            "agent_path": str(_agent_folder) if _agent_folder else None,
+                            "queen_id": getattr(phase_state, "queen_id", None),
+                        },
+                    )
+                )
+                # Give the event a moment to be serialized and sent
+                await asyncio.sleep(0.1)
+            return json.dumps(
+                {
+                    "status": "colony_creation_requested",
+                    "agent_name": _agent_name,
+                    "agent_path": str(_agent_folder) if _agent_folder else None,
+                    "message": (
+                        f"Design confirmed for '{_agent_name}'. "
+                        "A new colony is being created for this agent. "
+                        "The user will be navigated there shortly to complete the build."
+                    ),
                 }
             )
 
@@ -1927,10 +2031,6 @@ def register_queen_lifecycle_tools(
 
         # Create agent folder early so flowchart and agent_path are available
         # throughout the entire BUILDING phase.
-        _agent_name = (
-            agent_name
-            or phase_state.draft_graph.get("agent_name", "").strip()
-        )
         if _agent_name:
             from framework.config import COLONIES_DIR
 

@@ -298,7 +298,8 @@ export type EventTypeName =
   | "trigger_fired"
   | "trigger_removed"
   | "trigger_updated"
-  | "queen_identity_selected";
+  | "queen_identity_selected"
+  | "colony_creation_requested";
 
 export interface AgentEvent {
   type: EventTypeName;

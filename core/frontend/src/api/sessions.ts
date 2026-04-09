@@ -10,7 +10,7 @@ export const sessionsApi = {
   // --- Session lifecycle ---
 
   /** Create a session. If agentPath is provided, loads a graph in one step. */
-  create: (agentPath?: string, agentId?: string, model?: string, initialPrompt?: string, queenResumeFrom?: string, initialPhase?: string) =>
+  create: (agentPath?: string, agentId?: string, model?: string, initialPrompt?: string, queenResumeFrom?: string, initialPhase?: string, copyHistoryFrom?: string) =>
     api.post<LiveSession>("/sessions", {
       agent_path: agentPath,
       agent_id: agentId,
@@ -18,6 +18,7 @@ export const sessionsApi = {
       initial_prompt: initialPrompt,
       queen_resume_from: queenResumeFrom || undefined,
       initial_phase: initialPhase || undefined,
+      copy_history_from: copyHistoryFrom || undefined,
     }),
 
   /** List all active sessions. */

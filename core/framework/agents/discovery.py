@@ -216,6 +216,28 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                             desc = data.get("description", desc)
                     except Exception:
                         pass
+                else:
+                    # Try flowchart.json (draft agent) for metadata
+                    flowchart_path = path / "flowchart.json"
+                    if flowchart_path.exists():
+                        try:
+                            data = json.loads(
+                                flowchart_path.read_text(encoding="utf-8"),
+                            )
+                            if isinstance(data, dict):
+                                # Use draft_graph metadata if available
+                                draft = data.get("draft_graph", data)
+                                if isinstance(draft, dict):
+                                    raw_name = draft.get("agent_name", name)
+                                    if raw_name:
+                                        name = raw_name.replace("_", " ").title()
+                                    desc = draft.get("description", desc)
+                                    # Count nodes from draft
+                                    nodes = draft.get("nodes", [])
+                                    if nodes:
+                                        node_count = len(nodes)
+                        except Exception:
+                            pass
 
             entries.append(
                 AgentEntry(

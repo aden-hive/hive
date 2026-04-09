@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import { Loader2, WifiOff, KeyRound, FolderOpen, X } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import DraftGraph from "@/components/DraftGraph";
@@ -25,7 +25,7 @@ import { cronToLabel } from "@/lib/graphUtils";
 import { ApiError } from "@/api/client";
 import { useColony } from "@/context/ColonyContext";
 import { useHeaderActions } from "@/context/HeaderActionsContext";
-import { agentSlug, getQueenForAgent } from "@/lib/colony-registry";
+import { agentSlug, getQueenForAgent, slugToDisplayName } from "@/lib/colony-registry";
 import BrowserStatusBadge from "@/components/BrowserStatusBadge";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
@@ -190,20 +190,37 @@ function defaultAgentState(): AgentState {
 
 export default function ColonyChat() {
   const { colonyId } = useParams<{ colonyId: string }>();
-  const { colonies, markVisited } = useColony();
+  const location = useLocation();
+  const { colonies, markVisited, refresh: refreshColonies } = useColony();
   const { setActions } = useHeaderActions();
+  
+  // Get queenResumeFrom from navigation state (set when transitioning from DM mode)
+  const queenResumeFrom = (location.state as { queenResumeFrom?: string } | null)?.queenResumeFrom;
 
   // Find the colony matching this route
   const colony = colonies.find((c) => c.id === colonyId);
-  const agentPath = colony?.agentPath ?? "";
+  
+  // If colony not found (e.g., newly created from DM mode), derive agent path from URL
+  // colonyId is like "founder-twitter-agent", agent folder is like "founder_twitter_agent"
+  const derivedAgentPath = colonyId 
+    ? `colonies/${colonyId.replace(/-/g, "_")}`
+    : "";
+  const agentPath = colony?.agentPath ?? derivedAgentPath;
   const slug = agentPath ? agentSlug(agentPath) : "";
   const queenInfo = getQueenForAgent(slug);
-  const colonyName = colony?.name ?? colonyId ?? "Colony";
+  const colonyName = colony?.name ?? slugToDisplayName(slug) ?? colonyId ?? "Colony";
 
   // Mark colony as visited when navigating to it
   useEffect(() => {
     if (colonyId) markVisited(colonyId);
   }, [colonyId, markVisited]);
+
+  // Refresh colonies if colony not found (e.g., newly created from DM mode)
+  useEffect(() => {
+    if (colonyId && !colony) {
+      refreshColonies();
+    }
+  }, [colonyId, colony, refreshColonies]);
 
   // ── Core state ───────────────────────────────────────────────────────────
 
@@ -422,23 +439,41 @@ export default function ColonyChat() {
       let restoredOriginalDraft: DraftGraphData | null = null;
 
       if (!liveSession) {
-        // Pre-fetch messages from cold session
+        // Pre-fetch messages from DM session (if transitioning from DM) or cold session
         let preRestoredMsgs: ChatMessage[] = [];
-        if (coldRestoreId) {
+        // Prioritize queenResumeFrom (DM session) over coldRestoreId - DM conversation is the source of truth
+        const historySessionId = queenResumeFrom ?? coldRestoreId;
+        if (historySessionId) {
           const displayName = formatAgentDisplayName(agentPath);
-          const restored = await restoreSessionMessages(coldRestoreId, agentPath, displayName);
+          const restored = await restoreSessionMessages(historySessionId, agentPath, displayName);
           preRestoredMsgs = restored.messages;
           restoredPhase = restored.restoredPhase;
           restoredFlowchartMap = restored.flowchartMap;
           restoredOriginalDraft = restored.originalDraft;
         }
 
-        if (coldRestoreId || preRestoredMsgs.length > 0) {
+        if (historySessionId || preRestoredMsgs.length > 0) {
           suppressIntroRef.current = true;
         }
 
-        // Create new session (pass coldRestoreId for resume)
-        liveSession = await sessionsApi.create(agentPath, undefined, undefined, undefined, coldRestoreId ?? undefined);
+        // Create new session 
+        // - For DM transition: create queen-only session first (no worker yet, just flowchart)
+        // - For cold resume: try to load worker if agent is complete
+        if (queenResumeFrom) {
+          // DM → colony transition: create queen-only session, queen will build the agent
+          // Don't pass agentPath - the colony only has flowchart.json, no worker yet
+          liveSession = await sessionsApi.create(undefined, undefined, undefined, undefined, undefined, "building", queenResumeFrom);
+          // Then load the graph (worker) separately - this may fail if agent.json doesn't exist yet
+          try {
+            liveSession = await sessionsApi.loadGraph(liveSession.session_id, agentPath);
+          } catch {
+            // Worker not ready yet (no agent.json), queen will build it
+            console.log("Agent not fully built yet, queen will build in BUILDING phase");
+          }
+        } else {
+          // Regular cold resume
+          liveSession = await sessionsApi.create(agentPath, undefined, undefined, undefined, coldRestoreId ?? undefined);
+        }
 
         if (preRestoredMsgs.length > 0) {
           preRestoredMsgs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
@@ -479,7 +514,7 @@ export default function ColonyChat() {
         }
       }
 
-      const hasRestoredContent = isResumedSession || !!coldRestoreId;
+      const hasRestoredContent = isResumedSession || !!coldRestoreId || !!queenResumeFrom;
       if (!hasRestoredContent) suppressIntroRef.current = false;
 
       updateState({

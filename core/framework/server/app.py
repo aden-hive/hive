@@ -46,12 +46,22 @@ def validate_agent_path(agent_path: str | Path) -> Path:
     restricting agent loading to known safe directories: ``exports/``,
     ``examples/``, and ``~/.hive/agents/``.
 
+    Supports ``colonies/`` prefix as shorthand for ``~/.hive/colonies/``.
+
     Returns the resolved ``Path`` on success.
 
     Raises:
         ValueError: If the path is outside all allowed roots.
     """
-    resolved = Path(agent_path).expanduser().resolve()
+    agent_path_str = str(agent_path)
+    
+    # Handle colonies/ prefix as shorthand for ~/.hive/colonies/
+    if agent_path_str.startswith("colonies/"):
+        from framework.config import COLONIES_DIR
+        resolved = (COLONIES_DIR / agent_path_str[9:]).resolve()
+    else:
+        resolved = Path(agent_path).expanduser().resolve()
+    
     for root in _get_allowed_agent_roots():
         if resolved.is_relative_to(root) and resolved != root:
             return resolved

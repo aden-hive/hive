@@ -47,6 +47,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.TRIGGER_REMOVED,
     EventType.TRIGGER_UPDATED,
     EventType.DRAFT_GRAPH_UPDATED,
+    EventType.COLONY_CREATION_REQUESTED,
 ]
 
 # Keepalive interval in seconds

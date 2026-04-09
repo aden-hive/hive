@@ -171,6 +171,10 @@ _QUEEN_INDEPENDENT_TOOLS = [
     "search_files",
     "run_command",
     "undo_changes",
+    # DM mode agent building - allow drafting and colony creation
+    "save_agent_draft",
+    "confirm_and_build",
+    "load_built_agent",
 ]
 
 
@@ -634,7 +638,9 @@ document, database, subprocess, etc.) with unique shapes and colors. Set \
 flowchart_type on a node to override. Nodes need only an id. \
 Use decision nodes (flowchart_type: "decision", with decision_clause and \
 labeled yes/no edges) to make conditional branching explicit. \
-hexagons — connect them as leaf nodes to their parent.
+hexagons — connect them as leaf nodes to their parent. \
+⚠️ In DM mode (independent phase), the user CANNOT see the flowchart visualizer. \
+After calling save_agent_draft(), you MUST describe the design in text to the user.
 - confirm_and_build() — Record user confirmation of the draft. Dissolves \
 planning-only nodes (decision → predecessor criteria; browser/GCU → \
 approves via ask_user.
@@ -764,13 +770,34 @@ _queen_behavior_independent = """
 
 You are the agent. No worker, no graph — you execute directly.
 1. Understand the task from the user
-2. Plan your approach briefly (no flowcharts or agent design)
+2. Plan your approach briefly
 3. Execute using your tools: file I/O, shell commands, browser automation
 4. Report results, iterate if needed
 
-You have NO lifecycle tools (no start_graph, stop_graph, confirm_and_build, etc.).
-If the task requires building a dedicated agent, tell the user to start a \
-new session without independent mode.
+## Agent Building in DM Mode (INDEPENDENT Phase)
+
+When the user wants to build a Hive agent in DM mode:
+1. Discuss the plan with the user (what the agent should do, what tools it needs)
+2. Call save_agent_draft() to save the design to the system
+3. **DESCRIBE THE DESIGN IN TEXT to the user** - The user CANNOT see any visual flowchart in DM mode! You must tell them:
+   - Agent name
+   - What it does (the goal)  
+   - Key nodes/steps in plain English
+   - What tools it will use
+4. Ask for approval with: ask_user("Ready to build?", ["Approve and build", "Adjust the design"])
+5. **WHEN USER CLICKS "Approve and build" - YOU MUST CALL:**
+   ```
+   confirm_and_build(agent_name="the_agent_name")
+   ```
+   This is NOT optional. Do NOT just say you'll create the colony. You MUST call the function.
+6. The system will navigate to the colony automatically. The visual flowchart will appear there.
+
+**⚠️ CRITICAL - DM Mode Limitation:**
+- The user CANNOT see the flowchart visualizer in DM mode
+- Calling save_agent_draft() does NOT show anything to the user
+- You MUST describe the design in text before asking for approval
+- **WHEN USER APPROVES, CALL confirm_and_build() IMMEDIATELY. DO NOT HESITATE.**
+- The flowchart ONLY becomes visible AFTER navigating to the colony
 """
 
 # -- Behavior shared across all phases --
@@ -825,10 +852,19 @@ confirmation before moving to building. The sequence is:
   confirm_and_build()
 Skipping any of these steps will be blocked by the system.
 
-Remember: DO NOT write or edit any files yet. This is a read-only exploration \
-and planning phase. You have read-only tools but no write/edit tools in this \
-phase. If the user asks you to write code, explain that you need to finalize \
-the plan first.
+## DM Mode Transition (Queen-only conversations)
+
+When you are in a direct message conversation with the user (not in a colony):
+1. After the user approves the design with "Approve and build", you MUST \
+explain what will happen next BEFORE calling confirm_and_build()
+2. Tell the user: "Great! I'm creating a colony for this agent now. You'll be \
+taken there in a moment to complete the build."
+3. Then call confirm_and_build(agent_name) once to create the colony
+4. The system will automatically navigate the user to the new colony
+
+**IMPORTANT:** Only call confirm_and_build() ONCE with the agent_name parameter. \
+Multiple calls will be ignored. The function handles both confirmation and folder \
+creation in one step when agent_name is provided.
 
 ## Diagnosis mode (returning from staging/running)
 

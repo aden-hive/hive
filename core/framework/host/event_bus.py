@@ -162,6 +162,9 @@ class EventType(StrEnum):
     TRIGGER_REMOVED = "trigger_removed"
     TRIGGER_UPDATED = "trigger_updated"
 
+    # Colony creation requested (queen DM mode -> frontend navigation)
+    COLONY_CREATION_REQUESTED = "colony_creation_requested"
+
 
 @dataclass
 class AgentEvent:
