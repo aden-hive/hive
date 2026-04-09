@@ -101,14 +101,16 @@ logger = logging.getLogger(__name__)
 # Tags whose content is internal reasoning and must be stripped from
 # the user-visible stream.  Covers <think> and the 5-pillar character
 # assessment tags.
-_INTERNAL_TAGS = frozenset({
-    "think",
-    "social_distance",
-    "context",
-    "mood_filter",
-    "physical_presence",
-    "language_engine",
-})
+_INTERNAL_TAGS = frozenset(
+    {
+        "think",
+        "social_distance",
+        "context",
+        "mood_filter",
+        "physical_presence",
+        "language_engine",
+    }
+)
 _STRIP_RE = re.compile(
     r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>"
     r".*?"
@@ -117,9 +119,7 @@ _STRIP_RE = re.compile(
 )
 
 
-_INTERNAL_OPEN_RE = re.compile(
-    r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>"
-)
+_INTERNAL_OPEN_RE = re.compile(r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>")
 # Matches a trailing `<` that could be the start of an internal tag.
 # We build a pattern that matches `<` followed by any prefix of any
 # internal tag name (e.g. `<so`, `<contex`, `<think`).
@@ -128,25 +128,42 @@ for _tag in _INTERNAL_TAGS:
     for _i in range(1, len(_tag) + 1):
         _PARTIAL_PREFIXES.add(_tag[:_i])
 _PARTIAL_OPEN_RE = re.compile(
-    r"<(?:" + "|".join(re.escape(p) for p in sorted(_PARTIAL_PREFIXES, key=len, reverse=True)) + r")$"
+    r"<(?:"
+    + "|".join(re.escape(p) for p in sorted(_PARTIAL_PREFIXES, key=len, reverse=True))
+    + r")$"
 )
+
+_GENERIC_TAG_RE = re.compile(r"</?[a-zA-Z_][\w-]*\s*/?>")
+_GENERIC_TAG_OR_PARTIAL_RE = re.compile(r"<[a-zA-Z_]|</[a-zA-Z_]|<$")
 
 
 def _strip_internal_tags_from_snapshot(snapshot: str) -> str:
     """Remove all internal tag blocks from the full accumulated text.
 
-    Also truncates at any unclosed or partially-opened internal tag
-    so partial tags never leak to the frontend during streaming.
+    Also truncates at any unclosed or partially-opened tag so partial
+    tags never leak to the frontend during streaming.
     """
     cleaned = _STRIP_RE.sub("", snapshot)
     # Truncate at any fully-opened but unclosed internal tag
     m = _INTERNAL_OPEN_RE.search(cleaned)
     if m:
-        cleaned = cleaned[:m.start()]
+        cleaned = cleaned[: m.start()]
     # Truncate at any partial opening tag at the end (e.g. `<social` or `<co`)
     m2 = _PARTIAL_OPEN_RE.search(cleaned)
     if m2:
-        cleaned = cleaned[:m2.start()]
+        cleaned = cleaned[: m2.start()]
+
+    # Generic pass: strip any remaining XML-like tags the LLM hallucinated
+    # (e.g. <professional>, <staging>, </neutral>).  These are never
+    # intentional markup — just remove them outright.
+    cleaned = _GENERIC_TAG_RE.sub("", cleaned)
+    # Truncate at any remaining `<` that looks like it could be a tag
+    # start (followed by a letter) or a bare `<` at end of string.
+    # During streaming this suppresses partial tags until they resolve.
+    m3 = _GENERIC_TAG_OR_PARTIAL_RE.search(cleaned)
+    if m3:
+        cleaned = cleaned[: m3.start()]
+
     return cleaned
 
 
@@ -548,9 +565,7 @@ class AgentLoop(NodeProtocol):
         _consecutive_empty_turns: int = 0
 
         # 6. Main loop
-        logger.debug(
-            "[AgentLoop.execute] Entering main loop, start_iteration=%d", start_iteration
-        )
+        logger.debug("[AgentLoop.execute] Entering main loop, start_iteration=%d", start_iteration)
         for iteration in range(start_iteration, self._config.max_iterations):
             iter_start = time.time()
             logger.debug("[AgentLoop.execute] iteration=%d starting", iteration)
@@ -584,9 +599,7 @@ class AgentLoop(NodeProtocol):
                 )
 
             # 6b. Drain injection queue
-            logger.debug(
-                "[AgentLoop.execute] iteration=%d: draining injection queue...", iteration
-            )
+            logger.debug("[AgentLoop.execute] iteration=%d: draining injection queue...", iteration)
             drained_injections = await self._drain_injection_queue(conversation, ctx)
             logger.debug(
                 "[AgentLoop.execute] iteration=%d: drained %d injections",
@@ -682,7 +695,9 @@ class AgentLoop(NodeProtocol):
 
                     _new_prompt = stamp_prompt_datetime(ctx.dynamic_prompt_provider())
                 else:
-                    from framework.orchestrator.prompting import build_system_prompt_for_node_context
+                    from framework.orchestrator.prompting import (
+                        build_system_prompt_for_node_context,
+                    )
 
                     _new_prompt = build_system_prompt_for_node_context(ctx)
                 if _new_prompt != conversation.system_prompt:
@@ -755,8 +770,7 @@ class AgentLoop(NodeProtocol):
                         ctx, conversation, tools, iteration, accumulator
                     )
                     logger.debug(
-                        "[AgentLoop.execute] iteration=%d:"
-                        " _run_single_turn completed successfully",
+                        "[AgentLoop.execute] iteration=%d: _run_single_turn completed successfully",
                         iteration,
                     )
                     _turn_ms = int((time.monotonic() - _turn_t0) * 1000)
@@ -830,8 +844,7 @@ class AgentLoop(NodeProtocol):
 
                 except Exception as e:
                     logger.debug(
-                        "[AgentLoop.execute] iteration=%d:"
-                        " Exception in _run_single_turn: %s (%s)",
+                        "[AgentLoop.execute] iteration=%d: Exception in _run_single_turn: %s (%s)",
                         iteration,
                         type(e).__name__,
                         str(e)[:200],
@@ -1006,7 +1019,6 @@ class AgentLoop(NodeProtocol):
                 and not outputs_set
                 and not user_input_requested
                 and not queen_input_requested
-                
             )
             if truly_empty and accumulator is not None:
                 missing = self._get_missing_output_keys(
@@ -1265,7 +1277,6 @@ class AgentLoop(NodeProtocol):
             _worker_no_tool_turn = (
                 not real_tool_results
                 and not outputs_set
-                
                 and not queen_input_requested
                 and not user_input_requested
             )
@@ -1771,7 +1782,7 @@ class AgentLoop(NodeProtocol):
                 missing = self._get_missing_output_keys(
                     accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
                 )
-                if missing and self._judge is not None :
+                if missing and self._judge is not None:
                     hint = (
                         f"Task incomplete. Required outputs not yet produced: {missing}. "
                         f"Follow your system prompt instructions to complete the work."
@@ -2216,11 +2227,9 @@ class AgentLoop(NodeProtocol):
                         # Strip internal reasoning tags from the full
                         # snapshot, then diff against what we already
                         # emitted to get the new visible delta.
-                        _new_clean = _strip_internal_tags_from_snapshot(
-                            event.snapshot
-                        )
+                        _new_clean = _strip_internal_tags_from_snapshot(event.snapshot)
                         if len(_new_clean) > len(_clean_snapshot):
-                            _delta = _new_clean[len(_clean_snapshot):]
+                            _delta = _new_clean[len(_clean_snapshot) :]
                             _clean_snapshot = _new_clean
                             await self._publish_text_delta(
                                 stream_id,
@@ -2347,14 +2356,13 @@ class AgentLoop(NodeProtocol):
             # execution.  The LLM will see it on the next inner turn.
             if not self._injection_queue.empty():
                 while not self._injection_queue.empty():
-                    _inj_content, _inj_client, _inj_images = (
-                        self._injection_queue.get_nowait()
-                    )
+                    _inj_content, _inj_client, _inj_images = self._injection_queue.get_nowait()
                     if _inj_client:
                         await conversation.add_user_message(_inj_content)
                         logger.info(
                             "[%s] Priority-injected user message mid-turn (%d chars)",
-                            node_id, len(_inj_content),
+                            node_id,
+                            len(_inj_content),
                         )
                     else:
                         await conversation.add_user_message(_inj_content)
@@ -3536,4 +3544,3 @@ class AgentLoop(NodeProtocol):
     # -------------------------------------------------------------------
     # Subagent Execution
     # -------------------------------------------------------------------
-

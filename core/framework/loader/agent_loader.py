@@ -961,9 +961,6 @@ def load_agent_config(data: str | dict) -> tuple[GraphSpec, Goal]:
         elif nc.tools.policy == "none":
             tools_list = []
             tool_policy = "none"
-        elif nc.tools.policy == "all":
-            tools_list = []
-            tool_policy = "all"
         else:
             # Inherit agent-level tool config
             if config.tools.policy == "explicit" and config.tools.allowed:
@@ -1037,9 +1034,7 @@ def load_agent_config(data: str | dict) -> tuple[GraphSpec, Goal]:
         "max_tokens": config.max_tokens,
         "loop_config": dict(config.loop_config),
         "conversation_mode": config.conversation_mode,
-        "identity_prompt": _resolve_template_vars(
-            config.identity_prompt, tvars
-        ) or "",
+        "identity_prompt": _resolve_template_vars(config.identity_prompt, tvars) or "",
     }
 
     graph = GraphSpec(**graph_kwargs)
@@ -1267,6 +1262,7 @@ class AgentLoader:
         os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)
 
         # MCP tools are loaded by McpRegistryStage in the pipeline during AgentHost.start()
+
     @staticmethod
     def _import_agent_module(agent_path: Path):
         """Import an agent package from its directory path.
@@ -2120,9 +2116,7 @@ class AgentLoader:
                 warnings.append(warning_msg)
         except ImportError:
             # aden_tools not installed - fall back to direct check
-            has_llm_nodes = any(
-                node.node_type == "event_loop" for node in self.graph.nodes
-            )
+            has_llm_nodes = any(node.node_type == "event_loop" for node in self.graph.nodes)
             if has_llm_nodes:
                 api_key_env = self._get_api_key_env_var(self.model)
                 if api_key_env and not os.environ.get(api_key_env):

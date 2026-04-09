@@ -12,7 +12,7 @@ These are resolved at load time from ``AgentConfig.variables``.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ToolAccessConfig(BaseModel):
@@ -20,23 +20,37 @@ class ToolAccessConfig(BaseModel):
 
     Controls which tools a node/agent has access to.
 
-    * ``all``      -- every tool from the registry.
     * ``explicit`` -- only tools listed in ``allowed`` (default; empty = zero tools).
     * ``none``     -- no tools at all.
+
+    ``all`` is not permitted — agents must declare every tool they use.
     """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     policy: str = Field(
         default="explicit",
-        description="One of: 'all', 'explicit', 'none'.",
+        description="One of: 'explicit', 'none'. 'all' is not allowed.",
     )
     allowed: list[str] = Field(
         default_factory=list,
         description="Tool names when policy='explicit'.",
+        alias="tools",
     )
     denied: list[str] = Field(
         default_factory=list,
         description="Tool names to deny (applied after allowed).",
     )
+
+    @model_validator(mode="after")
+    def _reject_policy_all(self) -> ToolAccessConfig:
+        if self.policy == "all":
+            raise ValueError(
+                "tool policy 'all' is not allowed — "
+                "list every tool explicitly in 'allowed' instead. "
+                "This ensures agents only see the tools they need."
+            )
+        return self
 
 
 class NodeConfig(BaseModel):

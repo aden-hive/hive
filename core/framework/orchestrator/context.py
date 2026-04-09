@@ -283,7 +283,11 @@ def build_node_context_from_graph_context(
     gc = graph_context
     resolved_override_tools = override_tools
     if resolved_override_tools is None and gc.is_continuous and gc.cumulative_tools:
-        resolved_override_tools = list(gc.cumulative_tools)
+        if node_spec.tool_access_policy == "explicit" and node_spec.tools:
+            declared = set(node_spec.tools)
+            resolved_override_tools = [t for t in gc.cumulative_tools if t.name in declared]
+        else:
+            resolved_override_tools = list(gc.cumulative_tools)
 
     resolved_inherited_conversation = inherited_conversation
     if resolved_inherited_conversation is None and gc.is_continuous:
