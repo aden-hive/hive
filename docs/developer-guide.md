@@ -543,7 +543,7 @@ chore(deps): update React to 18.2.0
 
 1. Create a feature branch from `main`
 2. Make your changes with clear commits
-3. Run tests locally: `make test`
+3. Run tests locally: `make test` (runs both `core/` and `tools/` Python suites)
 4. Run linting: `make check`
 5. Push and create a PR
 6. Fill out the PR template

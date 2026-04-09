@@ -44,7 +44,9 @@ Run these from the repository root:
 make lint           # Auto-fix lint issues across core/, tools/, exports/
 make format         # Apply ruff formatting
 make check          # Dry-run check (same as CI) — no files modified
-make test           # Run the test suite
+make test           # Run Python test suites for core/ and tools/
+make test-core      # Run only core/ tests
+make test-tools     # Run only tools/ tests
 make install-hooks  # One-time: install pre-commit hooks
 make help           # Show all available targets
 ```

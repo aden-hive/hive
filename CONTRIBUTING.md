@@ -47,7 +47,7 @@ You may submit PRs without prior assignment for:
 7. Run checks and tests:
    ```bash
    make check    # Lint and format checks (ruff check + ruff format --check on core/ and tools/)
-   make test     # Core tests (cd core && pytest tests/ -v)
+   make test     # Python test suites for both core/ and tools/
    ```
 8. Commit your changes following our commit conventions
 9. Push to your fork and submit a Pull Request
@@ -138,11 +138,15 @@ feat(component): add new feature description
 # Run lint and format checks (mirrors CI lint job)
 make check
 
-# Run core framework tests (mirrors CI test job)
+# Run Python test suites (mirrors CI test + test-tools jobs)
 make test
 
+# Or run an individual suite
+make test-core
+make test-tools
+
 # Or run tests directly
-cd core && pytest tests/ -v
+cd core && uv run pytest tests/ -v
 
 # Run tools package tests (when contributing to tools/)
 cd tools && uv run pytest tests/ -v

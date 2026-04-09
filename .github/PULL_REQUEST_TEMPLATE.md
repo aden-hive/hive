@@ -24,8 +24,8 @@ Fixes #(issue number)
 
 Describe the tests you ran to verify your changes:
 
-- [ ] Unit tests pass (`cd core && pytest tests/`)
-- [ ] Lint passes (`cd core && ruff check .`)
+- [ ] Unit tests pass (`make test`)
+- [ ] Lint passes (`make check`)
 - [ ] Manual testing performed
 
 ## Checklist
