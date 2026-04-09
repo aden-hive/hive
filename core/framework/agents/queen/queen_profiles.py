@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,6 +25,14 @@ if TYPE_CHECKING:
     from framework.llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class QueenSelection:
+    """Structured selector result for routing diagnostics."""
+
+    queen_id: str
+    reason: str
 
 # ---------------------------------------------------------------------------
 # Default queen profiles
@@ -980,7 +989,7 @@ def format_queen_identity_prompt(profile: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 _QUEEN_SELECTOR_SYSTEM_PROMPT = """\
-You are a routing classifier. Given a user's request, select the single best-matching \
+If you're a CEO of the company, who should take this request?. Given a request, select the single best-matching \
 queen identity from the list below.
 
 Queens:
@@ -994,26 +1003,32 @@ Queens:
 - queen_operations: Founder coaching, strategic decisions, leadership challenges, company growth, pivots
 
 Reply with ONLY a valid JSON object — no markdown, no prose:
-{"queen_id": "<one of the IDs above>"}
+{"reason": "<reason and thinking of selecting who will take the request>", "queen_id": "<one of the IDs above>"}
 
 Rules:
 - Pick the queen whose domain most directly applies to the user's request.
-- If the request is about building software, coding, or technical systems, pick queen_technology.
 - If the request spans multiple domains, pick the one most central to the ask.
-- If truly ambiguous, default to queen_technology.
+- The reason must briefly explain why that queen should take this request.
 """
 
 _DEFAULT_QUEEN_ID = "queen_technology"
 
 
-async def select_queen(user_message: str, llm: LLMProvider) -> str:
-    """Classify a user message into the best-matching queen ID.
+async def select_queen_with_reason(user_message: str, llm: LLMProvider) -> QueenSelection:
+    """Classify a user message into the best-matching queen ID and reason.
 
-    Makes a single non-streaming LLM call. Returns the queen_id string.
+    Makes a single non-streaming LLM call. Returns the queen_id and selector
+    reason so routing decisions can be logged explicitly.
     Falls back to head-of-technology on any failure.
     """
     if not user_message.strip():
-        return _DEFAULT_QUEEN_ID
+        reason = "User message was empty, so routing defaulted to queen_technology."
+        logger.info(
+            "Queen selector: %s takes the task. reason=%s",
+            _DEFAULT_QUEEN_ID,
+            reason,
+        )
+        return QueenSelection(queen_id=_DEFAULT_QUEEN_ID, reason=reason)
 
     try:
         response = await llm.acomplete(
@@ -1022,14 +1037,58 @@ async def select_queen(user_message: str, llm: LLMProvider) -> str:
             max_tokens=2048,
             json_mode=True,
         )
-        raw = response.content.strip()
+    except Exception as exc:
+        logger.exception(
+            "Queen selector failed during LLM classification; defaulting to %s. error=%s",
+            _DEFAULT_QUEEN_ID,
+            exc,
+        )
+        return QueenSelection(
+            queen_id=_DEFAULT_QUEEN_ID,
+            reason=f"Selection failed because the classifier errored: {exc}",
+        )
+
+    raw = response.content.strip()
+    try:
         parsed = json.loads(raw)
-        queen_id = parsed.get("queen_id", "").strip()
-        if queen_id not in DEFAULT_QUEENS:
-            logger.warning("Queen selector returned unknown ID %r, falling back", queen_id)
-            return _DEFAULT_QUEEN_ID
-        logger.info("Queen selector: selected %s for request", queen_id)
-        return queen_id
-    except Exception:
-        logger.warning("Queen selection failed, falling back to %s", _DEFAULT_QUEEN_ID, exc_info=True)
-        return _DEFAULT_QUEEN_ID
+    except json.JSONDecodeError as exc:
+        logger.error(
+            "Queen selector failed to parse JSON; defaulting to %s. error=%s raw=%r",
+            _DEFAULT_QUEEN_ID,
+            exc,
+            raw,
+        )
+        return QueenSelection(
+            queen_id=_DEFAULT_QUEEN_ID,
+            reason=f"Selection failed because the classifier returned invalid JSON: {exc.msg}",
+        )
+
+    queen_id = str(parsed.get("queen_id", "")).strip()
+    reason = str(parsed.get("reason", "")).strip()
+    if queen_id not in DEFAULT_QUEENS:
+        logger.error(
+            "Queen selector returned an unknown queen_id; defaulting to %s. queen_id=%r reason=%r raw=%r",
+            _DEFAULT_QUEEN_ID,
+            queen_id,
+            reason,
+            raw,
+        )
+        fallback_reason = reason or f"Selection failed because the classifier returned unknown queen_id {queen_id!r}."
+        return QueenSelection(queen_id=_DEFAULT_QUEEN_ID, reason=fallback_reason)
+
+    if not reason:
+        reason = f"Classifier selected {queen_id} but did not provide an explicit reason."
+        logger.warning(
+            "Queen selector response omitted reason for queen_id=%s; using synthesized reason.",
+            queen_id,
+        )
+
+    logger.info("Queen selector: %s takes the task. reason=%s", queen_id, reason)
+    return QueenSelection(queen_id=queen_id, reason=reason)
+
+
+async def select_queen(user_message: str, llm: LLMProvider) -> str:
+    """Classify a user message into the best-matching queen ID."""
+
+    selection = await select_queen_with_reason(user_message, llm)
+    return selection.queen_id
