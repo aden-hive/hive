@@ -50,11 +50,8 @@ export const configApi = {
   setLLMConfig: (provider: string, model: string) =>
     api.put<LLMConfigUpdateResponse>("/config/llm", { provider, model }),
 
-  activateSubscription: (subscriptionId: string, model?: string) =>
-    api.put<LLMConfigUpdateResponse>("/config/llm", {
-      subscription: subscriptionId,
-      ...(model ? { model } : {}),
-    }),
+  activateSubscription: (subscriptionId: string) =>
+    api.put<LLMConfigUpdateResponse>("/config/llm", { subscription: subscriptionId }),
 
   getModels: () => api.get<ModelsCatalogue>("/config/models"),
 
