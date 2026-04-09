@@ -13,6 +13,11 @@ Testing commands:
     hive test-debug <agent_path> <test_name>
     hive test-list <agent_path>
     hive test-stats <agent_path>
+
+MCP registry commands:
+    hive mcp init [--server-url URL]
+    hive mcp validate <path>
+    hive mcp test <path>
 """
 
 import argparse
@@ -98,7 +103,7 @@ def main():
 
     register_debugger_commands(subparsers)
 
-    # Register MCP registry commands (mcp install, mcp add, ...)
+    # Register MCP registry commands (mcp install, mcp add, mcp init, mcp validate, mcp test)
     from framework.runner.mcp_registry_cli import register_mcp_commands
 
     register_mcp_commands(subparsers)
