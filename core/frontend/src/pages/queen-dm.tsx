@@ -33,6 +33,7 @@ export default function QueenDM() {
     { id: string; prompt: string; options?: string[] }[] | null
   >(null);
   const [awaitingInput, setAwaitingInput] = useState(false);
+  const [activeToolCalls, setActiveToolCalls] = useState<Record<string, { name: string; done: boolean }>>({});
 
   const turnCounterRef = useRef(0);
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
@@ -115,6 +116,7 @@ export default function QueenDM() {
           turnCounterRef.current++;
           setIsTyping(true);
           setQueenReady(true);
+          setActiveToolCalls({});
           break;
 
         case "execution_completed":
@@ -202,6 +204,80 @@ export default function QueenDM() {
           if (rawPhase === "independent" || rawPhase === "planning" || rawPhase === "building" || rawPhase === "staging" || rawPhase === "running") {
             setQueenPhase(rawPhase);
           }
+          break;
+        }
+
+        case "tool_call_started": {
+          const toolName = (event.data?.tool_name as string) || "unknown";
+          const toolUseId = (event.data?.tool_use_id as string) || "";
+          const sid = event.stream_id;
+          const execId = event.execution_id || "exec";
+
+          setActiveToolCalls((prev) => {
+            const newActive = { ...prev, [toolUseId]: { name: toolName, done: false } };
+            const tools = Object.entries(newActive).map(([id, t]) => ({ name: t.name, done: t.done }));
+            const allDone = tools.length > 0 && tools.every((t) => t.done);
+            const msgId = `tool-pill-${sid}-${execId}-${turnCounterRef.current}`;
+            const toolMsg: ChatMessage = {
+              id: msgId,
+              agent: queenName,
+              agentColor: "",
+              content: JSON.stringify({ tools, allDone }),
+              timestamp: "",
+              type: "tool_status",
+              role: "queen",
+              thread: "queen-dm",
+              createdAt: Date.now(),
+              nodeId: event.node_id || undefined,
+              executionId: event.execution_id || undefined,
+            };
+            setMessages((prevMsgs) => {
+              const idx = prevMsgs.findIndex((m) => m.id === msgId);
+              if (idx >= 0) {
+                return prevMsgs.map((m, i) => (i === idx ? toolMsg : m));
+              }
+              return [...prevMsgs, toolMsg];
+            });
+            return newActive;
+          });
+          break;
+        }
+
+        case "tool_call_completed": {
+          const toolUseId = (event.data?.tool_use_id as string) || "";
+          const sid = event.stream_id;
+          const execId = event.execution_id || "exec";
+
+          setActiveToolCalls((prev) => {
+            const updated = { ...prev };
+            if (updated[toolUseId]) {
+              updated[toolUseId] = { ...updated[toolUseId], done: true };
+            }
+            const tools = Object.entries(updated).map(([id, t]) => ({ name: t.name, done: t.done }));
+            const allDone = tools.length > 0 && tools.every((t) => t.done);
+            const msgId = `tool-pill-${sid}-${execId}-${turnCounterRef.current}`;
+            const toolMsg: ChatMessage = {
+              id: msgId,
+              agent: queenName,
+              agentColor: "",
+              content: JSON.stringify({ tools, allDone }),
+              timestamp: "",
+              type: "tool_status",
+              role: "queen",
+              thread: "queen-dm",
+              createdAt: Date.now(),
+              nodeId: event.node_id || undefined,
+              executionId: event.execution_id || undefined,
+            };
+            setMessages((prevMsgs) => {
+              const idx = prevMsgs.findIndex((m) => m.id === msgId);
+              if (idx >= 0) {
+                return prevMsgs.map((m, i) => (i === idx ? toolMsg : m));
+              }
+              return [...prevMsgs, toolMsg];
+            });
+            return updated;
+          });
           break;
         }
 
