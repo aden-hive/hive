@@ -61,16 +61,34 @@ _SUBSCRIPTION_DEFINITIONS: list[dict[str, str]] = [
         "flag": "use_claude_code_subscription",
     },
     {
+        "id": "zai_code",
+        "name": "ZAI Code Subscription",
+        "description": "Use your ZAI Code plan",
+        "flag": "use_zai_code_subscription",
+    },
+    {
         "id": "codex",
         "name": "OpenAI Codex Subscription",
         "description": "Use your Codex/ChatGPT Plus plan",
         "flag": "use_codex_subscription",
     },
     {
+        "id": "minimax_code",
+        "name": "MiniMax Coding Key",
+        "description": "Use your MiniMax coding key",
+        "flag": "use_minimax_code_subscription",
+    },
+    {
         "id": "kimi_code",
         "name": "Kimi Code Subscription",
         "description": "Use your Kimi Code plan",
         "flag": "use_kimi_code_subscription",
+    },
+    {
+        "id": "hive_llm",
+        "name": "Hive LLM",
+        "description": "Use your Hive API key",
+        "flag": "use_hive_llm_subscription",
     },
     {
         "id": "antigravity",
@@ -179,6 +197,10 @@ def _detect_subscriptions() -> list[str]:
     except Exception:
         pass
 
+    # ZAI Code subscription (API key based)
+    if os.environ.get("ZAI_API_KEY"):
+        detected.append("zai_code")
+
     # Codex subscription
     try:
         from framework.loader.agent_loader import get_codex_token
@@ -187,13 +209,25 @@ def _detect_subscriptions() -> list[str]:
     except Exception:
         pass
 
-    # Kimi Code subscription
+    # MiniMax Coding Key (API key based)
+    if os.environ.get("MINIMAX_API_KEY"):
+        detected.append("minimax_code")
+
+    # Kimi Code subscription (CLI config file or API key env var)
+    kimi_token = None
     try:
         from framework.loader.agent_loader import get_kimi_code_token
-        if get_kimi_code_token():
-            detected.append("kimi_code")
+        kimi_token = get_kimi_code_token()
     except Exception:
         pass
+    if not kimi_token:
+        kimi_token = os.environ.get("KIMI_API_KEY")
+    if kimi_token:
+        detected.append("kimi_code")
+
+    # Hive LLM (API key based)
+    if os.environ.get("HIVE_API_KEY"):
+        detected.append("hive_llm")
 
     # Antigravity subscription
     try:
@@ -219,12 +253,21 @@ def _get_subscription_token(sub_id: str) -> str | None:
     if sub_id == "claude_code":
         from framework.loader.agent_loader import get_claude_code_token
         return get_claude_code_token()
+    elif sub_id == "zai_code":
+        return os.environ.get("ZAI_API_KEY")
     elif sub_id == "codex":
         from framework.loader.agent_loader import get_codex_token
         return get_codex_token()
+    elif sub_id == "minimax_code":
+        return os.environ.get("MINIMAX_API_KEY")
     elif sub_id == "kimi_code":
         from framework.loader.agent_loader import get_kimi_code_token
-        return get_kimi_code_token()
+        token = get_kimi_code_token()
+        if not token:
+            token = os.environ.get("KIMI_API_KEY")
+        return token
+    elif sub_id == "hive_llm":
+        return os.environ.get("HIVE_API_KEY")
     elif sub_id == "antigravity":
         from framework.loader.agent_loader import get_antigravity_token
         return get_antigravity_token()
@@ -290,7 +333,7 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
 
     Accepts two modes:
     1. API key mode: {"provider": "anthropic", "model": "claude-sonnet-4-20250514"}
-    2. Subscription mode: {"subscription": "claude_code", "model": "claude-sonnet-4-20250514"}
+    2. Subscription mode: {"subscription": "claude_code"} (uses preset model)
     """
     try:
         body = await request.json()
@@ -308,29 +351,18 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
             )
 
         preset = get_preset(subscription_id)
-        model = body.get("model") or sub["default_model"]
+        # Subscriptions use the fixed model from their preset (no model switching)
+        model = sub["default_model"]
         provider = sub["provider"]
         api_base = sub.get("api_base")
 
-        # Look up token limits
+        # Look up token limits from preset
         max_tokens: int | None = None
         max_context_tokens: int | None = None
-        if preset and preset.get("model") == model:
+        if preset:
             max_tokens = int(preset["max_tokens"])
             max_context_tokens = int(preset["max_context_tokens"])
         else:
-            # Subscriptions may use the same curated models as their provider.
-            model_info = _find_model_info(provider, model)
-            if not model_info:
-                # Some subscriptions point at curated models owned by a different provider.
-                match = find_model_any_provider(model)
-                if match:
-                    _, model_info = match
-            if model_info:
-                max_tokens = int(model_info["max_tokens"])
-                max_context_tokens = int(model_info["max_context_tokens"])
-
-        if max_tokens is None or max_context_tokens is None:
             max_tokens = 8192
             max_context_tokens = 120000
 

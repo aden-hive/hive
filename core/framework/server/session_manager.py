@@ -98,11 +98,12 @@ class SessionManager:
     (blocking I/O) then started on the event loop.
     """
 
-    def __init__(self, model: str | None = None, credential_store=None) -> None:
+    def __init__(self, model: str | None = None, credential_store=None, queen_tool_registry=None) -> None:
         self._sessions: dict[str, Session] = {}
         self._loading: set[str] = set()
         self._model = model
         self._credential_store = credential_store
+        self._queen_tool_registry = queen_tool_registry
         self._lock = asyncio.Lock()
         # Strong references for fire-and-forget background tasks (e.g. shutdown
         # reflections) so they aren't garbage-collected before completion.
@@ -964,6 +965,7 @@ class SessionManager:
             queen_profile=queen_profile,
             initial_prompt=initial_prompt,
             initial_phase=initial_phase,
+            tool_registry=self._queen_tool_registry,
         )
         logger.debug(
             "[_start_queen] create_queen returned, queen_task=%s, queen_executor=%s",
