@@ -989,8 +989,10 @@ def format_queen_identity_prompt(profile: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 _QUEEN_SELECTOR_SYSTEM_PROMPT = """\
-If you're a CEO of the company, who should take this request?. Given a request, select the single best-matching \
-queen identity from the list below.
+You are a routing classifier acting as the CEO of the company.
+
+Treat the incoming request as something you personally want to accomplish.
+Select the single best-matching queen identity from the list below to take on that goal.
 
 Queens:
 - queen_technology: Technical architecture, software engineering, infrastructure, DevOps, system design
@@ -1006,7 +1008,8 @@ Reply with ONLY a valid JSON object — no markdown, no prose:
 {"reason": "<reason and thinking of selecting who will take the request>", "queen_id": "<one of the IDs above>"}
 
 Rules:
-- Pick the queen whose domain most directly applies to the user's request.
+- Think about the request from the CEO's perspective: this is your goal and you need the best queen to own it.
+- Pick the queen whose domain most directly applies to the goal.
 - If the request spans multiple domains, pick the one most central to the ask.
 - The reason must briefly explain why that queen should take this request.
 """
