@@ -341,6 +341,12 @@ Rules:
 - If there is nothing worth remembering, do nothing (respond with a brief
   reason — no tool calls needed).
 - File names should be kebab-case slugs ending in .md.
+- For user identity/profile information (name, role, background), ALWAYS use
+  the canonical filename 'user-profile.md'. This is the single source of
+  truth for user profile data, shared with the settings UI.
+- When updating user-profile.md, preserve the '## Identity' section — it is
+  managed by the settings UI. Add/update other sections (Professional Style,
+  Current Focus, Preferences, etc.) below it.
 - Do NOT exceed {MAX_FILE_SIZE_BYTES} bytes per file or {MAX_FILES} total files.
 """
 

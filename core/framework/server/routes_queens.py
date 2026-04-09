@@ -8,6 +8,7 @@
 
 import json
 import logging
+from typing import Any
 
 from aiohttp import web
 
@@ -29,6 +30,56 @@ async def handle_list_profiles(request: web.Request) -> web.Response:
     return web.json_response({"queens": queens})
 
 
+def _transform_profile_for_api(profile: dict) -> dict:
+    """Transform internal profile format to API format expected by frontend.
+    
+    Maps YAML fields (core_traits, hidden_background, etc.) to display fields
+    (summary, experience, skills, signature_achievement).
+    """
+    result: dict[str, Any] = {
+        "name": profile.get("name", ""),
+        "title": profile.get("title", ""),
+    }
+    
+    # Build summary from core_traits + psychological_profile
+    summary_parts = []
+    if profile.get("core_traits"):
+        summary_parts.append(profile["core_traits"])
+    if profile.get("psychological_profile", {}).get("anti_stereotype"):
+        summary_parts.append(profile["psychological_profile"]["anti_stereotype"])
+    if summary_parts:
+        result["summary"] = "\n\n".join(summary_parts)
+    
+    # Build experience from hidden_background
+    experience = []
+    hidden = profile.get("hidden_background", {})
+    if hidden.get("past_wound") or hidden.get("deep_motive") or hidden.get("behavioral_mapping"):
+        details = []
+        if hidden.get("past_wound"):
+            details.append(f"Background: {hidden['past_wound']}")
+        if hidden.get("deep_motive"):
+            details.append(f"Drive: {hidden['deep_motive']}")
+        if hidden.get("behavioral_mapping"):
+            details.append(f"Approach: {hidden['behavioral_mapping']}")
+        experience.append({
+            "role": f"{profile.get('title', 'Executive Advisor')}",
+            "details": details
+        })
+    if experience:
+        result["experience"] = experience
+    
+    # Skills from skills field
+    if profile.get("skills"):
+        result["skills"] = profile["skills"]
+    
+    # Signature achievement from world_lore
+    world_lore = profile.get("world_lore", {})
+    if world_lore.get("habitat"):
+        result["signature_achievement"] = f"{world_lore['habitat']}. {world_lore.get('lexicon', '')}".strip()
+    
+    return result
+
+
 async def handle_get_profile(request: web.Request) -> web.Response:
     """GET /api/queen/{queen_id}/profile — get full queen profile."""
     queen_id = request.match_info["queen_id"]
@@ -37,7 +88,9 @@ async def handle_get_profile(request: web.Request) -> web.Response:
         profile = load_queen_profile(queen_id)
     except FileNotFoundError:
         return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
-    return web.json_response({"id": queen_id, **profile})
+    
+    api_profile = _transform_profile_for_api(profile)
+    return web.json_response({"id": queen_id, **api_profile})
 
 
 async def handle_update_profile(request: web.Request) -> web.Response:

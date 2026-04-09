@@ -20,6 +20,10 @@ from framework.config import (
     _PROVIDER_CRED_MAP,
     get_hive_config,
 )
+from framework.agents.queen.queen_memory_v2 import (
+    global_memory_dir,
+    build_memory_document,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -467,6 +471,69 @@ async def handle_get_profile(request: web.Request) -> web.Response:
     })
 
 
+def _update_user_profile_memory(display_name: str, about: str) -> None:
+    """Sync user profile to global memory as a profile-type memory file.
+    
+    Uses the canonical filename 'user-profile.md' — this is the single
+    source of truth for user identity information, shared with the
+    reflection agent.
+    
+    Merges with existing content to preserve sections added by the reflection agent.
+    """
+    try:
+        mem_dir = global_memory_dir()
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        
+        profile_filename = "user-profile.md"
+        memory_path = mem_dir / profile_filename
+        
+        # Read existing content if present
+        existing_body = ""
+        if memory_path.exists():
+            existing_text = memory_path.read_text(encoding="utf-8")
+            # Extract body after frontmatter
+            if "---\n" in existing_text:
+                parts = existing_text.split("---\n", 2)
+                if len(parts) >= 3:
+                    existing_body = parts[2].strip()
+        
+        # Build Identity section from settings
+        identity_lines = []
+        if display_name:
+            identity_lines.append(f"- **Name:** {display_name}")
+        if about:
+            identity_lines.append(f"- **About:** {about}")
+        
+        identity_section = "## Identity\n" + "\n".join(identity_lines) if identity_lines else ""
+        
+        # Merge: replace or prepend Identity section, keep rest
+        if existing_body and "## Identity" in existing_body:
+            # Replace existing Identity section
+            before = existing_body.split("## Identity")[0].rstrip()
+            after_parts = existing_body.split("## Identity", 1)[1].split("\n## ", 1)
+            after = f"\n## {after_parts[1]}" if len(after_parts) > 1 else ""
+            new_body = f"{before}\n{identity_section}{after}".strip()
+        elif existing_body:
+            # Prepend Identity section before existing content
+            new_body = f"{identity_section}\n\n{existing_body}".strip()
+        else:
+            # Just Identity section
+            new_body = identity_section
+        
+        content = build_memory_document(
+            name="User Profile",
+            description=f"User identity: {display_name}" if display_name else "User profile information",
+            mem_type="profile",
+            body=new_body if new_body else "No profile information yet.",
+        )
+        
+        memory_path.write_text(content, encoding="utf-8")
+        logger.debug("User profile synced to global memory: %s", memory_path)
+    except Exception as exc:
+        # Don't fail the API call if memory write fails
+        logger.warning("Failed to sync user profile to global memory: %s", exc)
+
+
 async def handle_update_profile(request: web.Request) -> web.Response:
     """PUT /api/config/profile — persist user display name and about."""
     try:
@@ -484,6 +551,12 @@ async def handle_update_profile(request: web.Request) -> web.Response:
         profile["theme"] = body["theme"]
     config["user_profile"] = profile
     _write_config_atomic(config)
+
+    # Sync to global memory (profile type)
+    _update_user_profile_memory(
+        profile.get("displayName", ""),
+        profile.get("about", "")
+    )
 
     logger.info("User profile updated: displayName=%s", profile.get("displayName", ""))
     return web.json_response({
