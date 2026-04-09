@@ -2958,7 +2958,7 @@ class AgentLoop(NodeProtocol):
                     parts.append(f"{key}: {value}")
         if ctx.goal_context:
             parts.append(f"\nGoal: {ctx.goal_context}")
-        return "\n".join(parts) if parts else "Begin."
+        return "\n".join(parts) if parts else ""
 
     def _get_missing_output_keys(
         self,
