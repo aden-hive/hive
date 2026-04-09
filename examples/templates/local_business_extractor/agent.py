@@ -199,3 +199,97 @@ class LocalBusinessExtractor:
 
 
 default_agent = LocalBusinessExtractor()
+import os
+import json
+import copy
+import httpx
+from typing import List, Dict, Any
+from datetime import datetime
+
+# --- CORE: Bug #804 Fix - Deep Isolation Layer ---
+class DeepIsolatedMemory:
+    """Ensures read-only nodes cannot mutate shared state via reference leakage."""
+    def __init__(self):
+        self._storage = {}
+
+    def write(self, key: str, value: Any):
+        self._storage[key] = copy.deepcopy(value)
+
+    def read(self, key: str) -> Any:
+        return copy.deepcopy(self._storage.get(key))
+
+# --- AGENT: SAP Ariba Procurement Scout ---
+class SAPAribaScout:
+    def __init__(self, api_key: str, realm: str):
+        self.api_key = api_key
+        self.realm = realm
+        self.base_url = f"https://openapi.ariba.com/api/discovery/v1/{realm}"
+        self.keywords = [
+            "ai", "artificial intelligence", "software as a service", 
+            "plateforme as a service", "cloud", "api", "web3", "robotics", 
+            "computer vision", "radar & geographic imaging", 
+            "natural language and voice analysis", "video and social media management"
+        ]
+
+    async def fetch_opportunities(self) -> List[Dict]:
+        """Scans the B2B network for active RFI/RFP postings."""
+        all_matches = []
+        async with httpx.AsyncClient() as client:
+            for query in self.keywords:
+                # Note: In production, use OAuth2 headers
+                params = {"keywords": query, "status": "PUBLISHED"}
+                headers = {"apiKey": self.api_key}
+                
+                try:
+                    response = await client.get(f"{self.base_url}/opportunities", params=params, headers=headers)
+                    if response.status_code == 200:
+                        data = response.json()
+                        all_matches.extend(data.get("opportunities", []))
+                except Exception as e:
+                    print(f"Error fetching keyword '{query}': {e}")
+        
+        # Deduplicate results by ID
+        return list({op['id']: op for op in all_matches}.values())
+
+# --- HIVE: Outcome-Driven Orchestrator ---
+class HiveProcurementCluster:
+    def __init__(self, memory: DeepIsolatedMemory, scout: SAPAribaScout):
+        self.memory = memory
+        self.scout = scout
+
+    async def run_scout_mission(self):
+        print(f"[{datetime.now().isoformat()}] Mission Started: B2B Opportunity Discovery")
+        
+        # 1. Discovery Phase
+        raw_leads = await self.scout.fetch_opportunities()
+        self.memory.write("raw_leads", raw_leads)
+        
+        # 2. Analysis Phase (Logic Node)
+        # Here, the 'Queen' would typically generate a response drafter
+        leads = self.memory.read("raw_leads")
+        print(f"Found {len(leads)} opportunities matching tech-moat keywords.")
+        
+        for lead in leads:
+            print(f" - [MATCH]: {lead.get('title')} | Type: {lead.get('type')} | ID: {lead.get('id')}")
+            
+        # 3. Draft RFI/RFP (Placeholder for LLM Integration)
+        if leads:
+            self.memory.write("selected_lead", leads[0])
+            print(f"Targeting Lead: {leads[0].get('title')}. Ready for RFI drafting.")
+
+# --- EXECUTION ---
+if __name__ == "__main__":
+    import asyncio
+
+    # Setup environment
+    # In a real Aden Hive setup, these are pulled from a secure vault
+    ARIBA_KEY = os.getenv("SAP_ARIBA_API_KEY", "your_api_key_here")
+    ARIBA_REALM = os.getenv("SAP_ARIBA_REALM", "your_realm")
+
+    # Initialize Cluster
+    shared_mem = DeepIsolatedMemory()
+    ariba_scout = SAPAribaScout(ARIBA_KEY, ARIBA_REALM)
+    hive = HiveProcurementCluster(shared_mem, ariba_scout)
+
+    # Execute
+    asyncio.run(hive.run_scout_mission())
