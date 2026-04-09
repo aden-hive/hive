@@ -448,6 +448,14 @@ class AgentLoop(NodeProtocol):
                 # Clear any stale conversation parts before starting fresh.
                 # This ensures a clean slate even if the store directory is reused.
                 if self._conversation_store is not None:
+                    existing_parts = await self._conversation_store.read_parts()
+                    if existing_parts:
+                        logger.warning(
+                            "[%s] Restore returned no conversation despite %d persisted part(s); "
+                            "clearing store and starting fresh",
+                            node_id,
+                            len(existing_parts),
+                        )
                     await self._conversation_store.clear()
 
                 # Fresh conversation: either isolated mode or first node in continuous mode.

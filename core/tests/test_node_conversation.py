@@ -499,6 +499,35 @@ class TestPersistence:
         assert restored.next_seq == 3
 
     @pytest.mark.asyncio
+    async def test_restore_phase_filter_falls_back_for_legacy_unphased_parts(self):
+        """Legacy stores without phase_id should still restore in isolated mode."""
+        store = MockConversationStore()
+        await store.write_meta({"system_prompt": "hello"})
+        await store.write_part(0, {"seq": 0, "role": "assistant", "content": "restored"})
+        await store.write_cursor({"next_seq": 1})
+
+        restored = await NodeConversation.restore(store, phase_id="queen")
+        assert restored is not None
+        assert [m.content for m in restored.messages] == ["restored"]
+        assert restored.next_seq == 1
+
+    @pytest.mark.asyncio
+    async def test_restore_phase_filter_does_not_fall_back_for_mismatched_phased_parts(self):
+        """Phase filtering should still exclude stores that use explicit phase ids."""
+        store = MockConversationStore()
+        await store.write_meta({"system_prompt": "hello"})
+        await store.write_part(
+            0,
+            {"seq": 0, "role": "assistant", "content": "node-a only", "phase_id": "node-a"},
+        )
+        await store.write_cursor({"next_seq": 1})
+
+        restored = await NodeConversation.restore(store, phase_id="queen")
+        assert restored is not None
+        assert restored.message_count == 0
+        assert restored.next_seq == 1
+
+    @pytest.mark.asyncio
     async def test_clear_deletes_all_parts(self):
         store = MockConversationStore()
         conv_a = NodeConversation(system_prompt="hello", store=store, run_id="run-a")
