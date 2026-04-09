@@ -1,5 +1,5 @@
-import { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useRef, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Loader2, Send } from "lucide-react";
 import { messagesApi } from "@/api/messages";
 import { useColony } from "@/context/ColonyContext";
@@ -13,11 +13,27 @@ const promptHints = [
 
 export default function Home() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { userProfile, refresh } = useColony();
   const [inputValue, setInputValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [activePrompt, setActivePrompt] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Pre-fill input if navigated from Prompt Library with a prompt
+  useEffect(() => {
+    const state = location.state as { prompt?: string } | null;
+    if (state?.prompt) {
+      setInputValue(state.prompt);
+      // Clear the state so refreshing doesn't re-fill
+      navigate(location.pathname, { replace: true });
+      // Focus and resize textarea
+      setTimeout(() => {
+        textareaRef.current?.focus();
+        textareaRef.current?.dispatchEvent(new Event("input", { bubbles: true }));
+      }, 0);
+    }
+  }, [location.state, location.pathname, navigate]);
 
   const displayName = userProfile.displayName || "there";
 

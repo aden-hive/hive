@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams, useLocation } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
 import QueenSessionSwitcher from "@/components/QueenSessionSwitcher";
@@ -18,7 +18,19 @@ const makeId = () => Math.random().toString(36).slice(2, 9);
 export default function QueenDM() {
   const { queenId } = useParams<{ queenId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const { queens, queenProfiles, refresh } = useColony();
+  
+  // Get initial prompt from route state (from Prompt Library)
+  const initialPromptRef = useRef((location.state as { prompt?: string } | null)?.prompt);
+  const promptSentRef = useRef(false);
+  
+  // Clear location state immediately after reading to prevent re-sends on refresh
+  useEffect(() => {
+    if (location.state?.prompt) {
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
   const { setActions } = useHeaderActions();
   const profileQueen = queenProfiles.find((q) => q.id === queenId);
   const colonyQueen = queens.find((q) => q.id === queenId);
@@ -98,20 +110,46 @@ export default function QueenDM() {
 
     (async () => {
       try {
-        const result = selectedSessionParam
-          ? await queensApi.selectSession(queenId, selectedSessionParam)
-          : await queensApi.getOrCreateSession(queenId, undefined, "independent");
-        if (cancelled) return;
-
-        const sid = result.session_id;
-        setSessionId(sid);
-        setQueenReady(true);
-        // Show typing indicator while the queen initializes (identity hook + first turn)
-        setIsTyping(true);
-
-        if (selectedSessionParam && selectedSessionParam !== sid) {
+        let sid: string;
+        
+        // Fast path: if we have a session_id in URL from home screen (just created),
+        // use it directly without an extra API call. The session is already live.
+        // This eliminates the 10-13s delay from the unnecessary selectSession API call.
+        if (selectedSessionParam && selectedSessionParam.startsWith("session_")) {
+          sid = selectedSessionParam;
+          setSessionId(sid);
+          setQueenReady(true);
+          setIsTyping(true);
+          setLoading(false); // Hide loading immediately - SSE will connect now
+          // Don't await restoreMessages - let it happen in background
+          restoreMessages(sid, () => cancelled).then(() => refresh());
+          return;
+        }
+        
+        if (selectedSessionParam) {
+          // Resume historical session - need to verify ownership via API
+          const result = await queensApi.selectSession(queenId, selectedSessionParam);
+          if (cancelled) return;
+          sid = result.session_id;
+          setSessionId(sid);
+          setQueenReady(true);
+          setIsTyping(true);
+          
+          if (selectedSessionParam !== sid) {
+            setSearchParams({ session: sid }, { replace: true });
+          }
+        } else {
+          // No session specified - get or create one
+          const result = await queensApi.getOrCreateSession(queenId, undefined, "independent");
+          if (cancelled) return;
+          sid = result.session_id;
+          setSessionId(sid);
+          setQueenReady(true);
+          setIsTyping(true);
+          
           setSearchParams({ session: sid }, { replace: true });
         }
+        
         await restoreMessages(sid, () => cancelled);
         refresh();
       } catch {
@@ -467,6 +505,19 @@ export default function QueenDM() {
     }
   }, [sessionId]);
 
+  // Auto-send initial prompt from Prompt Library when session is ready
+  useEffect(() => {
+    const prompt = initialPromptRef.current;
+    if (prompt && sessionId && queenReady && !promptSentRef.current && !loading) {
+      promptSentRef.current = true;
+      initialPromptRef.current = undefined; // Clear so refresh doesn't re-send
+      // Small delay to ensure SSE is connected
+      setTimeout(() => {
+        handleSend(prompt, "queen-dm");
+      }, 100);
+    }
+  }, [sessionId, queenReady, loading, handleSend]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Chat */}
@@ -475,7 +526,11 @@ export default function QueenDM() {
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-sm">
             <div className="flex items-center gap-3 text-muted-foreground">
               <Loader2 className="w-5 h-5 animate-spin" />
-              <span className="text-sm">Connecting to {queenName}...</span>
+              <span className="text-sm">
+                {selectedSessionParam?.startsWith("session_") 
+                  ? "Connecting to session..." 
+                  : `Connecting to ${queenName}...`}
+              </span>
             </div>
           </div>
         )}
