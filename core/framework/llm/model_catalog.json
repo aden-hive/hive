@@ -1,0 +1,271 @@
+{
+  "schema_version": 1,
+  "providers": {
+    "anthropic": {
+      "default_model": "claude-haiku-4-5-20251001",
+      "models": [
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "label": "Haiku 4.5 - Fast + cheap",
+          "recommended": false,
+          "max_tokens": 64000,
+          "max_context_tokens": 136000
+        },
+        {
+          "id": "claude-sonnet-4-5-20250929",
+          "label": "Sonnet 4.5 - Best balance",
+          "recommended": false,
+          "max_tokens": 64000,
+          "max_context_tokens": 136000
+        },
+        {
+          "id": "claude-opus-4-6",
+          "label": "Opus 4.6 - Most capable",
+          "recommended": true,
+          "max_tokens": 128000,
+          "max_context_tokens": 872000
+        }
+      ]
+    },
+    "openai": {
+      "default_model": "gpt-5.4",
+      "models": [
+        {
+          "id": "gpt-5.4",
+          "label": "GPT-5.4 - Best intelligence",
+          "recommended": true,
+          "max_tokens": 128000,
+          "max_context_tokens": 960000
+        },
+        {
+          "id": "gpt-5.4-mini",
+          "label": "GPT-5.4 Mini - Faster + cheaper",
+          "recommended": false,
+          "max_tokens": 128000,
+          "max_context_tokens": 400000
+        },
+        {
+          "id": "gpt-5.4-nano",
+          "label": "GPT-5.4 Nano - Cheapest high-volume",
+          "recommended": false,
+          "max_tokens": 128000,
+          "max_context_tokens": 400000
+        }
+      ]
+    },
+    "gemini": {
+      "default_model": "gemini-3-flash-preview",
+      "models": [
+        {
+          "id": "gemini-3-flash-preview",
+          "label": "Gemini 3 Flash - Fast",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 900000
+        },
+        {
+          "id": "gemini-3.1-pro-preview",
+          "label": "Gemini 3.1 Pro - Best quality",
+          "recommended": true,
+          "max_tokens": 32768,
+          "max_context_tokens": 900000
+        }
+      ]
+    },
+    "groq": {
+      "default_model": "moonshotai/kimi-k2-instruct-0905",
+      "models": [
+        {
+          "id": "moonshotai/kimi-k2-instruct-0905",
+          "label": "Kimi K2 - Best quality",
+          "recommended": true,
+          "max_tokens": 8192,
+          "max_context_tokens": 120000
+        },
+        {
+          "id": "openai/gpt-oss-120b",
+          "label": "GPT-OSS 120B - Fast reasoning",
+          "recommended": false,
+          "max_tokens": 8192,
+          "max_context_tokens": 120000
+        }
+      ]
+    },
+    "cerebras": {
+      "default_model": "zai-glm-4.7",
+      "models": [
+        {
+          "id": "zai-glm-4.7",
+          "label": "ZAI-GLM 4.7 - Best quality",
+          "recommended": true,
+          "max_tokens": 8192,
+          "max_context_tokens": 120000
+        },
+        {
+          "id": "qwen3-235b-a22b-instruct-2507",
+          "label": "Qwen3 235B - Frontier reasoning",
+          "recommended": false,
+          "max_tokens": 8192,
+          "max_context_tokens": 120000
+        }
+      ]
+    },
+    "minimax": {
+      "default_model": "MiniMax-M2.5",
+      "models": [
+        {
+          "id": "MiniMax-M2.5",
+          "label": "MiniMax-M2.5",
+          "recommended": true,
+          "max_tokens": 8192,
+          "max_context_tokens": 120000
+        }
+      ]
+    },
+    "mistral": {
+      "default_model": "mistral-large-latest",
+      "models": [
+        {
+          "id": "mistral-large-latest",
+          "label": "Mistral Large",
+          "recommended": true,
+          "max_tokens": 8192,
+          "max_context_tokens": 120000
+        }
+      ]
+    },
+    "together": {
+      "default_model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "models": [
+        {
+          "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+          "label": "Llama 3.3 70B Turbo",
+          "recommended": false,
+          "max_tokens": 8192,
+          "max_context_tokens": 120000
+        }
+      ]
+    },
+    "deepseek": {
+      "default_model": "deepseek-chat",
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "label": "DeepSeek Chat",
+          "recommended": false,
+          "max_tokens": 8192,
+          "max_context_tokens": 120000
+        }
+      ]
+    },
+    "openrouter": {
+      "default_model": "google/gemini-2.5-pro",
+      "models": [
+        {
+          "id": "google/gemini-2.5-pro",
+          "label": "Gemini 2.5 Pro",
+          "recommended": true,
+          "max_tokens": 8192,
+          "max_context_tokens": 900000
+        },
+        {
+          "id": "google/gemini-2.5-flash",
+          "label": "Gemini 2.5 Flash",
+          "recommended": false,
+          "max_tokens": 8192,
+          "max_context_tokens": 900000
+        },
+        {
+          "id": "anthropic/claude-sonnet-4",
+          "label": "Claude Sonnet 4 (via OR)",
+          "recommended": false,
+          "max_tokens": 8192,
+          "max_context_tokens": 180000
+        },
+        {
+          "id": "deepseek/deepseek-r1",
+          "label": "DeepSeek R1",
+          "recommended": false,
+          "max_tokens": 8192,
+          "max_context_tokens": 120000
+        }
+      ]
+    }
+  },
+  "presets": {
+    "claude_code": {
+      "provider": "anthropic",
+      "model": "claude-opus-4-6",
+      "max_tokens": 128000,
+      "max_context_tokens": 872000
+    },
+    "zai_code": {
+      "provider": "openai",
+      "api_key_env_var": "ZAI_API_KEY",
+      "model": "glm-5",
+      "max_tokens": 32768,
+      "max_context_tokens": 180000,
+      "api_base": "https://api.z.ai/api/coding/paas/v4"
+    },
+    "codex": {
+      "provider": "openai",
+      "model": "gpt-5.3-codex",
+      "max_tokens": 16384,
+      "max_context_tokens": 120000,
+      "api_base": "https://chatgpt.com/backend-api/codex"
+    },
+    "minimax_code": {
+      "provider": "minimax",
+      "api_key_env_var": "MINIMAX_API_KEY",
+      "model": "MiniMax-M2.5",
+      "max_tokens": 32768,
+      "max_context_tokens": 900000,
+      "api_base": "https://api.minimax.io/v1"
+    },
+    "kimi_code": {
+      "provider": "kimi",
+      "api_key_env_var": "KIMI_API_KEY",
+      "model": "kimi-k2.5",
+      "max_tokens": 32768,
+      "max_context_tokens": 240000,
+      "api_base": "https://api.kimi.com/coding"
+    },
+    "hive_llm": {
+      "provider": "hive",
+      "api_key_env_var": "HIVE_API_KEY",
+      "model": "queen",
+      "max_tokens": 32768,
+      "max_context_tokens": 180000,
+      "api_base": "https://api.adenhq.com",
+      "model_choices": [
+        {
+          "id": "queen",
+          "label": "queen",
+          "recommended": true
+        },
+        {
+          "id": "kimi-2.5",
+          "label": "kimi-2.5",
+          "recommended": false
+        },
+        {
+          "id": "GLM-5",
+          "label": "GLM-5",
+          "recommended": false
+        }
+      ]
+    },
+    "antigravity": {
+      "provider": "openai",
+      "model": "gemini-3-flash",
+      "max_tokens": 32768,
+      "max_context_tokens": 1000000
+    },
+    "ollama_local": {
+      "provider": "ollama",
+      "max_tokens": 8192,
+      "max_context_tokens": 16384,
+      "api_base": "http://localhost:11434"
+    }
+  }
+}

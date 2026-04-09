@@ -363,10 +363,15 @@ def _dump_failed_request(
             "attempt": attempt,
             "estimated_tokens": _estimate_tokens(model, messages),
             "num_messages": len(messages),
+            "api_base": kwargs.get("api_base"),
+            "request_keys": sorted(kwargs.keys()),
             "messages": messages,
             "tools": kwargs.get("tools"),
             "max_tokens": kwargs.get("max_tokens"),
             "temperature": kwargs.get("temperature"),
+            "stream": kwargs.get("stream"),
+            "tool_choice": kwargs.get("tool_choice"),
+            "response_format": kwargs.get("response_format"),
         }
 
         with open(filepath, "w", encoding="utf-8") as f:
@@ -379,6 +384,108 @@ def _dump_failed_request(
     except OSError as e:
         logger.warning(f"Failed to dump request debug log to {FAILED_REQUESTS_DIR}: {e}")
         return "log_write_failed"
+
+
+def _summarize_message_content(content: Any) -> dict[str, Any]:
+    """Return a structural summary of one message content payload."""
+    if isinstance(content, str):
+        return {
+            "content_kind": "string",
+            "text_chars": len(content),
+        }
+
+    if isinstance(content, list):
+        block_types: list[str] = []
+        text_chars = 0
+        for block in content:
+            if isinstance(block, dict):
+                block_type = str(block.get("type", "unknown"))
+                block_types.append(block_type)
+                if block_type == "text":
+                    text_chars += len(str(block.get("text", "")))
+                elif block_type == "tool_result":
+                    block_content = block.get("content")
+                    if isinstance(block_content, str):
+                        text_chars += len(block_content)
+                    elif isinstance(block_content, list):
+                        for inner in block_content:
+                            if isinstance(inner, dict) and inner.get("type") == "text":
+                                text_chars += len(str(inner.get("text", "")))
+            else:
+                block_types.append(type(block).__name__)
+        return {
+            "content_kind": "list",
+            "blocks": len(content),
+            "block_types": block_types,
+            "text_chars": text_chars,
+        }
+
+    return {
+        "content_kind": type(content).__name__,
+    }
+
+
+def _summarize_messages_for_log(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build a high-signal, no-secret summary of the outgoing messages payload."""
+    summary: list[dict[str, Any]] = []
+    for idx, message in enumerate(messages):
+        item: dict[str, Any] = {
+            "idx": idx,
+            "role": message.get("role"),
+            "keys": sorted(message.keys()),
+        }
+        item.update(_summarize_message_content(message.get("content")))
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            item["tool_calls"] = len(tool_calls)
+            tool_names = []
+            for tc in tool_calls:
+                if isinstance(tc, dict):
+                    fn = tc.get("function")
+                    if isinstance(fn, dict) and fn.get("name"):
+                        tool_names.append(str(fn["name"]))
+            if tool_names:
+                item["tool_call_names"] = tool_names
+        if message.get("cache_control"):
+            item["cache_control"] = True
+        if message.get("tool_call_id"):
+            item["tool_call_id"] = str(message.get("tool_call_id"))
+        summary.append(item)
+    return summary
+
+
+def _summarize_request_for_log(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact structural summary of a LiteLLM request payload."""
+    tools = kwargs.get("tools")
+    tool_names: list[str] = []
+    if isinstance(tools, list):
+        for tool in tools:
+            if isinstance(tool, dict):
+                fn = tool.get("function")
+                if isinstance(fn, dict) and fn.get("name"):
+                    tool_names.append(str(fn["name"]))
+
+    messages = kwargs.get("messages", [])
+    if isinstance(messages, list):
+        non_system_roles = [m.get("role") for m in messages if m.get("role") != "system"]
+    else:
+        non_system_roles = []
+    return {
+        "model": kwargs.get("model"),
+        "api_base": kwargs.get("api_base"),
+        "stream": kwargs.get("stream"),
+        "max_tokens": kwargs.get("max_tokens"),
+        "tool_count": len(tools) if isinstance(tools, list) else 0,
+        "tool_names": tool_names,
+        "tool_choice": kwargs.get("tool_choice"),
+        "response_format": bool(kwargs.get("response_format")),
+        "message_count": len(messages) if isinstance(messages, list) else 0,
+        "non_system_message_count": len(non_system_roles),
+        "first_non_system_role": non_system_roles[0] if non_system_roles else None,
+        "last_non_system_role": non_system_roles[-1] if non_system_roles else None,
+        "system_only": bool(messages) and not non_system_roles,
+        "messages": _summarize_messages_for_log(messages if isinstance(messages, list) else []),
+    }
 
 
 def _compute_retry_delay(
@@ -1156,6 +1263,12 @@ class LiteLLMProvider(LLMProvider):
         api_base = (self.api_base or "").lower()
         return "openrouter.ai/api/v1" in api_base
 
+    def _is_zai_openai_backend(self) -> bool:
+        """Return True when using Z-AI's OpenAI-compatible chat endpoint."""
+        model = (self.model or "").lower()
+        api_base = (self.api_base or "").lower()
+        return "api.z.ai" in api_base or model.startswith("openai/glm-") or model == "glm-5"
+
     def _should_use_openrouter_tool_compat(
         self,
         error: BaseException,
@@ -1816,6 +1929,33 @@ class LiteLLMProvider(LLMProvider):
             kwargs.pop("max_tokens", None)
             kwargs.pop("stream_options", None)
 
+        request_summary = _summarize_request_for_log(kwargs)
+        logger.debug(
+            "[stream] prepared request: %s",
+            json.dumps(request_summary, default=str),
+        )
+        if request_summary["system_only"]:
+            logger.warning(
+                "[stream] %s request has no non-system chat messages "
+                "(api_base=%s tools=%d system_chars=%d). "
+                "Some chat-completions backends reject system-only payloads.",
+                self.model,
+                self.api_base,
+                request_summary["tool_count"],
+                sum(
+                    message.get("text_chars", 0)
+                    for message in request_summary["messages"]
+                    if message.get("role") == "system"
+                ),
+            )
+            if self._is_zai_openai_backend():
+                logger.warning(
+                    "[stream] %s appears to be using Z-AI/GLM's OpenAI-compatible backend. "
+                    "This backend has rejected system-only payloads with "
+                    "'The messages parameter is illegal.' in prior requests.",
+                    self.model,
+                )
+
         for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
             # Post-stream events (ToolCall, TextEnd, Finish) are buffered
             # because they depend on the full stream.  TextDeltaEvents are
@@ -2179,6 +2319,20 @@ class LiteLLMProvider(LLMProvider):
                     )
                     await asyncio.sleep(wait)
                     continue
+                dump_path = _dump_failed_request(
+                    model=self.model,
+                    kwargs=kwargs,
+                    error_type=f"stream_exception_{type(e).__name__.lower()}",
+                    attempt=attempt,
+                )
+                logger.error(
+                    "[stream] %s request failed with %s: %s | request=%s | dump=%s",
+                    self.model,
+                    type(e).__name__,
+                    e,
+                    json.dumps(_summarize_request_for_log(kwargs), default=str),
+                    dump_path,
+                )
                 recoverable = _is_stream_transient_error(e)
                 yield StreamErrorEvent(error=str(e), recoverable=recoverable)
                 return

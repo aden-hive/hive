@@ -2202,6 +2202,24 @@ class AgentLoop(NodeProtocol):
                 len(messages),
                 len(tools),
             )
+            logger.debug(
+                "[_run_single_turn] inner_turn=%d: request context node=%s roles=%s system_chars=%d max_tokens=%d",
+                inner_turn,
+                node_id,
+                [m.get("role") for m in messages],
+                len(conversation.system_prompt or ""),
+                ctx.max_tokens,
+            )
+            if not messages:
+                logger.warning(
+                    "[_run_single_turn] inner_turn=%d: no non-system conversation messages "
+                    "before LLM call for node=%s model=%s api_base=%s. "
+                    "This will produce a system-only payload, which some providers reject.",
+                    inner_turn,
+                    node_id,
+                    getattr(ctx.llm, "model", type(ctx.llm).__name__),
+                    getattr(ctx.llm, "api_base", None),
+                )
 
             # Stream LLM response in a child task so cancel_current_turn()
             # can kill it instantly without terminating the queen's main loop.

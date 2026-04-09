@@ -829,42 +829,95 @@ $ProviderMap = [ordered]@{
     DEEPSEEK_API_KEY  = @{ Name = "DeepSeek";            Id = "deepseek" }
 }
 
-$DefaultModels = @{
-    anthropic   = "claude-haiku-4-5-20251001"
-    openai      = "gpt-5-mini"
-    minimax     = "MiniMax-M2.5"
-    gemini      = "gemini-3-flash-preview"
-    groq        = "moonshotai/kimi-k2-instruct-0905"
-    cerebras    = "zai-glm-4.7"
-    mistral     = "mistral-large-latest"
-    together_ai = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
-    deepseek    = "deepseek-chat"
+$ModelCatalogPath = Join-Path $ScriptDir "core\framework\llm\model_catalog.json"
+$script:ModelCatalog = $null
+
+function Initialize-ModelCatalog {
+    try {
+        $script:ModelCatalog = Get-Content -Path $ModelCatalogPath -Raw | ConvertFrom-Json
+        return $true
+    } catch {
+        return $false
+    }
 }
 
-# Model choices: array of hashtables per provider
-$ModelChoices = @{
-    anthropic = @(
-        @{ Id = "claude-haiku-4-5-20251001";  Label = "Haiku 4.5 - Fast + cheap (recommended)"; MaxTokens = 8192;  MaxContextTokens = 180000 },
-        @{ Id = "claude-sonnet-4-20250514";   Label = "Sonnet 4 - Fast + capable";              MaxTokens = 8192;  MaxContextTokens = 180000 },
-        @{ Id = "claude-sonnet-4-5-20250929"; Label = "Sonnet 4.5 - Best balance";              MaxTokens = 16384; MaxContextTokens = 180000 },
-        @{ Id = "claude-opus-4-6";            Label = "Opus 4.6 - Most capable";                MaxTokens = 32768; MaxContextTokens = 180000 }
-    )
-    openai = @(
-        @{ Id = "gpt-5-mini"; Label = "GPT-5 Mini - Fast + cheap (recommended)"; MaxTokens = 16384; MaxContextTokens = 120000 },
-        @{ Id = "gpt-5.2";   Label = "GPT-5.2 - Most capable";                   MaxTokens = 16384; MaxContextTokens = 120000 }
-    )
-    gemini = @(
-        @{ Id = "gemini-3-flash-preview"; Label = "Gemini 3 Flash - Fast (recommended)"; MaxTokens = 8192; MaxContextTokens = 900000 },
-        @{ Id = "gemini-3.1-pro-preview";  Label = "Gemini 3.1 Pro - Best quality";       MaxTokens = 8192; MaxContextTokens = 900000 }
-    )
-    groq = @(
-        @{ Id = "moonshotai/kimi-k2-instruct-0905"; Label = "Kimi K2 - Best quality (recommended)"; MaxTokens = 8192; MaxContextTokens = 120000 },
-        @{ Id = "openai/gpt-oss-120b";              Label = "GPT-OSS 120B - Fast reasoning";        MaxTokens = 8192; MaxContextTokens = 120000 }
-    )
-    cerebras = @(
-        @{ Id = "zai-glm-4.7";                    Label = "ZAI-GLM 4.7 - Best quality (recommended)"; MaxTokens = 8192; MaxContextTokens = 120000 },
-        @{ Id = "qwen3-235b-a22b-instruct-2507";  Label = "Qwen3 235B - Frontier reasoning";          MaxTokens = 8192; MaxContextTokens = 120000 }
-    )
+function Get-ProviderCatalog {
+    param([string]$ProviderId)
+
+    if (-not $script:ModelCatalog -or -not $script:ModelCatalog.providers) {
+        return $null
+    }
+
+    $providerProp = $script:ModelCatalog.providers.PSObject.Properties[$ProviderId]
+    if ($providerProp) {
+        return $providerProp.Value
+    }
+
+    return $null
+}
+
+function Get-DefaultModel {
+    param([string]$ProviderId)
+
+    $providerCatalog = Get-ProviderCatalog $ProviderId
+    if ($providerCatalog) {
+        return [string]$providerCatalog.default_model
+    }
+
+    return ""
+}
+
+function Get-ModelChoices {
+    param([string]$ProviderId)
+
+    $providerCatalog = Get-ProviderCatalog $ProviderId
+    if (-not $providerCatalog -or -not $providerCatalog.models) {
+        return @()
+    }
+
+    return @($providerCatalog.models)
+}
+
+function Get-PresetConfig {
+    param([string]$PresetId)
+
+    if (-not $script:ModelCatalog -or -not $script:ModelCatalog.presets) {
+        return $null
+    }
+
+    $presetProp = $script:ModelCatalog.presets.PSObject.Properties[$PresetId]
+    if ($presetProp) {
+        return $presetProp.Value
+    }
+
+    return $null
+}
+
+function Apply-Preset {
+    param([string]$PresetId)
+
+    $preset = Get-PresetConfig $PresetId
+    if (-not $preset) {
+        throw "Missing preset: $PresetId"
+    }
+
+    $script:SelectedProviderId = [string]$preset.provider
+    $script:SelectedModel = if ($preset.model) { [string]$preset.model } else { "" }
+    $script:SelectedMaxTokens = [int]$preset.max_tokens
+    $script:SelectedMaxContextTokens = [int]$preset.max_context_tokens
+    $script:SelectedEnvVar = if ($preset.api_key_env_var) { [string]$preset.api_key_env_var } else { "" }
+    $script:SelectedApiBase = if ($preset.api_base) { [string]$preset.api_base } else { "" }
+}
+
+function Get-PresetModelChoices {
+    param([string]$PresetId)
+
+    $preset = Get-PresetConfig $PresetId
+    if (-not $preset -or -not $preset.model_choices) {
+        return @()
+    }
+
+    return @($preset.model_choices)
 }
 
 function Normalize-OpenRouterModelId {
@@ -942,9 +995,9 @@ function Get-ModelSelection {
         }
     }
 
-    $choices = $ModelChoices[$ProviderId]
+    $choices = Get-ModelChoices $ProviderId
     if (-not $choices -or $choices.Count -eq 0) {
-        return @{ Model = $DefaultModels[$ProviderId]; MaxTokens = 8192; MaxContextTokens = 120000 }
+        return @{ Model = (Get-DefaultModel $ProviderId); MaxTokens = 8192; MaxContextTokens = 120000 }
     }
     if ($choices.Count -eq 1) {
         return @{ Model = $choices[0].Id; MaxTokens = $choices[0].MaxTokens; MaxContextTokens = $choices[0].MaxContextTokens }
@@ -1058,6 +1111,13 @@ try {
     $null = & ollama list 2>$null
     if ($LASTEXITCODE -eq 0) { $OllamaDetected = $true }
 } catch { }
+
+if (-not (Initialize-ModelCatalog)) {
+    Write-Fail "Failed to load core/framework/llm/model_catalog.json."
+    Write-Host "  Please ensure your Python environment is set up, then rerun quickstart."
+    Write-Host ""
+    exit 1
+}
 
 # ── Read previous configuration (if any) ──────────────────────
 $PrevProvider = ""
@@ -1261,21 +1321,14 @@ switch ($num) {
             exit 1
         }
         $SubscriptionMode        = "claude_code"
-        $SelectedProviderId      = "anthropic"
-        $SelectedModel           = "claude-opus-4-6"
-        $SelectedMaxTokens       = 32768
-        $SelectedMaxContextTokens = 180000
+        Apply-Preset "claude_code"
         Write-Host ""
         Write-Ok "Using Claude Code subscription"
     }
     2 {
         # ZAI Code Subscription
         $SubscriptionMode        = "zai_code"
-        $SelectedProviderId      = "openai"
-        $SelectedEnvVar          = "ZAI_API_KEY"
-        $SelectedModel           = "glm-5"
-        $SelectedMaxTokens       = 32768
-        $SelectedMaxContextTokens = 120000
+        Apply-Preset "zai_code"
         Write-Host ""
         Write-Ok "Using ZAI Code subscription"
         Write-Color -Text "  Model: glm-5 | API: api.z.ai" -Color DarkGray
@@ -1305,10 +1358,7 @@ switch ($num) {
         }
         if ($CodexCredDetected) {
             $SubscriptionMode        = "codex"
-            $SelectedProviderId      = "openai"
-            $SelectedModel           = "gpt-5.3-codex"
-            $SelectedMaxTokens       = 16384
-            $SelectedMaxContextTokens = 120000
+            Apply-Preset "codex"
             Write-Host ""
             Write-Ok "Using OpenAI Codex subscription"
         }
@@ -1316,12 +1366,7 @@ switch ($num) {
     4 {
         # MiniMax Coding Key
         $SubscriptionMode        = "minimax_code"
-        $SelectedProviderId      = "minimax"
-        $SelectedEnvVar          = "MINIMAX_API_KEY"
-        $SelectedModel           = "MiniMax-M2.5"
-        $SelectedMaxTokens       = 32768
-        $SelectedMaxContextTokens = 900000
-        $SelectedApiBase         = "https://api.minimax.io/v1"
+        Apply-Preset "minimax_code"
         Write-Host ""
         Write-Ok "Using MiniMax coding key"
         Write-Color -Text "  Model: MiniMax-M2.5 | API: api.minimax.io" -Color DarkGray
@@ -1329,11 +1374,7 @@ switch ($num) {
     5 {
         # Kimi Code Subscription
         $SubscriptionMode        = "kimi_code"
-        $SelectedProviderId      = "kimi"
-        $SelectedEnvVar          = "KIMI_API_KEY"
-        $SelectedModel           = "kimi-k2.5"
-        $SelectedMaxTokens       = 32768
-        $SelectedMaxContextTokens = 120000
+        Apply-Preset "kimi_code"
         Write-Host ""
         Write-Ok "Using Kimi Code subscription"
         Write-Color -Text "  Model: kimi-k2.5 | API: api.kimi.com/coding" -Color DarkGray
@@ -1341,24 +1382,37 @@ switch ($num) {
     6 {
         # Hive LLM
         $SubscriptionMode        = "hive_llm"
-        $SelectedProviderId      = "hive"
-        $SelectedEnvVar          = "HIVE_API_KEY"
-        $SelectedMaxTokens       = 32768
-        $SelectedMaxContextTokens = 120000
+        Apply-Preset "hive_llm"
         Write-Host ""
         Write-Ok "Using Hive LLM"
         Write-Host ""
         Write-Host "  Select a model:"
-        Write-Host "  " -NoNewline; Write-Color -Text "1)" -Color Cyan -NoNewline; Write-Host " queen              " -NoNewline; Write-Color -Text "(default - Hive flagship)" -Color DarkGray
-        Write-Host "  " -NoNewline; Write-Color -Text "2)" -Color Cyan -NoNewline; Write-Host " kimi-2.5"
-        Write-Host "  " -NoNewline; Write-Color -Text "3)" -Color Cyan -NoNewline; Write-Host " GLM-5"
+        $hiveChoices = Get-PresetModelChoices "hive_llm"
+        $hiveDefaultChoice = "1"
+        for ($i = 0; $i -lt $hiveChoices.Count; $i++) {
+            Write-Host "  " -NoNewline
+            Write-Color -Text "$($i + 1))" -Color Cyan -NoNewline
+            Write-Host " $($hiveChoices[$i].label)" -NoNewline
+            if ($hiveChoices[$i].recommended -eq $true) {
+                $hiveDefaultChoice = [string]($i + 1)
+                Write-Host "  " -NoNewline
+                Write-Color -Text "(default - Hive flagship)" -Color DarkGray
+            } else {
+                Write-Host ""
+            }
+        }
         Write-Host ""
-        $hiveModelChoice = Read-Host "  Enter model choice (1-3) [1]"
-        if (-not $hiveModelChoice) { $hiveModelChoice = "1" }
-        switch ($hiveModelChoice) {
-            "2" { $SelectedModel = "kimi-2.5" }
-            "3" { $SelectedModel = "GLM-5" }
-            default { $SelectedModel = "queen" }
+        while ($true) {
+            $hiveModelChoice = Read-Host "  Enter model choice (1-$($hiveChoices.Count)) [$hiveDefaultChoice]"
+            if (-not $hiveModelChoice) { $hiveModelChoice = $hiveDefaultChoice }
+            if ($hiveModelChoice -match '^\d+$') {
+                $choiceNum = [int]$hiveModelChoice
+                if ($choiceNum -ge 1 -and $choiceNum -le $hiveChoices.Count) {
+                    $SelectedModel = [string]$hiveChoices[$choiceNum - 1].id
+                    break
+                }
+            }
+            Write-Color -Text "Invalid choice. Please enter 1-$($hiveChoices.Count)" -Color Red
         }
         Write-Color -Text "  Model: $SelectedModel | API: $HiveLlmEndpoint" -Color DarkGray
     }
@@ -1390,10 +1444,7 @@ switch ($num) {
 
         if ($AntigravityCredDetected) {
             $SubscriptionMode        = "antigravity"
-            $SelectedProviderId      = "openai"
-            $SelectedModel           = "gemini-3-flash"
-            $SelectedMaxTokens       = 32768
-            $SelectedMaxContextTokens = 1000000
+            Apply-Preset "antigravity"
             Write-Host ""
             Write-Warn "Using Antigravity can technically cause your account suspension. Please use at your own risk."
             Write-Host ""
@@ -1543,9 +1594,10 @@ switch ($num) {
                     $SelectedModel = $ollamaModels[$num - 1]
                     Write-Host ""
                     Write-Ok "Model: $SelectedModel"
-                    $SelectedMaxTokens = 8192
-                    $SelectedMaxContextTokens = 16384
-                    $SelectedApiBase = "http://localhost:11434"
+                    $ollamaPreset = Get-PresetConfig "ollama_local"
+                    $SelectedMaxTokens = [int]$ollamaPreset.max_tokens
+                    $SelectedMaxContextTokens = [int]$ollamaPreset.max_context_tokens
+                    $SelectedApiBase = [string]$ollamaPreset.api_base
                     break
                 }
             }
@@ -1592,7 +1644,7 @@ if ($SubscriptionMode -eq "minimax_code") {
             # Health check the new key
             Write-Host "  Verifying MiniMax API key... " -NoNewline
             try {
-                $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "minimax" $apiKey "https://api.minimax.io/v1" 2>$null
+                $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "minimax" $apiKey $SelectedApiBase 2>$null
                 $hcJson = $hcResult | ConvertFrom-Json
                 if ($hcJson.valid -eq $true) {
                     Write-Color -Text "ok" -Color Green
@@ -1653,7 +1705,7 @@ if ($SubscriptionMode -eq "zai_code") {
             # Health check the new key
             Write-Host "  Verifying ZAI API key... " -NoNewline
             try {
-                $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "zai" $apiKey "https://api.z.ai/api/coding/paas/v4" 2>$null
+                $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "zai" $apiKey $SelectedApiBase 2>$null
                 $hcJson = $hcResult | ConvertFrom-Json
                 if ($hcJson.valid -eq $true) {
                     Write-Color -Text "ok" -Color Green
@@ -1721,7 +1773,7 @@ if ($SubscriptionMode -eq "kimi_code") {
             # Health check the new key
             Write-Host "  Verifying Kimi API key... " -NoNewline
             try {
-                $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "kimi" $apiKey "https://api.kimi.com/coding" 2>$null
+                $hcResult = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") "kimi" $apiKey $SelectedApiBase 2>$null
                 $hcJson = $hcResult | ConvertFrom-Json
                 if ($hcJson.valid -eq $true) {
                     Write-Color -Text "ok" -Color Green
@@ -1832,7 +1884,7 @@ if ($SelectedProviderId -and -not $SelectedModel) {
 # Save configuration
 if ($SelectedProviderId) {
     if (-not $SelectedModel) {
-        $SelectedModel = $DefaultModels[$SelectedProviderId]
+        $SelectedModel = Get-DefaultModel $SelectedProviderId
     }
     Write-Host ""
     Write-Host "  Saving configuration... " -NoNewline
@@ -1855,25 +1907,26 @@ if ($SelectedProviderId) {
         $config.llm["use_claude_code_subscription"] = $true
     } elseif ($SubscriptionMode -eq "codex") {
         $config.llm["use_codex_subscription"] = $true
+        if ($SelectedApiBase) { $config.llm["api_base"] = $SelectedApiBase }
     } elseif ($SubscriptionMode -eq "antigravity") {
         $config.llm["use_antigravity_subscription"] = $true
     } elseif ($SubscriptionMode -eq "zai_code") {
-        $config.llm["api_base"] = "https://api.z.ai/api/coding/paas/v4"
+        $config.llm["api_base"] = $SelectedApiBase
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } elseif ($SubscriptionMode -eq "minimax_code") {
         $config.llm["api_base"] = $SelectedApiBase
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } elseif ($SubscriptionMode -eq "kimi_code") {
-        $config.llm["api_base"] = "https://api.kimi.com/coding"
+        $config.llm["api_base"] = $SelectedApiBase
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } elseif ($SubscriptionMode -eq "hive_llm") {
-        $config.llm["api_base"] = $HiveLlmEndpoint
+        $config.llm["api_base"] = $SelectedApiBase
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } elseif ($SelectedProviderId -eq "openrouter") {
         $config.llm["api_base"] = "https://openrouter.ai/api/v1"
         $config.llm["api_key_env_var"] = $SelectedEnvVar
     } elseif ($SelectedProviderId -eq "ollama") {
-        $config.llm["api_base"] = "http://localhost:11434"
+        $config.llm["api_base"] = $SelectedApiBase
         $config.llm.Remove("api_key_env_var")
     } elseif ($SelectedEnvVar) {
         $config.llm["api_key_env_var"] = $SelectedEnvVar
@@ -2166,7 +2219,7 @@ Write-Host ""
 
 # Show configured provider
 if ($SelectedProviderId) {
-    if (-not $SelectedModel) { $SelectedModel = $DefaultModels[$SelectedProviderId] }
+    if (-not $SelectedModel) { $SelectedModel = Get-DefaultModel $SelectedProviderId }
     Write-Color -Text "Default LLM:" -Color White
     if ($SubscriptionMode -eq "claude_code") {
         Write-Ok "Claude Code Subscription -> $SelectedModel"
@@ -2190,9 +2243,6 @@ if ($SelectedProviderId) {
         Write-Host " -> " -NoNewline
         Write-Color -Text $SelectedModel -Color DarkGray
     }
-    Write-Color -Text "  To use a different model for worker agents, run:" -Color DarkGray
-    Write-Host "     " -NoNewline
-    Write-Color -Text ".\scripts\setup_worker_model.ps1" -Color Cyan
     Write-Host ""
 }
 

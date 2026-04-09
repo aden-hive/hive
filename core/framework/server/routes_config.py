@@ -20,6 +20,12 @@ from framework.config import (
     _PROVIDER_CRED_MAP,
     get_hive_config,
 )
+from framework.llm.model_catalog import (
+    find_model,
+    find_model_any_provider,
+    get_models_catalogue,
+    get_preset,
+)
 from framework.agents.queen.queen_memory_v2 import (
     global_memory_dir,
     build_memory_document,
@@ -47,45 +53,58 @@ PROVIDER_ENV_VARS: dict[str, str] = {
     "deepseek": "DEEPSEEK_API_KEY",
 }
 
-# ---------------------------------------------------------------------------
-# Subscription metadata (mirrors quickstart.sh subscription modes)
-# ---------------------------------------------------------------------------
-
-SUBSCRIPTIONS: list[dict] = [
+_SUBSCRIPTION_DEFINITIONS: list[dict[str, str]] = [
     {
         "id": "claude_code",
         "name": "Claude Code Subscription",
         "description": "Use your Claude Max/Pro plan",
-        "provider": "anthropic",
         "flag": "use_claude_code_subscription",
-        "default_model": "claude-sonnet-4-20250514",
     },
     {
         "id": "codex",
         "name": "OpenAI Codex Subscription",
         "description": "Use your Codex/ChatGPT Plus plan",
-        "provider": "openai",
         "flag": "use_codex_subscription",
-        "default_model": "gpt-5.4",
-        "api_base": "https://chatgpt.com/backend-api/codex",
     },
     {
         "id": "kimi_code",
         "name": "Kimi Code Subscription",
         "description": "Use your Kimi Code plan",
-        "provider": "kimi",
         "flag": "use_kimi_code_subscription",
-        "default_model": "kimi/moonshot-v1",
     },
     {
         "id": "antigravity",
         "name": "Antigravity Subscription",
         "description": "Use your Google/Gemini plan",
-        "provider": "antigravity",
         "flag": "use_antigravity_subscription",
-        "default_model": "antigravity/gemini-2.5-pro",
     },
 ]
+
+
+def _build_subscriptions() -> list[dict]:
+    subscriptions: list[dict] = []
+    for definition in _SUBSCRIPTION_DEFINITIONS:
+        preset = get_preset(definition["id"])
+        if not preset:
+            raise RuntimeError(f"Missing preset for subscription {definition['id']}")
+
+        subscriptions.append({
+            "id": definition["id"],
+            "name": definition["name"],
+            "description": definition["description"],
+            "provider": preset["provider"],
+            "flag": definition["flag"],
+            "default_model": preset.get("model", ""),
+            **({"api_base": preset["api_base"]} if preset.get("api_base") else {}),
+        })
+    return subscriptions
+
+
+# ---------------------------------------------------------------------------
+# Subscription metadata (mirrors quickstart subscription modes)
+# ---------------------------------------------------------------------------
+
+SUBSCRIPTIONS: list[dict] = _build_subscriptions()
 
 # All subscription config flags
 _ALL_SUBSCRIPTION_FLAGS = [s["flag"] for s in SUBSCRIPTIONS]
@@ -93,65 +112,8 @@ _ALL_SUBSCRIPTION_FLAGS = [s["flag"] for s in SUBSCRIPTIONS]
 # Map subscription ID → subscription metadata
 _SUBSCRIPTION_MAP = {s["id"]: s for s in SUBSCRIPTIONS}
 
-# Model catalogue — mirrors quickstart.sh MODEL_CHOICES_*
-MODELS_CATALOGUE: dict[str, list[dict]] = {
-    "anthropic": [
-        {"id": "claude-haiku-4-5-20251001", "label": "Haiku 4.5 - Fast + cheap", "recommended": False, "max_tokens": 8192, "max_context_tokens": 180000},
-        {"id": "claude-sonnet-4-20250514", "label": "Sonnet 4 - Fast + capable", "recommended": False, "max_tokens": 8192, "max_context_tokens": 180000},
-        {"id": "claude-sonnet-4-5-20250929", "label": "Sonnet 4.5 - Best balance", "recommended": False, "max_tokens": 16384, "max_context_tokens": 180000},
-        {"id": "claude-opus-4-6", "label": "Opus 4.6 - Most capable", "recommended": True, "max_tokens": 32768, "max_context_tokens": 180000},
-    ],
-    "openai": [
-        {"id": "gpt-5.4", "label": "GPT-5.4 - Best intelligence", "recommended": True, "max_tokens": 128000, "max_context_tokens": 960000},
-        {"id": "gpt-5.4-mini", "label": "GPT-5.4 Mini - Faster + cheaper", "recommended": False, "max_tokens": 128000, "max_context_tokens": 400000},
-        {"id": "gpt-5.4-nano", "label": "GPT-5.4 Nano - Cheapest high-volume", "recommended": False, "max_tokens": 128000, "max_context_tokens": 400000},
-    ],
-    "gemini": [
-        {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash - Fast", "recommended": False, "max_tokens": 8192, "max_context_tokens": 900000},
-        {"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro - Best quality", "recommended": True, "max_tokens": 8192, "max_context_tokens": 900000},
-    ],
-    "groq": [
-        {"id": "moonshotai/kimi-k2-instruct-0905", "label": "Kimi K2 - Best quality", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
-        {"id": "openai/gpt-oss-120b", "label": "GPT-OSS 120B - Fast reasoning", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "cerebras": [
-        {"id": "zai-glm-4.7", "label": "ZAI-GLM 4.7 - Best quality", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
-        {"id": "qwen3-235b-a22b-instruct-2507", "label": "Qwen3 235B - Frontier reasoning", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "minimax": [
-        {"id": "MiniMax-M2.5", "label": "MiniMax-M2.5", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "mistral": [
-        {"id": "mistral-large-latest", "label": "Mistral Large", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "together": [
-        {"id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "label": "Llama 3.3 70B Turbo", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "deepseek": [
-        {"id": "deepseek-chat", "label": "DeepSeek Chat", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "openrouter": [
-        {"id": "google/gemini-2.5-pro", "label": "Gemini 2.5 Pro", "recommended": True, "max_tokens": 8192, "max_context_tokens": 900000},
-        {"id": "google/gemini-2.5-flash", "label": "Gemini 2.5 Flash", "recommended": False, "max_tokens": 8192, "max_context_tokens": 900000},
-        {"id": "anthropic/claude-sonnet-4", "label": "Claude Sonnet 4 (via OR)", "recommended": False, "max_tokens": 8192, "max_context_tokens": 180000},
-        {"id": "deepseek/deepseek-r1", "label": "DeepSeek R1", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-}
-
-# Default model per provider (matches quickstart DEFAULT_MODELS)
-DEFAULT_MODELS: dict[str, str] = {
-    "anthropic": "claude-haiku-4-5-20251001",
-    "openai": "gpt-5.4",
-    "minimax": "MiniMax-M2.5",
-    "gemini": "gemini-3-flash-preview",
-    "groq": "moonshotai/kimi-k2-instruct-0905",
-    "cerebras": "zai-glm-4.7",
-    "mistral": "mistral-large-latest",
-    "together": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    "deepseek": "deepseek-chat",
-    "openrouter": "google/gemini-2.5-pro",
-}
-
+# Model catalogue loaded from the shared JSON source of truth.
+MODELS_CATALOGUE: dict[str, list[dict]] = get_models_catalogue()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -167,10 +129,7 @@ def _get_api_base_for_provider(provider: str) -> str | None:
 
 def _find_model_info(provider: str, model_id: str) -> dict | None:
     """Look up a model in the catalogue to get its token limits."""
-    for m in MODELS_CATALOGUE.get(provider, []):
-        if m["id"] == model_id:
-            return m
-    return None
+    return find_model(provider, model_id)
 
 
 def _write_config_atomic(config: dict) -> None:
@@ -348,21 +307,32 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
                 {"error": f"Unknown subscription: {subscription_id}"}, status=400
             )
 
+        preset = get_preset(subscription_id)
         model = body.get("model") or sub["default_model"]
         provider = sub["provider"]
         api_base = sub.get("api_base")
 
         # Look up token limits
-        # Subscriptions use same models as their provider (e.g., claude_code → anthropic)
-        model_info = _find_model_info(provider, model)
-        if not model_info:
-            # Try looking up in the mapped provider's catalogue
-            for prov_id, models in MODELS_CATALOGUE.items():
-                model_info = next((m for m in models if m["id"] == model), None)
-                if model_info:
-                    break
-        max_tokens = model_info["max_tokens"] if model_info else 8192
-        max_context_tokens = model_info["max_context_tokens"] if model_info else 120000
+        max_tokens: int | None = None
+        max_context_tokens: int | None = None
+        if preset and preset.get("model") == model:
+            max_tokens = int(preset["max_tokens"])
+            max_context_tokens = int(preset["max_context_tokens"])
+        else:
+            # Subscriptions may use the same curated models as their provider.
+            model_info = _find_model_info(provider, model)
+            if not model_info:
+                # Some subscriptions point at curated models owned by a different provider.
+                match = find_model_any_provider(model)
+                if match:
+                    _, model_info = match
+            if model_info:
+                max_tokens = int(model_info["max_tokens"])
+                max_context_tokens = int(model_info["max_context_tokens"])
+
+        if max_tokens is None or max_context_tokens is None:
+            max_tokens = 8192
+            max_context_tokens = 120000
 
         # Update config: activate this subscription, clear others
         config = get_hive_config()
