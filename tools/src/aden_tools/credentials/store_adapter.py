@@ -521,9 +521,11 @@ class CredentialStoreAdapter:
                 local_composite = CompositeStorage(primary=encrypted, fallbacks=[env])
 
                 # Aden components
+                # Use 5-second timeout to avoid blocking on slow/failed requests
                 client = AdenCredentialClient(
                     AdenClientConfig(
                         base_url=os.environ.get("ADEN_API_URL", "https://api.adenhq.com"),
+                        timeout=5.0,
                     )
                 )
                 provider = AdenSyncProvider(client=client)
