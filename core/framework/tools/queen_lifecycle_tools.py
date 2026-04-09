@@ -1927,10 +1927,7 @@ def register_queen_lifecycle_tools(
 
         # Create agent folder early so flowchart and agent_path are available
         # throughout the entire BUILDING phase.
-        _agent_name = (
-            agent_name
-            or phase_state.draft_graph.get("agent_name", "").strip()
-        )
+        _agent_name = agent_name or phase_state.draft_graph.get("agent_name", "").strip()
         if _agent_name:
             from framework.config import COLONIES_DIR
 
@@ -1967,9 +1964,7 @@ def register_queen_lifecycle_tools(
 
         # Transition to BUILDING phase
         await phase_state.switch_to_building(source="tool")
-        _update_meta_json(
-            session_manager, manager_session_id, {"phase": "building"}
-        )
+        _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
         phase_state.build_confirmed = False
 
         # No injection here -- the return message tells the queen what to do.
@@ -3044,8 +3039,7 @@ def register_queen_lifecycle_tools(
                     if parent_dir not in _sys.path:
                         _sys.path.insert(0, parent_dir)
                     stale = [
-                        n for n in _sys.modules
-                        if n == pkg_name or n.startswith(f"{pkg_name}.")
+                        n for n in _sys.modules if n == pkg_name or n.startswith(f"{pkg_name}.")
                     ]
                     for n in stale:
                         del _sys.modules[n]
@@ -3206,7 +3200,9 @@ def register_queen_lifecycle_tools(
                 "properties": {
                     "agent_path": {
                         "type": "string",
-                        "description": ("Path to the agent directory (e.g. '~/.hive/colonies/my_agent')"),
+                        "description": (
+                            "Path to the agent directory (e.g. '~/.hive/colonies/my_agent')"
+                        ),
                     },
                 },
                 "required": ["agent_path"],
@@ -3230,6 +3226,24 @@ def register_queen_lifecycle_tools(
         runtime = _get_runtime()
         if runtime is None:
             return json.dumps({"error": "No worker loaded in this session."})
+
+        # Guard: refuse to start while an execution is already running.
+        # Calling again would cancel the active one via the
+        # "Restarted with new execution" path in ExecutionStream.execute(),
+        # which is almost never what the queen intends.
+        for graph_id in runtime.list_graphs():
+            reg = runtime.get_graph_registration(graph_id)
+            if reg is None:
+                continue
+            for _ep_id, stream in reg.streams.items():
+                if stream.active_execution_ids:
+                    return json.dumps(
+                        {
+                            "error": "Worker is already running.",
+                            "active_execution_ids": list(stream.active_execution_ids),
+                            "hint": "Wait for the worker to finish (WORKER_TERMINAL event) or call stop_agent() before starting a new run.",
+                        }
+                    )
 
         try:
             # Pre-flight: validate credentials and resync MCP servers.

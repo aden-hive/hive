@@ -138,19 +138,22 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
       // Map agent_path → session_id + queen_id from live sessions
       const liveSessionMap = new Map<string, { sessionId: string; queenId: string | null }>();
       for (const s of sessionsResult.sessions) {
-        liveSessionMap.set(s.agent_path.replace(/\/$/, ""), {
-          sessionId: s.session_id,
-          queenId: s.queen_id ?? null,
-        });
+        const slug = agentSlug(s.agent_path);
+        if (slug) {
+          liveSessionMap.set(slug, {
+            sessionId: s.session_id,
+            queenId: s.queen_id ?? null,
+          });
+        }
       }
 
       // Map agent_path → queen_id from history (most recent session wins)
       const historyQueenMap = new Map<string, string>();
       for (const s of historyResult.sessions) {
         if (s.agent_path && s.queen_id) {
-          const normalized = s.agent_path.replace(/\/$/, "");
-          if (!historyQueenMap.has(normalized)) {
-            historyQueenMap.set(normalized, s.queen_id);
+          const slug = agentSlug(s.agent_path);
+          if (slug && !historyQueenMap.has(slug)) {
+            historyQueenMap.set(slug, s.queen_id);
           }
         }
       }
@@ -160,11 +163,10 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
       const newColonies: Colony[] = allAgents.map((agent) => {
         const slug = agentSlug(agent.path);
         const colonyId = slugToColonyId(slug);
-        const normalizedPath = agent.path.replace(/\/$/, "");
-        const liveInfo = liveSessionMap.get(normalizedPath);
+        const liveInfo = liveSessionMap.get(slug);
         const sessionId = liveInfo?.sessionId ?? null;
         const isRunning = sessionId !== null;
-        const queenProfileId = liveInfo?.queenId ?? historyQueenMap.get(normalizedPath) ?? null;
+        const queenProfileId = liveInfo?.queenId ?? historyQueenMap.get(slug) ?? null;
 
         return {
           id: colonyId,
@@ -210,17 +212,16 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
   const fetchStatus = useCallback(async () => {
     try {
       const { sessions } = await sessionsApi.list();
-      const livePathSet = new Set(
-        sessions.map((s) => s.agent_path.replace(/\/$/, "")),
-      );
+      const liveSlugMap = new Map<string, string>();
+      for (const s of sessions) {
+        const slug = agentSlug(s.agent_path);
+        if (slug) liveSlugMap.set(slug, s.session_id);
+      }
       setColonies((prev) =>
         prev.map((c) => {
-          const normalizedPath = c.agentPath.replace(/\/$/, "");
-          const isRunning = livePathSet.has(normalizedPath);
-          const sessionId =
-            sessions.find((s) => s.agent_path.replace(/\/$/, "") === normalizedPath)
-              ?.session_id ?? null;
-          return { ...c, status: isRunning ? "running" : "idle", sessionId };
+          const slug = agentSlug(c.agentPath);
+          const sessionId = liveSlugMap.get(slug) ?? null;
+          return { ...c, status: sessionId ? "running" : "idle", sessionId };
         }),
       );
       const liveQueenIds = new Set(

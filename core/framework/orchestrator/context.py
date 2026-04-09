@@ -10,6 +10,7 @@ This module centralizes:
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -17,6 +18,24 @@ from framework.orchestrator.edge import GraphSpec
 from framework.orchestrator.goal import Goal
 from framework.orchestrator.node import DataBuffer, NodeContext, NodeProtocol, NodeSpec
 from framework.tracker.decision_tracker import DecisionTracker
+
+logger = logging.getLogger(__name__)
+
+# Tool names that are ALWAYS available to every node, regardless of
+# the node's explicit tool policy.  These are framework essentials that
+# agents need unconditionally.
+_ALWAYS_AVAILABLE_TOOLS: frozenset[str] = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "list_directory",
+        "search_files",
+        "hashline_edit",
+        "set_output",
+        "escalate",
+    }
+)
 
 
 @dataclass
@@ -128,28 +147,38 @@ def _resolve_available_tools(
     """Select tools available to the current node.
 
     Respects ``node_spec.tool_access_policy``:
-    - ``"all"``      -- all tools from the registry (no filtering).
-    - ``"explicit"``  -- only tools whose name appears in ``node_spec.tools``.
-                        If the list is empty, **no tools** are given (default-deny).
-    - ``"none"``     -- no tools at all.
+    - ``"explicit"`` -- only tools whose name appears in ``node_spec.tools``
+                        PLUS framework-default tools (read_file, set_output, etc.).
+                        If the list is empty, only defaults are given.
+    - ``"none"``     -- only framework-default tools (read_file, set_output, etc.).
+
+    Framework-default tools (``_ALWAYS_AVAILABLE_TOOLS``) are always included
+    regardless of policy — agents need file I/O and output/escalate to function.
     """
 
     if override_tools is not None:
-        return list(override_tools)
+        # Merge override with always-available, dedup by name
+        names = {t.name for t in override_tools}
+        extra = [t for t in tools if t.name in _ALWAYS_AVAILABLE_TOOLS and t.name not in names]
+        return list(override_tools) + extra
 
     policy = getattr(node_spec, "tool_access_policy", "explicit")
 
+    # Always include framework-default tools
+    always_tools = [t for t in tools if t.name in _ALWAYS_AVAILABLE_TOOLS]
+
     if policy == "none":
-        return []
+        return always_tools
 
-    if policy == "all":
-        return list(tools)
-
-    # "explicit" (default): only tools named in node_spec.tools.
+    # "explicit" (default): declared tools + framework defaults
     if not node_spec.tools:
-        return []
+        return always_tools
 
-    return [tool for tool in tools if tool.name in node_spec.tools]
+    declared = set(node_spec.tools)
+    declared_tools = [
+        t for t in tools if t.name in declared and t.name not in _ALWAYS_AVAILABLE_TOOLS
+    ]
+    return always_tools + declared_tools
 
 
 def _derive_input_data(buffer: DataBuffer, input_keys: list[str]) -> dict[str, Any]:
@@ -283,7 +312,11 @@ def build_node_context_from_graph_context(
     gc = graph_context
     resolved_override_tools = override_tools
     if resolved_override_tools is None and gc.is_continuous and gc.cumulative_tools:
-        resolved_override_tools = list(gc.cumulative_tools)
+        if node_spec.tool_access_policy == "explicit" and node_spec.tools:
+            declared = set(node_spec.tools) | _ALWAYS_AVAILABLE_TOOLS
+            resolved_override_tools = [t for t in gc.cumulative_tools if t.name in declared]
+        else:
+            resolved_override_tools = list(gc.cumulative_tools)
 
     resolved_inherited_conversation = inherited_conversation
     if resolved_inherited_conversation is None and gc.is_continuous:

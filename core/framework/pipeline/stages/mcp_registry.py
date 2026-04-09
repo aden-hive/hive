@@ -42,6 +42,7 @@ class McpRegistryStage(PipelineStage):
             self._tool_registry = ToolRegistry()
 
         from framework.loader.mcp_registry import MCPRegistry
+        from framework.orchestrator.files import FILES_MCP_SERVER_NAME
 
         registry = MCPRegistry()
         mcp_loaded = False
@@ -52,9 +53,7 @@ class McpRegistryStage(PipelineStage):
             if names:
                 configs = registry.resolve_for_agent(include=names)
                 if configs:
-                    self._tool_registry.load_registry_servers(
-                        [asdict(c) for c in configs]
-                    )
+                    self._tool_registry.load_registry_servers([asdict(c) for c in configs])
                     mcp_loaded = True
                     logger.info(
                         "[pipeline] McpRegistryStage: loaded %d servers: %s",
@@ -73,12 +72,22 @@ class McpRegistryStage(PipelineStage):
         if not mcp_loaded:
             configs = registry.resolve_for_agent(profile="all")
             if configs:
-                self._tool_registry.load_registry_servers(
-                    [asdict(c) for c in configs]
-                )
+                self._tool_registry.load_registry_servers([asdict(c) for c in configs])
                 logger.info(
                     "[pipeline] McpRegistryStage: loaded %d servers (fallback)",
                     len(configs),
+                )
+
+        # 4. Ensure files-tools is always available — agents need file I/O
+        #    for reading skills, writing data, etc. regardless of config.
+        loaded_names = set(self._tool_registry._mcp_server_tools.keys())
+        if FILES_MCP_SERVER_NAME not in loaded_names:
+            files_configs = registry.resolve_for_agent(include=[FILES_MCP_SERVER_NAME])
+            if files_configs:
+                self._tool_registry.load_registry_servers([asdict(c) for c in files_configs])
+                logger.info(
+                    "[pipeline] McpRegistryStage: injected %s",
+                    FILES_MCP_SERVER_NAME,
                 )
 
         total = len(self._tool_registry.get_tools())

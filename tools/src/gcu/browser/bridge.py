@@ -510,7 +510,28 @@ class BeelineBridge:
             await asyncio.sleep(0.1)
 
         if not node_id:
-            return {"ok": False, "error": f"Element not found: {selector}"}
+            # Check if the element might be inside a Shadow DOM container
+            shadow_hint = ""
+            try:
+                shadow_check = await self.evaluate(tab_id, """
+                    (function() {
+                        var hosts = document.querySelectorAll('[id]');
+                        for (var h of hosts) {
+                            if (h.shadowRoot) return h.id;
+                        }
+                        return null;
+                    })()
+                """)
+                shadow_host = (shadow_check or {}).get("result")
+                if shadow_host:
+                    shadow_hint = (
+                        f" The page has Shadow DOM (host: #{shadow_host}). "
+                        f"Use browser_shadow_query('#{shadow_host} >>> {selector}') "
+                        f"to pierce shadow roots, or browser_evaluate with manual JS traversal."
+                    )
+            except Exception:
+                pass
+            return {"ok": False, "error": f"Element not found: {selector}{shadow_hint}"}
 
         # Scroll into view FIRST to ensure element is rendered
         try:
