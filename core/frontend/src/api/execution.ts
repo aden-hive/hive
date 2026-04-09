@@ -24,12 +24,12 @@ export const executionApi = {
     sessionId: string,
     nodeId: string,
     content: string,
-    graphId?: string,
+    colonyId?: string,
   ) =>
     api.post<InjectResult>(`/sessions/${sessionId}/inject`, {
       node_id: nodeId,
       content,
-      graph_id: graphId,
+      colony_id: colonyId,
     }),
 
   chat: (
@@ -63,4 +63,10 @@ export const executionApi = {
 
   goalProgress: (sessionId: string) =>
     api.get<GoalProgress>(`/sessions/${sessionId}/goal-progress`),
+
+  colonySpawn: (sessionId: string, task: string, count: number = 1) =>
+    api.post<{ worker_ids: string[]; count: number }>(
+      `/sessions/${sessionId}/colony-spawn`,
+      { task, count },
+    ),
 };

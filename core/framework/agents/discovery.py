@@ -166,7 +166,6 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
     """Discover agents from all known sources grouped by category."""
     from framework.loader.cli import (
         _extract_python_agent_metadata,
-        _get_framework_agents_dir,
         _is_valid_agent_dir,
     )
 
@@ -175,9 +174,6 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
     groups: dict[str, list[AgentEntry]] = {}
     sources = [
         ("Your Agents", COLONIES_DIR),
-        ("Your Agents", Path("exports")),  # compat fallback
-        ("Framework", _get_framework_agents_dir()),
-        ("Examples", Path("examples/templates")),
     ]
 
     # Track seen agent directory names to avoid duplicates when the same

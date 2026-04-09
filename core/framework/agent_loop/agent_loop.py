@@ -1,6 +1,6 @@
-"""EventLoopNode: Multi-turn LLM streaming loop with tool execution and judge evaluation.
+"""AgentLoop: Multi-turn LLM streaming loop with tool execution and judge evaluation.
 
-Implements NodeProtocol and runs a streaming event loop:
+Implements AgentProtocol and runs a streaming event loop:
 1. Calls LLMProvider.stream() to get streaming events
 2. Processes text deltas, tool calls, and finish events
 3. Executes tools and feeds results back to the conversation
@@ -68,8 +68,6 @@ from framework.agent_loop.internals.synthetic_tools import (
     build_ask_user_multiple_tool,
     build_ask_user_tool,
     build_escalate_tool,
-    build_set_output_tool,
-    handle_set_output,
 )
 from framework.agent_loop.internals.tool_result_handler import (
     build_json_preview,
@@ -84,7 +82,7 @@ from framework.agent_loop.internals.types import (
     JudgeVerdict,
     TriggerEvent,
 )
-from framework.orchestrator.node import NodeContext, NodeProtocol, NodeResult
+from framework.agent_loop.types import AgentContext, AgentProtocol, AgentResult
 from framework.llm.capabilities import supports_image_tool_results
 from framework.llm.provider import Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
@@ -255,16 +253,15 @@ OutputAccumulator = event_loop_types.OutputAccumulator
 # ---------------------------------------------------------------------------
 
 
-class AgentLoop(NodeProtocol):
+class AgentLoop(AgentProtocol):
     """Multi-turn LLM streaming loop with tool execution and judge evaluation.
 
     Lifecycle:
     1. Try to restore from durable state (crash recovery)
-    2. If no prior state, init from NodeSpec.system_prompt + input_keys
+    2. If no prior state, init from AgentSpec.system_prompt + input_keys
     3. Loop: drain injection queue -> stream LLM -> execute tools
        -> if queen-interactive: block for user input (see below)
        -> judge evaluates (acceptance criteria)
-       (each add_* and set_output writes through to store immediately)
     4. Publish events to EventBus at each stage
     5. Write cursor after each iteration
     6. Terminate when judge returns ACCEPT, shutdown signaled, or max iterations
@@ -272,17 +269,17 @@ class AgentLoop(NodeProtocol):
 
     Queen interaction blocking:
 
-    - **Text-only turns** (no real tool calls, no set_output)
+    - **Text-only turns** (no real tool calls)
       automatically block for user input.  If the LLM is talking to the
-      user (not calling tools or setting outputs), it should wait for
-      the user's response before the judge runs.
-    - **Work turns** (tool calls or set_output) flow through without
-      blocking — the LLM is making progress, not asking the user.
+      user (not calling tools), it should wait for the user's response
+      before the judge runs.
+    - **Work turns** (tool calls) flow through without blocking —
+      the LLM is making progress, not asking the user.
     - A synthetic ``ask_user`` tool is also injected for explicit
       blocking when the LLM wants to be deliberate about requesting
       input (e.g. mid-tool-call).
 
-    Always returns NodeResult with retryable=False semantics. The executor
+    Always returns AgentResult with retryable=False semantics. The executor
     must NOT retry event loop nodes -- retry is handled internally by the
     judge (RETRY action continues the loop). See WP-7 enforcement.
     """
@@ -316,7 +313,7 @@ class AgentLoop(NodeProtocol):
         self._spill_counter: int = 0
         # Subagent mark_complete: when True, _evaluate returns ACCEPT immediately
 
-    def validate_input(self, ctx: NodeContext) -> list[str]:
+    def validate_input(self, ctx: AgentContext) -> list[str]:
         """Validate hard requirements only.
 
         Event loop nodes are LLM-powered and can reason about flexible input,
@@ -325,25 +322,26 @@ class AgentLoop(NodeProtocol):
         """
         errors = []
         if ctx.llm is None:
-            errors.append("LLM provider is required for EventLoopNode")
+            errors.append("LLM provider is required for AgentLoop")
         return errors
 
     # -------------------------------------------------------------------
     # Public API
     # -------------------------------------------------------------------
 
-    async def execute(self, ctx: NodeContext) -> NodeResult:
+    async def execute(self, ctx: AgentContext) -> AgentResult:
         """Run the event loop."""
+        self._last_ctx = ctx
         logger.debug(
             "[AgentLoop.execute] Starting execution for node=%s, stream=%s",
-            ctx.node_id,
+            ctx.agent_id,
             ctx.stream_id,
         )
         start_time = time.time()
         total_input_tokens = 0
         total_output_tokens = 0
-        stream_id = ctx.stream_id or ctx.node_id
-        node_id = ctx.node_id
+        stream_id = ctx.stream_id or ctx.agent_id
+        node_id = ctx.agent_id
         execution_id = ctx.execution_id or ""
         # Store skill dirs for AS-9 file-read interception in _execute_tool
         self._skill_dirs: list[str] = ctx.skill_dirs
@@ -374,7 +372,7 @@ class AgentLoop(NodeProtocol):
             if ctx.runtime_logger:
                 ctx.runtime_logger.log_node_complete(
                     node_id=node_id,
-                    node_name=ctx.node_spec.name,
+                    node_name=ctx.agent_spec.name,
                     node_type="event_loop",
                     success=False,
                     error=error_msg,
@@ -385,25 +383,80 @@ class AgentLoop(NodeProtocol):
                     output_tokens=0,
                     latency_ms=0,
                 )
-            return NodeResult(success=False, error=error_msg)
+            return AgentResult(success=False, error=error_msg)
 
         # 2. Restore or create new conversation + accumulator
-        # Track whether we're in continuous mode (conversation threaded across nodes)
-        _is_continuous = getattr(ctx, "continuous_mode", False)
+        restored = await self._restore(ctx)
+        if restored is not None:
+            conversation = restored.conversation
+            accumulator = restored.accumulator
+            start_iteration = restored.start_iteration
+            _restored_recent_responses = restored.recent_responses
+            _restored_tool_fingerprints = restored.recent_tool_fingerprints
+            _restored_pending_input = restored.pending_input
 
-        if _is_continuous and ctx.inherited_conversation is not None:
-            # Continuous mode with inherited conversation from prior node.
-            # This takes priority over store restoration — when the graph loops
-            # back to a previously-visited node, the inherited conversation
-            # carries forward the full thread rather than restoring stale state.
-            # System prompt already updated by executor. Transition marker
-            # already inserted by executor. Fresh accumulator for this phase.
-            # Phase already set by executor via set_current_phase().
-            conversation = ctx.inherited_conversation
-            # Use cumulative output keys for compaction protection (all phases),
-            # falling back to current node's keys if not in continuous mode.
-            conversation._output_keys = (
-                ctx.cumulative_output_keys or ctx.node_spec.output_keys or None
+            # Refresh the system prompt
+            from framework.agent_loop.prompting import (
+                build_system_prompt_for_context,
+                stamp_prompt_datetime,
+            )
+
+            _current_prompt = build_system_prompt_for_context(ctx)
+            if conversation.system_prompt != _current_prompt:
+                conversation.update_system_prompt(_current_prompt)
+                logger.info("Refreshed system prompt for restored conversation")
+
+            # Refresh other meta fields that may differ across runs
+            conversation._max_context_tokens = self._config.max_context_tokens
+            if ctx.agent_spec.output_keys:
+                conversation._output_keys = ctx.agent_spec.output_keys
+            conversation._meta_persisted = False
+        else:
+            _restored_recent_responses = []
+            _restored_tool_fingerprints = []
+            _restored_pending_input = None
+
+            if self._conversation_store is not None:
+                await self._conversation_store.clear()
+
+            from framework.agent_loop.prompting import (
+                build_system_prompt_for_context,
+                stamp_prompt_datetime,
+            )
+
+            system_prompt = build_system_prompt_for_context(ctx)
+
+            if ctx.skills_catalog_prompt:
+                logger.info(
+                    "[%s] Injected skills catalog (%d chars)",
+                    node_id,
+                    len(ctx.skills_catalog_prompt),
+                )
+            if ctx.protocols_prompt:
+                logger.info(
+                    "[%s] Injected operational protocols (%d chars)",
+                    node_id,
+                    len(ctx.protocols_prompt),
+                )
+
+            if ctx.default_skill_batch_nudge:
+                from framework.skills.defaults import is_batch_scenario as _is_batch
+
+                _input_text = (
+                    (ctx.goal_context or "")
+                    + " "
+                    + " ".join(str(v) for v in ctx.input_data.values() if v)
+                )
+                if _is_batch(_input_text):
+                    system_prompt = f"{system_prompt}\n\n{ctx.default_skill_batch_nudge}"
+                    logger.info("[%s] DS-12: batch scenario detected, nudge injected", node_id)
+
+            conversation = NodeConversation(
+                system_prompt=system_prompt,
+                max_context_tokens=self._config.max_context_tokens,
+                output_keys=ctx.agent_spec.output_keys or None,
+                store=self._conversation_store,
+                run_id=ctx.effective_run_id,
             )
             accumulator = OutputAccumulator(
                 store=self._conversation_store,
@@ -412,102 +465,12 @@ class AgentLoop(NodeProtocol):
                 run_id=ctx.effective_run_id,
             )
             start_iteration = 0
-            _restored_recent_responses: list[str] = []
-            _restored_tool_fingerprints: list[list[tuple[str, str]]] = []
-            _restored_pending_input = None
-        else:
-            # Try crash-recovery restore from store, then fall back to fresh.
-            restored = await self._restore(ctx)
-            if restored is not None:
-                conversation = restored.conversation
-                accumulator = restored.accumulator
-                start_iteration = restored.start_iteration
-                _restored_recent_responses = restored.recent_responses
-                _restored_tool_fingerprints = restored.recent_tool_fingerprints
-                _restored_pending_input = restored.pending_input
 
-                # Refresh the system prompt with full composition including
-                # execution preamble and node-type preamble.  The stored
-                # prompt may be stale after code changes or when runtime-
-                # injected context (e.g. worker identity) has changed.
-                from framework.orchestrator.prompting import build_system_prompt_for_node_context
+            initial_message = self._build_initial_message(ctx)
+            if initial_message:
+                await conversation.add_user_message(initial_message)
 
-                _current_prompt = build_system_prompt_for_node_context(ctx)
-                if conversation.system_prompt != _current_prompt:
-                    conversation.update_system_prompt(_current_prompt)
-                    logger.info("Refreshed system prompt for restored conversation")
-
-                # Refresh other meta fields that may differ across runs
-                conversation._max_context_tokens = self._config.max_context_tokens
-                if ctx.node_spec.output_keys:
-                    conversation._output_keys = ctx.node_spec.output_keys
-                conversation._meta_persisted = False  # Force re-persist with updated values
-            else:
-                _restored_recent_responses = []
-                _restored_tool_fingerprints = []
-                _restored_pending_input = None
-
-                # Clear any stale conversation parts before starting fresh.
-                # This ensures a clean slate even if the store directory is reused.
-                if self._conversation_store is not None:
-                    await self._conversation_store.clear()
-
-                # Fresh conversation: either isolated mode or first node in continuous mode.
-                from framework.orchestrator.prompting import build_system_prompt_for_node_context
-
-                system_prompt = build_system_prompt_for_node_context(ctx)
-
-                if ctx.skills_catalog_prompt:
-                    logger.info(
-                        "[%s] Injected skills catalog (%d chars)",
-                        node_id,
-                        len(ctx.skills_catalog_prompt),
-                    )
-                if ctx.protocols_prompt:
-                    logger.info(
-                        "[%s] Injected operational protocols (%d chars)",
-                        node_id,
-                        len(ctx.protocols_prompt),
-                    )
-
-                # DS-12: batch auto-detection — prepend ledger-init nudge when input looks batch-y
-                if ctx.default_skill_batch_nudge:
-                    from framework.skills.defaults import is_batch_scenario as _is_batch
-
-                    _input_text = (
-                        (ctx.goal_context or "")
-                        + " "
-                        + " ".join(str(v) for v in ctx.input_data.values() if v)
-                    )
-                    if _is_batch(_input_text):
-                        system_prompt = f"{system_prompt}\n\n{ctx.default_skill_batch_nudge}"
-                        logger.info("[%s] DS-12: batch scenario detected, nudge injected", node_id)
-
-                conversation = NodeConversation(
-                    system_prompt=system_prompt,
-                    max_context_tokens=self._config.max_context_tokens,
-                    output_keys=ctx.node_spec.output_keys or None,
-                    store=self._conversation_store,
-                    run_id=ctx.effective_run_id,
-                )
-                # Stamp phase for first node in continuous mode
-                if _is_continuous:
-                    conversation.set_current_phase(ctx.node_id)
-                accumulator = OutputAccumulator(
-                    store=self._conversation_store,
-                    spillover_dir=self._config.spillover_dir,
-                    max_value_chars=self._config.max_output_value_chars,
-                    run_id=ctx.effective_run_id,
-                )
-                start_iteration = 0
-
-                # Add initial user message from input data
-                initial_message = self._build_initial_message(ctx)
-                if initial_message:
-                    await conversation.add_user_message(initial_message)
-
-                # Fire session_start hooks (e.g. persona selection)
-                await self._run_hooks("session_start", conversation, trigger=initial_message)
+            await self._run_hooks("session_start", conversation, trigger=initial_message)
 
         # 2a. Guard: ensure at least one non-system message exists.
         # A restored conversation may have 0 messages if phase_id filtering
@@ -515,17 +478,15 @@ class AgentLoop(NodeProtocol):
         # (e.g. node that failed before the first LLM call).
         if conversation.message_count == 0:
             initial_message = self._build_initial_message(ctx)
-            if initial_message:
-                await conversation.add_user_message(initial_message)
+            if not initial_message:
+                initial_message = "Hello"
+            await conversation.add_user_message(initial_message)
 
         # 2b. Restore spill counter from existing files (resume safety)
         self._restore_spill_counter()
 
         # 3. Build tool list: node tools + synthetic framework tools + delegate tools
         tools = list(ctx.available_tools)
-        set_output_tool = self._build_set_output_tool(ctx.node_spec.output_keys)
-        if set_output_tool:
-            tools.append(set_output_tool)
         if ctx.supports_direct_user_io:
             tools.append(self._build_ask_user_tool())
             if stream_id == "queen":
@@ -576,7 +537,7 @@ class AgentLoop(NodeProtocol):
                 if ctx.runtime_logger:
                     ctx.runtime_logger.log_node_complete(
                         node_id=node_id,
-                        node_name=ctx.node_spec.name,
+                        node_name=ctx.agent_spec.name,
                         node_type="event_loop",
                         success=True,
                         total_steps=iteration,
@@ -590,12 +551,12 @@ class AgentLoop(NodeProtocol):
                         escalate_count=_escalate_count,
                         continue_count=_continue_count,
                     )
-                return NodeResult(
+                return AgentResult(
                     success=True,
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
                     latency_ms=latency_ms,
-                    conversation=conversation if _is_continuous else None,
+                    conversation=None,
                 )
 
             # 6b. Drain injection queue
@@ -657,12 +618,12 @@ class AgentLoop(NodeProtocol):
                             stream_id, node_id, iteration + 1, execution_id
                         )
                         latency_ms = int((time.time() - start_time) * 1000)
-                        return NodeResult(
+                        return AgentResult(
                             success=True,
                             output=accumulator.to_dict(),
                             tokens_used=total_input_tokens + total_output_tokens,
                             latency_ms=latency_ms,
-                            conversation=conversation if _is_continuous else None,
+                            conversation=None,
                         )
                     if self._injection_queue.empty() and self._trigger_queue.empty():
                         logger.info(
@@ -678,7 +639,6 @@ class AgentLoop(NodeProtocol):
             # 6b2. Dynamic tool refresh (mode switching)
             if ctx.dynamic_tools_provider is not None:
                 _synthetic_names = {
-                    "set_output",
                     "ask_user",
                     "ask_user_multiple",
                     "escalate",
@@ -691,15 +651,9 @@ class AgentLoop(NodeProtocol):
             # 6b3. Dynamic prompt refresh (phase switching / memory refresh)
             if ctx.dynamic_prompt_provider is not None or ctx.dynamic_memory_provider is not None:
                 if ctx.dynamic_prompt_provider is not None:
-                    from framework.orchestrator.prompting import stamp_prompt_datetime
-
                     _new_prompt = stamp_prompt_datetime(ctx.dynamic_prompt_provider())
                 else:
-                    from framework.orchestrator.prompting import (
-                        build_system_prompt_for_node_context,
-                    )
-
-                    _new_prompt = build_system_prompt_for_node_context(ctx)
+                    _new_prompt = build_system_prompt_for_context(ctx)
                 if _new_prompt != conversation.system_prompt:
                     conversation.update_system_prompt(_new_prompt)
                     logger.info("[%s] Dynamic prompt updated", node_id)
@@ -960,7 +914,7 @@ class AgentLoop(NodeProtocol):
                         )
                         ctx.runtime_logger.log_node_complete(
                             node_id=node_id,
-                            node_name=ctx.node_spec.name,
+                            node_name=ctx.agent_spec.name,
                             node_type="event_loop",
                             success=False,
                             error=error_msg,
@@ -1022,14 +976,14 @@ class AgentLoop(NodeProtocol):
             )
             if truly_empty and accumulator is not None:
                 missing = self._get_missing_output_keys(
-                    accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+                    accumulator, ctx.agent_spec.output_keys, ctx.agent_spec.nullable_output_keys
                 )
                 # Only accept on empty response if the node actually has
                 # output_keys that are all satisfied.  Nodes with NO
                 # output_keys (e.g. the forever-alive queen) should never
                 # be terminated by a ghost empty stream — "missing" is
                 # trivially empty when there are no required outputs.
-                has_real_outputs = bool(ctx.node_spec.output_keys)
+                has_real_outputs = bool(ctx.agent_spec.output_keys)
                 if not missing and has_real_outputs:
                     logger.info(
                         "[%s] iter=%d: empty response but all outputs set — accepting",
@@ -1040,12 +994,12 @@ class AgentLoop(NodeProtocol):
                         stream_id, node_id, iteration + 1, execution_id
                     )
                     latency_ms = int((time.time() - start_time) * 1000)
-                    return NodeResult(
+                    return AgentResult(
                         success=True,
                         output=accumulator.to_dict(),
                         tokens_used=total_input_tokens + total_output_tokens,
                         latency_ms=latency_ms,
-                        conversation=conversation if _is_continuous else None,
+                        conversation=None,
                     )
                 elif missing:
                     # Ghost empty stream: LLM returned nothing and outputs
@@ -1071,7 +1025,7 @@ class AgentLoop(NodeProtocol):
                         if ctx.runtime_logger:
                             ctx.runtime_logger.log_node_complete(
                                 node_id=node_id,
-                                node_name=ctx.node_spec.name,
+                                node_name=ctx.agent_spec.name,
                                 node_type="event_loop",
                                 success=False,
                                 error=error_msg,
@@ -1152,7 +1106,7 @@ class AgentLoop(NodeProtocol):
                     )
                     ctx.runtime_logger.log_node_complete(
                         node_id=node_id,
-                        node_name=ctx.node_spec.name,
+                        node_name=ctx.agent_spec.name,
                         node_type="event_loop",
                         success=False,
                         error="Node stalled",
@@ -1167,7 +1121,7 @@ class AgentLoop(NodeProtocol):
                         escalate_count=_escalate_count,
                         continue_count=_continue_count,
                     )
-                return NodeResult(
+                return AgentResult(
                     success=False,
                     error=(
                         f"Node stalled: {self._config.stall_detection_threshold} similar "
@@ -1177,7 +1131,7 @@ class AgentLoop(NodeProtocol):
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
                     latency_ms=latency_ms,
-                    conversation=conversation if _is_continuous else None,
+                    conversation=None,
                 )
 
             # 6f'. Tool doom loop detection
@@ -1191,7 +1145,6 @@ class AgentLoop(NodeProtocol):
                 for tc in logged_tool_calls
                 if tc.get("tool_name")
                 not in (
-                    "set_output",
                     "ask_user",
                     "ask_user_multiple",
                     "escalate",
@@ -1367,8 +1320,8 @@ class AgentLoop(NodeProtocol):
                     _auto_missing = (
                         self._get_missing_output_keys(
                             accumulator,
-                            ctx.node_spec.output_keys,
-                            ctx.node_spec.nullable_output_keys,
+                            ctx.agent_spec.output_keys,
+                            ctx.agent_spec.nullable_output_keys,
                         )
                         if accumulator is not None
                         else True
@@ -1421,7 +1374,7 @@ class AgentLoop(NodeProtocol):
                         )
                         ctx.runtime_logger.log_node_complete(
                             node_id=node_id,
-                            node_name=ctx.node_spec.name,
+                            node_name=ctx.agent_spec.name,
                             node_type="event_loop",
                             success=True,
                             total_steps=iteration + 1,
@@ -1435,12 +1388,12 @@ class AgentLoop(NodeProtocol):
                             escalate_count=_escalate_count,
                             continue_count=_continue_count,
                         )
-                    return NodeResult(
+                    return AgentResult(
                         success=True,
                         output=accumulator.to_dict(),
                         tokens_used=total_input_tokens + total_output_tokens,
                         latency_ms=latency_ms,
-                        conversation=conversation if _is_continuous else None,
+                        conversation=None,
                     )
 
                 logger.info(
@@ -1509,7 +1462,7 @@ class AgentLoop(NodeProtocol):
                         )
                         ctx.runtime_logger.log_node_complete(
                             node_id=node_id,
-                            node_name=ctx.node_spec.name,
+                            node_name=ctx.agent_spec.name,
                             node_type="event_loop",
                             success=True,
                             total_steps=iteration + 1,
@@ -1523,12 +1476,12 @@ class AgentLoop(NodeProtocol):
                             escalate_count=_escalate_count,
                             continue_count=_continue_count,
                         )
-                    return NodeResult(
+                    return AgentResult(
                         success=True,
                         output=accumulator.to_dict(),
                         tokens_used=total_input_tokens + total_output_tokens,
                         latency_ms=latency_ms,
-                        conversation=conversation if _is_continuous else None,
+                        conversation=None,
                     )
 
                 if self._injection_queue.empty() and self._trigger_queue.empty():
@@ -1553,8 +1506,8 @@ class AgentLoop(NodeProtocol):
                     _missing = (
                         self._get_missing_output_keys(
                             accumulator,
-                            ctx.node_spec.output_keys,
-                            ctx.node_spec.nullable_output_keys,
+                            ctx.agent_spec.output_keys,
+                            ctx.agent_spec.nullable_output_keys,
                         )
                         if accumulator is not None
                         else True
@@ -1601,7 +1554,7 @@ class AgentLoop(NodeProtocol):
                     if ctx.runtime_logger:
                         ctx.runtime_logger.log_node_complete(
                             node_id=node_id,
-                            node_name=ctx.node_spec.name,
+                            node_name=ctx.agent_spec.name,
                             node_type="event_loop",
                             success=True,
                             total_steps=iteration + 1,
@@ -1615,12 +1568,12 @@ class AgentLoop(NodeProtocol):
                             escalate_count=_escalate_count,
                             continue_count=_continue_count,
                         )
-                    return NodeResult(
+                    return AgentResult(
                         success=True,
                         output=accumulator.to_dict(),
                         tokens_used=total_input_tokens + total_output_tokens,
                         latency_ms=latency_ms,
-                        conversation=conversation if _is_continuous else None,
+                        conversation=None,
                     )
 
                 logger.info("[%s] iter=%d: waiting for queen input...", node_id, iteration)
@@ -1676,7 +1629,7 @@ class AgentLoop(NodeProtocol):
                     if ctx.runtime_logger:
                         ctx.runtime_logger.log_node_complete(
                             node_id=node_id,
-                            node_name=ctx.node_spec.name,
+                            node_name=ctx.agent_spec.name,
                             node_type="event_loop",
                             success=True,
                             total_steps=iteration + 1,
@@ -1690,12 +1643,12 @@ class AgentLoop(NodeProtocol):
                             escalate_count=_escalate_count,
                             continue_count=_continue_count,
                         )
-                    return NodeResult(
+                    return AgentResult(
                         success=True,
                         output=accumulator.to_dict(),
                         tokens_used=total_input_tokens + total_output_tokens,
                         latency_ms=latency_ms,
-                        conversation=conversation if _is_continuous else None,
+                        conversation=None,
                     )
 
                 if self._injection_queue.empty() and self._trigger_queue.empty():
@@ -1780,7 +1733,7 @@ class AgentLoop(NodeProtocol):
             if verdict.action == "ACCEPT":
                 # Check for missing output keys
                 missing = self._get_missing_output_keys(
-                    accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+                    accumulator, ctx.agent_spec.output_keys, ctx.agent_spec.nullable_output_keys
                 )
                 if missing and self._judge is not None:
                     hint = (
@@ -1815,7 +1768,7 @@ class AgentLoop(NodeProtocol):
                 # Exit point 5: Judge ACCEPT — log step + log_node_complete
                 # Write outputs to data buffer
                 for key, value in accumulator.to_dict().items():
-                    ctx.buffer.write(key, value, validate=False)
+                    ctx.input_data[key] = value
 
                 await self._publish_loop_completed(stream_id, node_id, iteration + 1, execution_id)
                 latency_ms = int((time.time() - start_time) * 1000)
@@ -1836,7 +1789,7 @@ class AgentLoop(NodeProtocol):
                     )
                     ctx.runtime_logger.log_node_complete(
                         node_id=node_id,
-                        node_name=ctx.node_spec.name,
+                        node_name=ctx.agent_spec.name,
                         node_type="event_loop",
                         success=True,
                         total_steps=iteration + 1,
@@ -1850,12 +1803,12 @@ class AgentLoop(NodeProtocol):
                         escalate_count=_escalate_count,
                         continue_count=_continue_count,
                     )
-                return NodeResult(
+                return AgentResult(
                     success=True,
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
                     latency_ms=latency_ms,
-                    conversation=conversation if _is_continuous else None,
+                    conversation=None,
                 )
 
             elif verdict.action == "ESCALATE":
@@ -1879,7 +1832,7 @@ class AgentLoop(NodeProtocol):
                     )
                     ctx.runtime_logger.log_node_complete(
                         node_id=node_id,
-                        node_name=ctx.node_spec.name,
+                        node_name=ctx.agent_spec.name,
                         node_type="event_loop",
                         success=False,
                         error=f"Judge escalated: {verdict.feedback or 'no feedback'}",
@@ -1894,13 +1847,13 @@ class AgentLoop(NodeProtocol):
                         escalate_count=_escalate_count,
                         continue_count=_continue_count,
                     )
-                return NodeResult(
+                return AgentResult(
                     success=False,
                     error=f"Judge escalated: {verdict.feedback or 'no feedback'}",
                     output=accumulator.to_dict(),
                     tokens_used=total_input_tokens + total_output_tokens,
                     latency_ms=latency_ms,
-                    conversation=conversation if _is_continuous else None,
+                    conversation=None,
                 )
 
             elif verdict.action == "RETRY":
@@ -1932,7 +1885,7 @@ class AgentLoop(NodeProtocol):
         if ctx.runtime_logger:
             ctx.runtime_logger.log_node_complete(
                 node_id=node_id,
-                node_name=ctx.node_spec.name,
+                node_name=ctx.agent_spec.name,
                 node_type="event_loop",
                 success=False,
                 error=f"Max iterations ({self._config.max_iterations}) reached without acceptance",
@@ -1947,13 +1900,13 @@ class AgentLoop(NodeProtocol):
                 escalate_count=_escalate_count,
                 continue_count=_continue_count,
             )
-        return NodeResult(
+        return AgentResult(
             success=False,
             error=(f"Max iterations ({self._config.max_iterations}) reached without acceptance"),
             output=accumulator.to_dict(),
             tokens_used=total_input_tokens + total_output_tokens,
             latency_ms=latency_ms,
-            conversation=conversation if _is_continuous else None,
+            conversation=None,
         )
 
     async def inject_event(
@@ -2034,7 +1987,7 @@ class AgentLoop(NodeProtocol):
 
     async def _await_user_input(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         prompt: str = "",
         *,
         options: list[str] | None = None,
@@ -2074,8 +2027,8 @@ class AgentLoop(NodeProtocol):
 
         if emit_client_request and self._event_bus:
             await self._event_bus.emit_client_input_requested(
-                stream_id=ctx.stream_id or ctx.node_id,
-                node_id=ctx.node_id,
+                stream_id=ctx.stream_id or ctx.agent_id,
+                node_id=ctx.agent_id,
                 prompt=prompt,
                 execution_id=ctx.execution_id or "",
                 options=options,
@@ -2095,7 +2048,7 @@ class AgentLoop(NodeProtocol):
 
     async def _run_single_turn(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         conversation: NodeConversation,
         tools: list[Tool],
         iteration: int,
@@ -2136,8 +2089,8 @@ class AgentLoop(NodeProtocol):
         ``real_tool_results`` which resets each inner iteration, this list grows
         across the entire turn.
         """
-        stream_id = ctx.stream_id or ctx.node_id
-        node_id = ctx.node_id
+        stream_id = ctx.stream_id or ctx.agent_id
+        node_id = ctx.agent_id
         execution_id = ctx.execution_id or ""
         token_counts: dict[str, int] = {"input": 0, "output": 0, "cached": 0}
         tool_call_count = 0
@@ -2407,58 +2360,11 @@ class AgentLoop(NodeProtocol):
                 )
 
                 if tc.tool_name == "set_output":
-                    # --- Framework-level set_output handling ---
-                    _tc_start = time.time()
-                    _tc_ts = datetime.now(UTC).isoformat()
-                    result = self._handle_set_output(tc.tool_input, ctx.node_spec.output_keys)
+                    # set_output is no longer supported — inform the agent
                     result = ToolResult(
                         tool_use_id=tc.tool_use_id,
-                        content=result.content,
-                        is_error=result.is_error,
-                    )
-                    if not result.is_error:
-                        value = tc.tool_input.get("value", "")
-                        # Parse JSON strings into native types so downstream
-                        # consumers get lists/dicts instead of serialised JSON,
-                        # and the hallucination validator skips non-string values.
-                        if isinstance(value, str):
-                            try:
-                                parsed = json.loads(value)
-                                if isinstance(parsed, (list, dict, bool, int, float)):
-                                    value = parsed
-                            except (json.JSONDecodeError, TypeError):
-                                pass
-                        key = tc.tool_input.get("key", "")
-
-                        # Auto-spill happens inside accumulator.set()
-                        # — it fires on every code path (fresh, resume,
-                        # restore) and prevents overwrite regression.
-                        await accumulator.set(key, value)
-                        stored = accumulator.get(key)
-                        # If the accumulator spilled, update the tool
-                        # result so the LLM knows data was saved to a file.
-                        if isinstance(stored, str) and stored.startswith("[Saved to '"):
-                            result = ToolResult(
-                                tool_use_id=tc.tool_use_id,
-                                content=(
-                                    f"Output '{key}' auto-saved to file "
-                                    f"(value was too large for inline). "
-                                    f"{stored}"
-                                ),
-                                is_error=False,
-                            )
-                        outputs_set_this_turn.append(key)
-                        await self._publish_output_key_set(stream_id, node_id, key, execution_id)
-                    logged_tool_calls.append(
-                        {
-                            "tool_use_id": tc.tool_use_id,
-                            "tool_name": "set_output",
-                            "tool_input": tc.tool_input,
-                            "content": result.content,
-                            "is_error": result.is_error,
-                            "start_timestamp": _tc_ts,
-                            "duration_s": round(time.time() - _tc_start, 3),
-                        }
+                        content="set_output is no longer available. Report your results via conversation instead.",
+                        is_error=True,
                     )
                     results_by_id[tc.tool_use_id] = result
 
@@ -2708,7 +2614,6 @@ class AgentLoop(NodeProtocol):
 
                 # Build log entries for real tools (exclude synthetic tools)
                 if tc.tool_name not in (
-                    "set_output",
                     "ask_user",
                     "ask_user_multiple",
                     "escalate",
@@ -2884,21 +2789,9 @@ class AgentLoop(NodeProtocol):
         """Build the synthetic ask_user_multiple tool. Delegates to synthetic_tools module."""
         return build_ask_user_multiple_tool()
 
-    def _build_set_output_tool(self, output_keys: list[str] | None) -> Tool | None:
-        """Build the synthetic set_output tool. Delegates to synthetic_tools module."""
-        return build_set_output_tool(output_keys)
-
     def _build_escalate_tool(self) -> Tool:
         """Build the synthetic escalate tool. Delegates to synthetic_tools module."""
         return build_escalate_tool()
-
-    def _handle_set_output(
-        self,
-        tool_input: dict[str, Any],
-        output_keys: list[str] | None,
-    ) -> ToolResult:
-        """Handle set_output tool call. Delegates to synthetic_tools module."""
-        return handle_set_output(tool_input, output_keys)
 
     # -------------------------------------------------------------------
     # Judge evaluation
@@ -2906,7 +2799,7 @@ class AgentLoop(NodeProtocol):
 
     async def _judge_turn(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         conversation: NodeConversation,
         accumulator: OutputAccumulator,
         assistant_text: str,
@@ -2944,7 +2837,7 @@ class AgentLoop(NodeProtocol):
 
         return extract_tool_call_history(conversation.messages, max_entries=max_entries)
 
-    def _build_initial_message(self, ctx: NodeContext) -> str:
+    def _build_initial_message(self, ctx: AgentContext) -> str:
         """Build the initial user message from input data and buffer.
 
         Includes ALL input_data (not just declared input_keys) so that
@@ -2959,9 +2852,9 @@ class AgentLoop(NodeProtocol):
                 parts.append(f"{key}: {value}")
                 seen.add(key)
         # Fallback: check data buffer for declared input_keys not already covered
-        for key in ctx.node_spec.input_keys:
+        for key in ctx.agent_spec.input_keys:
             if key not in seen:
-                value = ctx.buffer.read(key)
+                value = ctx.input_data.get(key)
                 if value is not None:
                     parts.append(f"{key}: {value}")
         if ctx.goal_context:
@@ -3110,7 +3003,7 @@ class AgentLoop(NodeProtocol):
 
     async def _compact(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         conversation: NodeConversation,
         accumulator: OutputAccumulator | None = None,
     ) -> None:
@@ -3138,7 +3031,7 @@ class AgentLoop(NodeProtocol):
 
     async def _llm_compact(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         messages: list,
         accumulator: OutputAccumulator | None = None,
         _depth: int = 0,
@@ -3169,7 +3062,7 @@ class AgentLoop(NodeProtocol):
 
     def _build_llm_compaction_prompt(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         accumulator: OutputAccumulator | None,
         formatted_messages: str,
     ) -> str:
@@ -3183,7 +3076,7 @@ class AgentLoop(NodeProtocol):
 
     def _build_emergency_summary(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         accumulator: OutputAccumulator | None = None,
         conversation: NodeConversation | None = None,
     ) -> str:
@@ -3203,7 +3096,7 @@ class AgentLoop(NodeProtocol):
 
     async def _restore(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
     ) -> RestoredState | None:
         """Attempt to restore from a previous checkpoint.
 
@@ -3219,7 +3112,7 @@ class AgentLoop(NodeProtocol):
 
     async def _write_cursor(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         conversation: NodeConversation,
         accumulator: OutputAccumulator,
         iteration: int,
@@ -3244,7 +3137,9 @@ class AgentLoop(NodeProtocol):
             pending_input=pending_input,
         )
 
-    async def _drain_injection_queue(self, conversation: NodeConversation, ctx: NodeContext) -> int:
+    async def _drain_injection_queue(
+        self, conversation: NodeConversation, ctx: AgentContext
+    ) -> int:
         """Drain all pending injected events as user messages. Returns count."""
         return await drain_injection_queue(
             queue=self._injection_queue,
@@ -3266,7 +3161,7 @@ class AgentLoop(NodeProtocol):
 
     async def _check_pause(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         conversation: NodeConversation,
         iteration: int,
     ) -> bool:
@@ -3299,7 +3194,7 @@ class AgentLoop(NodeProtocol):
 
     async def _generate_action_plan(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         stream_id: str,
         node_id: str,
         execution_id: str,
@@ -3339,7 +3234,7 @@ class AgentLoop(NodeProtocol):
 
     async def _publish_context_usage(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         conversation: NodeConversation,
         trigger: str,
     ) -> None:
@@ -3395,7 +3290,7 @@ class AgentLoop(NodeProtocol):
 
     def _log_skip_judge(
         self,
-        ctx: NodeContext,
+        ctx: AgentContext,
         node_id: str,
         iteration: int,
         feedback: str,
@@ -3441,14 +3336,14 @@ class AgentLoop(NodeProtocol):
         node_id: str,
         content: str,
         snapshot: str,
-        ctx: NodeContext,
+        ctx: AgentContext,
         execution_id: str = "",
         iteration: int | None = None,
         inner_turn: int = 0,
     ) -> None:
         # Strip leading whitespace from first output chunk for client_facing nodes
         # (some LLMs like Kimi output leading whitespace before text)
-        if ctx.node_spec.client_facing and not snapshot and content:
+        if ctx.agent_spec.client_facing and not snapshot and content:
             content = content.lstrip()
             if not content:  # Content was all whitespace
                 return

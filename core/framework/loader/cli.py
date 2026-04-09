@@ -1494,10 +1494,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
         # Preload agents specified via --agent
         for agent_path in args.agent:
             try:
-                session = await manager.create_session_with_worker_graph(agent_path, model=model)
+                session = await manager.create_session_with_worker_colony(agent_path, model=model)
                 info = session.worker_info
-                name = info.name if info else session.graph_id
-                print(f"Loaded agent: {session.graph_id} ({name})")
+                name = info.name if info else session.colony_id
+                print(f"Loaded agent: {session.colony_id} ({name})")
             except Exception as e:
                 print(f"Error loading {agent_path}: {e}")
 

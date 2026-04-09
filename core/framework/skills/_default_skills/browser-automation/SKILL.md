@@ -13,8 +13,8 @@ Follow these rules for reliable, efficient browser interaction.
 ### Reading Pages
 - ALWAYS prefer `browser_snapshot` over `browser_get_text("body")` -- it returns a compact ~1-5 KB accessibility tree vs 100+ KB of raw HTML.
 - Interaction tools (`browser_click`, `browser_type`, `browser_fill`, `browser_scroll`, etc.) return a page snapshot automatically in their result. Use it to decide your next action -- do NOT call `browser_snapshot` separately after every action. Only call `browser_snapshot` when you need a fresh view without performing an action, or after setting `auto_snapshot=false`.
-- Do NOT use `browser_screenshot` to read text -- use `browser_snapshot` for that (compact, searchable, fast).
-- DO use `browser_screenshot` when you need visual context: charts, images, canvas elements, layout verification, or when the snapshot doesn't capture what you need.
+- Many complex pages (LinkedIn, Twitter/X, SPAs with virtual scrolling) have DOMs that don't match what's visually rendered — snapshot refs may be stale, missing, or misaligned with visible layout. On these pages, `browser_screenshot` is the only reliable way to orient yourself.
+- When using screenshots for interaction, you MUST convert image pixel positions via `browser_coords(x, y)` before clicking. NEVER pass raw screenshot pixel positions directly to `browser_click_coordinate` — the image is downscaled and the coordinates will be wrong. Always: screenshot → read position → `browser_coords` → use `physical_x/y` to click.
 - Only fall back to `browser_get_text` for extracting specific small elements by CSS selector.
 
 ### Navigation & Waiting

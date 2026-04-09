@@ -28,7 +28,7 @@ async def create_queen(
     """Build the queen executor and return the running asyncio task.
 
     Handles tool registration, phase-state initialization, prompt
-    composition, persona hook setup, graph preparation, and the queen
+    composition, persona hook setup, colony preparation, and the queen
     event loop.
     """
     from framework.agents.queen.agent import (
@@ -151,14 +151,14 @@ async def create_queen(
         phase_state=phase_state,
     )
 
-    # ---- Monitoring tools (only when worker is loaded) ----------------
-    if session.graph_runtime:
+    # ---- Colony runtime check (only when worker is loaded) ----------------
+    if session.colony_runtime:
         from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
 
         register_worker_monitoring_tools(
             queen_registry,
             session.worker_path,
-            worker_graph_id=session.graph_runtime._graph_id,
+            worker_colony_id=session.colony_runtime._graph_id,
             default_session_id=session.id,
         )
 
@@ -381,7 +381,7 @@ async def create_queen(
 
         return HookResult(system_prompt=phase_state.get_current_prompt())
 
-    # ---- Graph preparation -------------------------------------------
+    # ---- Colony preparation -------------------------------------------
     initial_prompt_text = phase_state.get_current_prompt()
 
     registered_tool_names = set(queen_registry.get_tools().keys())
@@ -413,8 +413,8 @@ async def create_queen(
     from types import SimpleNamespace
 
     from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
+    from framework.agent_loop.types import AgentContext, AgentSpec
     from framework.storage.conversation_store import FileConversationStore
-    from framework.orchestrator.node import DataBuffer, NodeContext
 
     async def _queen_loop():
         logger.debug("[_queen_loop] Starting queen loop for session %s", session.id)
@@ -440,11 +440,19 @@ async def create_queen(
 
             from framework.tracker.decision_tracker import DecisionTracker
 
-            ctx = NodeContext(
+            queen_spec = AgentSpec(
+                id="queen",
+                name="Queen",
+                description="Queen agent — manages the colony and interacts with the user.",
+                system_prompt="",
+                tools=[t.name for t in queen_tools],
+                tool_access_policy="all",
+            )
+
+            ctx = AgentContext(
                 runtime=DecisionTracker(queen_dir),
-                node_id="queen",
-                node_spec=adjusted_node,
-                buffer=DataBuffer(),
+                agent_id="queen",
+                agent_spec=queen_spec,
                 llm=session.llm,
                 available_tools=queen_tools,
                 goal_context=queen_goal.to_prompt_context(),

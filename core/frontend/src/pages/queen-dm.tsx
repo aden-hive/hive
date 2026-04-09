@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { Loader2, Users } from "lucide-react";
 import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
 import QueenSessionSwitcher from "@/components/QueenSessionSwitcher";
 import { executionApi } from "@/api/execution";
@@ -43,6 +43,7 @@ export default function QueenDM() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [switchingSessionId, setSwitchingSessionId] = useState<string | null>(null);
   const [creatingNewSession, setCreatingNewSession] = useState(false);
+  const [spawning, setSpawning] = useState(false);
 
   const turnCounterRef = useRef(0);
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
@@ -156,6 +157,42 @@ export default function QueenDM() {
     };
   }, [queenId, sessionId]);
 
+  const handleColonySpawn = useCallback(async () => {
+    if (!sessionId || spawning) return;
+    const task = prompt("Enter task for worker clone:");
+    if (!task) return;
+    setSpawning(true);
+    try {
+      const result = await executionApi.colonySpawn(sessionId, task);
+      const msg: ChatMessage = {
+        id: makeId(),
+        agent: "System",
+        agentColor: "",
+        content: `Spawned ${result.count} worker(s): ${result.worker_ids.join(", ")}`,
+        timestamp: "",
+        type: "system",
+        thread: "queen-dm",
+        createdAt: Date.now(),
+      };
+      setMessages((prev) => [...prev, msg]);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const msg: ChatMessage = {
+        id: makeId(),
+        agent: "System",
+        agentColor: "",
+        content: `Spawn failed: ${errMsg}`,
+        timestamp: "",
+        type: "system",
+        thread: "queen-dm",
+        createdAt: Date.now(),
+      };
+      setMessages((prev) => [...prev, msg]);
+    } finally {
+      setSpawning(false);
+    }
+  }, [sessionId, spawning]);
+
   const handleSelectHistoricalSession = useCallback(
     (nextSessionId: string) => {
       if (!nextSessionId || nextSessionId === sessionId) return;
@@ -181,15 +218,26 @@ export default function QueenDM() {
   useEffect(() => {
     if (!queenId) return;
     setActions(
-      <QueenSessionSwitcher
-        sessions={historySessions}
-        currentSessionId={sessionId}
-        loading={historyLoading}
-        switchingSessionId={switchingSessionId}
-        creatingNew={creatingNewSession}
-        onSelect={handleSelectHistoricalSession}
-        onCreateNew={handleCreateNewSession}
-      />
+      <>
+        <button
+          onClick={handleColonySpawn}
+          disabled={spawning || !sessionId}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0 disabled:opacity-50"
+          title="Spawn worker clones from the queen"
+        >
+          <Users className="w-3.5 h-3.5" />
+          {spawning ? "Spawning..." : "Spawn Worker"}
+        </button>
+        <QueenSessionSwitcher
+          sessions={historySessions}
+          currentSessionId={sessionId}
+          loading={historyLoading}
+          switchingSessionId={switchingSessionId}
+          creatingNew={creatingNewSession}
+          onSelect={handleSelectHistoricalSession}
+          onCreateNew={handleCreateNewSession}
+        />
+      </>
     );
     return () => setActions(null);
   }, [

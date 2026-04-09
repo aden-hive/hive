@@ -31,8 +31,8 @@ def _get_allowed_agent_roots() -> tuple[Path, ...]:
         from framework.config import COLONIES_DIR
 
         _ALLOWED_AGENT_ROOTS = (
-            COLONIES_DIR.resolve(),                     # ~/.hive/colonies/
-            (_REPO_ROOT / "exports").resolve(),         # compat fallback
+            COLONIES_DIR.resolve(),  # ~/.hive/colonies/
+            (_REPO_ROOT / "exports").resolve(),  # compat fallback
             (_REPO_ROOT / "examples").resolve(),
             (Path.home() / ".hive" / "agents").resolve(),
         )
@@ -258,7 +258,7 @@ def create_app(model: str | None = None) -> web.Application:
     from framework.server.routes_credentials import register_routes as register_credential_routes
     from framework.server.routes_events import register_routes as register_event_routes
     from framework.server.routes_execution import register_routes as register_execution_routes
-    from framework.server.routes_graphs import register_routes as register_graph_routes
+    from framework.server.routes_workers import register_routes as register_worker_routes
     from framework.server.routes_logs import register_routes as register_log_routes
     from framework.server.routes_messages import register_routes as register_message_routes
     from framework.server.routes_queens import register_routes as register_queen_routes
@@ -270,7 +270,7 @@ def create_app(model: str | None = None) -> web.Application:
     register_event_routes(app)
     register_message_routes(app)
     register_session_routes(app)
-    register_graph_routes(app)
+    register_worker_routes(app)
     register_log_routes(app)
     register_queen_routes(app)
 

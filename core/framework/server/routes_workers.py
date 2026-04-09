@@ -1,4 +1,4 @@
-"""Graph and node inspection routes — node list, node detail, node criteria."""
+"""Worker inspection routes — node list, node detail, node criteria, node tools."""
 
 import json
 import logging
@@ -11,26 +11,26 @@ from framework.server.app import resolve_session, safe_path_segment
 logger = logging.getLogger(__name__)
 
 
-def _get_graph_registration(session, graph_id: str):
-    """Get _GraphRegistration for a graph_id. Returns (reg, None) or (None, error_response)."""
-    if not session.graph_runtime:
+def _get_worker_registration(session, colony_id: str):
+    """Get _GraphRegistration for a colony_id. Returns (reg, None) or (None, error_response)."""
+    if not session.colony_runtime:
         return None, web.json_response({"error": "No worker loaded in this session"}, status=503)
-    reg = session.graph_runtime.get_graph_registration(graph_id)
+    reg = session.colony_runtime.get_graph_registration(colony_id)
     if reg is None:
-        return None, web.json_response({"error": f"Graph '{graph_id}' not found"}, status=404)
+        return None, web.json_response({"error": f"Colony '{colony_id}' not found"}, status=404)
     return reg, None
 
 
-def _get_graph_spec(session, graph_id: str):
-    """Get GraphSpec for a graph_id. Returns (graph_spec, None) or (None, error_response)."""
-    reg, err = _get_graph_registration(session, graph_id)
+def _get_worker_spec(session, colony_id: str):
+    """Get the agent spec for a colony_id. Returns (spec, None) or (None, error_response)."""
+    reg, err = _get_worker_registration(session, colony_id)
     if err:
         return None, err
     return reg.graph, None
 
 
 def _node_to_dict(node) -> dict:
-    """Serialize a NodeSpec to a JSON-friendly dict."""
+    """Serialize a node spec to a JSON-friendly dict."""
     return {
         "id": node.id,
         "name": node.name,
@@ -51,20 +51,19 @@ def _node_to_dict(node) -> dict:
 
 
 async def handle_list_nodes(request: web.Request) -> web.Response:
-    """List nodes in a graph."""
+    """List nodes in a worker."""
     session, err = resolve_session(request)
     if err:
         return err
 
-    graph_id = request.match_info["graph_id"]
-    reg, err = _get_graph_registration(session, graph_id)
+    colony_id = request.match_info["colony_id"]
+    reg, err = _get_worker_registration(session, colony_id)
     if err:
         return err
 
     graph = reg.graph
     nodes = [_node_to_dict(n) for n in graph.nodes]
 
-    # Optionally enrich with session progress
     worker_session_id = request.query.get("session_id")
     if worker_session_id and session.worker_path:
         worker_session_id = safe_path_segment(worker_session_id)
@@ -101,7 +100,7 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         {"source": e.source, "target": e.target, "condition": e.condition, "priority": e.priority}
         for e in graph.edges
     ]
-    rt = session.graph_runtime
+    rt = session.colony_runtime
     entry_points = [
         {
             "id": ep.id,
@@ -117,7 +116,6 @@ async def handle_list_nodes(request: web.Request) -> web.Response:
         }
         for ep in reg.entry_points.values()
     ]
-    # Append triggers from triggers.json (stored on session)
     for t in getattr(session, "available_triggers", {}).values():
         entry = {
             "id": t.id,
@@ -147,10 +145,10 @@ async def handle_get_node(request: web.Request) -> web.Response:
     if err:
         return err
 
-    graph_id = request.match_info["graph_id"]
+    colony_id = request.match_info["colony_id"]
     node_id = request.match_info["node_id"]
 
-    graph, err = _get_graph_spec(session, graph_id)
+    graph, err = _get_worker_spec(session, colony_id)
     if err:
         return err
 
@@ -175,10 +173,10 @@ async def handle_node_criteria(request: web.Request) -> web.Response:
     if err:
         return err
 
-    graph_id = request.match_info["graph_id"]
+    colony_id = request.match_info["colony_id"]
     node_id = request.match_info["node_id"]
 
-    graph, err = _get_graph_spec(session, graph_id)
+    graph, err = _get_worker_spec(session, colony_id)
     if err:
         return err
 
@@ -193,8 +191,8 @@ async def handle_node_criteria(request: web.Request) -> web.Response:
     }
 
     worker_session_id = request.query.get("session_id")
-    if worker_session_id and session.graph_runtime:
-        log_store = getattr(session.graph_runtime, "_runtime_log_store", None)
+    if worker_session_id and session.colony_runtime:
+        log_store = getattr(session.colony_runtime, "_runtime_log_store", None)
         if log_store:
             details = await log_store.load_details(worker_session_id)
             if details:
@@ -218,10 +216,10 @@ async def handle_node_tools(request: web.Request) -> web.Response:
     if err:
         return err
 
-    graph_id = request.match_info["graph_id"]
+    colony_id = request.match_info["colony_id"]
     node_id = request.match_info["node_id"]
 
-    graph, err = _get_graph_spec(session, graph_id)
+    graph, err = _get_worker_spec(session, colony_id)
     if err:
         return err
 
@@ -249,83 +247,17 @@ async def handle_node_tools(request: web.Request) -> web.Response:
     return web.json_response({"tools": tools_out})
 
 
-async def handle_draft_graph(request: web.Request) -> web.Response:
-    """Return the current draft graph from planning phase (if any)."""
-    session, err = resolve_session(request)
-    if err:
-        return err
-
-    phase_state = getattr(session, "phase_state", None)
-    if phase_state is None or phase_state.draft_graph is None:
-        return web.json_response({"draft": None})
-
-    return web.json_response({"draft": phase_state.draft_graph})
-
-
-async def handle_flowchart_map(request: web.Request) -> web.Response:
-    """Return the flowchart→runtime node mapping and the original (pre-dissolution) draft.
-
-    Available after confirm_and_build() dissolves decision nodes, or loaded
-    from the agent's flowchart.json file, or synthesized from the runtime graph.
-    """
-    session, err = resolve_session(request)
-    if err:
-        return err
-
-    phase_state = getattr(session, "phase_state", None)
-
-    # Fast path: already in memory
-    if phase_state is not None and phase_state.original_draft_graph is not None:
-        return web.json_response(
-            {
-                "map": phase_state.flowchart_map,
-                "original_draft": phase_state.original_draft_graph,
-            }
-        )
-
-    # Try loading from flowchart.json in the agent folder
-    worker_path = getattr(session, "worker_path", None)
-    if worker_path is not None:
-        from pathlib import Path
-
-        target = Path(worker_path) / "flowchart.json"
-        if target.is_file():
-            try:
-                data = json.loads(target.read_text(encoding="utf-8"))
-                original_draft = data.get("original_draft")
-                fmap = data.get("flowchart_map")
-                # Cache in phase_state for future requests
-                if phase_state is not None and original_draft:
-                    phase_state.original_draft_graph = original_draft
-                    phase_state.flowchart_map = fmap
-                return web.json_response(
-                    {
-                        "map": fmap,
-                        "original_draft": original_draft,
-                    }
-                )
-            except Exception:
-                logger.warning("Failed to read flowchart.json from %s", worker_path)
-
-    return web.json_response({"map": None, "original_draft": None})
-
-
 def register_routes(app: web.Application) -> None:
-    """Register graph/node inspection routes."""
-    # Draft graph (planning phase — visual only, no loaded worker required)
-    app.router.add_get("/api/sessions/{session_id}/draft-graph", handle_draft_graph)
-    # Flowchart map (post-dissolution — maps runtime nodes to original draft nodes)
-    app.router.add_get("/api/sessions/{session_id}/flowchart-map", handle_flowchart_map)
-    # Session-primary routes
-    app.router.add_get("/api/sessions/{session_id}/graphs/{graph_id}/nodes", handle_list_nodes)
+    """Register worker inspection routes."""
+    app.router.add_get("/api/sessions/{session_id}/colonies/{colony_id}/nodes", handle_list_nodes)
     app.router.add_get(
-        "/api/sessions/{session_id}/graphs/{graph_id}/nodes/{node_id}", handle_get_node
+        "/api/sessions/{session_id}/colonies/{colony_id}/nodes/{node_id}", handle_get_node
     )
     app.router.add_get(
-        "/api/sessions/{session_id}/graphs/{graph_id}/nodes/{node_id}/criteria",
+        "/api/sessions/{session_id}/colonies/{colony_id}/nodes/{node_id}/criteria",
         handle_node_criteria,
     )
     app.router.add_get(
-        "/api/sessions/{session_id}/graphs/{graph_id}/nodes/{node_id}/tools",
+        "/api/sessions/{session_id}/colonies/{colony_id}/nodes/{node_id}/tools",
         handle_node_tools,
     )

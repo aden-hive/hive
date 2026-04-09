@@ -2,8 +2,8 @@
 
 export interface LiveSession {
   session_id: string;
-  graph_id: string | null;
-  graph_name: string | null;
+  colony_id: string | null;
+  colony_name: string | null;
   has_worker: boolean;
   agent_path: string;
   description: string;
@@ -26,7 +26,7 @@ export interface LiveSession {
 
 export interface LiveSessionDetail extends LiveSession {
   entry_points?: EntryPoint[];
-  graphs?: string[];
+  colonies?: string[];
   /** True when the session exists on disk but is not live (server restarted). */
   cold?: boolean;
 }
@@ -114,7 +114,7 @@ export interface Message {
   [key: string]: unknown;
 }
 
-// --- Graph / Node types ---
+// --- Worker / Node types ---
 
 export interface NodeSpec {
   id: string;
@@ -291,20 +291,16 @@ export type EventTypeName =
   | "node_stalled"
   | "node_tool_doom_loop"
   | "judge_verdict"
-  | "output_key_set"
   | "node_retry"
-  | "edge_traversed"
   | "context_compacted"
   | "context_usage_updated"
   | "webhook_received"
   | "custom"
   | "escalation_requested"
-  | "worker_graph_loaded"
+  | "worker_colony_loaded"
   | "credentials_required"
   | "queen_phase_changed"
   | "subagent_report"
-  | "draft_graph_updated"
-  | "flowchart_map_updated"
   | "trigger_available"
   | "trigger_activated"
   | "trigger_deactivated"
@@ -321,6 +317,6 @@ export interface AgentEvent {
   data: Record<string, unknown>;
   timestamp: string;
   correlation_id: string | null;
-  graph_id: string | null;
+  colony_id: string | null;
   run_id?: string | null;
 }

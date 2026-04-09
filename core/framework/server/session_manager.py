@@ -53,13 +53,13 @@ class Session:
     # Queen (always present once started)
     queen_executor: Any = None  # GraphExecutor for queen input injection
     queen_task: asyncio.Task | None = None
-    # Loaded graph (optional)
-    graph_id: str | None = None
+    # Loaded colony (optional)
+    colony_id: str | None = None
     worker_path: Path | None = None
     runner: Any | None = None  # AgentRunner
-    graph_runtime: Any | None = None  # AgentRuntime
+    colony_runtime: Any | None = None  # ColonyRuntime or AgentRuntime
     worker_info: Any | None = None  # AgentInfo
-    # Queen phase state (building/staging/running)
+    # Queen phase state (working/reviewing)
     phase_state: Any = None  # QueenPhaseState
     # Worker handoff subscription
     worker_handoff_sub: str | None = None
@@ -147,7 +147,7 @@ class SessionManager:
     ) -> Session:
         """Create session infrastructure (EventBus, LLM) without starting queen.
 
-        Internal helper — use create_session() or create_session_with_worker_graph().
+        Internal helper — use create_session() or create_session_with_worker_colony().
         """
         from framework.host.event_bus import EventBus
 
@@ -200,7 +200,12 @@ class SessionManager:
             session.queen_name = queen_name
 
         # Start queen immediately (queen-only, no worker tools yet)
-        await self._start_queen(session, worker_identity=None, initial_prompt=initial_prompt, initial_phase=initial_phase)
+        await self._start_queen(
+            session,
+            worker_identity=None,
+            initial_prompt=initial_prompt,
+            initial_phase=initial_phase,
+        )
 
         logger.info(
             "Session '%s' created (queen-only, resume_from=%s)",
@@ -209,7 +214,7 @@ class SessionManager:
         )
         return session
 
-    async def create_session_with_worker_graph(
+    async def create_session_with_worker_colony(
         self,
         agent_path: str | Path,
         agent_id: str | None = None,
@@ -229,7 +234,7 @@ class SessionManager:
         from framework.tools.queen_lifecycle_tools import build_worker_profile
 
         agent_path = Path(agent_path)
-        resolved_graph_id = agent_id or agent_path.name
+        resolved_colony_id = agent_id or agent_path.name
 
         # When cold-restoring, check meta.json for the phase — if the agent
         # was still being built we must NOT try to load the worker (the code
@@ -268,11 +273,11 @@ class SessionManager:
         elif _resume_queen_id:
             session.queen_name = _resume_queen_id
         try:
-            # Load the graph FIRST (before queen) so queen gets full tools
+            # Load the colony FIRST (before queen) so queen gets full tools
             await self._load_worker_core(
                 session,
                 agent_path,
-                graph_id=resolved_graph_id,
+                colony_id=resolved_colony_id,
                 model=model,
             )
 
@@ -281,12 +286,15 @@ class SessionManager:
 
             # Start queen with worker profile + lifecycle + monitoring tools
             worker_identity = (
-                build_worker_profile(session.graph_runtime, agent_path=agent_path)
-                if session.graph_runtime
+                build_worker_profile(session.colony_runtime, agent_path=agent_path)
+                if session.colony_runtime
                 else None
             )
             await self._start_queen(
-                session, worker_identity=worker_identity, initial_prompt=initial_prompt, initial_phase=initial_phase
+                session,
+                worker_identity=worker_identity,
+                initial_prompt=initial_prompt,
+                initial_phase=initial_phase,
             )
 
         except Exception:
@@ -319,10 +327,10 @@ class SessionManager:
         self,
         session: Session,
         agent_path: str | Path,
-        graph_id: str | None = None,
+        colony_id: str | None = None,
         model: str | None = None,
     ) -> None:
-        """Load a graph into a session (core logic).
+        """Load a worker into a session (core logic).
 
         Sets up the runner, runtime, and session fields. Does NOT notify
         the queen — callers handle that step.
@@ -330,14 +338,14 @@ class SessionManager:
         from framework.loader import AgentLoader
 
         agent_path = Path(agent_path)
-        resolved_graph_id = graph_id or agent_path.name
+        resolved_colony_id = colony_id or agent_path.name
 
-        if session.graph_runtime is not None:
-            raise ValueError(f"Session '{session.id}' already has graph '{session.graph_id}'")
+        if session.colony_runtime is not None:
+            raise ValueError(f"Session '{session.id}' already has colony '{session.colony_id}'")
 
         async with self._lock:
             if session.id in self._loading:
-                raise ValueError(f"Session '{session.id}' is currently loading a graph")
+                raise ValueError(f"Session '{session.id}' is currently loading a colony")
             self._loading.add(session.id)
 
         try:
@@ -399,10 +407,10 @@ class SessionManager:
             info = runner.info()
 
             # Update session
-            session.graph_id = resolved_graph_id
+            session.colony_id = resolved_colony_id
             session.worker_path = agent_path
             session.runner = runner
-            session.graph_runtime = runtime
+            session.colony_runtime = runtime
             session.worker_info = info
 
             async with self._lock:
@@ -410,7 +418,7 @@ class SessionManager:
 
             logger.info(
                 "Worker '%s' loaded into session '%s'",
-                resolved_graph_id,
+                resolved_colony_id,
                 session.id,
             )
 
@@ -513,10 +521,10 @@ class SessionManager:
         Called after worker loading to restart any timer/webhook triggers
         that were active before a server restart.
         """
-        if not session.available_triggers or not session.graph_runtime:
+        if not session.available_triggers or not session.colony_runtime:
             return
         try:
-            store = session.graph_runtime._session_store
+            store = session.colony_runtime._session_store
             state = await store.read_state(session_id)
             if state and state.active_triggers:
                 from framework.tools.queen_lifecycle_tools import (
@@ -552,16 +560,16 @@ class SessionManager:
         except Exception as e:
             logger.warning("Failed to restore active triggers: %s", e)
 
-    async def load_graph(
+    async def load_colony(
         self,
         session_id: str,
         agent_path: str | Path,
-        graph_id: str | None = None,
+        colony_id: str | None = None,
         model: str | None = None,
     ) -> Session:
-        """Load a graph into an existing session (with running queen).
+        """Load a worker colony into an existing session (with running queen).
 
-        Starts the graph runtime and notifies the queen.
+        Starts the colony runtime and notifies the queen.
         """
         agent_path = Path(agent_path)
 
@@ -572,13 +580,13 @@ class SessionManager:
         await self._load_worker_core(
             session,
             agent_path,
-            graph_id=graph_id,
+            colony_id=colony_id,
             model=model,
         )
 
         # Notify queen about the loaded worker (skip for queen itself).
-        if agent_path.name != "queen" and session.graph_runtime:
-            await self._notify_queen_graph_loaded(session)
+        if agent_path.name != "queen" and session.colony_runtime:
+            await self._notify_queen_colony_loaded(session)
 
         # Update meta.json so cold-restore can discover this session by agent_path
         storage_session_id = session.queen_resume_from or session.id
@@ -603,16 +611,16 @@ class SessionManager:
         await self._restore_active_triggers(session, session_id)
 
         # Emit SSE event so the frontend can update UI
-        await self._emit_graph_loaded(session)
+        await self._emit_colony_loaded(session)
 
         return session
 
-    async def unload_graph(self, session_id: str) -> bool:
-        """Unload the worker from a session. Queen stays alive."""
+    async def unload_colony(self, session_id: str) -> bool:
+        """Unload the worker colony from a session. Queen stays alive."""
         session = self._sessions.get(session_id)
         if session is None:
             return False
-        if session.graph_runtime is None:
+        if session.colony_runtime is None:
             return False
 
         # Cleanup worker
@@ -620,7 +628,7 @@ class SessionManager:
             try:
                 await session.runner.cleanup_async()
             except Exception as e:
-                logger.error("Error cleaning up graph '%s': %s", session.graph_id, e)
+                logger.error("Error cleaning up colony '%s': %s", session.colony_id, e)
 
         # Cancel active trigger timers
         for tid, task in session.active_timer_tasks.items():
@@ -642,17 +650,17 @@ class SessionManager:
             await self._emit_trigger_events(session, "removed", session.available_triggers)
             session.available_triggers.clear()
 
-        graph_id = session.graph_id
-        session.graph_id = None
+        colony_id = session.colony_id
+        session.colony_id = None
         session.worker_path = None
         session.runner = None
-        session.graph_runtime = None
+        session.colony_runtime = None
         session.worker_info = None
 
         # Notify queen
         await self._notify_queen_worker_unloaded(session)
 
-        logger.info("Graph '%s' unloaded from session '%s'", graph_id, session_id)
+        logger.info("Colony '%s' unloaded from session '%s'", colony_id, session_id)
         return True
 
     # ------------------------------------------------------------------
@@ -905,7 +913,7 @@ class SessionManager:
 
         # Auto-load worker on cold restore — the queen's conversation expects
         # the agent to be loaded, but the new session has no worker.
-        if session.queen_resume_from and not session.graph_runtime:
+        if session.queen_resume_from and not session.colony_runtime:
             meta_path = queen_dir / "meta.json"
             if meta_path.exists():
                 try:
@@ -916,11 +924,9 @@ class SessionManager:
                     if _agent_path and Path(_agent_path).exists():
                         if _phase in ("staging", "running", None):
                             # Agent fully built — load worker and resume
-                            await self.load_graph(session.id, _agent_path)
+                            await self.load_colony(session.id, _agent_path)
                             if session.phase_state:
                                 await session.phase_state.switch_to_staging(source="auto")
-                            # Emit flowchart overlay so frontend can display it
-                            await self._emit_flowchart_on_restore(session, _agent_path)
                             logger.info("Cold restore: auto-loaded worker from %s", _agent_path)
                         elif _phase == "building":
                             # Agent folder exists but incomplete — resume building
@@ -939,8 +945,8 @@ class SessionManager:
     # Queen notifications
     # ------------------------------------------------------------------
 
-    async def _notify_queen_graph_loaded(self, session: Session) -> None:
-        """Inject a system message into the queen about the loaded graph."""
+    async def _notify_queen_colony_loaded(self, session: Session) -> None:
+        """Inject a system message into the queen about the loaded colony."""
         from framework.tools.queen_lifecycle_tools import build_worker_profile
 
         executor = session.queen_executor
@@ -950,7 +956,7 @@ class SessionManager:
         if node is None or not hasattr(node, "inject_event"):
             return
 
-        profile = build_worker_profile(session.graph_runtime, agent_path=session.worker_path)
+        profile = build_worker_profile(session.colony_runtime, agent_path=session.worker_path)
 
         # Append available trigger info so the queen knows what's schedulable
         trigger_lines = ""
@@ -966,46 +972,23 @@ class SessionManager:
                 + "\n".join(parts)
             )
 
-        await node.inject_event(f"[SYSTEM] Graph loaded.{profile}{trigger_lines}")
+        await node.inject_event(f"[SYSTEM] Colony loaded.{profile}{trigger_lines}")
 
-    async def _emit_graph_loaded(self, session: Session) -> None:
-        """Publish a WORKER_GRAPH_LOADED event so the frontend can update."""
+    async def _emit_colony_loaded(self, session: Session) -> None:
+        """Publish a WORKER_COLONY_LOADED event so the frontend can update."""
         from framework.host.event_bus import AgentEvent, EventType
 
         info = session.worker_info
         await session.event_bus.publish(
             AgentEvent(
-                type=EventType.WORKER_GRAPH_LOADED,
+                type=EventType.WORKER_COLONY_LOADED,
                 stream_id="queen",
                 data={
-                    "graph_id": session.graph_id,
-                    "graph_name": info.name if info else session.graph_id,
+                    "colony_id": session.colony_id,
+                    "colony_name": info.name if info else session.colony_id,
                     "agent_path": str(session.worker_path) if session.worker_path else "",
                     "goal": info.goal_name if info else "",
                     "node_count": info.node_count if info else 0,
-                },
-            )
-        )
-
-    async def _emit_flowchart_on_restore(self, session: Session, agent_path: str | Path) -> None:
-        """Emit FLOWCHART_MAP_UPDATED from persisted flowchart file on cold restore."""
-        from framework.host.event_bus import AgentEvent, EventType
-        from framework.tools.flowchart_utils import load_flowchart_file
-
-        original_draft, flowchart_map = load_flowchart_file(agent_path)
-        if original_draft is None:
-            return
-        # Cache in phase_state so the REST endpoint also returns it
-        if session.phase_state:
-            session.phase_state.original_draft_graph = original_draft
-            session.phase_state.flowchart_map = flowchart_map
-        await session.event_bus.publish(
-            AgentEvent(
-                type=EventType.FLOWCHART_MAP_UPDATED,
-                stream_id="queen",
-                data={
-                    "map": flowchart_map,
-                    "original_draft": original_draft,
                 },
             )
         )
@@ -1037,9 +1020,9 @@ class SessionManager:
         event_type = (
             EventType.TRIGGER_AVAILABLE if kind == "available" else EventType.TRIGGER_REMOVED
         )
-        # Resolve graph entry node for trigger target
+        # Resolve entry node for trigger target
         runner = getattr(session, "runner", None)
-        graph_entry = runner.graph.entry_node if runner else None
+        colony_entry = runner.graph.entry_node if runner else None
 
         for t in triggers.values():
             await session.event_bus.publish(
@@ -1051,7 +1034,7 @@ class SessionManager:
                         "trigger_type": t.trigger_type,
                         "trigger_config": t.trigger_config,
                         "name": t.description or t.id,
-                        **({"entry_node": graph_entry} if graph_entry else {}),
+                        **({"entry_node": colony_entry} if colony_entry else {}),
                     },
                 )
             )
@@ -1071,8 +1054,8 @@ class SessionManager:
 
         # Build worker identity if worker is loaded
         worker_identity = (
-            build_worker_profile(session.graph_runtime, agent_path=session.worker_path)
-            if session.graph_runtime
+            build_worker_profile(session.colony_runtime, agent_path=session.worker_path)
+            if session.colony_runtime
             else None
         )
         logger.debug("[revive_queen] worker_identity=%s", "present" if worker_identity else "None")
@@ -1094,22 +1077,22 @@ class SessionManager:
     def get_session(self, session_id: str) -> Session | None:
         return self._sessions.get(session_id)
 
-    def get_session_by_graph_id(self, graph_id: str) -> Session | None:
-        """Find a session by its loaded graph's ID."""
+    def get_session_by_colony_id(self, colony_id: str) -> Session | None:
+        """Find a session by its loaded colony's ID."""
         for s in self._sessions.values():
-            if s.graph_id == graph_id:
+            if s.colony_id == colony_id:
                 return s
         return None
 
     def get_session_for_agent(self, agent_id: str) -> Session | None:
         """Resolve an agent_id to a session (backward compat).
 
-        Checks session.id first, then session.graph_id.
+        Checks session.id first, then session.colony_id.
         """
         s = self._sessions.get(agent_id)
         if s:
             return s
-        return self.get_session_by_graph_id(agent_id)
+        return self.get_session_by_colony_id(agent_id)
 
     def is_loading(self, session_id: str) -> bool:
         return session_id in self._loading

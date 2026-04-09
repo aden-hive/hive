@@ -35,8 +35,8 @@ async def handle_trigger(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.graph_runtime:
-        return web.json_response({"error": "No graph loaded in this session"}, status=503)
+    if not session.colony_runtime:
+        return web.json_response({"error": "No colony loaded in this session"}, status=503)
 
     # Validate credentials before running — deferred from load time to avoid
     # showing the modal before the user clicks Run.  Runs in executor because
@@ -71,7 +71,7 @@ async def handle_trigger(request: web.Request) -> web.Response:
     if "resume_session_id" not in session_state:
         session_state["resume_session_id"] = session.id
 
-    execution_id = await session.graph_runtime.trigger(
+    execution_id = await session.colony_runtime.trigger(
         entry_point_id,
         input_data,
         session_state=session_state,
@@ -99,18 +99,18 @@ async def handle_inject(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.graph_runtime:
-        return web.json_response({"error": "No graph loaded in this session"}, status=503)
+    if not session.colony_runtime:
+        return web.json_response({"error": "No colony loaded in this session"}, status=503)
 
     body = await request.json()
     node_id = body.get("node_id")
     content = body.get("content", "")
-    graph_id = body.get("graph_id")
+    colony_id = body.get("colony_id")
 
     if not node_id:
         return web.json_response({"error": "node_id is required"}, status=400)
 
-    delivered = await session.graph_runtime.inject_input(node_id, content, graph_id=graph_id)
+    delivered = await session.colony_runtime.inject_input(node_id, content, graph_id=colony_id)
     return web.json_response({"delivered": delivered})
 
 
@@ -316,10 +316,10 @@ async def handle_goal_progress(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.graph_runtime:
-        return web.json_response({"error": "No graph loaded in this session"}, status=503)
+    if not session.colony_runtime:
+        return web.json_response({"error": "No colony loaded in this session"}, status=503)
 
-    progress = await session.graph_runtime.get_goal_progress()
+    progress = await session.colony_runtime.get_goal_progress()
     return web.json_response(progress, dumps=lambda obj: json.dumps(obj, default=str))
 
 
@@ -332,8 +332,8 @@ async def handle_resume(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.graph_runtime:
-        return web.json_response({"error": "No graph loaded in this session"}, status=503)
+    if not session.colony_runtime:
+        return web.json_response({"error": "No colony loaded in this session"}, status=503)
 
     body = await request.json()
     worker_session_id = body.get("session_id")
@@ -373,13 +373,13 @@ async def handle_resume(request: web.Request) -> web.Response:
         "run_id": _load_checkpoint_run_id(cp_path),
     }
 
-    entry_points = session.graph_runtime.get_entry_points()
+    entry_points = session.colony_runtime.get_entry_points()
     if not entry_points:
         return web.json_response({"error": "No entry points available"}, status=400)
 
     input_data = state.get("input_data", {})
 
-    execution_id = await session.graph_runtime.trigger(
+    execution_id = await session.colony_runtime.trigger(
         entry_points[0].id,
         input_data=input_data,
         session_state=resume_session_state,
@@ -397,7 +397,7 @@ async def handle_resume(request: web.Request) -> web.Response:
 async def handle_pause(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/pause — pause the worker (queen stays alive).
 
-    Mirrors the queen's stop_graph() tool: cancels all active worker
+    Mirrors the queen's stop_worker() tool: cancels all active worker
     executions, pauses timers so nothing auto-restarts, but does NOT
     touch the queen so she can observe and react to the pause.
     """
@@ -405,14 +405,14 @@ async def handle_pause(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.graph_runtime:
-        return web.json_response({"error": "No graph loaded in this session"}, status=503)
+    if not session.colony_runtime:
+        return web.json_response({"error": "No colony loaded in this session"}, status=503)
 
-    runtime = session.graph_runtime
+    runtime = session.colony_runtime
     cancelled = []
 
-    for graph_id in runtime.list_graphs():
-        reg = runtime.get_graph_registration(graph_id)
+    for colony_id in runtime.list_graphs():
+        reg = runtime.get_graph_registration(colony_id)
         if reg is None:
             continue
         for _ep_id, stream in reg.streams.items():
@@ -457,8 +457,8 @@ async def handle_stop(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.graph_runtime:
-        return web.json_response({"error": "No graph loaded in this session"}, status=503)
+    if not session.colony_runtime:
+        return web.json_response({"error": "No colony loaded in this session"}, status=503)
 
     body = await request.json()
     execution_id = body.get("execution_id")
@@ -466,8 +466,8 @@ async def handle_stop(request: web.Request) -> web.Response:
     if not execution_id:
         return web.json_response({"error": "execution_id is required"}, status=400)
 
-    for graph_id in session.graph_runtime.list_graphs():
-        reg = session.graph_runtime.get_graph_registration(graph_id)
+    for colony_id in session.colony_runtime.list_graphs():
+        reg = session.colony_runtime.get_graph_registration(colony_id)
         if reg is None:
             continue
         for _ep_id, stream in reg.streams.items():
@@ -512,8 +512,8 @@ async def handle_replay(request: web.Request) -> web.Response:
     if err:
         return err
 
-    if not session.graph_runtime:
-        return web.json_response({"error": "No graph loaded in this session"}, status=503)
+    if not session.colony_runtime:
+        return web.json_response({"error": "No colony loaded in this session"}, status=503)
 
     body = await request.json()
     worker_session_id = body.get("session_id")
@@ -531,7 +531,7 @@ async def handle_replay(request: web.Request) -> web.Response:
     if not cp_path.exists():
         return web.json_response({"error": "Checkpoint not found"}, status=404)
 
-    entry_points = session.graph_runtime.get_entry_points()
+    entry_points = session.colony_runtime.get_entry_points()
     if not entry_points:
         return web.json_response({"error": "No entry points available"}, status=400)
 
@@ -541,7 +541,7 @@ async def handle_replay(request: web.Request) -> web.Response:
         "run_id": _load_checkpoint_run_id(cp_path),
     }
 
-    execution_id = await session.graph_runtime.trigger(
+    execution_id = await session.colony_runtime.trigger(
         entry_points[0].id,
         input_data={},
         session_state=replay_session_state,
@@ -571,6 +571,109 @@ async def handle_cancel_queen(request: web.Request) -> web.Response:
     return web.json_response({"cancelled": True})
 
 
+async def handle_colony_spawn(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/colony-spawn — spawn worker clones.
+
+    Body: {"task": "...", "count": 1}
+    Returns: {"worker_ids": ["...", "..."]}
+
+    Clones the queen's own AgentLoop — same tools, same LLM, same prompt.
+    Each worker runs independently with the given task as input.
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    if not session.queen_executor:
+        return web.json_response(
+            {"error": "Queen is not running in this session."},
+            status=503,
+        )
+
+    body = await request.json()
+    task = body.get("task", "")
+    count = min(int(body.get("count", 1)), 10)
+
+    if not task:
+        return web.json_response({"error": "task is required"}, status=400)
+
+    from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
+    from framework.agent_loop.types import AgentContext, AgentSpec
+    from framework.host.worker import Worker
+    from framework.schemas.goal import Goal
+    from framework.tracker.decision_tracker import DecisionTracker
+    import uuid
+
+    queen_loop: AgentLoop = session.queen_executor.node_registry["queen"]
+    queen_ctx: AgentContext = queen_loop._last_ctx if hasattr(queen_loop, "_last_ctx") else None
+
+    queen_spec = AgentSpec(
+        id="queen",
+        name="Queen",
+        description="Queen worker clone",
+        tools=[],
+        tool_access_policy="all",
+    )
+
+    if queen_ctx:
+        queen_spec = queen_ctx.agent_spec
+
+    goal = Goal(
+        id="spawn-task",
+        name=task[:60],
+        description=task,
+    )
+
+    worker_ids: list[str] = []
+    for _ in range(count):
+        worker_id = f"worker_{uuid.uuid4().hex[:12]}"
+        stream_id = f"worker:{worker_id}"
+
+        worker_loop = AgentLoop(
+            event_bus=session.event_bus,
+            config=queen_loop._config if hasattr(queen_loop, "_config") else LoopConfig(),
+            tool_executor=queen_loop._tool_executor
+            if hasattr(queen_loop, "_tool_executor")
+            else None,
+            conversation_store=queen_loop._conversation_store
+            if hasattr(queen_loop, "_conversation_store")
+            else None,
+        )
+
+        worker_ctx = AgentContext(
+            runtime=DecisionTracker(session.queen_dir),
+            agent_id=worker_id,
+            agent_spec=queen_spec,
+            input_data={"task": task},
+            llm=session.llm,
+            available_tools=queen_ctx.available_tools if queen_ctx else [],
+            goal_context=goal.to_prompt_context(),
+            goal=goal,
+            max_tokens=queen_ctx.max_tokens if queen_ctx else 8192,
+            stream_id=stream_id,
+            execution_id=worker_id,
+            accounts_prompt=queen_ctx.accounts_prompt if queen_ctx else "",
+            skills_catalog_prompt=queen_ctx.skills_catalog_prompt if queen_ctx else "",
+            protocols_prompt=queen_ctx.protocols_prompt if queen_ctx else "",
+            skill_dirs=queen_ctx.skill_dirs if queen_ctx else [],
+        )
+
+        worker = Worker(
+            worker_id=worker_id,
+            task=task,
+            agent_loop=worker_loop,
+            context=worker_ctx,
+            event_bus=session.event_bus,
+            colony_id=session.id,
+        )
+
+        await worker.start_background()
+        worker_ids.append(worker_id)
+
+    logger.info("Spawned %d worker(s) from queen session %s", len(worker_ids), session.id)
+    return web.json_response({"worker_ids": worker_ids, "count": len(worker_ids)})
+
+
 def register_routes(app: web.Application) -> None:
     """Register execution control routes."""
     # Session-primary routes
@@ -584,3 +687,4 @@ def register_routes(app: web.Application) -> None:
     app.router.add_post("/api/sessions/{session_id}/cancel-queen", handle_cancel_queen)
     app.router.add_post("/api/sessions/{session_id}/replay", handle_replay)
     app.router.add_get("/api/sessions/{session_id}/goal-progress", handle_goal_progress)
+    app.router.add_post("/api/sessions/{session_id}/colony-spawn", handle_colony_spawn)

@@ -10,15 +10,12 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from framework.observability import set_trace_context
 from framework.schemas.decision import Decision, DecisionType, Option, Outcome
 from framework.schemas.run import Run, RunStatus
 from framework.storage.concurrent import ConcurrentStorage
-
-if TYPE_CHECKING:
-    from framework.host.outcome_aggregator import OutcomeAggregator
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +72,6 @@ class StreamDecisionTracker:
         self,
         stream_id: str,
         storage: ConcurrentStorage,
-        outcome_aggregator: "OutcomeAggregator | None" = None,
     ):
         """
         Initialize stream runtime.
@@ -83,11 +79,9 @@ class StreamDecisionTracker:
         Args:
             stream_id: Unique identifier for this stream
             storage: Concurrent storage backend
-            outcome_aggregator: Optional aggregator for cross-stream evaluation
         """
         self.stream_id = stream_id
         self._storage = storage
-        self._outcome_aggregator = outcome_aggregator
 
         # Track runs by execution_id (thread-safe via lock)
         self._runs: dict[str, Run] = {}
@@ -268,14 +262,6 @@ class StreamDecisionTracker:
 
         run.add_decision(decision)
 
-        # Report to outcome aggregator if available
-        if self._outcome_aggregator:
-            self._outcome_aggregator.record_decision(
-                stream_id=self.stream_id,
-                execution_id=execution_id,
-                decision=decision,
-            )
-
         return decision_id
 
     def record_outcome(
@@ -320,15 +306,6 @@ class StreamDecisionTracker:
         )
 
         run.record_outcome(decision_id, outcome)
-
-        # Report to outcome aggregator if available
-        if self._outcome_aggregator:
-            self._outcome_aggregator.record_outcome(
-                stream_id=self.stream_id,
-                execution_id=execution_id,
-                decision_id=decision_id,
-                outcome=outcome,
-            )
 
     # === PROBLEM RECORDING ===
 

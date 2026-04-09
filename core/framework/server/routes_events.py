@@ -28,7 +28,6 @@ DEFAULT_EVENT_TYPES = [
     EventType.NODE_LOOP_COMPLETED,
     EventType.LLM_TURN_COMPLETE,
     EventType.NODE_ACTION_PLAN,
-    EventType.EDGE_TRAVERSED,
     EventType.GOAL_PROGRESS,
     EventType.NODE_INTERNAL_OUTPUT,
     EventType.NODE_STALLED,
@@ -36,7 +35,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.NODE_TOOL_DOOM_LOOP,
     EventType.CONTEXT_COMPACTED,
     EventType.CONTEXT_USAGE_UPDATED,
-    EventType.WORKER_GRAPH_LOADED,
+    EventType.WORKER_COLONY_LOADED,
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
     EventType.QUEEN_PHASE_CHANGED,
@@ -46,7 +45,6 @@ DEFAULT_EVENT_TYPES = [
     EventType.TRIGGER_FIRED,
     EventType.TRIGGER_REMOVED,
     EventType.TRIGGER_UPDATED,
-    EventType.DRAFT_GRAPH_UPDATED,
 ]
 
 # Keepalive interval in seconds

@@ -506,7 +506,7 @@ def build_llm_compaction_prompt(
     service.  Each section focuses on a different aspect of the conversation
     so the summariser produces consistently useful, well-organised output.
     """
-    spec = ctx.node_spec
+    spec = ctx.agent_spec
     ctx_lines = [f"NODE: {spec.name} (id={spec.id})"]
     if spec.description:
         ctx_lines.append(f"PURPOSE: {spec.description}")
@@ -622,13 +622,13 @@ def write_compaction_debug_log(
     log_dir.mkdir(parents=True, exist_ok=True)
 
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%f")
-    node_label = ctx.node_id.replace("/", "_")
+    node_label = ctx.agent_id.replace("/", "_")
     log_path = log_dir / f"{ts}_{node_label}.md"
 
     lines: list[str] = [
-        f"# Compaction Debug — {ctx.node_id}",
+        f"# Compaction Debug — {ctx.agent_id}",
         f"**Time:** {datetime.now(UTC).isoformat()}",
-        f"**Node:** {ctx.node_spec.name} (`{ctx.node_id}`)",
+        f"**Node:** {ctx.agent_spec.name} (`{ctx.agent_id}`)",
     ]
     if ctx.stream_id:
         lines.append(f"**Stream:** {ctx.stream_id}")
@@ -715,7 +715,7 @@ async def log_compaction(
 
     if ctx.runtime_logger:
         ctx.runtime_logger.log_step(
-            node_id=ctx.node_id,
+            node_id=ctx.agent_id,
             node_type="event_loop",
             step_index=-1,
             llm_text=f"Context compacted ({level}): {before_pct}% \u2192 {after_pct}%",
@@ -736,8 +736,8 @@ async def log_compaction(
         await event_bus.publish(
             AgentEvent(
                 type=EventType.CONTEXT_COMPACTED,
-                stream_id=ctx.stream_id or ctx.node_id,
-                node_id=ctx.node_id,
+                stream_id=ctx.stream_id or ctx.agent_id,
+                node_id=ctx.agent_id,
                 data=event_data,
             )
         )
@@ -768,7 +768,7 @@ def build_emergency_summary(
     ]
 
     # 1. Node identity
-    spec = ctx.node_spec
+    spec = ctx.agent_spec
     parts.append(f"NODE: {spec.name} (id={spec.id})")
     if spec.description:
         parts.append(f"PURPOSE: {spec.description}")
@@ -776,7 +776,7 @@ def build_emergency_summary(
     # 2. Inputs the node received
     input_lines = []
     for key in spec.input_keys:
-        value = ctx.input_data.get(key) or ctx.buffer.read(key)
+        value = ctx.input_data.get(key)
         if value is not None:
             # Truncate long values but keep them recognisable
             v_str = str(value)

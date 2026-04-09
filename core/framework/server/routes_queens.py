@@ -87,7 +87,7 @@ async def _create_bound_queen_session(
             from framework.server.app import validate_agent_path
 
             resolved_agent_path = str(validate_agent_path(agent_path))
-            return await manager.create_session_with_worker_graph(
+            return await manager.create_session_with_worker_colony(
                 resolved_agent_path,
                 queen_resume_from=resume_from,
                 initial_prompt=initial_prompt,
@@ -119,7 +119,7 @@ async def handle_list_profiles(request: web.Request) -> web.Response:
 
 def _transform_profile_for_api(profile: dict) -> dict:
     """Transform internal profile format to API format expected by frontend.
-    
+
     Maps YAML fields (core_traits, hidden_background, etc.) to display fields
     (summary, experience, skills, signature_achievement).
     """
@@ -127,7 +127,7 @@ def _transform_profile_for_api(profile: dict) -> dict:
         "name": profile.get("name", ""),
         "title": profile.get("title", ""),
     }
-    
+
     # Build summary from core_traits + psychological_profile
     summary_parts = []
     if profile.get("core_traits"):
@@ -136,7 +136,7 @@ def _transform_profile_for_api(profile: dict) -> dict:
         summary_parts.append(profile["psychological_profile"]["anti_stereotype"])
     if summary_parts:
         result["summary"] = "\n\n".join(summary_parts)
-    
+
     # Build experience from hidden_background
     experience = []
     hidden = profile.get("hidden_background", {})
@@ -148,22 +148,23 @@ def _transform_profile_for_api(profile: dict) -> dict:
             details.append(f"Drive: {hidden['deep_motive']}")
         if hidden.get("behavioral_mapping"):
             details.append(f"Approach: {hidden['behavioral_mapping']}")
-        experience.append({
-            "role": f"{profile.get('title', 'Executive Advisor')}",
-            "details": details
-        })
+        experience.append(
+            {"role": f"{profile.get('title', 'Executive Advisor')}", "details": details}
+        )
     if experience:
         result["experience"] = experience
-    
+
     # Skills from skills field
     if profile.get("skills"):
         result["skills"] = profile["skills"]
-    
+
     # Signature achievement from world_lore
     world_lore = profile.get("world_lore", {})
     if world_lore.get("habitat"):
-        result["signature_achievement"] = f"{world_lore['habitat']}. {world_lore.get('lexicon', '')}".strip()
-    
+        result["signature_achievement"] = (
+            f"{world_lore['habitat']}. {world_lore.get('lexicon', '')}".strip()
+        )
+
     return result
 
 
@@ -175,7 +176,7 @@ async def handle_get_profile(request: web.Request) -> web.Response:
         profile = load_queen_profile(queen_id)
     except FileNotFoundError:
         return web.json_response({"error": f"Queen '{queen_id}' not found"}, status=404)
-    
+
     api_profile = _transform_profile_for_api(profile)
     return web.json_response({"id": queen_id, **api_profile})
 
@@ -224,11 +225,13 @@ async def handle_queen_session(request: web.Request) -> web.Response:
     # 1. Check for an existing live session bound to this queen.
     for session in manager.list_sessions():
         if session.queen_name == queen_id:
-            return web.json_response({
-                "session_id": session.id,
-                "queen_id": queen_id,
-                "status": "live",
-            })
+            return web.json_response(
+                {
+                    "session_id": session.id,
+                    "queen_id": queen_id,
+                    "status": "live",
+                }
+            )
 
     # Stop any live sessions bound to a different queen so only one queen
     # is active at a time.
@@ -267,11 +270,13 @@ async def handle_queen_session(request: web.Request) -> web.Response:
         )
         status = "created"
 
-    return web.json_response({
-        "session_id": session.id,
-        "queen_id": queen_id,
-        "status": status,
-    })
+    return web.json_response(
+        {
+            "session_id": session.id,
+            "queen_id": queen_id,
+            "status": status,
+        }
+    )
 
 
 async def handle_select_queen_session(request: web.Request) -> web.Response:

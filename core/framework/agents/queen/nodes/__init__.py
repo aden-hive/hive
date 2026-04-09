@@ -37,9 +37,7 @@ _appendices = _build_appendices()
 
 # GCU guide — shared between planning and building via _shared_building_knowledge.
 _gcu_section = (
-    ("\n\n# Browser Automation Nodes\n\n" + _gcu_guide)
-    if _is_gcu_enabled() and _gcu_guide
-    else ""
+    ("\n\n# Browser Automation Nodes\n\n" + _gcu_guide) if _is_gcu_enabled() and _gcu_guide else ""
 )
 
 # Tools available to phases.
@@ -77,7 +75,7 @@ _QUEEN_PLANNING_TOOLS = [
     "list_agent_sessions",
     "list_agent_checkpoints",
     "get_agent_checkpoint",
-    # Draft graph (visual-only, no code) — new planning workflow
+    # Draft layout (visual-only, no code) — new planning workflow
     "save_agent_draft",
     "confirm_and_build",
     # Scaffold + transition to building (requires confirm_and_build first)
@@ -103,7 +101,7 @@ _QUEEN_STAGING_TOOLS = [
     "run_command",
     # Agent inspection
     "list_credentials",
-    "get_graph_status",
+    "get_worker_status",
     # Launch
     "run_agent_with_input",
     # Trigger management
@@ -123,9 +121,9 @@ _QUEEN_RUNNING_TOOLS = [
     # Credentials
     "list_credentials",
     # Worker lifecycle
-    "stop_graph",
-    "switch_to_editing",
-    "get_graph_status",
+    "stop_worker",
+    "switch_to_reviewing",
+    "get_worker_status",
     "run_agent_with_input",
     "inject_message",
     # Monitoring
@@ -136,7 +134,7 @@ _QUEEN_RUNNING_TOOLS = [
 ]
 
 # Editing phase: worker done, still loaded — tweak config and re-run.
-# Has inject_message for live adjustments. stop_graph_and_edit/plan available
+# Has inject_message for live adjustments. stop_worker_and_review/plan available
 # here to escalate when a deeper change is needed.
 _QUEEN_EDITING_TOOLS = [
     # Read-only (inspect)
@@ -146,7 +144,7 @@ _QUEEN_EDITING_TOOLS = [
     "run_command",
     # Credentials
     "list_credentials",
-    "get_graph_status",
+    "get_worker_status",
     # Re-run or tweak
     "run_agent_with_input",
     "inject_message",
@@ -157,7 +155,7 @@ _QUEEN_EDITING_TOOLS = [
     "list_triggers",
 ]
 
-# Independent phase: queen operates as a standalone agent — no graph/worker.
+# Independent phase: queen operates as a standalone agent — no worker.
 # Core tools are listed here; MCP tools (coder-tools, gcu-tools) are added
 # dynamically in queen_orchestrator.py because their tool names aren't known
 # at import time.
@@ -284,7 +282,7 @@ both list_agent_tools() and built-in features like GCU
 ### Credential Check (MANDATORY)
 
 The summary from list_agent_tools() includes `credentials_required` and \
-`credentials_available` per provider. **Before designing the graph**, check \
+`credentials_available` per provider. **Before designing the layout**, check \
 which providers the design will need and whether credentials are available.
 
 For each provider whose tools you plan to use and where \
@@ -339,7 +337,7 @@ explicitly only when auto-detection would be wrong.
 Decision nodes (amber diamonds) are **planning-only** visual elements. They \
 let you show explicit conditional logic in the flowchart so the user can see \
 and approve branching behavior. At `confirm_and_build()`, decision nodes are \
-automatically **dissolved** into the runtime graph:
+automatically **dissolved** into the runtime:
 
 - The decision clause is merged into the predecessor node's `success_criteria`
 - The yes/no edges are rewired as the predecessor's `on_success`/`on_failure` edges
@@ -374,7 +372,7 @@ In the draft: the `[Valid data?]` node has `flowchart_type: "decision"`, \
 
 Browser nodes are regular `event_loop` nodes with browser tools \
 (from the gcu-tools MCP server) in their tool list. They are wired \
-into the graph with edges like any other node:
+into the layout with edges like any other node:
 ```
 research → browser_scan → analyze_results
 ```
@@ -456,7 +454,7 @@ in one call. Do NOT run these steps individually.
 ## Debugging Built Agents
 When a user says "my agent is failing" or "debug this agent":
 1. list_agent_sessions("{agent_name}") — find the session
-2. get_graph_status(focus="issues") — check for problems
+2. get_worker_status(focus="issues") — check for problems
 3. list_agent_checkpoints / get_agent_checkpoint — trace execution
 
 # Implementation Workflow
@@ -527,13 +525,13 @@ tools:
 ## 6. Verify and Load
 
 Call `validate_agent_package("{name}")` after initialization. \
-It runs structural checks (class validation, graph validation, tool \
+It runs structural checks (class validation, layout validation, tool \
 validation, tests) and returns a consolidated result. If anything \
 fails: read the error, fix with read_file+write_file, re-validate. Up to 3x.
 
 When validation passes, immediately call \
 `load_built_agent("<agent_path>")` to load the agent into the \
-session. This switches to STAGING phase and shows the graph in the \
+session. This switches to STAGING phase and shows the layout in the \
 visualizer. Do NOT wait for user input between validation and loading.
 """
 
@@ -595,11 +593,11 @@ _queen_identity_editing = """\
 You are in EDITING mode. The worker has finished executing and is still loaded. \
 You can tweak configuration, inject messages, and re-run with different input \
 without rebuilding. If a deeper change is needed (code edits, new tools), \
-escalate to BUILDING via stop_graph_and_edit or to PLANNING via stop_graph_and_plan.
+escalate to BUILDING via stop_worker_and_review or to PLANNING via stop_worker_and_plan.
 """
 
 _queen_role_independent = """\
-You are in INDEPENDENT mode. No worker graph — you do the work yourself. \
+You are in INDEPENDENT mode. No worker layout — you do the work yourself. \
 You have full coding tools (read/write/edit/search/run) and MCP tools \
 (file operations via coder-tools, browser automation via gcu-tools). \
 Execute the user's task directly using conversation and tools. \
@@ -626,7 +624,7 @@ to BUILDING phase for that.
 - list_agent_checkpoints(agent_name, session_id) — View execution history
 - get_agent_checkpoint(agent_name, session_id, checkpoint_id?) — Load a checkpoint
 
-## Draft Graph Workflow (new agents)
+## Draft Workflow (new agents)
 - save_agent_draft(agent_name, goal, nodes, edges?, terminal_nodes?, ...) — \
 Create an ISO 5807 color-coded flowchart draft. No code is generated. Each \
 node is auto-classified into a standard flowchart symbol (process, decision, \
@@ -650,7 +648,7 @@ phase. Only use this when the user explicitly asks to work with an existing agen
 (e.g. "load my_agent", "run the research agent"). Confirm with the user first.
 
 ## Workflow summary
-1. Understand requirements → discover tools → design graph
+1. Understand requirements → discover tools → design the layout
 2. Call save_agent_draft() to create visual draft → present to user
 3. Call ask_user() to get explicit approval
 4. Call confirm_and_build() to record approval
@@ -689,7 +687,7 @@ _queen_tools_staging = """
 The agent is loaded and ready to run. You can inspect it and launch it:
 - Read-only: read_file, list_directory, search_files, run_command
 - list_credentials(credential_id?) — Verify credentials are configured
-- get_graph_status(focus?) — Brief status
+- get_worker_status(focus?) — Brief status
 - run_agent_with_input(task) — Start the worker and switch to RUNNING phase
 - set_trigger / remove_trigger / list_triggers — Timer management
 
@@ -703,10 +701,10 @@ _queen_tools_running = """
 
 The worker is running. You have monitoring and lifecycle tools:
 - Read-only: read_file, list_directory, search_files, run_command
-- get_graph_status(focus?) — Brief status
+- get_worker_status(focus?) — Brief status
 - inject_message(content) — Send a message to the running worker
 - get_worker_health_summary() — Read the latest health data
-- stop_graph() — Stop the worker immediately
+- stop_worker() — Stop the worker immediately
 - switch_to_editing() — Stop the worker and enter EDITING phase \
 for config tweaks, re-runs, or escalation to building/planning
 - run_agent_with_input(task) — Re-run the worker with new input
@@ -721,7 +719,7 @@ _queen_tools_editing = """
 
 The worker has finished executing and is still loaded. You can tweak and re-run:
 - Read-only: read_file, list_directory, search_files, run_command
-- get_graph_status(focus?) — Brief status of the loaded agent
+- get_worker_status(focus?) — Brief status of the loaded agent
 - inject_message(content) — Send a config tweak or prompt adjustment
 - run_agent_with_input(task) — Re-run the worker with new input
 - get_worker_health_summary() — Review last run's health data
@@ -734,7 +732,7 @@ You can only re-run or tweak from this phase.
 _queen_tools_independent = """
 # Tools (INDEPENDENT mode)
 
-You are operating as a standalone agent — no worker graph. You do the work directly.
+You are operating as a standalone agent — no worker layout. You do the work directly.
 
 ## File I/O (coder-tools MCP)
 - read_file, write_file, edit_file, hashline_edit, list_directory, \
@@ -762,13 +760,13 @@ Report the last run's results to the user and ask what they want to do next.
 _queen_behavior_independent = """
 ## Independent — do the work yourself
 
-You are the agent. No worker, no graph — you execute directly.
+You are the agent. No worker — you execute directly.
 1. Understand the task from the user
 2. Plan your approach briefly (no flowcharts or agent design)
 3. Execute using your tools: file I/O, shell commands, browser automation
 4. Report results, iterate if needed
 
-You have NO lifecycle tools (no start_graph, stop_graph, confirm_and_build, etc.).
+You have NO lifecycle tools (no start_worker, stop_worker, confirm_and_build, etc.).
 If the task requires building a dedicated agent, tell the user to start a \
 new session without independent mode.
 """
@@ -804,7 +802,7 @@ You are in planning mode. Your job is to:
 3. Discover available tools with list_agent_tools()
 4. Assess framework fit and gaps
 5. Consider multiple approaches and their trade-offs
-6. Design the agent graph — call save_agent_draft() **as soon as you have a \
+6. Design the agent layout — call save_agent_draft() **as soon as you have a \
 rough shape**, even before finalizing all details
 7. **Iterate on the draft interactively** — every time the user gives feedback \
 that changes the structure, call save_agent_draft() again so they see the \
@@ -832,7 +830,7 @@ the plan first.
 
 ## Diagnosis mode (returning from staging/running)
 
-If you entered planning from a running/staged agent (via stop_graph_and_plan), \
+If you entered planning from a running/staged agent (via stop_worker_and_plan), \
 your priority is diagnosis, not new design:
 1. Inspect the agent's checkpoints, sessions, and logs to understand what went wrong
 2. Summarize the root cause to the user
@@ -880,7 +878,7 @@ nodes without needing user re-confirmation. The user sees the updated \
 flowchart immediately.
 
 - **Minor changes** (add a node, rename, adjust edges): call \
-save_agent_draft() with the updated graph and keep building.
+save_agent_draft() with the updated draft and keep building.
 - **User wants to discuss, redesign, or change integrations/tools**: call \
 replan_agent(). The previous draft is restored so you can edit it with \
 the user. After they approve, confirm_and_build() → continue building.
@@ -891,12 +889,12 @@ user says "replan", "go back", "let's redesign", "change the approach", \
 "use a different tool/API", etc. Do NOT stay in building to handle these \
 — switch to planning so the user can review and approve the new design.
 
-## CRITICAL — Graph topology errors require replanning, not code edits
+## CRITICAL — Topology errors require replanning, not code edits
 
-If you discover that the agent graph has structural problems — browser nodes \
+If you discover that the agent layout has structural problems — browser nodes \
 in the linear flow, missing edges, wrong node connections, incorrect \
 node connections — you MUST call replan_agent() and fix the draft. \
-Do NOT attempt to fix topology by editing agent.json directly. The graph \
+Do NOT attempt to fix topology by editing agent.json directly. The structure \
 structure is defined by the draft → dissolution → code-gen pipeline. \
 Editing the config to rewire nodes bypasses the flowchart and creates drift \
 between what the user sees and what the config does.
@@ -934,7 +932,7 @@ If NO worker is loaded, say so and offer to build one.
 
 ## When in staging phase (agent loaded, not running):
 - Tell the user the agent is loaded and ready in plain language (for example, \
-"<graph_name> has been loaded.").
+"<worker_name> has been loaded.").
 - Avoid lead-ins like "A worker is loaded and ready in staging phase: ...".
 - For tasks matching the worker's goal: ALWAYS ask the user for their \
 specific input BEFORE calling run_agent_with_input(task). NEVER make up \
@@ -944,7 +942,7 @@ compose a structured task description from their input and call \
 run_agent_with_input(task). The worker has no intake node — it receives \
 your task and starts processing.
 - If the user wants to modify the agent, wait for EDITING phase \
-(after worker finishes) where you will have stop_graph_and_edit().
+(after worker finishes) where you will have stop_worker_and_review().
 
 ## When idle (worker not running):
 - Greet the user. Mention what the worker can do in one sentence.
@@ -955,16 +953,16 @@ your task and starts processing.
 ## When the user clicks Run (external event notification)
 When you receive an event that the user clicked Run:
 - If the worker started successfully, briefly acknowledge it — do NOT \
-repeat the full status. The user can see the graph is running.
+repeat the full status. The user can see the layout is running.
 - If the worker failed to start (credential or structural error), \
 explain the problem clearly and help fix it. For credential errors, \
 guide the user to set up the missing credentials. For structural \
-issues, offer to fix the agent graph directly.
+issues, offer to fix the agent layout directly.
 
 ## Showing or describing the loaded worker
 
-When the user asks to "show the graph", "describe the agent", or \
-"re-generate the graph", read the Worker Profile and present the \
+When the user asks to "show the layout", "describe the agent", or \
+"re-generate the layout", read the Worker Profile and present the \
 worker's current architecture as an ASCII diagram. Use the processing \
 stages, tools, and edges from the loaded worker. Do NOT enter the \
 agent building workflow — you are describing what already exists, not \
@@ -976,11 +974,11 @@ During RUNNING phase, you cannot directly switch to building or planning. \
 When the worker finishes, you move to EDITING where you can:
 - Re-run with different input via run_agent_with_input(task)
 - Tweak config via inject_message(content)
-- Escalate to stop_graph_and_edit() or stop_graph_and_plan() if deeper changes are needed
+- Escalate to stop_worker_and_review() or stop_worker_and_plan() if deeper changes are needed
 
 During STAGING or EDITING phase:
-- Use stop_graph_and_plan() when the request is vague or needs discussion
-- Use stop_graph_and_edit() when the user gave a specific, concrete instruction
+- Use stop_worker_and_plan() when the request is vague or needs discussion
+- Use stop_worker_and_review() when the user gave a specific, concrete instruction
 
 ## Trigger Management
 
@@ -991,7 +989,7 @@ whether to call run_agent_with_input(task).
 
 ### When the user says "Enable trigger <id>" (or clicks Enable in the UI):
 
-1. Call get_graph_status(focus="memory") to check if the worker has \
+1. Call get_worker_status(focus="memory") to check if the worker has \
 saved configuration (rules, preferences, settings from a prior run).
 2. If memory contains saved config: compose a task string from it \
 (e.g. "Process inbox emails using saved rules") and call \
@@ -1024,14 +1022,14 @@ You wake up when:
 - A worker escalation arrives (`[WORKER_ESCALATION_REQUEST]`)
 - The worker finishes (`[WORKER_TERMINAL]`)
 
-If the user asks for progress, call get_graph_status() ONCE and report. \
-If the summary mentions issues, follow up with get_graph_status(focus="issues").
+If the user asks for progress, call get_worker_status() ONCE and report. \
+If the summary mentions issues, follow up with get_worker_status(focus="issues").
 
 ## Browser automation nodes
 
 Browser nodes may take 2-5 minutes for web scraping tasks. During this time:
 - Progress will show 0% until the node calls set_output at the end.
-- Check get_graph_status(focus="full") for activity updates.
+- Check get_worker_status(focus="full") for activity updates.
 - Do NOT conclude it is stuck just because you see repeated \
 browser_click/browser_snapshot calls — that is expected for web scraping.
 - Only intervene if: the node has been running for 5+ minutes with no new \
@@ -1093,9 +1091,9 @@ decision via inject_message() so the worker can clean up.
 **Errors / unexpected failures:**
 - Explain what went wrong in plain terms.
 - Ask the user: "Fix the agent and retry?" → in EDITING phase, \
-use stop_graph_and_edit().
+use stop_worker_and_review().
 - Or offer: "Diagnose the issue" → in EDITING phase, \
-use stop_graph_and_plan().
+use stop_worker_and_plan().
 - Or offer: "Retry as-is", "Skip this task", "Abort run"
 - (Skip asking if user explicitly told you to auto-retry or auto-skip errors.)
 - If the escalation had wait_for_response: inject_message() with the decision.
@@ -1106,21 +1104,21 @@ use stop_graph_and_plan().
 
 ## Showing or describing the loaded worker
 
-When the user asks to "show the graph", "describe the agent", or \
-"re-generate the graph", read the Worker Profile and present the \
+When the user asks to "show the layout", "describe the agent", or \
+"re-generate the layout", read the Worker Profile and present the \
 worker's current architecture as an ASCII diagram. Use the processing \
 stages, tools, and edges from the loaded worker. Do NOT enter the \
 agent building workflow — you are describing what already exists, not \
 building something new.
 
-- Call get_graph_status(focus="issues") for more details when needed.
+- Call get_worker_status(focus="issues") for more details when needed.
 
 ## Fixing or Modifying the loaded worker (while running)
 
 When the user asks to fix or modify the worker while it is running, \
 do NOT attempt to switch phases. Wait for the worker to finish — \
 you will move to EDITING phase automatically. From there you can \
-use stop_graph_and_edit() or stop_graph_and_plan().
+use stop_worker_and_review() or stop_worker_and_plan().
 
 ## Trigger Handling
 
@@ -1128,7 +1126,7 @@ You will receive [TRIGGER: ...] messages when a scheduled timer fires. \
 These are framework-level signals, not user messages.
 
 Rules:
-- Check get_graph_status() before calling run_agent_with_input(task). If the worker \
+- Check get_worker_status() before calling run_agent_with_input(task). If the worker \
 is already RUNNING, decide: skip this trigger, or note it for after completion.
 - When multiple [TRIGGER] messages arrive at once, read them all before acting. \
 Batch your response — do not call run_agent_with_input() once per trigger.
@@ -1157,16 +1155,16 @@ _queen_tools_docs = (
     + "\n\n### RUNNING phase (worker is executing)\n"
     + _queen_tools_running.strip()
     + "\n\n### Phase transitions\n"
-    "- save_agent_draft(...) → creates visual-only draft graph (stays in PLANNING)\n"
+    "- save_agent_draft(...) → creates visual-only draft (stays in PLANNING)\n"
     "- confirm_and_build() → records user approval of draft (stays in PLANNING)\n"
     "- confirm_and_build(agent_name) → scaffolds package + switches to "
     "BUILDING (requires draft + confirmation for new agents)\n"
     "- replan_agent() → switches back to PLANNING phase (only when user explicitly requests)\n"
     "- load_built_agent(path) → switches to STAGING phase\n"
     "- run_agent_with_input(task) → starts worker, switches to RUNNING phase\n"
-    "- stop_graph() → stops worker, switches to STAGING phase (ask user: re-run or edit?)\n"
-    "- stop_graph_and_edit() → stops worker (if running), switches to BUILDING phase\n"
-    "- stop_graph_and_plan() → stops worker (if running), switches to PLANNING phase\n"
+    "- stop_worker() → stops worker, switches to STAGING phase (ask user: re-run or edit?)\n"
+    "- stop_worker_and_review() → stops worker (if running), switches to BUILDING phase\n"
+    "- stop_worker_and_plan() → stops worker (if running), switches to PLANNING phase\n"
 )
 
 _queen_behavior = (
