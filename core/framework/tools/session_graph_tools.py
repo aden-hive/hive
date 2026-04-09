@@ -312,5 +312,107 @@ def register_graph_tools(registry: ToolRegistry, runtime: AgentHost) -> int:
     registry.register("get_user_presence", _presence_tool, lambda inputs: get_user_presence())
     tools_registered += 1
 
+    # --- validate_agent_package -----------------------------------------------
+
+    def validate_agent_package(agent_name: str) -> str:
+        """Validate an agent's configuration without loading it.
+
+        Parses agent.json, checks the schema (including tool policies,
+        MCP server refs, node wiring), and returns actionable errors.
+        Call this **before** load_agent to catch problems early.
+        """
+        from framework.server.app import validate_agent_path as _vap
+
+        try:
+            resolved = _vap(agent_name)
+        except ValueError as e:
+            return json.dumps({"valid": False, "errors": [str(e)]})
+
+        agent_json = resolved / "agent.json"
+        if not agent_json.exists():
+            return json.dumps(
+                {
+                    "valid": False,
+                    "errors": [f"No agent.json found at {resolved}"],
+                }
+            )
+
+        try:
+            raw = json.loads(agent_json.read_text(encoding="utf-8"))
+        except Exception as e:
+            return json.dumps({"valid": False, "errors": [f"Invalid JSON: {e}"]})
+
+        errors: list[str] = []
+
+        # 1. Schema validation via AgentConfig
+        try:
+            from framework.schemas.agent_config import AgentConfig
+
+            AgentConfig(**raw)
+        except Exception as e:
+            errors.append(f"agent.json schema error: {e}")
+
+        # 2. Tool policy checks on each node
+        for node in raw.get("nodes", []):
+            nid = node.get("id", "?")
+            t = node.get("tools", {})
+            if isinstance(t, dict):
+                policy = t.get("policy", "explicit")
+                if policy == "all":
+                    errors.append(
+                        f"Node '{nid}' uses policy 'all' — "
+                        f"list every tool explicitly in 'tools' instead."
+                    )
+                allowed = t.get("tools") or t.get("allowed") or []
+                if policy == "explicit" and not allowed:
+                    errors.append(
+                        f"Node '{nid}' has policy 'explicit' but empty tool list — "
+                        f"the node will have ZERO tools. Add tool names."
+                    )
+
+        # 3. MCP server refs
+        mcp = raw.get("mcp_servers", [])
+        if not mcp:
+            errors.append(
+                "No mcp_servers specified — the agent will have no tools. "
+                'Add at least: [{"name": "hive-tools"}, {"name": "gcu-tools"}]'
+            )
+        for ref in mcp:
+            if isinstance(ref, str):
+                errors.append(
+                    f"mcp_servers entry '{ref}' is a string, not an object. "
+                    f'Use {{"name": "{ref}"}} instead.'
+                )
+
+        if errors:
+            return json.dumps({"valid": False, "errors": errors})
+        return json.dumps({"valid": True, "errors": []})
+
+    _validate_tool = Tool(
+        name="validate_agent_package",
+        description=(
+            "Validate an agent's agent.json configuration without loading it. "
+            "Checks schema, tool policies, MCP server refs, and node wiring. "
+            "Call BEFORE load_agent to catch problems early. "
+            "Returns {valid: bool, errors: [string]}."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_name": {
+                    "type": "string",
+                    "description": "Name/path of the agent package to validate.",
+                },
+            },
+            "required": ["agent_name"],
+        },
+    )
+    registry.register(
+        "validate_agent_package",
+        _validate_tool,
+        lambda inputs: validate_agent_package(inputs["agent_name"]),
+    )
+    tools_registered += 1
+
     logger.info("Registered %d graph lifecycle tools", tools_registered)
     return tools_registered
