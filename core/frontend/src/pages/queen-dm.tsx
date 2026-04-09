@@ -33,7 +33,7 @@ export default function QueenDM() {
     { id: string; prompt: string; options?: string[] }[] | null
   >(null);
   const [awaitingInput, setAwaitingInput] = useState(false);
-  const [activeToolCalls, setActiveToolCalls] = useState<Record<string, { name: string; done: boolean }>>({});
+  const [, setActiveToolCalls] = useState<Record<string, { name: string; done: boolean }>>({});
 
   const turnCounterRef = useRef(0);
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
@@ -122,6 +122,11 @@ export default function QueenDM() {
         case "execution_completed":
           setIsTyping(false);
           setIsStreaming(false);
+          break;
+
+        case "llm_turn_complete":
+          turnCounterRef.current++;
+          setActiveToolCalls({});
           break;
 
         case "client_output_delta":
@@ -215,7 +220,7 @@ export default function QueenDM() {
 
           setActiveToolCalls((prev) => {
             const newActive = { ...prev, [toolUseId]: { name: toolName, done: false } };
-            const tools = Object.entries(newActive).map(([id, t]) => ({ name: t.name, done: t.done }));
+            const tools = Object.entries(newActive).map(([, t]) => ({ name: t.name, done: t.done }));
             const allDone = tools.length > 0 && tools.every((t) => t.done);
             const msgId = `tool-pill-${sid}-${execId}-${turnCounterRef.current}`;
             const toolMsg: ChatMessage = {
@@ -253,7 +258,7 @@ export default function QueenDM() {
             if (updated[toolUseId]) {
               updated[toolUseId] = { ...updated[toolUseId], done: true };
             }
-            const tools = Object.entries(updated).map(([id, t]) => ({ name: t.name, done: t.done }));
+            const tools = Object.entries(updated).map(([, t]) => ({ name: t.name, done: t.done }));
             const allDone = tools.length > 0 && tools.every((t) => t.done);
             const msgId = `tool-pill-${sid}-${execId}-${turnCounterRef.current}`;
             const toolMsg: ChatMessage = {
