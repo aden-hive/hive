@@ -122,7 +122,7 @@ export default function Home() {
         </div>
         {submitting && activePrompt && (
           <p className="mt-4 text-center text-xs text-muted-foreground">
-            Starting a new session with the right queen...
+            The queens are debating who should take this on...
           </p>
         )}
       </div>
