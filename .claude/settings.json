@@ -4,7 +4,9 @@
       "Bash(grep -n \"_is_context_too_large_error\" core/framework/agent_loop/agent_loop.py core/framework/agent_loop/internals/*.py)",
       "Read(//^class/ {cls=$3} /def test_/**)",
       "Read(//^    @pytest.mark.asyncio/{getline n; print NR\": \"n} /^    def test_/**)",
-      "Bash(python3)"
+      "Bash(python3)",
+      "Bash(grep -nE 'Tool\\\\\\(\\\\s*$|name=\"[a-z_]+\",' core/framework/tools/queen_lifecycle_tools.py)",
+      "Bash(awk -F'\"' '{print $2}')"
     ]
   },
   "hooks": {

@@ -26,6 +26,80 @@ def _load_checkpoint_run_id(cp_path) -> str | None:
     return LEGACY_RUN_ID
 
 
+# Tool names the worker SHOULD inherit when a colony is forked. These are
+# the "work-doing" primitives — anything else in a queen phase tool list is
+# queen-lifecycle and must not flow into worker.json.
+_WORKER_INHERITED_TOOLS: frozenset[str] = frozenset(
+    {
+        # File I/O
+        "read_file",
+        "write_file",
+        "edit_file",
+        "hashline_edit",
+        "list_directory",
+        "search_files",
+        "undo_changes",
+        # Shell
+        "run_command",
+        # Framework synthetics (always available to any AgentLoop node)
+        "set_output",
+        "escalate",
+        "ask_user",
+        "ask_user_multiple",
+    }
+)
+
+
+# Queen-lifecycle tools that are registered into the queen's tool registry
+# but NOT listed in any _QUEEN_*_TOOLS phase list (they're reachable only via
+# explicit registration, not phase-based gating). These must still be stripped
+# from forked worker configs.
+_QUEEN_LIFECYCLE_EXTRAS: frozenset[str] = frozenset(
+    {
+        "start_worker",
+        "stop_worker_and_plan",
+        "stop_worker_and_review",
+    }
+)
+
+
+def _resolve_queen_only_tools() -> frozenset[str]:
+    """Compute the set of queen-lifecycle tool names to strip on fork.
+
+    Derived from the queen phase tool lists in ``agents.queen.nodes``:
+    any tool listed in any ``_QUEEN_*_TOOLS`` set that is NOT in
+    :data:`_WORKER_INHERITED_TOOLS` is a queen-only tool. Browser and MCP
+    tools are not in the queen phase lists (they're added dynamically),
+    so they pass through untouched. Supplemented by
+    :data:`_QUEEN_LIFECYCLE_EXTRAS` for tools registered without phase
+    gating.
+
+    Computed lazily so this module can be imported before the queen
+    nodes package is loaded.
+    """
+    from framework.agents.queen.nodes import (
+        _QUEEN_BUILDING_TOOLS,
+        _QUEEN_EDITING_TOOLS,
+        _QUEEN_INDEPENDENT_TOOLS,
+        _QUEEN_PLANNING_TOOLS,
+        _QUEEN_RUNNING_TOOLS,
+        _QUEEN_STAGING_TOOLS,
+    )
+
+    union: set[str] = set()
+    for tool_list in (
+        _QUEEN_PLANNING_TOOLS,
+        _QUEEN_BUILDING_TOOLS,
+        _QUEEN_STAGING_TOOLS,
+        _QUEEN_RUNNING_TOOLS,
+        _QUEEN_EDITING_TOOLS,
+        _QUEEN_INDEPENDENT_TOOLS,
+    ):
+        union.update(tool_list)
+    derived = union - _WORKER_INHERITED_TOOLS
+    return frozenset(derived | _QUEEN_LIFECYCLE_EXTRAS)
+
+
 async def handle_trigger(request: web.Request) -> web.Response:
     """POST /api/sessions/{session_id}/trigger — start an execution.
 
@@ -637,8 +711,19 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
     worker_config_path = colony_dir / f"{worker_name}.json"
 
     # ── 1. Gather queen state ─────────────────────────────────────
+    # Queen-lifecycle + agent-management tools are registered ONLY against
+    # the queen's runtime (they need a live session + phase_state to
+    # operate). Forking them into a worker config makes the worker fail
+    # tool validation when its own runtime loads because those tools
+    # aren't registered there. Strip them out of the snapshot.
+    #
+    # The blacklist is derived from the queen phase tool lists: any tool
+    # that appears in any _QUEEN_*_TOOLS list but is NOT in the worker's
+    # "work-doing" whitelist (file I/O + shell + undo) is queen-only.
+    # This stays in sync automatically when new queen tools are added.
+    queen_only_tools = _resolve_queen_only_tools()
     queen_tools: list = queen_ctx.available_tools if queen_ctx else []
-    tool_names = [t.name for t in queen_tools]
+    tool_names = [t.name for t in queen_tools if t.name not in queen_only_tools]
 
     system_prompt = ""
     phase_state = getattr(session, "phase_state", None)
