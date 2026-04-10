@@ -225,7 +225,9 @@ class CredentialSetupSession:
                 skipped.append(cred.credential_name)
                 break
             except Exception as e:
-                logger.warning("Error setting up credential %s", cred.credential_name, exc_info=True)
+                logger.warning(
+                    "Error setting up credential %s", cred.credential_name, exc_info=True
+                )
                 errors.append(f"{cred.credential_name}: {e}")
 
         self._print_summary(configured, skipped, errors)
