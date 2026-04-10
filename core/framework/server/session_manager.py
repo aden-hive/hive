@@ -125,10 +125,21 @@ class SessionManager:
 
         rc = RuntimeConfig(model=model or self._model or RuntimeConfig().model)
         llm_config = get_hive_config().get("llm", {})
-        if llm_config.get("use_antigravity_subscription"):
-            from framework.llm.antigravity import AntigravityProvider
 
-            return AntigravityProvider(model=rc.model)
+        # Google Gemini CLI (OAuth) subscription
+        if llm_config.get("use_google_gemini_cli_subscription"):
+            from framework.llm.google import GoogleGeminiCliProvider
+
+            return GoogleGeminiCliProvider(model=rc.model)
+
+        # Google direct API key provider
+        if str(llm_config.get("provider", "")).lower() == "google":
+            try:
+                from framework.llm.google import GoogleApiKeyProvider
+
+                return GoogleApiKeyProvider(model=rc.model, api_key=rc.api_key)
+            except RuntimeError:
+                pass
 
         from framework.llm.litellm import LiteLLMProvider
 

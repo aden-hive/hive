@@ -55,16 +55,28 @@ class LlmProviderStage(PipelineStage):
         llm_config = config.get("llm", {})
         api_base = llm_config.get("api_base")
 
-        # Check for Antigravity (special provider)
-        if llm_config.get("use_antigravity_subscription"):
+        # Check for Google Gemini CLI (OAuth subscription)
+        if llm_config.get("use_google_gemini_cli_subscription"):
             try:
-                from framework.llm.antigravity import AntigravityProvider
+                from framework.llm.google import GoogleGeminiCliProvider
 
-                provider = AntigravityProvider(model=model)
+                provider = GoogleGeminiCliProvider(model=model)
                 if provider.has_credentials():
                     self.llm = provider
-                    logger.info("[pipeline] LlmProviderStage: Antigravity")
+                    logger.info("[pipeline] LlmProviderStage: Google Gemini CLI (OAuth)")
                     return
+            except Exception:
+                pass
+
+        # Check for Google direct API key provider
+        if str(llm_config.get("provider", "")).lower() == "google":
+            try:
+                from framework.llm.google import GoogleApiKeyProvider
+
+                api_key = get_api_key()
+                self.llm = GoogleApiKeyProvider(model=model, api_key=api_key)
+                logger.info("[pipeline] LlmProviderStage: Google (API key)")
+                return
             except Exception:
                 pass
 

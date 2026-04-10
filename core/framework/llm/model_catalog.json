@@ -72,6 +72,86 @@
         }
       ]
     },
+    "google": {
+      "default_model": "gemini-3.1-pro-preview",
+      "models": [
+        {
+          "id": "gemini-3.1-pro-preview",
+          "label": "Gemini 3.1 Pro - Best quality",
+          "recommended": true,
+          "max_tokens": 32768,
+          "max_context_tokens": 1048576
+        },
+        {
+          "id": "gemini-3-flash-preview",
+          "label": "Gemini 3 Flash - Fast",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 1048576
+        },
+        {
+          "id": "gemini-3.1-flash-lite-preview",
+          "label": "Gemini 3.1 Flash Lite - Lightest",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 1048576
+        },
+        {
+          "id": "gemini-2.5-pro",
+          "label": "Gemini 2.5 Pro - Proven quality",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 1048576
+        },
+        {
+          "id": "gemini-2.5-flash",
+          "label": "Gemini 2.5 Flash - Fast + proven",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 1048576
+        }
+      ]
+    },
+    "google-gemini-cli": {
+      "default_model": "gemini-3.1-pro-preview",
+      "models": [
+        {
+          "id": "gemini-3.1-pro-preview",
+          "label": "Gemini 3.1 Pro - Best quality",
+          "recommended": true,
+          "max_tokens": 32768,
+          "max_context_tokens": 1048576
+        },
+        {
+          "id": "gemini-3-flash-preview",
+          "label": "Gemini 3 Flash - Fast",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 1048576
+        },
+        {
+          "id": "gemini-3.1-flash-lite-preview",
+          "label": "Gemini 3.1 Flash Lite - Lightest",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 1048576
+        },
+        {
+          "id": "gemini-2.5-pro",
+          "label": "Gemini 2.5 Pro - Proven quality",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 1048576
+        },
+        {
+          "id": "gemini-2.5-flash",
+          "label": "Gemini 2.5 Flash - Fast + proven",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 1048576
+        }
+      ]
+    },
     "groq": {
       "default_model": "openai/gpt-oss-120b",
       "models": [
@@ -384,11 +464,72 @@
         }
       ]
     },
-    "antigravity": {
-      "provider": "openai",
-      "model": "gemini-3-flash",
+    "google_api": {
+      "provider": "google",
+      "api_key_env_var": "GEMINI_API_KEY",
+      "model": "gemini-3-flash-preview",
       "max_tokens": 32768,
-      "max_context_tokens": 1000000
+      "max_context_tokens": 1048576,
+      "model_choices": [
+        {
+          "id": "gemini-3.1-pro-preview",
+          "label": "Gemini 3.1 Pro - Best quality",
+          "recommended": true
+        },
+        {
+          "id": "gemini-3-flash-preview",
+          "label": "Gemini 3 Flash - Fast",
+          "recommended": false
+        },
+        {
+          "id": "gemini-3.1-flash-lite-preview",
+          "label": "Gemini 3.1 Flash Lite - Lightest",
+          "recommended": false
+        },
+        {
+          "id": "gemini-2.5-pro",
+          "label": "Gemini 2.5 Pro - Proven quality",
+          "recommended": false
+        },
+        {
+          "id": "gemini-2.5-flash",
+          "label": "Gemini 2.5 Flash - Fast + proven",
+          "recommended": false
+        }
+      ]
+    },
+    "google_gemini_cli": {
+      "provider": "google-gemini-cli",
+      "model": "gemini-3-flash-preview",
+      "max_tokens": 32768,
+      "max_context_tokens": 1048576,
+      "model_choices": [
+        {
+          "id": "gemini-3.1-pro-preview",
+          "label": "Gemini 3.1 Pro - Best quality",
+          "recommended": true
+        },
+        {
+          "id": "gemini-3-flash-preview",
+          "label": "Gemini 3 Flash - Fast",
+          "recommended": false
+        },
+        {
+          "id": "gemini-3.1-flash-lite-preview",
+          "label": "Gemini 3.1 Flash Lite - Lightest",
+          "recommended": false
+        },
+        {
+          "id": "gemini-2.5-pro",
+          "label": "Gemini 2.5 Pro - Proven quality",
+          "recommended": false
+        },
+        {
+          "id": "gemini-2.5-flash",
+          "label": "Gemini 2.5 Flash - Fast + proven",
+          "recommended": false
+        }
+      ]
     },
     "ollama_local": {
       "provider": "ollama",

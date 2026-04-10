@@ -90,10 +90,16 @@ _SUBSCRIPTION_DEFINITIONS: list[dict[str, str]] = [
         "flag": "use_hive_llm_subscription",
     },
     {
-        "id": "antigravity",
-        "name": "Antigravity Subscription",
-        "description": "Use your Google/Gemini plan",
-        "flag": "use_antigravity_subscription",
+        "id": "google_api",
+        "name": "Google Gemini (API Key)",
+        "description": "Use your Gemini API key",
+        "flag": "use_google_api_subscription",
+    },
+    {
+        "id": "google_gemini_cli",
+        "name": "Google Gemini CLI",
+        "description": "Use your Google account (OAuth login)",
+        "flag": "use_google_gemini_cli_subscription",
     },
 ]
 
@@ -231,12 +237,13 @@ def _detect_subscriptions() -> list[str]:
     if os.environ.get("HIVE_API_KEY"):
         detected.append("hive_llm")
 
-    # Antigravity subscription
+    # Google Gemini CLI subscription (OAuth)
     try:
-        from framework.loader.agent_loader import get_antigravity_token
+        from framework.llm.google import GoogleGeminiCliProvider
 
-        if get_antigravity_token():
-            detected.append("antigravity")
+        provider = GoogleGeminiCliProvider()
+        if provider.has_credentials():
+            detected.append("google_gemini_cli")
     except Exception:
         pass
 
@@ -274,10 +281,16 @@ def _get_subscription_token(sub_id: str) -> str | None:
         return token
     elif sub_id == "hive_llm":
         return os.environ.get("HIVE_API_KEY")
-    elif sub_id == "antigravity":
-        from framework.loader.agent_loader import get_antigravity_token
+    elif sub_id == "google_gemini_cli":
+        from framework.llm.google import GoogleGeminiCliProvider
 
-        return get_antigravity_token()
+        try:
+            provider = GoogleGeminiCliProvider()
+            if provider.has_credentials():
+                return provider._ensure_token()
+        except Exception:
+            pass
+        return None
     return None
 
 

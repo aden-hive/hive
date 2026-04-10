@@ -1089,9 +1089,16 @@ $hiveKey = [System.Environment]::GetEnvironmentVariable("HIVE_API_KEY", "User")
 if (-not $hiveKey) { $hiveKey = $env:HIVE_API_KEY }
 if ($hiveKey) { $HiveCredDetected = $true }
 
-$AntigravityCredDetected = $false
-$antigravityAuthPath = Join-Path $env:USERPROFILE ".hive\antigravity-accounts.json"
-if (Test-Path $antigravityAuthPath) { $AntigravityCredDetected = $true }
+$GoogleGeminiCliCredDetected = $false
+$googleGeminiCliAuthPath = Join-Path $env:USERPROFILE ".hive\google-gemini-cli-accounts.json"
+if (Test-Path $googleGeminiCliAuthPath) { $GoogleGeminiCliCredDetected = $true }
+
+$GoogleApiCredDetected = $false
+$googleApiKey = [System.Environment]::GetEnvironmentVariable("GEMINI_API_KEY", "User")
+if (-not $googleApiKey) { $googleApiKey = [System.Environment]::GetEnvironmentVariable("GEMINI_API_KEY", "Process") }
+if (-not $googleApiKey) { $googleApiKey = [System.Environment]::GetEnvironmentVariable("GOOGLE_API_KEY", "User") }
+if (-not $googleApiKey) { $googleApiKey = [System.Environment]::GetEnvironmentVariable("GOOGLE_API_KEY", "Process") }
+if ($googleApiKey) { $GoogleApiCredDetected = $true }
 
 # Detect API key providers
 $ProviderMenuEnvVars  = @("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "OPENROUTER_API_KEY")
@@ -1135,7 +1142,7 @@ if (Test-Path $HiveConfigFile) {
             if ($prevLlm.use_claude_code_subscription) { $PrevSubMode = "claude_code" }
             elseif ($prevLlm.use_codex_subscription) { $PrevSubMode = "codex" }
             elseif ($prevLlm.use_kimi_code_subscription) { $PrevSubMode = "kimi_code" }
-            elseif ($prevLlm.use_antigravity_subscription) { $PrevSubMode = "antigravity" }
+            elseif ($prevLlm.use_google_gemini_cli_subscription) { $PrevSubMode = "google_gemini_cli" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.z.ai*") { $PrevSubMode = "zai_code" }
             elseif ($prevLlm.provider -eq "minimax" -or ($prevLlm.api_base -and $prevLlm.api_base -like "*api.minimax.io*")) { $PrevSubMode = "minimax_code" }
             elseif ($prevLlm.api_base -and $prevLlm.api_base -like "*api.kimi.com*") { $PrevSubMode = "kimi_code" }
@@ -1155,7 +1162,8 @@ if ($PrevSubMode -or $PrevProvider) {
         "minimax_code" { if ($MinimaxCredDetected) { $prevCredValid = $true } }
         "kimi_code"   { if ($KimiCredDetected)   { $prevCredValid = $true } }
         "hive_llm"    { if ($HiveCredDetected)   { $prevCredValid = $true } }
-        "antigravity" { if ($AntigravityCredDetected) { $prevCredValid = $true } }
+        "google_api" { if ($GoogleApiCredDetected) { $prevCredValid = $true } }
+        "google_gemini_cli" { if ($GoogleGeminiCliCredDetected) { $prevCredValid = $true } }
         default {
             if ($PrevProvider -eq "ollama") {
                 $prevCredValid = $true
@@ -1174,17 +1182,18 @@ if ($PrevSubMode -or $PrevProvider) {
             "minimax_code" { $DefaultChoice = "4" }
             "kimi_code"   { $DefaultChoice = "5" }
             "hive_llm"    { $DefaultChoice = "6" }
-            "antigravity" { $DefaultChoice = "7" }
+            "google_api" { $DefaultChoice = "7" }
+            "google_gemini_cli" { $DefaultChoice = "8" }
         }
         if (-not $DefaultChoice) {
             switch ($PrevProvider) {
-                "anthropic" { $DefaultChoice = "8" }
-                "openai"    { $DefaultChoice = "9" }
-                "gemini"    { $DefaultChoice = "10" }
-                "groq"      { $DefaultChoice = "11" }
-                "cerebras"  { $DefaultChoice = "12" }
-                "openrouter" { $DefaultChoice = "13" }
-                "ollama"     { $DefaultChoice = "14" }
+                "anthropic" { $DefaultChoice = "9" }
+                "openai"    { $DefaultChoice = "10" }
+                "gemini"    { $DefaultChoice = "11" }
+                "groq"      { $DefaultChoice = "12" }
+                "cerebras"  { $DefaultChoice = "13" }
+                "openrouter" { $DefaultChoice = "14" }
+                "ollama"     { $DefaultChoice = "15" }
                 "minimax"   { $DefaultChoice = "4" }
                 "kimi"      { $DefaultChoice = "5" }
                 "hive"      { $DefaultChoice = "6" }
@@ -1253,19 +1262,26 @@ switch ($HiveGatewayAvailability) {
 }
 if ($HiveCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 
-# 7) Antigravity
+# 7) Google Gemini (API Key)
 Write-Host "  " -NoNewline
 Write-Color -Text "7" -Color Cyan -NoNewline
-Write-Host ") Antigravity Subscription  " -NoNewline
+Write-Host ") Google Gemini (API Key)  " -NoNewline
+Write-Color -Text "(use your Google AI Studio key)" -Color DarkGray -NoNewline
+if ($GoogleApiCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
+
+# 8) Google Gemini CLI (Google Account)
+Write-Host "  " -NoNewline
+Write-Color -Text "8" -Color Cyan -NoNewline
+Write-Host ") Google Gemini CLI (Google Account)  " -NoNewline
 Write-Color -Text "(use your Google/Gemini plan)" -Color DarkGray -NoNewline
-if ($AntigravityCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
+if ($GoogleGeminiCliCredDetected) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 
 Write-Host ""
 Write-Color -Text "  API key providers:" -Color Cyan
 
-# 8-13) API key providers
+# 9-14) API key providers
 for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
-    $num = $idx + 8
+    $num = $idx + 9
     $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "Process")
     if (-not $envVal) { $envVal = [System.Environment]::GetEnvironmentVariable($ProviderMenuEnvVars[$idx], "User") }
     Write-Host "  " -NoNewline
@@ -1274,9 +1290,9 @@ for ($idx = 0; $idx -lt $ProviderMenuEnvVars.Count; $idx++) {
     if ($envVal) { Write-Color -Text "  (credential detected)" -Color Green } else { Write-Host "" }
 }
 
-# 14) Local (Ollama) - no API key needed
+# 15) Local (Ollama) - no API key needed
 Write-Host "  " -NoNewline
-Write-Color -Text "14" -Color Cyan -NoNewline
+Write-Color -Text "15" -Color Cyan -NoNewline
 if ($OllamaDetected) {
     Write-Host ") Local (Ollama) - No API key needed  " -NoNewline
     Write-Color -Text "(ollama detected)" -Color Green
@@ -1284,7 +1300,7 @@ if ($OllamaDetected) {
     Write-Host ") Local (Ollama) - No API key needed"
 }
 
-$SkipChoice = 8 + $ProviderMenuEnvVars.Count + 1
+$SkipChoice = 9 + $ProviderMenuEnvVars.Count + 1
 Write-Host "  " -NoNewline
 Write-Color -Text "$SkipChoice" -Color Cyan -NoNewline
 Write-Host ") Skip for now"
@@ -1417,24 +1433,38 @@ switch ($num) {
         Write-Color -Text "  Model: $SelectedModel | API: $HiveLlmEndpoint" -Color DarkGray
     }
     7 {
-        # Antigravity Subscription
-        if (-not $AntigravityCredDetected) {
+        # Google Gemini (API Key)
+        $SubscriptionMode = "google_api"
+        Apply-Preset "google_api"
+        $SelectedEnvVar = "GEMINI_API_KEY"
+        $SelectedProviderId = "google"
+        $providerName = "Google Gemini"
+        $signupUrl = "https://aistudio.google.com/apikey"
+        if ($env:GEMINI_API_KEY -or $env:GOOGLE_API_KEY) {
             Write-Host ""
-            Write-Color -Text "  Setting up Antigravity authentication..." -Color Cyan
+            Write-Ok "Using Google Gemini (API Key)"
+            Write-Color -Text "  Found existing API key" -Color DarkGray
+        }
+    }
+    8 {
+        # Google Gemini CLI (Google Account) - OAuth
+        if (-not $GoogleGeminiCliCredDetected) {
+            Write-Host ""
+            Write-Color -Text "  Setting up Google Gemini CLI authentication..." -Color Cyan
             Write-Host ""
             Write-Warn "A browser window will open for Google OAuth."
-            Write-Host "  Sign in with your Google account that has Antigravity access."
+            Write-Host "  Sign in with your Google account that has Google Gemini access."
             Write-Host ""
             try {
-                $null = & $UvCmd run python (Join-Path $ScriptDir "core\antigravity_auth.py") auth account add 2>&1
-                if ($LASTEXITCODE -eq 0 -and (Test-Path $antigravityAuthPath)) {
-                    $AntigravityCredDetected = $true
+                $null = & $UvCmd run python (Join-Path $ScriptDir "core\google_auth.py") auth account add 2>&1
+                if ($LASTEXITCODE -eq 0 -and (Test-Path $googleGeminiCliAuthPath)) {
+                    $GoogleGeminiCliCredDetected = $true
                 }
             } catch {
-                $AntigravityCredDetected = $false
+                $GoogleGeminiCliCredDetected = $false
             }
 
-            if (-not $AntigravityCredDetected) {
+            if (-not $GoogleGeminiCliCredDetected) {
                 Write-Host ""
                 Write-Fail "Authentication failed or was cancelled."
                 Write-Host ""
@@ -1442,19 +1472,48 @@ switch ($num) {
             }
         }
 
-        if ($AntigravityCredDetected) {
-            $SubscriptionMode        = "antigravity"
-            Apply-Preset "antigravity"
+        if ($GoogleGeminiCliCredDetected) {
+            $SubscriptionMode        = "google_gemini_cli"
+            Apply-Preset "google_gemini_cli"
             Write-Host ""
-            Write-Warn "Using Antigravity can technically cause your account suspension. Please use at your own risk."
+            Write-Warn "Using Google Gemini CLI can technically cause your account suspension. Please use at your own risk."
             Write-Host ""
-            Write-Ok "Using Antigravity subscription"
-            Write-Color -Text "  Model: gemini-3-flash | Direct OAuth (no proxy required)" -Color DarkGray
+            Write-Ok "Using Google Gemini CLI subscription"
+            Write-Host ""
+            Write-Host "  Select a model:"
+            $agChoices = Get-PresetModelChoices "google_gemini_cli"
+            $agDefaultChoice = "1"
+            for ($i = 0; $i -lt $agChoices.Count; $i++) {
+                Write-Host "  " -NoNewline
+                Write-Color -Text "$($i + 1))" -Color Cyan -NoNewline
+                Write-Host " $($agChoices[$i].label)" -NoNewline
+                if ($agChoices[$i].recommended -eq $true) {
+                    $agDefaultChoice = [string]($i + 1)
+                    Write-Host "  " -NoNewline
+                    Write-Color -Text "(default)" -Color DarkGray
+                } else {
+                    Write-Host ""
+                }
+            }
+            Write-Host ""
+            while ($true) {
+                $agModelChoice = Read-Host "  Enter model choice (1-$($agChoices.Count)) [$agDefaultChoice]"
+                if (-not $agModelChoice) { $agModelChoice = $agDefaultChoice }
+                if ($agModelChoice -match '^\d+$') {
+                    $choiceNum = [int]$agModelChoice
+                    if ($choiceNum -ge 1 -and $choiceNum -le $agChoices.Count) {
+                        $SelectedModel = [string]$agChoices[$choiceNum - 1].id
+                        break
+                    }
+                }
+                Write-Color -Text "Invalid choice. Please enter 1-$($agChoices.Count)" -Color Red
+            }
+            Write-Color -Text "  Model: $SelectedModel | Direct OAuth (no proxy required)" -Color DarkGray
         }
     }
-    { $_ -ge 8 -and $_ -le 13 } {
+    { $_ -ge 9 -and $_ -le 14 } {
         # API key providers
-        $provIdx = $num - 8
+        $provIdx = $num - 9
         $SelectedEnvVar     = $ProviderMenuEnvVars[$provIdx]
         $SelectedProviderId = $ProviderMenuIds[$provIdx]
         $providerName       = $ProviderMenuNames[$provIdx] -replace ' - .*', ''  # strip description
@@ -1534,7 +1593,7 @@ switch ($num) {
             }
         }
     }
-    14 {
+    15 {
         # Local (Ollama)
         if (-not $OllamaDetected) {
             Write-Host ""
@@ -1908,8 +1967,10 @@ if ($SelectedProviderId) {
     } elseif ($SubscriptionMode -eq "codex") {
         $config.llm["use_codex_subscription"] = $true
         if ($SelectedApiBase) { $config.llm["api_base"] = $SelectedApiBase }
-    } elseif ($SubscriptionMode -eq "antigravity") {
-        $config.llm["use_antigravity_subscription"] = $true
+    } elseif ($SubscriptionMode -eq "google_api") {
+        $config.llm["api_key_env_var"] = $SelectedEnvVar
+    } elseif ($SubscriptionMode -eq "google_gemini_cli") {
+        $config.llm["use_google_gemini_cli_subscription"] = $true
     } elseif ($SubscriptionMode -eq "zai_code") {
         $config.llm["api_base"] = $SelectedApiBase
         $config.llm["api_key_env_var"] = $SelectedEnvVar
@@ -2232,8 +2293,10 @@ if ($SelectedProviderId) {
         Write-Color -Text "  API: api.minimax.io/v1 (OpenAI-compatible)" -Color DarkGray
     } elseif ($SubscriptionMode -eq "codex") {
         Write-Ok "OpenAI Codex Subscription -> $SelectedModel"
-    } elseif ($SubscriptionMode -eq "antigravity") {
-        Write-Ok "Antigravity Subscription -> $SelectedModel"
+    } elseif ($SubscriptionMode -eq "google_api") {
+        Write-Ok "Google Gemini (API Key) -> $SelectedModel"
+    } elseif ($SubscriptionMode -eq "google_gemini_cli") {
+        Write-Ok "Google Gemini CLI -> $SelectedModel"
         Write-Color -Text "  Direct OAuth (no proxy required)" -Color DarkGray
     } elseif ($SelectedProviderId -eq "openrouter") {
         Write-Ok "OpenRouter API Key -> $SelectedModel"

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Antigravity authentication CLI.
+"""Google Gemini CLI authentication CLI.
 
-Implements OAuth2 flow for Google's Antigravity Code Assist gateway.
-Credentials are stored in ~/.hive/antigravity-accounts.json.
+Implements OAuth2 flow for Google's Gemini API.
+Credentials are stored in ~/.hive/google-gemini-cli-accounts.json.
 
 Usage:
-    python -m antigravity_auth auth account add
-    python -m antigravity_auth auth account list
-    python -m antigravity_auth auth account remove <email>
+    python -m google_auth auth account add
+    python -m google_auth auth account list
+    python -m google_auth auth account remove <email>
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 _OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
-# Scopes for Antigravity/Cloud Code Assist
+# Scopes for the public Gemini API (not Cloud Code Assist)
 _OAUTH_SCOPES = [
     "https://www.googleapis.com/auth/cloud-platform",
     "https://www.googleapis.com/auth/userinfo.email",
@@ -42,97 +42,90 @@ _OAUTH_SCOPES = [
 ]
 
 # Credentials file path in ~/.hive/
-_ACCOUNTS_FILE = Path.home() / ".hive" / "antigravity-accounts.json"
+_ACCOUNTS_FILE = Path.home() / ".hive" / "google-gemini-cli-accounts.json"
 
-# Default project ID
-_DEFAULT_PROJECT_ID = "rising-fact-p41fc"
-_DEFAULT_REDIRECT_PORT = 51121
+_DEFAULT_REDIRECT_PORT = 0  # 0 = use dynamic port (like official gemini-cli)
 
-# OAuth credentials fetched from the opencode-antigravity-auth project.
-# This project reverse-engineered and published the public OAuth credentials
-# for Google's Antigravity/Cloud Code Assist API.
-# Source: https://github.com/NoeFabris/opencode-antigravity-auth
+# OAuth credentials fetched from the official gemini-cli source.
 _CREDENTIALS_URL = (
-    "https://raw.githubusercontent.com/NoeFabris/opencode-antigravity-auth/dev/src/constants.ts"
+    "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/code_assist/oauth2.ts"
 )
 
-# Cached credentials fetched from public source
+# Cached credentials
 _cached_client_id: str | None = None
 _cached_client_secret: str | None = None
 
 
-def _fetch_credentials_from_public_source() -> tuple[str | None, str | None]:
-    """Fetch OAuth client ID and secret from the public npm package source on GitHub."""
+def _fetch_credentials() -> tuple[str | None, str | None]:
+    """Fetch OAuth client ID and secret from the official gemini-cli repo."""
     global _cached_client_id, _cached_client_secret
     if _cached_client_id and _cached_client_secret:
         return _cached_client_id, _cached_client_secret
 
     try:
         req = urllib.request.Request(
-            _CREDENTIALS_URL, headers={"User-Agent": "Hive-Antigravity-Auth/1.0"}
+            _CREDENTIALS_URL, headers={"User-Agent": "Hive-Google-Auth/1.0"}
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             content = resp.read().decode("utf-8")
-            import re
+        import re
 
-            id_match = re.search(r'ANTIGRAVITY_CLIENT_ID\s*=\s*"([^"]+)"', content)
-            secret_match = re.search(r'ANTIGRAVITY_CLIENT_SECRET\s*=\s*"([^"]+)"', content)
-            if id_match:
-                _cached_client_id = id_match.group(1)
-            if secret_match:
-                _cached_client_secret = secret_match.group(1)
-            return _cached_client_id, _cached_client_secret
+        # Match official gemini-cli variable names.
+        # OAUTH_CLIENT_ID may span two lines in the TS source.
+        id_match = re.search(r"OAUTH_CLIENT_ID\s*=\s*\n?\s*'([a-z0-9\-\.]+\.apps\.googleusercontent\.com)'", content)
+        secret_match = re.search(r"OAUTH_CLIENT_SECRET\s*=\s*'([^']+)'", content)
+        if id_match:
+            _cached_client_id = id_match.group(1)
+        if secret_match:
+            _cached_client_secret = secret_match.group(1)
+        return _cached_client_id, _cached_client_secret
     except Exception as e:
-        logger.debug(f"Failed to fetch credentials from public source: {e}")
+        logger.debug("Failed to fetch credentials from gemini-cli source: %s", e)
     return None, None
 
 
 def get_client_id() -> str:
-    """Get OAuth client ID from env, config, or public source."""
-    env_id = os.environ.get("ANTIGRAVITY_CLIENT_ID")
+    """Get OAuth client ID from env, config, or official source."""
+    env_id = os.environ.get("GOOGLE_GEMINI_CLI_CLIENT_ID")
     if env_id:
         return env_id
 
-    # Try hive config
     hive_cfg = Path.home() / ".hive" / "configuration.json"
     if hive_cfg.exists():
         try:
             with open(hive_cfg) as f:
                 cfg = json.load(f)
-                cfg_id = cfg.get("llm", {}).get("antigravity_client_id")
+                cfg_id = cfg.get("llm", {}).get("google_gemini_cli_client_id")
                 if cfg_id:
                     return cfg_id
         except Exception:
             pass
 
-    # Fetch from public source
-    client_id, _ = _fetch_credentials_from_public_source()
+    client_id, _ = _fetch_credentials()
     if client_id:
         return client_id
 
-    raise RuntimeError("Could not obtain Antigravity OAuth client ID")
+    raise RuntimeError("Could not obtain Google OAuth client ID")
 
 
 def get_client_secret() -> str | None:
-    """Get OAuth client secret from env, config, or public source."""
-    secret = os.environ.get("ANTIGRAVITY_CLIENT_SECRET")
+    """Get OAuth client secret from env, config, or official source."""
+    secret = os.environ.get("GOOGLE_GEMINI_CLI_CLIENT_SECRET")
     if secret:
         return secret
 
-    # Try to read from hive config
     hive_cfg = Path.home() / ".hive" / "configuration.json"
     if hive_cfg.exists():
         try:
             with open(hive_cfg) as f:
                 cfg = json.load(f)
-                secret = cfg.get("llm", {}).get("antigravity_client_secret")
+                secret = cfg.get("llm", {}).get("google_gemini_cli_client_secret")
                 if secret:
                     return secret
         except Exception:
             pass
 
-    # Fetch from public source (npm package on GitHub)
-    _, secret = _fetch_credentials_from_public_source()
+    _, secret = _fetch_credentials()
     return secret
 
 
@@ -152,12 +145,12 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
     error: str | None = None
 
     def log_message(self, format: str, *args: Any) -> None:
-        pass  # Suppress default logging
+        pass
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
 
-        if parsed.path == "/oauth-callback":
+        if parsed.path == "/oauth2callback":
             query = urllib.parse.parse_qs(parsed.query)
 
             if "error" in query:
@@ -182,7 +175,7 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
         self.end_headers()
         html = f"""<!DOCTYPE html>
 <html>
-<head><title>Antigravity Auth</title></head>
+<head><title>Google Gemini Auth</title></head>
 <body style="font-family: system-ui; display: flex; align-items: center;
       justify-content: center; height: 100vh; margin: 0; background: #1a1a2e;
       color: #eee;">
@@ -196,7 +189,12 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
 
 def wait_for_callback(port: int, timeout: int = 300) -> tuple[str | None, str | None, str | None]:
     """Start local server and wait for OAuth callback."""
-    server = HTTPServer(("localhost", port), OAuthCallbackHandler)
+    # Reset class-level state from any previous auth attempt.
+    OAuthCallbackHandler.auth_code = None
+    OAuthCallbackHandler.state = None
+    OAuthCallbackHandler.error = None
+
+    server = HTTPServer(("127.0.0.1", port), OAuthCallbackHandler)
     server.timeout = 1
 
     start = time.time()
@@ -238,7 +236,7 @@ def exchange_code_for_tokens(
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
     except Exception as e:
-        logger.error(f"Token exchange failed: {e}")
+        logger.error("Token exchange failed: %s", e)
         return None
 
 
@@ -272,40 +270,31 @@ def save_accounts(data: dict[str, Any]) -> None:
     _ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(_ACCOUNTS_FILE, "w") as f:
         json.dump(data, f, indent=2)
-    logger.info(f"Saved credentials to {_ACCOUNTS_FILE}")
+    logger.info("Saved credentials to %s", _ACCOUNTS_FILE)
 
 
-def validate_credentials(access_token: str, project_id: str = _DEFAULT_PROJECT_ID) -> bool:
-    """Test if credentials work by making a simple API call to Antigravity.
+def validate_credentials(access_token: str) -> bool:
+    """Test if credentials work by making a simple API call to Cloud Code Assist.
 
     Returns True if credentials are valid, False otherwise.
     """
-    endpoint = "https://daily-cloudcode-pa.sandbox.googleapis.com"
-    body = {
-        "project": project_id,
-        "model": "gemini-3-flash",
+    body = json.dumps({
+        "model": "models/gemini-3-flash-preview",
         "request": {
             "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
             "generationConfig": {"maxOutputTokens": 10},
         },
-        "requestType": "agent",
-        "userAgent": "antigravity",
-        "requestId": "validation-test",
-    }
+    }).encode("utf-8")
+
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/1.18.3"
-        ),
-        "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
     }
 
     try:
         req = urllib.request.Request(
-            f"{endpoint}/v1internal:generateContent",
-            data=json.dumps(body).encode("utf-8"),
+            "https://cloudcode-pa.googleapis.com/v1internal:generateContent",
+            data=body,
             headers=headers,
             method="POST",
         )
@@ -339,12 +328,12 @@ def refresh_access_token(
         with urllib.request.urlopen(req, timeout=30) as resp:
             return json.loads(resp.read())
     except Exception as e:
-        logger.debug(f"Token refresh failed: {e}")
+        logger.debug("Token refresh failed: %s", e)
         return None
 
 
 def cmd_account_add(args: argparse.Namespace) -> int:
-    """Add a new Antigravity account via OAuth2.
+    """Add a new Google account via OAuth2.
 
     First checks if valid credentials already exist. If so, validates them
     and skips OAuth if they work. Otherwise, proceeds with OAuth flow.
@@ -361,25 +350,21 @@ def cmd_account_add(args: argparse.Namespace) -> int:
         access_token = account.get("access")
         refresh_token_str = account.get("refresh", "")
         refresh_token = refresh_token_str.split("|")[0] if refresh_token_str else None
-        project_id = (
-            refresh_token_str.split("|")[1] if "|" in refresh_token_str else _DEFAULT_PROJECT_ID
-        )
         email = account.get("email", "unknown")
         expires_ms = account.get("expires", 0)
         expires_at = expires_ms / 1000.0 if expires_ms else 0.0
 
         # Check if token is expired or near expiry
         if access_token and expires_at and time.time() < expires_at - 60:
-            # Token still valid, test it
-            logger.info(f"Found existing credentials for: {email}")
+            logger.info("Found existing credentials for: %s", email)
             logger.info("Validating existing credentials...")
-            if validate_credentials(access_token, project_id):
-                logger.info("✓ Credentials valid! Skipping OAuth.")
+            if validate_credentials(access_token):
+                logger.info("Credentials valid! Skipping OAuth.")
                 return 0
             else:
                 logger.info("Credentials failed validation, refreshing...")
         elif refresh_token:
-            logger.info(f"Found expired credentials for: {email}")
+            logger.info("Found expired credentials for: %s", email)
             logger.info("Attempting token refresh...")
 
             tokens = refresh_access_token(refresh_token, client_id, client_secret)
@@ -387,7 +372,6 @@ def cmd_account_add(args: argparse.Namespace) -> int:
                 new_access = tokens.get("access_token")
                 expires_in = tokens.get("expires_in", 3600)
                 if new_access:
-                    # Update the account
                     account["access"] = new_access
                     account["expires"] = int((time.time() + expires_in) * 1000)
                     accounts_data["last_refresh"] = time.strftime(
@@ -395,10 +379,9 @@ def cmd_account_add(args: argparse.Namespace) -> int:
                     )
                     save_accounts(accounts_data)
 
-                    # Validate the refreshed token
                     logger.info("Validating refreshed credentials...")
-                    if validate_credentials(new_access, project_id):
-                        logger.info("✓ Credentials refreshed and validated!")
+                    if validate_credentials(new_access):
+                        logger.info("Credentials refreshed and validated!")
                         return 0
                     else:
                         logger.info("Refreshed token failed validation, proceeding with OAuth...")
@@ -409,13 +392,13 @@ def cmd_account_add(args: argparse.Namespace) -> int:
     if not client_secret:
         logger.warning(
             "No client secret configured. Token refresh may fail.\n"
-            "Set ANTIGRAVITY_CLIENT_SECRET env var or add "
-            "'antigravity_client_secret' to ~/.hive/configuration.json"
+            "Set GOOGLE_GEMINI_CLI_CLIENT_SECRET env var or add "
+            "'google_gemini_cli_client_secret' to ~/.hive/configuration.json"
         )
 
-    # Use fixed port and path matching Google's expected OAuth redirect URI
-    port = _DEFAULT_REDIRECT_PORT
-    redirect_uri = f"http://localhost:{port}/oauth-callback"
+    # Use dynamic port (matching official gemini-cli behavior)
+    port = _DEFAULT_REDIRECT_PORT or find_free_port()
+    redirect_uri = f"http://127.0.0.1:{port}/oauth2callback"
 
     # Generate state for CSRF protection
     state = secrets.token_urlsafe(16)
@@ -433,17 +416,17 @@ def cmd_account_add(args: argparse.Namespace) -> int:
     auth_url = f"{_OAUTH_AUTH_URL}?{urllib.parse.urlencode(params)}"
 
     logger.info("Opening browser for authentication...")
-    logger.info(f"If the browser doesn't open, visit: {auth_url}\n")
+    logger.info("If the browser doesn't open, visit:\n%s\n", auth_url)
 
     # Open browser
     webbrowser.open(auth_url)
 
     # Wait for callback
-    logger.info(f"Listening for callback on port {port}...")
+    logger.info("Listening for callback on port %s...", port)
     code, received_state, error = wait_for_callback(port)
 
     if error:
-        logger.error(f"Authentication failed: {error}")
+        logger.error("Authentication failed: %s", error)
         return 1
 
     if not code:
@@ -472,7 +455,7 @@ def cmd_account_add(args: argparse.Namespace) -> int:
     # Get user email
     email = get_user_email(access_token)
     if email:
-        logger.info(f"Authenticated as: {email}")
+        logger.info("Authenticated as: %s", email)
 
     # Load existing accounts and add/update
     accounts_data = load_accounts()
@@ -480,7 +463,7 @@ def cmd_account_add(args: argparse.Namespace) -> int:
 
     # Build new account entry (V4 schema)
     expires_ms = int((time.time() + expires_in) * 1000)
-    refresh_entry = f"{refresh_token}|{_DEFAULT_PROJECT_ID}"
+    refresh_entry = refresh_token or ""
 
     new_account = {
         "access": access_token,
@@ -494,17 +477,17 @@ def cmd_account_add(args: argparse.Namespace) -> int:
     existing_idx = next((i for i, a in enumerate(accounts) if a.get("email") == email), None)
     if existing_idx is not None:
         accounts[existing_idx] = new_account
-        logger.info(f"Updated existing account: {email}")
+        logger.info("Updated existing account: %s", email)
     else:
         accounts.append(new_account)
-        logger.info(f"Added new account: {email}")
+        logger.info("Added new account: %s", email)
 
     accounts_data["accounts"] = accounts
     accounts_data["schemaVersion"] = 4
     accounts_data["last_refresh"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     save_accounts(accounts_data)
-    logger.info("\n✓ Authentication complete!")
+    logger.info("\nAuthentication complete!")
     return 0
 
 
@@ -515,14 +498,14 @@ def cmd_account_list(args: argparse.Namespace) -> int:
 
     if not accounts:
         logger.info("No accounts configured.")
-        logger.info("Run 'antigravity auth account add' to add one.")
+        logger.info("Run 'google_auth auth account add' to add one.")
         return 0
 
     logger.info("Configured accounts:\n")
     for i, account in enumerate(accounts, 1):
         email = account.get("email", "unknown")
         enabled = "enabled" if account.get("enabled", True) else "disabled"
-        logger.info(f"  {i}. {email} ({enabled})")
+        logger.info("  %s. %s (%s)", i, email, enabled)
 
     return 0
 
@@ -537,18 +520,18 @@ def cmd_account_remove(args: argparse.Namespace) -> int:
     accounts = [a for a in accounts if a.get("email") != email]
 
     if len(accounts) == original_len:
-        logger.error(f"No account found with email: {email}")
+        logger.error("No account found with email: %s", email)
         return 1
 
     data["accounts"] = accounts
     save_accounts(data)
-    logger.info(f"Removed account: {email}")
+    logger.info("Removed account: %s", email)
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Antigravity authentication CLI",
+        description="Google Gemini CLI authentication CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", help="Commands")

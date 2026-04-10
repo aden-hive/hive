@@ -1,10 +1,12 @@
-"""Integration test: Run a real EventLoopNode against the Antigravity backend.
+"""Integration test: Run a real EventLoopNode against the Google Gemini backend.
 
-Run: .venv/bin/python core/tests/test_antigravity_eventloop.py
+Run: uv run python core/tests/test_google_eventloop.py
 
 Requires:
-  - ~/.hive/antigravity-accounts.json with valid credentials
-    (run 'uv run python core/antigravity_auth.py auth account add' to authenticate)
+  - ~/.hive/google-gemini-cli-accounts.json with valid credentials
+    (run 'uv run python core/google_auth.py auth account add' to authenticate)
+  OR
+  - GEMINI_API_KEY or GOOGLE_API_KEY environment variable
 """
 
 import asyncio
@@ -15,36 +17,49 @@ from unittest.mock import MagicMock
 sys.path.insert(0, "core")
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
-# Show our provider's retry/stream logs
-logging.getLogger("framework.llm.litellm").setLevel(logging.DEBUG)
+logging.getLogger("framework.llm.google").setLevel(logging.DEBUG)
 
 from framework.config import RuntimeConfig  # noqa: E402
 from framework.graph.event_loop_node import EventLoopNode, LoopConfig  # noqa: E402
 from framework.graph.node import DataBuffer, NodeContext, NodeResult, NodeSpec  # noqa: E402
-from framework.llm.litellm import LiteLLMProvider  # noqa: E402
 
 
-def make_provider() -> LiteLLMProvider:
+def make_provider():
     cfg = RuntimeConfig()
-    if not cfg.api_key:
-        print("ERROR: No Antigravity token found.")
-        print("  1. Run 'antigravity-auth accounts add' to authenticate.")
-        print("  2. Run 'antigravity-auth serve' to start the local proxy.")
-        print("  3. Configure Hive: run quickstart.sh and select option 7 (Antigravity).")
-        sys.exit(1)
     print(f"Model       : {cfg.model}")
-    print(f"Base        : {cfg.api_base}")
-    print(f"Antigravity : {'localhost:8069' in (cfg.api_base or '')}")
-    return LiteLLMProvider(
-        model=cfg.model,
-        api_key=cfg.api_key,
-        api_base=cfg.api_base,
-        **cfg.extra_kwargs,
-    )
+
+    # Try Google Gemini CLI (OAuth) first
+    try:
+        from framework.llm.google import GoogleGeminiCliProvider
+
+        provider = GoogleGeminiCliProvider(model=cfg.model)
+        if provider.has_credentials():
+            print(f"Provider    : Google Gemini CLI (OAuth)")
+            return provider
+    except Exception:
+        pass
+
+    # Try Google API key
+    try:
+        from framework.llm.google import GoogleApiKeyProvider
+
+        api_key = cfg.api_key
+        if api_key:
+            provider = GoogleApiKeyProvider(model=cfg.model, api_key=api_key)
+            print(f"Provider    : Google Gemini (API key)")
+            return provider
+    except Exception:
+        pass
+
+    print("ERROR: No Google credentials found.")
+    print("  1. Run 'uv run python core/google_auth.py auth account add' for OAuth.")
+    print("  2. Or set GEMINI_API_KEY / GOOGLE_API_KEY for API key auth.")
+    print("  3. Run quickstart.sh and select option 7 or 8.")
+    sys.exit(1)
 
 
 def make_context(
-    llm: LiteLLMProvider,
+    llm,
     *,
     node_id: str = "test",
     system_prompt: str = "You are a helpful assistant.",
@@ -82,9 +97,7 @@ def make_context(
     )
 
 
-async def run_test(
-    name: str, llm: LiteLLMProvider, system: str, output_keys: list[str]
-) -> NodeResult:
+async def run_test(name: str, llm, system: str, output_keys: list[str]) -> NodeResult:
     print(f"\n{'=' * 60}")
     print(f"TEST: {name}")
     print(f"{'=' * 60}")
@@ -111,7 +124,6 @@ async def main():
     llm = make_provider()
     print()
 
-    # Test 1: Simple text output — the node should call set_output to fill "answer"
     r1 = await run_test(
         name="Simple text generation",
         llm=llm,
@@ -123,7 +135,6 @@ async def main():
         output_keys=["answer"],
     )
 
-    # Test 2: If test 1 failed, try bare stream() to isolate the issue
     if not r1.success:
         print(f"\n{'=' * 60}")
         print("FALLBACK: Testing bare provider.stream() directly")

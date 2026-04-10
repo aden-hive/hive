@@ -888,7 +888,7 @@ prompt_model_selection() {
 }
 
 # Function to save configuration
-# Args: provider_id env_var model max_tokens max_context_tokens [use_claude_code_sub] [api_base] [use_codex_sub] [use_antigravity_sub]
+# Args: provider_id env_var model max_tokens max_context_tokens [use_claude_code_sub] [api_base] [use_codex_sub] [use_google_gemini_cli_sub]
 save_configuration() {
     local provider_id="$1"
     local env_var="$2"
@@ -898,7 +898,7 @@ save_configuration() {
     local use_claude_code_sub="${6:-}"
     local api_base="${7:-}"
     local use_codex_sub="${8:-}"
-    local use_antigravity_sub="${9:-}"
+    local use_google_gemini_cli_sub="${9:-}"
 
     # Fallbacks if not provided
     if [ -z "$model" ]; then
@@ -920,7 +920,7 @@ save_configuration() {
         "$use_claude_code_sub" \
         "$api_base" \
         "$use_codex_sub" \
-        "$use_antigravity_sub" \
+        "$use_google_gemini_cli_sub" \
         "$(date -u +"%Y-%m-%dT%H:%M:%S+00:00")" 2>/dev/null <<'PY'
 import json
 import sys
@@ -935,7 +935,7 @@ from pathlib import Path
     use_claude_code_sub,
     api_base,
     use_codex_sub,
-    use_antigravity_sub,
+    use_google_gemini_cli_sub,
     created_at,
 ) = sys.argv[1:11]
 
@@ -970,22 +970,22 @@ if use_codex_sub == "true":
 else:
     config["llm"].pop("use_codex_subscription", None)
 
-if use_antigravity_sub == "true":
-    config["llm"]["use_antigravity_subscription"] = True
+if use_google_gemini_cli_sub == "true":
+    config["llm"]["use_google_gemini_cli_subscription"] = True
     config["llm"].pop("api_key_env_var", None)
-    # Store the Antigravity OAuth client secret so token refresh works
+    # Store the Google Gemini CLI OAuth client secret so token refresh works
     # without hardcoding it in source code (read at runtime via config.py).
     import os as _os
-    _secret = _os.environ.get("ANTIGRAVITY_CLIENT_SECRET") or ""
+    _secret = _os.environ.get("GOOGLE_GEMINI_CLI_CLIENT_SECRET") or ""
     if _secret:
-        config["llm"]["antigravity_client_secret"] = _secret
-    _client_id = _os.environ.get("ANTIGRAVITY_CLIENT_ID") or ""
+        config["llm"]["google_gemini_cli_client_secret"] = _secret
+    _client_id = _os.environ.get("GOOGLE_GEMINI_CLI_CLIENT_ID") or ""
     if _client_id:
-        config["llm"]["antigravity_client_id"] = _client_id
+        config["llm"]["google_gemini_cli_client_id"] = _client_id
 else:
-    config["llm"].pop("use_antigravity_subscription", None)
-    config["llm"].pop("antigravity_client_secret", None)
-    config["llm"].pop("antigravity_client_id", None)
+    config["llm"].pop("use_google_gemini_cli_subscription", None)
+    config["llm"].pop("google_gemini_cli_client_secret", None)
+    config["llm"].pop("google_gemini_cli_client_id", None)
 
 if api_base:
     config["llm"]["api_base"] = api_base
@@ -1016,7 +1016,7 @@ SELECTED_ENV_VAR=""     # Will hold the chosen env var
 SELECTED_MODEL=""       # Will hold the chosen model ID
 SELECTED_MAX_TOKENS=8192 # Will hold the chosen max_tokens (output limit)
 SELECTED_MAX_CONTEXT_TOKENS=120000 # Will hold the chosen max_context_tokens (input history budget)
-SUBSCRIPTION_MODE=""    # "claude_code" | "codex" | "zai_code" | ""
+SUBSCRIPTION_MODE=""    # "claude_code" | "codex" | "zai_code" | "google_api" | "google_gemini_cli" | ""
 
 # ── Credential detection (silent — just set flags) ───────────
 CLAUDE_CRED_DETECTED=false
@@ -1055,15 +1055,15 @@ if [ -n "${HIVE_API_KEY:-}" ]; then
     HIVE_CRED_DETECTED=true
 fi
 
-ANTIGRAVITY_CRED_DETECTED=false
-# Check native Antigravity IDE (macOS/Linux) SQLite state DB first
-if [ -f "$HOME/Library/Application Support/Antigravity/User/globalStorage/state.vscdb" ]; then
-    ANTIGRAVITY_CRED_DETECTED=true
-elif [ -f "$HOME/.config/Antigravity/User/globalStorage/state.vscdb" ]; then
-    ANTIGRAVITY_CRED_DETECTED=true
+GOOGLE_API_CRED_DETECTED=false
+if [ -n "${GEMINI_API_KEY:-}" ] || [ -n "${GOOGLE_API_KEY:-}" ]; then
+    GOOGLE_API_CRED_DETECTED=true
+fi
+
+GOOGLE_GEMINI_CLI_CRED_DETECTED=false
 # Native OAuth credentials
-elif [ -f "$HOME/.hive/antigravity-accounts.json" ]; then
-    ANTIGRAVITY_CRED_DETECTED=true
+if [ -f "$HOME/.hive/google-gemini-cli-accounts.json" ]; then
+    GOOGLE_GEMINI_CLI_CRED_DETECTED=true
 fi
 
 OLLAMA_DETECTED=false
@@ -1122,8 +1122,8 @@ try:
         sub = "codex"
     elif llm.get("use_kimi_code_subscription"):
         sub = "kimi_code"
-    elif llm.get("use_antigravity_subscription"):
-        sub = "antigravity"
+    elif llm.get("use_google_gemini_cli_subscription"):
+        sub = "google_gemini_cli"
     elif llm.get("provider", "") == "minimax" or "api.minimax.io" in llm.get("api_base", ""):
         sub = "minimax_code"
     elif llm.get("provider", "") == "hive" or "adenhq.com" in llm.get("api_base", ""):
@@ -1147,7 +1147,8 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
         codex)       [ "$CODEX_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         kimi_code)   [ "$KIMI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         hive_llm)    [ "$HIVE_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
-        antigravity) [ "$ANTIGRAVITY_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        google_api) [ "$GOOGLE_API_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
+        google_gemini_cli) [ "$GOOGLE_GEMINI_CLI_CRED_DETECTED" = true ] && PREV_CRED_VALID=true ;;
         *)
             # API key provider — check if the env var is set; ollama uses local runtime detection
             if [ "$PREV_PROVIDER" = "ollama" ]; then
@@ -1168,17 +1169,18 @@ if [ -n "$PREV_SUB_MODE" ] || [ -n "$PREV_PROVIDER" ]; then
             minimax_code) DEFAULT_CHOICE=4 ;;
             kimi_code)   DEFAULT_CHOICE=5 ;;
             hive_llm)    DEFAULT_CHOICE=6 ;;
-            antigravity) DEFAULT_CHOICE=7 ;;
+            google_api)  DEFAULT_CHOICE=7 ;;
+            google_gemini_cli) DEFAULT_CHOICE=8 ;;
         esac
         if [ -z "$DEFAULT_CHOICE" ]; then
             case "$PREV_PROVIDER" in
-                anthropic) DEFAULT_CHOICE=8 ;;
-                openai)    DEFAULT_CHOICE=9 ;;
-                gemini)    DEFAULT_CHOICE=10 ;;
-                groq)      DEFAULT_CHOICE=11 ;;
-                cerebras)  DEFAULT_CHOICE=12 ;;
-                openrouter) DEFAULT_CHOICE=13 ;;
-                ollama)    DEFAULT_CHOICE=14 ;;
+                anthropic) DEFAULT_CHOICE=9 ;;
+                openai)    DEFAULT_CHOICE=10 ;;
+                gemini)    DEFAULT_CHOICE=11 ;;
+                groq)      DEFAULT_CHOICE=12 ;;
+                cerebras)  DEFAULT_CHOICE=13 ;;
+                openrouter) DEFAULT_CHOICE=14 ;;
+                ollama)    DEFAULT_CHOICE=15 ;;
                 minimax)   DEFAULT_CHOICE=4 ;;
                 kimi)      DEFAULT_CHOICE=5 ;;
                 hive)      DEFAULT_CHOICE=6 ;;
@@ -1257,21 +1259,28 @@ else
     echo -e "  ${CYAN}6)${NC} Hive LLM                   ${DIM}(use your Hive API key)${NC}  $HIVE_LLM_STATUS"
 fi
 
-# 7) Antigravity
-if [ "$ANTIGRAVITY_CRED_DETECTED" = true ]; then
-    echo -e "  ${CYAN}7)${NC} Antigravity Subscription  ${DIM}(use your Google/Gemini plan)${NC}  ${GREEN}(credential detected)${NC}"
+# 7) Google Gemini (API Key)
+if [ "$GOOGLE_API_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}7)${NC} Google Gemini (API Key)  ${DIM}(use your API key)${NC}  ${GREEN}(credential detected)${NC}"
 else
-    echo -e "  ${CYAN}7)${NC} Antigravity Subscription  ${DIM}(use your Google/Gemini plan)${NC}"
+    echo -e "  ${CYAN}7)${NC} Google Gemini (API Key)  ${DIM}(use your API key)${NC}"
+fi
+
+# 8) Google Gemini CLI (Google Account)
+if [ "$GOOGLE_GEMINI_CLI_CRED_DETECTED" = true ]; then
+    echo -e "  ${CYAN}8)${NC} Google Gemini CLI (Google Account)  ${DIM}(use your Google/Gemini plan)${NC}  ${GREEN}(credential detected)${NC}"
+else
+    echo -e "  ${CYAN}8)${NC} Google Gemini CLI (Google Account)  ${DIM}(use your Google/Gemini plan)${NC}"
 fi
 
 echo ""
 echo -e "  ${CYAN}${BOLD}API key providers:${NC}"
 
-# 8-13) API key providers — show (credential detected) if key already set
+# 9-14) API key providers — show (credential detected) if key already set
 PROVIDER_MENU_ENVS=(ANTHROPIC_API_KEY OPENAI_API_KEY GEMINI_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY)
 PROVIDER_MENU_NAMES=("Anthropic (Claude) - Recommended" "OpenAI (GPT)" "Google Gemini - Free tier available" "Groq - Fast, free tier" "Cerebras - Fast, free tier" "OpenRouter - Bring any OpenRouter model")
 for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
-    num=$((idx + 8))
+    num=$((idx + 9))
     env_var="${PROVIDER_MENU_ENVS[$idx]}"
     if [ -n "${!env_var}" ]; then
         echo -e "  ${CYAN}$num)${NC} ${PROVIDER_MENU_NAMES[$idx]}  ${GREEN}(credential detected)${NC}"
@@ -1280,14 +1289,14 @@ for idx in "${!PROVIDER_MENU_ENVS[@]}"; do
     fi
 done
 
-# 14) Local (Ollama) — no API key needed
+# 15) Local (Ollama) — no API key needed
 if [ "$OLLAMA_DETECTED" = true ]; then
-    echo -e "  ${CYAN}14)${NC} Local (Ollama) - No API key needed  ${GREEN}(ollama detected)${NC}"
+    echo -e "  ${CYAN}15)${NC} Local (Ollama) - No API key needed  ${GREEN}(ollama detected)${NC}"
 else
-    echo -e "  ${CYAN}14)${NC} Local (Ollama) - No API key needed"
+    echo -e "  ${CYAN}15)${NC} Local (Ollama) - No API key needed"
 fi
 
-SKIP_CHOICE=$((8 + ${#PROVIDER_MENU_ENVS[@]} + 1))
+SKIP_CHOICE=$((9 + ${#PROVIDER_MENU_ENVS[@]} + 1))
 echo -e "  ${CYAN}$SKIP_CHOICE)${NC} Skip for now"
 echo ""
 
@@ -1420,24 +1429,39 @@ case $choice in
         echo -e "  ${DIM}Model: $SELECTED_MODEL | API: ${HIVE_LLM_ENDPOINT}${NC}"
         ;;
     7)
-        # Antigravity Subscription
-        if [ "$ANTIGRAVITY_CRED_DETECTED" = false ]; then
+        # Google Gemini (API Key)
+        SUBSCRIPTION_MODE="google_api"
+        apply_preset "google_api"
+        SELECTED_ENV_VAR="GEMINI_API_KEY"
+        SELECTED_PROVIDER_ID="google"
+        PROVIDER_NAME="Google Gemini"
+        SIGNUP_URL="https://aistudio.google.com/apikey"
+        # Check for existing key
+        if [ -n "$GEMINI_API_KEY" ] || [ -n "$GOOGLE_API_KEY" ]; then
             echo ""
-            echo -e "${CYAN}  Setting up Antigravity authentication...${NC}"
+            echo -e "${GREEN}⬢${NC} Using Google Gemini (API Key)"
+            echo -e "  ${DIM}Found existing API key${NC}"
+        fi
+        ;;
+    8)
+        # Google Gemini CLI (Google Account)
+        if [ "$GOOGLE_GEMINI_CLI_CRED_DETECTED" = false ]; then
+            echo ""
+            echo -e "${CYAN}  Setting up Google Gemini CLI authentication...${NC}"
             echo ""
             echo -e "  ${YELLOW}A browser window will open for Google OAuth.${NC}"
-            echo -e "  Sign in with your Google account that has Antigravity access."
+            echo -e "  Sign in with your Google account that has Google Gemini CLI access."
             echo ""
 
             # Run native OAuth flow
-            if uv run python "$SCRIPT_DIR/core/antigravity_auth.py" auth account add; then
+            if uv run python "$SCRIPT_DIR/core/google_auth.py" auth account add; then
                 # Re-detect credentials
-                if [ -f "$HOME/.hive/antigravity-accounts.json" ]; then
-                    ANTIGRAVITY_CRED_DETECTED=true
+                if [ -f "$HOME/.hive/google-gemini-cli-accounts.json" ]; then
+                    GOOGLE_GEMINI_CLI_CRED_DETECTED=true
                 fi
             fi
 
-            if [ "$ANTIGRAVITY_CRED_DETECTED" = false ]; then
+            if [ "$GOOGLE_GEMINI_CLI_CRED_DETECTED" = false ]; then
                 echo ""
                 echo -e "${RED}  Authentication failed or was cancelled.${NC}"
                 echo ""
@@ -1445,54 +1469,82 @@ case $choice in
             fi
         fi
 
-        if [ "$ANTIGRAVITY_CRED_DETECTED" = true ]; then
-            SUBSCRIPTION_MODE="antigravity"
-            apply_preset "antigravity"
+        if [ "$GOOGLE_GEMINI_CLI_CRED_DETECTED" = true ]; then
+            SUBSCRIPTION_MODE="google_gemini_cli"
+            apply_preset "google_gemini_cli"
             echo ""
-            echo -e "${YELLOW}  ⚠ Using Antigravity can technically cause your account suspension. Please use at your own risk.${NC}"
+            echo -e "${YELLOW}  ⚠ Using Google Gemini CLI can technically cause your account suspension. Please use at your own risk.${NC}"
             echo ""
-            echo -e "${GREEN}⬢${NC} Using Antigravity subscription"
-            echo -e "  ${DIM}Model: gemini-3-flash | Direct OAuth (no proxy required)${NC}"
+            echo -e "${GREEN}⬢${NC} Using Google Gemini CLI"
+            echo ""
+            echo -e "  Select a model:"
+            ag_choice_count="$(get_preset_model_choice_count "google_gemini_cli")"
+            ag_default_choice=1
+            ag_idx=0
+            while [ "$ag_idx" -lt "$ag_choice_count" ]; do
+                ag_num=$((ag_idx + 1))
+                ag_model_id="$(get_preset_model_choice_field "google_gemini_cli" "$ag_idx" "id")"
+                ag_label="$(get_preset_model_choice_field "google_gemini_cli" "$ag_idx" "label")"
+                ag_recommended="$(get_preset_model_choice_field "google_gemini_cli" "$ag_idx" "recommended")"
+                if [ "$ag_recommended" = "true" ]; then
+                    echo -e "  ${CYAN}${ag_num})${NC} ${ag_label}              ${DIM}(default)${NC}"
+                    ag_default_choice="$ag_num"
+                else
+                    echo -e "  ${CYAN}${ag_num})${NC} ${ag_label}"
+                fi
+                ag_idx=$((ag_idx + 1))
+            done
+            echo ""
+            while true; do
+                read -r -p "  Enter model choice (1-$ag_choice_count) [$ag_default_choice]: " ag_model_choice || true
+                ag_model_choice="${ag_model_choice:-$ag_default_choice}"
+                if [[ "$ag_model_choice" =~ ^[0-9]+$ ]] && [ "$ag_model_choice" -ge 1 ] && [ "$ag_model_choice" -le "$ag_choice_count" ]; then
+                    SELECTED_MODEL="$(get_preset_model_choice_field "google_gemini_cli" "$((ag_model_choice - 1))" "id")"
+                    break
+                fi
+                echo -e "${RED}Invalid choice. Please enter 1-$ag_choice_count${NC}"
+            done
+            echo -e "  ${DIM}Model: $SELECTED_MODEL | Direct OAuth (no proxy required)${NC}"
         fi
         ;;
-    8)
+    9)
         SELECTED_ENV_VAR="ANTHROPIC_API_KEY"
         SELECTED_PROVIDER_ID="anthropic"
         PROVIDER_NAME="Anthropic"
         SIGNUP_URL="https://console.anthropic.com/settings/keys"
         ;;
-    9)
+    10)
         SELECTED_ENV_VAR="OPENAI_API_KEY"
         SELECTED_PROVIDER_ID="openai"
         PROVIDER_NAME="OpenAI"
         SIGNUP_URL="https://platform.openai.com/api-keys"
         ;;
-    10)
+    11)
         SELECTED_ENV_VAR="GEMINI_API_KEY"
         SELECTED_PROVIDER_ID="gemini"
         PROVIDER_NAME="Google Gemini"
         SIGNUP_URL="https://aistudio.google.com/apikey"
         ;;
-    11)
+    12)
         SELECTED_ENV_VAR="GROQ_API_KEY"
         SELECTED_PROVIDER_ID="groq"
         PROVIDER_NAME="Groq"
         SIGNUP_URL="https://console.groq.com/keys"
         ;;
-    12)
+    13)
         SELECTED_ENV_VAR="CEREBRAS_API_KEY"
         SELECTED_PROVIDER_ID="cerebras"
         PROVIDER_NAME="Cerebras"
         SIGNUP_URL="https://cloud.cerebras.ai/"
         ;;
-    13)
+    14)
         SELECTED_ENV_VAR="OPENROUTER_API_KEY"
         SELECTED_PROVIDER_ID="openrouter"
         SELECTED_API_BASE="https://openrouter.ai/api/v1"
         PROVIDER_NAME="OpenRouter"
         SIGNUP_URL="https://openrouter.ai/keys"
         ;;
-    14)
+    15)
         # Local (Ollama) — no API key; pick model from ollama list
         if [ "$OLLAMA_DETECTED" != true ]; then
             echo ""
@@ -1555,7 +1607,7 @@ case $choice in
 esac
 
 # For API-key providers: prompt for key (allow replacement if already set)
-if { [ -z "$SUBSCRIPTION_MODE" ] || [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ] || [ "$SUBSCRIPTION_MODE" = "hive_llm" ]; } && [ -n "$SELECTED_ENV_VAR" ]; then
+if { [ -z "$SUBSCRIPTION_MODE" ] || [ "$SUBSCRIPTION_MODE" = "minimax_code" ] || [ "$SUBSCRIPTION_MODE" = "kimi_code" ] || [ "$SUBSCRIPTION_MODE" = "hive_llm" ] || [ "$SUBSCRIPTION_MODE" = "google_api" ]; } && [ -n "$SELECTED_ENV_VAR" ]; then
     while true; do
         CURRENT_KEY="${!SELECTED_ENV_VAR}"
         if [ -n "$CURRENT_KEY" ]; then
@@ -1700,8 +1752,10 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "true" "" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "codex" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" "true" > /dev/null || SAVE_OK=false
-    elif [ "$SUBSCRIPTION_MODE" = "antigravity" ]; then
+    elif [ "$SUBSCRIPTION_MODE" = "google_gemini_cli" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "" "" "true" > /dev/null || SAVE_OK=false
+    elif [ "$SUBSCRIPTION_MODE" = "google_api" ]; then
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
@@ -2083,6 +2137,11 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
         echo -e "  ${GREEN}⬢${NC} MiniMax Coding Key → ${DIM}$SELECTED_MODEL${NC}"
         echo -e "  ${DIM}API: api.minimax.io/v1 (OpenAI-compatible)${NC}"
+    elif [ "$SUBSCRIPTION_MODE" = "google_api" ]; then
+        echo -e "  ${GREEN}⬢${NC} Google Gemini (API Key) → ${DIM}$SELECTED_MODEL${NC}"
+    elif [ "$SUBSCRIPTION_MODE" = "google_gemini_cli" ]; then
+        echo -e "  ${GREEN}⬢${NC} Google Gemini CLI → ${DIM}$SELECTED_MODEL${NC}"
+        echo -e "  ${DIM}Direct OAuth (no proxy required)${NC}"
     elif [ "$SELECTED_PROVIDER_ID" = "openrouter" ]; then
         echo -e "  ${GREEN}⬢${NC} OpenRouter API Key → ${DIM}$SELECTED_MODEL${NC}"
         echo -e "  ${DIM}API: openrouter.ai/api/v1 (OpenAI-compatible)${NC}"
