@@ -128,10 +128,9 @@ async def handle_create_session(request: web.Request) -> web.Response:
     session_id = body.get("session_id")
     model = body.get("model")
     initial_prompt = body.get("initial_prompt")
-    # When set, the queen writes conversations to this existing session's directory
-    # so the full history accumulates in one place across server restarts.
     queen_resume_from = body.get("queen_resume_from")
     initial_phase = body.get("initial_phase")
+    worker_name = body.get("worker_name")
 
     if agent_path:
         try:
@@ -141,7 +140,6 @@ async def handle_create_session(request: web.Request) -> web.Response:
 
     try:
         if agent_path:
-            # One-step: create session + load colony
             session = await manager.create_session_with_worker_colony(
                 agent_path,
                 agent_id=agent_id,
@@ -150,6 +148,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 initial_prompt=initial_prompt,
                 queen_resume_from=queen_resume_from,
                 initial_phase=initial_phase,
+                worker_name=worker_name,
             )
         else:
             # Queen-only session
@@ -694,6 +693,7 @@ async def handle_discover(request: web.Request) -> web.Response:
                 "tags": entry.tags,
                 "last_active": entry.last_active,
                 "is_loaded": str(entry.path.resolve()) in loaded_paths,
+                "workers": [w.to_dict() for w in entry.workers],
             }
             for entry in entries
         ]

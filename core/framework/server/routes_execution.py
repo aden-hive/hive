@@ -572,13 +572,21 @@ async def handle_cancel_queen(request: web.Request) -> web.Response:
 
 
 async def handle_colony_spawn(request: web.Request) -> web.Response:
-    """POST /api/sessions/{session_id}/colony-spawn — spawn worker clones.
+    """POST /api/sessions/{session_id}/colony-spawn — clone queen to colony.
 
-    Body: {"task": "...", "count": 1}
-    Returns: {"worker_ids": ["...", "..."]}
+    Body: {"colony_name": "...", "worker_name": "...", "task": "..."}
+    Returns: {"colony_path": "...", "worker_name": "...", "worker_id": "..."}
 
-    Clones the queen's own AgentLoop — same tools, same LLM, same prompt.
-    Each worker runs independently with the given task as input.
+    Colony layout::
+
+        ~/.hive/colonies/{colony_name}/
+            agent.json                  ← colony manifest (name, description, workers list)
+            {worker_name}.json          ← per-worker config (system_prompt, tools, goal, etc.)
+            conversations/              ← copied from queen
+            data/
+
+    Full clone: copies queen conversation history, tools, tool executor,
+    system prompt, skills, memory, and loop config into a new colony worker.
     """
     session, err = resolve_session(request)
     if err:
@@ -591,87 +599,236 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
         )
 
     body = await request.json()
-    task = body.get("task", "")
-    count = min(int(body.get("count", 1)), 10)
+    colony_name = body.get("colony_name", "").strip()
+    worker_name = body.get("worker_name", "").strip()
+    task = body.get("task", "").strip()
 
-    if not task:
-        return web.json_response({"error": "task is required"}, status=400)
+    if not colony_name:
+        return web.json_response({"error": "colony_name is required"}, status=400)
+
+    import re
+
+    if not re.match(r"^[a-z0-9_]+$", colony_name):
+        return web.json_response(
+            {"error": "colony_name must be lowercase alphanumeric with underscores"},
+            status=400,
+        )
+
+    if not worker_name:
+        return web.json_response({"error": "worker_name is required"}, status=400)
+
+    if not re.match(r"^[a-z0-9_]+$", worker_name):
+        return web.json_response(
+            {"error": "worker_name must be lowercase alphanumeric with underscores"},
+            status=400,
+        )
+
+    import asyncio
+    import json
+    import shutil
+    import uuid
+    from datetime import datetime, timezone
+    from pathlib import Path
 
     from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
     from framework.agent_loop.types import AgentContext, AgentSpec
     from framework.host.worker import Worker
     from framework.schemas.goal import Goal
+    from framework.storage.conversation_store import FileConversationStore
     from framework.tracker.decision_tracker import DecisionTracker
-    import uuid
 
     queen_loop: AgentLoop = session.queen_executor.node_registry["queen"]
-    queen_ctx: AgentContext = queen_loop._last_ctx if hasattr(queen_loop, "_last_ctx") else None
+    queen_ctx: AgentContext = getattr(queen_loop, "_last_ctx", None)
 
-    queen_spec = AgentSpec(
-        id="queen",
-        name="Queen",
-        description="Queen worker clone",
-        tools=[],
-        tool_access_policy="all",
+    colony_dir = Path.home() / ".hive" / "colonies" / colony_name
+    is_new = not colony_dir.exists()
+    colony_dir.mkdir(parents=True, exist_ok=True)
+    (colony_dir / "data").mkdir(exist_ok=True)
+
+    worker_storage = Path.home() / ".hive" / "agents" / colony_name / worker_name
+    worker_storage.mkdir(parents=True, exist_ok=True)
+
+    worker_config_path = colony_dir / f"{worker_name}.json"
+    if worker_config_path.exists():
+        return web.json_response(
+            {"error": f"Worker '{worker_name}' already exists in colony '{colony_name}'"},
+            status=409,
+        )
+
+    # ── 1. Copy queen conversation → worker storage ──────────────
+    worker_conv_dir = worker_storage / "conversations"
+    queen_conv_store: FileConversationStore | None = getattr(
+        queen_loop, "_conversation_store", None
+    )
+    if queen_conv_store is not None:
+        queen_conv_base = queen_conv_store._base
+        if queen_conv_base.exists():
+            await asyncio.to_thread(
+                shutil.copytree, queen_conv_base, worker_conv_dir, dirs_exist_ok=True
+            )
+            logger.info("Copied queen conversation to %s", worker_conv_dir)
+    colony_conv_store = FileConversationStore(worker_conv_dir)
+
+    # ── 2. Clone queen AgentSpec ──────────────────────────────────
+    queen_spec = (
+        queen_ctx.agent_spec.model_copy()
+        if queen_ctx
+        else AgentSpec(
+            id="queen",
+            name="Queen",
+            description="Queen worker clone",
+            tools=[],
+            tool_access_policy="all",
+        )
     )
 
-    if queen_ctx:
-        queen_spec = queen_ctx.agent_spec
+    # ── 3. Full tools + executor (shared reference, stateless) ────
+    queen_tools: list = queen_ctx.available_tools if queen_ctx else []
+    queen_tool_executor = getattr(queen_loop, "_tool_executor", None)
+    tool_names = [t.name for t in queen_tools]
 
+    # ── 4. System prompt from current phase state ─────────────────
+    system_prompt = ""
+    phase_state = getattr(session, "phase_state", None)
+    if phase_state is not None:
+        try:
+            system_prompt = phase_state.get_current_prompt()
+        except Exception:
+            pass
+    if not system_prompt and queen_ctx:
+        from framework.agent_loop.prompting import build_system_prompt_for_context
+
+        try:
+            system_prompt = build_system_prompt_for_context(queen_ctx)
+        except Exception:
+            pass
+
+    # ── 5. Skills, memory, identity ───────────────────────────────
+    queen_skills_catalog = queen_ctx.skills_catalog_prompt if queen_ctx else ""
+    queen_protocols = queen_ctx.protocols_prompt if queen_ctx else ""
+    queen_skill_dirs = queen_ctx.skill_dirs if queen_ctx else []
+    queen_identity = ""
+    queen_memory = ""
+    if phase_state is not None:
+        queen_identity = getattr(phase_state, "queen_identity_prompt", "") or ""
+        queen_memory = getattr(phase_state, "_cached_global_recall_block", "") or ""
+
+    # ── 6. Loop config (same as queen) ────────────────────────────
+    queen_lc_config = {
+        "max_iterations": 999_999,
+        "max_tool_calls_per_turn": 30,
+        "max_context_tokens": 180_000,
+    }
+    queen_config: LoopConfig | None = getattr(queen_loop, "_config", None)
+    if queen_config is not None:
+        queen_lc_config["max_iterations"] = queen_config.max_iterations
+        queen_lc_config["max_tool_calls_per_turn"] = queen_config.max_tool_calls_per_turn
+        queen_lc_config["max_context_tokens"] = queen_config.max_context_tokens
+        queen_lc_config["max_tool_result_chars"] = queen_config.max_tool_result_chars
+        queen_lc_config["spillover_dir"] = str(colony_dir / "data")
+    worker_loop_config = LoopConfig(
+        max_iterations=queen_lc_config["max_iterations"],
+        max_tool_calls_per_turn=queen_lc_config["max_tool_calls_per_turn"],
+        max_context_tokens=queen_lc_config["max_context_tokens"],
+        max_tool_result_chars=queen_lc_config.get("max_tool_result_chars", 30_000),
+        spillover_dir=str(colony_dir / "data"),
+    )
+
+    # ── 7. Goal ───────────────────────────────────────────────────
+    worker_task = task or "Continue the work from the queen's current session."
     goal = Goal(
-        id="spawn-task",
-        name=task[:60],
-        description=task,
+        id=f"{colony_name}-{worker_name}",
+        name=worker_task[:60],
+        description=worker_task,
     )
 
-    worker_ids: list[str] = []
-    for _ in range(count):
-        worker_id = f"worker_{uuid.uuid4().hex[:12]}"
-        stream_id = f"worker:{worker_id}"
+    # ── 8. Build worker ───────────────────────────────────────────
+    worker_id = f"worker_{uuid.uuid4().hex[:12]}"
+    stream_id = f"worker:{worker_id}"
 
-        worker_loop = AgentLoop(
-            event_bus=session.event_bus,
-            config=queen_loop._config if hasattr(queen_loop, "_config") else LoopConfig(),
-            tool_executor=queen_loop._tool_executor
-            if hasattr(queen_loop, "_tool_executor")
-            else None,
-            conversation_store=queen_loop._conversation_store
-            if hasattr(queen_loop, "_conversation_store")
-            else None,
-        )
+    worker_loop = AgentLoop(
+        event_bus=session.event_bus,
+        config=worker_loop_config,
+        tool_executor=queen_tool_executor,
+        conversation_store=colony_conv_store,
+    )
 
-        worker_ctx = AgentContext(
-            runtime=DecisionTracker(session.queen_dir),
-            agent_id=worker_id,
-            agent_spec=queen_spec,
-            input_data={"task": task},
-            llm=session.llm,
-            available_tools=queen_ctx.available_tools if queen_ctx else [],
-            goal_context=goal.to_prompt_context(),
-            goal=goal,
-            max_tokens=queen_ctx.max_tokens if queen_ctx else 8192,
-            stream_id=stream_id,
-            execution_id=worker_id,
-            accounts_prompt=queen_ctx.accounts_prompt if queen_ctx else "",
-            skills_catalog_prompt=queen_ctx.skills_catalog_prompt if queen_ctx else "",
-            protocols_prompt=queen_ctx.protocols_prompt if queen_ctx else "",
-            skill_dirs=queen_ctx.skill_dirs if queen_ctx else [],
-        )
+    worker_ctx = AgentContext(
+        runtime=DecisionTracker(worker_storage),
+        agent_id=worker_id,
+        agent_spec=queen_spec,
+        input_data={"task": worker_task},
+        llm=session.llm,
+        available_tools=queen_tools,
+        goal_context=goal.to_prompt_context(),
+        goal=goal,
+        max_tokens=queen_ctx.max_tokens if queen_ctx else 8192,
+        stream_id=stream_id,
+        execution_id=worker_id,
+        accounts_prompt=queen_ctx.accounts_prompt if queen_ctx else "",
+        identity_prompt=queen_identity,
+        memory_prompt=queen_memory,
+        skills_catalog_prompt=queen_skills_catalog,
+        protocols_prompt=queen_protocols,
+        skill_dirs=list(queen_skill_dirs),
+    )
 
-        worker = Worker(
-            worker_id=worker_id,
-            task=task,
-            agent_loop=worker_loop,
-            context=worker_ctx,
-            event_bus=session.event_bus,
-            colony_id=session.id,
-        )
+    worker = Worker(
+        worker_id=worker_id,
+        task=worker_task,
+        agent_loop=worker_loop,
+        context=worker_ctx,
+        event_bus=session.event_bus,
+        colony_id=colony_name,
+    )
 
-        await worker.start_background()
-        worker_ids.append(worker_id)
+    await worker.start_background()
 
-    logger.info("Spawned %d worker(s) from queen session %s", len(worker_ids), session.id)
-    return web.json_response({"worker_ids": worker_ids, "count": len(worker_ids)})
+    # ── 9. Write {worker_name}.json ───────────────────────────────
+    worker_meta = {
+        "name": worker_name,
+        "version": "1.0.0",
+        "description": f"Worker clone from queen session {session.id}",
+        "goal": {
+            "description": worker_task,
+            "success_criteria": [],
+            "constraints": [],
+        },
+        "system_prompt": system_prompt,
+        "tools": tool_names,
+        "skills_catalog_prompt": queen_skills_catalog,
+        "protocols_prompt": queen_protocols,
+        "skill_dirs": list(queen_skill_dirs),
+        "identity_prompt": queen_identity,
+        "memory_prompt": queen_memory,
+        "queen_phase": phase_state.phase if phase_state else "",
+        "queen_id": getattr(phase_state, "queen_id", "") if phase_state else "",
+        "loop_config": queen_lc_config,
+        "spawned_from": session.id,
+        "spawned_at": datetime.now(timezone.utc).isoformat(),
+    }
+    worker_config_path.write_text(
+        json.dumps(worker_meta, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+
+    logger.info(
+        "Cloned queen to colony '%s' worker '%s' (id=%s, new=%s, tools=%d, conv=%s)",
+        colony_name,
+        worker_name,
+        worker_id,
+        is_new,
+        len(queen_tools),
+        "copied" if worker_conv_dir.exists() else "none",
+    )
+    return web.json_response(
+        {
+            "colony_path": str(colony_dir),
+            "colony_name": colony_name,
+            "worker_name": worker_name,
+            "worker_id": worker_id,
+            "is_new": is_new,
+        }
+    )
 
 
 def register_routes(app: web.Application) -> None:

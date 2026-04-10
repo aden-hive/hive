@@ -466,13 +466,14 @@ class QueenPhaseState:
             )
 
 
-def build_worker_profile(runtime: ColonyRuntime, agent_path: Path | str | None = None) -> str:
-    """Build a worker capability profile from the colony's agent spec and goal."""
-    spec = runtime._agent_spec
-    goal = runtime._goal
+def build_worker_profile(runtime: Any, agent_path: Path | str | None = None) -> str:
+    """Build a worker capability profile from the runtime's spec and goal."""
+    goal = runtime._goal if hasattr(runtime, "_goal") else runtime.goal
 
     lines = ["\n\n# Worker Profile"]
-    lines.append(f"Agent: {runtime.colony_id}")
+    colony_id = getattr(runtime, "colony_id", None) or ""
+    if colony_id:
+        lines.append(f"Agent: {colony_id}")
     if agent_path:
         lines.append(f"Path: {agent_path}")
     lines.append(f"Goal: {goal.name}")
@@ -489,7 +490,8 @@ def build_worker_profile(runtime: ColonyRuntime, agent_path: Path | str | None =
         for c in goal.constraints:
             lines.append(f"- {c.description}")
 
-    if spec.tools:
+    spec = getattr(runtime, "_agent_spec", None)
+    if spec and hasattr(spec, "tools") and spec.tools:
         lines.append(f"\n## Worker Tools\n{', '.join(sorted(spec.tools))}")
 
     lines.append("\nStatus at session start: idle (not started).")

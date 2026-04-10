@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams, useLocation } from "react-router-dom";
-import { Loader2, WifiOff, KeyRound, FolderOpen, X, Users } from "lucide-react";
+import { Loader2, WifiOff, KeyRound, FolderOpen, X } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import DraftGraph from "@/components/DraftGraph";
 import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
@@ -237,17 +237,6 @@ export default function ColonyChat() {
           <KeyRound className="w-3.5 h-3.5" />
           Credentials
         </button>
-        {agentState.sessionId && (
-          <button
-            onClick={handleColonySpawn}
-            disabled={spawning}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0 disabled:opacity-50"
-            title="Spawn worker clones from the queen"
-          >
-            <Users className="w-3.5 h-3.5" />
-            {spawning ? "Spawning..." : "Spawn Worker"}
-          </button>
-        )}
         {agentState.sessionId && (
           <button
             onClick={() => sessionsApi.revealFolder(agentState.sessionId!).catch(() => {})}
@@ -1224,42 +1213,6 @@ export default function ColonyChat() {
       // fire-and-forget
     }
   }, [agentState.sessionId, updateState]);
-
-  const [spawning, setSpawning] = useState(false);
-
-  const handleColonySpawn = useCallback(async () => {
-    if (!agentState.sessionId || spawning) return;
-    const task = prompt("Enter task for worker clone:");
-    if (!task) return;
-    setSpawning(true);
-    try {
-      const result = await executionApi.colonySpawn(agentState.sessionId, task);
-      upsertMessage({
-        id: makeId(),
-        agent: "System",
-        agentColor: "",
-        content: `Spawned ${result.count} worker(s): ${result.worker_ids.join(", ")}`,
-        timestamp: "",
-        type: "system",
-        thread: agentPath,
-        createdAt: Date.now(),
-      });
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      upsertMessage({
-        id: makeId(),
-        agent: "System",
-        agentColor: "",
-        content: `Spawn failed: ${errMsg}`,
-        timestamp: "",
-        type: "system",
-        thread: agentPath,
-        createdAt: Date.now(),
-      });
-    } finally {
-      setSpawning(false);
-    }
-  }, [agentState.sessionId, spawning, agentPath, upsertMessage]);
 
   const handleSend = useCallback(
     (text: string, _thread: string, images?: ImageContent[]) => {

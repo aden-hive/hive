@@ -1225,7 +1225,6 @@ class AgentLoader:
             self._storage_path = storage_path
             self._temp_dir = None
         else:
-            # Use persistent storage in ~/.hive/agents/{agent_name}/ per RUNTIME_LOGGING.md spec
             home = Path.home()
             default_storage = home / ".hive" / "agents" / agent_path.name
             default_storage.mkdir(parents=True, exist_ok=True)
@@ -1314,164 +1313,95 @@ class AgentLoader:
         credential_store: Any | None = None,
     ) -> "AgentLoader":
         """
-        Load an agent from an export folder.
+        Load a colony worker from its config directory.
 
-        Imports the agent's Python package and reads module-level variables
-        (goal, nodes, edges, etc.) to build a GraphSpec. Falls back to
-        agent.json if no Python module is found.
+        Finds {worker_name}.json files in the directory and builds a
+        minimal GraphSpec from the first one found.
 
         Args:
-            agent_path: Path to agent folder
+            agent_path: Path to colony directory containing worker config JSONs
             mock_mode: If True, use mock LLM responses
-            storage_path: Path for runtime storage (defaults to ~/.hive/agents/{name})
-            model: LLM model to use (reads from agent's default_config if None)
+            storage_path: Path for runtime storage
+            model: LLM model to use
             interactive: If True (default), offer interactive credential setup.
-                Set to False from TUI callers that handle setup via their own UI.
-            skip_credential_validation: If True, skip credential checks at load time.
-                When None (default), uses the agent module's setting.
-            credential_store: Optional shared CredentialStore (avoids creating redundant stores).
+            skip_credential_validation: If True, skip credential checks.
+            credential_store: Optional shared CredentialStore.
 
         Returns:
-            AgentRunner instance ready to run
+            AgentLoader instance ready to run
         """
         agent_path = Path(agent_path)
 
-        # Try loading from Python module first (code-based agents)
-        agent_py = agent_path / "agent.py"
-        if agent_py.exists():
-            agent_module = cls._import_agent_module(agent_path)
-
-            goal = getattr(agent_module, "goal", None)
-            nodes = getattr(agent_module, "nodes", None)
-            edges = getattr(agent_module, "edges", None)
-
-            if goal is None or nodes is None or edges is None:
-                raise ValueError(
-                    f"Agent at {agent_path} must define 'goal', 'nodes', and 'edges' "
-                    f"in agent.py (or __init__.py)"
-                )
-
-            # Read model and max_tokens from agent's config if not explicitly provided
-            agent_config = getattr(agent_module, "default_config", None)
-            if model is None:
-                if agent_config and hasattr(agent_config, "model"):
-                    model = agent_config.model
-
-            if agent_config and hasattr(agent_config, "max_tokens"):
-                max_tokens = agent_config.max_tokens
-                logger.info(
-                    "Agent default_config overrides max_tokens: %d "
-                    "(configuration.json value ignored)",
-                    max_tokens,
-                )
-            else:
-                hive_config = get_hive_config()
-                max_tokens = hive_config.get("llm", {}).get("max_tokens", DEFAULT_MAX_TOKENS)
-
-            # Resolve max_context_tokens with priority:
-            #   1. agent loop_config["max_context_tokens"] (explicit, wins silently)
-            #   2. agent default_config.max_context_tokens (logged)
-            #   3. configuration.json llm.max_context_tokens
-            #   4. hardcoded default (32_000)
-            agent_loop_config: dict = dict(getattr(agent_module, "loop_config", {}))
-            if "max_context_tokens" not in agent_loop_config:
-                if agent_config and hasattr(agent_config, "max_context_tokens"):
-                    agent_loop_config["max_context_tokens"] = agent_config.max_context_tokens
-                    logger.info(
-                        "Agent default_config overrides max_context_tokens: %d"
-                        " (configuration.json value ignored)",
-                        agent_config.max_context_tokens,
-                    )
-                else:
-                    agent_loop_config["max_context_tokens"] = get_max_context_tokens()
-
-            # Read intro_message from agent metadata (shown on TUI load)
-            agent_metadata = getattr(agent_module, "metadata", None)
-            intro_message = ""
-            if agent_metadata and hasattr(agent_metadata, "intro_message"):
-                intro_message = agent_metadata.intro_message
-
-            # Build GraphSpec from module-level variables
-            graph_kwargs: dict = {
-                "id": f"{agent_path.name}-graph",
-                "goal_id": goal.id,
-                "version": "1.0.0",
-                "entry_node": getattr(agent_module, "entry_node", nodes[0].id),
-                "entry_points": getattr(agent_module, "entry_points", {}),
-                "terminal_nodes": getattr(agent_module, "terminal_nodes", []),
-                "pause_nodes": getattr(agent_module, "pause_nodes", []),
-                "nodes": nodes,
-                "edges": edges,
-                "max_tokens": max_tokens,
-                "loop_config": agent_loop_config,
-            }
-            # Only pass optional fields if explicitly defined by the agent module
-            conversation_mode = getattr(agent_module, "conversation_mode", None)
-            if conversation_mode is not None:
-                graph_kwargs["conversation_mode"] = conversation_mode
-            identity_prompt = getattr(agent_module, "identity_prompt", None)
-            if identity_prompt is not None:
-                graph_kwargs["identity_prompt"] = identity_prompt
-
-            graph = GraphSpec(**graph_kwargs)
-
-            # Generate flowchart.json if missing (for template/legacy agents)
-            generate_fallback_flowchart(graph, goal, agent_path)
-            # Read skill configuration from agent module
-            agent_default_skills = getattr(agent_module, "default_skills", None)
-            agent_skills = getattr(agent_module, "skills", None)
-
-            # Read runtime config (webhook settings, etc.) if defined
-            agent_runtime_config = getattr(agent_module, "runtime_config", None)
-
-            # Read pre-run hooks (e.g., credential_tester needs account selection)
-            skip_cred = getattr(agent_module, "skip_credential_validation", False)
-            if skip_credential_validation is not None:
-                skip_cred = skip_credential_validation
-            needs_acct = getattr(agent_module, "requires_account_selection", False)
-            configure_fn = getattr(agent_module, "configure_for_account", None)
-            list_accts_fn = getattr(agent_module, "list_connected_accounts", None)
-
-            runner = cls(
-                agent_path=agent_path,
-                graph=graph,
-                goal=goal,
-                mock_mode=mock_mode,
-                storage_path=storage_path,
-                model=model,
-                intro_message=intro_message,
-                runtime_config=agent_runtime_config,
-                interactive=interactive,
-                skip_credential_validation=skip_cred,
-                requires_account_selection=needs_acct,
-                configure_for_account=configure_fn,
-                list_accounts=list_accts_fn,
-                credential_store=credential_store,
-            )
-            # Stash skill config for use in _setup()
-            runner._agent_default_skills = agent_default_skills
-            runner._agent_skills = agent_skills
-            return runner
-
-        # Fallback: load from agent.json (declarative config)
-        agent_json_path = agent_path / "agent.json"
-
-        if not agent_json_path.is_file():
-            raise FileNotFoundError(f"No agent.py or agent.json found in {agent_path}")
-
-        export_data = agent_json_path.read_text(encoding="utf-8")
-        if not export_data.strip():
-            raise ValueError(f"Empty agent.json: {agent_json_path}")
-
-        parsed = json.loads(export_data)
-        graph, goal = load_agent_config(parsed)
-        logger.info(
-            "Loaded declarative agent config from agent.json (name=%s)",
-            parsed.get("name"),
+        # Find {worker_name}.json worker config files in the colony directory
+        worker_jsons = sorted(
+            p
+            for p in agent_path.iterdir()
+            if p.is_file()
+            and p.suffix == ".json"
+            and p.stem not in ("agent", "flowchart", "triggers", "configuration")
         )
 
-        # Generate flowchart.json if missing (for legacy JSON-based agents)
-        generate_fallback_flowchart(graph, goal, agent_path)
+        if not worker_jsons:
+            raise FileNotFoundError(f"No worker config found in {agent_path}")
+
+        from framework.orchestrator.edge import EdgeSpec, GraphSpec
+        from framework.orchestrator.goal import Constraint, Goal as GoalModel, SuccessCriterion
+        from framework.orchestrator.node import NodeSpec
+
+        # Load the first worker config
+        first_worker = json.loads(worker_jsons[0].read_text(encoding="utf-8"))
+        worker_name = first_worker.get("name", worker_jsons[0].stem)
+        system_prompt = first_worker.get("system_prompt", "")
+        tool_names = first_worker.get("tools", [])
+        goal_data = first_worker.get("goal", {})
+        loop_config = first_worker.get("loop_config", {})
+
+        success_criteria = [
+            SuccessCriterion(id=f"sc-{i}", description=sc, metric="llm_judge", target="")
+            for i, sc in enumerate(goal_data.get("success_criteria", []))
+        ]
+        constraints = [
+            Constraint(id=f"c-{i}", description=c, constraint_type="hard", category="general")
+            for i, c in enumerate(goal_data.get("constraints", []))
+        ]
+        goal = GoalModel(
+            id=f"{agent_path.name}-goal",
+            name=goal_data.get("description", worker_name),
+            description=goal_data.get("description", ""),
+            success_criteria=success_criteria,
+            constraints=constraints,
+        )
+
+        node = NodeSpec(
+            id=worker_name,
+            name=worker_name.replace("_", " ").title(),
+            description=first_worker.get("description", ""),
+            node_type="event_loop",
+            tools=tool_names,
+            system_prompt=system_prompt,
+        )
+        graph = GraphSpec(
+            id=f"{agent_path.name}-graph",
+            goal_id=goal.id,
+            entry_node=worker_name,
+            nodes=[node],
+            edges=[],
+            max_tokens=loop_config.get("max_tokens", 4096),
+            loop_config=loop_config,
+            identity_prompt=first_worker.get("identity_prompt", ""),
+            conversation_mode="continuous",
+        )
+
+        logger.info(
+            "Loaded colony worker config from %s (name=%s, tools=%d)",
+            worker_jsons[0].name,
+            worker_name,
+            len(tool_names),
+        )
+
+        if storage_path is None:
+            storage_path = Path.home() / ".hive" / "agents" / agent_path.name / worker_name
+            storage_path.mkdir(parents=True, exist_ok=True)
 
         runner = cls(
             agent_path=agent_path,
@@ -2136,8 +2066,8 @@ class AgentLoader:
 
     def cleanup(self) -> None:
         """Clean up resources (synchronous)."""
-        # Clean up MCP client connections
-        self._tool_registry.cleanup()
+        if hasattr(self, "_tool_registry"):
+            self._tool_registry.cleanup()
 
         if self._temp_dir:
             self._temp_dir.cleanup()

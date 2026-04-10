@@ -224,13 +224,29 @@ class SessionManager:
         queen_resume_from: str | None = None,
         queen_name: str | None = None,
         initial_phase: str | None = None,
+        worker_name: str | None = None,
     ) -> Session:
         """Create a session and load a worker in one step.
 
-        When ``queen_resume_from`` is set the session reuses the original session
-        ID so the frontend sees a single continuous session.  The queen writes
-        conversation messages to that existing directory, preserving full history.
+        When ``worker_name`` is provided, creates a worker-only session
+        (no queen) — the worker runs as the primary interactive loop.
+        Otherwise, creates a queen+worker session (legacy path).
         """
+        agent_path = Path(agent_path)
+        resolved_colony_id = agent_id or agent_path.name
+
+        if worker_name:
+            return await self._create_worker_only_session(
+                agent_path=agent_path,
+                worker_name=worker_name,
+                colony_id=resolved_colony_id,
+                session_id=session_id,
+                model=model,
+                initial_prompt=initial_prompt,
+                queen_resume_from=queen_resume_from,
+                queen_name=queen_name,
+            )
+
         from framework.tools.queen_lifecycle_tools import build_worker_profile
 
         agent_path = Path(agent_path)
@@ -317,6 +333,244 @@ class SessionManager:
             # If anything fails (non-cold-restore), tear down the session
             await self.stop_session(session.id)
             raise
+        return session
+
+    async def _create_worker_only_session(
+        self,
+        agent_path: Path,
+        worker_name: str,
+        colony_id: str,
+        session_id: str | None = None,
+        model: str | None = None,
+        initial_prompt: str | None = None,
+        queen_resume_from: str | None = None,
+        queen_name: str | None = None,
+    ) -> Session:
+        """Create a worker-only session (no queen).
+
+        Loads the worker's {worker_name}.json config, creates an AgentLoop,
+        and sets it as the primary interactive executor so chat/SSE work
+        through the existing infrastructure.
+        """
+        import json as _json
+        import shutil
+
+        from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
+        from framework.agent_loop.types import AgentContext, AgentSpec
+        from framework.orchestrator.graph_executor import GraphExecutor
+        from framework.schemas.goal import Goal
+        from framework.storage.conversation_store import FileConversationStore
+        from framework.tracker.decision_tracker import DecisionTracker
+
+        worker_config_path = agent_path / f"{worker_name}.json"
+        if not worker_config_path.exists():
+            raise FileNotFoundError(f"Worker config not found: {worker_config_path}")
+
+        worker_data = _json.loads(worker_config_path.read_text(encoding="utf-8"))
+
+        session = await self._create_session_core(
+            session_id=queen_resume_from,
+            model=model,
+        )
+        session.queen_resume_from = queen_resume_from
+        if queen_name:
+            session.queen_name = queen_name
+
+        session.colony_id = colony_id
+        session.colony_name = colony_id
+        session.worker_path = agent_path
+
+        # Worker storage: ~/.hive/agents/{colony_name}/{worker_name}/
+        worker_storage = Path.home() / ".hive" / "agents" / colony_id / worker_name
+        worker_storage.mkdir(parents=True, exist_ok=True)
+
+        # Copy conversations from colony if fresh
+        worker_conv_dir = worker_storage / "conversations"
+        if not worker_conv_dir.exists():
+            colony_conv = agent_path / "conversations"
+            if colony_conv.exists():
+                shutil.copytree(colony_conv, worker_conv_dir)
+        conversation_store = FileConversationStore(worker_conv_dir)
+
+        # Build AgentSpec from worker config
+        spec = AgentSpec(
+            id=worker_name,
+            name=worker_data.get("name", worker_name),
+            description=worker_data.get("description", ""),
+            system_prompt=worker_data.get("system_prompt", ""),
+            tools=worker_data.get("tools", []),
+            tool_access_policy="all",
+            identity_prompt=worker_data.get("identity_prompt", ""),
+        )
+
+        # Build loop config
+        lc_data = worker_data.get("loop_config", {})
+        loop_config = LoopConfig(
+            max_iterations=lc_data.get("max_iterations", 999_999),
+            max_tool_calls_per_turn=lc_data.get("max_tool_calls_per_turn", 30),
+            max_context_tokens=lc_data.get("max_context_tokens", 180_000),
+            spillover_dir=str(agent_path / "data"),
+        )
+
+        # Build goal
+        goal_data = worker_data.get("goal", {})
+        goal = Goal(
+            id=f"{colony_id}-{worker_name}",
+            name=goal_data.get("description", worker_name)[:60],
+            description=goal_data.get("description", ""),
+        )
+
+        # Queen dir for SSE/session metadata (reuse queen session storage)
+        storage_session_id = queen_resume_from or session.id
+        queen_dir = _queen_session_dir(storage_session_id, session.queen_name)
+        queen_dir.mkdir(parents=True, exist_ok=True)
+        session.queen_dir = queen_dir
+
+        # Write meta
+        _meta_path = queen_dir / "meta.json"
+        _existing_meta: dict = {}
+        if _meta_path.exists():
+            try:
+                _existing_meta = _json.loads(_meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        _existing_meta.update(
+            {
+                "created_at": time.time(),
+                "queen_id": session.queen_name,
+                "agent_name": worker_name,
+                "agent_path": str(agent_path),
+                "worker_name": worker_name,
+            }
+        )
+        _meta_path.write_text(_json.dumps(_existing_meta), encoding="utf-8")
+
+        # Set up event log
+        iteration_offset = 0
+        events_path = queen_dir / "events.jsonl"
+        if events_path.exists():
+            max_iter = -1
+            with open(events_path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        evt = _json.loads(line)
+                        i = evt.get("iteration", 0)
+                        if i > max_iter:
+                            max_iter = i
+                    except Exception:
+                        pass
+            if max_iter >= 0:
+                iteration_offset = max_iter + 1
+
+        # Load the worker via AgentLoader to get the full pipeline (MCP, skills, creds)
+        from framework.loader import AgentLoader
+
+        loop = asyncio.get_running_loop()
+        runner = await loop.run_in_executor(
+            None,
+            lambda: AgentLoader.load(
+                agent_path,
+                model=model or self._model,
+                interactive=False,
+                skip_credential_validation=True,
+                credential_store=self._credential_store,
+            ),
+        )
+        if runner._agent_runtime is None:
+            await loop.run_in_executor(
+                None,
+                lambda: runner._setup(event_bus=session.event_bus),
+            )
+
+        session.colony_runtime = runner._agent_runtime
+        session.runner = runner
+
+        # Start the AgentHost
+        runtime = runner._agent_runtime
+        if runtime and not runtime.is_running:
+            await runtime.start()
+
+        # Register entry point so we can trigger execution
+        from framework.host.execution_manager import EntryPointSpec
+
+        if not runtime._streams:
+            runtime.register_entry_point(
+                EntryPointSpec(
+                    id="default",
+                    name="Default",
+                    entry_node=worker_name,
+                    trigger_type="manual",
+                    isolation_level="shared",
+                ),
+            )
+
+        # Create a queen-like executor for the worker so chat injection works
+        # We reuse the queen_executor field even though it's a worker
+        queen_registry = runner._tool_registry
+
+        # Start with queen's default tools if available
+        queen_llm = runner._llm or session.llm
+        all_tools = list(queen_registry.get_tools().values())
+        tool_executor = queen_registry.get_executor()
+
+        agent_loop = AgentLoop(
+            event_bus=session.event_bus,
+            config=loop_config,
+            tool_executor=tool_executor,
+            conversation_store=conversation_store,
+        )
+
+        worker_ctx = AgentContext(
+            runtime=DecisionTracker(worker_storage),
+            agent_id=worker_name,
+            agent_spec=spec,
+            input_data={"task": goal_data.get("description", "")},
+            llm=queen_llm,
+            available_tools=all_tools,
+            goal_context=goal.to_prompt_context(),
+            goal=goal,
+            max_tokens=8192,
+            stream_id=worker_name,
+            execution_id=worker_name,
+            identity_prompt=worker_data.get("identity_prompt", ""),
+            memory_prompt=worker_data.get("memory_prompt", ""),
+            skills_catalog_prompt=worker_data.get("skills_catalog_prompt", ""),
+            protocols_prompt=worker_data.get("protocols_prompt", ""),
+            skill_dirs=worker_data.get("skill_dirs", []),
+        )
+
+        session.queen_executor = GraphExecutor(
+            node_id=worker_name,
+            agent_loop=agent_loop,
+            context=worker_ctx,
+            event_bus=session.event_bus,
+        )
+
+        # Start the worker's agent loop in the background
+        session.queen_task = asyncio.create_task(
+            session.queen_executor.run(initial_message=initial_prompt)
+        )
+
+        # Set up event persistence
+        if session.event_bus and queen_dir:
+            from framework.host.event_bus import EventBus
+
+            session.event_bus.start_persistence(queen_dir, iteration_offset=iteration_offset)
+
+        logger.info(
+            "Worker-only session '%s' started: colony=%s worker=%s tools=%d",
+            session.id,
+            colony_id,
+            worker_name,
+            len(all_tools),
+        )
+
+        async with self._lock:
+            self._loading.discard(session.id)
+
         return session
 
     # ------------------------------------------------------------------

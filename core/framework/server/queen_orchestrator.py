@@ -158,7 +158,9 @@ async def create_queen(
         register_worker_monitoring_tools(
             queen_registry,
             session.worker_path,
-            worker_colony_id=session.colony_runtime._graph_id,
+            worker_graph_id=getattr(session.colony_runtime, "_graph_id", None)
+            or getattr(session.colony_runtime, "graph", None)
+            and session.colony_runtime.graph.id,
             default_session_id=session.id,
         )
 

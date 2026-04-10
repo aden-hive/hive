@@ -64,9 +64,15 @@ export const executionApi = {
   goalProgress: (sessionId: string) =>
     api.get<GoalProgress>(`/sessions/${sessionId}/goal-progress`),
 
-  colonySpawn: (sessionId: string, task: string, count: number = 1) =>
-    api.post<{ worker_ids: string[]; count: number }>(
+  colonySpawn: (sessionId: string, colonyName: string, workerName: string, task?: string) =>
+    api.post<{
+      colony_path: string;
+      colony_name: string;
+      worker_name: string;
+      worker_id: string;
+      is_new: boolean;
+    }>(
       `/sessions/${sessionId}/colony-spawn`,
-      { task, count },
+      { colony_name: colonyName, worker_name: workerName, task },
     ),
 };
