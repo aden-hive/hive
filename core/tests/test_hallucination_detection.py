@@ -106,6 +106,16 @@ class TestDataBufferHallucinationDetection:
         buffer.write("output", content)
         assert buffer.read("output") == content
 
+    def test_allows_long_natural_language_with_keywords(self):
+        """Natural language with programming words should not be rejected as code."""
+        buffer = DataBuffer()
+        content = (
+            "We need to update the class schedule and import all student records carefully. " * 120
+        )
+
+        buffer.write("output", content)
+        assert buffer.read("output") == content
+
     def test_validate_false_bypasses_check(self):
         """Using validate=False should bypass the check."""
         buffer = DataBuffer()
@@ -121,9 +131,8 @@ class TestDataBufferHallucinationDetection:
         # Create a 50KB string with code at the 75% mark
         size = 50000
         code_position = int(size * 0.75)
-        content = (
-            "A" * code_position + "def hidden_code(): pass" + "B" * (size - code_position - 25)
-        )
+        code = "\ndef hidden_code():\n    pass\n"
+        content = "A" * code_position + code + "B" * (size - code_position - len(code))
 
         with pytest.raises(DataBufferWriteError) as exc_info:
             buffer.write("output", content)
@@ -151,8 +160,8 @@ class TestOutputValidatorHallucinationDetection:
         validator = OutputValidator()
 
         # Code at position 600 (was previously missed with [:500] check)
-        padding = "A" * 600
-        code = "import os"
+        padding = "A" * 600 + "\n"
+        code = "import os\n"
         content = padding + code
 
         assert validator._contains_code_indicators(content) is True
@@ -174,6 +183,16 @@ class TestOutputValidatorHallucinationDetection:
 
         # Long text without any code indicators
         content = "This is a perfectly normal document. " * 300
+
+        assert validator._contains_code_indicators(content) is False
+
+    def test_no_false_positive_for_natural_language_keywords(self):
+        """Natural language with words like class/import should stay unflagged."""
+        validator = OutputValidator()
+        content = (
+            "Let me update the class schedule for next week. "
+            "We need to import all data from the database and send a summary."
+        )
 
         assert validator._contains_code_indicators(content) is False
 

@@ -24,6 +24,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from framework.graph.code_detection import contains_code_indicators
 from framework.llm.provider import LLMProvider, Tool
 from framework.runtime.core import Runtime
 
@@ -373,52 +374,7 @@ class DataBuffer:
         Returns:
             True if code indicators are found, False otherwise
         """
-        code_indicators = [
-            # Python
-            "```python",
-            "def ",
-            "class ",
-            "import ",
-            "async def ",
-            "from ",
-            # JavaScript/TypeScript
-            "function ",
-            "const ",
-            "let ",
-            "=> {",
-            "require(",
-            "export ",
-            # SQL
-            "SELECT ",
-            "INSERT ",
-            "UPDATE ",
-            "DELETE ",
-            "DROP ",
-            # HTML/Script injection
-            "<script",
-            "<?php",
-            "<%",
-        ]
-
-        # For strings under 10KB, check the entire content
-        if len(value) < 10000:
-            return any(indicator in value for indicator in code_indicators)
-
-        # For longer strings, sample at strategic positions
-        sample_positions = [
-            0,  # Start
-            len(value) // 4,  # 25%
-            len(value) // 2,  # 50%
-            3 * len(value) // 4,  # 75%
-            max(0, len(value) - 2000),  # Near end
-        ]
-
-        for pos in sample_positions:
-            chunk = value[pos : pos + 2000]
-            if any(indicator in chunk for indicator in code_indicators):
-                return True
-
-        return False
+        return contains_code_indicators(value)
 
     def read_all(self) -> dict[str, Any]:
         """Read all accessible data."""

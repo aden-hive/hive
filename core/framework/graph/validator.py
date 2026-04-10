@@ -10,6 +10,8 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from framework.graph.code_detection import contains_code_indicators
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,55 +49,7 @@ class OutputValidator:
         Returns:
             True if code indicators are found, False otherwise
         """
-        code_indicators = [
-            # Python
-            "def ",
-            "class ",
-            "import ",
-            "from ",
-            "if __name__",
-            "async def ",
-            "await ",
-            "try:",
-            "except:",
-            # JavaScript/TypeScript
-            "function ",
-            "const ",
-            "let ",
-            "=> {",
-            "require(",
-            "export ",
-            # SQL
-            "SELECT ",
-            "INSERT ",
-            "UPDATE ",
-            "DELETE ",
-            "DROP ",
-            # HTML/Script injection
-            "<script",
-            "<?php",
-            "<%",
-        ]
-
-        # For strings under 10KB, check the entire content
-        if len(value) < 10000:
-            return any(indicator in value for indicator in code_indicators)
-
-        # For longer strings, sample at strategic positions
-        sample_positions = [
-            0,  # Start
-            len(value) // 4,  # 25%
-            len(value) // 2,  # 50%
-            3 * len(value) // 4,  # 75%
-            max(0, len(value) - 2000),  # Near end
-        ]
-
-        for pos in sample_positions:
-            chunk = value[pos : pos + 2000]
-            if any(indicator in chunk for indicator in code_indicators):
-                return True
-
-        return False
+        return contains_code_indicators(value)
 
     def validate_output_keys(
         self,
