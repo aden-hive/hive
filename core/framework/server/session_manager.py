@@ -308,6 +308,7 @@ class SessionManager:
                     model=model,
                     initial_prompt=initial_prompt,
                     queen_resume_from=queen_resume_from,
+                    queen_name=queen_name or _resume_queen_id,
                 )
 
         # Use the colony's forked session ID as the live session ID.
@@ -355,8 +356,11 @@ class SessionManager:
         except Exception:
             if queen_resume_from:
                 # Cold restore: worker load failed (e.g. incomplete code from a
-                # building session).  Fall back to queen-only so the user can
-                # continue the conversation and fix / rebuild the agent.
+                # building session, or the colony directory was deleted). Fall
+                # back to queen-only so the user can continue the conversation.
+                # Forward queen_name so the recovered session is stored under
+                # the correct queen identity -- otherwise it lands in default/
+                # and the frontend routes the user to the wrong dir.
                 logger.warning(
                     "Cold restore: worker load failed for '%s', falling back to queen-only",
                     agent_path,
@@ -368,6 +372,7 @@ class SessionManager:
                     model=model,
                     initial_prompt=initial_prompt,
                     queen_resume_from=queen_resume_from,
+                    queen_name=queen_name or _resume_queen_id,
                 )
             # If anything fails (non-cold-restore), tear down the session
             await self.stop_session(session.id)

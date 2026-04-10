@@ -11,6 +11,7 @@ needs and run everything against a temp directory.
 
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +24,56 @@ from framework.agent_loop.internals.types import LoopConfig
 from framework.host.event_bus import EventBus
 from framework.server.app import create_app
 from framework.server.session_manager import Session, _queen_session_dir
+
+
+# Modules that import HIVE_HOME / QUEENS_DIR / COLONIES_DIR / MEMORIES_DIR /
+# HIVE_CONFIG_FILE at import time and need their bindings rewritten when we
+# redirect ~/.hive to a temp directory. Patching Path.home alone is NOT
+# sufficient -- these constants are captured once at module import.
+_HIVE_PATH_CONSUMERS = (
+    "framework.config",
+    "framework.server.session_manager",
+    "framework.server.queen_orchestrator",
+    "framework.server.routes_queens",
+    "framework.server.app",
+    "framework.agents.discovery",
+    "framework.agents.queen.queen_profiles",
+    "framework.tools.queen_lifecycle_tools",
+    "framework.storage.migrate_v2",
+    "framework.loader.cli",
+)
+
+_HIVE_PATH_NAMES = (
+    ("HIVE_HOME", lambda h: h),
+    ("QUEENS_DIR", lambda h: h / "agents" / "queens"),
+    ("COLONIES_DIR", lambda h: h / "colonies"),
+    ("MEMORIES_DIR", lambda h: h / "memories"),
+    ("HIVE_CONFIG_FILE", lambda h: h / "configuration.json"),
+)
+
+
+def _isolate_hive_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Redirect ~/.hive to ``tmp_path/.hive`` for this test.
+
+    Patches ``Path.home()`` and every module-level binding of
+    ``HIVE_HOME``/``QUEENS_DIR``/``COLONIES_DIR``/``MEMORIES_DIR``/
+    ``HIVE_CONFIG_FILE`` that was captured at import time. Without this,
+    tests that exercise the fork handler leak real session directories
+    into the developer's actual ``~/.hive/agents/queens/`` tree.
+    """
+    fake_home_root = tmp_path
+    fake_hive = fake_home_root / ".hive"
+    fake_hive.mkdir(exist_ok=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home_root))
+    for mod_name in _HIVE_PATH_CONSUMERS:
+        try:
+            mod = importlib.import_module(mod_name)
+        except ImportError:
+            continue
+        for attr_name, builder in _HIVE_PATH_NAMES:
+            if hasattr(mod, attr_name):
+                monkeypatch.setattr(mod, attr_name, builder(fake_hive))
+    return fake_hive
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +250,7 @@ async def test_colony_spawn_creates_correct_artifacts(tmp_path, monkeypatch):
       - worker storage must receive the queen conversations
       - source queen session meta must be linked back to the colony
     """
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    _isolate_hive_home(tmp_path, monkeypatch)
 
     queen_name = "queen_finance_fundraising"
     source_session_id = "session_20260410_120000_aaaaaaaa"
@@ -259,8 +310,15 @@ async def test_colony_spawn_creates_correct_artifacts(tmp_path, monkeypatch):
     assert worker_meta["queen_phase"] == "planning"
     assert worker_meta["spawned_from"] == source_session_id
     assert worker_meta["goal"]["description"] == "trade carefully"
-    assert worker_meta["system_prompt"] == "you are the queen"
-    assert worker_meta["identity_prompt"] == "You are Charlotte, head of finance."
+    # The worker system_prompt is a FOCUSED task brief, NOT the queen's
+    # persona prompt. The queen's identity must not leak into the worker.
+    assert "focused worker" in worker_meta["system_prompt"]
+    assert "trade carefully" in worker_meta["system_prompt"]
+    assert "Charlotte" not in worker_meta["system_prompt"]
+    # identity_prompt and memory_prompt must be empty -- the worker is
+    # not the queen and must not inherit her persona or global memory.
+    assert worker_meta["identity_prompt"] == ""
+    assert worker_meta["memory_prompt"] == ""
     assert worker_meta["tools"] == ["read_file", "search_files"]
     assert worker_meta["skills_catalog_prompt"] == "<skills/>"
     assert worker_meta["protocols_prompt"] == "<protocols/>"
@@ -315,7 +373,7 @@ async def test_create_session_with_worker_colony_uses_forked_session_id(
     source first. The backend now overrides ``queen_resume_from`` with the
     colony's designated session ID.
     """
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    _isolate_hive_home(tmp_path, monkeypatch)
 
     from framework.server.session_manager import SessionManager
 

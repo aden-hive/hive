@@ -317,7 +317,7 @@ class Orchestrator:
         Returns:
             List of error messages (empty if all tools are available)
         """
-        errors = []
+        errors: list[str] = []  # retained for API compatibility; now always empty
         available_tool_names = {t.name for t in self.tools}
 
         # Compute reachable nodes from the execution's entry node
@@ -331,18 +331,34 @@ class Orchestrator:
             for edge in graph.get_outgoing_edges(nid):
                 to_visit.append(edge.target)
 
+        # Strip tool names that aren't registered in this runtime instead of
+        # hard-failing. The worker is forked from the queen's tool snapshot
+        # which may include MCP tools the worker's runtime doesn't load (e.g.
+        # coder-tools agent-management tools). Blocking the worker on missing
+        # tools leaves the queen stranded mid-task; stripping + warning lets
+        # the worker proceed with what it does have.
         for node in graph.nodes:
             if node.id not in reachable:
                 continue
-            if node.tools:
-                missing = set(node.tools) - available_tool_names
-                if missing:
-                    available = sorted(available_tool_names) if available_tool_names else "none"
-                    errors.append(
-                        f"Node '{node.name}' (id={node.id}) requires tools "
-                        f"{sorted(missing)} but they are not registered. "
-                        f"Available tools: {available}"
-                    )
+            if not node.tools:
+                continue
+            declared = list(node.tools)
+            kept = [t for t in declared if t in available_tool_names]
+            missing = [t for t in declared if t not in available_tool_names]
+            if missing:
+                self.logger.warning(
+                    "Node '%s' (id=%s) declares %d tools not in this runtime; "
+                    "stripping them and continuing: %s",
+                    node.name,
+                    node.id,
+                    len(missing),
+                    sorted(missing),
+                )
+                # Mutate in place so downstream tool resolution only sees the
+                # tools we actually have. NodeSpec.tools is a list on a
+                # pydantic BaseModel (model_config allows extra), so direct
+                # assignment is safe.
+                node.tools = kept
 
         return errors
 

@@ -3077,34 +3077,29 @@ def register_queen_lifecycle_tools(
                 )
                 info = updated_session.worker_info
 
-                # Validate that all tools declared by nodes are registered
+                # Tools declared but not registered in the loaded runtime are
+                # stripped with a warning so the worker still starts. Forked
+                # workers often snapshot the queen's tool list which includes
+                # MCP tools the worker's runtime doesn't load; blocking on
+                # that would leave the queen stranded.
                 loaded_runtime = _get_runtime()
                 if loaded_runtime is not None:
                     available_tool_names = {t.name for t in loaded_runtime._tools}
-                    missing_by_node: dict[str, list[str]] = {}
                     for node in loaded_runtime.graph.nodes:
                         if node.tools:
-                            missing = set(node.tools) - available_tool_names
+                            declared = list(node.tools)
+                            kept = [t for t in declared if t in available_tool_names]
+                            missing = [t for t in declared if t not in available_tool_names]
                             if missing:
-                                missing_by_node[f"{node.name} (id={node.id})"] = sorted(missing)
-                    if missing_by_node:
-                        # Unload the broken graph
-                        try:
-                            await session_manager.unload_colony(manager_session_id)
-                        except Exception:
-                            pass
-                        details = "; ".join(
-                            f"Node '{k}' missing {v}" for k, v in missing_by_node.items()
-                        )
-                        return json.dumps(
-                            {
-                                "error": (
-                                    f"Tool validation failed: {details}. "
-                                    "Fix node tool declarations or add the missing "
-                                    "tools, then try loading again."
+                                logger.warning(
+                                    "Node '%s' (id=%s) declares %d tools not in the "
+                                    "loaded runtime; stripping and continuing: %s",
+                                    node.name,
+                                    node.id,
+                                    len(missing),
+                                    sorted(missing),
                                 )
-                            }
-                        )
+                                node.tools = kept
 
                 # Ensure we have a flowchart for this agent — try in order:
                 # 1. Already in phase_state (from planning workflow)

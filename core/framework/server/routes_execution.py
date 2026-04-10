@@ -725,29 +725,29 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
     queen_tools: list = queen_ctx.available_tools if queen_ctx else []
     tool_names = [t.name for t in queen_tools if t.name not in queen_only_tools]
 
-    system_prompt = ""
     phase_state = getattr(session, "phase_state", None)
-    if phase_state is not None:
-        try:
-            system_prompt = phase_state.get_current_prompt()
-        except Exception:
-            pass
-    if not system_prompt and queen_ctx:
-        from framework.agent_loop.prompting import build_system_prompt_for_context
 
-        try:
-            system_prompt = build_system_prompt_for_context(queen_ctx)
-        except Exception:
-            pass
-
+    # Skills + protocols ARE inherited by the worker so it knows how to
+    # use tools and follow operational conventions. These are NOT queen
+    # identity data -- they are runtime-neutral guides.
     queen_skills_catalog = queen_ctx.skills_catalog_prompt if queen_ctx else ""
     queen_protocols = queen_ctx.protocols_prompt if queen_ctx else ""
     queen_skill_dirs = queen_ctx.skill_dirs if queen_ctx else []
-    queen_identity = ""
-    queen_memory = ""
-    if phase_state is not None:
-        queen_identity = getattr(phase_state, "queen_identity_prompt", "") or ""
-        queen_memory = getattr(phase_state, "_cached_global_recall_block", "") or ""
+
+    # Build a focused, worker-scoped system prompt. We deliberately do
+    # NOT inherit the queen's identity_prompt or her phase-specific prompt
+    # (building / running / etc.) -- those describe "how to be a queen"
+    # and confuse the worker into greeting the user as Charlotte with no
+    # memory. The worker is a task executor; give it a task-focused brief.
+    worker_task = task or "Continue the work from the queen's current session."
+    worker_system_prompt = (
+        "You are a focused worker agent spawned by the queen to carry out "
+        "one specific task. Read the goal carefully, use your available "
+        "tools to make progress, and call set_output when complete. "
+        "If you get stuck or need human judgement, call escalate to hand "
+        "the question back to the queen.\n\n"
+        f"Task: {worker_task}"
+    )
 
     queen_lc_config: dict = {
         "max_iterations": 999_999,
@@ -761,9 +761,11 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
         queen_lc_config["max_context_tokens"] = queen_config.max_context_tokens
         queen_lc_config["max_tool_result_chars"] = queen_config.max_tool_result_chars
 
-    worker_task = task or "Continue the work from the queen's current session."
-
     # ── 2. Write worker.json (create or update) ──────────────────
+    # identity_prompt and memory_prompt are intentionally EMPTY -- the
+    # worker is not Charlotte / Alexandra / etc., it is a task executor.
+    # Inheriting the queen's persona made the worker greet the user in
+    # first person with no memory of the task it was actually given.
     worker_meta = {
         "name": worker_name,
         "version": "1.0.0",
@@ -773,13 +775,13 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
             "success_criteria": [],
             "constraints": [],
         },
-        "system_prompt": system_prompt,
+        "system_prompt": worker_system_prompt,
         "tools": tool_names,
         "skills_catalog_prompt": queen_skills_catalog,
         "protocols_prompt": queen_protocols,
         "skill_dirs": list(queen_skill_dirs),
-        "identity_prompt": queen_identity,
-        "memory_prompt": queen_memory,
+        "identity_prompt": "",
+        "memory_prompt": "",
         "queen_phase": phase_state.phase if phase_state else "",
         "queen_id": getattr(phase_state, "queen_id", "") if phase_state else "",
         "loop_config": queen_lc_config,
