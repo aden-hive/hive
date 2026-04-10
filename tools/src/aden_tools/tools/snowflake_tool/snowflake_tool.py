@@ -28,7 +28,7 @@ def _get_config() -> tuple[str, dict] | dict:
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "aden-tools/1.0",
+        "User-Agent": "hive_tools/1.0",
         "X-Snowflake-Authorization-Token-Type": os.getenv("SNOWFLAKE_TOKEN_TYPE", "OAUTH"),
     }
     return base_url, headers

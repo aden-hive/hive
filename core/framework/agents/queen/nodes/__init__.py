@@ -207,8 +207,8 @@ _shared_building_knowledge = (
 **Never use absolute paths** like `/mnt/data/...` or `/workspace/...` — they fail.
 The project root is implicit.
 
-## Worker File Tools (hive-tools MCP)
-Workers use a DIFFERENT MCP server (hive-tools) with DIFFERENT tool names. \
+## Worker File Tools (hive_tools MCP)
+Workers use a DIFFERENT MCP server (hive_tools) with DIFFERENT tool names. \
 When designing worker nodes or writing worker system prompts, reference these \
 tool names — NOT the coder-tools names (read_file, write_file, etc.).
 
@@ -219,12 +219,12 @@ Worker data tools (from files-tools MCP server):
 - list_files(path) — list directory contents
 - search_files(pattern, path) — regex search in files
 
-Worker data tools (from hive-tools MCP server):
+Worker data tools (from hive_tools MCP server):
 - csv_read, csv_write, csv_append — CSV operations
 - pdf_read — read PDF files
 
 All tools are registered in the global MCP registry (~/.hive/mcp_registry/). \
-Workers get tools from: hive-tools, gcu-tools, files-tools.
+Workers get tools from: hive_tools, gcu-tools, files-tools.
 
 IMPORTANT: Do NOT tell workers to use read_file, write_file, edit_file, \
 search_files, or list_directory — those are YOUR tools, not theirs.
@@ -513,7 +513,7 @@ The agent.json must include ALL of these in one write:
 - `edges` — connecting all nodes with proper conditions
 - `entry_node`, `terminal_nodes`
 - `mcp_servers` — REQUIRED. Always include all three: \
-`[{"name": "hive-tools"}, {"name": "gcu-tools"}, {"name": "files-tools"}]`
+`[{"name": "hive_tools"}, {"name": "gcu-tools"}, {"name": "files-tools"}]`
 - `loop_config` — `max_iterations`, `max_context_tokens`
 
 **Write the COMPLETE config in one `write_file` call. No TODOs, no placeholders.** \
@@ -522,7 +522,7 @@ The queen writes final production-ready system prompts directly.
 **There are NO Python files.** The framework loads agent.json directly.
 
 MCP servers are loaded from the global registry by name. Available servers:
-- `hive-tools` — web search, email, CRM, calendar, 100+ integrations
+- `hive_tools` — web search, email, CRM, calendar, 100+ integrations
 - `gcu-tools` — browser automation (click, type, navigate, screenshot)
 - `files-tools` — file I/O (read, write, edit, search, list)
 

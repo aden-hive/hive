@@ -510,17 +510,17 @@ if __name__ == "__main__":
 
 ## mcp_servers.json
 
-> **Auto-generated.** `initialize_and_build_agent` creates this file with hive-tools
+> **Auto-generated.** `initialize_and_build_agent` creates this file with hive_tools
 > as the default. Only edit manually to add additional MCP servers.
 
 ```json
 {
-  "hive-tools": {
+  "hive_tools": {
     "transport": "stdio",
     "command": "uv",
     "args": ["run", "python", "mcp_server.py", "--stdio"],
     "cwd": "../../tools",
-    "description": "Hive tools MCP server"
+    "description": "hive_tools MCP server"
   }
 }
 ```

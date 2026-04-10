@@ -389,7 +389,7 @@ def list_agent_tools(
 
     Args:
         server_config_path: Path to mcp_servers.json. Default: tools/mcp_servers.json
-            (the standard hive-tools server). Can also point to an agent's config
+            (the standard hive_tools server). Can also point to an agent's config
             to see what tools that specific agent has access to.
         output_schema: Controls verbosity of the response.
             "summary" (default) — provider list with tool counts + credential status. Very compact.

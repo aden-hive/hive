@@ -372,7 +372,7 @@ class ToolRegistry:
         """Resolve cwd and script paths for MCP stdio config (Windows compatibility).
 
         Use this when building MCPServerConfig from a config file (e.g. in
-        list_agent_tools, discover_mcp_tools) so hive-tools and other servers
+        list_agent_tools, discover_mcp_tools) so hive_tools and other servers
         work on Windows. Call with base_dir = directory containing the config.
         """
         registry = ToolRegistry()

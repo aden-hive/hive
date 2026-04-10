@@ -36,7 +36,7 @@ If `agent.py` exists (legacy), it's loaded as a Python module instead.
     "max_context_tokens": 32000
   },
   "mcp_servers": [
-    {"name": "hive-tools"},
+    {"name": "hive_tools"},
     {"name": "gcu-tools"}
   ],
   "variables": {

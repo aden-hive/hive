@@ -41,7 +41,7 @@ loop_config:
 
 # MCP servers to connect (resolved by name from ~/.hive/mcp_registry/)
 mcp_servers:
-  - name: hive-tools
+  - name: hive_tools
   - name: gcu-tools
 
 nodes:
@@ -200,7 +200,7 @@ The `mcp_servers.json` file is still loaded automatically if present alongside
 
 ```yaml
 mcp_servers:
-  - name: hive-tools
+  - name: hive_tools
   - name: gcu-tools
 ```
 

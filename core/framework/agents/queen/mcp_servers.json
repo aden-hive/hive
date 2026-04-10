@@ -13,7 +13,7 @@
     "cwd": "../../../../tools",
     "description": "Browser automation tools (Playwright-based)"
   },
-  "aden-tools": {
+  "hive_tools": {
     "transport": "stdio",
     "command": "uv",
     "args": ["run", "python", "mcp_server.py", "--stdio"],
