@@ -62,6 +62,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _render_credentials_block(provider: Any) -> str:
+    """Call a credentials_prompt_provider safely and return its output.
+
+    Returns "" if no provider is set or if it raises (the Queen prompt must
+    never fail to render because credential discovery hit a hiccup).
+    """
+    if provider is None:
+        return ""
+    try:
+        result = provider()
+    except Exception:
+        logger.debug("credentials_prompt_provider raised", exc_info=True)
+        return ""
+    return result or ""
+
+
 @dataclass
 class WorkerSessionAdapter:
     """Adapter for TUI compatibility.
@@ -108,6 +124,12 @@ class QueenPhaseState:
     # Community skills catalog (XML) — appended after protocols
     skills_catalog_prompt: str = ""
 
+    # Provider for the ambient "Connected integrations" block. The orchestrator
+    # wires this to a function that snapshots CredentialStoreAdapter accounts
+    # and renders them via build_accounts_prompt(). Called on every prompt
+    # rebuild so newly added/deleted credentials show up without restart.
+    credentials_prompt_provider: Any = None  # Callable[[], str] | None
+
     # Queen identity (set once at session start by queen identity hook,
     # persisted here so it survives dynamic prompt refreshes across iterations).
     queen_id: str | None = None
@@ -144,6 +166,9 @@ class QueenPhaseState:
         if self.queen_identity_prompt:
             parts.append(self.queen_identity_prompt)
         parts.append(base)
+        credentials_block = _render_credentials_block(self.credentials_prompt_provider)
+        if credentials_block:
+            parts.append(credentials_block)
         if self.skills_catalog_prompt:
             parts.append(self.skills_catalog_prompt)
         if self.protocols_prompt:
@@ -249,6 +274,10 @@ class QueenPhaseState:
     # Community skills catalog (XML) — appended after protocols
     skills_catalog_prompt: str = ""
 
+    # Provider for the ambient "Connected integrations" block. See
+    # docstring on the simpler QueenPhaseState above.
+    credentials_prompt_provider: Any = None  # Callable[[], str] | None
+
     # Queen identity (set once at session start by queen identity hook,
     # persisted here so it survives dynamic prompt refreshes across iterations).
     queen_id: str | None = None
@@ -293,6 +322,9 @@ class QueenPhaseState:
         if self.queen_identity_prompt:
             parts.append(self.queen_identity_prompt)
         parts.append(base)
+        credentials_block = _render_credentials_block(self.credentials_prompt_provider)
+        if credentials_block:
+            parts.append(credentials_block)
         if self.skills_catalog_prompt:
             parts.append(self.skills_catalog_prompt)
         if self.protocols_prompt:

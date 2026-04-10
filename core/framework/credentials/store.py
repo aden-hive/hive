@@ -19,6 +19,7 @@ from typing import Any
 from pydantic import SecretStr
 
 from .models import (
+    CredentialExpiredError,
     CredentialKey,
     CredentialObject,
     CredentialRefreshError,
@@ -177,6 +178,8 @@ class CredentialStore:
         self,
         credential_id: str,
         refresh_if_needed: bool = True,
+        *,
+        raise_on_refresh_failure: bool = False,
     ) -> CredentialObject | None:
         """
         Get a credential by ID.
@@ -184,6 +187,11 @@ class CredentialStore:
         Args:
             credential_id: The credential identifier
             refresh_if_needed: If True, refresh expired credentials
+            raise_on_refresh_failure: If True, raise ``CredentialExpiredError``
+                when refresh fails instead of silently returning the stale
+                credential. Tool-execution call sites should pass True so the
+                agent gets a structured "reauth needed" signal rather than a
+                later 401 from the provider.
 
         Returns:
             CredentialObject or None if not found
@@ -193,7 +201,9 @@ class CredentialStore:
             cached = self._get_from_cache(credential_id)
             if cached is not None:
                 if refresh_if_needed and self._should_refresh(cached):
-                    return self._refresh_credential(cached)
+                    return self._refresh_credential(
+                        cached, raise_on_failure=raise_on_refresh_failure
+                    )
                 return cached
 
             # Load from storage
@@ -203,30 +213,46 @@ class CredentialStore:
 
             # Refresh if needed
             if refresh_if_needed and self._should_refresh(credential):
-                credential = self._refresh_credential(credential)
+                credential = self._refresh_credential(
+                    credential, raise_on_failure=raise_on_refresh_failure
+                )
 
             # Cache
             self._add_to_cache(credential)
 
             return credential
 
-    def get_key(self, credential_id: str, key_name: str) -> str | None:
+    def get_key(
+        self,
+        credential_id: str,
+        key_name: str,
+        *,
+        raise_on_refresh_failure: bool = False,
+    ) -> str | None:
         """
         Convenience method to get a specific key value.
 
         Args:
             credential_id: The credential identifier
             key_name: The key within the credential
+            raise_on_refresh_failure: See ``get_credential``.
 
         Returns:
             The key value or None if not found
         """
-        credential = self.get_credential(credential_id)
+        credential = self.get_credential(
+            credential_id, raise_on_refresh_failure=raise_on_refresh_failure
+        )
         if credential is None:
             return None
         return credential.get_key(key_name)
 
-    def get(self, credential_id: str) -> str | None:
+    def get(
+        self,
+        credential_id: str,
+        *,
+        raise_on_refresh_failure: bool = False,
+    ) -> str | None:
         """
         Legacy compatibility: get the primary key value.
 
@@ -235,11 +261,14 @@ class CredentialStore:
 
         Args:
             credential_id: The credential identifier
+            raise_on_refresh_failure: See ``get_credential``.
 
         Returns:
             The primary key value or None
         """
-        credential = self.get_credential(credential_id)
+        credential = self.get_credential(
+            credential_id, raise_on_refresh_failure=raise_on_refresh_failure
+        )
         if credential is None:
             return None
         return credential.get_default_key()
@@ -510,8 +539,20 @@ class CredentialStore:
 
         return provider.should_refresh(credential)
 
-    def _refresh_credential(self, credential: CredentialObject) -> CredentialObject:
-        """Refresh a credential using its provider."""
+    def _refresh_credential(
+        self,
+        credential: CredentialObject,
+        *,
+        raise_on_failure: bool = False,
+    ) -> CredentialObject:
+        """Refresh a credential using its provider.
+
+        When ``raise_on_failure`` is True, a refresh failure raises
+        ``CredentialExpiredError`` carrying provider/alias/help_url metadata
+        for the caller (typically the tool runner) to surface a reauth
+        request. Otherwise, the stale credential is returned to preserve
+        legacy best-effort behavior.
+        """
         provider = self.get_provider_for_credential(credential)
         if provider is None:
             logger.warning(f"No provider found for credential '{credential.id}'")
@@ -530,6 +571,16 @@ class CredentialStore:
 
         except CredentialRefreshError as e:
             logger.error(f"Failed to refresh credential '{credential.id}': {e}")
+            if raise_on_failure:
+                raise CredentialExpiredError(
+                    credential_id=credential.id,
+                    message=(
+                        f"OAuth token for '{credential.id}' is expired and "
+                        f"refresh failed: {e}. Reauthorization required."
+                    ),
+                    provider=credential.provider_type,
+                    alias=credential.alias,
+                ) from e
             return credential
 
     def refresh_credential(self, credential_id: str) -> CredentialObject | None:

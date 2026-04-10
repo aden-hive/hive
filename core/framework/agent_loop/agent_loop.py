@@ -225,6 +225,44 @@ def _is_context_too_large_error(exc: BaseException) -> bool:
     return bool(_CONTEXT_TOO_LARGE_RE.search(str(exc)))
 
 
+def _build_tool_error_result(tc: Any, exc: BaseException) -> ToolResult:
+    """Convert a tool exception into a ToolResult for the model.
+
+    Special-cases ``CredentialExpiredError`` so the agent receives a
+    structured ``credential_expired`` payload (with credential_id, provider,
+    alias, reauth_url) instead of an opaque error string. The agent's
+    behavior block recognizes this shape and prompts the user to reauthorize.
+    """
+    try:
+        from framework.credentials.models import CredentialExpiredError
+    except ImportError:
+        CredentialExpiredError = None  # type: ignore[assignment]
+
+    if CredentialExpiredError is not None and isinstance(exc, CredentialExpiredError):
+        payload: dict[str, Any] = {
+            "error": "credential_expired",
+            "credential_id": exc.credential_id,
+            "message": str(exc),
+        }
+        if exc.provider:
+            payload["provider"] = exc.provider
+        if exc.alias:
+            payload["alias"] = exc.alias
+        if exc.help_url:
+            payload["reauth_url"] = exc.help_url
+        return ToolResult(
+            tool_use_id=tc.tool_use_id,
+            content=json.dumps(payload),
+            is_error=True,
+        )
+
+    return ToolResult(
+        tool_use_id=tc.tool_use_id,
+        content=f"Tool '{tc.tool_name}' raised: {exc}",
+        is_error=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 
@@ -2630,11 +2668,7 @@ class AgentLoop(AgentProtocol):
                         "duration_s": _dur_s,
                     }
                     if isinstance(raw, BaseException):
-                        result = ToolResult(
-                            tool_use_id=tc.tool_use_id,
-                            content=f"Tool '{tc.tool_name}' raised: {raw}",
-                            is_error=True,
-                        )
+                        result = _build_tool_error_result(tc, raw)
                     else:
                         result = raw
                     results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
