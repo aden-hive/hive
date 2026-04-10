@@ -137,18 +137,14 @@ export default function Home() {
           ))}
         </div>
         {submitting && activePrompt && (
-          <p className="mt-4 text-center text-xs text-muted-foreground">
-            <span>The queens are debating who should take this on</span>
-            <span aria-hidden="true" className="inline-flex w-4 justify-start">
-              {[0, 1, 2].map((dot) => (
-                <span
-                  key={dot}
-                  className="animate-pulse [animation-duration:1.2s]"
-                  style={{ animationDelay: `${dot * 160}ms` }}
-                >
-                  .
-                </span>
-              ))}
+          <p className="mt-4 text-center text-xs">
+            <span className="queen-debate-line">
+              <span>The queens are debating who should take this on</span>
+              <span aria-hidden="true">
+                {[0, 1, 2].map((dot) => (
+                  <span key={dot}>.</span>
+                ))}
+              </span>
             </span>
           </p>
         )}

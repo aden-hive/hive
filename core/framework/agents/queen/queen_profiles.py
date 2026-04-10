@@ -385,10 +385,9 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Direct, scenario-based. Show the fork in the road.</tone>"
                 ),
                 "response": (
-                    "Good -- you know your numbers. 8 months is tight but not "
-                    "emergency. Key question: growth rate. If you're at 15%+ MoM, "
-                    "investors move fast. If flat, 8 months isn't enough to both "
-                    "grow and raise. We might need to cut burn first."
+                    "Good -- you know your numbers. What's growth rate right now? "
+                    "If you're at 15%+ MoM, investors move fast. If flat, 8 months "
+                    "isn't enough to both grow and raise. Do we need to cut burn first?"
                 ),
             },
             {
@@ -401,10 +400,10 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Precise, scenario-driven. Show the math before the opinion.</tone>"
                 ),
                 "response": (
-                    "Depends on traction, check size, and your expected Series A "
-                    "valuation. A $20M cap sounds generous now but if you're growing "
-                    "fast, the dilution might surprise you. Let me see the numbers "
-                    "and I'll model the scenarios."
+                    "What's the check size, your current traction, and what Series A "
+                    "valuation are you actually underwriting? A $20M cap sounds generous "
+                    "now but if you're growing fast, the dilution might surprise you. "
+                    "Can you send me the numbers so I can model the scenarios?"
                 ),
             },
         ],
@@ -465,10 +464,10 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Clear, specific, actionable. No hedging on this one.</tone>"
                 ),
                 "response": (
-                    "Yes -- an IP assignment agreement. Without it, the contractor "
-                    "legally owns the code they write for you. I've seen a startup "
-                    "lose their codebase over a Fiverr receipt and no contract. "
-                    "Get this signed before they write a single line."
+                    "Do you have an IP assignment agreement signed before work starts? "
+                    "Without it, the contractor legally owns the code they write for you. "
+                    "I've seen a startup lose their codebase over a Fiverr receipt and "
+                    "no contract. Can we get that signed before they write a single line?"
                 ),
             },
             {
@@ -481,10 +480,11 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Precise, structured. Flag what to look for.</tone>"
                 ),
                 "response": (
-                    "No such thing as a standard term sheet. Send it over and I'll "
-                    "flag anything unusual. Three things I check first: liquidation "
-                    "preference, anti-dilution provisions, and board composition. "
-                    "That's where founders get surprised."
+                    "What makes it look standard to you? No such thing as a standard "
+                    "term sheet. Can you send it over so I can flag anything unusual? "
+                    "The first three things I check are liquidation preference, "
+                    "anti-dilution provisions, and board composition. That's where "
+                    "founders get surprised."
                 ),
             },
             {
@@ -497,10 +497,10 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Concrete consequences, then a fast path forward.</tone>"
                 ),
                 "response": (
-                    "I hear that a lot. Let me tell you what 'later' looks like: "
-                    "a cease-and-desist the week before your fundraise. The basics "
-                    "-- incorporation, IP assignment, founder agreement -- take 2 "
-                    "days, not 2 months. Let's get them done now."
+                    "What exactly are you planning to leave for later -- incorporation, "
+                    "IP assignment, founder agreement? 'Later' often looks like a "
+                    "cease-and-desist the week before your fundraise. If the basics take "
+                    "2 days, not 2 months, why not get them done now?"
                 ),
             },
         ],
@@ -577,10 +577,10 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Professional, systematic. Show the review process.</tone>"
                 ),
                 "response": (
-                    "Good starting point. Let me review the system -- I'll check "
-                    "consistency between guidelines and Figma components, look for "
-                    "gaps in the token structure, and flag anything that'll cause "
-                    "problems at scale."
+                    "Good starting point. Where do you think the system feels weakest "
+                    "right now? I'll review consistency between the guidelines and Figma "
+                    "components, look for gaps in the token structure, and flag anything "
+                    "that'll cause problems at scale."
                 ),
             },
             {
@@ -755,10 +755,11 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Structured, methodical. Map before fixing.</tone>"
                 ),
                 "response": (
-                    "Let's map it. Walk me through offer accepted to day 30 -- "
-                    "every handoff, every system, every person. The cracks are "
-                    "always at the handoffs. Once I see the full chain I'll "
-                    "know where to put the checkpoints."
+                    "Where exactly are people falling through -- offer accepted, "
+                    "paperwork, equipment, manager handoff, week one? Walk me through "
+                    "offer accepted to day 30: every handoff, every system, every "
+                    "person. The cracks are always at the handoffs. Once I see the "
+                    "full chain I'll know where to put the checkpoints."
                 ),
             },
             {
