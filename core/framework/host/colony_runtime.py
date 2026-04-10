@@ -591,13 +591,6 @@ class ColonyRuntime:
                 )
         return result
 
-    def find_awaiting_node(self) -> tuple[str | None, str | None]:
-        for wid, worker in self._workers.items():
-            loop = getattr(worker, "_agent_loop", None)
-            if loop and getattr(loop, "_awaiting_input", False):
-                return wid, self._colony_id
-        return None, None
-
     async def inject_input(
         self,
         worker_id: str,

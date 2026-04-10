@@ -67,8 +67,13 @@ class Session:
     worker_info: Any | None = None  # AgentInfo
     # Queen phase state (working/reviewing)
     phase_state: Any = None  # QueenPhaseState
-    # Worker handoff subscription
+    # Worker handoff subscription (colony-scoped escalation receiver)
     worker_handoff_sub: str | None = None
+    # Pending worker escalations awaiting queen reply.
+    # Keyed by request_id -> {worker_id, colony_id, reason, context, opened_at}.
+    # Populated by queen_orchestrator._on_worker_escalation and drained by
+    # the reply_to_worker tool.
+    pending_escalations: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Memory reflection + recall subscriptions (global memory)
     memory_reflection_subs: list = field(default_factory=list)  # list[str]
     # Trigger definitions loaded from agent's triggers.json (available but inactive)
@@ -1047,46 +1052,16 @@ class SessionManager:
     # Queen startup
     # ------------------------------------------------------------------
 
-    async def _handle_worker_handoff(self, session: Session, executor: Any, event: Any) -> None:
-        """Route worker escalation events into the queen conversation."""
-        if event.stream_id == "queen":
-            return
-
-        reason = str(event.data.get("reason", "")).strip()
-        context = str(event.data.get("context", "")).strip()
-        node_label = event.node_id or "unknown_node"
-        stream_label = event.stream_id or "unknown_stream"
-
-        handoff = (
-            "[WORKER_ESCALATION_REQUEST]\n"
-            f"stream_id: {stream_label}\n"
-            f"node_id: {node_label}\n"
-            f"reason: {reason or 'unspecified'}\n"
-        )
-        if context:
-            handoff += f"context:\n{context}\n"
-
-        node = executor.node_registry.get("queen")
-        if node is not None and hasattr(node, "inject_event"):
-            await node.inject_event(handoff, is_client_input=False)
-        else:
-            logger.warning("Worker handoff received but queen node not ready")
-
     def _subscribe_worker_handoffs(self, session: Session, executor: Any) -> None:
-        """Subscribe queen to worker/subagent escalation handoff events."""
-        from framework.host.event_bus import EventType as _ET
+        """Deprecated — colony-scoped escalation routing lives in queen_orchestrator.
 
-        if session.worker_handoff_sub is not None:
-            session.event_bus.unsubscribe(session.worker_handoff_sub)
-            session.worker_handoff_sub = None
-
-        async def _on_worker_handoff(event):
-            await self._handle_worker_handoff(session, executor, event)
-
-        session.worker_handoff_sub = session.event_bus.subscribe(
-            event_types=[_ET.ESCALATION_REQUESTED],
-            handler=_on_worker_handoff,
-        )
+        Kept as a shim so any legacy caller is a no-op. The real subscription
+        is installed by ``queen_orchestrator.create_queen`` via
+        ``colony_runtime.subscribe_to_events(..., filter_colony=...)`` so that
+        cross-colony leakage is impossible and every handoff carries the
+        worker_id + request_id the queen needs to reply with addressed intent.
+        """
+        return None
 
     async def _start_queen(
         self,

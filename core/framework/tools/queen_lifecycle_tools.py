@@ -3343,6 +3343,125 @@ def register_queen_lifecycle_tools(
     )
     tools_registered += 1
 
+    # --- list_worker_questions / reply_to_worker ------------------------------
+    #
+    # Workers escalate via the framework-level ``escalate`` tool, which emits
+    # ESCALATION_REQUESTED events stamped with a fresh request_id. The queen's
+    # colony-scoped subscription (see queen_orchestrator._on_worker_escalation)
+    # records each pending escalation on ``session.pending_escalations``,
+    # keyed by request_id, so multiple concurrent waiters stay addressable.
+    # These tools read and drain that inbox.
+
+    async def list_worker_questions() -> str:
+        """List pending worker escalations awaiting a queen reply."""
+        pending = getattr(session, "pending_escalations", None) or {}
+        # Copy values and trim context to keep the tool return compact.
+        entries = []
+        now = time.time()
+        for entry in pending.values():
+            entries.append(
+                {
+                    "request_id": entry.get("request_id"),
+                    "worker_id": entry.get("worker_id"),
+                    "colony_id": entry.get("colony_id"),
+                    "node_id": entry.get("node_id"),
+                    "reason": entry.get("reason"),
+                    "context_preview": (entry.get("context") or "")[:300],
+                    "waiting_seconds": round(now - float(entry.get("opened_at") or now), 1),
+                }
+            )
+        return json.dumps({"count": len(entries), "pending": entries})
+
+    _list_questions_tool = Tool(
+        name="list_worker_questions",
+        description=(
+            "List all worker escalations currently awaiting your reply. "
+            "Each entry has a request_id that you pass to reply_to_worker() "
+            "to unblock the specific worker that asked."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "list_worker_questions",
+        _list_questions_tool,
+        lambda inputs: list_worker_questions(),
+    )
+    tools_registered += 1
+
+    async def reply_to_worker(request_id: str, reply: str) -> str:
+        """Reply to a specific worker escalation by request_id."""
+        runtime = _get_runtime()
+        if runtime is None:
+            return json.dumps({"error": "No colony running in this session."})
+
+        pending = getattr(session, "pending_escalations", None)
+        if pending is None:
+            return json.dumps({"error": "Session has no escalation inbox."})
+
+        entry = pending.get(request_id)
+        if entry is None:
+            return json.dumps(
+                {
+                    "error": "Unknown request_id. Call list_worker_questions() "
+                    "to see currently pending escalations.",
+                    "request_id": request_id,
+                }
+            )
+
+        worker_id = entry.get("worker_id")
+        if not worker_id:
+            return json.dumps(
+                {"error": "Escalation entry is missing worker_id.", "request_id": request_id}
+            )
+
+        # Format the reply so the waiting worker's conversation shows
+        # it as a queen handoff rather than a raw user message.
+        reply_text = f"[QUEEN_REPLY] request_id={request_id}\n{reply}"
+        try:
+            delivered = await runtime.inject_input(worker_id, reply_text)
+        except Exception as e:
+            return json.dumps({"error": f"Failed to inject reply: {e}"})
+
+        # Drop the entry regardless of delivery — a failed delivery
+        # usually means the worker already terminated, in which case
+        # it cannot be unblocked and the entry should not linger.
+        pending.pop(request_id, None)
+
+        return json.dumps(
+            {
+                "status": "delivered" if delivered else "worker_not_active",
+                "worker_id": worker_id,
+                "request_id": request_id,
+            }
+        )
+
+    _reply_tool = Tool(
+        name="reply_to_worker",
+        description=(
+            "Reply to a specific worker escalation. The reply is injected "
+            "into the identified worker's conversation so it can resume. "
+            "Use list_worker_questions() to discover pending request_ids."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "description": "The escalation request_id from list_worker_questions.",
+                },
+                "reply": {
+                    "type": "string",
+                    "description": "Guidance or answer text to hand back to the worker.",
+                },
+            },
+            "required": ["request_id", "reply"],
+        },
+    )
+    registry.register(
+        "reply_to_worker", _reply_tool, lambda inputs: reply_to_worker(**inputs)
+    )
+    tools_registered += 1
+
     # --- set_trigger -----------------------------------------------------------
 
     async def set_trigger(

@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -1189,6 +1190,7 @@ class AgentLoop(AgentProtocol):
                             reason="Tool doom loop detected",
                             context=doom_desc,
                             execution_id=execution_id,
+                            request_id=uuid.uuid4().hex,
                         )
                         await conversation.add_user_message(
                             "[SYSTEM] Escalated tool doom loop to queen for intervention."
@@ -1304,6 +1306,7 @@ class AgentLoop(AgentProtocol):
                     reason="Worker produced text-only turns without progress; auto-escalating",
                     context=assistant_text[:2000] if assistant_text else "",
                     execution_id=execution_id,
+                    request_id=uuid.uuid4().hex,
                 )
                 queen_input_requested = True
 
@@ -1644,6 +1647,7 @@ class AgentLoop(AgentProtocol):
                                 "Worker escalated but received no queen guidance before shutdown"
                             ),
                             execution_id=execution_id,
+                            request_id=uuid.uuid4().hex,
                         )
                     await self._publish_loop_completed(
                         stream_id, node_id, iteration + 1, execution_id
@@ -2555,6 +2559,7 @@ class AgentLoop(AgentProtocol):
                         reason=reason,
                         context=context,
                         execution_id=execution_id,
+                        request_id=uuid.uuid4().hex,
                     )
                     queen_input_requested = True
 

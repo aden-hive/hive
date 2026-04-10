@@ -126,6 +126,9 @@ _QUEEN_RUNNING_TOOLS = [
     "get_worker_status",
     "run_agent_with_input",
     "inject_message",
+    # Worker escalation inbox
+    "list_worker_questions",
+    "reply_to_worker",
     # Monitoring
     "get_worker_health_summary",
     "set_trigger",
@@ -148,6 +151,9 @@ _QUEEN_EDITING_TOOLS = [
     # Re-run or tweak
     "run_agent_with_input",
     "inject_message",
+    # Worker escalation inbox
+    "list_worker_questions",
+    "reply_to_worker",
     # Monitoring
     "get_worker_health_summary",
     "set_trigger",

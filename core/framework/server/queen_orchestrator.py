@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time as _time_mod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +16,141 @@ if TYPE_CHECKING:
     from framework.server.session_manager import Session
 
 logger = logging.getLogger(__name__)
+
+# Maximum number of unanswered worker escalations the queen's inbox will
+# buffer before auto-replying queue_full to new ones.
+MAX_PENDING_ESCALATIONS = 32
+
+
+def install_worker_escalation_routing(
+    session: Session,
+    *,
+    colony_runtime: Any | None = None,
+) -> str | None:
+    """Install the colony-scoped worker escalation handler on the queen bus.
+
+    Every worker ``escalate()`` call emits ESCALATION_REQUESTED stamped with
+    colony_id (by StreamEventBus) and a request_id (by AgentLoop). This
+    handler records the escalation in ``session.pending_escalations`` so the
+    queen can look it up by request_id later, and surfaces it to the queen
+    loop as an addressed [WORKER_ESCALATION] inject.
+
+    When ``colony_runtime`` is provided the subscription is scoped with
+    ``filter_colony`` so only escalations from workers in *this* queen's
+    colony are delivered — cross-colony leakage is structurally impossible.
+    Falls back to the raw session bus when no colony is attached.
+
+    Returns the subscription id (for unsubscribe) or ``None`` on failure.
+    """
+    from framework.host.event_bus import EventType
+
+    async def _on_worker_escalation(event):
+        stream_id = event.stream_id or ""
+        # Defensive: ignore any stray non-worker origin (e.g. queen).
+        if not stream_id.startswith("worker:"):
+            return
+        worker_id = stream_id[len("worker:"):]
+        data = event.data or {}
+        request_id = data.get("request_id")
+        reason = str(data.get("reason", "")).strip()
+        context_text = str(data.get("context", "")).strip()
+        node_label = event.node_id or "unknown_node"
+
+        # Back-pressure: if the queen's inbox is full, auto-reply to the
+        # worker so it unblocks instead of wedging forever.
+        if len(session.pending_escalations) >= MAX_PENDING_ESCALATIONS:
+            runtime = session.colony_runtime
+            if runtime is not None and worker_id:
+                try:
+                    await runtime.inject_input(
+                        worker_id,
+                        "[QUEEN_REPLY] queue_full — queen inbox saturated; "
+                        "proceed with best judgment or retry later.",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to send queue_full reply to worker %s",
+                        worker_id,
+                        exc_info=True,
+                    )
+            return
+
+        # Record the pending entry so reply_to_worker can address it.
+        if request_id:
+            session.pending_escalations[request_id] = {
+                "request_id": request_id,
+                "worker_id": worker_id,
+                "colony_id": event.colony_id,
+                "node_id": node_label,
+                "reason": reason,
+                "context": context_text,
+                "opened_at": _time_mod.time(),
+            }
+
+        # Surface the escalation to the queen as an addressed
+        # [WORKER_ESCALATION] message.
+        lines = ["[WORKER_ESCALATION]"]
+        if request_id:
+            lines.append(f"request_id: {request_id}")
+        lines.append(f"worker_id: {worker_id or 'unknown'}")
+        lines.append(f"node_id: {node_label}")
+        lines.append(f"reason: {reason or 'unspecified'}")
+        if context_text:
+            lines.append("context:")
+            lines.append(context_text)
+        if request_id:
+            lines.append(
+                "Use reply_to_worker(request_id, reply) to unblock, "
+                "or list_worker_questions() to see all pending."
+            )
+        else:
+            lines.append(
+                "No request_id — use inject_message(content=...) to relay "
+                "guidance manually."
+            )
+        handoff = "\n".join(lines)
+
+        # Fallback: if the queen loop has gone away, publish a
+        # CLIENT_INPUT_REQUESTED so the human sees the question and the
+        # worker does not wedge.
+        queen_node = (
+            session.queen_executor.node_registry.get("queen")
+            if session.queen_executor is not None
+            else None
+        )
+        if queen_node is None or not hasattr(queen_node, "inject_event"):
+            if session.event_bus is not None:
+                await session.event_bus.emit_client_input_requested(
+                    stream_id="queen",
+                    node_id="queen",
+                    prompt=handoff,
+                    execution_id=session.id,
+                )
+            return
+
+        await queen_node.inject_event(handoff, is_client_input=False)
+
+    # Prefer colony-scoped subscription when a colony is loaded so
+    # filter_colony does the isolation work for us.
+    runtime = colony_runtime if colony_runtime is not None else session.colony_runtime
+    if runtime is not None:
+        try:
+            return runtime.subscribe_to_events(
+                [EventType.ESCALATION_REQUESTED],
+                _on_worker_escalation,
+                filter_colony=runtime.colony_id,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to install colony-scoped escalation sub", exc_info=True
+            )
+            # fall through to session bus
+    if session.event_bus is None:
+        return None
+    return session.event_bus.subscribe(
+        event_types=[EventType.ESCALATION_REQUESTED],
+        handler=_on_worker_escalation,
+    )
 
 
 async def create_queen(
@@ -556,7 +692,15 @@ async def create_queen(
                 event_types=[EventType.EXECUTION_COMPLETED, EventType.EXECUTION_FAILED],
                 handler=_on_worker_done,
             )
-            session_manager._subscribe_worker_handoffs(session, session.queen_executor)
+
+            # ---- Colony-scoped worker escalation routing ----
+            # Replaces the legacy unfiltered SessionManager subscription.
+            # ``filter_colony`` (inside install_worker_escalation_routing)
+            # ensures only escalations from workers in THIS queen's colony
+            # reach THIS queen — cross-colony leakage is structurally
+            # impossible because StreamEventBus stamps colony_id on every
+            # published event before dispatch.
+            session.worker_handoff_sub = install_worker_escalation_routing(session)
 
             from framework.agents.queen.reflection_agent import subscribe_reflection_triggers
 

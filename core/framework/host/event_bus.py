@@ -1157,15 +1157,25 @@ class EventBus:
         reason: str = "",
         context: str = "",
         execution_id: str | None = None,
+        request_id: str | None = None,
     ) -> None:
-        """Emit escalation requested event (agent wants queen)."""
+        """Emit escalation requested event (agent wants queen).
+
+        ``request_id`` is a caller-supplied handle used by the queen to
+        address its reply back to the specific escalation. When omitted the
+        event still fires but the queen cannot route a targeted reply.
+        """
         await self.publish(
             AgentEvent(
                 type=EventType.ESCALATION_REQUESTED,
                 stream_id=stream_id,
                 node_id=node_id,
                 execution_id=execution_id,
-                data={"reason": reason, "context": context},
+                data={
+                    "request_id": request_id,
+                    "reason": reason,
+                    "context": context,
+                },
             )
         )
 
