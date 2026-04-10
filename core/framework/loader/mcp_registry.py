@@ -36,6 +36,25 @@ _DEFAULT_CONFIG = {
     "refresh_interval_hours": DEFAULT_REFRESH_INTERVAL_HOURS,
 }
 
+# Default local MCP servers that ship with Hive. Seeded on first startup so
+# fresh users get working file I/O, browser automation, and the hive tool
+# suite without having to run `hive mcp add` manually. ``cwd`` is filled in
+# at registration time with the absolute path to the ``tools/`` directory.
+_DEFAULT_LOCAL_SERVERS: dict[str, dict[str, Any]] = {
+    "hive-tools": {
+        "description": "Hive tools: web search, email, CRM, calendar, and 100+ integrations",
+        "args": ["run", "python", "mcp_server.py", "--stdio"],
+    },
+    "gcu-tools": {
+        "description": "Browser automation: click, type, navigate, screenshot, snapshot",
+        "args": ["run", "python", "-m", "gcu.server", "--stdio"],
+    },
+    "files-tools": {
+        "description": "File I/O: read, write, edit, search, list, run commands",
+        "args": ["run", "python", "files_server.py", "--stdio"],
+    },
+}
+
 
 class MCPRegistry:
     """Manages local MCP server state in ~/.hive/mcp_registry/."""
@@ -58,6 +77,53 @@ class MCPRegistry:
 
         if not self._installed_path.exists():
             self._write_json(self._installed_path, {"servers": {}})
+
+    def ensure_defaults(self) -> list[str]:
+        """Seed the built-in local MCP servers (hive-tools, gcu-tools, files-tools).
+
+        Idempotent — servers already present are left untouched. Skips seeding
+        entirely when the source-tree ``tools/`` directory cannot be located
+        (e.g. when Hive is installed from a wheel rather than a checkout).
+
+        Returns the list of names that were newly registered.
+        """
+        self.initialize()
+
+        # parents: [0]=loader, [1]=framework, [2]=core, [3]=repo root
+        tools_dir = Path(__file__).resolve().parents[3] / "tools"
+        if not tools_dir.is_dir():
+            logger.debug(
+                "MCPRegistry.ensure_defaults: tools dir %s missing; skipping default seed",
+                tools_dir,
+            )
+            return []
+
+        cwd = str(tools_dir)
+        data = self._read_installed()
+        existing = data.get("servers", {})
+        added: list[str] = []
+
+        for name, spec in _DEFAULT_LOCAL_SERVERS.items():
+            if name in existing:
+                continue
+            try:
+                self.add_local(
+                    name=name,
+                    transport="stdio",
+                    command="uv",
+                    args=list(spec["args"]),
+                    cwd=cwd,
+                    description=spec["description"],
+                )
+                added.append(name)
+            except MCPError as exc:
+                logger.warning(
+                    "MCPRegistry.ensure_defaults: failed to seed '%s': %s", name, exc
+                )
+
+        if added:
+            logger.info("MCPRegistry: seeded default local servers: %s", added)
+        return added
 
     # ── Internal I/O ────────────────────────────────────────────────
 

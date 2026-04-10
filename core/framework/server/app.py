@@ -263,6 +263,7 @@ def create_app(model: str | None = None) -> web.Application:
 
         registry = MCPRegistry()
         registry.initialize()
+        registry.ensure_defaults()
         if (queen_pkg_dir / "mcp_registry.json").is_file():
             _queen_tool_registry.set_mcp_registry_agent_path(queen_pkg_dir)
         registry_configs, selection_max_tools = registry.load_agent_selection(queen_pkg_dir)

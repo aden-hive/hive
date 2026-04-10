@@ -830,7 +830,16 @@ class TestCrashRecovery:
     async def test_restore_legacy_unphased_assistant_message_preserves_store(
         self, tmp_path, runtime, buffer
     ):
-        """Legacy queen stores without phase_id should resume instead of being cleared."""
+        """Legacy queen stores without phase_id should resume instead of being cleared.
+
+        The queen is a forever-alive conversational node: it no longer
+        terminates after a single text-only turn (the old implicit-judge
+        ACCEPT path was deliberately removed so Charlotte/etc. can greet,
+        clarify, summarize without the loop exiting). To keep this test
+        verifying "restore preserves the legacy store" we pre-signal
+        shutdown so the queen exits cleanly after producing its first
+        recovered turn.
+        """
         store = FileConversationStore(tmp_path / "conv")
         await store.write_meta(
             {
@@ -864,6 +873,10 @@ class TestCrashRecovery:
         )
         ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
 
+        # Pre-signal shutdown — the queen runs one iteration, produces
+        # its recovered text, then exits the auto-block wait because
+        # _shutdown is True (got_input returns False → loop terminates).
+        node.signal_shutdown()
         result = await node.execute(ctx)
 
         assert result.success is True

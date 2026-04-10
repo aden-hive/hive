@@ -15,7 +15,8 @@
       "Read(//tmp/**)"
     ],
     "additionalDirectories": [
-      "/home/timothy/.hive/skills/writing-hive-skills"
+      "/home/timothy/.hive/skills/writing-hive-skills",
+      "/tmp"
     ]
   },
   "hooks": {
