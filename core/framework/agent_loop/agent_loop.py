@@ -2483,6 +2483,27 @@ class AgentLoop(AgentProtocol):
                     # --- Framework-level ask_user handling ---
                     ask_user_prompt = tc.tool_input.get("question", "")
                     raw_options = tc.tool_input.get("options", None)
+
+                    # Self-heal: some model families (notably the queen
+                    # profile prompt poisoning the output style) cram
+                    # the options inside the question string as a
+                    # pseudo-XML blob like:
+                    #
+                    #   "What do you want to do?</question>\n_OPTIONS:
+                    #    [\"De-risk\", \"Add\", \"Short\"]"
+                    #
+                    # When that happens the question text leaks
+                    # </question> and _OPTIONS: into the chat UI and
+                    # the buttons never appear. Detect + repair.
+                    from framework.agent_loop.internals.synthetic_tools import (
+                        sanitize_ask_user_inputs,
+                    )
+
+                    ask_user_prompt, recovered_options = sanitize_ask_user_inputs(
+                        ask_user_prompt, raw_options
+                    )
+                    if recovered_options is not None and raw_options is None:
+                        raw_options = recovered_options
                     # Defensive: ensure options is a list of strings.
                     # Smaller models sometimes send a string instead of
                     # an array — try to recover gracefully.

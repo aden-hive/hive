@@ -1181,6 +1181,314 @@ def register_queen_lifecycle_tools(
     )
     tools_registered += 1
 
+    # --- create_colony ---------------------------------------------------------
+    #
+    # Forks the current queen session into a colony. Requires the queen
+    # to have ALREADY AUTHORED a skill folder capturing what she learned
+    # during this session (using her write_file / edit_file tools), and
+    # pass the folder path to this tool. The tool validates the skill
+    # folder (SKILL.md exists, frontmatter has the required ``name`` +
+    # ``description`` fields, directory name matches frontmatter name),
+    # then forks. If the skill lives outside ``~/.hive/skills/`` the
+    # tool copies it in so the new colony's worker will discover it on
+    # its first skill scan.
+    #
+    # This is the codified version of the user's instruction:
+    #
+    #   "When the queen agent needs to create a colony, it needs to
+    #    write down whatever it just learned from the current session
+    #    as an agent skill and put it in the ~/.hive/skills folder."
+    #
+    # Two-step flow for the queen LLM:
+    #
+    #   1. Author the skill with write_file (or a sequence of writes
+    #      for scripts/references/assets subdirs) — she already knows
+    #      the format via the writing-hive-skills default skill.
+    #   2. Call create_colony(colony_name, task, skill_path) pointing
+    #      at the folder she just wrote.
+
+    import re as _re
+    import shutil as _shutil
+
+    _COLONY_NAME_RE = _re.compile(r"^[a-z0-9_]+$")
+    _SKILL_NAME_RE = _re.compile(r"^[a-z0-9-]+$")
+
+    def _validate_and_install_skill(skill_path: str) -> tuple[Path | None, str | None]:
+        """Validate an authored skill folder and ensure it lives under ~/.hive/skills/.
+
+        Returns ``(installed_path, error)``. On success ``error`` is
+        ``None`` and ``installed_path`` is the final location under
+        ``~/.hive/skills/{name}/``. On failure ``installed_path`` is
+        ``None`` and ``error`` is a human-readable reason suitable for
+        returning to the queen as a JSON error payload.
+        """
+        if not skill_path or not isinstance(skill_path, str):
+            return None, "skill_path must be a non-empty string"
+
+        src = Path(skill_path).expanduser().resolve()
+        if not src.exists():
+            return None, f"skill_path does not exist: {src}"
+        if not src.is_dir():
+            return None, f"skill_path must be a directory, got file: {src}"
+
+        skill_md = src / "SKILL.md"
+        if not skill_md.is_file():
+            return None, f"skill_path has no SKILL.md at {skill_md}"
+
+        # Parse the frontmatter to pull out the name and verify
+        # description exists. We don't need a full YAML parser — the
+        # writing-hive-skills protocol is rigid enough that a line-by-line
+        # scan of the first frontmatter block suffices for validation.
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except OSError as e:
+            return None, f"failed to read SKILL.md: {e}"
+
+        if not content.startswith("---"):
+            return None, "SKILL.md missing opening '---' frontmatter marker"
+        after_open = content.split("---", 2)
+        if len(after_open) < 3:
+            return None, "SKILL.md missing closing '---' frontmatter marker"
+        frontmatter_text = after_open[1]
+
+        fm_name: str | None = None
+        fm_description: str | None = None
+        for raw_line in frontmatter_text.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("name:"):
+                fm_name = line.split(":", 1)[1].strip().strip('"').strip("'")
+            elif line.startswith("description:"):
+                fm_description = line.split(":", 1)[1].strip().strip('"').strip("'")
+
+        if not fm_name:
+            return None, "SKILL.md frontmatter missing 'name' field"
+        if not fm_description:
+            return None, "SKILL.md frontmatter missing 'description' field"
+        if not (1 <= len(fm_description) <= 1024):
+            return None, "SKILL.md 'description' must be 1–1024 chars"
+        if not _SKILL_NAME_RE.match(fm_name):
+            return None, (
+                f"SKILL.md 'name' field '{fm_name}' must match [a-z0-9-] "
+                "pattern"
+            )
+        if fm_name.startswith("-") or fm_name.endswith("-") or "--" in fm_name:
+            return None, (
+                f"SKILL.md 'name' '{fm_name}' has leading/trailing/"
+                "consecutive hyphens"
+            )
+        if len(fm_name) > 64:
+            return None, f"SKILL.md 'name' '{fm_name}' exceeds 64 chars"
+
+        # The directory basename should match the frontmatter name —
+        # this is the writing-hive-skills convention. We ENFORCE it
+        # because the skill loader uses dir names as identity.
+        if src.name != fm_name:
+            return None, (
+                f"skill directory name '{src.name}' does not match "
+                f"SKILL.md frontmatter name '{fm_name}'. Rename the "
+                "folder or fix the frontmatter."
+            )
+
+        # Install into ~/.hive/skills/{name}/ if not already there.
+        target_root = Path.home() / ".hive" / "skills"
+        target = target_root / fm_name
+        try:
+            target_root.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            return None, f"failed to create skills root: {e}"
+
+        try:
+            if src.resolve() == target.resolve():
+                # Already in the right place — nothing to do.
+                return target, None
+        except OSError:
+            pass
+
+        try:
+            if target.exists():
+                # Overwrite existing — the queen is explicitly creating
+                # a new colony for this version, so her authored skill
+                # wins over any prior version. copytree with
+                # dirs_exist_ok handles subdirs (scripts/, references/,
+                # assets/) but does NOT delete files removed in the
+                # new version. For a clean overwrite we rmtree first.
+                _shutil.rmtree(target)
+            _shutil.copytree(src, target)
+        except OSError as e:
+            return None, f"failed to install skill into {target}: {e}"
+
+        return target, None
+
+    async def create_colony(
+        *,
+        colony_name: str,
+        task: str,
+        skill_path: str,
+    ) -> str:
+        """Create a colony after installing a pre-authored skill folder."""
+        if session is None:
+            return json.dumps({"error": "No session bound to this tool registry."})
+
+        cn = (colony_name or "").strip()
+        if not _COLONY_NAME_RE.match(cn):
+            return json.dumps(
+                {
+                    "error": (
+                        "colony_name must be lowercase alphanumeric "
+                        "with underscores (e.g. 'honeycomb_research')."
+                    )
+                }
+            )
+
+        installed_skill, skill_err = _validate_and_install_skill(skill_path)
+        if skill_err is not None:
+            return json.dumps(
+                {
+                    "error": skill_err,
+                    "hint": (
+                        "Author the skill folder first using write_file "
+                        "(and edit_file for follow-ups). The folder must "
+                        "contain a SKILL.md with YAML frontmatter "
+                        "{name, description} — see your "
+                        "writing-hive-skills default skill for the "
+                        "format. Then call create_colony again with "
+                        "skill_path pointing at that folder."
+                    ),
+                }
+            )
+
+        logger.info(
+            "create_colony: installed skill from %s → %s",
+            skill_path,
+            installed_skill,
+        )
+
+        # Fork the queen session into the colony. The fork inherits
+        # session.queen_ctx.skill_dirs which already includes
+        # ~/.hive/skills/, so the freshly installed skill is
+        # discovered on the worker's first scan.
+        try:
+            from framework.server.routes_execution import fork_session_into_colony
+        except Exception as e:
+            return json.dumps(
+                {
+                    "error": f"fork_session_into_colony import failed: {e}",
+                    "skill_installed": str(installed_skill),
+                }
+            )
+
+        try:
+            fork_result = await fork_session_into_colony(
+                session=session,
+                colony_name=cn,
+                task=(task or "").strip(),
+            )
+        except Exception as e:
+            logger.exception("create_colony: fork failed after installing skill")
+            return json.dumps(
+                {
+                    "error": f"colony fork failed: {e}",
+                    "skill_installed": str(installed_skill),
+                    "hint": (
+                        "The skill was installed but the fork failed. "
+                        "You can retry create_colony — re-installing "
+                        "the skill is idempotent."
+                    ),
+                }
+            )
+
+        return json.dumps(
+            {
+                "status": "created",
+                "colony_name": fork_result.get("colony_name", cn),
+                "colony_path": fork_result.get("colony_path"),
+                "queen_session_id": fork_result.get("queen_session_id"),
+                "is_new": fork_result.get("is_new", True),
+                "skill_installed": str(installed_skill),
+                "skill_name": installed_skill.name if installed_skill else None,
+            }
+        )
+
+    _create_colony_tool = Tool(
+        name="create_colony",
+        description=(
+            "Fork this session into a colony — but FIRST author a "
+            "Hive Skill folder capturing what you learned during this "
+            "conversation, and pass its path to this tool. The tool "
+            "validates the skill folder (SKILL.md present, frontmatter "
+            "name+description valid, directory name matches frontmatter "
+            "name), installs it under ~/.hive/skills/{name}/ if it's "
+            "not already there, and then forks the session.\n\n"
+            "TWO-STEP FLOW:\n\n"
+            "  1. Use write_file (plus edit_file / list_directory as "
+            "     needed) to create a skill folder. The folder must "
+            "     contain a SKILL.md with YAML frontmatter {name, "
+            "     description} and a markdown body. Optional subdirs: "
+            "     scripts/, references/, assets/. See your "
+            "     writing-hive-skills default skill for the spec. We "
+            "     recommend authoring it directly at "
+            "     ~/.hive/skills/{skill-name}/SKILL.md so no copy is "
+            "     needed.\n"
+            "  2. Call create_colony(colony_name, task, skill_path) "
+            "     pointing at the folder you just wrote.\n\n"
+            "WHY THIS EXISTS: a fresh worker has zero memory of your "
+            "chat with the user. If you spent the session figuring out "
+            "an API auth flow, pagination, data shapes, and gotchas — "
+            "that knowledge must live in a skill, not in your private "
+            "context, or the worker will repeat your discovery work "
+            "from scratch.\n\n"
+            "WHAT TO PUT IN THE SKILL BODY: the operational protocol "
+            "the next worker needs to do this work. Include API "
+            "endpoints with example requests, the exact auth flow, "
+            "response shapes you observed, gotchas you hit (rate "
+            "limits, pagination quirks, edge cases), conventions you "
+            "settled on, and pre-baked queries/commands. Write it as "
+            "if onboarding a new engineer who has never seen this "
+            "system. Realistic target: 300–2000 chars of body."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "colony_name": {
+                    "type": "string",
+                    "description": (
+                        "Lowercase alphanumeric+underscore name for "
+                        "the new colony (e.g. 'honeycomb_research')."
+                    ),
+                },
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "FULL self-contained task description for the "
+                        "first worker run in the new colony. Worker "
+                        "has zero context — include everything."
+                    ),
+                },
+                "skill_path": {
+                    "type": "string",
+                    "description": (
+                        "Path to a pre-authored skill folder containing "
+                        "SKILL.md. May be absolute or ~-expanded. The "
+                        "directory basename MUST match the SKILL.md "
+                        "frontmatter 'name' field. If the path is "
+                        "outside ~/.hive/skills/ the folder is copied "
+                        "in. Example: '~/.hive/skills/honeycomb-api-"
+                        "protocol'."
+                    ),
+                },
+            },
+            "required": ["colony_name", "task", "skill_path"],
+        },
+    )
+    registry.register(
+        "create_colony",
+        _create_colony_tool,
+        lambda inputs: create_colony(**inputs),
+    )
+    tools_registered += 1
+
     # --- switch_to_reviewing ----------------------------------------------------
 
     async def switch_to_reviewing_tool() -> str:

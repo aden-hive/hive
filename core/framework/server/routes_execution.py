@@ -650,15 +650,6 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
     Body: {"colony_name": "...", "task": "..."}
     Returns: {"colony_path": "...", "colony_name": "...", "is_new": bool,
               "queen_session_id": "..."}
-
-    The clone:
-    1. Creates a colony directory with a single worker config (``worker.json``)
-       holding the queen's current tools, prompts, skills, and loop config.
-    2. Duplicates the queen's full session (conversations + events) into a new
-       queen-session directory assigned to the colony so that cold-restoring
-       the colony resumes with the queen's entire conversation history.
-    3. Multiple independent sessions can be created against the same colony,
-       giving parallel execution capacity without separate worker configs.
     """
     session, err = resolve_session(request)
     if err:
@@ -685,6 +676,43 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
             status=400,
         )
 
+    try:
+        result = await fork_session_into_colony(
+            session=session,
+            colony_name=colony_name,
+            task=task,
+        )
+    except Exception as e:
+        logger.exception("colony_spawn fork failed")
+        return web.json_response({"error": f"colony fork failed: {e}"}, status=500)
+
+    return web.json_response(result)
+
+
+async def fork_session_into_colony(
+    *,
+    session: Any,
+    colony_name: str,
+    task: str,
+) -> dict:
+    """Fork a queen session into a colony directory.
+
+    Extracted from ``handle_colony_spawn`` so the queen-side
+    ``create_colony`` tool can call it directly without going through
+    HTTP. The caller is responsible for validating ``colony_name``
+    against the lowercase-alphanumeric regex.
+
+    The fork:
+    1. Creates a colony directory with a single worker config (``worker.json``)
+       holding the queen's current tools, prompts, skills, and loop config.
+    2. Duplicates the queen's full session (conversations + events) into a new
+       queen-session directory assigned to the colony so that cold-restoring
+       the colony resumes with the queen's entire conversation history.
+    3. Multiple independent sessions can be created against the same colony,
+       giving parallel execution capacity without separate worker configs.
+
+    Returns ``{"colony_path", "colony_name", "queen_session_id", "is_new"}``.
+    """
     import asyncio
     import json
     import shutil
@@ -905,14 +933,12 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
         len(queen_tools),
         colony_session_id,
     )
-    return web.json_response(
-        {
-            "colony_path": str(colony_dir),
-            "colony_name": colony_name,
-            "queen_session_id": colony_session_id,
-            "is_new": is_new,
-        }
-    )
+    return {
+        "colony_path": str(colony_dir),
+        "colony_name": colony_name,
+        "queen_session_id": colony_session_id,
+        "is_new": is_new,
+    }
 
 
 def register_routes(app: web.Application) -> None:

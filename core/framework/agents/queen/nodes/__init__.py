@@ -84,6 +84,10 @@ _QUEEN_PLANNING_TOOLS = [
     # Parallel fan-out — use directly for one-off batch work the user
     # wants RIGHT NOW (without first designing an agent for it).
     "run_parallel_workers",
+    # Fork this session into a colony, writing a learned-skill file
+    # under ~/.hive/skills/ first so the new colony inherits the
+    # session's knowledge.
+    "create_colony",
 ]
 
 # Building phase: full coding + agent construction tools.
@@ -181,6 +185,8 @@ _QUEEN_INDEPENDENT_TOOLS = [
     "undo_changes",
     # Parallel fan-out (Phase 4 unified ColonyRuntime)
     "run_parallel_workers",
+    # Fork to colony — captures session knowledge as a skill first
+    "create_colony",
 ]
 
 
@@ -684,6 +690,26 @@ is a dict {"task": "...", "data"?: {...}}; the tool returns aggregated \
 write a single user-facing synthesis on your next turn. Prefer this over \
 designing a draft when the work is one-shot and the user wants results, not \
 a saved agent.
+
+## Forking the session into a colony (with session-knowledge capture)
+Two-step flow:
+  1. AUTHOR THE SKILL FIRST. Use write_file to create a skill folder \
+     (recommended location: `~/.hive/skills/{skill-name}/SKILL.md`) \
+     capturing what you learned during THIS session — API endpoints, \
+     auth flow, response shapes, gotchas, conventions, query patterns. \
+     The SKILL.md needs YAML frontmatter with `name` (matching the \
+     directory name) and `description` (1-1024 chars including trigger \
+     keywords), followed by a markdown body. Optional subdirs: \
+     scripts/, references/, assets/. Read your writing-hive-skills \
+     default skill for the full spec.
+  2. create_colony(colony_name, task, skill_path) — Validate the skill \
+     folder, install it under ~/.hive/skills/ if it's not already there, \
+     and fork this session into a new colony. The new colony's worker \
+     (which inherits ~/.hive/skills/) discovers the skill on its first \
+     scan, so it's born already knowing what you learned instead of \
+     re-doing your discovery work from scratch. ALWAYS prefer \
+     create_colony over a raw fork when ending a session that uncovered \
+     reusable operational knowledge.
 
 ## Workflow summary
 1. Understand requirements → discover tools → design the layout
