@@ -1052,8 +1052,16 @@ async def select_queen_with_reason(user_message: str, llm: LLMProvider) -> Queen
         )
 
     raw = response.content.strip()
+    # Extract JSON object if the response has extra text before/after it
+    if raw.startswith("{"):
+        json_str = raw
+    else:
+        # Find the first '{' and last '}' to extract the JSON object
+        start = raw.find("{")
+        end = raw.rfind("}")
+        json_str = raw[start:end+1] if start != -1 and end != -1 and end > start else raw
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(json_str)
     except json.JSONDecodeError as exc:
         logger.error(
             "Queen selector failed to parse JSON; defaulting to %s. error=%s raw=%r",
