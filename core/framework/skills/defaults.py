@@ -77,6 +77,7 @@ SKILL_REGISTRY: dict[str, str] = {
     "hive.quality-monitor": "quality-monitor",
     "hive.error-recovery": "error-recovery",
     "hive.task-decomposition": "task-decomposition",
+    "hive.writing-hive-skills": "writing-hive-skills",
 }
 
 # All shared buffer keys used by default skills (for permission auto-inclusion)

@@ -15,7 +15,7 @@ function makeEvent(overrides: Partial<AgentEvent>): AgentEvent {
     data: {},
     timestamp: "2026-01-01T00:00:00Z",
     correlation_id: null,
-    graph_id: null,
+    colony_id: null,
     ...overrides,
   };
 }

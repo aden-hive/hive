@@ -1,10 +1,10 @@
 """Queen agent definition.
 
-The queen is a single AgentLoop -- no graph, no orchestrator.
+The queen is a single AgentLoop — no orchestrator dependency.
 Loaded by queen_orchestrator.create_queen().
 """
 
-from framework.orchestrator.goal import Goal
+from framework.schemas.goal import Goal
 
 from .nodes import queen_node
 

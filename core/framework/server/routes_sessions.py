@@ -1,17 +1,17 @@
 """Session lifecycle and session info routes.
 
 Session-primary routes:
-- POST   /api/sessions                               — create session (with or without worker)
-- GET    /api/sessions                               — list all active sessions
-- GET    /api/sessions/{session_id}                  — session detail
-- DELETE /api/sessions/{session_id}                  — stop session entirely
-- POST   /api/sessions/{session_id}/graph            — load a graph into session
-- DELETE /api/sessions/{session_id}/graph            — unload graph from session
-- GET    /api/sessions/{session_id}/stats            — runtime statistics
-- GET    /api/sessions/{session_id}/entry-points     — list entry points
-- PATCH  /api/sessions/{session_id}/triggers/{id}   — update trigger task
-- GET    /api/sessions/{session_id}/graphs           — list graph IDs
-- GET    /api/sessions/{session_id}/events/history  — persisted eventbus log (for replay)
+- POST   /api/sessions                                — create session (with or without worker)
+- GET    /api/sessions                                — list all active sessions
+- GET    /api/sessions/{session_id}                   — session detail
+- DELETE /api/sessions/{session_id}                   — stop session entirely
+- POST   /api/sessions/{session_id}/colony            — load a colony into session
+- DELETE /api/sessions/{session_id}/colony            — unload colony from session
+- GET    /api/sessions/{session_id}/stats             — runtime statistics
+- GET    /api/sessions/{session_id}/entry-points      — list entry points
+- PATCH  /api/sessions/{session_id}/triggers/{id}    — update trigger task
+- GET    /api/sessions/{session_id}/colonies          — list colony IDs
+- GET    /api/sessions/{session_id}/events/history   — persisted eventbus log (for replay)
 
 """
 
@@ -49,9 +49,9 @@ def _session_to_live_dict(session) -> dict:
     queen_model: str = getattr(getattr(session, "runner", None), "model", "") or ""
     return {
         "session_id": session.id,
-        "graph_id": session.graph_id,
-        "graph_name": info.name if info else session.graph_id,
-        "has_worker": session.graph_runtime is not None,
+        "colony_id": session.colony_id,
+        "colony_name": info.name if info else session.colony_id,
+        "has_worker": session.colony_runtime is not None,
         "agent_path": str(session.worker_path) if session.worker_path else "",
         "description": info.description if info else "",
         "goal": info.goal_name if info else "",
@@ -61,7 +61,7 @@ def _session_to_live_dict(session) -> dict:
         "intro_message": getattr(session.runner, "intro_message", "") or "",
         "queen_phase": phase_state.phase
         if phase_state
-        else ("staging" if session.graph_runtime else "planning"),
+        else ("staging" if session.colony_runtime else "planning"),
         "queen_supports_images": supports_image_tool_results(queen_model) if queen_model else True,
         "queen_id": getattr(phase_state, "queen_id", None) if phase_state else None,
         "queen_name": (phase_state.queen_profile or {}).get("name") if phase_state else None,
@@ -109,17 +109,17 @@ async def handle_create_session(request: web.Request) -> web.Response:
     """POST /api/sessions — create a session.
 
     Body: {
-        "agent_path": "..." (optional — if provided, creates session with graph),
-        "agent_id": "..." (optional — graph ID override),
+        "agent_path": "..." (optional — if provided, creates session with colony),
+        "agent_id": "..." (optional — colony ID override),
         "session_id": "..." (optional — custom session ID),
         "model": "..." (optional),
         "initial_prompt": "..." (optional — first user message for the queen),
         "initial_phase": "..." (optional — "independent" for standalone queen),
     }
 
-    When agent_path is provided, creates a session with a graph in one step
+    When agent_path is provided, creates a session with a colony in one step
     (equivalent to the old POST /api/agents). Otherwise creates a queen-only
-    session that can later have a graph loaded via POST /sessions/{id}/graph.
+    session that can later have a colony loaded via POST /sessions/{id}/colony.
     """
     manager = _get_manager(request)
     body = await request.json() if request.can_read_body else {}
@@ -128,10 +128,10 @@ async def handle_create_session(request: web.Request) -> web.Response:
     session_id = body.get("session_id")
     model = body.get("model")
     initial_prompt = body.get("initial_prompt")
-    # When set, the queen writes conversations to this existing session's directory
-    # so the full history accumulates in one place across server restarts.
     queen_resume_from = body.get("queen_resume_from")
+    queen_name = body.get("queen_name")
     initial_phase = body.get("initial_phase")
+    worker_name = body.get("worker_name")
 
     if agent_path:
         try:
@@ -141,15 +141,16 @@ async def handle_create_session(request: web.Request) -> web.Response:
 
     try:
         if agent_path:
-            # One-step: create session + load graph
-            session = await manager.create_session_with_worker_graph(
+            session = await manager.create_session_with_worker_colony(
                 agent_path,
                 agent_id=agent_id,
                 session_id=session_id,
                 model=model,
                 initial_prompt=initial_prompt,
                 queen_resume_from=queen_resume_from,
+                queen_name=queen_name,
                 initial_phase=initial_phase,
+                worker_name=worker_name,
             )
         else:
             # Queen-only session
@@ -165,7 +166,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
         if "currently loading" in msg:
             resolved_id = agent_id or (Path(agent_path).name if agent_path else "")
             return web.json_response(
-                {"error": msg, "graph_id": resolved_id, "loading": True},
+                {"error": msg, "colony_id": resolved_id, "loading": True},
                 status=409,
             )
         return web.json_response({"error": msg}, status=409)
@@ -219,8 +220,8 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
 
     data = _session_to_live_dict(session)
 
-    if session.graph_runtime:
-        rt = session.graph_runtime
+    if session.colony_runtime:
+        rt = session.colony_runtime
         data["entry_points"] = [
             {
                 "id": ep.id,
@@ -238,12 +239,12 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
         ]
         # Append triggers from triggers.json (stored on session)
         runner = getattr(session, "runner", None)
-        graph_entry = runner.graph.entry_node if runner else ""
+        colony_entry = runner.graph.entry_node if runner else ""
         for t in getattr(session, "available_triggers", {}).values():
             entry = {
                 "id": t.id,
                 "name": t.description or t.id,
-                "entry_node": graph_entry,
+                "entry_node": colony_entry,
                 "trigger_type": t.trigger_type,
                 "trigger_config": t.trigger_config,
                 "task": t.task,
@@ -252,7 +253,7 @@ async def handle_get_live_session(request: web.Request) -> web.Response:
             if mono is not None:
                 entry["next_fire_in"] = max(0.0, mono - time.monotonic())
             data["entry_points"].append(entry)
-        data["graphs"] = session.graph_runtime.list_graphs()
+        data["colonies"] = session.colony_runtime.list_graphs()
 
     return web.json_response(data)
 
@@ -273,14 +274,14 @@ async def handle_stop_session(request: web.Request) -> web.Response:
 
 
 # ------------------------------------------------------------------
-# Graph lifecycle
+# Colony lifecycle
 # ------------------------------------------------------------------
 
 
-async def handle_load_graph(request: web.Request) -> web.Response:
-    """POST /api/sessions/{session_id}/graph — load a graph into a session.
+async def handle_load_colony(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/colony — load a colony into a session.
 
-    Body: {"agent_path": "...", "graph_id": "..." (optional), "model": "..." (optional)}
+    Body: {"agent_path": "...", "colony_id": "..." (optional), "model": "..." (optional)}
     """
     manager = _get_manager(request)
     session_id = request.match_info["session_id"]
@@ -295,14 +296,14 @@ async def handle_load_graph(request: web.Request) -> web.Response:
     except ValueError as e:
         return web.json_response({"error": str(e)}, status=400)
 
-    graph_id = body.get("graph_id")
+    colony_id = body.get("colony_id")
     model = body.get("model")
 
     try:
-        session = await manager.load_graph(
+        session = await manager.load_colony(
             session_id,
             agent_path,
-            graph_id=graph_id,
+            colony_id=colony_id,
             model=model,
         )
     except ValueError as e:
@@ -313,18 +314,18 @@ async def handle_load_graph(request: web.Request) -> web.Response:
         resp = _credential_error_response(e, agent_path)
         if resp is not None:
             return resp
-        logger.exception("Error loading graph: %s", e)
+        logger.exception("Error loading colony: %s", e)
         return web.json_response({"error": "Internal server error"}, status=500)
 
     return web.json_response(_session_to_live_dict(session))
 
 
-async def handle_unload_graph(request: web.Request) -> web.Response:
-    """DELETE /api/sessions/{session_id}/graph — unload graph, keep queen alive."""
+async def handle_unload_colony(request: web.Request) -> web.Response:
+    """DELETE /api/sessions/{session_id}/colony — unload colony, keep queen alive."""
     manager = _get_manager(request)
     session_id = request.match_info["session_id"]
 
-    removed = await manager.unload_graph(session_id)
+    removed = await manager.unload_colony(session_id)
     if not removed:
         session = manager.get_session(session_id)
         if session is None:
@@ -333,11 +334,11 @@ async def handle_unload_graph(request: web.Request) -> web.Response:
                 status=404,
             )
         return web.json_response(
-            {"error": "No graph loaded in this session"},
+            {"error": "No colony loaded in this session"},
             status=409,
         )
 
-    return web.json_response({"session_id": session_id, "graph_unloaded": True})
+    return web.json_response({"session_id": session_id, "colony_unloaded": True})
 
 
 # ------------------------------------------------------------------
@@ -357,7 +358,7 @@ async def handle_session_stats(request: web.Request) -> web.Response:
             status=404,
         )
 
-    stats = session.graph_runtime.get_stats() if session.graph_runtime else {}
+    stats = session.colony_runtime.get_stats() if session.colony_runtime else {}
     return web.json_response(stats)
 
 
@@ -373,7 +374,7 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
             status=404,
         )
 
-    rt = session.graph_runtime
+    rt = session.colony_runtime
     eps = rt.get_entry_points() if rt else []
     entry_points = [
         {
@@ -392,12 +393,12 @@ async def handle_session_entry_points(request: web.Request) -> web.Response:
     ]
     # Append triggers from triggers.json (stored on session)
     runner = getattr(session, "runner", None)
-    graph_entry = runner.graph.entry_node if runner else ""
+    colony_entry = runner.graph.entry_node if runner else ""
     for t in getattr(session, "available_triggers", {}).values():
         entry = {
             "id": t.id,
             "name": t.description or t.id,
-            "entry_node": graph_entry,
+            "entry_node": colony_entry,
             "trigger_type": t.trigger_type,
             "trigger_config": t.trigger_config,
             "task": t.task,
@@ -530,7 +531,7 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
 
     _save_trigger_to_agent(session, trigger_id, tdef)
 
-    # Emit SSE event so the frontend updates the graph and detail panel
+    # Emit SSE event so the frontend updates the colony and detail panel
     bus = getattr(session, "event_bus", None)
     if bus:
         from framework.host.event_bus import AgentEvent, EventType
@@ -563,8 +564,8 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
     )
 
 
-async def handle_session_graphs(request: web.Request) -> web.Response:
-    """GET /api/sessions/{session_id}/graphs — list loaded graphs."""
+async def handle_session_colonies(request: web.Request) -> web.Response:
+    """GET /api/sessions/{session_id}/colonies — list loaded colonies."""
     manager = _get_manager(request)
     session_id = request.match_info["session_id"]
     session = manager.get_session(session_id)
@@ -575,8 +576,8 @@ async def handle_session_graphs(request: web.Request) -> web.Response:
             status=404,
         )
 
-    graphs = session.graph_runtime.list_graphs() if session.graph_runtime else []
-    return web.json_response({"graphs": graphs})
+    colonies = session.colony_runtime.list_graphs() if session.colony_runtime else []
+    return web.json_response({"colonies": colonies})
 
 
 async def handle_session_events_history(request: web.Request) -> web.Response:
@@ -694,6 +695,7 @@ async def handle_discover(request: web.Request) -> web.Response:
                 "tags": entry.tags,
                 "last_active": entry.last_active,
                 "is_loaded": str(entry.path.resolve()) in loaded_paths,
+                "workers": [w.to_dict() for w in entry.workers],
             }
             for entry in entries
         ]
@@ -794,9 +796,9 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/sessions/{session_id}", handle_get_live_session)
     app.router.add_delete("/api/sessions/{session_id}", handle_stop_session)
 
-    # Graph lifecycle
-    app.router.add_post("/api/sessions/{session_id}/graph", handle_load_graph)
-    app.router.add_delete("/api/sessions/{session_id}/graph", handle_unload_graph)
+    # Colony lifecycle
+    app.router.add_post("/api/sessions/{session_id}/colony", handle_load_colony)
+    app.router.add_delete("/api/sessions/{session_id}/colony", handle_unload_colony)
 
     # Session info
     app.router.add_post("/api/sessions/{session_id}/reveal", handle_reveal_session_folder)
@@ -805,6 +807,6 @@ def register_routes(app: web.Application) -> None:
     app.router.add_patch(
         "/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task
     )
-    app.router.add_get("/api/sessions/{session_id}/graphs", handle_session_graphs)
+    app.router.add_get("/api/sessions/{session_id}/colonies", handle_session_colonies)
 
     app.router.add_get("/api/sessions/{session_id}/events/history", handle_session_events_history)

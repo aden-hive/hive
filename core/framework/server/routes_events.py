@@ -6,7 +6,7 @@ import logging
 from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionResetError as _AiohttpConnReset
 
-from framework.host.event_bus import AgentEvent, EventType
+from framework.host.event_bus import EventType
 from framework.server.app import resolve_session
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,6 @@ DEFAULT_EVENT_TYPES = [
     EventType.NODE_LOOP_COMPLETED,
     EventType.LLM_TURN_COMPLETE,
     EventType.NODE_ACTION_PLAN,
-    EventType.EDGE_TRAVERSED,
     EventType.GOAL_PROGRESS,
     EventType.NODE_INTERNAL_OUTPUT,
     EventType.NODE_STALLED,
@@ -36,7 +35,8 @@ DEFAULT_EVENT_TYPES = [
     EventType.NODE_TOOL_DOOM_LOOP,
     EventType.CONTEXT_COMPACTED,
     EventType.CONTEXT_USAGE_UPDATED,
-    EventType.WORKER_GRAPH_LOADED,
+    EventType.WORKER_COLONY_LOADED,
+    EventType.COLONY_CREATED,
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
     EventType.QUEEN_PHASE_CHANGED,
@@ -46,11 +46,31 @@ DEFAULT_EVENT_TYPES = [
     EventType.TRIGGER_FIRED,
     EventType.TRIGGER_REMOVED,
     EventType.TRIGGER_UPDATED,
-    EventType.DRAFT_GRAPH_UPDATED,
 ]
 
 # Keepalive interval in seconds
 KEEPALIVE_INTERVAL = 15.0
+
+# Phase 5 SSE filter: parallel-worker streams (stream_id="worker:{uuid}")
+# publish high-frequency LLM deltas / tool calls that would flood the
+# user's queen DM chat. We let only this small allowlist of worker
+# events through to the queen-chat SSE so the frontend can render
+# fan-out lifecycle and structured fan-in reports without seeing the
+# raw worker chatter. Per-worker SSE panels (Phase 5b) bypass this
+# filter via a dedicated /workers/{worker_id}/events route.
+_WORKER_EVENT_ALLOWLIST = {
+    EventType.SUBAGENT_REPORT.value,
+    EventType.EXECUTION_COMPLETED.value,
+    EventType.EXECUTION_FAILED.value,
+}
+
+
+def _is_worker_noise(evt_dict: dict) -> bool:
+    """True if the event is a parallel-worker event we should drop."""
+    stream_id = evt_dict.get("stream_id") or ""
+    if not stream_id.startswith("worker:"):
+        return False
+    return evt_dict.get("type") not in _WORKER_EVENT_ALLOWLIST
 
 
 def _parse_event_types(query_param: str | None) -> list[EventType]:
@@ -112,6 +132,8 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
             return
 
         evt_dict = event.to_dict()
+        if _is_worker_noise(evt_dict):
+            return
         if evt_dict.get("type") in _CRITICAL_EVENTS:
             try:
                 queue.put_nowait(evt_dict)
@@ -157,61 +179,21 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     replayed = 0
     for past_event in event_bus._event_history:
         if past_event.type.value in replay_types:
+            past_dict = past_event.to_dict()
+            if _is_worker_noise(past_dict):
+                continue
             try:
-                queue.put_nowait(past_event.to_dict())
+                queue.put_nowait(past_dict)
                 replayed += 1
             except asyncio.QueueFull:
                 break
     if replayed:
         logger.info("SSE replayed %d buffered events for session='%s'", replayed, session.id)
 
-    # Inject a live-status snapshot so the frontend knows which nodes are
-    # currently running.  This covers the case where the user navigated away
-    # and back — the localStorage snapshot is stale, and the ring-buffer
-    # replay may not include the original node_loop_started events.
-    graph_runtime = getattr(session, "graph_runtime", None)
-    if graph_runtime and getattr(graph_runtime, "is_running", False):
-        try:
-            for stream_info in graph_runtime.get_active_streams():
-                graph_id = stream_info.get("graph_id")
-                stream_id = stream_info.get("stream_id", "default")
-                for exec_id in stream_info.get("active_execution_ids", []):
-                    # Synthesize execution_started so frontend sets workerRunState
-                    synth_exec = AgentEvent(
-                        type=EventType.EXECUTION_STARTED,
-                        stream_id=stream_id,
-                        execution_id=exec_id,
-                        graph_id=graph_id,
-                        data={"synthetic": True},
-                    ).to_dict()
-                    try:
-                        queue.put_nowait(synth_exec)
-                    except asyncio.QueueFull:
-                        pass
-
-                # Find the currently executing node via the executor
-                for _gid, reg in graph_runtime._graphs.items():
-                    if _gid != graph_id:
-                        continue
-                    for _ep_id, stream in reg.streams.items():
-                        for exec_id, executor in stream._active_executors.items():
-                            current = getattr(executor, "current_node_id", None)
-                            if current:
-                                synth_node = AgentEvent(
-                                    type=EventType.NODE_LOOP_STARTED,
-                                    stream_id=stream_id,
-                                    node_id=current,
-                                    execution_id=exec_id,
-                                    graph_id=graph_id,
-                                    data={"synthetic": True},
-                                ).to_dict()
-                                try:
-                                    queue.put_nowait(synth_node)
-                                except asyncio.QueueFull:
-                                    pass
-            logger.info("SSE injected live-status snapshot for session='%s'", session.id)
-        except Exception:
-            logger.debug("Failed to inject live-status snapshot", exc_info=True)
+    # Live status is surfaced via the EventBus ring-buffer replay above
+    # (executed earlier in this handler).  The old graph-executor snapshot
+    # injection was removed when graph execution was retired -- the
+    # AgentLoop publishes its own lifecycle events to the EventBus.
 
     event_count = 0
     close_reason = "unknown"

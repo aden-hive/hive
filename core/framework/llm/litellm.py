@@ -38,6 +38,10 @@ from framework.llm.stream_events import StreamEvent
 
 logger = logging.getLogger(__name__)
 
+logging.getLogger("openai._base_client").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 
 def _patch_litellm_anthropic_oauth() -> None:
     """Patch litellm's Anthropic header construction to fix OAuth token handling.
@@ -1877,6 +1881,40 @@ class LiteLLMProvider(LLMProvider):
                 sys_msg["cache_control"] = {"type": "ephemeral"}
             full_messages.append(sys_msg)
         full_messages.extend(messages)
+
+        if logger.isEnabledFor(logging.DEBUG) and full_messages:
+            import json as _json
+            from pathlib import Path as _Path
+            from datetime import datetime as _dt
+
+            _debug_dir = _Path.home() / ".hive" / "debug_logs"
+            _debug_dir.mkdir(parents=True, exist_ok=True)
+            _ts = _dt.now().strftime("%Y%m%d_%H%M%S_%f")
+            _dump_file = _debug_dir / f"llm_request_{_ts}.json"
+            _summary = []
+            for _mi, _m in enumerate(full_messages):
+                _role = _m.get("role", "?")
+                _c = _m.get("content")
+                _tc = _m.get("tool_calls")
+                _tcid = _m.get("tool_call_id")
+                _summary.append(
+                    {
+                        "idx": _mi,
+                        "role": _role,
+                        "content_length": len(str(_c)) if _c else 0,
+                        "content_preview": str(_c)[:200] if _c else repr(_c),
+                        "has_tool_calls": bool(_tc),
+                        "tool_call_count": len(_tc) if _tc else 0,
+                        "tool_call_id": _tcid,
+                    }
+                )
+            try:
+                _dump_file.write_text(
+                    _json.dumps(_summary, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
+                logger.debug("[LLM-MSG] %d messages dumped to %s", len(full_messages), _dump_file)
+            except Exception:
+                pass
 
         # Codex Responses API requires an `instructions` field (system prompt).
         # Inject a minimal one when callers don't provide a system message.

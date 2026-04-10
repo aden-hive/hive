@@ -53,14 +53,30 @@ async def restore(
     # continuous mode (or when _restore is called for timer-resume)
     # load all parts — the full conversation threads across nodes.
     _is_continuous = getattr(ctx, "continuous_mode", False)
-    phase_filter = None if _is_continuous else ctx.node_id
+    # The queen has agent_id="queen" but messages are stored with phase_id=None.
+    # Only apply phase filtering for non-queen workers in a multi-agent setup.
+    phase_filter = None if (_is_continuous or ctx.agent_id == "queen") else ctx.agent_id
     conversation = await NodeConversation.restore(
         conversation_store,
         phase_id=phase_filter,
         run_id=ctx.effective_run_id,
     )
     if conversation is None:
+        logger.info(
+            "[restore] No conversation found for agent_id=%s phase_filter=%s run_id=%s",
+            ctx.agent_id,
+            phase_filter,
+            ctx.effective_run_id,
+        )
         return None
+
+    logger.info(
+        "[restore] Restored %d messages for agent_id=%s phase_filter=%s run_id=%s",
+        conversation.message_count,
+        ctx.agent_id,
+        phase_filter,
+        ctx.effective_run_id,
+    )
 
     # If run_id filtering removed all messages, this is an intentional
     # restart (new run), not a crash recovery.  Return None so the caller
@@ -124,7 +140,7 @@ async def write_cursor(
         cursor.update(
             {
                 "iteration": iteration,
-                "node_id": ctx.node_id,
+                "node_id": ctx.agent_id,
                 "outputs": accumulator.to_dict(),
             }
         )
@@ -245,11 +261,6 @@ async def check_pause(
 
     # Check context-level pause flags (legacy/alternative methods)
     pause_requested = ctx.input_data.get("pause_requested", False)
-    if not pause_requested:
-        try:
-            pause_requested = ctx.buffer.read("pause_requested") or False
-        except (PermissionError, KeyError):
-            pause_requested = False
     if pause_requested:
         completed = iteration
         logger.info(f"⏸ Pausing after {completed} iteration(s) completed (context-level)")

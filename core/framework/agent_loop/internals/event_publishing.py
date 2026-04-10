@@ -45,14 +45,14 @@ async def generate_action_plan(
     Runs as a fire-and-forget task so it never blocks the main loop.
     """
     try:
-        system_prompt = ctx.node_spec.system_prompt or ""
+        system_prompt = ctx.agent_spec.system_prompt or ""
         # Trim to keep the prompt small
         prompt_summary = system_prompt[:500]
         if len(system_prompt) > 500:
             prompt_summary += "..."
 
         tool_names = [t.name for t in ctx.available_tools]
-        output_keys = ctx.node_spec.output_keys or []
+        output_keys = ctx.agent_spec.output_keys or []
 
         prompt = (
             f'You are about to work on a task as node "{node_id}".\n\n'
@@ -185,8 +185,8 @@ async def publish_context_usage(
     await event_bus.publish(
         AgentEvent(
             type=EventType.CONTEXT_USAGE_UPDATED,
-            stream_id=ctx.stream_id or ctx.node_id,
-            node_id=ctx.node_id,
+            stream_id=ctx.stream_id or ctx.agent_id,
+            node_id=ctx.agent_id,
             data={
                 "usage_ratio": round(ratio, 4),
                 "usage_pct": round(ratio * 100),
@@ -319,9 +319,7 @@ async def publish_output_key_set(
     execution_id: str = "",
 ) -> None:
     if event_bus:
-        await event_bus.emit_output_key_set(
-            stream_id=stream_id, node_id=node_id, key=key, execution_id=execution_id
-        )
+        pass
 
 
 async def run_hooks(

@@ -1,6 +1,9 @@
-"""Legacy compatibility wrapper around :mod:`framework.graph.prompting`.
+"""Compatibility wrapper around :mod:`framework.orchestrator.prompting`.
 
-New runtime code should import from ``framework.graph.prompting`` directly.
+Re-exports the prompt-composition primitives plus a few helpers
+(``compose_system_prompt``, ``build_transition_marker``) used by skills
+and queen tooling.  New code should import directly from
+``framework.orchestrator.prompting``.
 """
 
 from __future__ import annotations
@@ -102,7 +105,7 @@ def build_transition_marker(
                 file_size = file_path.stat().st_size
                 buffer_items[key] = (
                     f"[Saved to '{filename}' ({file_size:,} bytes). "
-                    f"Use load_data(filename='{filename}') to access.]"
+                    f"Use read_file(path='{filename}') to access.]"
                 )
             except Exception:
                 buffer_items[key] = val_str[:300] + "..."

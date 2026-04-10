@@ -8,7 +8,7 @@ Run with:
 import json
 import time
 
-from framework.graph.node import find_json_object
+from framework.orchestrator.node import find_json_object
 
 # Test inputs
 

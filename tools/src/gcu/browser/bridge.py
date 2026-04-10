@@ -722,6 +722,20 @@ class BeelineBridge:
         button_map = {"left": "left", "right": "right", "middle": "middle"}
         cdp_button = button_map.get(button, "left")
 
+        from .tools.inspection import _screenshot_scales, _screenshot_css_scales
+
+        phys_scale = _screenshot_scales.get(tab_id, "unset")
+        css_scale = _screenshot_css_scales.get(tab_id, "unset")
+        logger.info(
+            "click_coordinate tab=%d: x=%.1f, y=%.1f → CDP Input.dispatchMouseEvent. "
+            "stored_scales: physicalScale=%s, cssScale=%s",
+            tab_id,
+            x,
+            y,
+            phys_scale,
+            css_scale,
+        )
+
         await self._cdp(
             tab_id,
             "Input.dispatchMouseEvent",
@@ -1781,13 +1795,32 @@ class BeelineBridge:
                 )
                 meta = (meta_result or {}).get("result", {}).get("result", {}).get("value") or {}
 
+                dpr = meta.get("dpr", 1.0)
+                css_w = meta.get("cssWidth", 0)
+                css_h = meta.get("cssHeight", 0)
+
+                import struct as _struct
+
+                raw_bytes = base64.b64decode(data) if data else b""
+                png_w = _struct.unpack(">I", raw_bytes[16:20])[0] if len(raw_bytes) >= 24 else 0
+                png_h = _struct.unpack(">I", raw_bytes[20:24])[0] if len(raw_bytes) >= 24 else 0
+                logger.info(
+                    "CDP screenshot raw: png=%dx%d, css=%dx%d, dpr=%s, implied_dpr=%.2f",
+                    png_w,
+                    png_h,
+                    css_w,
+                    css_h,
+                    dpr,
+                    (png_w / css_w) if css_w else 0.0,
+                )
+
                 return {
                     "ok": True,
                     "tabId": tab_id,
                     "url": meta.get("url", ""),
-                    "devicePixelRatio": meta.get("dpr", 1.0),
-                    "cssWidth": meta.get("cssWidth", 0),
-                    "cssHeight": meta.get("cssHeight", 0),
+                    "devicePixelRatio": dpr,
+                    "cssWidth": css_w,
+                    "cssHeight": css_h,
                     "data": data,
                     "mimeType": "image/png",
                 }

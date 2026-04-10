@@ -68,23 +68,50 @@ def build_accounts_prompt(
     tool_provider_map: dict[str, str] | None = None,
     node_tool_names: list[str] | None = None,
 ) -> str:
-    """Build a prompt section describing connected accounts."""
+    """Build a prompt section describing connected accounts.
+
+    Format: a ``# Connected integrations`` heading, then one block per
+    provider. Each provider header names the tools that accept an
+    ``account=`` argument; each account is listed alias-first with the
+    alias wrapped in double quotes so the model treats it as a literal
+    identifier (not prose). Single-account providers collapse to a
+    two-line block. Pure data — behavioral guidance lives in the node's
+    planning_knowledge section, not here.
+    """
     if not accounts:
         return ""
 
+    def _format_identity(acct: dict[str, Any]) -> str:
+        identity = acct.get("identity", {})
+        parts = [str(v) for v in identity.values() if v]
+        return f" ({', '.join(parts)})" if parts else ""
+
+    def _format_account_line(acct: dict[str, Any]) -> str:
+        alias = acct.get("alias", "unknown")
+        source_tag = " [local]" if acct.get("source") == "local" else ""
+        return f'- "{alias}"{_format_identity(acct)}{source_tag}'
+
+    provider_accounts: dict[str, list[dict[str, Any]]] = {}
+    for acct in accounts:
+        provider_accounts.setdefault(acct.get("provider", "unknown"), []).append(acct)
+
+    # Appended (only when any rendered provider has >1 account) so the model
+    # knows to disambiguate instead of silently picking one.
+    multi_account_note = (
+        "\nWhen a provider below has multiple accounts, ask the user which "
+        "one to use and list the options — do not guess."
+    )
+
+    # Simple path: no tool map — just group accounts by provider.
     if tool_provider_map is None:
-        lines = [
-            "Connected accounts (use the alias as the `account` parameter "
-            "when calling tools to target a specific account):"
-        ]
-        for acct in accounts:
-            provider = acct.get("provider", "unknown")
-            alias = acct.get("alias", "unknown")
-            identity = acct.get("identity", {})
-            detail_parts = [f"{k}: {v}" for k, v in identity.items() if v]
-            detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
-            lines.append(f"- {provider}/{alias}{detail}")
-        return "\n".join(lines)
+        sections: list[str] = ["# Connected integrations"]
+        for provider, acct_list in provider_accounts.items():
+            sections.append(f"\n{provider}")
+            for acct in acct_list:
+                sections.append(_format_account_line(acct))
+        if any(len(acct_list) > 1 for acct_list in provider_accounts.values()):
+            sections.append(multi_account_note)
+        return "\n".join(sections)
 
     provider_tools: dict[str, list[str]] = {}
     for tool_name, provider in tool_provider_map.items():
@@ -92,45 +119,37 @@ def build_accounts_prompt(
 
     node_tool_set = set(node_tool_names) if node_tool_names else None
 
-    provider_accounts: dict[str, list[dict[str, Any]]] = {}
-    for acct in accounts:
-        provider = acct.get("provider", "unknown")
-        provider_accounts.setdefault(provider, []).append(acct)
-
-    sections: list[str] = ["Connected accounts:"]
+    sections = ["# Connected integrations"]
+    has_multi_account = False
 
     for provider, acct_list in provider_accounts.items():
         tools_for_provider = sorted(provider_tools.get(provider, []))
-
         if node_tool_set is not None:
-            relevant_tools = [
-                tool_name for tool_name in tools_for_provider if tool_name in node_tool_set
-            ]
-            if not relevant_tools:
+            tools_for_provider = [t for t in tools_for_provider if t in node_tool_set]
+            if not tools_for_provider:
                 continue
-            tools_for_provider = relevant_tools
 
         all_local = all(acct.get("source") == "local" for acct in acct_list)
-        display_name = provider.replace("_", " ").title()
-        if tools_for_provider and not all_local:
-            tools_str = ", ".join(tools_for_provider)
-            sections.append(f'\n{display_name} (use account="<alias>" with: {tools_str}):')
-        elif tools_for_provider and all_local:
-            tools_str = ", ".join(tools_for_provider)
-            sections.append(f"\n{display_name} (tools: {tools_str}):")
-        else:
-            sections.append(f"\n{display_name}:")
+        tools_str = ", ".join(tools_for_provider)
 
+        if tools_for_provider and not all_local:
+            header_suffix = f' (use account="<alias>" with: {tools_str})'
+        elif tools_for_provider and all_local:
+            header_suffix = f" (tools: {tools_str})"
+        else:
+            header_suffix = ""
+
+        sections.append(f"\n{provider}{header_suffix}")
         for acct in acct_list:
-            alias = acct.get("alias", "unknown")
-            identity = acct.get("identity", {})
-            detail_parts = [f"{k}: {v}" for k, v in identity.items() if v]
-            detail = f" ({', '.join(detail_parts)})" if detail_parts else ""
-            source_tag = " [local]" if acct.get("source") == "local" else ""
-            sections.append(f"  - {provider}/{alias}{detail}{source_tag}")
+            sections.append(_format_account_line(acct))
+        if len(acct_list) > 1:
+            has_multi_account = True
 
     if len(sections) <= 1:
         return ""
+
+    if has_multi_account:
+        sections.append(multi_account_note)
 
     return "\n".join(sections)
 
@@ -267,7 +286,7 @@ def build_transition_message(spec: TransitionSpec) -> str:
 
     if spec.data_files:
         sections.append(
-            "\nData files (use load_data to access):\n"
+            "\nData files (use read_file to access):\n"
             + "\n".join(f"  {entry}" for entry in spec.data_files)
         )
 

@@ -10,7 +10,7 @@ import CredentialsModal, {
   clearCredentialCache,
 } from "@/components/CredentialsModal";
 import { executionApi } from "@/api/execution";
-import { graphsApi } from "@/api/graphs";
+import { workersApi } from "@/api/workers";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
 import type {
@@ -74,7 +74,7 @@ async function restoreSessionMessages(
         if (p && ["planning", "building", "staging", "running"].includes(p)) {
           runningPhase = p as ChatMessage["phase"];
         }
-        if (evt.type === "flowchart_map_updated" && evt.data) {
+        if (evt.type === "custom" && (evt.data as Record<string, unknown>)?.event === "flowchart_updated" && evt.data) {
           const mapData = evt.data as {
             map?: Record<string, string[]>;
             original_draft?: DraftGraphData;
@@ -107,8 +107,7 @@ interface AgentState {
   queenReady: boolean;
   error: string | null;
   displayName: string | null;
-  graphId: string | null;
-  nodeSpecs: NodeSpec[];
+  colonyId: string | null;  nodeSpecs: NodeSpec[];
   awaitingInput: boolean;
   workerInputMessageId: string | null;
   queenBuilding: boolean;
@@ -154,7 +153,7 @@ function defaultAgentState(): AgentState {
     queenReady: false,
     error: null,
     displayName: null,
-    graphId: null,
+    colonyId: null,
     nodeSpecs: [],
     awaitingInput: false,
     workerInputMessageId: null,
@@ -371,21 +370,21 @@ export default function ColonyChat() {
   const fetchGraph = useCallback(
     async (sessionId: string, knownGraphId?: string) => {
       try {
-        let graphId = knownGraphId;
-        if (!graphId) {
-          // Try session detail first (graph_id is always set when worker is loaded)
+        let colonyId = knownGraphId;
+        if (!colonyId) {
+          // Try session detail first (colony_id is always set when worker is loaded)
           try {
             const detail = await sessionsApi.get(sessionId);
-            graphId = detail.graph_id ?? undefined;
+            colonyId = detail.colony_id ?? undefined;
           } catch { /* fall through */ }
         }
-        if (!graphId) {
-          const { graphs } = await sessionsApi.graphs(sessionId);
-          if (!graphs.length) return;
-          graphId = graphs[0];
+        if (!colonyId) {
+          const { colonies } = await sessionsApi.colonies(sessionId);
+          if (!colonies.length) return;
+          colonyId = colonies[0];
         }
-        const topology = await graphsApi.nodes(sessionId, graphId);
-        updateState({ graphId, nodeSpecs: topology.nodes });
+        const topology = await workersApi.nodes(sessionId, colonyId);
+        updateState({ colonyId, nodeSpecs: topology.nodes });
         const nodes = topologyToGraphNodes(topology);
         if (nodes.length > 0) setGraphNodes(nodes);
       } catch {
@@ -486,7 +485,7 @@ export default function ColonyChat() {
       }
 
       const session = liveSession!;
-      const displayName = formatAgentDisplayName(session.graph_name || agentPath);
+      const displayName = formatAgentDisplayName(session.colony_name || agentPath);
       const initialPhase =
         restoredPhase || session.queen_phase || (session.has_worker ? "staging" : "planning");
       queenPhaseRef.current = initialPhase;
@@ -564,10 +563,10 @@ export default function ColonyChat() {
 
   // Fetch graph when session becomes ready
   useEffect(() => {
-    if (agentState.sessionId && agentState.ready && !agentState.graphId) {
+    if (agentState.sessionId && agentState.ready && !agentState.colonyId) {
       fetchGraph(agentState.sessionId);
     }
-  }, [agentState.sessionId, agentState.ready, agentState.graphId, fetchGraph]);
+  }, [agentState.sessionId, agentState.ready, agentState.colonyId, fetchGraph]);
 
   // ── SSE event handler ──────────────────────────────────────────────────
 
@@ -655,7 +654,7 @@ export default function ColonyChat() {
               pendingQuestionSource: null,
             });
             markAllNodesAs(["running", "looping"], "complete");
-            if (state.sessionId) fetchGraph(state.sessionId, state.graphId || undefined);
+            if (state.sessionId) fetchGraph(state.sessionId, state.colonyId || undefined);
           }
           break;
 
@@ -848,7 +847,7 @@ export default function ColonyChat() {
           }
           break;
 
-        case "edge_traversed":
+        case "node_retry":
           if (!isQueen) {
             const sourceNode = event.data?.source_node as string | undefined;
             const targetNode = event.data?.target_node as string | undefined;
@@ -1014,54 +1013,45 @@ export default function ColonyChat() {
             ...(newPhase === "planning" ? { originalDraft: null, flowchartMap: null } : {}),
             ...(eventAgentPath ? { agentPath: eventAgentPath } : {}),
           });
-          const sid = state.sessionId;
-          if (sid && newPhase !== "planning" && newPhase !== "building") {
-            graphsApi
-              .flowchartMap(sid)
-              .then(({ map, original_draft }) => {
-                updateState({ flowchartMap: map, originalDraft: original_draft });
-              })
-              .catch(() => {});
-          }
           break;
         }
 
-        case "draft_graph_updated": {
-          const draft = event.data as unknown as DraftGraphData | undefined;
-          if (draft?.nodes) {
-            const MIN_SPINNER_MS = 600;
-            const since = designingDraftSinceRef.current;
-            const elapsed = Date.now() - since;
-            const remaining = Math.max(0, MIN_SPINNER_MS - elapsed);
-            if (remaining > 0 && since > 0) {
-              updateState({ draftGraph: draft });
-              designingDraftTimerRef.current = setTimeout(() => {
-                updateState({ designingDraft: false });
-              }, remaining);
-            } else {
-              updateState({ draftGraph: draft, designingDraft: false });
+        case "custom": {
+          const customEvent = event.data as Record<string, unknown>;
+          if (customEvent?.event === "draft_updated") {
+            const draft = customEvent as unknown as DraftGraphData | undefined;
+            if (draft?.nodes) {
+              const MIN_SPINNER_MS = 600;
+              const since = designingDraftSinceRef.current;
+              const elapsed = Date.now() - since;
+              const remaining = Math.max(0, MIN_SPINNER_MS - elapsed);
+              if (remaining > 0 && since > 0) {
+                updateState({ draftGraph: draft });
+                designingDraftTimerRef.current = setTimeout(() => {
+                  updateState({ designingDraft: false });
+                }, remaining);
+              } else {
+                updateState({ draftGraph: draft, designingDraft: false });
+              }
+            }
+          } else if (customEvent?.event === "flowchart_updated") {
+            const mapData = customEvent as {
+              map?: Record<string, string[]>;
+              original_draft?: DraftGraphData;
+            };
+            if (mapData) {
+              updateState({
+                flowchartMap: mapData.map ?? null,
+                originalDraft: mapData.original_draft ?? null,
+                draftGraph: null,
+              });
             }
           }
           break;
         }
 
-        case "flowchart_map_updated": {
-          const mapData = event.data as {
-            map?: Record<string, string[]>;
-            original_draft?: DraftGraphData;
-          } | undefined;
-          if (mapData) {
-            updateState({
-              flowchartMap: mapData.map ?? null,
-              originalDraft: mapData.original_draft ?? null,
-              draftGraph: null,
-            });
-          }
-          break;
-        }
-
-        case "worker_graph_loaded": {
-          const graphName = event.data?.graph_name as string | undefined;
+        case "worker_colony_loaded": {
+          const graphName = event.data?.colony_name as string | undefined;
           const agentPathFromEvent = event.data?.agent_path as string | undefined;
           const dn = formatAgentDisplayName(graphName || agentSlug(agentPath));
           clearCredentialCache(agentPathFromEvent);
@@ -1069,7 +1059,7 @@ export default function ColonyChat() {
             displayName: dn,
             queenBuilding: false,
             workerRunState: "idle",
-            graphId: null,
+            colonyId: null,
             nodeSpecs: [],
           });
           setGraphNodes([]);
@@ -1456,7 +1446,7 @@ export default function ColonyChat() {
             <NodeDetailPanel
               node={resolvedSelectedNode}
               sessionId={agentState.sessionId || ""}
-              graphId={agentState.graphId || ""}
+              colonyId={agentState.colonyId || ""}
               nodeLogs={agentState.nodeLogs[resolvedSelectedNode.id] || []}
               actionPlan={agentState.nodeActionPlans[resolvedSelectedNode.id]}
               onClose={() => setSelectedNode(null)}

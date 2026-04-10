@@ -6,14 +6,11 @@ export interface Colony {
   status: "running" | "idle";
   unreadCount: number;
   queenId: string;
-  /** Queen profile ID from session data (e.g. "queen_technology") */
   queenProfileId: string | null;
-  /** Backend session ID when live */
   sessionId: string | null;
-  /** Number of active sessions */
   sessionCount: number;
-  /** Number of total runs */
   runCount: number;
+  queenName: string;
 }
 
 export interface QueenBee {

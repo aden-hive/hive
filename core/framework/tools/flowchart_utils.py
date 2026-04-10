@@ -152,8 +152,6 @@ def classify_flowchart_node(
         "sql_query",
         "read_table",
         "write_table",
-        "save_data",
-        "load_data",
     }
     db_desc_hints = {"database", "data store", "storage", "persist", "cache"}
     if node_tools & db_tool_hints or any(h in desc for h in db_desc_hints):

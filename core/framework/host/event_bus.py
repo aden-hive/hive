@@ -108,14 +108,10 @@ class EventType(StrEnum):
     # Judge decisions (implicit judge in event loop nodes)
     JUDGE_VERDICT = "judge_verdict"
 
-    # Output tracking
-    OUTPUT_KEY_SET = "output_key_set"
-
-    # Retry / edge tracking
+    # Retry tracking
     NODE_RETRY = "node_retry"
-    EDGE_TRAVERSED = "edge_traversed"
 
-    # Worker agent lifecycle (event-driven graph execution)
+    # Worker agent lifecycle
     WORKER_COMPLETED = "worker_completed"
     WORKER_FAILED = "worker_failed"
 
@@ -135,17 +131,15 @@ class EventType(StrEnum):
     # Execution resurrection (auto-restart on non-fatal failure)
     EXECUTION_RESURRECTED = "execution_resurrected"
 
-    # Graph lifecycle (session manager → frontend)
-    WORKER_GRAPH_LOADED = "worker_graph_loaded"
+    # Colony lifecycle (session manager → frontend)
+    WORKER_COLONY_LOADED = "worker_colony_loaded"
+    # Queen create_colony tool finished forking; carries colony_name +
+    # path so the frontend can render a system message linking to the
+    # new colony page at /colony/{colony_name}.
+    COLONY_CREATED = "colony_created"
     CREDENTIALS_REQUIRED = "credentials_required"
 
-    # Draft graph (planning phase — lightweight graph preview)
-    DRAFT_GRAPH_UPDATED = "draft_graph_updated"
-
-    # Flowchart map updated (after reconciliation with runtime graph)
-    FLOWCHART_MAP_UPDATED = "flowchart_map_updated"
-
-    # Queen phase changes (building <-> staging <-> running)
+    # Queen phase changes (working <-> reviewing)
     QUEEN_PHASE_CHANGED = "queen_phase_changed"
 
     # Queen identity — which queen profile was selected for this session
@@ -174,7 +168,7 @@ class AgentEvent:
     data: dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
     correlation_id: str | None = None  # For tracking related events
-    graph_id: str | None = None  # Which graph emitted this event (multi-graph sessions)
+    colony_id: str | None = None  # Which colony emitted this event
     run_id: str | None = None  # Unique ID per trigger() invocation — used for run dividers
 
     def to_dict(self) -> dict:
@@ -187,7 +181,7 @@ class AgentEvent:
             "data": self.data,
             "timestamp": self.timestamp.isoformat(),
             "correlation_id": self.correlation_id,
-            "graph_id": self.graph_id,
+            "colony_id": self.colony_id,
         }
         if self.run_id is not None:
             d["run_id"] = self.run_id
@@ -208,7 +202,7 @@ class Subscription:
     filter_stream: str | None = None  # Only receive events from this stream
     filter_node: str | None = None  # Only receive events from this node
     filter_execution: str | None = None  # Only receive events from this execution
-    filter_graph: str | None = None  # Only receive events from this graph
+    filter_colony: str | None = None  # Only receive events from this colony
 
 
 class EventBus:
@@ -390,7 +384,7 @@ class EventBus:
         filter_stream: str | None = None,
         filter_node: str | None = None,
         filter_execution: str | None = None,
-        filter_graph: str | None = None,
+        filter_colony: str | None = None,
     ) -> str:
         """
         Subscribe to events.
@@ -401,7 +395,7 @@ class EventBus:
             filter_stream: Only receive events from this stream
             filter_node: Only receive events from this node
             filter_execution: Only receive events from this execution
-            filter_graph: Only receive events from this graph
+            filter_colony: Only receive events from this colony
 
         Returns:
             Subscription ID (use to unsubscribe)
@@ -416,7 +410,7 @@ class EventBus:
             filter_stream=filter_stream,
             filter_node=filter_node,
             filter_execution=filter_execution,
-            filter_graph=filter_graph,
+            filter_colony=filter_colony,
         )
 
         self._subscriptions[sub_id] = subscription
@@ -518,8 +512,8 @@ class EventBus:
         if subscription.filter_execution and subscription.filter_execution != event.execution_id:
             return False
 
-        # Check graph filter
-        if subscription.filter_graph and subscription.filter_graph != event.graph_id:
+        # Check colony filter
+        if subscription.filter_colony and subscription.filter_colony != event.colony_id:
             return False
 
         return True
@@ -1029,24 +1023,6 @@ class EventBus:
             )
         )
 
-    async def emit_output_key_set(
-        self,
-        stream_id: str,
-        node_id: str,
-        key: str,
-        execution_id: str | None = None,
-    ) -> None:
-        """Emit output key set event."""
-        await self.publish(
-            AgentEvent(
-                type=EventType.OUTPUT_KEY_SET,
-                stream_id=stream_id,
-                node_id=node_id,
-                execution_id=execution_id,
-                data={"key": key},
-            )
-        )
-
     async def emit_node_retry(
         self,
         stream_id: str,
@@ -1067,29 +1043,6 @@ class EventBus:
                     "retry_count": retry_count,
                     "max_retries": max_retries,
                     "error": error,
-                },
-            )
-        )
-
-    async def emit_edge_traversed(
-        self,
-        stream_id: str,
-        source_node: str,
-        target_node: str,
-        edge_condition: str = "",
-        execution_id: str | None = None,
-    ) -> None:
-        """Emit edge traversed event."""
-        await self.publish(
-            AgentEvent(
-                type=EventType.EDGE_TRAVERSED,
-                stream_id=stream_id,
-                node_id=source_node,
-                execution_id=execution_id,
-                data={
-                    "source_node": source_node,
-                    "target_node": target_node,
-                    "edge_condition": edge_condition,
                 },
             )
         )
@@ -1208,15 +1161,25 @@ class EventBus:
         reason: str = "",
         context: str = "",
         execution_id: str | None = None,
+        request_id: str | None = None,
     ) -> None:
-        """Emit escalation requested event (agent wants queen)."""
+        """Emit escalation requested event (agent wants queen).
+
+        ``request_id`` is a caller-supplied handle used by the queen to
+        address its reply back to the specific escalation. When omitted the
+        event still fires but the queen cannot route a targeted reply.
+        """
         await self.publish(
             AgentEvent(
                 type=EventType.ESCALATION_REQUESTED,
                 stream_id=stream_id,
                 node_id=node_id,
                 execution_id=execution_id,
-                data={"reason": reason, "context": context},
+                data={
+                    "request_id": request_id,
+                    "reason": reason,
+                    "context": context,
+                },
             )
         )
 
@@ -1297,7 +1260,7 @@ class EventBus:
         stream_id: str | None = None,
         node_id: str | None = None,
         execution_id: str | None = None,
-        graph_id: str | None = None,
+        colony_id: str | None = None,
         timeout: float | None = None,
     ) -> AgentEvent | None:
         """
@@ -1308,7 +1271,7 @@ class EventBus:
             stream_id: Filter by stream
             node_id: Filter by node
             execution_id: Filter by execution
-            graph_id: Filter by graph
+            colony_id: Filter by colony
             timeout: Maximum time to wait (seconds)
 
         Returns:
@@ -1329,7 +1292,7 @@ class EventBus:
             filter_stream=stream_id,
             filter_node=node_id,
             filter_execution=execution_id,
-            filter_graph=graph_id,
+            filter_colony=colony_id,
         )
 
         try:

@@ -172,7 +172,7 @@ class ExecutionManager:
         goal: "Goal",
         state_manager: SharedBufferManager,
         storage: "ConcurrentStorage",
-        outcome_aggregator: "OutcomeAggregator",
+        outcome_aggregator: "OutcomeAggregator | None" = None,
         event_bus: "EventBus | None" = None,
         llm: "LLMProvider | None" = None,
         tools: list["Tool"] | None = None,
@@ -265,7 +265,6 @@ class ExecutionManager:
         self._runtime = StreamDecisionTracker(
             stream_id=stream_id,
             storage=storage,
-            outcome_aggregator=outcome_aggregator,
         )
 
         # Execution tracking

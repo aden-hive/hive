@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from framework import Runtime
+from framework import DecisionTracker as Runtime
 from framework.schemas.decision import DecisionType
 
 

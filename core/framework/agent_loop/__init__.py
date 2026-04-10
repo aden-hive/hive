@@ -5,11 +5,12 @@ from framework.agent_loop.conversation import (  # noqa: F401
     Message,
     NodeConversation,
 )
-
-# Lazy import to avoid circular dependency with graph/event_loop/
-# (graph/event_loop/* imports framework.graph.conversation which is a shim
-# pointing here, which would trigger agent_loop.py loading, which imports
-# graph/event_loop/* again)
+from framework.agent_loop.types import (  # noqa: F401
+    AgentContext,
+    AgentProtocol,
+    AgentResult,
+    AgentSpec,
+)
 
 
 def __getattr__(name: str):

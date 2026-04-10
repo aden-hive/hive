@@ -42,11 +42,14 @@ class TestSkillResourceBaseDir:
 
         assert "<base_dir>/path/with &lt;&amp;&gt; chars</base_dir>" in prompt
 
-    def test_base_dir_absent_for_framework_skills(self):
-        """Framework-scope skills are filtered from the catalog, so no base_dir either."""
+    def test_base_dir_present_for_framework_skills(self):
+        """Framework-scope skills now appear in the catalog like any other scope,
+        and their base_dir is included in the XML."""
         skill = _make_skill("fw", "/hive/_default_skills/fw", source_scope="framework")
         catalog = SkillCatalog([skill])
-        assert catalog.to_prompt() == ""
+        prompt = catalog.to_prompt()
+        assert "<name>fw</name>" in prompt
+        assert "<base_dir>/hive/_default_skills/fw</base_dir>" in prompt
 
     def test_allowlisted_dirs_matches_skills(self):
         """allowlisted_dirs returns all skill base_dirs including framework ones."""
@@ -70,7 +73,7 @@ class TestSkillDirsPropagation:
     def _make_ctx(self, **kwargs):
         from unittest.mock import MagicMock
 
-        from framework.graph.node import NodeContext
+        from framework.orchestrator.node import NodeContext
 
         return NodeContext(
             runtime=MagicMock(),

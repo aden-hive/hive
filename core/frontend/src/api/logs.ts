@@ -24,7 +24,7 @@ export const logsApi = {
 
   nodeLogs: (
     sessionId: string,
-    graphId: string,
+    colonyId: string,
     nodeId: string,
     workerSessionId: string,
     level?: string,
@@ -35,6 +35,6 @@ export const logsApi = {
       details?: LogNodeDetail[];
       tool_logs?: LogToolStep[];
     }>(
-      `/sessions/${sessionId}/graphs/${graphId}/nodes/${nodeId}/logs?session_id=${workerSessionId}${level ? `&level=${level}` : ""}`,
+      `/sessions/${sessionId}/colonies/${colonyId}/nodes/${nodeId}/logs?session_id=${workerSessionId}${level ? `&level=${level}` : ""}`,
     ),
 };

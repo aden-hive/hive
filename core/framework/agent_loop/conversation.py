@@ -61,9 +61,12 @@ class Message:
             return {"role": "user", "content": self.content}
 
         if self.role == "assistant":
-            d: dict[str, Any] = {"role": "assistant", "content": self.content}
+            d: dict[str, Any] = {"role": "assistant"}
             if self.tool_calls:
                 d["tool_calls"] = self.tool_calls
+                d["content"] = self.content if self.content else None
+            else:
+                d["content"] = self.content or ""
             return d
 
         # role == "tool"
@@ -235,8 +238,8 @@ def extract_tool_call_history(messages: list[Message], max_entries: int = 30) ->
             return args.get("query", "")
         if name == "web_scrape":
             return args.get("url", "")
-        if name in ("load_data", "save_data"):
-            return args.get("filename", "")
+        if name == "read_file":
+            return args.get("path", "")
         return ""
 
     for msg in messages:
@@ -252,8 +255,8 @@ def extract_tool_call_history(messages: list[Message], max_entries: int = 30) ->
                 summary = _summarize_input(name, args)
                 tool_calls_detail.setdefault(name, []).append(summary)
 
-                if name == "save_data" and args.get("filename"):
-                    files_saved.append(args["filename"])
+                if name == "read_file" and args.get("path"):
+                    files_saved.append(args["path"])
                 if name == "set_output" and args.get("key"):
                     outputs_set.append(args["key"])
 
@@ -515,7 +518,48 @@ class NodeConversation:
         can happen when a loop is cancelled mid-tool-execution.
         """
         msgs = [m.to_llm_dict() for m in self._messages]
-        return self._repair_orphaned_tool_calls(msgs)
+        msgs = self._repair_orphaned_tool_calls(msgs)
+        msgs = self._sanitize_for_api(msgs)
+        return msgs
+
+    @staticmethod
+    def _sanitize_for_api(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Final pass: ensure message sequence is valid for strict APIs.
+
+        Rules:
+        1. No two consecutive messages with the same role (merge or drop)
+        2. Tool messages must have a tool_call_id
+        3. Assistant messages with tool_calls must have content=null, not ""
+        4. First message must not be 'tool' or 'assistant' (without prior context)
+        """
+        cleaned: list[dict[str, Any]] = []
+        for m in msgs:
+            role = m.get("role")
+
+            # Fix assistant content when tool_calls present
+            if role == "assistant" and m.get("tool_calls"):
+                if m.get("content") == "":
+                    m["content"] = None
+
+            # Drop tool messages without tool_call_id
+            if role == "tool" and not m.get("tool_call_id"):
+                continue
+
+            # Drop consecutive duplicate roles (merge user messages)
+            if cleaned and cleaned[-1].get("role") == role == "user":
+                prev_content = cleaned[-1].get("content", "")
+                curr_content = m.get("content", "")
+                if isinstance(prev_content, str) and isinstance(curr_content, str):
+                    cleaned[-1]["content"] = f"{prev_content}\n{curr_content}"
+                    continue
+
+            cleaned.append(m)
+
+        # Drop leading assistant/tool messages (no prior context)
+        while cleaned and cleaned[0].get("role") in ("assistant", "tool"):
+            cleaned.pop(0)
+
+        return cleaned
 
     @staticmethod
     def _repair_orphaned_tool_calls(
@@ -735,7 +779,7 @@ class NodeConversation:
                 placeholder = (
                     f"[Pruned tool result: {orig_len} chars. "
                     f"Full data in '{spillover}'. "
-                    f"Use load_data('{spillover}') to retrieve.]"
+                    f"Use read_file('{spillover}') to retrieve.]"
                 )
             else:
                 placeholder = f"[Pruned tool result: {orig_len} chars cleared from context.]"
@@ -1026,7 +1070,7 @@ class NodeConversation:
             full_path = str((spill_path / conv_filename).resolve())
             ref_parts.append(
                 f"[Previous conversation saved to '{full_path}'. "
-                f"Use load_data('{conv_filename}') to review if needed.]"
+                f"Use read_file('{conv_filename}') to review if needed.]"
             )
         elif not collapsed_msgs:
             ref_parts.append("[Previous freeform messages compacted.]")

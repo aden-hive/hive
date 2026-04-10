@@ -1,7 +1,10 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useParams, useSearchParams, useLocation } from "react-router-dom";
-import { Loader2 } from "lucide-react";
-import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
+import { useParams, useSearchParams } from "react-router-dom";
+import { Loader2, Users } from "lucide-react";
+import ChatPanel, {
+  type ChatMessage,
+  type ImageContent,
+} from "@/components/ChatPanel";
 import QueenSessionSwitcher from "@/components/QueenSessionSwitcher";
 import { executionApi } from "@/api/execution";
 import { sessionsApi } from "@/api/sessions";
@@ -20,11 +23,13 @@ export default function QueenDM() {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const { queens, queenProfiles, refresh } = useColony();
-  
+
   // Get initial prompt from route state (from Prompt Library)
-  const initialPromptRef = useRef((location.state as { prompt?: string } | null)?.prompt);
+  const initialPromptRef = useRef(
+    (location.state as { prompt?: string } | null)?.prompt,
+  );
   const promptSentRef = useRef(false);
-  
+
   // Clear location state immediately after reading to prevent re-sends on refresh
   useEffect(() => {
     if (location.state?.prompt) {
@@ -50,15 +55,25 @@ export default function QueenDM() {
     { id: string; prompt: string; options?: string[] }[] | null
   >(null);
   const [awaitingInput, setAwaitingInput] = useState(false);
-  const [, setActiveToolCalls] = useState<Record<string, { name: string; done: boolean }>>({});
+  const [, setActiveToolCalls] = useState<
+    Record<string, { name: string; done: boolean }>
+  >({});
   const [historySessions, setHistorySessions] = useState<HistorySession[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [switchingSessionId, setSwitchingSessionId] = useState<string | null>(null);
+  const [switchingSessionId, setSwitchingSessionId] = useState<string | null>(
+    null,
+  );
   const [creatingNewSession, setCreatingNewSession] = useState(false);
+  const [spawning, setSpawning] = useState(false);
+  const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
+  const [cloneColonyName, setCloneColonyName] = useState("");
+  const [cloneTask, setCloneTask] = useState("");
 
   const turnCounterRef = useRef(0);
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
-  const [queenPhase, setQueenPhase] = useState<"planning" | "building" | "staging" | "running" | "independent">("independent");
+  const [queenPhase, setQueenPhase] = useState<
+    "planning" | "building" | "staging" | "running" | "independent"
+  >("independent");
 
   const resetViewState = useCallback(() => {
     setSessionId(null);
@@ -111,11 +126,14 @@ export default function QueenDM() {
     (async () => {
       try {
         let sid: string;
-        
+
         // Fast path: if we have a session_id in URL from home screen (just created),
         // use it directly without an extra API call. The session is already live.
         // This eliminates the 10-13s delay from the unnecessary selectSession API call.
-        if (selectedSessionParam && selectedSessionParam.startsWith("session_")) {
+        if (
+          selectedSessionParam &&
+          selectedSessionParam.startsWith("session_")
+        ) {
           sid = selectedSessionParam;
           setSessionId(sid);
           setQueenReady(true);
@@ -125,31 +143,38 @@ export default function QueenDM() {
           restoreMessages(sid, () => cancelled).then(() => refresh());
           return;
         }
-        
+
         if (selectedSessionParam) {
           // Resume historical session - need to verify ownership via API
-          const result = await queensApi.selectSession(queenId, selectedSessionParam);
+          const result = await queensApi.selectSession(
+            queenId,
+            selectedSessionParam,
+          );
           if (cancelled) return;
           sid = result.session_id;
           setSessionId(sid);
           setQueenReady(true);
           setIsTyping(true);
-          
+
           if (selectedSessionParam !== sid) {
             setSearchParams({ session: sid }, { replace: true });
           }
         } else {
           // No session specified - get or create one
-          const result = await queensApi.getOrCreateSession(queenId, undefined, "independent");
+          const result = await queensApi.getOrCreateSession(
+            queenId,
+            undefined,
+            "independent",
+          );
           if (cancelled) return;
           sid = result.session_id;
           setSessionId(sid);
           setQueenReady(true);
           setIsTyping(true);
-          
+
           setSearchParams({ session: sid }, { replace: true });
         }
-        
+
         await restoreMessages(sid, () => cancelled);
         refresh();
       } catch {
@@ -166,7 +191,14 @@ export default function QueenDM() {
     return () => {
       cancelled = true;
     };
-  }, [queenId, selectedSessionParam, restoreMessages, refresh, resetViewState, setSearchParams]);
+  }, [
+    queenId,
+    selectedSessionParam,
+    restoreMessages,
+    refresh,
+    resetViewState,
+    setSearchParams,
+  ]);
 
   useEffect(() => {
     if (!queenId) return;
@@ -194,6 +226,49 @@ export default function QueenDM() {
     };
   }, [queenId, sessionId]);
 
+  const handleColonySpawn = useCallback(async () => {
+    if (!sessionId || spawning) return;
+    const colony = cloneColonyName.trim();
+    if (!colony) return;
+    setSpawning(true);
+    try {
+      const result = await executionApi.colonySpawn(
+        sessionId,
+        colony,
+        cloneTask.trim() || undefined,
+      );
+      const msg: ChatMessage = {
+        id: makeId(),
+        agent: "System",
+        agentColor: "",
+        content: `Forked to colony "${result.colony_name}"${result.is_new ? " (new)" : ""} — session ${result.queen_session_id}`,
+        timestamp: "",
+        type: "system",
+        thread: "queen-dm",
+        createdAt: Date.now(),
+      };
+      setMessages((prev) => [...prev, msg]);
+      setCloneDialogOpen(false);
+      setCloneColonyName("");
+      setCloneTask("");
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const msg: ChatMessage = {
+        id: makeId(),
+        agent: "System",
+        agentColor: "",
+        content: `Clone failed: ${errMsg}`,
+        timestamp: "",
+        type: "system",
+        thread: "queen-dm",
+        createdAt: Date.now(),
+      };
+      setMessages((prev) => [...prev, msg]);
+    } finally {
+      setSpawning(false);
+    }
+  }, [sessionId, spawning, cloneColonyName, cloneTask]);
+
   const handleSelectHistoricalSession = useCallback(
     (nextSessionId: string) => {
       if (!nextSessionId || nextSessionId === sessionId) return;
@@ -206,7 +281,11 @@ export default function QueenDM() {
   const handleCreateNewSession = useCallback(() => {
     if (!queenId) return;
     setCreatingNewSession(true);
-    const request = queensApi.createNewSession(queenId, undefined, "independent");
+    const request = queensApi.createNewSession(
+      queenId,
+      undefined,
+      "independent",
+    );
     request
       .then((result) => {
         setSearchParams({ session: result.session_id });
@@ -219,15 +298,26 @@ export default function QueenDM() {
   useEffect(() => {
     if (!queenId) return;
     setActions(
-      <QueenSessionSwitcher
-        sessions={historySessions}
-        currentSessionId={sessionId}
-        loading={historyLoading}
-        switchingSessionId={switchingSessionId}
-        creatingNew={creatingNewSession}
-        onSelect={handleSelectHistoricalSession}
-        onCreateNew={handleCreateNewSession}
-      />
+      <>
+        <button
+          onClick={() => setCloneDialogOpen(true)}
+          disabled={!sessionId}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex-shrink-0 disabled:opacity-50"
+          title="Clone queen to a colony"
+        >
+          <Users className="w-3.5 h-3.5" />
+          Clone Colony
+        </button>
+        <QueenSessionSwitcher
+          sessions={historySessions}
+          currentSessionId={sessionId}
+          loading={historyLoading}
+          switchingSessionId={switchingSessionId}
+          creatingNew={creatingNewSession}
+          onSelect={handleSelectHistoricalSession}
+          onCreateNew={handleCreateNewSession}
+        />
+      </>,
     );
     return () => setActions(null);
   }, [
@@ -268,7 +358,12 @@ export default function QueenDM() {
 
         case "client_output_delta":
         case "llm_text_delta": {
-          const chatMsg = sseEventToChatMessage(event, "queen-dm", queenName, turnCounterRef.current);
+          const chatMsg = sseEventToChatMessage(
+            event,
+            "queen-dm",
+            queenName,
+            turnCounterRef.current,
+          );
           if (chatMsg) {
             if (event.execution_id) {
               const iter = event.data?.iteration ?? 0;
@@ -278,7 +373,9 @@ export default function QueenDM() {
                 queenIterTextRef.current[iterKey] = {};
               }
               const snapshot =
-                (event.data?.snapshot as string) || (event.data?.content as string) || "";
+                (event.data?.snapshot as string) ||
+                (event.data?.content as string) ||
+                "";
               queenIterTextRef.current[iterKey][inner] = snapshot;
               const parts = queenIterTextRef.current[iterKey];
               const sorted = Object.keys(parts)
@@ -304,10 +401,16 @@ export default function QueenDM() {
         case "client_input_requested": {
           const prompt = (event.data?.prompt as string) || "";
           const rawOptions = event.data?.options;
-          const options = Array.isArray(rawOptions) ? (rawOptions as string[]) : null;
+          const options = Array.isArray(rawOptions)
+            ? (rawOptions as string[])
+            : null;
           const rawQuestions = event.data?.questions;
           const questions = Array.isArray(rawQuestions)
-            ? (rawQuestions as { id: string; prompt: string; options?: string[] }[])
+            ? (rawQuestions as {
+                id: string;
+                prompt: string;
+                options?: string[];
+              }[])
             : null;
           setAwaitingInput(true);
           setIsTyping(false);
@@ -319,7 +422,12 @@ export default function QueenDM() {
         }
 
         case "client_input_received": {
-          const chatMsg = sseEventToChatMessage(event, "queen-dm", queenName, turnCounterRef.current);
+          const chatMsg = sseEventToChatMessage(
+            event,
+            "queen-dm",
+            queenName,
+            turnCounterRef.current,
+          );
           if (chatMsg) {
             setMessages((prev) => {
               // Reconcile optimistic user message
@@ -328,7 +436,8 @@ export default function QueenDM() {
                 if (
                   last.type === "user" &&
                   last.content === chatMsg.content &&
-                  Math.abs((chatMsg.createdAt ?? 0) - (last.createdAt ?? 0)) <= 15000
+                  Math.abs((chatMsg.createdAt ?? 0) - (last.createdAt ?? 0)) <=
+                    15000
                 ) {
                   return prev.map((m, i) =>
                     i === prev.length - 1 ? { ...m, id: chatMsg.id } : m,
@@ -343,9 +452,43 @@ export default function QueenDM() {
 
         case "queen_phase_changed": {
           const rawPhase = event.data?.phase as string;
-          if (rawPhase === "independent" || rawPhase === "planning" || rawPhase === "building" || rawPhase === "staging" || rawPhase === "running") {
+          if (
+            rawPhase === "independent" ||
+            rawPhase === "planning" ||
+            rawPhase === "building" ||
+            rawPhase === "staging" ||
+            rawPhase === "running"
+          ) {
             setQueenPhase(rawPhase);
           }
+          break;
+        }
+
+        case "colony_created": {
+          // Queen called create_colony() — surface a clickable system
+          // message linking to /colony/{colony_name} so the user can
+          // navigate to the new colony immediately.
+          const colonyName = (event.data?.colony_name as string) || "";
+          const isNew = (event.data?.is_new as boolean) ?? true;
+          const skillName = (event.data?.skill_name as string) || "";
+          if (!colonyName) break;
+          const msg: ChatMessage = {
+            id: makeId(),
+            agent: "System",
+            agentColor: "",
+            content: JSON.stringify({
+              kind: "colony_created",
+              colony_name: colonyName,
+              is_new: isNew,
+              skill_name: skillName,
+              href: `/colony/${colonyName}`,
+            }),
+            timestamp: "",
+            type: "colony_link",
+            thread: "queen-dm",
+            createdAt: Date.now(),
+          };
+          setMessages((prev) => [...prev, msg]);
           break;
         }
 
@@ -356,8 +499,14 @@ export default function QueenDM() {
           const execId = event.execution_id || "exec";
 
           setActiveToolCalls((prev) => {
-            const newActive = { ...prev, [toolUseId]: { name: toolName, done: false } };
-            const tools = Object.entries(newActive).map(([, t]) => ({ name: t.name, done: t.done }));
+            const newActive = {
+              ...prev,
+              [toolUseId]: { name: toolName, done: false },
+            };
+            const tools = Object.entries(newActive).map(([, t]) => ({
+              name: t.name,
+              done: t.done,
+            }));
             const allDone = tools.length > 0 && tools.every((t) => t.done);
             const msgId = `tool-pill-${sid}-${execId}-${turnCounterRef.current}`;
             const toolMsg: ChatMessage = {
@@ -395,7 +544,10 @@ export default function QueenDM() {
             if (updated[toolUseId]) {
               updated[toolUseId] = { ...updated[toolUseId], done: true };
             }
-            const tools = Object.entries(updated).map(([, t]) => ({ name: t.name, done: t.done }));
+            const tools = Object.entries(updated).map(([, t]) => ({
+              name: t.name,
+              done: t.done,
+            }));
             const allDone = tools.length > 0 && tools.every((t) => t.done);
             const msgId = `tool-pill-${sid}-${execId}-${turnCounterRef.current}`;
             const toolMsg: ChatMessage = {
@@ -508,7 +660,13 @@ export default function QueenDM() {
   // Auto-send initial prompt from Prompt Library when session is ready
   useEffect(() => {
     const prompt = initialPromptRef.current;
-    if (prompt && sessionId && queenReady && !promptSentRef.current && !loading) {
+    if (
+      prompt &&
+      sessionId &&
+      queenReady &&
+      !promptSentRef.current &&
+      !loading
+    ) {
       promptSentRef.current = true;
       initialPromptRef.current = undefined; // Clear so refresh doesn't re-send
       // Small delay to ensure SSE is connected
@@ -527,8 +685,8 @@ export default function QueenDM() {
             <div className="flex items-center gap-3 text-muted-foreground">
               <Loader2 className="w-5 h-5 animate-spin" />
               <span className="text-sm">
-                {selectedSessionParam?.startsWith("session_") 
-                  ? "Connecting to session..." 
+                {selectedSessionParam?.startsWith("session_")
+                  ? "Connecting to session..."
                   : `Connecting to ${queenName}...`}
               </span>
             </div>
@@ -558,6 +716,76 @@ export default function QueenDM() {
           supportsImages={true}
         />
       </div>
+
+      {cloneDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => !spawning && setCloneDialogOpen(false)}
+          />
+          <div className="relative bg-card border border-border/60 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <h2 className="text-sm font-semibold text-foreground">
+              Fork to Colony
+            </h2>
+            <p className="text-[11px] text-muted-foreground">
+              Forks the queen's full session into a new colony. Multiple
+              sessions can run against it in parallel.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                  Colony name
+                </label>
+                <input
+                  type="text"
+                  value={cloneColonyName}
+                  onChange={(e) =>
+                    setCloneColonyName(
+                      e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""),
+                    )
+                  }
+                  placeholder="e.g. research_team"
+                  className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
+                  Task{" "}
+                  <span className="text-muted-foreground/40">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={cloneTask}
+                  onChange={(e) => setCloneTask(e.target.value)}
+                  placeholder="Continue the work from the queen's session"
+                  className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => {
+                  setCloneDialogOpen(false);
+                  setCloneColonyName("");
+                  setCloneTask("");
+                }}
+                disabled={spawning}
+                className="px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleColonySpawn}
+                disabled={spawning || !cloneColonyName.trim()}
+                className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                {spawning ? "Forking..." : "Fork"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

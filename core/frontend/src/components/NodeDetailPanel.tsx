@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, Cpu, Zap, Clock, RotateCcw, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronRight, Copy, Check, Terminal, Wrench, BookOpen, GitBranch, Bot } from "lucide-react";
 import type { GraphNode, NodeStatus } from "./graph-types";
 import type { NodeSpec, ToolInfo, NodeCriteria } from "../api/types";
-import { graphsApi } from "../api/graphs";
+import { workersApi } from "../api/workers";
 import { logsApi } from "../api/logs";
 import MarkdownContent from "./MarkdownContent";
 
@@ -41,7 +41,7 @@ interface NodeDetailPanelProps {
   allNodeSpecs?: NodeSpec[];
   subagentReports?: SubagentReport[];
   sessionId?: string;
-  graphId?: string;
+  colonyId?: string;
   workerSessionId?: string | null;
   nodeLogs?: string[];
   actionPlan?: string;
@@ -115,14 +115,14 @@ function ToolRow({ tool }: { tool: Tool }) {
   );
 }
 
-function LogsTab({ nodeId, isActive: _isActive, sessionId, graphId, workerSessionId, nodeLogs }: { nodeId: string; isActive: boolean; sessionId?: string; graphId?: string; workerSessionId?: string | null; nodeLogs?: string[] }) {
+function LogsTab({ nodeId, isActive: _isActive, sessionId, colonyId, workerSessionId, nodeLogs }: { nodeId: string; isActive: boolean; sessionId?: string; colonyId?: string; workerSessionId?: string | null; nodeLogs?: string[] }) {
   const [historicalLines, setHistoricalLines] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Fetch historical logs when session is available (post-execution viewing)
   useEffect(() => {
-    if (sessionId && graphId && workerSessionId) {
-      logsApi.nodeLogs(sessionId, graphId, nodeId, workerSessionId)
+    if (sessionId && colonyId && workerSessionId) {
+      logsApi.nodeLogs(sessionId, colonyId, nodeId, workerSessionId)
         .then(r => {
           const realLines: string[] = [];
           if (r.details) {
@@ -141,7 +141,7 @@ function LogsTab({ nodeId, isActive: _isActive, sessionId, graphId, workerSessio
         })
         .catch(() => { /* keep fallback on error */ });
     }
-  }, [sessionId, graphId, nodeId, workerSessionId]);
+  }, [sessionId, colonyId, nodeId, workerSessionId]);
 
   // Resolve which lines to display: live SSE logs > historical > default
   const lines = (nodeLogs && nodeLogs.length > 0)
@@ -317,7 +317,7 @@ const tabs: { id: Tab; label: string; Icon: React.FC<{ className?: string }> }[]
   { id: "subagents", label: "Subagents", Icon: ({ className }) => <Bot className={className} /> },
 ];
 
-export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagentReports, sessionId, graphId, workerSessionId, nodeLogs, actionPlan, contextUsage, onClose }: NodeDetailPanelProps) {
+export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagentReports, sessionId, colonyId, workerSessionId, nodeLogs, actionPlan, contextUsage, onClose }: NodeDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [realTools, setRealTools] = useState<ToolInfo[] | null>(null);
   const [realCriteria, setRealCriteria] = useState<NodeCriteria | null>(null);
@@ -330,21 +330,21 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
 
   // Fetch real tool descriptions when Tools tab is active and session is loaded
   useEffect(() => {
-    if (activeTab === "tools" && sessionId && graphId && node) {
-      graphsApi.nodeTools(sessionId, graphId, node.id)
+    if (activeTab === "tools" && sessionId && colonyId && node) {
+      workersApi.nodeTools(sessionId, colonyId, node.id)
         .then(r => setRealTools(r.tools))
         .catch(() => setRealTools(null));
     }
-  }, [activeTab, sessionId, graphId, node?.id]);
+  }, [activeTab, sessionId, colonyId, node?.id]);
 
   // Fetch real criteria when Overview tab is active and session is loaded
   useEffect(() => {
-    if (activeTab === "breakdown" && sessionId && graphId && node) {
-      graphsApi.nodeCriteria(sessionId, graphId, node.id, workerSessionId || undefined)
+    if (activeTab === "breakdown" && sessionId && colonyId && node) {
+      workersApi.nodeCriteria(sessionId, colonyId, node.id, workerSessionId || undefined)
         .then(r => setRealCriteria(r))
         .catch(() => setRealCriteria(null));
     }
-  }, [activeTab, sessionId, graphId, node?.id, workerSessionId]);
+  }, [activeTab, sessionId, colonyId, node?.id, workerSessionId]);
 
   if (!node) return null;
 
@@ -535,7 +535,7 @@ export default function NodeDetailPanel({ node, nodeSpec, allNodeSpecs, subagent
         )}
 
         {activeTab === "logs" && (
-          <LogsTab nodeId={node.id} isActive={isActive} sessionId={sessionId} graphId={graphId} workerSessionId={workerSessionId} nodeLogs={nodeLogs} />
+          <LogsTab nodeId={node.id} isActive={isActive} sessionId={sessionId} colonyId={colonyId} workerSessionId={workerSessionId} nodeLogs={nodeLogs} />
         )}
 
         {activeTab === "subagents" && nodeSpec?.sub_agents && (

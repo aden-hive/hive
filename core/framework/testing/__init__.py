@@ -47,9 +47,6 @@ from framework.testing.approval_types import (
 # Error categorization
 from framework.testing.categorizer import ErrorCategorizer
 
-# CLI
-from framework.testing.cli import register_testing_commands
-
 # Debug
 from framework.testing.debug_tool import DebugInfo, DebugTool
 
@@ -94,6 +91,4 @@ __all__ = [
     # Debug
     "DebugTool",
     "DebugInfo",
-    # CLI
-    "register_testing_commands",
 ]

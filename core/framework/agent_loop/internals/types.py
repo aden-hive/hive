@@ -80,6 +80,9 @@ class LoopConfig:
     # Worker auto-escalation: text-only turns before escalating to queen.
     worker_escalation_grace_turns: int = 1
     tool_doom_loop_enabled: bool = True
+    # Silent worker: consecutive tool-only turns (no user-facing text)
+    # before injecting a nudge to communicate progress.
+    silent_tool_streak_threshold: int = 5
 
     # Per-tool-call timeout.
     tool_call_timeout_seconds: float = 60.0

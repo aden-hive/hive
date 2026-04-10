@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time as _time_mod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,6 +16,195 @@ if TYPE_CHECKING:
     from framework.server.session_manager import Session
 
 logger = logging.getLogger(__name__)
+
+# Maximum number of unanswered worker escalations the queen's inbox will
+# buffer before auto-replying queue_full to new ones.
+MAX_PENDING_ESCALATIONS = 32
+
+
+def install_worker_escalation_routing(
+    session: Session,
+    *,
+    colony_runtime: Any | None = None,
+) -> str | None:
+    """Install the colony-scoped worker escalation handler on the queen bus.
+
+    Every worker ``escalate()`` call emits ESCALATION_REQUESTED stamped with
+    colony_id (by StreamEventBus) and a request_id (by AgentLoop). This
+    handler records the escalation in ``session.pending_escalations`` so the
+    queen can look it up by request_id later, and surfaces it to the queen
+    loop as an addressed [WORKER_ESCALATION] inject.
+
+    When ``colony_runtime`` is provided the subscription is scoped with
+    ``filter_colony`` so only escalations from workers in *this* queen's
+    colony are delivered — cross-colony leakage is structurally impossible.
+    Falls back to the raw session bus when no colony is attached.
+
+    Returns the subscription id (for unsubscribe) or ``None`` on failure.
+    """
+    from framework.host.event_bus import EventType
+
+    async def _on_worker_escalation(event):
+        stream_id = event.stream_id or ""
+        # Defensive: ignore any stray non-worker origin (e.g. queen).
+        if not stream_id.startswith("worker:"):
+            return
+        worker_id = stream_id[len("worker:"):]
+        data = event.data or {}
+        request_id = data.get("request_id")
+        reason = str(data.get("reason", "")).strip()
+        context_text = str(data.get("context", "")).strip()
+        node_label = event.node_id or "unknown_node"
+
+        # Back-pressure: if the queen's inbox is full, auto-reply to the
+        # worker so it unblocks instead of wedging forever.
+        if len(session.pending_escalations) >= MAX_PENDING_ESCALATIONS:
+            runtime = session.colony_runtime
+            if runtime is not None and worker_id:
+                try:
+                    await runtime.inject_input(
+                        worker_id,
+                        "[QUEEN_REPLY] queue_full — queen inbox saturated; "
+                        "proceed with best judgment or retry later.",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to send queue_full reply to worker %s",
+                        worker_id,
+                        exc_info=True,
+                    )
+            return
+
+        # Record the pending entry so reply_to_worker can address it.
+        if request_id:
+            session.pending_escalations[request_id] = {
+                "request_id": request_id,
+                "worker_id": worker_id,
+                "colony_id": event.colony_id,
+                "node_id": node_label,
+                "reason": reason,
+                "context": context_text,
+                "opened_at": _time_mod.time(),
+            }
+
+        # Surface the escalation to the queen as an addressed
+        # [WORKER_ESCALATION] message.
+        lines = ["[WORKER_ESCALATION]"]
+        if request_id:
+            lines.append(f"request_id: {request_id}")
+        lines.append(f"worker_id: {worker_id or 'unknown'}")
+        lines.append(f"node_id: {node_label}")
+        lines.append(f"reason: {reason or 'unspecified'}")
+        if context_text:
+            lines.append("context:")
+            lines.append(context_text)
+        if request_id:
+            lines.append(
+                "Use reply_to_worker(request_id, reply) to unblock, "
+                "or list_worker_questions() to see all pending."
+            )
+        else:
+            lines.append(
+                "No request_id — use inject_message(content=...) to relay "
+                "guidance manually."
+            )
+        handoff = "\n".join(lines)
+
+        # Fallback: if the queen loop has gone away, publish a
+        # CLIENT_INPUT_REQUESTED so the human sees the question and the
+        # worker does not wedge.
+        queen_node = (
+            session.queen_executor.node_registry.get("queen")
+            if session.queen_executor is not None
+            else None
+        )
+        if queen_node is None or not hasattr(queen_node, "inject_event"):
+            if session.event_bus is not None:
+                await session.event_bus.emit_client_input_requested(
+                    stream_id="queen",
+                    node_id="queen",
+                    prompt=handoff,
+                    execution_id=session.id,
+                )
+            return
+
+        await queen_node.inject_event(handoff, is_client_input=False)
+
+    # Prefer colony-scoped subscription when a colony is loaded so
+    # filter_colony does the isolation work for us.
+    runtime = colony_runtime if colony_runtime is not None else session.colony_runtime
+    if runtime is not None:
+        try:
+            return runtime.subscribe_to_events(
+                [EventType.ESCALATION_REQUESTED],
+                _on_worker_escalation,
+                filter_colony=runtime.colony_id,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to install colony-scoped escalation sub", exc_info=True
+            )
+            # fall through to session bus
+    if session.event_bus is None:
+        return None
+    return session.event_bus.subscribe(
+        event_types=[EventType.ESCALATION_REQUESTED],
+        handler=_on_worker_escalation,
+    )
+
+
+# Cache TTL for the ambient credentials block. The block is rebuilt at most
+# once per this interval; routes_credentials.invalidate_credentials_cache()
+# forces an immediate rebuild on save/delete.
+_CREDENTIALS_BLOCK_TTL_SECONDS = 30.0
+
+
+def _build_credentials_provider() -> Any:
+    """Return a closure that renders the ambient credentials block.
+
+    The closure snapshots connected accounts via CredentialStoreAdapter and
+    feeds them to build_accounts_prompt(). Output is connectivity-only —
+    provider, alias, identity. No status / valid / expires_at fields, since
+    those mislead the Queen the moment they go stale (liveness is enforced
+    at tool-call time via CredentialExpiredError instead).
+    """
+    import time
+
+    state: dict[str, Any] = {"cached": "", "cached_at": 0.0}
+
+    def _provider() -> str:
+        now = time.monotonic()
+        if (
+            state["cached"]
+            and (now - state["cached_at"]) < _CREDENTIALS_BLOCK_TTL_SECONDS
+        ):
+            return state["cached"]
+
+        try:
+            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
+            from framework.orchestrator.prompting import build_accounts_prompt
+
+            adapter = CredentialStoreAdapter.default()
+            accounts = adapter.get_all_account_info()
+            tool_provider_map = adapter.get_tool_provider_map()
+            rendered = build_accounts_prompt(
+                accounts,
+                tool_provider_map=tool_provider_map,
+                node_tool_names=None,
+            )
+        except Exception:
+            logger.debug("Failed to render ambient credentials block", exc_info=True)
+            rendered = ""
+
+        state["cached"] = rendered
+        state["cached_at"] = now
+        return rendered
+
+    def _invalidate() -> None:
+        state["cached_at"] = 0.0
+
+    _provider.invalidate = _invalidate  # type: ignore[attr-defined]
+    return _provider
 
 
 def initialize_memory_scopes(session: Session, phase_state: Any) -> tuple[Path, Path]:
@@ -81,8 +271,8 @@ async def create_queen(
     """Build the queen executor and return the running asyncio task.
 
     Handles tool registration, phase-state initialization, prompt
-    composition, queen identity materialization, graph preparation,
-    and the queen event loop.
+    composition, queen identity materialization, colony preparation, and the queen
+    event loop.
     """
     from framework.agents.queen.agent import (
         queen_goal,
@@ -173,6 +363,14 @@ async def create_queen(
     phase_state = QueenPhaseState(phase=effective_phase, event_bus=session.event_bus)
     session.phase_state = phase_state
 
+    # ---- Ambient credentials provider --------------------------------
+    # Renders the "Connected integrations" block injected into every Queen
+    # phase prompt so the Queen always knows which credentials are connected
+    # without having to call list_credentials. Cached briefly to keep the
+    # per-iteration prompt rebuild cheap; invalidated by routes_credentials
+    # when the user adds/removes an integration.
+    phase_state.credentials_prompt_provider = _build_credentials_provider()
+
     # ---- Track ask rounds during planning ----------------------------
     # Increment planning_ask_rounds each time the queen requests user
     # input (ask_user or ask_user_multiple) while in the planning phase.
@@ -205,19 +403,29 @@ async def create_queen(
         phase_state=phase_state,
     )
 
-    # ---- Monitoring tools (only when worker is loaded) ----------------
-    if session.graph_runtime:
+    # ---- Colony runtime check (only when worker is loaded) ----------------
+    if session.colony_runtime:
         from framework.tools.worker_monitoring_tools import register_worker_monitoring_tools
 
         register_worker_monitoring_tools(
             queen_registry,
             session.worker_path,
-            worker_graph_id=session.graph_runtime._graph_id,
+            worker_graph_id=getattr(session.colony_runtime, "_graph_id", None)
+            or getattr(session.colony_runtime, "graph", None)
+            and session.colony_runtime.graph.id,
             default_session_id=session.id,
         )
 
     queen_tools = list(queen_registry.get_tools().values())
     queen_tool_executor = queen_registry.get_executor()
+
+    # Phase 2 wiring: stash the resolved tool list + executor on the
+    # session so SessionManager._start_queen can build a real
+    # ColonyRuntime sharing the queen's tools, llm, and event bus.
+    # The unified runtime is what run_parallel_workers (Phase 4) will
+    # call into to fan out parallel workers from the queen.
+    session._queen_tools = queen_tools  # type: ignore[attr-defined]
+    session._queen_tool_executor = queen_tool_executor  # type: ignore[attr-defined]
 
     # ---- Partition tools by phase ------------------------------------
     planning_names = set(_QUEEN_PLANNING_TOOLS)
@@ -421,6 +629,45 @@ async def create_queen(
         phase_state.queen_identity_prompt = identity_prompt
         # Route session storage to ~/.hive/agents/queens/{queen_id}/sessions/
         session.queen_name = queen_id
+
+        # Relocate session dir from default/ to the selected queen's dir
+        # so all writes (conversations, events) go to the correct queen.
+        if queen_id != "default" and session.queen_dir:
+            import json as _json
+            import shutil as _shutil
+
+            _old_dir = session.queen_dir
+            if _old_dir.exists() and _old_dir.parent.parent.name == "default":
+                from framework.config import QUEENS_DIR as _QD
+
+                _new_dir = _QD / queen_id / "sessions" / _old_dir.name
+                _new_dir.parent.mkdir(parents=True, exist_ok=True)
+                _shutil.move(str(_old_dir), str(_new_dir))
+                session.queen_dir = _new_dir
+                logger.info(
+                    "Relocated queen session dir: %s -> %s",
+                    _old_dir,
+                    _new_dir,
+                )
+                # Update meta.json queen_id
+                _meta_path = _new_dir / "meta.json"
+                if _meta_path.exists():
+                    try:
+                        _meta = _json.loads(_meta_path.read_text(encoding="utf-8"))
+                        _meta["queen_id"] = queen_id
+                        _meta_path.write_text(
+                            _json.dumps(_meta, ensure_ascii=False), encoding="utf-8"
+                        )
+                    except (OSError, _json.JSONDecodeError):
+                        pass
+                # Re-point event bus log to new location, preserving offset
+                _offset = getattr(
+                    session.event_bus, "_session_log_iteration_offset", 0
+                )
+                session.event_bus.set_session_log(
+                    _new_dir / "events.jsonl", iteration_offset=_offset
+                )
+
         if _session_event_bus is not None:
             await _session_event_bus.publish(
                 AgentEvent(
@@ -458,7 +705,7 @@ async def create_queen(
 
         return HookResult(system_prompt=phase_state.get_current_prompt())
 
-    # ---- Graph preparation -------------------------------------------
+    # ---- Colony preparation -------------------------------------------
     initial_prompt_text = phase_state.get_current_prompt()
 
     registered_tool_names = set(queen_registry.get_tools().keys())
@@ -487,7 +734,7 @@ async def create_queen(
     from types import SimpleNamespace
 
     from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
-    from framework.orchestrator.node import DataBuffer, NodeContext
+    from framework.agent_loop.types import AgentContext, AgentSpec
     from framework.storage.conversation_store import FileConversationStore
 
     async def _queen_loop():
@@ -498,6 +745,8 @@ async def create_queen(
                 max_iterations=lc.get("max_iterations", 999_999),
                 max_tool_calls_per_turn=lc.get("max_tool_calls_per_turn", 30),
                 max_context_tokens=lc.get("max_context_tokens", 180_000),
+                max_tool_result_chars=lc.get("max_tool_result_chars", 30_000),
+                spillover_dir=str(queen_dir / "data"),
                 hooks=lc.get("hooks", {}),
             )
 
@@ -512,11 +761,19 @@ async def create_queen(
 
             from framework.tracker.decision_tracker import DecisionTracker
 
-            ctx = NodeContext(
+            queen_spec = AgentSpec(
+                id="queen",
+                name="Queen",
+                description="Queen agent — manages the colony and interacts with the user.",
+                system_prompt="",
+                tools=[t.name for t in queen_tools],
+                tool_access_policy="all",
+            )
+
+            ctx = AgentContext(
                 runtime=DecisionTracker(queen_dir),
-                node_id="queen",
-                node_spec=adjusted_node,
-                buffer=DataBuffer(),
+                agent_id="queen",
+                agent_spec=queen_spec,
                 llm=session.llm,
                 available_tools=queen_tools,
                 goal_context=queen_goal.to_prompt_context(),
@@ -579,7 +836,15 @@ async def create_queen(
                 event_types=[EventType.EXECUTION_COMPLETED, EventType.EXECUTION_FAILED],
                 handler=_on_worker_done,
             )
-            session_manager._subscribe_worker_handoffs(session, session.queen_executor)
+
+            # ---- Colony-scoped worker escalation routing ----
+            # Replaces the legacy unfiltered SessionManager subscription.
+            # ``filter_colony`` (inside install_worker_escalation_routing)
+            # ensures only escalations from workers in THIS queen's colony
+            # reach THIS queen — cross-colony leakage is structurally
+            # impossible because StreamEventBus stamps colony_id on every
+            # published event before dispatch.
+            session.worker_handoff_sub = install_worker_escalation_routing(session)
 
             from framework.agents.queen.reflection_agent import subscribe_reflection_triggers
 

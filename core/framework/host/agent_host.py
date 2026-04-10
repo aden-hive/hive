@@ -1440,6 +1440,26 @@ class AgentHost:
         return self._graph_id
 
     @property
+    def colony_id(self) -> str:
+        """Colony compatibility — returns the primary graph ID."""
+        return self._graph_id
+
+    def list_workers(self) -> list[str]:
+        """Colony compatibility — returns registered graph IDs."""
+        return self.list_graphs()
+
+    def get_worker_registration(self, graph_id: str):
+        """Colony compatibility — returns self for the matching graph."""
+        if graph_id in self._graphs:
+            return self
+        return None
+
+    @property
+    def streams(self) -> dict:
+        """Colony compatibility — returns _streams dict."""
+        return self._streams
+
+    @property
     def active_graph_id(self) -> str:
         """The currently focused graph (for TUI routing)."""
         return self._active_graph_id
@@ -1523,6 +1543,17 @@ class AgentHost:
                             task.cancel()
                             cancelled = True
         return cancelled
+
+    async def stop_all_workers(self) -> bool:
+        """Alias for ``cancel_all_tasks_async`` used by queen-lifecycle tools.
+
+        Queen tools (``stop_worker``, ``switch_to_reviewing``, etc.) call
+        ``runtime.stop_all_workers()`` which is the :class:`ColonyRuntime`
+        idiom. In the current architecture the session's runtime is an
+        :class:`AgentHost`, which stops workers by cancelling their
+        execution tasks. This alias bridges the two interfaces.
+        """
+        return await self.cancel_all_tasks_async()
 
     def _get_primary_session_state(
         self,

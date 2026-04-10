@@ -229,6 +229,14 @@ class NodeSpec(BaseModel):
         """Return True when this spec is the queen conversational node."""
         return self.id == "queen"
 
+    # Alias for AgentLoop compatibility (AgentSpec uses is_queen)
+    is_queen = is_queen_node
+
+    @property
+    def agent_type(self) -> str:
+        """Alias for node_type (AgentLoop compatibility)."""
+        return self.node_type
+
     def supports_direct_user_io(self) -> bool:
         """Return True when this node may talk to the user directly."""
         return self.is_queen_node()
@@ -557,6 +565,21 @@ class NodeContext:
     # the returned dict into node_loop_iteration event data.  Used by
     # the queen to record the current phase per iteration.
     iteration_metadata_provider: Any = None  # Callable[[], dict] | None
+
+    # ------------------------------------------------------------------
+    # Compatibility aliases — AgentLoop accesses ctx.agent_id / ctx.agent_spec
+    # but the orchestrator builds NodeContext with node_id / node_spec.
+    # ------------------------------------------------------------------
+
+    @property
+    def agent_id(self) -> str:
+        """Alias for node_id (AgentLoop compatibility)."""
+        return self.node_id
+
+    @property
+    def agent_spec(self) -> NodeSpec:
+        """Alias for node_spec (AgentLoop compatibility)."""
+        return self.node_spec
 
     @property
     def is_queen_stream(self) -> bool:

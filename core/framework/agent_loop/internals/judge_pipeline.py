@@ -79,7 +79,7 @@ async def judge_turn(
     if mark_complete_flag:
         return JudgeVerdict(action="ACCEPT")
 
-    if ctx.node_spec.skip_judge:
+    if ctx.agent_spec.skip_judge:
         return JudgeVerdict(action="RETRY")  # feedback=None → not logged
 
     # --- Level 1: custom judge -----------------------------------------
@@ -92,9 +92,9 @@ async def judge_turn(
             "accumulator": accumulator,
             "iteration": iteration,
             "conversation_summary": conversation.export_summary(),
-            "output_keys": ctx.node_spec.output_keys,
+            "output_keys": ctx.agent_spec.output_keys,
             "missing_keys": get_missing_output_keys_fn(
-                accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+                accumulator, ctx.agent_spec.output_keys, ctx.agent_spec.nullable_output_keys
             ),
         }
         verdict = await judge.evaluate(context)
@@ -110,7 +110,7 @@ async def judge_turn(
         return JudgeVerdict(action="RETRY")  # feedback=None → not logged
 
     missing = get_missing_output_keys_fn(
-        accumulator, ctx.node_spec.output_keys, ctx.node_spec.nullable_output_keys
+        accumulator, ctx.agent_spec.output_keys, ctx.agent_spec.nullable_output_keys
     )
 
     if missing:
@@ -124,8 +124,8 @@ async def judge_turn(
 
     # All output keys present — run safety checks before accepting.
 
-    output_keys = ctx.node_spec.output_keys or []
-    nullable_keys = set(ctx.node_spec.nullable_output_keys or [])
+    output_keys = ctx.agent_spec.output_keys or []
+    nullable_keys = set(ctx.agent_spec.nullable_output_keys or [])
 
     # All-nullable with nothing set → node produced nothing useful.
     all_nullable = output_keys and nullable_keys >= set(output_keys)
@@ -139,30 +139,16 @@ async def judge_turn(
             ),
         )
 
-    # Queen with no output keys → continuous interaction node.
-    # Inject tool-use pressure instead of auto-accepting.
-    if not output_keys and ctx.supports_direct_user_io:
-        return JudgeVerdict(
-            action="RETRY",
-            feedback=(
-                "STOP describing what you will do. "
-                "You have FULL access to all tools — file creation, "
-                "shell commands, MCP tools — and you CAN call them "
-                "directly in your response. Respond ONLY with tool "
-                "calls, no prose. Execute the task now."
-            ),
-        )
-
     # Level 2b: conversation-aware quality check (if success_criteria set)
-    if ctx.node_spec.success_criteria and ctx.llm:
+    if ctx.agent_spec.success_criteria and ctx.llm:
         from framework.orchestrator.conversation_judge import evaluate_phase_completion
 
         verdict = await evaluate_phase_completion(
             llm=ctx.llm,
             conversation=conversation,
-            phase_name=ctx.node_spec.name,
-            phase_description=ctx.node_spec.description,
-            success_criteria=ctx.node_spec.success_criteria,
+            phase_name=ctx.agent_spec.name,
+            phase_description=ctx.agent_spec.description,
+            success_criteria=ctx.agent_spec.success_criteria,
             accumulator_state=accumulator.to_dict(),
             max_context_tokens=max_context_tokens,
         )

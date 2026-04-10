@@ -132,8 +132,8 @@ class AgentConfig(BaseModel):
     """Top-level declarative agent configuration.
 
     Load from ``agent.json`` and pass to
-    :func:`framework.runner.runner.load_agent_config` to build the
-    ``GraphSpec`` + ``Goal`` pair.
+    :func:`framework.loader.agent_loader.load_agent_config` to build
+    the worker spec.
 
     Example (YAML)::
 

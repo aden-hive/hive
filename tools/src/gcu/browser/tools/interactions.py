@@ -138,11 +138,17 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return result
 
         try:
+            from .inspection import _screenshot_scales, _screenshot_css_scales
+
             click_result = await bridge.click_coordinate(target_tab, x, y, button=button)
             log_tool_call(
                 "browser_click_coordinate",
                 params,
-                result=click_result,
+                result={
+                    **click_result,
+                    "debug_stored_physicalScale": _screenshot_scales.get(target_tab, "unset"),
+                    "debug_stored_cssScale": _screenshot_css_scales.get(target_tab, "unset"),
+                },
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
             return click_result

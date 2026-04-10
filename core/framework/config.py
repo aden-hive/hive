@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from framework.orchestrator.edge import DEFAULT_MAX_TOKENS
+DEFAULT_MAX_TOKENS = 8192
 
 # ---------------------------------------------------------------------------
 # Hive home directory structure

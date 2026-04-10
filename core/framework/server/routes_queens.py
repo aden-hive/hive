@@ -87,7 +87,7 @@ async def _create_bound_queen_session(
             from framework.server.app import validate_agent_path
 
             resolved_agent_path = str(validate_agent_path(agent_path))
-            return await manager.create_session_with_worker_graph(
+            return await manager.create_session_with_worker_colony(
                 resolved_agent_path,
                 queen_resume_from=resume_from,
                 initial_prompt=initial_prompt,
@@ -237,7 +237,12 @@ async def handle_queen_session(request: web.Request) -> web.Response:
     # is active at a time.
     await _stop_live_sessions(manager)
 
-    # 2. Find the most recent cold session for this queen and resume it
+    # 2. Find the most recent cold session for this queen and resume it.
+    # IMPORTANT: skip sessions that don't belong in the queen DM:
+    #   - ``colony_fork: true`` -- duplicates created by handle_colony_spawn
+    #   - sessions bound to a currently-existing colony -- those are the
+    #     colony's chat, not the queen's DM. A session whose agent_path
+    #     points to a deleted colony is freed up and may be resumed.
     queen_sessions_dir = QUEENS_DIR / queen_id / "sessions"
     resume_from: str | None = None
     if queen_sessions_dir.exists():
@@ -247,8 +252,26 @@ async def handle_queen_session(request: web.Request) -> web.Response:
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
-            if candidates:
-                resume_from = candidates[0].name
+            for candidate in candidates:
+                meta_path = candidate / "meta.json"
+                meta: dict = {}
+                if meta_path.exists():
+                    try:
+                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    except (json.JSONDecodeError, OSError):
+                        meta = {}
+                if meta.get("colony_fork"):
+                    continue
+                # Skip sessions bound to an existing colony -- those are
+                # colony chats, not queen DMs.
+                bound_colony = meta.get("agent_path")
+                if bound_colony:
+                    from pathlib import Path as _P
+
+                    if _P(bound_colony).is_dir():
+                        continue
+                resume_from = candidate.name
+                break
         except OSError:
             pass
 

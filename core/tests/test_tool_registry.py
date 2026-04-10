@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from framework.llm.provider import Tool, ToolUse
-from framework.runner.tool_registry import ToolRegistry
+from framework.loader.tool_registry import ToolRegistry
 
 
 def _write_tool_module(tmp_path: Path, content: str) -> Path:
@@ -136,7 +136,7 @@ def test_register_mcp_server_uses_connection_manager_when_enabled(monkeypatch):
             manager_calls.append(("release", server_name))
 
     monkeypatch.setattr(
-        "framework.runner.mcp_connection_manager.MCPConnectionManager.get_instance",
+        "framework.loader.mcp_connection_manager.MCPConnectionManager.get_instance",
         lambda: FakeManager(),
     )
 
@@ -172,7 +172,7 @@ def test_register_mcp_server_defaults_to_connection_manager(monkeypatch):
             pass
 
     monkeypatch.setattr(
-        "framework.runner.mcp_connection_manager.MCPConnectionManager.get_instance",
+        "framework.loader.mcp_connection_manager.MCPConnectionManager.get_instance",
         lambda: FakeManager(),
     )
 
@@ -194,7 +194,7 @@ def test_register_mcp_server_direct_client_when_manager_disabled(monkeypatch):
         created_clients.append(client)
         return client
 
-    monkeypatch.setattr("framework.runner.mcp_client.MCPClient", fake_client_factory)
+    monkeypatch.setattr("framework.loader.mcp_client.MCPClient", fake_client_factory)
 
     count = registry.register_mcp_server(
         {"name": "direct", "transport": "stdio", "command": "echo"},
@@ -264,7 +264,7 @@ def test_load_registry_servers_emits_structured_log_fields(monkeypatch):
 
     monkeypatch.setattr(registry, "register_mcp_server", lambda *args, **kwargs: 2)
     monkeypatch.setattr(
-        "framework.runner.tool_registry.logger.info",
+        "framework.loader.tool_registry.logger.info",
         lambda message, *args, **kwargs: captured_logs.append((message, kwargs.get("extra"))),
     )
 
@@ -488,7 +488,7 @@ def test_register_function_executor_calls_function():
 def test_discover_from_module_finds_tool_decorated_functions(tmp_path):
     """discover_from_module should pick up functions decorated with @tool."""
     module_src = """
-        from framework.runner.tool_registry import tool
+        from framework.loader.tool_registry import tool
 
         @tool(description="Say hello")
         def greet(name: str) -> str:
@@ -602,7 +602,7 @@ def test_session_context_is_injected_into_mcp_tool_call(monkeypatch):
             received.append(dict(arguments))
             return {"result": "ok"}
 
-    monkeypatch.setattr("framework.runner.mcp_client.MCPClient", FakeClient)
+    monkeypatch.setattr("framework.loader.mcp_client.MCPClient", FakeClient)
 
     registry.register_mcp_server(
         {"name": "ctx-server", "transport": "stdio", "command": "echo"},
@@ -656,7 +656,7 @@ def test_execution_context_overrides_session_context(monkeypatch):
             received.append(dict(arguments))
             return {"result": "ok"}
 
-    monkeypatch.setattr("framework.runner.mcp_client.MCPClient", FakeClient)
+    monkeypatch.setattr("framework.loader.mcp_client.MCPClient", FakeClient)
     registry.register_mcp_server(
         {"name": "exec-server", "transport": "stdio", "command": "echo"},
         use_connection_manager=False,

@@ -50,18 +50,55 @@ def _resize_and_annotate(
     """
     try:
         from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        raw = base64.b64decode(data) if data else b""
+        orig_w = 0
+        if len(raw) >= 24 and raw[:8] == b"\x89PNG\r\n\x1a\n":
+            import struct
 
+            orig_w = struct.unpack(">I", raw[16:20])[0]
+        raw_size_bytes = len(raw)
+        physical_scale = orig_w / width if orig_w and width else 1.0
+        css_scale = (css_width / width) if css_width else (physical_scale / max(dpr, 1.0))
+        logger.warning(
+            "PIL not available — screenshot resize SKIPPED (cannot downscale image). "
+            "raw_size=%d bytes, png_width=%d, css_width=%s, dpr=%s, target_width=%d. "
+            "Returning ORIGINAL image with computed scales: physicalScale=%.4f, cssScale=%.4f. "
+            "Agent must use browser_coords() to convert image positions before clicking.",
+            raw_size_bytes,
+            orig_w,
+            css_width,
+            dpr,
+            width,
+            physical_scale,
+            css_scale,
+        )
+        return data, round(physical_scale, 4), round(css_scale, 4)
+
+    try:
         raw = base64.b64decode(data)
         img = Image.open(io.BytesIO(raw)).convert("RGBA")
         orig_w, orig_h = img.size
+
+        physical_scale = orig_w / width
+        css_scale = (css_width / width) if css_width else (physical_scale / max(dpr, 1.0))
+
+        logger.info(
+            "Screenshot resize: orig=%dx%d → target=%dx%d, "
+            "css_width=%s, dpr=%s, physicalScale=%.4f, cssScale=%.4f",
+            orig_w,
+            orig_h,
+            width,
+            round(orig_h * width / orig_w),
+            css_width,
+            dpr,
+            physical_scale,
+            css_scale,
+        )
+
         new_w = width
         new_h = round(orig_h * new_w / orig_w)
         img = img.resize((new_w, new_h), Image.LANCZOS)
-
-        # Physical scale: how many native/physical pixels per image pixel
-        physical_scale = orig_w / width
-        # CSS scale: physical_scale / DPR
-        css_scale = (css_width / width) if css_width else (physical_scale / max(dpr, 1.0))
 
         if highlights:
             overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -129,7 +166,14 @@ def _resize_and_annotate(
             round(css_scale, 4),
         )
     except Exception:
-        logger.debug("Screenshot resize/annotate failed, using original", exc_info=True)
+        logger.warning(
+            "Screenshot resize/annotate FAILED — returning original image with scale=1.0. "
+            "css_width=%s, dpr=%s, target_width=%d. Clicks will be misaligned.",
+            css_width,
+            dpr,
+            width,
+            exc_info=True,
+        )
         return data, 1.0, 1.0
 
 
@@ -272,6 +316,8 @@ def register_inspection_tools(mcp: FastMCP) -> None:
                     "url": screenshot_result.get("url", ""),
                     "physicalScale": physical_scale,
                     "cssScale": css_scale,
+                    "debug_cssWidth": css_width,
+                    "debug_dpr": dpr,
                 },
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
