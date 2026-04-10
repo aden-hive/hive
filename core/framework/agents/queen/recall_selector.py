@@ -141,7 +141,6 @@ def format_recall_injection(
 
     Includes relative timestamp (e.g., "3 days old") for memories older than 48 hours.
     """
-    import time
 
     mem_dir = memory_dir or _default_global_memory_dir()
     if not filenames:

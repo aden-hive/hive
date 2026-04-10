@@ -76,7 +76,7 @@ async def create_queen(
     queen_profile: dict,
     initial_prompt: str | None = None,
     initial_phase: str | None = None,
-    tool_registry: "ToolRegistry | None" = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> asyncio.Task:
     """Build the queen executor and return the running asyncio task.
 
@@ -122,20 +122,21 @@ async def create_queen(
         _queen_tools_staging,
         _shared_building_knowledge,
     )
+    from framework.host.event_bus import AgentEvent, EventType
     from framework.loader.mcp_registry import MCPRegistry
     from framework.loader.tool_registry import ToolRegistry
-    from framework.host.event_bus import AgentEvent, EventType
     from framework.tools.queen_lifecycle_tools import (
         QueenPhaseState,
         register_queen_lifecycle_tools,
     )
 
-
     # ---- Tool registry ------------------------------------------------
     # Use pre-loaded cached registry if available (fast path)
     if tool_registry is not None:
         queen_registry = tool_registry
-        logger.info("Queen: using pre-loaded tool registry with %d tools", len(queen_registry.get_tools()))
+        logger.info(
+            "Queen: using pre-loaded tool registry with %d tools", len(queen_registry.get_tools())
+        )
     else:
         # Build fresh (slow path - for backwards compatibility)
         queen_registry = ToolRegistry()
@@ -245,11 +246,13 @@ async def create_queen(
 
     # Independent phase gets core tools + all MCP tools not claimed by any
     # other phase (coder-tools file I/O, gcu-tools browser, etc.).
-    all_phase_names = planning_names | building_names | staging_names | running_names | editing_names
-    mcp_tools = [t for t in queen_tools if t.name not in all_phase_names]
-    phase_state.independent_tools = (
-        [t for t in queen_tools if t.name in independent_names] + mcp_tools
+    all_phase_names = (
+        planning_names | building_names | staging_names | running_names | editing_names
     )
+    mcp_tools = [t for t in queen_tools if t.name not in all_phase_names]
+    phase_state.independent_tools = [
+        t for t in queen_tools if t.name in independent_names
+    ] + mcp_tools
     logger.info(
         "Queen: independent tools: %s",
         sorted(t.name for t in phase_state.independent_tools),
@@ -436,6 +439,7 @@ async def create_queen(
         if trigger:
             try:
                 import asyncio
+
                 from framework.agents.queen.recall_selector import (
                     format_recall_injection,
                     select_memories,
@@ -447,7 +451,7 @@ async def create_queen(
                     timeout=3.0,
                 )
                 phase_state._cached_global_recall_block = format_recall_injection(selected, mem_dir)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.debug("recall: initial seeding timed out, will retry on first turn")
             except Exception:
                 logger.debug("recall: initial seeding failed", exc_info=True)
@@ -483,8 +487,8 @@ async def create_queen(
     from types import SimpleNamespace
 
     from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
-    from framework.storage.conversation_store import FileConversationStore
     from framework.orchestrator.node import DataBuffer, NodeContext
+    from framework.storage.conversation_store import FileConversationStore
 
     async def _queen_loop():
         logger.debug("[_queen_loop] Starting queen loop for session %s", session.id)
@@ -592,7 +596,9 @@ async def create_queen(
             # Set initial user message based on mode:
             # - RESTORE: Empty -> AgentLoop restores from disk, waits for /chat
             # - FRESH:   "Hello" or explicit prompt -> queen responds immediately
-            ctx.input_data = {"user_request": None if _is_restore_mode else (initial_prompt or "Hello")}
+            ctx.input_data = {
+                "user_request": None if _is_restore_mode else (initial_prompt or "Hello")
+            }
 
             logger.info(
                 "Queen %s in %s phase with %d tools: %s",
@@ -618,8 +624,7 @@ async def create_queen(
             raise
         finally:
             logger.warning(
-                "[_queen_loop] Queen loop exiting — clearing queen_executor "
-                "for session '%s'",
+                "[_queen_loop] Queen loop exiting — clearing queen_executor for session '%s'",
                 session.id,
             )
             session.queen_executor = None

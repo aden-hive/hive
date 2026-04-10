@@ -413,9 +413,7 @@ async def _reflection_loop(
                     "output": getattr(raw_usage, "completion_tokens", 0) or 0,
                     "cached": getattr(raw_usage, "prompt_tokens_details", None)
                     and getattr(raw_usage.prompt_tokens_details, "cached_tokens", 0),
-                    "stop_reason": getattr(
-                        raw.choices[0], "finish_reason", ""
-                    ) if raw else "",
+                    "stop_reason": getattr(raw.choices[0], "finish_reason", "") if raw else "",
                 }
         except Exception:
             token_counts = {}
@@ -476,6 +474,7 @@ async def _reflection_loop(
 # ---------------------------------------------------------------------------
 
 _CATEGORIES_STR = ", ".join(GLOBAL_MEMORY_CATEGORIES)
+
 
 def _build_unified_short_reflect_system(queen_id: str | None = None) -> str:
     """Build the unified short reflection prompt across memory scopes."""
@@ -649,7 +648,9 @@ async def run_unified_short_reflection(
         session_dir,
         llm,
         memory_dirs,
-        system_prompt=_build_unified_short_reflect_system(queen_id if "queen" in memory_dirs else None),
+        system_prompt=_build_unified_short_reflect_system(
+            queen_id if "queen" in memory_dirs else None
+        ),
         log_label="unified",
         queen_id=queen_id if "queen" in memory_dirs else None,
     )
@@ -769,7 +770,9 @@ async def run_unified_long_reflection(
     if queen_memory_dir is not None and queen_id:
         memory_dirs["queen"] = queen_memory_dir
 
-    manifest = _format_multi_scope_manifest(memory_dirs, queen_id=queen_id if "queen" in memory_dirs else None)
+    manifest = _format_multi_scope_manifest(
+        memory_dirs, queen_id=queen_id if "queen" in memory_dirs else None
+    )
     user_msg = (
         "## Current memory manifest across scopes\n\n"
         f"{manifest}\n\n"
