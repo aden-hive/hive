@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -832,6 +833,8 @@ async def run_shutdown_reflection(
 # ---------------------------------------------------------------------------
 
 _LONG_REFLECT_INTERVAL = 5
+_SHORT_REFLECT_TURN_INTERVAL = 2
+_SHORT_REFLECT_COOLDOWN_SEC = 120.0
 
 
 async def subscribe_reflection_triggers(
@@ -853,6 +856,8 @@ async def subscribe_reflection_triggers(
     queen_mem_dir = queen_memory_dir
     _lock = asyncio.Lock()
     _short_count = 0
+    _short_has_run = False
+    _last_short_time: float = 0.0
     _background_tasks: set[asyncio.Task] = set()
 
     async def _run_with_error_capture(coro: Any, *, context: str, memory_dir: Path) -> None:
@@ -907,7 +912,7 @@ async def subscribe_reflection_triggers(
         task.add_done_callback(_background_tasks.discard)
 
     async def _on_turn_complete(event: Any) -> None:
-        nonlocal _short_count
+        nonlocal _short_count, _short_has_run, _last_short_time
 
         if getattr(event, "stream_id", None) != "queen":
             return
@@ -923,9 +928,24 @@ async def subscribe_reflection_triggers(
             logger.debug("reflect: skipping tool turn (count=%d)", _short_count)
             return
 
+        # Apply turn-interval and cooldown gates after the first reflection.
+        if _short_has_run:
+            now = time.monotonic()
+            turn_ok = _short_count % _SHORT_REFLECT_TURN_INTERVAL == 0
+            cooldown_ok = (now - _last_short_time) >= _SHORT_REFLECT_COOLDOWN_SEC
+            if not turn_ok and not cooldown_ok:
+                logger.debug(
+                    "reflect: skipping, below turn/cooldown threshold (count=%d)",
+                    _short_count,
+                )
+                return
+
         if _lock.locked():
             logger.debug("reflect: skipping, already running (count=%d)", _short_count)
             return
+
+        _short_has_run = True
+        _last_short_time = time.monotonic()
 
         logger.debug(
             "reflect: triggered (count=%d, interval=%s, stop_reason=%s)",
