@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams, useLocation } from "react-router-dom";
 import { Loader2, Users } from "lucide-react";
 import ChatPanel, {
   type ChatMessage,
@@ -135,20 +135,19 @@ export default function QueenDM() {
 
     (async () => {
       try {
-        let result;
         if (isBootstrap) {
           // Pass the home-screen prompt as initial_prompt so the server
           // seeds the first turn with the real user message — not a phantom
           // "Hello" fallback. One atomic call, no separate chat() race.
-          result = await queensApi.createNewSession(
+          await queensApi.createNewSession(
             queenId,
             pendingFirstMessage ?? undefined,
             "independent",
           );
         } else if (selectedSessionParam) {
-          result = await queensApi.selectSession(queenId, selectedSessionParam);
+          await queensApi.selectSession(queenId, selectedSessionParam);
         } else {
-          result = await queensApi.getOrCreateSession(queenId, undefined, "independent");
+          await queensApi.getOrCreateSession(queenId, undefined, "independent");
         }
         if (cancelled) return;
         let sid: string;
@@ -221,6 +220,7 @@ export default function QueenDM() {
           setSearchParams({ session: sid }, { replace: true });
         } else if (selectedSessionParam && selectedSessionParam !== sid) {
           setSearchParams({ session: sid }, { replace: true });
+        }
         }
 
         await restoreMessages(sid, () => cancelled);
