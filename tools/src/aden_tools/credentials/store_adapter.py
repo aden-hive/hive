@@ -26,12 +26,28 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .base import CredentialError, CredentialSpec
 
 if TYPE_CHECKING:
     from framework.credentials import CredentialStore
+
+
+# Process-wide memoization for CredentialStoreAdapter.default().
+#
+# Without this, every caller (e.g. each MCP server registration in
+# tool_registry._build_mcp_admission_gate) rebuilds a fresh CredentialStore +
+# AdenSyncProvider and re-runs sync_all() against the Aden server. On a typical
+# `hive open` startup that meant 4 full syncs (one per MCP server + the parent
+# bootstrap), each round-tripping every credential. The cache key includes the
+# specs identity and ADEN_API_KEY so a deliberate change still rebuilds.
+_DEFAULT_ADAPTER_CACHE: dict[tuple[int, str | None], Any] = {}
+
+
+def _reset_default_adapter_cache() -> None:
+    """Clear the memoized default adapter. Intended for tests."""
+    _DEFAULT_ADAPTER_CACHE.clear()
 
 
 class CredentialStoreAdapter:
@@ -535,6 +551,15 @@ class CredentialStoreAdapter:
 
             specs = CREDENTIAL_SPECS
 
+        # Return memoized instance when available. The full default() body —
+        # provider construction + sync_all() — is expensive (network round-trip
+        # per credential). Multiple call sites (notably the MCP admission gate
+        # in tool_registry, which fires once per server) hit this on startup.
+        cache_key = (id(specs), os.environ.get("ADEN_API_KEY"))
+        cached = _DEFAULT_ADAPTER_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
         env_mapping = {name: spec.env_var for name, spec in specs.items()}
 
         # --- Aden sync branch ---
@@ -587,7 +612,9 @@ class CredentialStoreAdapter:
                 except Exception as e:
                     log.warning("Aden initial sync failed (will retry on access): %s", e)
 
-                return cls(store=store, specs=specs)
+                instance = cls(store=store, specs=specs)
+                _DEFAULT_ADAPTER_CACHE[cache_key] = instance
+                return instance
 
             except Exception as e:
                 log.warning(
@@ -604,7 +631,9 @@ class CredentialStoreAdapter:
             log.warning("Encrypted credential storage unavailable, falling back to env vars: %s", e)
             store = CredentialStore.with_env_storage(env_mapping)
 
-        return cls(store=store, specs=specs)
+        instance = cls(store=store, specs=specs)
+        _DEFAULT_ADAPTER_CACHE[cache_key] = instance
+        return instance
 
     @classmethod
     def for_testing(
