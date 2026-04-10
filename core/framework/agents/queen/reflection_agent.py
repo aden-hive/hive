@@ -528,11 +528,14 @@ Rules:
 - If there is nothing worth remembering, do nothing (respond with a brief
   reason — no tool calls needed).
 - File names should be kebab-case slugs ending in .md.
-- For user identity/profile information (name, role, background), ALWAYS use
-  the canonical filename 'user-profile.md' in the `global` scope. This is the
-  single source of truth for user profile data, shared with the settings UI.
-- When updating `global:user-profile.md`, preserve the '## Identity' section —
-  it is managed by the settings UI. Add/update other sections below it.
+- For user identity/profile information about the human user (name, role,
+  background), ALWAYS use the canonical filename 'user-profile.md' in the
+  `global` scope. This is the single source of truth for user profile data,
+  shared with the settings UI.
+- When updating `global:user-profile.md`, preserve the '## User Identity'
+  section — it is managed by the settings UI. Never describe the assistant,
+  queen, or agent as the identity in this file. Add/update other sections
+  below it.
 - Do NOT exceed {MAX_FILE_SIZE_BYTES} bytes per file or {MAX_FILES} total files per scope.
 """
 

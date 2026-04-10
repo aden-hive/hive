@@ -258,6 +258,15 @@ async def create_queen(
     # ---- Global + queen-scoped memory ----------------------------------
     global_dir, queen_mem_dir = initialize_memory_scopes(session, phase_state)
 
+    # Materialize the selected queen identity before building the initial
+    # system prompt so the first turn includes the profile's core identity.
+    await materialize_queen_identity(
+        session=session,
+        phase_state=phase_state,
+        queen_profile=queen_profile,
+        event_bus=session.event_bus,
+    )
+
     # ---- Compose phase-specific prompts ------------------------------
     from framework.agents.queen.nodes import queen_node as _orig_node
 
