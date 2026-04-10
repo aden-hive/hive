@@ -48,6 +48,8 @@ export default function PromptLibrary() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const inactiveCategoryClass =
+    "bg-muted/60 text-foreground/75 hover:bg-muted/80 hover:text-foreground";
 
   const filteredPrompts = useMemo(() => {
     let result = prompts;
@@ -110,7 +112,7 @@ export default function PromptLibrary() {
               className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                 selectedCategory === null
                   ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:text-foreground"
+                  : inactiveCategoryClass
               }`}
             >
               All Categories
@@ -122,7 +124,7 @@ export default function PromptLibrary() {
                 className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                   selectedCategory === cat.id
                     ? "bg-primary text-primary-foreground"
-                    : `${cat.color} hover:opacity-80`
+                    : inactiveCategoryClass
                 }`}
               >
                 {cat.name}
@@ -135,7 +137,7 @@ export default function PromptLibrary() {
         {/* Prompts grid */}
         <div className="flex-1 overflow-y-auto p-6">
           {filteredPrompts.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
               {filteredPrompts.map((prompt) => (
                 <PromptCard key={prompt.id} prompt={prompt} onUse={handleUsePrompt} />
               ))}
