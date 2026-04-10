@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from framework.config import QUEENS_DIR
 from framework.host.triggers import TriggerDefinition
@@ -63,7 +63,11 @@ class Session:
     colony_id: str | None = None
     worker_path: Path | None = None
     runner: Any | None = None  # AgentRunner
-    colony_runtime: Any | None = None  # ColonyRuntime or AgentRuntime
+    colony_runtime: Any | None = None  # legacy worker AgentRuntime (Phase 2 deprecation pending)
+    # Phase 2 unified runtime: a real ColonyRuntime hosting the queen as
+    # overseer and (in colony sessions) parallel workers spawned via
+    # run_parallel_workers. Always set once _start_queen has run.
+    colony: Any | None = None  # ColonyRuntime
     worker_info: Any | None = None  # AgentInfo
     # Queen phase state (working/reviewing)
     phase_state: Any = None  # QueenPhaseState
@@ -95,6 +99,13 @@ class Session:
     queen_name: str = "default"
     # Colony name: set when a worker is loaded from a colony
     colony_name: str | None = None
+    # Session mode discriminator. "dm" = queen DM session under
+    # ~/.hive/agents/queens/{queen_id}/sessions/. "colony" = forked colony
+    # session under ~/.hive/colonies/{colony_name}/sessions/, with the
+    # queen running as the colony's overseer and the run_parallel_workers
+    # tool unlocked. The mode is the canonical discriminator for storage
+    # path, tool exposure, and SSE filtering — see the Phase 2 plan.
+    mode: Literal["dm", "colony"] = "dm"
 
 
 class SessionManager:
@@ -1037,6 +1048,18 @@ class SessionManager:
             except Exception as e:
                 logger.error("Error cleaning up worker: %s", e)
 
+        # Stop the unified ColonyRuntime (Phase 2 wiring) if it was started
+        if session.colony is not None:
+            try:
+                await session.colony.stop()
+            except Exception:
+                logger.warning(
+                    "Session '%s': error stopping unified ColonyRuntime",
+                    session_id,
+                    exc_info=True,
+                )
+            session.colony = None
+
         # Close per-session event log
         session.event_bus.close_session_log()
 
@@ -1209,6 +1232,22 @@ class SessionManager:
             session.queen_executor,
         )
 
+        # Phase 2 wiring: stand up a real ColonyRuntime that shares the
+        # queen's llm, tools, event bus, and storage path. In a DM session
+        # it has no parallel workers (the queen runs in queen_task), but
+        # the run_parallel_workers tool (Phase 4) will use this runtime
+        # as the spawn surface, and worker SUBAGENT_REPORT events flow
+        # back through the shared event_bus to the existing SSE.
+        try:
+            await self._start_unified_colony_runtime(session, queen_dir)
+        except Exception:
+            # ColonyRuntime is dormant infrastructure today — never let
+            # its construction abort queen startup. Phase 4 will harden.
+            logger.warning(
+                "_start_queen: unified ColonyRuntime construction failed",
+                exc_info=True,
+            )
+
         # Auto-load worker on cold restore — the queen's conversation expects
         # the agent to be loaded, but the new session has no worker.
         if session.queen_resume_from and not session.colony_runtime:
@@ -1238,6 +1277,82 @@ class SessionManager:
                             logger.info("Cold restore: PLANNING phase for %s", _agent_path)
                 except Exception:
                     logger.warning("Cold restore: failed to auto-load worker", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Phase 2: unified ColonyRuntime construction
+    # ------------------------------------------------------------------
+
+    async def _start_unified_colony_runtime(
+        self,
+        session: Session,
+        queen_dir: Path,
+    ) -> None:
+        """Build a real ColonyRuntime sharing the queen's resources.
+
+        This is the Phase 2 wiring. The ColonyRuntime is created with:
+
+        - ``llm``  → ``session.llm``
+        - ``event_bus`` → ``session.event_bus`` (so worker SUBAGENT_REPORT
+          and lifecycle events flow through the same bus the SSE handler
+          already subscribes to)
+        - ``tools`` → the queen's resolved tool list (stashed by
+          ``create_queen`` on ``session._queen_tools``)
+        - ``storage_path`` → ``queen_dir``  (parallel workers will land
+          under ``{queen_dir}/workers/{worker_id}/`` thanks to
+          ``ColonyRuntime.spawn``)
+        - ``colony_id`` → ``session.id``
+
+        The runtime is started but no overseer is attached — the queen
+        still runs as ``session.queen_task`` from ``create_queen``. This
+        is dormant fan-out infrastructure: ``run_parallel_workers``
+        (Phase 4) is what activates it.
+        """
+        from framework.agent_loop.types import AgentSpec
+        from framework.host.colony_runtime import ColonyRuntime
+        from framework.schemas.goal import Goal
+
+        queen_tools = getattr(session, "_queen_tools", None) or []
+        queen_tool_executor = getattr(session, "_queen_tool_executor", None)
+
+        colony_spec = AgentSpec(
+            id="queen_colony",
+            name="Queen Colony",
+            description=(
+                "Unified colony runtime hosting the queen overseer and "
+                "any parallel workers spawned via run_parallel_workers."
+            ),
+            system_prompt="",
+            tools=[t.name for t in queen_tools],
+            tool_access_policy="all",
+        )
+
+        colony_goal = Goal(
+            id=f"colony_goal_{session.id}",
+            name=f"Session {session.id}",
+            description="Default goal for the session-level ColonyRuntime.",
+        )
+
+        colony = ColonyRuntime(
+            agent_spec=colony_spec,
+            goal=colony_goal,
+            storage_path=queen_dir,
+            llm=session.llm,
+            tools=queen_tools,
+            tool_executor=queen_tool_executor,
+            event_bus=session.event_bus,
+            colony_id=session.id,
+            pipeline_stages=[],  # queen pipeline runs in queen_orchestrator, not here
+        )
+        await colony.start()
+        session.colony = colony
+
+        logger.info(
+            "_start_queen: unified ColonyRuntime ready for session %s "
+            "(%d tools, storage=%s)",
+            session.id,
+            len(queen_tools),
+            queen_dir,
+        )
 
     # ------------------------------------------------------------------
     # Queen notifications

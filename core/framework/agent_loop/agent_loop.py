@@ -68,6 +68,8 @@ from framework.agent_loop.internals.synthetic_tools import (
     build_ask_user_multiple_tool,
     build_ask_user_tool,
     build_escalate_tool,
+    build_report_to_parent_tool,
+    handle_report_to_parent,
 )
 from framework.agent_loop.internals.tool_result_handler import (
     build_json_preview,
@@ -83,6 +85,7 @@ from framework.agent_loop.internals.types import (
     TriggerEvent,
 )
 from framework.agent_loop.types import AgentContext, AgentProtocol, AgentResult
+from framework.host.event_bus import EventBus
 from framework.llm.capabilities import supports_image_tool_results
 from framework.llm.provider import Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
@@ -91,7 +94,6 @@ from framework.llm.stream_events import (
     TextDeltaEvent,
     ToolCallEvent,
 )
-from framework.host.event_bus import EventBus
 from framework.tracker.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
@@ -311,7 +313,13 @@ class AgentLoop(AgentProtocol):
         self._action_plan_emitted: set[str] = set()
         # Monotonic counter for spillover file naming (web_search_1.txt, etc.)
         self._spill_counter: int = 0
-        # Subagent mark_complete: when True, _evaluate returns ACCEPT immediately
+        # Set to True by the report_to_parent synthetic tool handler so the
+        # next loop iteration exits cleanly (parallel worker termination).
+        self._report_terminated: bool = False
+        # Back-reference to the Worker that owns this AgentLoop, if any.
+        # Set by the Worker's __init__ so the report_to_parent handler can
+        # record the explicit report payload on the owning Worker instance.
+        self._owner_worker: Any = None
 
     def validate_input(self, ctx: AgentContext) -> list[str]:
         """Validate hard requirements only.
@@ -493,11 +501,15 @@ class AgentLoop(AgentProtocol):
         tools = list(ctx.available_tools)
         if ctx.supports_direct_user_io:
             tools.append(self._build_ask_user_tool())
-            if stream_id == "queen":
+            if stream_id == "queen" or stream_id == "overseer":
                 tools.append(self._build_ask_user_multiple_tool())
-        # Workers can escalate blockers to the queen.
-        if stream_id not in ("queen", "judge"):
+        # Workers (parallel ephemeral agents) get escalate + report_to_parent.
+        # The overseer is client-facing like the queen and has neither.
+        if stream_id not in ("queen", "judge", "overseer"):
             tools.append(self._build_escalate_tool())
+        # Only parallel workers (stream_id="worker:{uuid}") get report_to_parent.
+        if isinstance(stream_id, str) and stream_id.startswith("worker:"):
+            tools.append(build_report_to_parent_tool())
 
         logger.info(
             "[%s] Tools available (%d): %s | direct_user_io=%s | judge=%s",
@@ -534,6 +546,29 @@ class AgentLoop(AgentProtocol):
         for iteration in range(start_iteration, self._config.max_iterations):
             iter_start = time.time()
             logger.debug("[AgentLoop.execute] iteration=%d starting", iteration)
+
+            # 6a-pre. Early exit for workers that called report_to_parent on
+            # the previous turn. The report_to_parent handler sets this
+            # flag; the loop finishes the current turn (so the LLM sees
+            # the acknowledgement tool result) and exits at the top of the
+            # next iteration. Parallel workers terminate here.
+            if self._report_terminated:
+                latency_ms = int((time.time() - start_time) * 1000)
+                logger.info(
+                    "[%s] iter=%d: worker terminated via report_to_parent",
+                    node_id,
+                    iteration,
+                )
+                await self._publish_loop_completed(
+                    stream_id, node_id, iteration, execution_id
+                )
+                return AgentResult(
+                    success=True,
+                    output=accumulator.to_dict(),
+                    tokens_used=total_input_tokens + total_output_tokens,
+                    latency_ms=latency_ms,
+                    conversation=None,
+                )
 
             # 6a. Check pause (no current-iteration data yet — only log_node_complete needed)
             if await self._check_pause(ctx, conversation, iteration):
@@ -2564,6 +2599,50 @@ class AgentLoop(AgentProtocol):
                         is_error=False,
                     )
                     results_by_id[tc.tool_use_id] = result
+
+                elif tc.tool_name == "report_to_parent":
+                    # --- Framework-level report_to_parent handling ---
+                    # Parallel workers call this to emit a structured
+                    # SUBAGENT_REPORT and terminate cleanly. The worker
+                    # owner (Worker instance) records the explicit report
+                    # via ``record_explicit_report`` so Worker.run()'s
+                    # terminal event emission picks it up.
+                    if not (
+                        isinstance(stream_id, str)
+                        and stream_id.startswith("worker:")
+                    ):
+                        result = ToolResult(
+                            tool_use_id=tc.tool_use_id,
+                            content=(
+                                "ERROR: report_to_parent is only available to "
+                                "parallel workers (stream_id='worker:*'). "
+                                "The overseer talks to the user directly."
+                            ),
+                            is_error=True,
+                        )
+                        results_by_id[tc.tool_use_id] = result
+                        continue
+
+                    report_tc_input = dict(tc.tool_input)
+                    report_tc_input["tool_use_id"] = tc.tool_use_id
+                    result = handle_report_to_parent(report_tc_input)
+                    results_by_id[tc.tool_use_id] = result
+
+                    # Record on the owning Worker so its terminal event
+                    # emission picks up the explicit report.
+                    owner_worker = getattr(self, "_owner_worker", None)
+                    if owner_worker is not None:
+                        normalised = report_tc_input.get("_normalised", {})
+                        owner_worker.record_explicit_report(
+                            status=normalised.get("status", "success"),
+                            summary=normalised.get("summary", ""),
+                            data=normalised.get("data", {}),
+                        )
+
+                    # Terminate the loop cleanly after this turn. Set the
+                    # same completion flag path that set_output used so
+                    # the next iteration exits with success.
+                    self._report_terminated = True
 
                 else:
                     # --- Real tool: check for truncated args, else queue ---

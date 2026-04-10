@@ -81,6 +81,9 @@ _QUEEN_PLANNING_TOOLS = [
     # Scaffold + transition to building (requires confirm_and_build first)
     # Load existing agent (after user confirms)
     "load_built_agent",
+    # Parallel fan-out — use directly for one-off batch work the user
+    # wants RIGHT NOW (without first designing an agent for it).
+    "run_parallel_workers",
 ]
 
 # Building phase: full coding + agent construction tools.
@@ -125,6 +128,7 @@ _QUEEN_RUNNING_TOOLS = [
     "switch_to_reviewing",
     "get_worker_status",
     "run_agent_with_input",
+    "run_parallel_workers",
     "inject_message",
     # Monitoring
     "get_worker_health_summary",
@@ -169,6 +173,8 @@ _QUEEN_INDEPENDENT_TOOLS = [
     "search_files",
     "run_command",
     "undo_changes",
+    # Parallel fan-out (Phase 4 unified ColonyRuntime)
+    "run_parallel_workers",
 ]
 
 
@@ -647,6 +653,17 @@ to fix the currently loaded agent (no draft required).
 phase. Only use this when the user explicitly asks to work with an existing agent \
 (e.g. "load my_agent", "run the research agent"). Confirm with the user first.
 
+## Parallel fan-out (one-off batch work — no agent build required)
+- run_parallel_workers(tasks, timeout?) — Spawn N workers concurrently and \
+wait for all reports. Use this when the user asks for batch / parallel work \
+RIGHT NOW that does NOT need a reusable agent (e.g. "fetch batches 1–5 from \
+this API", "summarise these 10 PDFs", "compare these candidates"). Each task \
+is a dict {"task": "...", "data"?: {...}}; the tool returns aggregated \
+{worker_id, status, summary, data, error} reports. Read the summaries and \
+write a single user-facing synthesis on your next turn. Prefer this over \
+designing a draft when the work is one-shot and the user wants results, not \
+a saved agent.
+
 ## Workflow summary
 1. Understand requirements → discover tools → design the layout
 2. Call save_agent_draft() to create visual draft → present to user
@@ -766,7 +783,7 @@ You are the agent. No worker — you execute directly.
 3. Execute using your tools: file I/O, shell commands, browser automation
 4. Report results, iterate if needed
 
-You have NO lifecycle tools (no start_worker, stop_worker, confirm_and_build, etc.).
+You have NO lifecycle tools (no run_agent_with_input, stop_worker, confirm_and_build, etc.).
 If the task requires building a dedicated agent, tell the user to start a \
 new session without independent mode.
 """

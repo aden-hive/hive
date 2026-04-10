@@ -179,6 +179,7 @@ class ColonyRuntime:
         )
 
         storage_path_obj = Path(storage_path) if isinstance(storage_path, str) else storage_path
+        self._storage_path: Path = storage_path_obj
         self._storage = ConcurrentStorage(
             base_path=storage_path_obj,
             cache_ttl=self._config.cache_ttl,
@@ -195,6 +196,12 @@ class ColonyRuntime:
 
         # Worker management
         self._workers: dict[str, Worker] = {}
+        # The persistent client-facing overseer (optional). Set by
+        # ``start_overseer()`` at session start. In a DM session the
+        # overseer is the queen chatting with the user with 0 parallel
+        # workers. In a colony session she's the queen orchestrating N
+        # parallel workers.
+        self._overseer: Worker | None = None
         self._triggers: dict[str, TriggerSpec] = {}
         self._trigger_definitions: dict[str, TriggerDefinition] = {}
 
@@ -236,6 +243,27 @@ class ColonyRuntime:
     @property
     def agent_id(self) -> str:
         return self._colony_id
+
+    @property
+    def goal(self) -> Goal:
+        """The colony's overall goal.
+
+        Exposed as a public property for queen lifecycle tools that
+        introspect the runtime (e.g. ``get_worker_status``,
+        ``get_goal_progress``). Previously only available as the private
+        ``_goal`` attribute.
+        """
+        return self._goal
+
+    @property
+    def overseer(self) -> Worker | None:
+        """The colony's long-running client-facing overseer worker.
+
+        ``None`` until ``start_overseer()`` has been called. The overseer
+        is a persistent ``Worker`` that wraps the queen's ``AgentLoop``
+        and routes user chat via ``inject(message)``.
+        """
+        return self._overseer
 
     @property
     def is_running(self) -> bool:
@@ -384,8 +412,21 @@ class ColonyRuntime:
         count: int = 1,
         input_data: dict[str, Any] | None = None,
         session_state: dict[str, Any] | None = None,
+        agent_spec: AgentSpec | None = None,
+        tools: list[Any] | None = None,
+        tool_executor: Callable | None = None,
     ) -> list[str]:
         """Spawn worker clones and start them in the background.
+
+        By default each spawn uses the colony's own ``agent_spec``,
+        ``tools``, and ``tool_executor`` (set at construction). Pass
+        the per-spawn override args to spawn a worker that runs
+        DIFFERENT code from the colony default — used by the queen's
+        ``run_agent_with_input`` tool to spawn the loaded honeycomb /
+        custom worker through the unified runtime, instead of going
+        through the deprecated ``AgentHost.trigger`` → ``Orchestrator``
+        path that silently dropped ``user_request`` via the buffer
+        filter.
 
         Returns list of worker IDs.
         """
@@ -393,27 +434,45 @@ class ColonyRuntime:
             raise RuntimeError("ColonyRuntime is not running")
 
         from framework.agent_loop.agent_loop import AgentLoop
+        from framework.storage.conversation_store import FileConversationStore
+
+        # Resolve per-spawn vs colony-default code identity
+        spawn_spec = agent_spec or self._agent_spec
+        spawn_tools = tools if tools is not None else self._tools
+        spawn_executor = tool_executor or self._tool_executor
 
         worker_ids = []
         for i in range(count):
             worker_id = self._session_store.generate_session_id()
 
+            # Each parallel worker gets its own storage dir under
+            # {colony_session}/workers/{worker_id}/ so its conversation,
+            # events, and data never leak into the overseer's tree or
+            # (worse) the process CWD.
+            worker_storage = self._storage_path / "workers" / worker_id
+            worker_storage.mkdir(parents=True, exist_ok=True)
+            worker_conv_store = FileConversationStore(
+                worker_storage / "conversations"
+            )
+
+            # AgentLoop takes bus/judge/config/executor at construction;
+            # LLM, tools, stream_id, execution_id all come from the
+            # AgentContext passed to execute().
             agent_loop = AgentLoop(
-                llm=self._llm,
-                tools=list(self._tools),
-                tool_executor=self._tool_executor,
                 event_bus=self._scoped_event_bus,
-                stream_id=f"worker:{worker_id}",
-                execution_id=worker_id,
+                tool_executor=spawn_executor,
+                conversation_store=worker_conv_store,
             )
 
             agent_context = AgentContext(
                 runtime=self._make_runtime_adapter(worker_id),
                 agent_id=worker_id,
-                agent_spec=self._agent_spec,
+                agent_spec=spawn_spec,
                 input_data=input_data or {"task": task},
                 goal_context=self._goal.to_prompt_context(),
                 goal=self._goal,
+                llm=self._llm,
+                available_tools=list(spawn_tools),
                 accounts_prompt=self._accounts_prompt,
                 skills_catalog_prompt=self.skills_catalog_prompt,
                 protocols_prompt=self.protocols_prompt,
@@ -429,6 +488,7 @@ class ColonyRuntime:
                 context=agent_context,
                 event_bus=self._scoped_event_bus,
                 colony_id=self._colony_id,
+                storage_path=worker_storage,
             )
 
             self._workers[worker_id] = worker
@@ -436,14 +496,274 @@ class ColonyRuntime:
             worker_ids.append(worker_id)
 
             logger.info(
-                "Spawned worker %s (%d/%d) for task: %s",
+                "Spawned worker %s (%d/%d) using %s — task: %s",
                 worker_id,
                 i + 1,
                 count,
+                "override spec" if agent_spec else "colony default spec",
                 task[:80],
             )
 
         return worker_ids
+
+    async def spawn_batch(
+        self,
+        tasks: list[dict[str, Any]],
+    ) -> list[str]:
+        """Spawn a batch of parallel workers, one per task spec.
+
+        Each task spec is a dict ``{"task": str, "data": dict | None}``.
+        Workers start as independent asyncio background tasks and run
+        concurrently; this method returns their IDs immediately without
+        waiting for completion. Use ``wait_for_worker_reports(ids,
+        timeout)`` to block until they all finish.
+
+        The overseer's ``run_parallel_workers`` tool is the usual
+        caller; it pairs ``spawn_batch`` + ``wait_for_worker_reports``
+        into a single fan-out/fan-in primitive.
+        """
+        worker_ids: list[str] = []
+        for spec in tasks:
+            task_text = str(spec.get("task", ""))
+            task_data = spec.get("data")
+            if task_data is not None and not isinstance(task_data, dict):
+                task_data = {"value": task_data}
+            ids = await self.spawn(
+                task=task_text,
+                count=1,
+                input_data=task_data or {"task": task_text},
+            )
+            worker_ids.extend(ids)
+        return worker_ids
+
+    async def wait_for_worker_reports(
+        self,
+        worker_ids: list[str],
+        timeout: float = 600.0,
+    ) -> list[dict[str, Any]]:
+        """Block until every worker in ``worker_ids`` has reported.
+
+        Subscribes to ``SUBAGENT_REPORT`` events on the colony event bus
+        and collects one report per worker. If a worker has already
+        reported (fast completion) the existing ``WorkerResult`` is used
+        directly. On timeout, still-running workers are force-stopped
+        via ``stop_worker`` and their reports are synthesised as
+        ``status="timeout"``.
+
+        Returns a list of report dicts in the same order as
+        ``worker_ids``::
+
+            [
+                {
+                    "worker_id": "...",
+                    "status": "success" | "partial" | "failed" | "timeout" | "stopped",
+                    "summary": "...",
+                    "data": {...},
+                    "error": "..." | None,
+                    "duration_seconds": 12.3,
+                    "tokens_used": 4567,
+                },
+                ...
+            ]
+        """
+        if not worker_ids:
+            return []
+
+        # Reports already in hand (workers that finished before we got here)
+        collected: dict[str, dict[str, Any]] = {}
+        pending_ids: set[str] = set()
+
+        for wid in worker_ids:
+            worker = self._workers.get(wid)
+            if worker is None:
+                collected[wid] = {
+                    "worker_id": wid,
+                    "status": "failed",
+                    "summary": "Worker not found in registry.",
+                    "data": {},
+                    "error": "no_such_worker",
+                    "duration_seconds": 0.0,
+                    "tokens_used": 0,
+                }
+                continue
+            if not worker.is_active and worker._result is not None:
+                # Already finished — synthesize from the stored result
+                r = worker._result
+                collected[wid] = {
+                    "worker_id": wid,
+                    "status": r.status,
+                    "summary": r.summary,
+                    "data": r.data,
+                    "error": r.error,
+                    "duration_seconds": r.duration_seconds,
+                    "tokens_used": r.tokens_used,
+                }
+                continue
+            pending_ids.add(wid)
+
+        if not pending_ids:
+            return [collected[wid] for wid in worker_ids]
+
+        # Subscribe to SUBAGENT_REPORT events for the remaining workers
+        report_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+
+        async def on_report(event: AgentEvent) -> None:
+            data = dict(event.data or {})
+            wid = data.get("worker_id")
+            if wid and wid in pending_ids:
+                await report_queue.put(data)
+
+        sub_id = self._scoped_event_bus.subscribe(
+            event_types=[EventType.SUBAGENT_REPORT],
+            handler=on_report,
+        )
+
+        deadline = time.monotonic() + timeout
+        try:
+            while pending_ids:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    report = await asyncio.wait_for(
+                        report_queue.get(), timeout=remaining
+                    )
+                except TimeoutError:
+                    break
+                wid = report.get("worker_id")
+                if wid in pending_ids:
+                    collected[wid] = report
+                    pending_ids.discard(wid)
+        finally:
+            self._scoped_event_bus.unsubscribe(sub_id)
+
+        # Any still-pending workers are timed out — force-stop them and
+        # synthesise a timeout report.
+        for wid in list(pending_ids):
+            try:
+                await self.stop_worker(wid)
+            except Exception:
+                logger.exception("Failed to force-stop worker %s on timeout", wid)
+            worker = self._workers.get(wid)
+            duration = 0.0
+            tokens = 0
+            if worker is not None and worker._started_at > 0:
+                duration = time.monotonic() - worker._started_at
+            if worker is not None and worker._result is not None:
+                tokens = worker._result.tokens_used
+            collected[wid] = {
+                "worker_id": wid,
+                "status": "timeout",
+                "summary": f"Worker did not report within {timeout:.0f}s.",
+                "data": {},
+                "error": "timeout",
+                "duration_seconds": duration,
+                "tokens_used": tokens,
+            }
+            pending_ids.discard(wid)
+
+        return [collected[wid] for wid in worker_ids]
+
+    async def start_overseer(
+        self,
+        queen_spec: AgentSpec,
+        seed_conversation: list[dict[str, Any]] | None = None,
+        queen_tools: list[Any] | None = None,
+        initial_prompt: str | None = None,
+    ) -> Worker:
+        """Start the colony's long-running client-facing overseer.
+
+        The overseer is a persistent ``Worker`` that wraps the queen's
+        ``AgentLoop`` and:
+
+        - Never terminates on its own (``persistent=True`` on the Worker).
+        - Has the queen's full tool set, streamed with ``stream_id="overseer"``.
+        - Receives user chat via ``session.colony_runtime.overseer.inject(msg)``.
+
+        In a queen DM session the overseer runs with 0 parallel workers.
+        In a colony session she can spawn parallel workers via the
+        ``run_parallel_workers`` tool which calls ``spawn_batch`` +
+        ``wait_for_worker_reports`` under the hood.
+
+        Pass ``seed_conversation`` to pre-populate the overseer's
+        conversation history — used when forking a DM to a colony so
+        the overseer starts with the DM's prior context loaded.
+
+        Must be called after ``start()``. Idempotent: calling a second
+        time returns the already-started overseer.
+        """
+        if self._overseer is not None:
+            return self._overseer
+
+        if not self._running:
+            raise RuntimeError(
+                "start_overseer requires the ColonyRuntime to be running "
+                "(call start() first)"
+            )
+
+        from framework.agent_loop.agent_loop import AgentLoop
+        from framework.storage.conversation_store import FileConversationStore
+
+        overseer_id = f"overseer:{self._colony_id}"
+
+        # The overseer's conversation lives at the colony session root:
+        # {colony_session}/conversations/. Workers get their own sub-dirs
+        # under workers/{worker_id}/; the overseer is the root occupant.
+        self._storage_path.mkdir(parents=True, exist_ok=True)
+        overseer_conv_store = FileConversationStore(
+            self._storage_path / "conversations"
+        )
+        agent_loop = AgentLoop(
+            event_bus=self._scoped_event_bus,
+            tool_executor=self._tool_executor,
+            conversation_store=overseer_conv_store,
+        )
+
+        overseer_ctx = AgentContext(
+            runtime=self._make_runtime_adapter(overseer_id),
+            agent_id=overseer_id,
+            agent_spec=queen_spec,
+            input_data={},
+            goal_context="",
+            goal=self._goal,
+            llm=self._llm,
+            available_tools=list(queen_tools or self._tools),
+            accounts_prompt=self._accounts_prompt,
+            skills_catalog_prompt=self.skills_catalog_prompt,
+            protocols_prompt=self.protocols_prompt,
+            skill_dirs=self.skill_dirs,
+            execution_id=overseer_id,
+            stream_id="overseer",
+        )
+
+        overseer = Worker(
+            worker_id=overseer_id,
+            task="",  # no finite task — persistent conversation
+            agent_loop=agent_loop,
+            context=overseer_ctx,
+            event_bus=self._scoped_event_bus,
+            colony_id=self._colony_id,
+            persistent=True,
+            storage_path=self._storage_path,
+        )
+
+        if seed_conversation:
+            await overseer.seed_conversation(seed_conversation)
+
+        self._overseer = overseer
+        await overseer.start_background()
+
+        if initial_prompt:
+            await overseer.inject(initial_prompt)
+
+        logger.info(
+            "Started overseer %s for colony %s (seeded=%d messages, initial_prompt=%s)",
+            overseer_id,
+            self._colony_id,
+            len(seed_conversation or []),
+            "yes" if initial_prompt else "no",
+        )
+        return overseer
 
     async def trigger(
         self,
@@ -659,7 +979,6 @@ class ColonyRuntime:
         return StreamDecisionTracker(
             stream_id=f"worker:{worker_id}",
             storage=self._storage,
-            outcome_aggregator=None,
         )
 
     def _prune_idempotency_keys(self) -> None:

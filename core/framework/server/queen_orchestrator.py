@@ -167,6 +167,14 @@ async def create_queen(
     queen_tools = list(queen_registry.get_tools().values())
     queen_tool_executor = queen_registry.get_executor()
 
+    # Phase 2 wiring: stash the resolved tool list + executor on the
+    # session so SessionManager._start_queen can build a real
+    # ColonyRuntime sharing the queen's tools, llm, and event bus.
+    # The unified runtime is what run_parallel_workers (Phase 4) will
+    # call into to fan out parallel workers from the queen.
+    session._queen_tools = queen_tools  # type: ignore[attr-defined]
+    session._queen_tool_executor = queen_tool_executor  # type: ignore[attr-defined]
+
     # ---- Partition tools by phase ------------------------------------
     planning_names = set(_QUEEN_PLANNING_TOOLS)
     building_names = set(_QUEEN_BUILDING_TOOLS)

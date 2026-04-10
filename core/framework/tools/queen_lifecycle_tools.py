@@ -949,60 +949,12 @@ def register_queen_lifecycle_tools(
         """Get current colony runtime from session (late-binding)."""
         return getattr(session, "colony_runtime", None)
 
-    # --- start_worker ----------------------------------------------------------
-
-    # How long to wait for credential validation + MCP resync before
-    # proceeding with trigger anyway.  These are pre-flight checks that
-    # should not block the queen indefinitely.
+    # ``start_worker`` was removed in the Phase 4 unification — its
+    # bare-bones spawn duplicated ``run_agent_with_input`` (which has
+    # credential preflight, concurrency guard, and phase tracking on
+    # top). The shared preflight timeout below is still used by
+    # ``run_agent_with_input``.
     _START_PREFLIGHT_TIMEOUT = 15  # seconds
-
-    async def start_worker(task: str) -> str:
-        """Spawn a colony worker clone with a task description.
-
-        The worker runs autonomously in the background.
-        Returns immediately with worker IDs.
-        """
-        runtime = _get_runtime()
-        if runtime is None:
-            return json.dumps({"error": "No colony running in this session."})
-
-        try:
-            runtime.resume_timers()
-
-            worker_ids = await runtime.spawn(
-                task=task,
-                count=1,
-                input_data={"user_request": task},
-            )
-            return json.dumps(
-                {
-                    "status": "started",
-                    "worker_ids": worker_ids,
-                    "task": task,
-                }
-            )
-        except Exception as e:
-            return json.dumps({"error": f"Failed to start worker: {e}"})
-
-    _start_tool = Tool(
-        name="start_worker",
-        description=(
-            "Spawn a colony worker clone with a task description. The worker runs "
-            "autonomously in the background. Returns worker IDs for tracking."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": "Description of the task for the worker to perform",
-                },
-            },
-            "required": ["task"],
-        },
-    )
-    registry.register("start_worker", _start_tool, lambda inputs: start_worker(**inputs))
-    tools_registered += 1
 
     # --- stop_worker -----------------------------------------------------------
 
@@ -1031,6 +983,170 @@ def register_queen_lifecycle_tools(
         parameters={"type": "object", "properties": {}},
     )
     registry.register("stop_worker", _stop_tool, lambda inputs: stop_worker())
+    tools_registered += 1
+
+    # --- run_parallel_workers --------------------------------------------------
+    #
+    # Phase 4 fan-out tool. Reads the unified ColonyRuntime from
+    # ``session.colony`` (built by SessionManager._start_unified_colony_runtime),
+    # spawns one Worker per task spec via spawn_batch, then blocks on
+    # wait_for_worker_reports until every worker has reported (or the
+    # timeout fires and stragglers are force-stopped). Returns a JSON
+    # array of structured reports {worker_id, status, summary, data,
+    # error, duration_seconds, tokens_used} that the queen reads on its
+    # next turn and aggregates into a user-facing summary.
+    #
+    # Worker SUBAGENT_REPORT events flow through session.event_bus, so
+    # the existing SSE pipeline surfaces them automatically. Workers'
+    # individual LLM deltas / tool calls also publish to the same bus
+    # under stream_id="worker:{worker_id}"; SSE filtering for those is
+    # Phase 5 — for now they reach the queen DM channel.
+
+    _RUN_PARALLEL_DEFAULT_TIMEOUT = 600.0  # 10 minutes per batch
+
+    def _get_unified_colony():
+        """Read the unified ColonyRuntime (Phase 2 wiring) from session."""
+        return getattr(session, "colony", None)
+
+    async def run_parallel_workers(
+        *,
+        tasks: list[dict],
+        timeout: float | None = None,
+    ) -> str:
+        """Spawn N parallel workers and wait for all reports.
+
+        Each task is a dict ``{"task": str, "data": dict | None}``.
+        Returns a JSON array of structured reports in input order.
+        """
+        colony = _get_unified_colony()
+        if colony is None:
+            return json.dumps(
+                {
+                    "error": (
+                        "No unified ColonyRuntime on this session. "
+                        "Phase 2 wiring expects session.colony to be set "
+                        "by SessionManager._start_unified_colony_runtime."
+                    )
+                }
+            )
+
+        if not isinstance(tasks, list) or not tasks:
+            return json.dumps(
+                {"error": "tasks must be a non-empty list of {task, data?} dicts"}
+            )
+
+        # Normalise: each entry must have a non-empty "task" string.
+        normalised: list[dict] = []
+        for i, spec in enumerate(tasks):
+            if not isinstance(spec, dict):
+                return json.dumps(
+                    {"error": f"tasks[{i}] is not a dict: {type(spec).__name__}"}
+                )
+            task_text = str(spec.get("task", "")).strip()
+            if not task_text:
+                return json.dumps({"error": f"tasks[{i}].task is empty"})
+            normalised.append(
+                {
+                    "task": task_text,
+                    "data": spec.get("data") if isinstance(spec.get("data"), dict) else None,
+                }
+            )
+
+        try:
+            worker_ids = await colony.spawn_batch(normalised)
+        except Exception as e:
+            return json.dumps({"error": f"spawn_batch failed: {e}"})
+
+        try:
+            reports = await colony.wait_for_worker_reports(
+                worker_ids,
+                timeout=timeout if timeout is not None else _RUN_PARALLEL_DEFAULT_TIMEOUT,
+            )
+        except Exception as e:
+            return json.dumps(
+                {
+                    "error": f"wait_for_worker_reports failed: {e}",
+                    "worker_ids": worker_ids,
+                }
+            )
+
+        return json.dumps(
+            {
+                "worker_count": len(reports),
+                "reports": reports,
+            }
+        )
+
+    _run_parallel_tool = Tool(
+        name="run_parallel_workers",
+        description=(
+            "Fan out a batch of tasks to parallel workers and wait for all "
+            "reports. Use this when you can split the work into independent "
+            "subtasks that can run concurrently (e.g. fetching N batches "
+            "from an API, processing M files, comparing K candidates).\n\n"
+            "CRITICAL: each worker is a FRESH process with NO memory of "
+            "your conversation. Every task string must be FULLY "
+            "self-contained — include the API endpoint, the exact "
+            "parameters, the expected output format, and any "
+            "constraints. Workers cannot ask the user follow-up "
+            "questions and cannot see your chat history. Write each "
+            "task as if handing it to a stranger.\n\n"
+            "Each worker runs in isolation with its own AgentLoop and "
+            "reports back via the report_to_parent tool. The call "
+            "blocks until every worker has reported or the timeout "
+            "fires. Returns a JSON object with a 'reports' array; each "
+            "report has worker_id, status "
+            "(success|partial|failed|timeout|stopped), summary, data, "
+            "error, duration_seconds, and tokens_used. Read the "
+            "summaries on your next turn and synthesize a user-facing "
+            "result. Default timeout is 600 seconds (10 minutes)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "description": (
+                        "List of task specs to fan out. Each spec is "
+                        '{"task": "<description>", "data": {<optional structured input>}}. '
+                        "The 'task' string becomes the worker's initial "
+                        "user message. 'data' is merged into the worker's "
+                        "AgentContext.input_data so structured fields are "
+                        "available to the worker's first turn."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "task": {
+                                "type": "string",
+                                "description": "Task description for the worker.",
+                            },
+                            "data": {
+                                "type": "object",
+                                "description": "Optional structured input fields.",
+                            },
+                        },
+                        "required": ["task"],
+                    },
+                    "minItems": 1,
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": (
+                        "Per-batch timeout in seconds. Workers still "
+                        "running when the timeout fires are force-stopped "
+                        "and reported as status='timeout'. Default 600."
+                    ),
+                },
+            },
+            "required": ["tasks"],
+        },
+    )
+    registry.register(
+        "run_parallel_workers",
+        _run_parallel_tool,
+        lambda inputs: run_parallel_workers(**inputs),
+    )
     tools_registered += 1
 
     # --- switch_to_reviewing ----------------------------------------------------
@@ -3209,33 +3325,62 @@ def register_queen_lifecycle_tools(
     async def run_agent_with_input(task: str) -> str:
         """Run the loaded worker agent with the given task input.
 
-        Performs preflight checks (credentials, MCP resync), triggers the
-        worker's default entry point, and switches to running phase.
+        Phase 4 unified path: spawns the loaded worker through
+        ``session.colony.spawn(...)`` (a real ColonyRuntime) instead of
+        the deprecated ``AgentHost.trigger`` → ``Orchestrator`` flow.
+        The new path passes ``input_data={"user_request": task}``
+        straight into ``AgentLoop._build_initial_message`` which
+        renders ALL keys to the worker's first user message — no
+        buffer filter, no dropped task string, no orchestrator
+        graph-execution machinery.
+
+        We still read the legacy ``session.colony_runtime`` (the
+        AgentHost loaded by ``load_built_agent``) to pull the worker's
+        tool list, tool executor, and entry-node system prompt — those
+        are the loaded honeycomb / custom worker's actual identity and
+        we want the spawned worker to BE that, not the queen's generic
+        colony spec.
         """
-        runtime = _get_runtime()
-        if runtime is None:
+        legacy = _get_runtime()  # the loaded AgentHost from load_built_agent
+        if legacy is None:
             return json.dumps({"error": "No worker loaded in this session."})
 
-        # Guard: refuse to start while an execution is already running.
-        # Calling again would cancel the active one via the
-        # "Restarted with new execution" path in ExecutionStream.execute(),
-        # which is almost never what the queen intends.
-        for colony_id in runtime.list_workers():
-            reg = runtime.get_worker_registration(colony_id)
-            if reg is None:
-                continue
-            for _ep_id, stream in reg.streams.items():
-                if stream.active_execution_ids:
-                    return json.dumps(
-                        {
-                            "error": "Worker is already running.",
-                            "active_execution_ids": list(stream.active_execution_ids),
-                            "hint": "Wait for the worker to finish (WORKER_TERMINAL event) or call stop_agent() before starting a new run.",
-                        }
+        colony = getattr(session, "colony", None)
+        if colony is None:
+            return json.dumps(
+                {
+                    "error": (
+                        "Session has no unified ColonyRuntime — "
+                        "_start_unified_colony_runtime did not run. "
+                        "Cannot spawn worker."
                     )
+                }
+            )
+
+        # Diagnostic: log the exact task arg the queen passed so we can
+        # spot generic / context-free task strings before they reach
+        # the worker. The worker has no chat context, so a vague task
+        # is the #1 cause of useless worker runs.
+        logger.info(
+            "run_agent_with_input: queen passing task to worker (len=%d): %r",
+            len(task),
+            task[:500] if isinstance(task, str) else task,
+        )
+        if isinstance(task, str) and len(task) < 60:
+            logger.warning(
+                "run_agent_with_input: SHORT TASK STRING (%d chars). "
+                "The worker has zero context from the queen's chat — "
+                "tasks shorter than ~60 chars usually fail because "
+                "they lack the specific instructions the worker needs. "
+                "Task: %r",
+                len(task),
+                task,
+            )
 
         try:
             # Pre-flight: validate credentials and resync MCP servers.
+            # Still uses the legacy AgentHost handles because that's
+            # where credentials live; the actual run is via colony.
             loop = asyncio.get_running_loop()
 
             async def _preflight():
@@ -3244,7 +3389,7 @@ def register_queen_lifecycle_tools(
                     await loop.run_in_executor(
                         None,
                         lambda: validate_credentials(
-                            runtime.graph.nodes,
+                            legacy.graph.nodes,
                             interactive=False,
                             skip=False,
                         ),
@@ -3275,20 +3420,60 @@ def register_queen_lifecycle_tools(
             except CredentialError:
                 raise  # handled below
 
-            # Resume timers in case they were paused by a previous stop
-            runtime.resume_timers()
+            # Build a per-spawn AgentSpec that mirrors the loaded
+            # worker's entry-node identity. This is what makes the
+            # spawned ColonyRuntime worker run the loaded honeycomb /
+            # custom worker's code instead of the queen's generic
+            # colony default.
+            from framework.agent_loop.types import AgentSpec
 
-            # Get session state from any prior execution for memory continuity
-            session_state = runtime._get_primary_session_state("default") or {}
+            graph = getattr(legacy, "graph", None)
+            entry_node = None
+            if graph is not None and hasattr(graph, "get_node"):
+                try:
+                    entry_node = graph.get_node(graph.entry_node)
+                except Exception:
+                    entry_node = None
 
-            if session_id:
-                session_state["resume_session_id"] = session_id
+            worker_system_prompt = (
+                getattr(entry_node, "system_prompt", None)
+                if entry_node is not None
+                else None
+            ) or ""
 
-            exec_id = await runtime.trigger(
-                entry_point_id="default",
-                input_data={"user_request": task},
-                session_state=session_state,
+            worker_tool_names = (
+                list(getattr(entry_node, "tools", []) or [])
+                if entry_node is not None
+                else []
             )
+
+            spawn_spec = AgentSpec(
+                id=f"loaded_worker:{getattr(graph, 'id', 'unknown')}",
+                name=getattr(graph, "id", "loaded_worker"),
+                description=(
+                    "Loaded worker agent spawned via run_agent_with_input "
+                    "through the unified ColonyRuntime path."
+                ),
+                system_prompt=worker_system_prompt,
+                tools=worker_tool_names,
+                tool_access_policy="all",
+            )
+
+            # Pull the live tool objects + executor straight from the
+            # loaded AgentHost so the spawned worker uses its actual
+            # MCP-loaded tools (browser, hubspot, honeycomb, etc.).
+            spawn_tools = list(getattr(legacy, "_tools", []) or [])
+            spawn_tool_executor = getattr(legacy, "_tool_executor", None)
+
+            worker_ids = await colony.spawn(
+                task=task,
+                count=1,
+                input_data={"user_request": task},
+                agent_spec=spawn_spec,
+                tools=spawn_tools,
+                tool_executor=spawn_tool_executor,
+            )
+            new_worker_id = worker_ids[0] if worker_ids else ""
 
             # Switch to running phase
             if phase_state is not None:
@@ -3299,8 +3484,10 @@ def register_queen_lifecycle_tools(
                 {
                     "status": "started",
                     "phase": "running",
-                    "execution_id": exec_id,
+                    "worker_id": new_worker_id,
                     "task": task,
+                    "tool_count": len(spawn_tools),
+                    "system_prompt_chars": len(worker_system_prompt),
                 }
             )
         except CredentialError as e:
@@ -3318,21 +3505,44 @@ def register_queen_lifecycle_tools(
                 )
             return json.dumps(error_payload)
         except Exception as e:
+            logger.exception("run_agent_with_input: spawn failed")
             return json.dumps({"error": f"Failed to start worker: {e}"})
 
     _run_input_tool = Tool(
         name="run_agent_with_input",
         description=(
-            "Run the loaded worker agent with the given task. Validates credentials, "
-            "triggers the worker's default entry point, and switches to running phase. "
-            "Use this after loading an agent (staging phase) to start execution."
+            "Run the loaded worker agent with the given task.\n\n"
+            "CRITICAL: the worker is a FRESH process. It has NO memory of "
+            "your conversation with the user, NO knowledge of what was "
+            "discussed, and NO access to your context. It only sees the "
+            "single 'task' string you pass here. If the user asked you "
+            "to fetch '125 tickers and build a market report with "
+            "gainers, losers, and category breakdowns', that ENTIRE "
+            "specification must be in the task arg verbatim — not "
+            "'continue our work', not 'do what we discussed', not "
+            "'finish the analysis'. Bad task: 'Continue the work from "
+            "the queen's current session'. Good task: 'Fetch all 125 "
+            "tickers from the honeycomb API (paginate past the default "
+            "50 page limit), then build a full market report including: "
+            "(1) top 10 gainers by % change, (2) top 10 losers, (3) top "
+            "10 by volume, (4) breakdown by category, (5) any unusual "
+            "patterns. Return as a structured summary.' Validates "
+            "credentials and switches to running phase. Use this after "
+            "loading an agent (staging phase) to start execution."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "The task or input for the worker agent to execute",
+                    "description": (
+                        "FULL self-contained task specification for the "
+                        "worker. Must include every requirement, "
+                        "constraint, and detail the worker needs — the "
+                        "worker has zero context from your conversation. "
+                        "Write it as if you're handing the task to a "
+                        "stranger who has never seen the user's request."
+                    ),
                 },
             },
             "required": ["task"],

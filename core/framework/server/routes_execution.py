@@ -56,7 +56,6 @@ _WORKER_INHERITED_TOOLS: frozenset[str] = frozenset(
 # from forked worker configs.
 _QUEEN_LIFECYCLE_EXTRAS: frozenset[str] = frozenset(
     {
-        "start_worker",
         "stop_worker_and_plan",
         "stop_worker_and_review",
     }

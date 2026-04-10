@@ -204,6 +204,94 @@ def build_escalate_tool() -> Tool:
         },
     )
 
+
+def build_report_to_parent_tool() -> Tool:
+    """Build the synthetic ``report_to_parent`` tool.
+
+    Parallel workers (those spawned by the overseer via
+    ``run_parallel_workers``) call this to send a structured report back
+    to the overseer queen when they have finished their task. Calling
+    ``report_to_parent`` terminates the worker's loop cleanly -- do not
+    call other tools after it.
+
+    The overseer receives these as ``SUBAGENT_REPORT`` events and
+    aggregates them into a single summary for the user.
+    """
+    return Tool(
+        name="report_to_parent",
+        description=(
+            "Send a structured report back to the parent overseer and "
+            "terminate. Call this when you have finished your task "
+            "(success, partial, or failed) or cannot make further "
+            "progress. Your loop ends after this call -- do not call any "
+            "other tool afterwards. The overseer reads the summary + "
+            "data fields and aggregates them into a user-facing response."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["success", "partial", "failed"],
+                    "description": (
+                        "Overall outcome. 'success' = task complete. "
+                        "'partial' = some progress but incomplete. "
+                        "'failed' = could not make progress."
+                    ),
+                },
+                "summary": {
+                    "type": "string",
+                    "description": (
+                        "One-paragraph narrative for the overseer. What "
+                        "you did, what you found, and any notable issues."
+                    ),
+                },
+                "data": {
+                    "type": "object",
+                    "description": (
+                        "Optional structured payload (rows fetched, IDs "
+                        "processed, files written, etc.) that the "
+                        "overseer can merge into its final summary."
+                    ),
+                },
+            },
+            "required": ["status", "summary"],
+        },
+    )
+
+
+def handle_report_to_parent(tool_input: dict[str, Any]) -> ToolResult:
+    """Normalise + validate a ``report_to_parent`` tool call.
+
+    Returns a ``ToolResult`` with the acknowledgement text the LLM sees;
+    the side effects (record on Worker, emit SUBAGENT_REPORT, terminate
+    loop) are performed by ``AgentLoop`` after this helper returns.
+    """
+    status = str(tool_input.get("status", "success")).strip().lower()
+    if status not in ("success", "partial", "failed"):
+        status = "success"
+    summary = str(tool_input.get("summary", "")).strip()
+    if not summary:
+        summary = f"(worker returned {status} with no summary)"
+    data = tool_input.get("data") or {}
+    if not isinstance(data, dict):
+        data = {"value": data}
+    # Store the normalised payload back on the input dict so the caller
+    # can pick it up without re-parsing.
+    tool_input["_normalised"] = {
+        "status": status,
+        "summary": summary,
+        "data": data,
+    }
+    return ToolResult(
+        tool_use_id=tool_input.get("tool_use_id", ""),
+        content=(
+            f"Report delivered to overseer (status={status}). "
+            f"This worker will terminate now."
+        ),
+    )
+
+
 def handle_set_output(
     tool_input: dict[str, Any],
     output_keys: list[str] | None,
