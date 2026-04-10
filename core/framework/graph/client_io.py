@@ -87,27 +87,33 @@ class ActiveNodeClientIO(NodeClientIO):
 
         self._input_event = asyncio.Event()
         self._input_result = None
-
-        if self._event_bus is not None:
-            await self._event_bus.emit_client_input_requested(
-                stream_id=self.node_id,
-                node_id=self.node_id,
-                prompt=prompt,
-                execution_id=self._execution_id or None,
-            )
+        result: str | None = None
 
         try:
+            # Include emit inside try/finally so cancellation during this await
+            # still triggers cleanup and resets _input_event to None.
+            if self._event_bus is not None:
+                await self._event_bus.emit_client_input_requested(
+                    stream_id=self.node_id,
+                    node_id=self.node_id,
+                    prompt=prompt,
+                    execution_id=self._execution_id or None,
+                )
+
             if timeout is not None:
                 await asyncio.wait_for(self._input_event.wait(), timeout=timeout)
             else:
                 await self._input_event.wait()
+
+            # Capture result before finally releases _input_event, preventing a
+            # concurrent request_input from wiping _input_result before we read it.
+            result = self._input_result
+            self._input_result = None
         finally:
             self._input_event = None
 
-        if self._input_result is None:
+        if result is None:
             raise RuntimeError("input event was set but no input was provided")
-        result = self._input_result
-        self._input_result = None
         return result
 
     async def provide_input(self, content: str) -> None:
