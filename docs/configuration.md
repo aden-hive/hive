@@ -28,7 +28,7 @@ The `quickstart.sh` script creates this file during setup. It stores the default
 }
 ```
 
-The default `max_tokens` value (8192) is defined as `DEFAULT_MAX_TOKENS` in `framework.graph.edge` and re-exported from `framework.graph`. Each agent's `RuntimeConfig` reads from this file at startup. To change defaults, either re-run `quickstart.sh` or edit the file directly.
+The default `max_tokens` value (8192) is defined as `DEFAULT_MAX_TOKENS` in `framework.orchestrator.edge` and re-exported from `framework.orchestrator`. Each agent's `RuntimeConfig` reads from this file at startup. To change defaults, either re-run `quickstart.sh` or edit the file directly.
 
 ## Environment Variables
 
@@ -149,7 +149,7 @@ Each agent package in `exports/` contains its own `config.py`:
 # exports/my_agent/config.py
 CONFIG = {
     "model": "anthropic/claude-sonnet-4-5-20250929",  # Default LLM model
-    "max_tokens": 8192,  # default: DEFAULT_MAX_TOKENS from framework.graph
+    "max_tokens": 8192,  # default: DEFAULT_MAX_TOKENS from framework.orchestrator
     "temperature": 0.7,
     "tools": ["web_search", "pdf_read"],   # MCP tools to enable
     "storage_path": "~/.hive/agents/my_agent/",  # Runtime data location (default)

@@ -13,7 +13,7 @@
 6. **Calling set_output in same turn as tool calls** — Call set_output in a SEPARATE turn.
 
 ## File Template Errors
-7. **Wrong import paths** — Use `from framework.graph import ...`, NOT `from core.framework.graph import ...`.
+7. **Wrong import paths** — Use `from framework.orchestrator import ...`, NOT `from framework.graph import ...` or `from core.framework...`.
 8. **Missing storage path** — Agent class must set `self._storage_path = Path.home() / ".hive" / "agents" / "agent_name"`.
 9. **Missing mcp_servers.json** — Without this, the agent has no tools at runtime.
 10. **Bare `python` command** — Use `"command": "uv"` with args `["run", "python", ...]`.

@@ -467,7 +467,7 @@ RESULT: Execution complete, event emitted, task ends
 STEP 12: GRAPH EXECUTION (THE ACTUAL AGENT LOGIC)
 ===================================================================
 
-FILE: /Users/timothy/repo/hive/core/framework/graph/executor.py
+FILE: core/framework/orchestrator/orchestrator.py
 
 FUNCTION: GraphExecutor.execute() (line 289)
 CALLED BY: ExecutionStream._run_execution() [line 644]
@@ -588,13 +588,13 @@ Memory Flow:
 KEY FILE PATHS AND LINE NUMBERS
 ===================================================================
 
-1. API Entry: /Users/timothy/repo/hive/core/framework/server/routes_sessions.py:103
-2. Session Manager: /Users/timothy/repo/hive/core/framework/server/session_manager.py:128
-3. Agent Runner Load: /Users/timothy/repo/hive/core/framework/runner/runner.py:789
-4. Agent Runner Setup: /Users/timothy/repo/hive/core/framework/runner/runner.py:1012
-5. Runtime Creation: /Users/timothy/repo/hive/core/framework/runtime/agent_runtime.py:1642
-6. Runtime Class: /Users/timothy/repo/hive/core/framework/runtime/agent_runtime.py:66
-7. Trigger Method: /Users/timothy/repo/hive/core/framework/runtime/agent_runtime.py:790
-8. Execution Stream: /Users/timothy/repo/hive/core/framework/runtime/execution_stream.py:134
-9. Graph Executor: /Users/timothy/repo/hive/core/framework/graph/executor.py:102
-10. Main Loop: /Users/timothy/repo/hive/core/framework/graph/executor.py:596
+1. API Entry: core/framework/server/routes_sessions.py:103
+2. Session Manager: core/framework/server/session_manager.py:128
+3. Agent Runner Load: core/framework/loader/agent_loader.py:789
+4. Agent Runner Setup: core/framework/host/agent_host.py:1012
+5. Runtime Creation: core/framework/host/agent_host.py:1642
+6. Runtime Class: core/framework/host/agent_host.py:66
+7. Trigger Method: core/framework/host/agent_host.py:790
+8. Execution Stream: core/framework/host/execution_manager.py:134
+9. Graph Executor: core/framework/orchestrator/orchestrator.py:102
+10. Main Loop: core/framework/orchestrator/orchestrator.py:596
