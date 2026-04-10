@@ -351,6 +351,16 @@ async def handle_list_specs(request: web.Request) -> web.Response:
             cred_id = spec.credential_id or name
             if spec.aden_supported:
                 any_aden = True
+            accounts = accounts_by_provider.get(cred_id, [])
+            # Pure-OAuth (Aden-only, no direct API key) credentials are
+            # authoritative through Aden — the accounts list is the source of
+            # truth. Local stores can hold stale cache entries after a remote
+            # deletion, so trusting `store.is_available()` here would surface
+            # ghost "Connected" rows with no accounts and no add affordance.
+            if spec.aden_supported and not spec.direct_api_key_supported:
+                available = len(accounts) > 0
+            else:
+                available = store.is_available(cred_id)
             specs.append({
                 "credential_name": name,
                 "credential_id": cred_id,
@@ -363,8 +373,8 @@ async def handle_list_specs(request: web.Request) -> web.Response:
                 "direct_api_key_supported": spec.direct_api_key_supported,
                 "credential_key": spec.credential_key,
                 "credential_group": spec.credential_group,
-                "available": store.is_available(cred_id),
-                "accounts": accounts_by_provider.get(cred_id, []),
+                "available": available,
+                "accounts": accounts,
             })
 
         # Include aden_api_key synthetic row if any spec uses Aden

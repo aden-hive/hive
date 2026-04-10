@@ -94,6 +94,8 @@ if "--stdio" not in sys.argv:
 def health_check() -> str:
     return "OK"
 
+
+def main() -> None:
     """Entry point for the MCP server."""
     parser = argparse.ArgumentParser(description="Aden Tools MCP Server")
     parser.add_argument(

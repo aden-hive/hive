@@ -13,11 +13,11 @@
     "cwd": "../../../../tools",
     "description": "Browser automation tools (Playwright-based)"
   },
-  "hive-tools": {
+  "aden-tools": {
     "transport": "stdio",
     "command": "uv",
     "args": ["run", "python", "mcp_server.py", "--stdio"],
     "cwd": "../../../../tools",
-    "description": "Hive tools MCP server (csv, pdf, web_search, web_scrape, email, integrations)"
+    "description": "Aden integration tools (gmail, calendar, hubspot, etc.) — gated by credentials and the verified manifest"
   }
 }
