@@ -423,7 +423,6 @@ def test_build_system_prompt_injects_dynamic_memory():
         protocols_prompt="",
         memory_prompt="",
         dynamic_memory_provider=lambda: "--- Global Memories ---\nremember this",
-        is_subagent_mode=False,
     )
 
     prompt = build_system_prompt_for_node_context(ctx)
@@ -433,6 +432,7 @@ def test_build_system_prompt_injects_dynamic_memory():
 
 def test_queen_phase_state_appends_global_memory_block():
     phase = QueenPhaseState(
+        phase="building",
         prompt_building="base prompt",
         _cached_global_recall_block="--- Global Memories ---\nglobal stuff",
     )
@@ -444,7 +444,7 @@ def test_queen_phase_state_appends_global_memory_block():
 
 
 def test_queen_phase_state_prompt_without_memory():
-    phase = QueenPhaseState(prompt_building="base prompt")
+    phase = QueenPhaseState(phase="building", prompt_building="base prompt")
 
     prompt = phase.get_current_prompt()
     assert "base prompt" in prompt
