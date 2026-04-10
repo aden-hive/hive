@@ -17,14 +17,15 @@ from framework.graph.client_io import ActiveNodeClientIO
 class _MockEventBus:
     """Minimal event bus stub — no-ops all emit calls."""
 
-    async def emit_client_input_requested(self, **kwargs) -> None:
-        pass
+    async def emit_client_input_requested(self, **kwargs: object) -> None:
+        """No-op implementation for testing."""
 
 
 class _SlowEventBus(_MockEventBus):
     """Event bus that blocks in emit_client_input_requested for cancellation tests."""
 
-    async def emit_client_input_requested(self, **kwargs) -> None:
+    async def emit_client_input_requested(self, **kwargs: object) -> None:
+        """Block for 1 second to allow cancellation during emit."""
         await asyncio.sleep(1.0)
 
 
@@ -64,17 +65,25 @@ async def test_request_input_result_captured_before_lock_release():
     reads_with_event_active: list[bool] = []
 
     class _TrackerDescriptor:
-        def __get__(self, obj, objtype=None):
+        """Data descriptor that records whether _input_event is active on each read."""
+
+        def __get__(self, obj: object, objtype: object = None) -> object:
+            """Return mock result and record whether _input_event was active."""
             if obj is None:
                 return self
-            reads_with_event_active.append(obj._input_event is not None)
+            reads_with_event_active.append(
+                getattr(obj, "_input_event", None) is not None
+            )
             return getattr(obj, "_mock_result", None)
 
-        def __set__(self, obj, value):
-            obj._mock_result = value
+        def __set__(self, obj: object, value: object) -> None:
+            """Store value in _mock_result to avoid descriptor recursion."""
+            obj._mock_result = value  # type: ignore[attr-defined]
 
     class _TrackedIO(ActiveNodeClientIO):
-        _input_result = _TrackerDescriptor()
+        """ActiveNodeClientIO subclass that tracks _input_result reads."""
+
+        _input_result = _TrackerDescriptor()  # type: ignore[assignment]
 
     io = _TrackedIO(node_id="n1")
 
