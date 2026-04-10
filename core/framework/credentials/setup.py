@@ -225,6 +225,7 @@ class CredentialSetupSession:
                 skipped.append(cred.credential_name)
                 break
             except Exception as e:
+                logger.warning("Error setting up credential %s", cred.credential_name, exc_info=True)
                 errors.append(f"{cred.credential_name}: {e}")
 
         self._print_summary(configured, skipped, errors)
@@ -273,6 +274,7 @@ class CredentialSetupSession:
             )
             return True
         except Exception as e:
+            logger.warning("Failed to initialize credential store", exc_info=True)
             self._print(f"{Colors.RED}Failed to initialize credential store: {e}{Colors.NC}")
             return False
 
@@ -455,6 +457,7 @@ class CredentialSetupSession:
                 self._print("Please connect this integration on https://hive.adenhq.com first.")
                 return False
         except Exception as e:
+            logger.warning("Failed to sync credentials from Aden for %s", cred.credential_name, exc_info=True)
             self._print(f"{Colors.RED}Failed to sync from Aden: {e}{Colors.NC}")
             return False
 
@@ -495,6 +498,7 @@ class CredentialSetupSession:
             store.save_credential(cred_obj)
             self._print(f"{Colors.GREEN}✓ Stored in ~/.hive/credentials/{Colors.NC}")
         except Exception as e:
+            logger.warning("Failed to store credential %s in credential store", cred.credential_id or cred.credential_name, exc_info=True)
             self._print(f"{Colors.YELLOW}⚠ Could not store in credential store: {e}{Colors.NC}")
 
         # Export to current session
