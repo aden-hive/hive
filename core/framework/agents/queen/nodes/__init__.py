@@ -81,6 +81,13 @@ _QUEEN_PLANNING_TOOLS = [
     # Scaffold + transition to building (requires confirm_and_build first)
     # Load existing agent (after user confirms)
     "load_built_agent",
+    # Parallel fan-out — use directly for one-off batch work the user
+    # wants RIGHT NOW (without first designing an agent for it).
+    "run_parallel_workers",
+    # Fork this session into a colony, writing a learned-skill file
+    # under ~/.hive/skills/ first so the new colony inherits the
+    # session's knowledge.
+    "create_colony",
 ]
 
 # Building phase: full coding + agent construction tools.
@@ -125,6 +132,7 @@ _QUEEN_RUNNING_TOOLS = [
     "switch_to_reviewing",
     "get_worker_status",
     "run_agent_with_input",
+    "run_parallel_workers",
     "inject_message",
     # Worker escalation inbox
     "list_worker_questions",
@@ -175,6 +183,10 @@ _QUEEN_INDEPENDENT_TOOLS = [
     "search_files",
     "run_command",
     "undo_changes",
+    # Parallel fan-out (Phase 4 unified ColonyRuntime)
+    "run_parallel_workers",
+    # Fork to colony — captures session knowledge as a skill first
+    "create_colony",
 ]
 
 
@@ -690,6 +702,40 @@ to fix the currently loaded agent (no draft required).
 phase. Only use this when the user explicitly asks to work with an existing agent \
 (e.g. "load my_agent", "run the research agent"). Confirm with the user first.
 
+## Parallel fan-out (one-off batch work — no agent build required)
+- run_parallel_workers(tasks, timeout?) — Spawn N workers concurrently and \
+wait for all reports. Use this when the user asks for batch / parallel work \
+RIGHT NOW that does NOT need a reusable agent (e.g. "fetch batches 1–5 from \
+this API", "summarise these 10 PDFs", "compare these candidates"). Each task \
+is a dict {"task": "...", "data"?: {...}}; the tool returns aggregated \
+{worker_id, status, summary, data, error} reports. Read the summaries and \
+write a single user-facing synthesis on your next turn. Prefer this over \
+designing a draft when the work is one-shot and the user wants results, not \
+a saved agent.
+
+## Forking the session into a colony (with session-knowledge capture)
+Two-step flow:
+  1. AUTHOR THE SKILL FIRST. Use write_file to create a skill folder \
+     (recommended location: `~/.hive/skills/{skill-name}/SKILL.md`) \
+     capturing what you learned during THIS session — API endpoints, \
+     auth flow, response shapes, gotchas, conventions, query patterns. \
+     The SKILL.md needs YAML frontmatter with `name` (matching the \
+     directory name) and `description` (1-1024 chars including trigger \
+     keywords), followed by a markdown body. Optional subdirs: \
+     scripts/, references/, assets/. Read your writing-hive-skills \
+     default skill for the full spec.
+  2. create_colony(colony_name, task, skill_path) — Validate the skill \
+     folder, install it under ~/.hive/skills/ if it's not already there, \
+     and fork this session into a new colony. NOTHING RUNS after this \
+     call: the task is baked into worker.json and the user starts the \
+     worker later from the new colony page. The task string still must \
+     be FULL and self-contained — when the user eventually runs it the \
+     worker has zero memory of your chat. The skill you wrote is \
+     installed under ~/.hive/skills/ so the worker discovers it on its \
+     first scan and starts informed instead of clueless. ALWAYS prefer \
+     create_colony over a raw fork when ending a session that uncovered \
+     reusable operational knowledge.
+
 ## Workflow summary
 1. Understand requirements → discover tools → design the layout
 2. Call save_agent_draft() to create visual draft → present to user
@@ -809,7 +855,7 @@ You are the agent. No worker — you execute directly.
 3. Execute using your tools: file I/O, shell commands, browser automation
 4. Report results, iterate if needed
 
-You have NO lifecycle tools (no start_worker, stop_worker, confirm_and_build, etc.).
+You have NO lifecycle tools (no run_agent_with_input, stop_worker, confirm_and_build, etc.).
 If the task requires building a dedicated agent, tell the user to start a \
 new session without independent mode.
 """

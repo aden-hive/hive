@@ -6,7 +6,14 @@
       "Read(//^    @pytest.mark.asyncio/{getline n; print NR\": \"n} /^    def test_/**)",
       "Bash(python3)",
       "Bash(grep -nE 'Tool\\\\\\(\\\\s*$|name=\"[a-z_]+\",' core/framework/tools/queen_lifecycle_tools.py)",
-      "Bash(awk -F'\"' '{print $2}')"
+      "Bash(awk -F'\"' '{print $2}')",
+      "Bash(grep -n \"create_colony\\\\|colony-spawn\\\\|colony_spawn\" /home/timothy/aden/hive/core/framework/agents/queen/nodes/__init__.py /home/timothy/aden/hive/core/framework/tools/*.py)",
+      "Bash(git stash:*)",
+      "Bash(python3 -c \"import sys,json; d=json.loads\\(sys.stdin.read\\(\\)\\); print\\('keys:', list\\(d.keys\\(\\)\\)[:10]\\)\")",
+      "Bash(python3 -c ':*)"
+    ],
+    "additionalDirectories": [
+      "/home/timothy/.hive/skills/writing-hive-skills"
     ]
   },
   "hooks": {

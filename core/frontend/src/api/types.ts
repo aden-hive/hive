@@ -310,6 +310,7 @@ export type EventTypeName =
   | "custom"
   | "escalation_requested"
   | "worker_colony_loaded"
+  | "colony_created"
   | "credentials_required"
   | "queen_phase_changed"
   | "subagent_report"

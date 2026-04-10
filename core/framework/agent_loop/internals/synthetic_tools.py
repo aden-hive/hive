@@ -15,6 +15,82 @@ from typing import Any
 from framework.llm.provider import Tool, ToolResult
 
 
+def sanitize_ask_user_inputs(
+    raw_question: Any,
+    raw_options: Any,
+) -> tuple[str, list[str] | None]:
+    """Self-heal a malformed ``ask_user`` tool call.
+
+    Some model families (notably when the system prompt teaches them
+    XML-ish scratchpad tags like ``<relationship>...</relationship>``)
+    carry that style into tool arguments and produce calls like::
+
+        ask_user({
+            "question": "What now?</question>\\n_OPTIONS: [\\"A\\", \\"B\\"]"
+        })
+
+    Symptoms:
+    - The chat UI renders ``</question>`` and ``_OPTIONS: [...]`` as
+      literal text in the question bubble.
+    - No buttons appear because the real ``options`` parameter is
+      empty.
+
+    This function:
+    - Strips leading/trailing whitespace.
+    - Removes a trailing ``</question>`` (with optional preceding
+      whitespace) from the question text.
+    - Detects an inline ``_OPTIONS:``, ``OPTIONS:``, or ``options:``
+      line followed by a JSON array, parses it, and returns the
+      recovered list as the second element.
+    - Removes the parsed line from the returned question text.
+
+    Returns ``(cleaned_question, recovered_options_or_None)``. The
+    caller should treat the recovered list as a fallback only when
+    the model did not also supply a real ``options`` array.
+    """
+    import json as _json
+    import re as _re
+
+    if raw_question is None:
+        return "", None
+    q = str(raw_question)
+
+    # Strip a stray </question> tag (case-insensitive, with optional
+    # preceding whitespace) anywhere in the string. This is the most
+    # common failure mode and never represents valid content.
+    q = _re.sub(r"\s*</\s*question\s*>\s*", "\n", q, flags=_re.IGNORECASE)
+
+    # Look for an inline options line. Match _OPTIONS, OPTIONS, options
+    # (with or without leading underscore), followed by ':' or '=', then
+    # a JSON array on the same line OR on the next line.
+    inline_options_re = _re.compile(
+        r"(?im)^\s*_?options\s*[:=]\s*(\[.*?\])\s*$",
+        _re.DOTALL,
+    )
+
+    recovered: list[str] | None = None
+    match = inline_options_re.search(q)
+    if match is not None:
+        try:
+            parsed = _json.loads(match.group(1))
+            if isinstance(parsed, list):
+                cleaned = [str(o).strip() for o in parsed if str(o).strip()]
+                if 1 <= len(cleaned) <= 8:
+                    recovered = cleaned
+        except (ValueError, TypeError):
+            pass
+        if recovered is not None:
+            # Remove the parsed line so it doesn't leak into the
+            # rendered question text.
+            q = inline_options_re.sub("", q, count=1)
+
+    # Strip any final whitespace / leftover blank lines from the
+    # question after removals.
+    q = _re.sub(r"\n{3,}", "\n\n", q).strip()
+
+    return q, recovered
+
+
 def build_ask_user_tool() -> Tool:
     """Build the synthetic ask_user tool for explicit user-input requests.
 
@@ -28,7 +104,20 @@ def build_ask_user_tool() -> Tool:
             "You MUST call this tool whenever you need the user's response. "
             "Always call it after greeting the user, asking a question, or "
             "requesting approval. Do NOT call it for status updates or "
-            "summaries that don't require a response. "
+            "summaries that don't require a response.\n\n"
+            "STRUCTURE RULES (CRITICAL):\n"
+            "- The 'question' field is PLAIN TEXT shown to the user. Do NOT "
+            "include XML tags, pseudo-tags like </question>, or option lists "
+            "in the question string. The UI does not parse them — they "
+            "render as raw text and look broken.\n"
+            "- The 'options' parameter is the ONLY way to render buttons. "
+            "If you want buttons, put them in the 'options' array, not in "
+            "the question string. Do NOT write 'OPTIONS: [...]', "
+            "'_options: [...]', or any inline list inside 'question'.\n"
+            "- The question text must read as a single clean prompt with "
+            "no markup. Example: 'What would you like to do?' — not "
+            "'What would you like to do?</question>'.\n\n"
+            "USAGE:\n"
             "Always include 2-3 predefined options. The UI automatically "
             "appends an 'Other' free-text input after your options, so NEVER "
             "include catch-all options like 'Custom idea', 'Something else', "
@@ -39,11 +128,14 @@ def build_ask_user_tool() -> Tool:
             "free-text input. "
             "The ONLY exception: omit options when the question demands a "
             "free-form answer the user must type out (e.g. 'Describe your "
-            "agent idea', 'Paste the error message'). "
+            "agent idea', 'Paste the error message').\n\n"
+            "CORRECT EXAMPLE:\n"
             '{"question": "What would you like to do?", "options": '
-            '["Build a new agent", "Modify existing agent", "Run tests"]} '
-            "Free-form example: "
-            '{"question": "Describe the agent you want to build."}'
+            '["Build a new agent", "Modify existing agent", "Run tests"]}\n\n'
+            "FREE-FORM EXAMPLE:\n"
+            '{"question": "Describe the agent you want to build."}\n\n'
+            "WRONG (do NOT do this — buttons will not render):\n"
+            '{"question": "What now?</question>\\n_OPTIONS: [\\"A\\", \\"B\\"]"}'
         ),
         parameters={
             "type": "object",
@@ -203,6 +295,94 @@ def build_escalate_tool() -> Tool:
             "required": ["reason"],
         },
     )
+
+
+def build_report_to_parent_tool() -> Tool:
+    """Build the synthetic ``report_to_parent`` tool.
+
+    Parallel workers (those spawned by the overseer via
+    ``run_parallel_workers``) call this to send a structured report back
+    to the overseer queen when they have finished their task. Calling
+    ``report_to_parent`` terminates the worker's loop cleanly -- do not
+    call other tools after it.
+
+    The overseer receives these as ``SUBAGENT_REPORT`` events and
+    aggregates them into a single summary for the user.
+    """
+    return Tool(
+        name="report_to_parent",
+        description=(
+            "Send a structured report back to the parent overseer and "
+            "terminate. Call this when you have finished your task "
+            "(success, partial, or failed) or cannot make further "
+            "progress. Your loop ends after this call -- do not call any "
+            "other tool afterwards. The overseer reads the summary + "
+            "data fields and aggregates them into a user-facing response."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": ["success", "partial", "failed"],
+                    "description": (
+                        "Overall outcome. 'success' = task complete. "
+                        "'partial' = some progress but incomplete. "
+                        "'failed' = could not make progress."
+                    ),
+                },
+                "summary": {
+                    "type": "string",
+                    "description": (
+                        "One-paragraph narrative for the overseer. What "
+                        "you did, what you found, and any notable issues."
+                    ),
+                },
+                "data": {
+                    "type": "object",
+                    "description": (
+                        "Optional structured payload (rows fetched, IDs "
+                        "processed, files written, etc.) that the "
+                        "overseer can merge into its final summary."
+                    ),
+                },
+            },
+            "required": ["status", "summary"],
+        },
+    )
+
+
+def handle_report_to_parent(tool_input: dict[str, Any]) -> ToolResult:
+    """Normalise + validate a ``report_to_parent`` tool call.
+
+    Returns a ``ToolResult`` with the acknowledgement text the LLM sees;
+    the side effects (record on Worker, emit SUBAGENT_REPORT, terminate
+    loop) are performed by ``AgentLoop`` after this helper returns.
+    """
+    status = str(tool_input.get("status", "success")).strip().lower()
+    if status not in ("success", "partial", "failed"):
+        status = "success"
+    summary = str(tool_input.get("summary", "")).strip()
+    if not summary:
+        summary = f"(worker returned {status} with no summary)"
+    data = tool_input.get("data") or {}
+    if not isinstance(data, dict):
+        data = {"value": data}
+    # Store the normalised payload back on the input dict so the caller
+    # can pick it up without re-parsing.
+    tool_input["_normalised"] = {
+        "status": status,
+        "summary": summary,
+        "data": data,
+    }
+    return ToolResult(
+        tool_use_id=tool_input.get("tool_use_id", ""),
+        content=(
+            f"Report delivered to overseer (status={status}). "
+            f"This worker will terminate now."
+        ),
+    )
+
 
 def handle_set_output(
     tool_input: dict[str, Any],

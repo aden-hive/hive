@@ -1,4 +1,5 @@
 import { memo, useState, useRef, useEffect, useMemo } from "react";
+import { Link } from "react-router-dom";
 import {
   Send,
   Square,
@@ -40,7 +41,8 @@ export interface ChatMessage {
     | "user"
     | "tool_status"
     | "worker_input_request"
-    | "run_divider";
+    | "run_divider"
+    | "colony_link";
   role?: "queen" | "worker";
   /** Which worker thread this message belongs to (worker agent name) */
   thread?: string;
@@ -234,6 +236,42 @@ const MessageBubble = memo(
           <span className="text-[11px] text-muted-foreground bg-muted/60 px-3 py-1.5 rounded-full">
             {msg.content}
           </span>
+        </div>
+      );
+    }
+
+    if (msg.type === "colony_link") {
+      // Rendered when the queen calls create_colony() and the backend
+      // emits a COLONY_CREATED event. Gives the user a clickable card
+      // that navigates to the new colony page.
+      let parsed: {
+        colony_name?: string;
+        is_new?: boolean;
+        skill_name?: string;
+        href?: string;
+      } = {};
+      try {
+        parsed = JSON.parse(msg.content);
+      } catch {
+        // ignore — fall through to a plain text render
+      }
+      const colonyName = parsed.colony_name || "";
+      const href = parsed.href || (colonyName ? `/colony/${colonyName}` : "");
+      const skillLabel = parsed.skill_name
+        ? ` · skill: ${parsed.skill_name}`
+        : "";
+      const isNewLabel = parsed.is_new === false ? " (updated)" : " (new)";
+      return (
+        <div className="flex justify-center py-2">
+          <Link
+            to={href}
+            className="inline-flex items-center gap-2 text-xs font-medium text-primary bg-primary/10 hover:bg-primary/20 px-4 py-2 rounded-full border border-primary/20 transition-colors"
+          >
+            <span>🏛️</span>
+            <span>
+              Colony <strong>{colonyName}</strong>{isNewLabel} ready{skillLabel} — open
+            </span>
+          </Link>
         </div>
       );
     }

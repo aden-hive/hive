@@ -981,76 +981,84 @@ def register_queen_lifecycle_tools(
         """Get current colony runtime from session (late-binding)."""
         return getattr(session, "colony_runtime", None)
 
-    # --- start_worker ----------------------------------------------------------
-
-    # How long to wait for credential validation + MCP resync before
-    # proceeding with trigger anyway.  These are pre-flight checks that
-    # should not block the queen indefinitely.
+    # ``start_worker`` was removed in the Phase 4 unification — its
+    # bare-bones spawn duplicated ``run_agent_with_input`` (which has
+    # credential preflight, concurrency guard, and phase tracking on
+    # top). The shared preflight timeout below is still used by
+    # ``run_agent_with_input``.
     _START_PREFLIGHT_TIMEOUT = 15  # seconds
-
-    async def start_worker(task: str) -> str:
-        """Spawn a colony worker clone with a task description.
-
-        The worker runs autonomously in the background.
-        Returns immediately with worker IDs.
-        """
-        runtime = _get_runtime()
-        if runtime is None:
-            return json.dumps({"error": "No colony running in this session."})
-
-        try:
-            runtime.resume_timers()
-
-            worker_ids = await runtime.spawn(
-                task=task,
-                count=1,
-                input_data={"user_request": task},
-            )
-            return json.dumps(
-                {
-                    "status": "started",
-                    "worker_ids": worker_ids,
-                    "task": task,
-                }
-            )
-        except Exception as e:
-            return json.dumps({"error": f"Failed to start worker: {e}"})
-
-    _start_tool = Tool(
-        name="start_worker",
-        description=(
-            "Spawn a colony worker clone with a task description. The worker runs "
-            "autonomously in the background. Returns worker IDs for tracking."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": "Description of the task for the worker to perform",
-                },
-            },
-            "required": ["task"],
-        },
-    )
-    registry.register("start_worker", _start_tool, lambda inputs: start_worker(**inputs))
-    tools_registered += 1
 
     # --- stop_worker -----------------------------------------------------------
 
     async def stop_worker(*, reason: str = "Stopped by queen") -> str:
-        """Stop all active workers in the colony."""
-        runtime = _get_runtime()
-        if runtime is None:
-            return json.dumps({"error": "No worker loaded in this session."})
+        """Stop all active workers in the session.
 
-        await runtime.stop_all_workers()
-        runtime.pause_timers()
+        Stops workers on BOTH the unified ColonyRuntime (``session.colony``
+        — where ``run_agent_with_input`` and ``run_parallel_workers``
+        spawn) AND the legacy ``session.colony_runtime`` (loaded
+        AgentHost — still tracks timers and any legacy triggers). A
+        previous version only stopped the legacy runtime, which meant
+        workers spawned via the new path kept running silently after
+        the queen called this tool.
+        """
+        stopped_unified = 0
+        stopped_legacy = 0
+        errors: list[str] = []
+
+        # 1. Stop everything on the unified ColonyRuntime. This is
+        # where run_agent_with_input and run_parallel_workers live.
+        colony = getattr(session, "colony", None)
+        if colony is not None:
+            try:
+                # Count live workers BEFORE stopping so we can report
+                # accurately — stop_all_workers clears the dict.
+                stopped_unified = sum(
+                    1 for w in colony.list_workers() if w.status.value in ("pending", "running")
+                )
+                await colony.stop_all_workers()
+            except Exception as e:
+                errors.append(f"unified: {e}")
+                logger.warning(
+                    "stop_worker: failed to stop unified colony workers",
+                    exc_info=True,
+                )
+
+        # 2. Stop the legacy runtime too (timers, old-path workers).
+        legacy = _get_runtime()
+        if legacy is not None:
+            try:
+                legacy_workers = legacy.list_workers()
+                stopped_legacy = len(legacy_workers) if isinstance(legacy_workers, list) else 0
+                await legacy.stop_all_workers()
+                legacy.pause_timers()
+            except Exception as e:
+                errors.append(f"legacy: {e}")
+                logger.warning(
+                    "stop_worker: failed to stop legacy runtime workers",
+                    exc_info=True,
+                )
+
+        if colony is None and legacy is None:
+            return json.dumps({"error": "No runtime on this session."})
+
+        total_stopped = stopped_unified + stopped_legacy
+        logger.info(
+            "stop_worker: stopped %d workers (unified=%d, legacy=%d). reason=%s",
+            total_stopped,
+            stopped_unified,
+            stopped_legacy,
+            reason,
+        )
 
         return json.dumps(
             {
                 "status": "stopped",
-                "timers_paused": True,
+                "workers_stopped": total_stopped,
+                "unified_stopped": stopped_unified,
+                "legacy_stopped": stopped_legacy,
+                "timers_paused": legacy is not None,
+                "reason": reason,
+                "errors": errors if errors else None,
             }
         )
 
@@ -1063,6 +1071,531 @@ def register_queen_lifecycle_tools(
         parameters={"type": "object", "properties": {}},
     )
     registry.register("stop_worker", _stop_tool, lambda inputs: stop_worker())
+    tools_registered += 1
+
+    # --- run_parallel_workers --------------------------------------------------
+    #
+    # Phase 4 fan-out tool. Reads the unified ColonyRuntime from
+    # ``session.colony`` (built by SessionManager._start_unified_colony_runtime),
+    # spawns one Worker per task spec via spawn_batch, then blocks on
+    # wait_for_worker_reports until every worker has reported (or the
+    # timeout fires and stragglers are force-stopped). Returns a JSON
+    # array of structured reports {worker_id, status, summary, data,
+    # error, duration_seconds, tokens_used} that the queen reads on its
+    # next turn and aggregates into a user-facing summary.
+    #
+    # Worker SUBAGENT_REPORT events flow through session.event_bus, so
+    # the existing SSE pipeline surfaces them automatically. Workers'
+    # individual LLM deltas / tool calls also publish to the same bus
+    # under stream_id="worker:{worker_id}"; SSE filtering for those is
+    # Phase 5 — for now they reach the queen DM channel.
+
+    _RUN_PARALLEL_DEFAULT_TIMEOUT = 600.0  # 10 minutes per batch
+
+    def _get_unified_colony():
+        """Read the unified ColonyRuntime (Phase 2 wiring) from session."""
+        return getattr(session, "colony", None)
+
+    async def run_parallel_workers(
+        *,
+        tasks: list[dict],
+        timeout: float | None = None,
+    ) -> str:
+        """Spawn N parallel workers and wait for all reports.
+
+        Each task is a dict ``{"task": str, "data": dict | None}``.
+        Returns a JSON array of structured reports in input order.
+        """
+        colony = _get_unified_colony()
+        if colony is None:
+            return json.dumps(
+                {
+                    "error": (
+                        "No unified ColonyRuntime on this session. "
+                        "Phase 2 wiring expects session.colony to be set "
+                        "by SessionManager._start_unified_colony_runtime."
+                    )
+                }
+            )
+
+        if not isinstance(tasks, list) or not tasks:
+            return json.dumps(
+                {"error": "tasks must be a non-empty list of {task, data?} dicts"}
+            )
+
+        # Normalise: each entry must have a non-empty "task" string.
+        normalised: list[dict] = []
+        for i, spec in enumerate(tasks):
+            if not isinstance(spec, dict):
+                return json.dumps(
+                    {"error": f"tasks[{i}] is not a dict: {type(spec).__name__}"}
+                )
+            task_text = str(spec.get("task", "")).strip()
+            if not task_text:
+                return json.dumps({"error": f"tasks[{i}].task is empty"})
+            normalised.append(
+                {
+                    "task": task_text,
+                    "data": spec.get("data") if isinstance(spec.get("data"), dict) else None,
+                }
+            )
+
+        try:
+            worker_ids = await colony.spawn_batch(normalised)
+        except Exception as e:
+            return json.dumps({"error": f"spawn_batch failed: {e}"})
+
+        try:
+            reports = await colony.wait_for_worker_reports(
+                worker_ids,
+                timeout=timeout if timeout is not None else _RUN_PARALLEL_DEFAULT_TIMEOUT,
+            )
+        except Exception as e:
+            return json.dumps(
+                {
+                    "error": f"wait_for_worker_reports failed: {e}",
+                    "worker_ids": worker_ids,
+                }
+            )
+
+        return json.dumps(
+            {
+                "worker_count": len(reports),
+                "reports": reports,
+            }
+        )
+
+    _run_parallel_tool = Tool(
+        name="run_parallel_workers",
+        description=(
+            "Fan out a batch of tasks to parallel workers and wait for all "
+            "reports. Use this when you can split the work into independent "
+            "subtasks that can run concurrently (e.g. fetching N batches "
+            "from an API, processing M files, comparing K candidates).\n\n"
+            "CRITICAL: each worker is a FRESH process with NO memory of "
+            "your conversation. Every task string must be FULLY "
+            "self-contained — include the API endpoint, the exact "
+            "parameters, the expected output format, and any "
+            "constraints. Workers cannot ask the user follow-up "
+            "questions and cannot see your chat history. Write each "
+            "task as if handing it to a stranger.\n\n"
+            "Each worker runs in isolation with its own AgentLoop and "
+            "reports back via the report_to_parent tool. The call "
+            "blocks until every worker has reported or the timeout "
+            "fires. Returns a JSON object with a 'reports' array; each "
+            "report has worker_id, status "
+            "(success|partial|failed|timeout|stopped), summary, data, "
+            "error, duration_seconds, and tokens_used. Read the "
+            "summaries on your next turn and synthesize a user-facing "
+            "result. Default timeout is 600 seconds (10 minutes)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "description": (
+                        "List of task specs to fan out. Each spec is "
+                        '{"task": "<description>", "data": {<optional structured input>}}. '
+                        "The 'task' string becomes the worker's initial "
+                        "user message. 'data' is merged into the worker's "
+                        "AgentContext.input_data so structured fields are "
+                        "available to the worker's first turn."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "task": {
+                                "type": "string",
+                                "description": "Task description for the worker.",
+                            },
+                            "data": {
+                                "type": "object",
+                                "description": "Optional structured input fields.",
+                            },
+                        },
+                        "required": ["task"],
+                    },
+                    "minItems": 1,
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": (
+                        "Per-batch timeout in seconds. Workers still "
+                        "running when the timeout fires are force-stopped "
+                        "and reported as status='timeout'. Default 600."
+                    ),
+                },
+            },
+            "required": ["tasks"],
+        },
+    )
+    registry.register(
+        "run_parallel_workers",
+        _run_parallel_tool,
+        lambda inputs: run_parallel_workers(**inputs),
+    )
+    tools_registered += 1
+
+    # --- create_colony ---------------------------------------------------------
+    #
+    # Forks the current queen session into a colony. Requires the queen
+    # to have ALREADY AUTHORED a skill folder capturing what she learned
+    # during this session (using her write_file / edit_file tools), and
+    # pass the folder path to this tool. The tool validates the skill
+    # folder (SKILL.md exists, frontmatter has the required ``name`` +
+    # ``description`` fields, directory name matches frontmatter name),
+    # then forks. If the skill lives outside ``~/.hive/skills/`` the
+    # tool copies it in so the new colony's worker will discover it on
+    # its first skill scan.
+    #
+    # This is the codified version of the user's instruction:
+    #
+    #   "When the queen agent needs to create a colony, it needs to
+    #    write down whatever it just learned from the current session
+    #    as an agent skill and put it in the ~/.hive/skills folder."
+    #
+    # Two-step flow for the queen LLM:
+    #
+    #   1. Author the skill with write_file (or a sequence of writes
+    #      for scripts/references/assets subdirs) — she already knows
+    #      the format via the writing-hive-skills default skill.
+    #   2. Call create_colony(colony_name, task, skill_path) pointing
+    #      at the folder she just wrote.
+
+    import re as _re
+    import shutil as _shutil
+
+    _COLONY_NAME_RE = _re.compile(r"^[a-z0-9_]+$")
+    _SKILL_NAME_RE = _re.compile(r"^[a-z0-9-]+$")
+
+    def _validate_and_install_skill(skill_path: str) -> tuple[Path | None, str | None]:
+        """Validate an authored skill folder and ensure it lives under ~/.hive/skills/.
+
+        Returns ``(installed_path, error)``. On success ``error`` is
+        ``None`` and ``installed_path`` is the final location under
+        ``~/.hive/skills/{name}/``. On failure ``installed_path`` is
+        ``None`` and ``error`` is a human-readable reason suitable for
+        returning to the queen as a JSON error payload.
+        """
+        if not skill_path or not isinstance(skill_path, str):
+            return None, "skill_path must be a non-empty string"
+
+        src = Path(skill_path).expanduser().resolve()
+        if not src.exists():
+            return None, f"skill_path does not exist: {src}"
+        if not src.is_dir():
+            return None, f"skill_path must be a directory, got file: {src}"
+
+        skill_md = src / "SKILL.md"
+        if not skill_md.is_file():
+            return None, f"skill_path has no SKILL.md at {skill_md}"
+
+        # Parse the frontmatter to pull out the name and verify
+        # description exists. We don't need a full YAML parser — the
+        # writing-hive-skills protocol is rigid enough that a line-by-line
+        # scan of the first frontmatter block suffices for validation.
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except OSError as e:
+            return None, f"failed to read SKILL.md: {e}"
+
+        if not content.startswith("---"):
+            return None, "SKILL.md missing opening '---' frontmatter marker"
+        after_open = content.split("---", 2)
+        if len(after_open) < 3:
+            return None, "SKILL.md missing closing '---' frontmatter marker"
+        frontmatter_text = after_open[1]
+
+        fm_name: str | None = None
+        fm_description: str | None = None
+        for raw_line in frontmatter_text.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("name:"):
+                fm_name = line.split(":", 1)[1].strip().strip('"').strip("'")
+            elif line.startswith("description:"):
+                fm_description = line.split(":", 1)[1].strip().strip('"').strip("'")
+
+        if not fm_name:
+            return None, "SKILL.md frontmatter missing 'name' field"
+        if not fm_description:
+            return None, "SKILL.md frontmatter missing 'description' field"
+        if not (1 <= len(fm_description) <= 1024):
+            return None, "SKILL.md 'description' must be 1–1024 chars"
+        if not _SKILL_NAME_RE.match(fm_name):
+            return None, (
+                f"SKILL.md 'name' field '{fm_name}' must match [a-z0-9-] "
+                "pattern"
+            )
+        if fm_name.startswith("-") or fm_name.endswith("-") or "--" in fm_name:
+            return None, (
+                f"SKILL.md 'name' '{fm_name}' has leading/trailing/"
+                "consecutive hyphens"
+            )
+        if len(fm_name) > 64:
+            return None, f"SKILL.md 'name' '{fm_name}' exceeds 64 chars"
+
+        # The directory basename should match the frontmatter name —
+        # this is the writing-hive-skills convention. We ENFORCE it
+        # because the skill loader uses dir names as identity.
+        if src.name != fm_name:
+            return None, (
+                f"skill directory name '{src.name}' does not match "
+                f"SKILL.md frontmatter name '{fm_name}'. Rename the "
+                "folder or fix the frontmatter."
+            )
+
+        # Install into ~/.hive/skills/{name}/ if not already there.
+        target_root = Path.home() / ".hive" / "skills"
+        target = target_root / fm_name
+        try:
+            target_root.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            return None, f"failed to create skills root: {e}"
+
+        try:
+            if src.resolve() == target.resolve():
+                # Already in the right place — nothing to do.
+                return target, None
+        except OSError:
+            pass
+
+        try:
+            if target.exists():
+                # Overwrite existing — the queen is explicitly creating
+                # a new colony for this version, so her authored skill
+                # wins over any prior version. copytree with
+                # dirs_exist_ok handles subdirs (scripts/, references/,
+                # assets/) but does NOT delete files removed in the
+                # new version. For a clean overwrite we rmtree first.
+                _shutil.rmtree(target)
+            _shutil.copytree(src, target)
+        except OSError as e:
+            return None, f"failed to install skill into {target}: {e}"
+
+        return target, None
+
+    async def create_colony(
+        *,
+        colony_name: str,
+        task: str,
+        skill_path: str,
+    ) -> str:
+        """Create a colony after installing a pre-authored skill folder.
+
+        File-system only: copies the queen session into a new colony
+        directory and writes ``worker.json`` with the task baked in.
+        NOTHING RUNS after fork. The user navigates to the colony when
+        they're ready to start the worker — at that point the worker
+        reads the task from ``worker.json`` and the skill from
+        ``~/.hive/skills/`` and starts informed.
+        """
+        if session is None:
+            return json.dumps({"error": "No session bound to this tool registry."})
+
+        cn = (colony_name or "").strip()
+        if not _COLONY_NAME_RE.match(cn):
+            return json.dumps(
+                {
+                    "error": (
+                        "colony_name must be lowercase alphanumeric "
+                        "with underscores (e.g. 'honeycomb_research')."
+                    )
+                }
+            )
+
+        installed_skill, skill_err = _validate_and_install_skill(skill_path)
+        if skill_err is not None:
+            return json.dumps(
+                {
+                    "error": skill_err,
+                    "hint": (
+                        "Author the skill folder first using write_file "
+                        "(and edit_file for follow-ups). The folder must "
+                        "contain a SKILL.md with YAML frontmatter "
+                        "{name, description} — see your "
+                        "writing-hive-skills default skill for the "
+                        "format. Then call create_colony again with "
+                        "skill_path pointing at that folder."
+                    ),
+                }
+            )
+
+        logger.info(
+            "create_colony: installed skill from %s → %s",
+            skill_path,
+            installed_skill,
+        )
+
+        # Fork the queen session into the colony directory. The fork
+        # copies conversations + writes worker.json + metadata.json.
+        # NO worker runs after this call. The new colony's worker
+        # inherits ~/.hive/skills/ on first run (whenever the user
+        # actually starts it), so the freshly installed skill is
+        # discoverable then.
+        try:
+            from framework.server.routes_execution import fork_session_into_colony
+        except Exception as e:
+            return json.dumps(
+                {
+                    "error": f"fork_session_into_colony import failed: {e}",
+                    "skill_installed": str(installed_skill),
+                }
+            )
+
+        try:
+            fork_result = await fork_session_into_colony(
+                session=session,
+                colony_name=cn,
+                task=(task or "").strip(),
+            )
+        except Exception as e:
+            logger.exception("create_colony: fork failed after installing skill")
+            return json.dumps(
+                {
+                    "error": f"colony fork failed: {e}",
+                    "skill_installed": str(installed_skill),
+                    "hint": (
+                        "The skill was installed but the fork failed. "
+                        "You can retry create_colony — re-installing "
+                        "the skill is idempotent."
+                    ),
+                }
+            )
+
+        # Emit COLONY_CREATED so the frontend can render a system
+        # message in the queen DM with a link to the new colony.
+        # Without this the queen's text response is the only signal
+        # the user gets, and there's no clickable navigation.
+        bus = getattr(session, "event_bus", None)
+        if bus is not None:
+            try:
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.COLONY_CREATED,
+                        stream_id="queen",
+                        data={
+                            "colony_name": fork_result.get("colony_name", cn),
+                            "colony_path": fork_result.get("colony_path"),
+                            "queen_session_id": fork_result.get("queen_session_id"),
+                            "is_new": fork_result.get("is_new", True),
+                            "skill_installed": str(installed_skill),
+                            "skill_name": installed_skill.name if installed_skill else None,
+                            "task": (task or "").strip(),
+                        },
+                    )
+                )
+            except Exception:
+                logger.warning(
+                    "create_colony: failed to publish COLONY_CREATED event",
+                    exc_info=True,
+                )
+
+        return json.dumps(
+            {
+                "status": "created",
+                "colony_name": fork_result.get("colony_name", cn),
+                "colony_path": fork_result.get("colony_path"),
+                "queen_session_id": fork_result.get("queen_session_id"),
+                "is_new": fork_result.get("is_new", True),
+                "skill_installed": str(installed_skill),
+                "skill_name": installed_skill.name if installed_skill else None,
+            }
+        )
+
+    _create_colony_tool = Tool(
+        name="create_colony",
+        description=(
+            "Fork this session into a colony — but FIRST author a "
+            "Hive Skill folder capturing what you learned during this "
+            "conversation, and pass its path to this tool. The tool "
+            "validates the skill folder (SKILL.md present, frontmatter "
+            "name+description valid, directory name matches frontmatter "
+            "name), installs it under ~/.hive/skills/{name}/ if it's "
+            "not already there, and then forks the session.\n\n"
+            "NOTHING RUNS AFTER FORK. This tool is file-system only: "
+            "it copies the queen session into a new colony directory "
+            "and writes worker.json with the task baked in. No worker "
+            "is started. The user navigates to the new colony when "
+            "they're ready to begin actual work — at that point the "
+            "worker reads the task from worker.json and the skill you "
+            "wrote here, and starts informed instead of clueless.\n\n"
+            "TWO-STEP FLOW:\n\n"
+            "  1. Use write_file (plus edit_file / list_directory as "
+            "     needed) to create a skill folder. The folder must "
+            "     contain a SKILL.md with YAML frontmatter {name, "
+            "     description} and a markdown body. Optional subdirs: "
+            "     scripts/, references/, assets/. See your "
+            "     writing-hive-skills default skill for the spec. We "
+            "     recommend authoring it directly at "
+            "     ~/.hive/skills/{skill-name}/SKILL.md so no copy is "
+            "     needed.\n"
+            "  2. Call create_colony(colony_name, task, skill_path) "
+            "     pointing at the folder you just wrote.\n\n"
+            "WHY THIS EXISTS: a fresh worker has zero memory of your "
+            "chat with the user. If you spent the session figuring out "
+            "an API auth flow, pagination, data shapes, and gotchas — "
+            "that knowledge must live in a skill, not in your private "
+            "context, or the worker will repeat your discovery work "
+            "from scratch.\n\n"
+            "WHAT TO PUT IN THE SKILL BODY: the operational protocol "
+            "the next worker needs to do this work. Include API "
+            "endpoints with example requests, the exact auth flow, "
+            "response shapes you observed, gotchas you hit (rate "
+            "limits, pagination quirks, edge cases), conventions you "
+            "settled on, and pre-baked queries/commands. Write it as "
+            "if onboarding a new engineer who has never seen this "
+            "system. Realistic target: 300–2000 chars of body."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "colony_name": {
+                    "type": "string",
+                    "description": (
+                        "Lowercase alphanumeric+underscore name for "
+                        "the new colony (e.g. 'honeycomb_research')."
+                    ),
+                },
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "FULL self-contained task description, baked "
+                        "into worker.json for the colony's first run. "
+                        "Nothing executes when create_colony returns — "
+                        "the task is stored, not run. The user starts "
+                        "the worker later from the new colony page. At "
+                        "that point the worker has zero memory of your "
+                        "chat, so this task string must contain "
+                        "everything: every requirement, constraint, "
+                        "and detail. Write it as if handing the work "
+                        "to a stranger who has never seen the user's "
+                        "request."
+                    ),
+                },
+                "skill_path": {
+                    "type": "string",
+                    "description": (
+                        "Path to a pre-authored skill folder containing "
+                        "SKILL.md. May be absolute or ~-expanded. The "
+                        "directory basename MUST match the SKILL.md "
+                        "frontmatter 'name' field. If the path is "
+                        "outside ~/.hive/skills/ the folder is copied "
+                        "in. Example: '~/.hive/skills/honeycomb-api-"
+                        "protocol'."
+                    ),
+                },
+            },
+            "required": ["colony_name", "task", "skill_path"],
+        },
+    )
+    registry.register(
+        "create_colony",
+        _create_colony_tool,
+        lambda inputs: create_colony(**inputs),
+    )
     tools_registered += 1
 
     # --- switch_to_reviewing ----------------------------------------------------
@@ -3241,33 +3774,62 @@ def register_queen_lifecycle_tools(
     async def run_agent_with_input(task: str) -> str:
         """Run the loaded worker agent with the given task input.
 
-        Performs preflight checks (credentials, MCP resync), triggers the
-        worker's default entry point, and switches to running phase.
+        Phase 4 unified path: spawns the loaded worker through
+        ``session.colony.spawn(...)`` (a real ColonyRuntime) instead of
+        the deprecated ``AgentHost.trigger`` → ``Orchestrator`` flow.
+        The new path passes ``input_data={"user_request": task}``
+        straight into ``AgentLoop._build_initial_message`` which
+        renders ALL keys to the worker's first user message — no
+        buffer filter, no dropped task string, no orchestrator
+        graph-execution machinery.
+
+        We still read the legacy ``session.colony_runtime`` (the
+        AgentHost loaded by ``load_built_agent``) to pull the worker's
+        tool list, tool executor, and entry-node system prompt — those
+        are the loaded honeycomb / custom worker's actual identity and
+        we want the spawned worker to BE that, not the queen's generic
+        colony spec.
         """
-        runtime = _get_runtime()
-        if runtime is None:
+        legacy = _get_runtime()  # the loaded AgentHost from load_built_agent
+        if legacy is None:
             return json.dumps({"error": "No worker loaded in this session."})
 
-        # Guard: refuse to start while an execution is already running.
-        # Calling again would cancel the active one via the
-        # "Restarted with new execution" path in ExecutionStream.execute(),
-        # which is almost never what the queen intends.
-        for colony_id in runtime.list_workers():
-            reg = runtime.get_worker_registration(colony_id)
-            if reg is None:
-                continue
-            for _ep_id, stream in reg.streams.items():
-                if stream.active_execution_ids:
-                    return json.dumps(
-                        {
-                            "error": "Worker is already running.",
-                            "active_execution_ids": list(stream.active_execution_ids),
-                            "hint": "Wait for the worker to finish (WORKER_TERMINAL event) or call stop_agent() before starting a new run.",
-                        }
+        colony = getattr(session, "colony", None)
+        if colony is None:
+            return json.dumps(
+                {
+                    "error": (
+                        "Session has no unified ColonyRuntime — "
+                        "_start_unified_colony_runtime did not run. "
+                        "Cannot spawn worker."
                     )
+                }
+            )
+
+        # Diagnostic: log the exact task arg the queen passed so we can
+        # spot generic / context-free task strings before they reach
+        # the worker. The worker has no chat context, so a vague task
+        # is the #1 cause of useless worker runs.
+        logger.info(
+            "run_agent_with_input: queen passing task to worker (len=%d): %r",
+            len(task),
+            task[:500] if isinstance(task, str) else task,
+        )
+        if isinstance(task, str) and len(task) < 60:
+            logger.warning(
+                "run_agent_with_input: SHORT TASK STRING (%d chars). "
+                "The worker has zero context from the queen's chat — "
+                "tasks shorter than ~60 chars usually fail because "
+                "they lack the specific instructions the worker needs. "
+                "Task: %r",
+                len(task),
+                task,
+            )
 
         try:
             # Pre-flight: validate credentials and resync MCP servers.
+            # Still uses the legacy AgentHost handles because that's
+            # where credentials live; the actual run is via colony.
             loop = asyncio.get_running_loop()
 
             async def _preflight():
@@ -3276,7 +3838,7 @@ def register_queen_lifecycle_tools(
                     await loop.run_in_executor(
                         None,
                         lambda: validate_credentials(
-                            runtime.graph.nodes,
+                            legacy.graph.nodes,
                             interactive=False,
                             skip=False,
                         ),
@@ -3307,20 +3869,68 @@ def register_queen_lifecycle_tools(
             except CredentialError:
                 raise  # handled below
 
-            # Resume timers in case they were paused by a previous stop
-            runtime.resume_timers()
+            # Build a per-spawn AgentSpec that mirrors the loaded
+            # worker's entry-node identity. This is what makes the
+            # spawned ColonyRuntime worker run the loaded honeycomb /
+            # custom worker's code instead of the queen's generic
+            # colony default.
+            from framework.agent_loop.types import AgentSpec
 
-            # Get session state from any prior execution for memory continuity
-            session_state = runtime._get_primary_session_state("default") or {}
+            graph = getattr(legacy, "graph", None)
+            entry_node = None
+            if graph is not None and hasattr(graph, "get_node"):
+                try:
+                    entry_node = graph.get_node(graph.entry_node)
+                except Exception:
+                    entry_node = None
 
-            if session_id:
-                session_state["resume_session_id"] = session_id
+            worker_system_prompt = (
+                getattr(entry_node, "system_prompt", None)
+                if entry_node is not None
+                else None
+            ) or ""
 
-            exec_id = await runtime.trigger(
-                entry_point_id="default",
-                input_data={"user_request": task},
-                session_state=session_state,
+            worker_tool_names = (
+                list(getattr(entry_node, "tools", []) or [])
+                if entry_node is not None
+                else []
             )
+
+            spawn_spec = AgentSpec(
+                id=f"loaded_worker:{getattr(graph, 'id', 'unknown')}",
+                name=getattr(graph, "id", "loaded_worker"),
+                description=(
+                    "Loaded worker agent spawned via run_agent_with_input "
+                    "through the unified ColonyRuntime path."
+                ),
+                system_prompt=worker_system_prompt,
+                tools=worker_tool_names,
+                tool_access_policy="all",
+            )
+
+            # Pull the live tool objects + executor straight from the
+            # loaded AgentHost so the spawned worker uses its actual
+            # MCP-loaded tools (browser, hubspot, honeycomb, etc.).
+            spawn_tools = list(getattr(legacy, "_tools", []) or [])
+            spawn_tool_executor = getattr(legacy, "_tool_executor", None)
+
+            worker_ids = await colony.spawn(
+                task=task,
+                count=1,
+                input_data={"user_request": task},
+                agent_spec=spawn_spec,
+                tools=spawn_tools,
+                tool_executor=spawn_tool_executor,
+                # Use the legacy single-worker stream tag so events flow
+                # through the SSE filter into the queen DM chat. The
+                # default "worker:{uuid}" tag is reserved for parallel
+                # fan-out via run_parallel_workers and is filtered out
+                # of the queen DM by routes_events.py to keep the chat
+                # clean. The loaded primary worker is the user's
+                # main visible workstream and must NOT be filtered.
+                stream_id="worker",
+            )
+            new_worker_id = worker_ids[0] if worker_ids else ""
 
             # Switch to running phase
             if phase_state is not None:
@@ -3331,8 +3941,10 @@ def register_queen_lifecycle_tools(
                 {
                     "status": "started",
                     "phase": "running",
-                    "execution_id": exec_id,
+                    "worker_id": new_worker_id,
                     "task": task,
+                    "tool_count": len(spawn_tools),
+                    "system_prompt_chars": len(worker_system_prompt),
                 }
             )
         except CredentialError as e:
@@ -3350,21 +3962,44 @@ def register_queen_lifecycle_tools(
                 )
             return json.dumps(error_payload)
         except Exception as e:
+            logger.exception("run_agent_with_input: spawn failed")
             return json.dumps({"error": f"Failed to start worker: {e}"})
 
     _run_input_tool = Tool(
         name="run_agent_with_input",
         description=(
-            "Run the loaded worker agent with the given task. Validates credentials, "
-            "triggers the worker's default entry point, and switches to running phase. "
-            "Use this after loading an agent (staging phase) to start execution."
+            "Run the loaded worker agent with the given task.\n\n"
+            "CRITICAL: the worker is a FRESH process. It has NO memory of "
+            "your conversation with the user, NO knowledge of what was "
+            "discussed, and NO access to your context. It only sees the "
+            "single 'task' string you pass here. If the user asked you "
+            "to fetch '125 tickers and build a market report with "
+            "gainers, losers, and category breakdowns', that ENTIRE "
+            "specification must be in the task arg verbatim — not "
+            "'continue our work', not 'do what we discussed', not "
+            "'finish the analysis'. Bad task: 'Continue the work from "
+            "the queen's current session'. Good task: 'Fetch all 125 "
+            "tickers from the honeycomb API (paginate past the default "
+            "50 page limit), then build a full market report including: "
+            "(1) top 10 gainers by % change, (2) top 10 losers, (3) top "
+            "10 by volume, (4) breakdown by category, (5) any unusual "
+            "patterns. Return as a structured summary.' Validates "
+            "credentials and switches to running phase. Use this after "
+            "loading an agent (staging phase) to start execution."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "The task or input for the worker agent to execute",
+                    "description": (
+                        "FULL self-contained task specification for the "
+                        "worker. Must include every requirement, "
+                        "constraint, and detail the worker needs — the "
+                        "worker has zero context from your conversation. "
+                        "Write it as if you're handing the task to a "
+                        "stranger who has never seen the user's request."
+                    ),
                 },
             },
             "required": ["task"],

@@ -36,6 +36,7 @@ DEFAULT_EVENT_TYPES = [
     EventType.CONTEXT_COMPACTED,
     EventType.CONTEXT_USAGE_UPDATED,
     EventType.WORKER_COLONY_LOADED,
+    EventType.COLONY_CREATED,
     EventType.CREDENTIALS_REQUIRED,
     EventType.SUBAGENT_REPORT,
     EventType.QUEEN_PHASE_CHANGED,
@@ -49,6 +50,27 @@ DEFAULT_EVENT_TYPES = [
 
 # Keepalive interval in seconds
 KEEPALIVE_INTERVAL = 15.0
+
+# Phase 5 SSE filter: parallel-worker streams (stream_id="worker:{uuid}")
+# publish high-frequency LLM deltas / tool calls that would flood the
+# user's queen DM chat. We let only this small allowlist of worker
+# events through to the queen-chat SSE so the frontend can render
+# fan-out lifecycle and structured fan-in reports without seeing the
+# raw worker chatter. Per-worker SSE panels (Phase 5b) bypass this
+# filter via a dedicated /workers/{worker_id}/events route.
+_WORKER_EVENT_ALLOWLIST = {
+    EventType.SUBAGENT_REPORT.value,
+    EventType.EXECUTION_COMPLETED.value,
+    EventType.EXECUTION_FAILED.value,
+}
+
+
+def _is_worker_noise(evt_dict: dict) -> bool:
+    """True if the event is a parallel-worker event we should drop."""
+    stream_id = evt_dict.get("stream_id") or ""
+    if not stream_id.startswith("worker:"):
+        return False
+    return evt_dict.get("type") not in _WORKER_EVENT_ALLOWLIST
 
 
 def _parse_event_types(query_param: str | None) -> list[EventType]:
@@ -110,6 +132,8 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
             return
 
         evt_dict = event.to_dict()
+        if _is_worker_noise(evt_dict):
+            return
         if evt_dict.get("type") in _CRITICAL_EVENTS:
             try:
                 queue.put_nowait(evt_dict)
@@ -155,8 +179,11 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     replayed = 0
     for past_event in event_bus._event_history:
         if past_event.type.value in replay_types:
+            past_dict = past_event.to_dict()
+            if _is_worker_noise(past_dict):
+                continue
             try:
-                queue.put_nowait(past_event.to_dict())
+                queue.put_nowait(past_dict)
                 replayed += 1
             except asyncio.QueueFull:
                 break

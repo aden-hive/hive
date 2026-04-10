@@ -45,3 +45,19 @@ class SharedBufferManager:
 
     def get_global_state(self) -> dict[str, Any]:
         return self._global_state
+
+    def cleanup_execution(self, execution_id: str, stream_id: str = "") -> None:
+        """Drop the per-execution state bucket.
+
+        No-op when the key is absent. Called from
+        ``ExecutionManager._run_execution``'s finally block. Before this
+        stub existed, the call raised ``AttributeError`` on every
+        execution teardown because the SharedBufferManager stub had no
+        such method.
+        """
+        execution_key = f"{stream_id}:{execution_id}"
+        self._execution_states.pop(execution_key, None)
+
+    def get_recent_changes(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Compat stub — returns empty list. Shared buffer was removed."""
+        return []
