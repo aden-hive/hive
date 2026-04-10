@@ -98,7 +98,9 @@ class SessionManager:
     (blocking I/O) then started on the event loop.
     """
 
-    def __init__(self, model: str | None = None, credential_store=None, queen_tool_registry=None) -> None:
+    def __init__(
+        self, model: str | None = None, credential_store=None, queen_tool_registry=None
+    ) -> None:
         self._sessions: dict[str, Session] = {}
         self._loading: set[str] = set()
         self._model = model
@@ -266,7 +268,12 @@ class SessionManager:
             session.queen_name = queen_name
 
         # Start queen immediately (queen-only, no worker tools yet)
-        await self._start_queen(session, worker_identity=None, initial_prompt=initial_prompt, initial_phase=initial_phase)
+        await self._start_queen(
+            session,
+            worker_identity=None,
+            initial_prompt=initial_prompt,
+            initial_phase=initial_phase,
+        )
 
         logger.info(
             "Session '%s' created (queen-only, resume_from=%s)",
@@ -352,7 +359,10 @@ class SessionManager:
                 else None
             )
             await self._start_queen(
-                session, worker_identity=worker_identity, initial_prompt=initial_prompt, initial_phase=initial_phase
+                session,
+                worker_identity=worker_identity,
+                initial_prompt=initial_prompt,
+                initial_phase=initial_phase,
             )
 
         except Exception:
@@ -752,11 +762,11 @@ class SessionManager:
         # are persisted before the session is destroyed (fire-and-forget).
         if session.queen_dir is not None:
             try:
-                from framework.agents.queen.reflection_agent import run_shutdown_reflection
                 from framework.agents.queen.queen_memory_v2 import (
                     global_memory_dir,
                     queen_memory_dir,
                 )
+                from framework.agents.queen.reflection_agent import run_shutdown_reflection
 
                 global_mem_dir = global_memory_dir()
                 queen_mem_dir = queen_memory_dir(session.queen_name)

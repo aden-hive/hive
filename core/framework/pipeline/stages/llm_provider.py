@@ -75,16 +75,19 @@ class LlmProviderStage(PipelineStage):
 
         if api_keys and len(api_keys) > 1:
             self.llm = LiteLLMProvider(
-                model=model, api_keys=api_keys, api_base=api_base,
+                model=model,
+                api_keys=api_keys,
+                api_base=api_base,
             )
         elif api_key:
             extra = {}
             if api_key.startswith("sk-ant-oat"):
-                extra["extra_headers"] = {
-                    "authorization": f"Bearer {api_key}"
-                }
+                extra["extra_headers"] = {"authorization": f"Bearer {api_key}"}
             self.llm = LiteLLMProvider(
-                model=model, api_key=api_key, api_base=api_base, **extra,
+                model=model,
+                api_key=api_key,
+                api_base=api_base,
+                **extra,
             )
         else:
             self.llm = LiteLLMProvider(model=model, api_base=api_base)

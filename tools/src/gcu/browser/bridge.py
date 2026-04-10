@@ -513,7 +513,9 @@ class BeelineBridge:
             # Check if the element might be inside a Shadow DOM container
             shadow_hint = ""
             try:
-                shadow_check = await self.evaluate(tab_id, """
+                shadow_check = await self.evaluate(
+                    tab_id,
+                    """
                     (function() {
                         var hosts = document.querySelectorAll('[id]');
                         for (var h of hosts) {
@@ -521,7 +523,8 @@ class BeelineBridge:
                         }
                         return null;
                     })()
-                """)
+                """,
+                )
                 shadow_host = (shadow_check or {}).get("result")
                 if shadow_host:
                     shadow_hint = (
@@ -1083,7 +1086,7 @@ class BeelineBridge:
           var box = document.createElement('div');
           box.id = '__hive_hl';
           box.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;'
-            + 'left:{int(x)}px;top:{int(y)}px;width:{max(1,int(w))}px;height:{max(1,int(h))}px;'
+            + 'left:{int(x)}px;top:{int(y)}px;width:{max(1, int(w))}px;height:{max(1, int(h))}px;'
             + 'border:2px solid {border_rgb};background:{bg_rgba};'
             + 'border-radius:3px;transition:opacity 0.4s ease;opacity:1;'
             + 'box-shadow:0 0 8px {bg_rgba};';
@@ -1111,8 +1114,12 @@ class BeelineBridge:
             pass  # best-effort visual feedback
 
         _interaction_highlights[tab_id] = {
-            "x": x, "y": y, "w": w, "h": h,
-            "label": label, "kind": "rect",
+            "x": x,
+            "y": y,
+            "w": w,
+            "h": h,
+            "label": label,
+            "kind": "rect",
         }
 
     async def highlight_point(self, tab_id: int, x: float, y: float, label: str = "") -> None:
@@ -1128,7 +1135,7 @@ class BeelineBridge:
           var dot = document.createElement('div');
           dot.id = '__hive_hl';
           dot.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;'
-            + 'left:{int(x)-8}px;top:{int(y)-8}px;width:16px;height:16px;'
+            + 'left:{int(x) - 8}px;top:{int(y) - 8}px;width:16px;height:16px;'
             + 'border-radius:50%;background:rgba(239,68,68,0.7);'
             + 'box-shadow:0 0 0 4px rgba(239,68,68,0.25),0 0 12px rgba(239,68,68,0.4);'
             + 'transition:opacity 0.4s ease;opacity:1;';
@@ -1155,17 +1162,24 @@ class BeelineBridge:
             pass
 
         _interaction_highlights[tab_id] = {
-            "x": x, "y": y, "w": 0, "h": 0,
-            "label": label, "kind": "point",
+            "x": x,
+            "y": y,
+            "w": 0,
+            "h": 0,
+            "label": label,
+            "kind": "point",
         }
 
     async def clear_highlight(self, tab_id: int) -> None:
         """Remove the injected highlight from the page."""
         try:
-            await self.evaluate(tab_id, """
+            await self.evaluate(
+                tab_id,
+                """
                 var el = document.getElementById('__hive_hl');
                 if (el) el.remove();
-            """)
+            """,
+            )
         except Exception:
             pass
         _interaction_highlights.pop(tab_id, None)

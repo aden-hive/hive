@@ -239,9 +239,12 @@ def write_yaml(config: dict, output_path: Path) -> None:
 
     with open(output_path, "w") as f:
         yaml.dump(
-            config, f,
-            default_flow_style=False, sort_keys=False,
-            allow_unicode=True, width=120,
+            config,
+            f,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+            width=120,
         )
 
     logger.info("Wrote %s", output_path)

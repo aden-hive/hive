@@ -43,8 +43,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from framework.credentials.models import CredentialError
-from framework.loader.preload_validation import credential_errors_to_json, validate_credentials
 from framework.host.event_bus import AgentEvent, EventType
+from framework.loader.preload_validation import credential_errors_to_json, validate_credentials
 from framework.server.app import validate_agent_path
 from framework.tools.flowchart_utils import (
     FLOWCHART_TYPES,
@@ -55,9 +55,9 @@ from framework.tools.flowchart_utils import (
 )
 
 if TYPE_CHECKING:
-    from framework.loader.tool_registry import ToolRegistry
     from framework.host.agent_host import AgentHost
     from framework.host.event_bus import EventBus
+    from framework.loader.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,9 @@ class QueenPhaseState:
     that trigger phase transitions.
     """
 
-    phase: str = "building"  # "independent", "planning", "building", "staging", "running", or "editing"
+    phase: str = (
+        "building"  # "independent", "planning", "building", "staging", "running", or "editing"
+    )
     planning_tools: list = field(default_factory=list)  # list[Tool]
     building_tools: list = field(default_factory=list)  # list[Tool]
     staging_tools: list = field(default_factory=list)  # list[Tool]

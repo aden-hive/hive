@@ -854,6 +854,7 @@ def _validate_agent_tools_impl(agent_path: str) -> dict:
         try:
             with open(agent_json_file, encoding="utf-8") as f:
                 data = json.load(f)
+
             # Build lightweight node stubs with .tools and .id/.name
             class _NodeStub:
                 def __init__(self, d):
@@ -866,6 +867,7 @@ def _validate_agent_tools_impl(agent_path: str) -> dict:
                         self.tools = t
                     else:
                         self.tools = []
+
             nodes = [_NodeStub(n) for n in data.get("nodes", [])]
         except Exception as e:
             return {"error": f"Failed to parse agent.json: {e}"}
@@ -1542,8 +1544,7 @@ def validate_agent_package(agent_name: str) -> str:
                 steps["schema_validation"] = {
                     "passed": result["valid"],
                     "output": (
-                        f"{result['nodes']} nodes, {result['edges']} edges, "
-                        f"entry={result['entry']}"
+                        f"{result['nodes']} nodes, {result['edges']} edges, entry={result['entry']}"
                     ),
                 }
                 if result.get("errors"):
@@ -1569,8 +1570,12 @@ def validate_agent_package(agent_name: str) -> str:
             """).format(agent_name=agent_name)
             proc = subprocess.run(
                 ["uv", "run", "python", "-c", _contract_script],
-                capture_output=True, text=True, timeout=30,
-                env=env, cwd=PROJECT_ROOT, stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env,
+                cwd=PROJECT_ROOT,
+                stdin=subprocess.DEVNULL,
             )
             if proc.returncode == 0:
                 result = json.loads(proc.stdout.strip())

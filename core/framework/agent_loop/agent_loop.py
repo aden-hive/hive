@@ -84,7 +84,7 @@ from framework.agent_loop.internals.types import (
     JudgeVerdict,
     TriggerEvent,
 )
-from framework.orchestrator.node import NodeContext, NodeProtocol, NodeResult
+from framework.host.event_bus import EventBus
 from framework.llm.capabilities import supports_image_tool_results
 from framework.llm.provider import Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
@@ -93,7 +93,7 @@ from framework.llm.stream_events import (
     TextDeltaEvent,
     ToolCallEvent,
 )
-from framework.host.event_bus import EventBus
+from framework.orchestrator.node import NodeContext, NodeProtocol, NodeResult
 from framework.tracker.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
@@ -101,14 +101,16 @@ logger = logging.getLogger(__name__)
 # Tags whose content is internal reasoning and must be stripped from
 # the user-visible stream.  Covers <think> and the 5-pillar character
 # assessment tags.
-_INTERNAL_TAGS = frozenset({
-    "think",
-    "relationship",
-    "context",
-    "sentiment",
-    "physical_state",
-    "tone",
-})
+_INTERNAL_TAGS = frozenset(
+    {
+        "think",
+        "relationship",
+        "context",
+        "sentiment",
+        "physical_state",
+        "tone",
+    }
+)
 _STRIP_RE = re.compile(
     r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>"
     r".*?"

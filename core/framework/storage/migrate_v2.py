@@ -11,7 +11,6 @@ Safe to re-run (skips already-migrated items).
 
 from __future__ import annotations
 
-import json
 import logging
 import shutil
 from pathlib import Path
@@ -90,9 +89,7 @@ def _migrate_queen_sessions() -> None:
             session_dir.rename(target)
             migrated += 1
         except OSError:
-            logger.warning(
-                "migrate_v2: failed to move session %s", session_dir, exc_info=True
-            )
+            logger.warning("migrate_v2: failed to move session %s", session_dir, exc_info=True)
 
     if migrated:
         logger.info("migrate_v2: moved %d queen session(s) to new path", migrated)

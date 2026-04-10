@@ -204,9 +204,9 @@ class AdenCachedStorage(CredentialStorage):
         # BYOK credentials like anthropic, brave_search are local-only.
         # Also check the _aden_managed flag on the credential itself.
         is_aden_managed = (
-            credential_id in self._provider_index or 
-            any(credential_id in ids for ids in self._provider_index.values()) or
-            (local_cred is not None and local_cred.keys.get("_aden_managed") is not None)
+            credential_id in self._provider_index
+            or any(credential_id in ids for ids in self._provider_index.values())
+            or (local_cred is not None and local_cred.keys.get("_aden_managed") is not None)
         )
         if not is_aden_managed:
             logger.debug(f"Credential '{credential_id}' is local-only, skipping Aden refresh")

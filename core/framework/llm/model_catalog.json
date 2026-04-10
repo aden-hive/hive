@@ -250,7 +250,7 @@
           "label": "Kimi K2.5 - Best coding",
           "recommended": true,
           "max_tokens": 32768,
-          "max_context_tokens": 240000
+          "max_context_tokens": 200000
         }
       ]
     },

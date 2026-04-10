@@ -341,8 +341,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     """Run an exported agent."""
 
     from framework.credentials.models import CredentialError
-    from framework.observability import configure_logging
     from framework.loader import AgentLoader
+    from framework.observability import configure_logging
 
     # Set logging level (quiet by default for cleaner output)
     if args.quiet:
@@ -774,8 +774,8 @@ def cmd_shell(args: argparse.Namespace) -> int:
     """Start an interactive agent session."""
 
     from framework.credentials.models import CredentialError
-    from framework.observability import configure_logging
     from framework.loader import AgentLoader
+    from framework.observability import configure_logging
 
     configure_logging(level="INFO")
 
@@ -1509,7 +1509,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
             await site.start()
         except OSError as e:
             if "already in use" in str(e) or getattr(e, "errno", None) in (48, 98):
-                print(f"\nError: Port {args.port} is already in use. Kill the existing process with:\n")
+                print(
+                    f"\nError: Port {args.port} is already in use. Kill the existing process with:\n"
+                )
                 print(f"  lsof -ti:{args.port} | xargs kill -9\n")
             raise
 

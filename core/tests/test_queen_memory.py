@@ -259,7 +259,9 @@ def test_format_recall_injection(tmp_path: Path):
 
 def test_format_recall_injection_custom_label(tmp_path: Path):
     (tmp_path / "a.md").write_text("---\nname: a\n---\nbody of a")
-    result = format_recall_injection(["a.md"], memory_dir=tmp_path, label="Queen Memories: queen_technology")
+    result = format_recall_injection(
+        ["a.md"], memory_dir=tmp_path, label="Queen Memories: queen_technology"
+    )
     assert "Queen Memories: queen_technology" in result
     assert "body of a" in result
 

@@ -745,7 +745,9 @@ class LiteLLMProvider(LLMProvider):
                 "LiteLLM is not installed. Please install it with: uv pip install litellm"
             )
 
-    def reconfigure(self, model: str, api_key: str | None = None, api_base: str | None = None) -> None:
+    def reconfigure(
+        self, model: str, api_key: str | None = None, api_base: str | None = None
+    ) -> None:
         """Hot-swap the model, API key, and/or base URL on this provider instance.
 
         Since the same LiteLLMProvider object is shared by reference across the
@@ -756,11 +758,11 @@ class LiteLLMProvider(LLMProvider):
         if _is_ollama_model(model):
             model = _ensure_ollama_chat_prefix(model)
         elif model.lower().startswith("kimi/"):
-            model = "anthropic/" + model[len("kimi/"):]
+            model = "anthropic/" + model[len("kimi/") :]
             if api_base and api_base.rstrip("/").endswith("/v1"):
                 api_base = api_base.rstrip("/")[:-3]
         elif model.lower().startswith("hive/"):
-            model = "anthropic/" + model[len("hive/"):]
+            model = "anthropic/" + model[len("hive/") :]
             if api_base and api_base.rstrip("/").endswith("/v1"):
                 api_base = api_base.rstrip("/")[:-3]
         self.model = model

@@ -36,8 +36,7 @@ class RateLimitStage(PipelineStage):
             return PipelineResult(
                 action="reject",
                 rejection_reason=(
-                    f"Rate limit exceeded: {self._max_rpm} req/min "
-                    f"for session '{session_id}'"
+                    f"Rate limit exceeded: {self._max_rpm} req/min for session '{session_id}'"
                 ),
             )
         self._timestamps[key].append(now)

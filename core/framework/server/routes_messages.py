@@ -3,7 +3,6 @@
 - POST /api/messages/new -- classify a message, create a fresh queen session
 """
 
-import asyncio
 from aiohttp import web
 
 from framework.agents.queen.queen_profiles import ensure_default_queens, select_queen
@@ -21,22 +20,22 @@ async def handle_new_message(request: web.Request) -> web.Response:
     message = message.strip()
 
     ensure_default_queens()
-    
+
     # Build LLM for classification
     llm = manager.build_llm()
-    
+
     # Run queen selection - this is the slow part we can't avoid
     queen_id = await select_queen(message, llm)
 
     await _stop_live_sessions(manager)
-    
+
     # Create session with pre-bound queen
     session = await manager.create_session(
         initial_prompt=message,
         queen_name=queen_id,
         initial_phase="independent",
     )
-    
+
     await session.event_bus.publish(
         AgentEvent(
             type=EventType.CLIENT_INPUT_RECEIVED,

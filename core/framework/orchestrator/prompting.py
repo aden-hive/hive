@@ -196,8 +196,6 @@ def build_system_prompt(spec: NodePromptSpec) -> str:
     if not False and spec.node_type == "event_loop" and spec.output_keys:
         parts.append(f"\n{EXECUTION_SCOPE_PREAMBLE}")
 
-
-
     if spec.focus_prompt:
         parts.append(f"\n--- Current Focus ---\n{spec.focus_prompt}")
 

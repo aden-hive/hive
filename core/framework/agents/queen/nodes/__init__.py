@@ -37,9 +37,7 @@ _appendices = _build_appendices()
 
 # GCU guide — shared between planning and building via _shared_building_knowledge.
 _gcu_section = (
-    ("\n\n# Browser Automation Nodes\n\n" + _gcu_guide)
-    if _is_gcu_enabled() and _gcu_guide
-    else ""
+    ("\n\n# Browser Automation Nodes\n\n" + _gcu_guide) if _is_gcu_enabled() and _gcu_guide else ""
 )
 
 # Tools available to phases.

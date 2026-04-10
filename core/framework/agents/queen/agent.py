@@ -12,8 +12,7 @@ queen_goal = Goal(
     id="queen-manager",
     name="Queen Manager",
     description=(
-        "Manage the worker agent lifecycle and serve as the "
-        "user's primary interactive interface."
+        "Manage the worker agent lifecycle and serve as the user's primary interactive interface."
     ),
     success_criteria=[],
     constraints=[],

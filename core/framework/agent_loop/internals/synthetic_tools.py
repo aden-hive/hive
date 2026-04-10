@@ -204,6 +204,7 @@ def build_escalate_tool() -> Tool:
         },
     )
 
+
 def handle_set_output(
     tool_input: dict[str, Any],
     output_keys: list[str] | None,

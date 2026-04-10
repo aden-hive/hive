@@ -722,9 +722,7 @@ async def handle_delete_agent(request: web.Request) -> web.Response:
     # Reject deletion of framework agents (~/.hive/agents/) — those are internal
     hive_agents_dir = Path.home() / ".hive" / "agents"
     if resolved.is_relative_to(hive_agents_dir):
-        return web.json_response(
-            {"error": "Cannot delete framework agents"}, status=403
-        )
+        return web.json_response({"error": "Cannot delete framework agents"}, status=403)
 
     # Stop any live sessions that use this agent
     for session in list(manager.list_sessions()):
@@ -755,9 +753,11 @@ async def handle_reveal_session_folder(request: web.Request) -> web.Response:
     storage_session_id = (session.queen_resume_from or session.id) if session else session_id
     if session:
         from framework.server.session_manager import _queen_session_dir
+
         folder = _queen_session_dir(storage_session_id, session.queen_name)
     else:
         from framework.server.session_manager import _find_queen_session_dir
+
         folder = _find_queen_session_dir(storage_session_id)
     folder.mkdir(parents=True, exist_ok=True)
 

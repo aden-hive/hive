@@ -122,10 +122,12 @@ class SkillsManager:
 
         # 1. Skill discovery -- always run to pick up framework skills;
         # community/project skills only when project_root is available.
-        discovery = SkillDiscovery(DiscoveryConfig(
-            project_root=self._config.project_root,
-            skip_framework_scope=False,
-        ))
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=self._config.project_root,
+                skip_framework_scope=False,
+            )
+        )
         discovered = discovery.discover()
         self._watched_dirs = discovery.scanned_directories
 
@@ -254,8 +256,11 @@ class SkillsManager:
         self._loaded = False
         self._do_load()
         self._loaded = True
-        logger.info("Skills reloaded: protocols=%d chars, catalog=%d chars",
-                    len(self._protocols_prompt), len(self._catalog_prompt))
+        logger.info(
+            "Skills reloaded: protocols=%d chars, catalog=%d chars",
+            len(self._protocols_prompt),
+            len(self._catalog_prompt),
+        )
 
     # ------------------------------------------------------------------
     # Prompt accessors (consumed by downstream layers)

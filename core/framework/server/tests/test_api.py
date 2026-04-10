@@ -16,9 +16,12 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from framework.host.triggers import TriggerDefinition
 from framework.llm.model_catalog import get_models_catalogue
+from framework.server import (
+    routes_messages,
+    routes_queens,
+    session_manager as session_manager_module,
+)
 from framework.server.app import create_app
-from framework.server import routes_messages, routes_queens
-from framework.server import session_manager as session_manager_module
 from framework.server.session_manager import Session
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -299,7 +302,9 @@ def _write_sample_session(base: Path, session_id: str):
     return session_id, session_dir, state
 
 
-def _write_queen_session(tmp_path: Path, queen_id: str, session_id: str, meta: dict | None = None) -> Path:
+def _write_queen_session(
+    tmp_path: Path, queen_id: str, session_id: str, meta: dict | None = None
+) -> Path:
     """Create a persisted queen session directory for restore tests."""
     session_dir = tmp_path / ".hive" / "agents" / "queens" / queen_id / "sessions" / session_id
     session_dir.mkdir(parents=True)
@@ -573,6 +578,7 @@ class TestSessionCRUD:
             )
             assert resp.status == 400
 
+
 class TestMessageBootstrap:
     @pytest.mark.asyncio
     async def test_new_message_requires_non_empty_message(self):
@@ -593,7 +599,9 @@ class TestMessageBootstrap:
         created = _make_session(agent_id="fresh_queen_session", with_queen=False)
         created.queen_name = "queen_technology"
         manager.create_session = AsyncMock(return_value=created)
-        monkeypatch.setattr(routes_messages, "select_queen", AsyncMock(return_value="queen_technology"))
+        monkeypatch.setattr(
+            routes_messages, "select_queen", AsyncMock(return_value="queen_technology")
+        )
 
         async with TestClient(TestServer(app)) as client:
             resp = await client.post("/api/messages/new", json={"message": "Build me a scraper"})
@@ -623,7 +631,9 @@ class TestQueenSessionSelection:
     @pytest.mark.asyncio
     async def test_select_queen_session_rejects_foreign_session(self, monkeypatch, tmp_path):
         _patch_queen_storage(monkeypatch, tmp_path)
-        _write_queen_session(tmp_path, "queen_growth", "other_session", {"queen_id": "queen_growth"})
+        _write_queen_session(
+            tmp_path, "queen_growth", "other_session", {"queen_id": "queen_growth"}
+        )
 
         app = create_app()
         async with TestClient(TestServer(app)) as client:
@@ -658,12 +668,12 @@ class TestQueenSessionSelection:
             "queen_id": "queen_technology",
             "status": "live",
         }
-        assert any(
-            call.args == ("other_live",) for call in manager.stop_session.await_args_list
-        )
+        assert any(call.args == ("other_live",) for call in manager.stop_session.await_args_list)
 
     @pytest.mark.asyncio
-    async def test_select_queen_session_restores_specific_history_session(self, monkeypatch, tmp_path):
+    async def test_select_queen_session_restores_specific_history_session(
+        self, monkeypatch, tmp_path
+    ):
         _patch_queen_storage(monkeypatch, tmp_path)
         _write_queen_session(
             tmp_path,

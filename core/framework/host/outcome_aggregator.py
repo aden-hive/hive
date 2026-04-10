@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, Any
 from framework.schemas.decision import Decision, Outcome
 
 if TYPE_CHECKING:
-    from framework.orchestrator.goal import Goal
     from framework.host.event_bus import EventBus
+    from framework.orchestrator.goal import Goal
 
 logger = logging.getLogger(__name__)
 

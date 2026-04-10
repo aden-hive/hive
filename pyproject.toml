@@ -2,4 +2,4 @@
 members = ["core", "tools"]
 
 [tool.ruff]
-line-length = 100
+line-length = 120

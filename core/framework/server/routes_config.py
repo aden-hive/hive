@@ -14,21 +14,20 @@ from pathlib import Path
 
 from aiohttp import web
 
+from framework.agents.queen.queen_memory_v2 import (
+    build_memory_document,
+    global_memory_dir,
+)
 from framework.config import (
+    _PROVIDER_CRED_MAP,
     HIVE_CONFIG_FILE,
     OPENROUTER_API_BASE,
-    _PROVIDER_CRED_MAP,
     get_hive_config,
 )
 from framework.llm.model_catalog import (
     find_model,
-    find_model_any_provider,
     get_models_catalogue,
     get_preset,
-)
-from framework.agents.queen.queen_memory_v2 import (
-    global_memory_dir,
-    build_memory_document,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,15 +105,17 @@ def _build_subscriptions() -> list[dict]:
         if not preset:
             raise RuntimeError(f"Missing preset for subscription {definition['id']}")
 
-        subscriptions.append({
-            "id": definition["id"],
-            "name": definition["name"],
-            "description": definition["description"],
-            "provider": preset["provider"],
-            "flag": definition["flag"],
-            "default_model": preset.get("model", ""),
-            **({"api_base": preset["api_base"]} if preset.get("api_base") else {}),
-        })
+        subscriptions.append(
+            {
+                "id": definition["id"],
+                "name": definition["name"],
+                "description": definition["description"],
+                "provider": preset["provider"],
+                "flag": definition["flag"],
+                "default_model": preset.get("model", ""),
+                **({"api_base": preset["api_base"]} if preset.get("api_base") else {}),
+            }
+        )
     return subscriptions
 
 
@@ -153,9 +154,7 @@ def _find_model_info(provider: str, model_id: str) -> dict | None:
 def _write_config_atomic(config: dict) -> None:
     """Write config to ~/.hive/configuration.json atomically."""
     HIVE_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
-        dir=str(HIVE_CONFIG_FILE.parent), suffix=".tmp"
-    )
+    fd, tmp_path = tempfile.mkstemp(dir=str(HIVE_CONFIG_FILE.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
@@ -192,6 +191,7 @@ def _detect_subscriptions() -> list[str]:
     # Claude Code subscription
     try:
         from framework.loader.agent_loader import get_claude_code_token
+
         if get_claude_code_token():
             detected.append("claude_code")
     except Exception:
@@ -204,6 +204,7 @@ def _detect_subscriptions() -> list[str]:
     # Codex subscription
     try:
         from framework.loader.agent_loader import get_codex_token
+
         if get_codex_token():
             detected.append("codex")
     except Exception:
@@ -217,6 +218,7 @@ def _detect_subscriptions() -> list[str]:
     kimi_token = None
     try:
         from framework.loader.agent_loader import get_kimi_code_token
+
         kimi_token = get_kimi_code_token()
     except Exception:
         pass
@@ -232,6 +234,7 @@ def _detect_subscriptions() -> list[str]:
     # Antigravity subscription
     try:
         from framework.loader.agent_loader import get_antigravity_token
+
         if get_antigravity_token():
             detected.append("antigravity")
     except Exception:
@@ -252,16 +255,19 @@ def _get_subscription_token(sub_id: str) -> str | None:
     """Get the token for a subscription."""
     if sub_id == "claude_code":
         from framework.loader.agent_loader import get_claude_code_token
+
         return get_claude_code_token()
     elif sub_id == "zai_code":
         return os.environ.get("ZAI_API_KEY")
     elif sub_id == "codex":
         from framework.loader.agent_loader import get_codex_token
+
         return get_codex_token()
     elif sub_id == "minimax_code":
         return os.environ.get("MINIMAX_API_KEY")
     elif sub_id == "kimi_code":
         from framework.loader.agent_loader import get_kimi_code_token
+
         token = get_kimi_code_token()
         if not token:
             token = os.environ.get("KIMI_API_KEY")
@@ -270,11 +276,14 @@ def _get_subscription_token(sub_id: str) -> str | None:
         return os.environ.get("HIVE_API_KEY")
     elif sub_id == "antigravity":
         from framework.loader.agent_loader import get_antigravity_token
+
         return get_antigravity_token()
     return None
 
 
-def _hot_swap_sessions(request: web.Request, full_model: str, api_key: str | None, api_base: str | None) -> int:
+def _hot_swap_sessions(
+    request: web.Request, full_model: str, api_key: str | None, api_base: str | None
+) -> int:
     """Hot-swap the LLM on all running sessions. Returns count of swapped sessions."""
     from framework.server.session_manager import SessionManager
 
@@ -315,17 +324,19 @@ async def handle_get_llm_config(request: web.Request) -> web.Response:
     active_subscription = _get_active_subscription(llm)
     detected_subscriptions = _detect_subscriptions()
 
-    return web.json_response({
-        "provider": provider,
-        "model": model,
-        "has_api_key": has_key,
-        "max_tokens": llm.get("max_tokens"),
-        "max_context_tokens": llm.get("max_context_tokens"),
-        "connected_providers": connected,
-        "active_subscription": active_subscription,
-        "detected_subscriptions": detected_subscriptions,
-        "subscriptions": SUBSCRIPTIONS,
-    })
+    return web.json_response(
+        {
+            "provider": provider,
+            "model": model,
+            "has_api_key": has_key,
+            "max_tokens": llm.get("max_tokens"),
+            "max_context_tokens": llm.get("max_context_tokens"),
+            "connected_providers": connected,
+            "active_subscription": active_subscription,
+            "detected_subscriptions": detected_subscriptions,
+            "subscriptions": SUBSCRIPTIONS,
+        }
+    )
 
 
 async def handle_update_llm_config(request: web.Request) -> web.Response:
@@ -393,18 +404,22 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
 
         logger.info(
             "LLM config updated: subscription=%s model=%s, hot-swapped %d session(s)",
-            subscription_id, model, swapped,
+            subscription_id,
+            model,
+            swapped,
         )
 
-        return web.json_response({
-            "provider": provider,
-            "model": model,
-            "has_api_key": token is not None,
-            "max_tokens": max_tokens,
-            "max_context_tokens": max_context_tokens,
-            "sessions_swapped": swapped,
-            "active_subscription": subscription_id,
-        })
+        return web.json_response(
+            {
+                "provider": provider,
+                "model": model,
+                "has_api_key": token is not None,
+                "max_tokens": max_tokens,
+                "max_context_tokens": max_context_tokens,
+                "sessions_swapped": swapped,
+                "active_subscription": subscription_id,
+            }
+        )
 
     else:
         # ── API key mode ─────────────────────────────────────────────
@@ -450,46 +465,52 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
 
         logger.info(
             "LLM config updated: provider=%s model=%s, hot-swapped %d session(s)",
-            provider, model, swapped,
+            provider,
+            model,
+            swapped,
         )
 
-        return web.json_response({
-            "provider": provider,
-            "model": model,
-            "has_api_key": api_key is not None,
-            "max_tokens": max_tokens,
-            "max_context_tokens": max_context_tokens,
-            "sessions_swapped": swapped,
-            "active_subscription": None,
-        })
+        return web.json_response(
+            {
+                "provider": provider,
+                "model": model,
+                "has_api_key": api_key is not None,
+                "max_tokens": max_tokens,
+                "max_context_tokens": max_context_tokens,
+                "sessions_swapped": swapped,
+                "active_subscription": None,
+            }
+        )
 
 
 async def handle_get_profile(request: web.Request) -> web.Response:
     """GET /api/config/profile — user display name and about."""
     profile = get_hive_config().get("user_profile", {})
-    return web.json_response({
-        "displayName": profile.get("displayName", ""),
-        "about": profile.get("about", ""),
-        "theme": profile.get("theme", ""),
-    })
+    return web.json_response(
+        {
+            "displayName": profile.get("displayName", ""),
+            "about": profile.get("about", ""),
+            "theme": profile.get("theme", ""),
+        }
+    )
 
 
 def _update_user_profile_memory(display_name: str, about: str) -> None:
     """Sync user profile to global memory as a profile-type memory file.
-    
+
     Uses the canonical filename 'user-profile.md' — this is the single
     source of truth for user identity information, shared with the
     reflection agent.
-    
+
     Merges with existing content to preserve sections added by the reflection agent.
     """
     try:
         mem_dir = global_memory_dir()
         mem_dir.mkdir(parents=True, exist_ok=True)
-        
+
         profile_filename = "user-profile.md"
         memory_path = mem_dir / profile_filename
-        
+
         # Read existing content if present
         existing_body = ""
         if memory_path.exists():
@@ -499,16 +520,16 @@ def _update_user_profile_memory(display_name: str, about: str) -> None:
                 parts = existing_text.split("---\n", 2)
                 if len(parts) >= 3:
                     existing_body = parts[2].strip()
-        
+
         # Build Identity section from settings
         identity_lines = []
         if display_name:
             identity_lines.append(f"- **Name:** {display_name}")
         if about:
             identity_lines.append(f"- **About:** {about}")
-        
+
         identity_section = "## Identity\n" + "\n".join(identity_lines) if identity_lines else ""
-        
+
         # Merge: replace or prepend Identity section, keep rest
         if existing_body and "## Identity" in existing_body:
             # Replace existing Identity section
@@ -522,14 +543,16 @@ def _update_user_profile_memory(display_name: str, about: str) -> None:
         else:
             # Just Identity section
             new_body = identity_section
-        
+
         content = build_memory_document(
             name="User Profile",
-            description=f"User identity: {display_name}" if display_name else "User profile information",
+            description=f"User identity: {display_name}"
+            if display_name
+            else "User profile information",
             mem_type="profile",
             body=new_body if new_body else "No profile information yet.",
         )
-        
+
         memory_path.write_text(content, encoding="utf-8")
         logger.debug("User profile synced to global memory: %s", memory_path)
     except Exception as exc:
@@ -556,17 +579,16 @@ async def handle_update_profile(request: web.Request) -> web.Response:
     _write_config_atomic(config)
 
     # Sync to global memory (profile type)
-    _update_user_profile_memory(
-        profile.get("displayName", ""),
-        profile.get("about", "")
-    )
+    _update_user_profile_memory(profile.get("displayName", ""), profile.get("about", ""))
 
     logger.info("User profile updated: displayName=%s", profile.get("displayName", ""))
-    return web.json_response({
-        "displayName": profile.get("displayName", ""),
-        "about": profile.get("about", ""),
-        "theme": profile.get("theme", ""),
-    })
+    return web.json_response(
+        {
+            "displayName": profile.get("displayName", ""),
+            "about": profile.get("about", ""),
+            "theme": profile.get("theme", ""),
+        }
+    )
 
 
 async def handle_get_models(request: web.Request) -> web.Response:
