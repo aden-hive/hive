@@ -71,9 +71,7 @@ async def test_request_input_result_captured_before_lock_release():
             """Return mock result and record whether _input_event was active."""
             if obj is None:
                 return self
-            reads_with_event_active.append(
-                getattr(obj, "_input_event", None) is not None
-            )
+            reads_with_event_active.append(getattr(obj, "_input_event", None) is not None)
             return getattr(obj, "_mock_result", None)
 
         def __set__(self, obj: object, value: object) -> None:
@@ -94,6 +92,6 @@ async def test_request_input_result_captured_before_lock_release():
 
     # The result must have been read while _input_event was still active (True)
     assert any(reads_with_event_active), (
-        "Expected at least one _input_result read while _input_event was set; "
-        "got reads_with_event_active=%r" % reads_with_event_active
+        f"Expected at least one _input_result read while _input_event was set; "
+        f"got reads_with_event_active={reads_with_event_active!r}"
     )
