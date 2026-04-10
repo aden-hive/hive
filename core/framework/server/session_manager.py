@@ -120,11 +120,14 @@ class SessionManager:
     (blocking I/O) then started on the event loop.
     """
 
-    def __init__(self, model: str | None = None, credential_store=None) -> None:
+    def __init__(
+        self, model: str | None = None, credential_store=None, queen_tool_registry=None
+    ) -> None:
         self._sessions: dict[str, Session] = {}
         self._loading: set[str] = set()
         self._model = model
         self._credential_store = credential_store
+        self._queen_tool_registry = queen_tool_registry
         self._lock = asyncio.Lock()
         # Strong references for fire-and-forget background tasks (e.g. shutdown
         # reflections) so they aren't garbage-collected before completion.
@@ -195,6 +198,71 @@ class SessionManager:
             self._sessions[resolved_id] = session
 
         return session
+
+    def _resume_queen_name(self, session_id: str) -> str | None:
+        """Best-effort queen identity lookup for a persisted session."""
+        session_dir = _find_queen_session_dir(session_id)
+        if not session_dir.exists():
+            return None
+
+        meta_path = session_dir / "meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                meta = {}
+            queen_id = meta.get("queen_id")
+            if isinstance(queen_id, str) and queen_id.strip():
+                return queen_id.strip()
+
+        if session_dir.parent.name == "sessions":
+            queen_id = session_dir.parent.parent.name
+            if queen_id:
+                return queen_id
+        return None
+
+    async def _ensure_session_queen_identity(
+        self,
+        session: Session,
+        initial_prompt: str | None = None,
+    ) -> dict:
+        """Resolve the queen identity and return the loaded profile.
+
+        Sets ``session.queen_name`` and returns the validated profile dict.
+        The caller can pass the profile directly to the orchestrator without
+        re-loading from disk.
+        """
+        from framework.agents.queen.queen_profiles import (
+            ensure_default_queens,
+            load_queen_profile,
+            select_queen,
+        )
+
+        ensure_default_queens()
+
+        candidates: list[str] = []
+        current_queen = (session.queen_name or "").strip()
+        if current_queen and current_queen != "default":
+            candidates.append(current_queen)
+
+        if session.queen_resume_from:
+            resumed_queen = self._resume_queen_name(session.queen_resume_from)
+            if resumed_queen and resumed_queen not in candidates:
+                candidates.append(resumed_queen)
+
+        for queen_id in candidates:
+            try:
+                profile = load_queen_profile(queen_id)
+            except FileNotFoundError:
+                logger.warning("Session '%s': queen profile '%s' not found", session.id, queen_id)
+                continue
+            session.queen_name = queen_id
+            return profile
+
+        selector_input = initial_prompt or ""
+        queen_id = await select_queen(selector_input, session.llm)
+        session.queen_name = queen_id
+        return load_queen_profile(queen_id)
 
     async def create_session(
         self,
@@ -1008,10 +1076,28 @@ class SessionManager:
         # are persisted before the session is destroyed (fire-and-forget).
         if session.queen_dir is not None:
             try:
+                from framework.agents.queen.queen_memory_v2 import (
+                    global_memory_dir,
+                    queen_memory_dir,
+                )
                 from framework.agents.queen.reflection_agent import run_shutdown_reflection
 
+                global_mem_dir = global_memory_dir()
+                queen_mem_dir = queen_memory_dir(session.queen_name)
+                if session.phase_state is not None:
+                    global_mem_dir = session.phase_state.global_memory_dir or global_mem_dir
+                    queen_mem_dir = session.phase_state.queen_memory_dir or queen_mem_dir
+
                 task = asyncio.create_task(
-                    asyncio.shield(run_shutdown_reflection(session.queen_dir, session.llm)),
+                    asyncio.shield(
+                        run_shutdown_reflection(
+                            session.queen_dir,
+                            session.llm,
+                            global_memory_dir_override=global_mem_dir,
+                            queen_memory_dir=queen_mem_dir,
+                            queen_id=session.queen_name,
+                        )
+                    ),
                     name=f"shutdown-reflect-{session_id}",
                 )
                 logger.info("Session '%s': shutdown reflection spawned", session_id)
@@ -1107,6 +1193,8 @@ class SessionManager:
             session.queen_executor,
         )
 
+        queen_profile = await self._ensure_session_queen_identity(session, initial_prompt)
+
         # Determine which session directory to use for queen storage.
         # When queen_resume_from is set we write to the ORIGINAL session's
         # directory so that all messages accumulate in one place.
@@ -1198,8 +1286,10 @@ class SessionManager:
             session_manager=self,
             worker_identity=worker_identity,
             queen_dir=queen_dir,
+            queen_profile=queen_profile,
             initial_prompt=initial_prompt,
             initial_phase=initial_phase,
+            tool_registry=self._queen_tool_registry,
         )
         logger.debug(
             "[_start_queen] create_queen returned, queen_task=%s, queen_executor=%s",

@@ -5,6 +5,7 @@ import {
   ChevronRight,
   MessageSquarePlus,
   Network,
+  Sparkles,
   KeyRound,
   ChevronDown,
 } from "lucide-react";
@@ -85,6 +86,13 @@ export default function Sidebar() {
         >
           <Network className="w-4 h-4" />
           <span>Org Chart</span>
+        </button>
+        <button
+          onClick={() => navigate("/prompt-library")}
+          className="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-sm text-foreground/70 hover:bg-sidebar-item-hover hover:text-foreground transition-colors"
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>Prompt Library</span>
         </button>
         <button
           onClick={() => navigate("/credentials")}

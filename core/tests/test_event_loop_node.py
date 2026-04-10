@@ -826,6 +826,61 @@ class TestCrashRecovery:
         assert len(input_events) == 1
         assert input_events[0].data["prompt"] == "What city?"
 
+    @pytest.mark.asyncio
+    async def test_restore_legacy_unphased_assistant_message_preserves_store(
+        self, tmp_path, runtime, buffer
+    ):
+        """Legacy queen stores without phase_id should resume instead of being cleared."""
+        store = FileConversationStore(tmp_path / "conv")
+        await store.write_meta(
+            {
+                "system_prompt": "You are a test assistant.",
+                "max_context_tokens": 32000,
+                "compaction_threshold": 0.8,
+                "output_keys": [],
+            }
+        )
+        await store.write_part(
+            0,
+            {
+                "seq": 0,
+                "role": "assistant",
+                "content": "[Error: previous turn failed.]",
+            },
+        )
+        await store.write_cursor({"iteration": 0, "next_seq": 1})
+
+        spec = NodeSpec(
+            id="queen",
+            name="Queen",
+            description="interactive queen",
+            node_type="event_loop",
+            output_keys=[],
+        )
+        llm = MockStreamingLLM(scenarios=[text_scenario("Recovered after restore.")])
+        node = EventLoopNode(
+            conversation_store=store,
+            config=LoopConfig(max_iterations=5),
+        )
+        ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
+
+        result = await node.execute(ctx)
+
+        assert result.success is True
+        assert len(llm.stream_calls) == 1
+        assert [m["role"] for m in llm.stream_calls[0]["messages"]] == ["assistant", "user"]
+        assert llm.stream_calls[0]["messages"][0]["content"] == "[Error: previous turn failed.]"
+        assert llm.stream_calls[0]["messages"][1]["content"] == (
+            "[Continue working on your current task.]"
+        )
+
+        restored = await NodeConversation.restore(store, phase_id="queen")
+        assert restored is not None
+        assert [m.role for m in restored.messages] == ["assistant", "user", "assistant"]
+        assert restored.messages[0].content == "[Error: previous turn failed.]"
+        assert restored.messages[1].content == "[Continue working on your current task.]"
+        assert restored.messages[2].content == "Recovered after restore."
+
 
 # ===========================================================================
 # External event injection

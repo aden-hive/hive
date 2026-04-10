@@ -207,18 +207,71 @@ def _build_credentials_provider() -> Any:
     return _provider
 
 
+def initialize_memory_scopes(session: Session, phase_state: Any) -> tuple[Path, Path]:
+    """Create and cache the global and queen-scoped memory directories."""
+    from framework.agents.queen.queen_memory_v2 import (
+        global_memory_dir,
+        init_memory_dir,
+        queen_memory_dir,
+    )
+
+    global_dir = global_memory_dir()
+    queen_dir = queen_memory_dir(session.queen_name)
+    init_memory_dir(global_dir)
+    init_memory_dir(queen_dir)
+    phase_state.global_memory_dir = global_dir
+    phase_state.queen_memory_dir = queen_dir
+    return global_dir, queen_dir
+
+
+async def materialize_queen_identity(
+    session: Session,
+    phase_state: Any,
+    queen_profile: dict,
+    event_bus: Any,
+) -> None:
+    """Format the queen identity prompt and set phase state.
+
+    Called after SessionManager has resolved and loaded the profile.
+    This function does no I/O — it only formats and caches.
+    """
+    from framework.agents.queen.queen_profiles import format_queen_identity_prompt
+    from framework.host.event_bus import AgentEvent, EventType
+
+    queen_id = session.queen_name
+
+    phase_state.queen_id = queen_id
+    phase_state.queen_profile = queen_profile
+    phase_state.queen_identity_prompt = format_queen_identity_prompt(queen_profile)
+
+    if event_bus is not None:
+        await event_bus.publish(
+            AgentEvent(
+                type=EventType.QUEEN_IDENTITY_SELECTED,
+                stream_id="queen",
+                data={
+                    "queen_id": queen_id,
+                    "name": queen_profile.get("name", ""),
+                    "title": queen_profile.get("title", ""),
+                },
+            )
+        )
+
+
 async def create_queen(
     session: Session,
     session_manager: Any,
     worker_identity: str | None,
     queen_dir: Path,
+    queen_profile: dict,
     initial_prompt: str | None = None,
     initial_phase: str | None = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> asyncio.Task:
     """Build the queen executor and return the running asyncio task.
 
     Handles tool registration, phase-state initialization, prompt
-    composition, persona hook setup, colony preparation, and the queen
+    composition, queen identity materialization, colony preparation, and the queen
     event loop.
     """
     from framework.agents.queen.agent import (
@@ -259,50 +312,51 @@ async def create_queen(
         _queen_tools_staging,
         _shared_building_knowledge,
     )
-    from framework.agents.queen.queen_profiles import (
-        ensure_default_queens,
-        format_queen_identity_prompt,
-        load_queen_profile,
-        select_queen,
-    )
-    from framework.agent_loop.agent_loop import HookContext, HookResult
+    from framework.host.event_bus import AgentEvent, EventType
     from framework.loader.mcp_registry import MCPRegistry
     from framework.loader.tool_registry import ToolRegistry
-    from framework.host.event_bus import AgentEvent, EventType
     from framework.tools.queen_lifecycle_tools import (
         QueenPhaseState,
         register_queen_lifecycle_tools,
     )
 
     # ---- Tool registry ------------------------------------------------
-    queen_registry = ToolRegistry()
-    import framework.agents.queen as _queen_pkg
+    # Use pre-loaded cached registry if available (fast path)
+    if tool_registry is not None:
+        queen_registry = tool_registry
+        logger.info(
+            "Queen: using pre-loaded tool registry with %d tools", len(queen_registry.get_tools())
+        )
+    else:
+        # Build fresh (slow path - for backwards compatibility)
+        queen_registry = ToolRegistry()
+        import framework.agents.queen as _queen_pkg
 
-    queen_pkg_dir = Path(_queen_pkg.__file__).parent
-    mcp_config = queen_pkg_dir / "mcp_servers.json"
-    if mcp_config.exists():
+        queen_pkg_dir = Path(_queen_pkg.__file__).parent
+        mcp_config = queen_pkg_dir / "mcp_servers.json"
+        if mcp_config.exists():
+            try:
+                queen_registry.load_mcp_config(mcp_config)
+                logger.info("Queen: loaded MCP tools from %s", mcp_config)
+            except Exception:
+                logger.warning("Queen: MCP config failed to load", exc_info=True)
+
         try:
-            queen_registry.load_mcp_config(mcp_config)
-            logger.info("Queen: loaded MCP tools from %s", mcp_config)
+            registry = MCPRegistry()
+            registry.initialize()
+            if (queen_pkg_dir / "mcp_registry.json").is_file():
+                queen_registry.set_mcp_registry_agent_path(queen_pkg_dir)
+            registry_configs, selection_max_tools = registry.load_agent_selection(queen_pkg_dir)
+            if registry_configs:
+                results = queen_registry.load_registry_servers(
+                    registry_configs,
+                    preserve_existing_tools=True,
+                    log_collisions=True,
+                    max_tools=selection_max_tools,
+                )
+                logger.info("Queen: loaded MCP registry servers: %s", results)
         except Exception:
-            logger.warning("Queen: MCP config failed to load", exc_info=True)
-
-    try:
-        registry = MCPRegistry()
-        registry.initialize()
-        if (queen_pkg_dir / "mcp_registry.json").is_file():
-            queen_registry.set_mcp_registry_agent_path(queen_pkg_dir)
-        registry_configs, selection_max_tools = registry.load_agent_selection(queen_pkg_dir)
-        if registry_configs:
-            results = queen_registry.load_registry_servers(
-                registry_configs,
-                preserve_existing_tools=True,
-                log_collisions=True,
-                max_tools=selection_max_tools,
-            )
-            logger.info("Queen: loaded MCP registry servers: %s", results)
-    except Exception:
-        logger.warning("Queen: MCP registry config failed to load", exc_info=True)
+            logger.warning("Queen: MCP registry config failed to load", exc_info=True)
 
     # ---- Phase state --------------------------------------------------
     effective_phase = initial_phase or ("staging" if worker_identity else "planning")
@@ -412,15 +466,17 @@ async def create_queen(
         sorted(t.name for t in phase_state.independent_tools),
     )
 
-    # ---- Global memory -------------------------------------------------
-    from framework.agents.queen.queen_memory_v2 import (
-        global_memory_dir,
-        init_memory_dir,
-    )
+    # ---- Global + queen-scoped memory ----------------------------------
+    global_dir, queen_mem_dir = initialize_memory_scopes(session, phase_state)
 
-    global_dir = global_memory_dir()
-    init_memory_dir(global_dir)
-    phase_state.global_memory_dir = global_dir
+    # Materialize the selected queen identity before building the initial
+    # system prompt so the first turn includes the profile's core identity.
+    await materialize_queen_identity(
+        session=session,
+        phase_state=phase_state,
+        queen_profile=queen_profile,
+        event_bus=session.event_bus,
+    )
 
     # ---- Compose phase-specific prompts ------------------------------
     from framework.agents.queen.nodes import queen_node as _orig_node
@@ -511,27 +567,35 @@ async def create_queen(
     except Exception:
         logger.debug("Queen skill loading failed (non-fatal)", exc_info=True)
 
-    # ---- Queen identity hook -----------------------------------------
+    # ---- Queen identity + recall -------------------------------------
     _session_llm = session.llm
     _session_event_bus = session.event_bus
+
+    async def _refresh_recall_cache(query: str) -> None:
+        """Populate the cached recall block for the next queen prompt."""
+        if not query or not isinstance(query, str):
+            return
+        try:
+            from framework.agents.queen.recall_selector import (
+                build_scoped_recall_blocks,
+            )
+
+            global_block, queen_block = await build_scoped_recall_blocks(
+                query,
+                _session_llm,
+                global_memory_dir=phase_state.global_memory_dir,
+                queen_memory_dir=phase_state.queen_memory_dir,
+                queen_id=phase_state.queen_id or session.queen_name,
+            )
+            phase_state._cached_global_recall_block = global_block
+            phase_state._cached_queen_recall_block = queen_block
+        except Exception:
+            logger.debug("recall: cache update failed", exc_info=True)
 
     # ---- Recall on each real user turn --------------------------------
     async def _recall_on_user_input(event: AgentEvent) -> None:
         """Re-select memories when real user input arrives."""
-        content = (event.data or {}).get("content", "")
-        if not content or not isinstance(content, str):
-            return
-        try:
-            from framework.agents.queen.recall_selector import (
-                format_recall_injection,
-                select_memories,
-            )
-
-            mem_dir = phase_state.global_memory_dir
-            selected = await select_memories(content, _session_llm, mem_dir)
-            phase_state._cached_global_recall_block = format_recall_injection(selected, mem_dir)
-        except Exception:
-            logger.debug("recall: user-turn cache update failed", exc_info=True)
+        await _refresh_recall_cache((event.data or {}).get("content", ""))
 
     session.event_bus.subscribe(
         [EventType.CLIENT_INPUT_RECEIVED],
@@ -544,9 +608,14 @@ async def create_queen(
         trigger = ctx.trigger or ""
         # If the session was pre-bound to a queen (user clicked a specific
         # queen in the UI), use that identity instead of LLM auto-selection.
+        # Also skip LLM auto-selection if queen was already selected during
+        # session creation (e.g., from home screen classification).
         if session.queen_name and session.queen_name != "default":
             queen_id = session.queen_name
+            logger.info("Using pre-selected queen: %s", queen_id)
         else:
+            # This should rarely happen now - queen is selected at session creation
+            logger.warning("No pre-selected queen, falling back to LLM classification")
             queen_id = await select_queen(trigger, _session_llm)
         try:
             profile = load_queen_profile(queen_id)
@@ -613,16 +682,24 @@ async def create_queen(
             )
 
         # Seed recall cache so the first turn has relevant memories.
+        # Use a short timeout to avoid blocking the first turn on slow models.
         if trigger:
             try:
+                import asyncio
+
                 from framework.agents.queen.recall_selector import (
                     format_recall_injection,
                     select_memories,
                 )
 
                 mem_dir = phase_state.global_memory_dir
-                selected = await select_memories(trigger, _session_llm, mem_dir)
+                selected = await asyncio.wait_for(
+                    select_memories(trigger, _session_llm, mem_dir),
+                    timeout=3.0,
+                )
                 phase_state._cached_global_recall_block = format_recall_injection(selected, mem_dir)
+            except TimeoutError:
+                logger.debug("recall: initial seeding timed out, will retry on first turn")
             except Exception:
                 logger.debug("recall: initial seeding failed", exc_info=True)
 
@@ -648,13 +725,10 @@ async def create_queen(
 
     # Determine session mode:
     # - RESTORE: Resume cold session with history, no initial prompt -> wait for user
-    # - FRESH:   New session OR explicit initial prompt -> run identity hook + greeting
+    # - FRESH:   New session OR explicit initial prompt -> greet immediately
     _is_restore_mode = bool(session.queen_resume_from) and initial_prompt is None
 
-    _queen_loop_config = {
-        **_base_loop_config,
-        "hooks": {"session_start": [_queen_identity_hook]} if not _is_restore_mode else {},
-    }
+    _queen_loop_config = {**_base_loop_config}
 
     # ---- Queen event loop (AgentLoop directly, no Orchestrator) -------
     from types import SimpleNamespace
@@ -778,7 +852,9 @@ async def create_queen(
                 session.event_bus,
                 queen_dir,
                 session.llm,
-                memory_dir=global_dir,
+                global_memory_dir=global_dir,
+                queen_memory_dir=queen_mem_dir,
+                queen_id=session.queen_name,
             )
             session.memory_reflection_subs = _reflection_subs
 

@@ -22,8 +22,8 @@ from typing import Any
 from framework.agent_loop.conversation import Message, NodeConversation
 from framework.agent_loop.internals.event_publishing import publish_context_usage
 from framework.agent_loop.internals.types import LoopConfig, OutputAccumulator
-from framework.orchestrator.node import NodeContext
 from framework.host.event_bus import EventBus
+from framework.orchestrator.node import NodeContext
 
 logger = logging.getLogger(__name__)
 

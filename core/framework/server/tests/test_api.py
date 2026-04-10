@@ -15,9 +15,13 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from framework.host.triggers import TriggerDefinition
+from framework.llm.model_catalog import get_models_catalogue
+from framework.server import (
+    routes_messages,
+    routes_queens,
+    session_manager as session_manager_module,
+)
 from framework.server.app import create_app
-from framework.server import routes_messages, routes_queens
-from framework.server import session_manager as session_manager_module
 from framework.server.session_manager import Session
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -1588,6 +1592,37 @@ class TestCredentials:
 
             store = app["credential_store"]
             assert store.get_key("test_cred", "api_key") == "new-value"
+
+
+class TestConfigRoutes:
+    """Tests for LLM configuration endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_get_models_uses_shared_model_catalogue(self):
+        app = create_app()
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/config/models")
+            data = await resp.json()
+
+        assert resp.status == 200
+        assert data["models"] == get_models_catalogue()
+
+    @pytest.mark.asyncio
+    async def test_get_llm_config_exposes_subscription_defaults_from_presets(self):
+        app = create_app()
+        app["credential_store"] = MagicMock()
+        app["credential_store"].get.return_value = None
+
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/config/llm")
+            data = await resp.json()
+
+        assert resp.status == 200
+        subscriptions = {subscription["id"]: subscription for subscription in data["subscriptions"]}
+        assert subscriptions["codex"]["default_model"] == "gpt-5.3-codex"
+        assert subscriptions["codex"]["api_base"] == "https://chatgpt.com/backend-api/codex"
+        assert subscriptions["kimi_code"]["default_model"] == "kimi-k2.5"
 
 
 class TestSSEFormat:

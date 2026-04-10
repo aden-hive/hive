@@ -11,11 +11,7 @@ def list_framework_agents() -> list[Path]:
         [
             p
             for p in FRAMEWORK_AGENTS_DIR.iterdir()
-            if p.is_dir()
-            and (
-                (p / "agent.json").exists()
-                or (p / "agent.py").exists()
-            )
+            if p.is_dir() and ((p / "agent.json").exists() or (p / "agent.py").exists())
         ],
         key=lambda p: p.name,
     )

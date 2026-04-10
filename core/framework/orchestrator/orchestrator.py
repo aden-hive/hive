@@ -16,9 +16,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from framework.agent_loop.conversation import LEGACY_RUN_ID
+from framework.llm.provider import LLMProvider, Tool
+from framework.observability import set_trace_context
 from framework.orchestrator.checkpoint_config import CheckpointConfig
 from framework.orchestrator.context import GraphContext, build_node_context
-from framework.agent_loop.conversation import LEGACY_RUN_ID
 from framework.orchestrator.edge import EdgeCondition, EdgeSpec, GraphSpec
 from framework.orchestrator.goal import Goal
 from framework.orchestrator.node import (
@@ -28,11 +30,9 @@ from framework.orchestrator.node import (
     NodeSpec,
 )
 from framework.orchestrator.validator import OutputValidator
-from framework.llm.provider import LLMProvider, Tool
-from framework.observability import set_trace_context
-from framework.tracker.decision_tracker import DecisionTracker
 from framework.schemas.checkpoint import Checkpoint
 from framework.storage.checkpoint_store import CheckpointStore
+from framework.tracker.decision_tracker import DecisionTracker
 from framework.utils.io import atomic_write
 
 logger = logging.getLogger(__name__)
@@ -377,8 +377,8 @@ class Orchestrator:
 
         Uses the same recursive binary-search splitting as EventLoopNode.
         """
-        from framework.agent_loop.conversation import extract_tool_call_history
         from framework.agent_loop.agent_loop import _is_context_too_large_error
+        from framework.agent_loop.conversation import extract_tool_call_history
 
         if _depth > self._PHASE_LLM_MAX_DEPTH:
             raise RuntimeError("Phase LLM compaction recursion limit")
@@ -1305,6 +1305,7 @@ class Orchestrator:
         Replaces the imperative while-loop with autonomous workers that
         self-activate based on edge conditions and fan-out tracking.
         """
+        from framework.host.event_bus import AgentEvent, EventType
         from framework.orchestrator.node_worker import (
             Activation,
             FanOutTag,
@@ -1312,7 +1313,6 @@ class Orchestrator:
             WorkerCompletion,
             WorkerLifecycle,
         )
-        from framework.host.event_bus import AgentEvent, EventType
 
         # Build shared graph context
         gc = GraphContext(

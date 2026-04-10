@@ -20,6 +20,7 @@ export default function AppHeader() {
 
   let title = "OpenHive";
   let icon: React.ReactNode = null;
+  let queenTitle: string | null = null;
 
   if (colonyMatch) {
     const colonyId = colonyMatch[1];
@@ -31,6 +32,7 @@ export default function AppHeader() {
     const queen = queens.find((q) => q.id === queenId);
     const queenInfo = getQueenForAgent(queenId);
     title = profile?.name ?? queen?.name ?? queenInfo.name;
+    queenTitle = profile?.title ?? queen?.role ?? queenInfo.role;
     icon = <Crown className="w-4 h-4 text-primary" />;
   } else if (location.pathname === "/org-chart") {
     title = "Org Chart";
@@ -55,6 +57,11 @@ export default function AppHeader() {
         <div className="flex items-center gap-2">
           {icon}
           <h1 className="text-sm font-semibold text-foreground">{title}</h1>
+          {queenTitle && (
+            <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary shadow-sm">
+              {queenTitle}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {actions}

@@ -73,20 +73,24 @@ class PipelineRunner:
                 reason = result.rejection_reason or "(no reason given)"
                 logger.warning(
                     "[pipeline] REJECTED by %s (%.1fms): %s",
-                    stage_name, elapsed_ms, reason,
+                    stage_name,
+                    elapsed_ms,
+                    reason,
                 )
                 raise PipelineRejectedError(stage_name, reason)
             if result.action == "transform":
                 logger.info(
                     "[pipeline] %s TRANSFORMED input (%.1fms)",
-                    stage_name, elapsed_ms,
+                    stage_name,
+                    elapsed_ms,
                 )
                 if result.input_data is not None:
                     ctx.input_data = result.input_data
             else:
                 logger.info(
                     "[pipeline] %s passed (%.1fms)",
-                    stage_name, elapsed_ms,
+                    stage_name,
+                    elapsed_ms,
                 )
         total_ms = (time.perf_counter() - pipeline_start) * 1000
         logger.info("[pipeline] Complete (%.1fms total)", total_ms)

@@ -244,7 +244,45 @@ def create_app(model: str | None = None) -> web.Application:
         credential_store = CredentialStore.for_testing({})
 
     app["credential_store"] = credential_store
-    app["manager"] = SessionManager(model=model, credential_store=credential_store)
+
+    # Pre-load queen MCP tools once at startup (cached for all sessions)
+    # This avoids rebuilding the tool registry for every queen session
+    from framework.loader.mcp_registry import MCPRegistry
+    from framework.loader.tool_registry import ToolRegistry
+
+    _queen_tool_registry: ToolRegistry | None = None
+    try:
+        _queen_tool_registry = ToolRegistry()
+        import framework.agents.queen as _queen_pkg
+
+        queen_pkg_dir = Path(_queen_pkg.__file__).parent
+        mcp_config = queen_pkg_dir / "mcp_servers.json"
+        if mcp_config.exists():
+            _queen_tool_registry.load_mcp_config(mcp_config)
+            logger.info("Pre-loaded queen MCP tools from %s", mcp_config)
+
+        registry = MCPRegistry()
+        registry.initialize()
+        if (queen_pkg_dir / "mcp_registry.json").is_file():
+            _queen_tool_registry.set_mcp_registry_agent_path(queen_pkg_dir)
+        registry_configs, selection_max_tools = registry.load_agent_selection(queen_pkg_dir)
+        if registry_configs:
+            _queen_tool_registry.load_registry_servers(
+                registry_configs,
+                preserve_existing_tools=True,
+                log_collisions=True,
+                max_tools=selection_max_tools,
+            )
+        logger.info(
+            "Pre-loaded queen tool registry with %d tools", len(_queen_tool_registry.get_tools())
+        )
+    except Exception as e:
+        logger.warning("Failed to pre-load queen tool registry: %s", e)
+
+    app["queen_tool_registry"] = _queen_tool_registry
+    app["manager"] = SessionManager(
+        model=model, credential_store=credential_store, queen_tool_registry=_queen_tool_registry
+    )
 
     # Register shutdown hook
     app.on_shutdown.append(_on_shutdown)

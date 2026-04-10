@@ -43,8 +43,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from framework.credentials.models import CredentialError
-from framework.loader.preload_validation import credential_errors_to_json, validate_credentials
 from framework.host.event_bus import AgentEvent, EventType
+from framework.loader.preload_validation import credential_errors_to_json, validate_credentials
 from framework.server.app import validate_agent_path
 from framework.tools.flowchart_utils import (
     FLOWCHART_TYPES,
@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from framework.loader.tool_registry import ToolRegistry
     from framework.host.colony_runtime import ColonyRuntime
     from framework.host.event_bus import EventBus
+    from framework.loader.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -286,8 +287,12 @@ class QueenPhaseState:
 
     # Cached global recall block — populated async by recall_selector after each turn.
     _cached_global_recall_block: str = ""
+    # Cached queen-scoped recall block — populated async by recall_selector after each turn.
+    _cached_queen_recall_block: str = ""
     # Global memory directory.
     global_memory_dir: Path | None = None
+    # Queen-scoped memory directory.
+    queen_memory_dir: Path | None = None
 
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
@@ -331,6 +336,8 @@ class QueenPhaseState:
             parts.append(self.protocols_prompt)
         if self._cached_global_recall_block:
             parts.append(self._cached_global_recall_block)
+        if self._cached_queen_recall_block:
+            parts.append(self._cached_queen_recall_block)
         return "\n\n".join(parts)
 
     async def _emit_phase_event(self) -> None:

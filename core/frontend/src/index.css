@@ -310,3 +310,44 @@
 .animate-in.slide-in-from-bottom {
   animation: slide-in-from-bottom 0.25s ease-out;
 }
+
+/* Home status line shimmer */
+@keyframes queen-debate-line {
+  0%, 100% {
+    opacity: 0.72;
+    transform: translateY(0);
+    background-position: 0% 50%;
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-1px);
+    background-position: 100% 50%;
+  }
+}
+
+.queen-debate-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  color: hsl(var(--muted-foreground));
+  background-image: linear-gradient(
+    90deg,
+    hsl(var(--muted-foreground) / 0.75),
+    hsl(var(--primary) / 0.95),
+    hsl(var(--muted-foreground) / 0.75)
+  );
+  background-size: 220% 100%;
+  background-position: 0% 50%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: queen-debate-line 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .queen-debate-line {
+    animation: none;
+    background-image: none;
+    color: hsl(var(--muted-foreground));
+  }
+}

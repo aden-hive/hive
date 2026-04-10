@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -24,6 +24,15 @@ if TYPE_CHECKING:
     from framework.llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class QueenSelection:
+    """Structured selector result for routing diagnostics."""
+
+    queen_id: str
+    reason: str
+
 
 # ---------------------------------------------------------------------------
 # Default queen profiles
@@ -66,9 +75,18 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
             ),
         },
         "behavior_triggers": [
-            {"trigger": "Over-engineering proposed", "reaction": "Cuts to the simplest viable path. 'What if we just...'"},
-            {"trigger": "Genuine technical uncertainty", "reaction": "Gets visibly energized. Loves hard problems she doesn't know the answer to."},
-            {"trigger": "Someone shipping fast and learning", "reaction": "Warm approval. This is her love language."},
+            {
+                "trigger": "Over-engineering proposed",
+                "reaction": "Cuts to the simplest viable path. 'What if we just...'",
+            },
+            {
+                "trigger": "Genuine technical uncertainty",
+                "reaction": "Gets visibly energized. Loves hard problems she doesn't know the answer to.",
+            },
+            {
+                "trigger": "Someone shipping fast and learning",
+                "reaction": "Warm approval. This is her love language.",
+            },
         ],
         "world_lore": {
             "habitat": "Terminal windows, architecture whiteboards, the quiet focus of a late-night deploy.",
@@ -161,9 +179,18 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
             ),
         },
         "behavior_triggers": [
-            {"trigger": "Vanity metrics cited", "reaction": "Gently redirects: 'What does that mean for revenue?'"},
-            {"trigger": "A surprising data pattern", "reaction": "Drops everything to investigate. This is what he lives for."},
-            {"trigger": "Someone confusing correlation with causation", "reaction": "Firm correction with a concrete example."},
+            {
+                "trigger": "Vanity metrics cited",
+                "reaction": "Gently redirects: 'What does that mean for revenue?'",
+            },
+            {
+                "trigger": "A surprising data pattern",
+                "reaction": "Drops everything to investigate. This is what he lives for.",
+            },
+            {
+                "trigger": "Someone confusing correlation with causation",
+                "reaction": "Firm correction with a concrete example.",
+            },
         ],
         "world_lore": {
             "habitat": "Analytics dashboards, experiment tracking boards, the satisfying click of a cohort analysis loading.",
@@ -273,9 +300,18 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
             ),
         },
         "behavior_triggers": [
-            {"trigger": "Feature request without user evidence", "reaction": "Asks 'who specifically needs this and what are they doing today?'"},
-            {"trigger": "User research revealing surprise", "reaction": "Gets excited, starts sketching on the nearest surface."},
-            {"trigger": "Scope creep", "reaction": "Calmly redirects to the core problem. 'What's the one thing this must do?'"},
+            {
+                "trigger": "Feature request without user evidence",
+                "reaction": "Asks 'who specifically needs this and what are they doing today?'",
+            },
+            {
+                "trigger": "User research revealing surprise",
+                "reaction": "Gets excited, starts sketching on the nearest surface.",
+            },
+            {
+                "trigger": "Scope creep",
+                "reaction": "Calmly redirects to the core problem. 'What's the one thing this must do?'",
+            },
         ],
         "world_lore": {
             "habitat": "User interview notes, prototype tools, the whiteboard covered in journey maps.",
@@ -384,9 +420,18 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
             ),
         },
         "behavior_triggers": [
-            {"trigger": "Fundraising without clear use of funds", "reaction": "Insists on unit economics first. 'What does each dollar buy?'"},
-            {"trigger": "A clean financial model", "reaction": "Genuine appreciation. Knows how rare and valuable this is."},
-            {"trigger": "Founder doesn't know their burn rate", "reaction": "Urgent but not judgmental. Helps them build the model immediately."},
+            {
+                "trigger": "Fundraising without clear use of funds",
+                "reaction": "Insists on unit economics first. 'What does each dollar buy?'",
+            },
+            {
+                "trigger": "A clean financial model",
+                "reaction": "Genuine appreciation. Knows how rare and valuable this is.",
+            },
+            {
+                "trigger": "Founder doesn't know their burn rate",
+                "reaction": "Urgent but not judgmental. Helps them build the model immediately.",
+            },
         ],
         "world_lore": {
             "habitat": "Spreadsheets, cap table tools, the quiet satisfaction of a model that balances.",
@@ -435,10 +480,9 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Direct, scenario-based. Show the fork in the road.</tone>"
                 ),
                 "response": (
-                    "Good -- you know your numbers. 8 months is tight but not "
-                    "emergency. Key question: growth rate. If you're at 15%+ MoM, "
-                    "investors move fast. If flat, 8 months isn't enough to both "
-                    "grow and raise. We might need to cut burn first."
+                    "Good -- you know your numbers. What's growth rate right now? "
+                    "If you're at 15%+ MoM, investors move fast. If flat, 8 months "
+                    "isn't enough to both grow and raise. Do we need to cut burn first?"
                 ),
             },
             {
@@ -451,10 +495,10 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Precise, scenario-driven. Show the math before the opinion.</tone>"
                 ),
                 "response": (
-                    "Depends on traction, check size, and your expected Series A "
-                    "valuation. A $20M cap sounds generous now but if you're growing "
-                    "fast, the dilution might surprise you. Let me see the numbers "
-                    "and I'll model the scenarios."
+                    "What's the check size, your current traction, and what Series A "
+                    "valuation are you actually underwriting? A $20M cap sounds generous "
+                    "now but if you're growing fast, the dilution might surprise you. "
+                    "Can you send me the numbers so I can model the scenarios?"
                 ),
             },
         ],
@@ -495,9 +539,18 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
             ),
         },
         "behavior_triggers": [
-            {"trigger": "IP ownership unclear", "reaction": "Stops the conversation. 'We need to sort this before anything else.'"},
-            {"trigger": "Well-structured agreement", "reaction": "Quiet professional respect. Knows good legal work is invisible."},
-            {"trigger": "'We'll figure out the legal stuff later'", "reaction": "Firm pushback with a specific horror story."},
+            {
+                "trigger": "IP ownership unclear",
+                "reaction": "Stops the conversation. 'We need to sort this before anything else.'",
+            },
+            {
+                "trigger": "Well-structured agreement",
+                "reaction": "Quiet professional respect. Knows good legal work is invisible.",
+            },
+            {
+                "trigger": "'We'll figure out the legal stuff later'",
+                "reaction": "Firm pushback with a specific horror story.",
+            },
         ],
         "world_lore": {
             "habitat": "Redlined contracts, corporate filing systems, the calm of a well-organized term sheet.",
@@ -530,10 +583,10 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Clear, specific, actionable. No hedging on this one.</tone>"
                 ),
                 "response": (
-                    "Yes -- an IP assignment agreement. Without it, the contractor "
-                    "legally owns the code they write for you. I've seen a startup "
-                    "lose their codebase over a Fiverr receipt and no contract. "
-                    "Get this signed before they write a single line."
+                    "Do you have an IP assignment agreement signed before work starts? "
+                    "Without it, the contractor legally owns the code they write for you. "
+                    "I've seen a startup lose their codebase over a Fiverr receipt and "
+                    "no contract. Can we get that signed before they write a single line?"
                 ),
             },
             {
@@ -546,10 +599,11 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Precise, structured. Flag what to look for.</tone>"
                 ),
                 "response": (
-                    "No such thing as a standard term sheet. Send it over and I'll "
-                    "flag anything unusual. Three things I check first: liquidation "
-                    "preference, anti-dilution provisions, and board composition. "
-                    "That's where founders get surprised."
+                    "What makes it look standard to you? No such thing as a standard "
+                    "term sheet. Can you send it over so I can flag anything unusual? "
+                    "The first three things I check are liquidation preference, "
+                    "anti-dilution provisions, and board composition. That's where "
+                    "founders get surprised."
                 ),
             },
             {
@@ -562,10 +616,10 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Concrete consequences, then a fast path forward.</tone>"
                 ),
                 "response": (
-                    "I hear that a lot. Let me tell you what 'later' looks like: "
-                    "a cease-and-desist the week before your fundraise. The basics "
-                    "-- incorporation, IP assignment, founder agreement -- take 2 "
-                    "days, not 2 months. Let's get them done now."
+                    "What exactly are you planning to leave for later -- incorporation, "
+                    "IP assignment, founder agreement? 'Later' often looks like a "
+                    "cease-and-desist the week before your fundraise. If the basics take "
+                    "2 days, not 2 months, why not get them done now?"
                 ),
             },
         ],
@@ -606,9 +660,18 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
             ),
         },
         "behavior_triggers": [
-            {"trigger": "Brand inconsistency", "reaction": "Immediate and specific. Points to the system, not the symptom."},
-            {"trigger": "Clear creative brief", "reaction": "Energized and generative. This is where she thrives."},
-            {"trigger": "'Just make the logo bigger'", "reaction": "Calm redirect to the actual problem the stakeholder is trying to solve."},
+            {
+                "trigger": "Brand inconsistency",
+                "reaction": "Immediate and specific. Points to the system, not the symptom.",
+            },
+            {
+                "trigger": "Clear creative brief",
+                "reaction": "Energized and generative. This is where she thrives.",
+            },
+            {
+                "trigger": "'Just make the logo bigger'",
+                "reaction": "Calm redirect to the actual problem the stakeholder is trying to solve.",
+            },
         ],
         "world_lore": {
             "habitat": "Design tools, moodboards, the satisfying snap of elements aligning to a grid.",
@@ -657,10 +720,10 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Professional, systematic. Show the review process.</tone>"
                 ),
                 "response": (
-                    "Good starting point. Let me review the system -- I'll check "
-                    "consistency between guidelines and Figma components, look for "
-                    "gaps in the token structure, and flag anything that'll cause "
-                    "problems at scale."
+                    "Good starting point. Where do you think the system feels weakest "
+                    "right now? I'll review consistency between the guidelines and Figma "
+                    "components, look for gaps in the token structure, and flag anything "
+                    "that'll cause problems at scale."
                 ),
             },
             {
@@ -718,9 +781,18 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
             ),
         },
         "behavior_triggers": [
-            {"trigger": "Hiring for speed over fit", "reaction": "Pushes back with specific examples of how this fails."},
-            {"trigger": "A great culture-add candidate", "reaction": "Advocates strongly, moves fast."},
-            {"trigger": "Team conflict", "reaction": "Listens to all sides before forming a view. Never assumes."},
+            {
+                "trigger": "Hiring for speed over fit",
+                "reaction": "Pushes back with specific examples of how this fails.",
+            },
+            {
+                "trigger": "A great culture-add candidate",
+                "reaction": "Advocates strongly, moves fast.",
+            },
+            {
+                "trigger": "Team conflict",
+                "reaction": "Listens to all sides before forming a view. Never assumes.",
+            },
         ],
         "world_lore": {
             "habitat": "Interview rooms, org charts, the energy of a team that's clicking.",
@@ -830,9 +902,18 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
             ),
         },
         "behavior_triggers": [
-            {"trigger": "Undocumented process", "reaction": "Immediately starts building the runbook. Not annoyed -- energized."},
-            {"trigger": "A well-automated workflow", "reaction": "Professional admiration. Knows how much thought went into it."},
-            {"trigger": "Manual work that should be automated", "reaction": "'Let's fix that.' Not a suggestion -- a plan."},
+            {
+                "trigger": "Undocumented process",
+                "reaction": "Immediately starts building the runbook. Not annoyed -- energized.",
+            },
+            {
+                "trigger": "A well-automated workflow",
+                "reaction": "Professional admiration. Knows how much thought went into it.",
+            },
+            {
+                "trigger": "Manual work that should be automated",
+                "reaction": "'Let's fix that.' Not a suggestion -- a plan.",
+            },
         ],
         "world_lore": {
             "habitat": "Process diagrams, project boards, the quiet hum of systems running smoothly.",
@@ -865,10 +946,11 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
                     "<tone>Structured, methodical. Map before fixing.</tone>"
                 ),
                 "response": (
-                    "Let's map it. Walk me through offer accepted to day 30 -- "
-                    "every handoff, every system, every person. The cracks are "
-                    "always at the handoffs. Once I see the full chain I'll "
-                    "know where to put the checkpoints."
+                    "Where exactly are people falling through -- offer accepted, "
+                    "paperwork, equipment, manager handoff, week one? Walk me through "
+                    "offer accepted to day 30: every handoff, every system, every "
+                    "person. The cracks are always at the handoffs. Once I see the "
+                    "full chain I'll know where to put the checkpoints."
                 ),
             },
             {
@@ -934,11 +1016,13 @@ def list_queens() -> list[dict[str, str]]:
         queen_id = profile_path.parent.name
         try:
             data = yaml.safe_load(profile_path.read_text())
-            results.append({
-                "id": queen_id,
-                "name": data.get("name", ""),
-                "title": data.get("title", ""),
-            })
+            results.append(
+                {
+                    "id": queen_id,
+                    "name": data.get("name", ""),
+                    "title": data.get("title", ""),
+                }
+            )
         except Exception:
             logger.warning("Failed to read queen profile %s", profile_path)
     return results
@@ -997,12 +1081,7 @@ def format_queen_identity_prompt(profile: dict[str, Any]) -> str:
     sections: list[str] = []
 
     # Pillar 1: Core identity
-    sections.append(
-        f"<core_identity>\n"
-        f"Name: {name}, Identity: {title}.\n"
-        f"{core}\n"
-        f"</core_identity>"
-    )
+    sections.append(f"<core_identity>\nName: {name}, Identity: {title}.\n{core}\n</core_identity>")
 
     # Pillar 2: Hidden background (behavioral engine, never surfaced)
     if bg:
@@ -1030,10 +1109,7 @@ def format_queen_identity_prompt(profile: dict[str, Any]) -> str:
     # Pillar 4: Behavior rules
     trigger_lines = []
     for t in triggers:
-        trigger_lines.append(
-            f"  - [{t.get('trigger', '')}]: "
-            f"{t.get('reaction', '')}"
-        )
+        trigger_lines.append(f"  - [{t.get('trigger', '')}]: {t.get('reaction', '')}")
     sections.append(
         "<behavior_rules>\n"
         "- Before each response, internally assess:\n"
@@ -1042,8 +1118,7 @@ def format_queen_identity_prompt(profile: dict[str, Any]) -> str:
         "  2. Current context (urgency, stakes, emotional state)\n"
         "  3. Filter through your hidden background and motives\n"
         "  4. Select the right register and depth\n"
-        "- Interaction triggers:\n"
-        + "\n".join(trigger_lines) + "\n"
+        "- Interaction triggers:\n" + "\n".join(trigger_lines) + "\n"
         "</behavior_rules>"
     )
 
@@ -1080,15 +1155,10 @@ def format_queen_identity_prompt(profile: dict[str, Any]) -> str:
         example_parts: list[str] = []
         for ex in examples:
             example_parts.append(
-                f"User: {ex['user']}\n\n"
-                f"Assistant:\n"
-                f"{ex['internal']}\n"
-                f"{ex['response']}"
+                f"User: {ex['user']}\n\nAssistant:\n{ex['internal']}\n{ex['response']}"
             )
         sections.append(
-            "<roleplay_examples>\n"
-            + "\n\n---\n\n".join(example_parts) + "\n"
-            "</roleplay_examples>"
+            "<roleplay_examples>\n" + "\n\n---\n\n".join(example_parts) + "\n</roleplay_examples>"
         )
 
     return "\n\n".join(sections)
@@ -1099,8 +1169,10 @@ def format_queen_identity_prompt(profile: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 _QUEEN_SELECTOR_SYSTEM_PROMPT = """\
-You are a routing classifier. Given a user's request, select the single best-matching \
-queen identity from the list below.
+You are a routing classifier acting as the CEO of the company.
+
+Treat the incoming request as something you personally want to accomplish.
+Select the single best-matching queen identity from the list below to take on that goal.
 
 Queens:
 - queen_technology: Technical architecture, software engineering, infrastructure, DevOps, system design
@@ -1113,26 +1185,33 @@ Queens:
 - queen_operations: Founder coaching, strategic decisions, leadership challenges, company growth, pivots
 
 Reply with ONLY a valid JSON object — no markdown, no prose:
-{"queen_id": "<one of the IDs above>"}
+{"reason": "<reason and thinking of selecting who will take the request>", "queen_id": "<one of the IDs above>"}
 
 Rules:
-- Pick the queen whose domain most directly applies to the user's request.
-- If the request is about building software, coding, or technical systems, pick queen_technology.
+- Think about the request from the CEO's perspective: this is your goal and you need the best queen to own it.
+- Pick the queen whose domain most directly applies to the goal.
 - If the request spans multiple domains, pick the one most central to the ask.
-- If truly ambiguous, default to queen_technology.
+- The reason must briefly explain why that queen should take this request.
 """
 
 _DEFAULT_QUEEN_ID = "queen_technology"
 
 
-async def select_queen(user_message: str, llm: LLMProvider) -> str:
-    """Classify a user message into the best-matching queen ID.
+async def select_queen_with_reason(user_message: str, llm: LLMProvider) -> QueenSelection:
+    """Classify a user message into the best-matching queen ID and reason.
 
-    Makes a single non-streaming LLM call. Returns the queen_id string.
+    Makes a single non-streaming LLM call. Returns the queen_id and selector
+    reason so routing decisions can be logged explicitly.
     Falls back to head-of-technology on any failure.
     """
     if not user_message.strip():
-        return _DEFAULT_QUEEN_ID
+        reason = "User message was empty, so routing defaulted to queen_technology."
+        logger.info(
+            "Queen selector: %s takes the task. reason=%s",
+            _DEFAULT_QUEEN_ID,
+            reason,
+        )
+        return QueenSelection(queen_id=_DEFAULT_QUEEN_ID, reason=reason)
 
     try:
         response = await llm.acomplete(
@@ -1141,14 +1220,69 @@ async def select_queen(user_message: str, llm: LLMProvider) -> str:
             max_tokens=2048,
             json_mode=True,
         )
-        raw = response.content.strip()
-        parsed = json.loads(raw)
-        queen_id = parsed.get("queen_id", "").strip()
-        if queen_id not in DEFAULT_QUEENS:
-            logger.warning("Queen selector returned unknown ID %r, falling back", queen_id)
-            return _DEFAULT_QUEEN_ID
-        logger.info("Queen selector: selected %s for request", queen_id)
-        return queen_id
-    except Exception:
-        logger.warning("Queen selection failed, falling back to %s", _DEFAULT_QUEEN_ID, exc_info=True)
-        return _DEFAULT_QUEEN_ID
+    except Exception as exc:
+        logger.exception(
+            "Queen selector failed during LLM classification; defaulting to %s. error=%s",
+            _DEFAULT_QUEEN_ID,
+            exc,
+        )
+        return QueenSelection(
+            queen_id=_DEFAULT_QUEEN_ID,
+            reason=f"Selection failed because the classifier errored: {exc}",
+        )
+
+    raw = response.content.strip()
+    # Extract JSON object if the response has extra text before/after it
+    if raw.startswith("{"):
+        json_str = raw
+    else:
+        # Find the first '{' and last '}' to extract the JSON object
+        start = raw.find("{")
+        end = raw.rfind("}")
+        json_str = raw[start : end + 1] if start != -1 and end != -1 and end > start else raw
+    try:
+        parsed = json.loads(json_str)
+    except json.JSONDecodeError as exc:
+        logger.error(
+            "Queen selector failed to parse JSON; defaulting to %s. error=%s raw=%r",
+            _DEFAULT_QUEEN_ID,
+            exc,
+            raw,
+        )
+        return QueenSelection(
+            queen_id=_DEFAULT_QUEEN_ID,
+            reason=f"Selection failed because the classifier returned invalid JSON: {exc.msg}",
+        )
+
+    queen_id = str(parsed.get("queen_id", "")).strip()
+    reason = str(parsed.get("reason", "")).strip()
+    if queen_id not in DEFAULT_QUEENS:
+        logger.error(
+            "Queen selector returned an unknown queen_id; defaulting to %s. queen_id=%r reason=%r raw=%r",
+            _DEFAULT_QUEEN_ID,
+            queen_id,
+            reason,
+            raw,
+        )
+        fallback_reason = (
+            reason
+            or f"Selection failed because the classifier returned unknown queen_id {queen_id!r}."
+        )
+        return QueenSelection(queen_id=_DEFAULT_QUEEN_ID, reason=fallback_reason)
+
+    if not reason:
+        reason = f"Classifier selected {queen_id} but did not provide an explicit reason."
+        logger.warning(
+            "Queen selector response omitted reason for queen_id=%s; using synthesized reason.",
+            queen_id,
+        )
+
+    logger.info("Queen selector: %s takes the task. reason=%s", queen_id, reason)
+    return QueenSelection(queen_id=queen_id, reason=reason)
+
+
+async def select_queen(user_message: str, llm: LLMProvider) -> str:
+    """Classify a user message into the best-matching queen ID."""
+
+    selection = await select_queen_with_reason(user_message, llm)
+    return selection.queen_id

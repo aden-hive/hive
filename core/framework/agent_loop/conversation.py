@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
 LEGACY_RUN_ID = "__legacy_run__"
+logger = logging.getLogger(__name__)
 
 
 def is_legacy_run_id(run_id: str | None) -> bool:
@@ -1252,7 +1254,21 @@ class NodeConversation:
 
         parts = await store.read_parts()
         if phase_id:
-            parts = [p for p in parts if p.get("phase_id") == phase_id]
+            filtered_parts = [p for p in parts if p.get("phase_id") == phase_id]
+            if filtered_parts:
+                parts = filtered_parts
+            elif parts and all(p.get("phase_id") is None for p in parts):
+                # Backward compatibility: older isolated stores (including queen
+                # sessions) persisted parts without phase_id. In that case, the
+                # phase filter would incorrectly hide the entire conversation.
+                logger.info(
+                    "Restoring legacy unphased conversation without applying "
+                    "phase filter (phase_id=%s, parts=%d)",
+                    phase_id,
+                    len(parts),
+                )
+            else:
+                parts = filtered_parts
         # Filter by run_id so intentional restarts (new run_id) start fresh
         # while crash recovery (same run_id) loads prior parts.
         if run_id and not is_legacy_run_id(run_id):

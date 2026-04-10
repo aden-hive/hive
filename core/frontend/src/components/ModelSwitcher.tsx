@@ -14,9 +14,10 @@ export default function ModelSwitcher({ onOpenSettings }: ModelSwitcherProps) {
     connectedProviders,
     availableModels,
     setModel,
+    activateSubscription,
     activeSubscription,
     subscriptions,
-    activateSubscription,
+    detectedSubscriptions,
     loading,
   } = useModel();
 
@@ -53,11 +54,6 @@ export default function ModelSwitcher({ onOpenSettings }: ModelSwitcherProps) {
     (p) => connectedProviders.has(p.id) && availableModels[p.id]?.length,
   );
 
-  // Whether the active subscription's provider is already covered by API key providers
-  const subProviderCovered = activeSubInfo
-    ? apiKeyProviders.some((p) => p.id === activeSubInfo.provider)
-    : true;
-
   const handleSelectApiKey = async (provider: string, modelId: string) => {
     setOpen(false);
     try {
@@ -67,15 +63,19 @@ export default function ModelSwitcher({ onOpenSettings }: ModelSwitcherProps) {
     }
   };
 
-  const handleSelectSubscription = async (modelId: string) => {
-    if (!activeSubscription) return;
+  const handleSelectSubscription = async (subscriptionId: string) => {
     setOpen(false);
     try {
-      await activateSubscription(activeSubscription, modelId);
+      await activateSubscription(subscriptionId);
     } catch (err) {
-      console.error("Failed to switch subscription model:", err);
+      console.error("Failed to activate subscription:", err);
     }
   };
+
+  // Get detected but inactive subscriptions
+  const availableSubscriptions = subscriptions.filter(
+    (sub) => detectedSubscriptions.has(sub.id) && activeSubscription !== sub.id
+  );
 
   const recommendedIcon = (
     <span
@@ -88,6 +88,8 @@ export default function ModelSwitcher({ onOpenSettings }: ModelSwitcherProps) {
       </span>
     </span>
   );
+
+  const hasAnyProvider = apiKeyProviders.length > 0 || availableSubscriptions.length > 0 || activeSubInfo;
 
   return (
     <div className="relative" ref={ref}>
@@ -104,81 +106,89 @@ export default function ModelSwitcher({ onOpenSettings }: ModelSwitcherProps) {
       {open && (
         <div className="absolute right-0 top-full mt-1.5 w-[260px] bg-card border border-border/60 rounded-lg shadow-xl z-50 overflow-hidden">
           <div className="max-h-[320px] overflow-y-auto">
-            {/* Active subscription's models */}
-            {activeSubInfo && !subProviderCovered && availableModels[activeSubInfo.provider]?.length > 0 && (
+            {/* Active subscription */}
+            {activeSubInfo && (
+              <div className="px-3 py-2 bg-purple-500/5 border-b border-border/40">
+                <p className="text-[10px] font-semibold text-purple-400/80 uppercase tracking-wider mb-1">
+                  Active Subscription
+                </p>
+                <div className="flex items-center gap-2">
+                  <Check className="w-3 h-3 text-purple-400" />
+                  <span className="text-xs font-medium text-foreground">
+                    {activeSubInfo.name}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Available subscriptions */}
+            {availableSubscriptions.length > 0 && (
               <div>
                 <p className="px-3 pt-2.5 pb-1 text-[10px] font-semibold text-purple-400/80 uppercase tracking-wider">
-                  {activeSubInfo.name}
+                  Available Subscriptions
                 </p>
-                {(availableModels[activeSubInfo.provider] || []).map(
-                  (model: ModelOption) => {
-                    const isActive = currentModel === model.id && !!activeSubscription;
-                    return (
-                      <button
-                        key={`sub-${model.id}`}
-                        onClick={() => handleSelectSubscription(model.id)}
-                        className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
-                          isActive
-                            ? "bg-primary/10 text-primary"
-                            : "text-foreground hover:bg-muted/30"
-                        }`}
-                      >
-                        {isActive ? (
-                          <Check className="w-3 h-3 flex-shrink-0" />
-                        ) : (
-                          <span className="w-3" />
-                        )}
-                        <span className="truncate">{model.label.split(" - ")[0]}</span>
-                        {model.recommended && recommendedIcon}
-                      </button>
-                    );
-                  },
-                )}
+                {availableSubscriptions.map((sub) => (
+                  <button
+                    key={sub.id}
+                    onClick={() => handleSelectSubscription(sub.id)}
+                    className="w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors text-foreground hover:bg-muted/30"
+                  >
+                    <span className="w-3" />
+                    <span className="truncate">{sub.name}</span>
+                  </button>
+                ))}
               </div>
             )}
 
             {/* API key provider models */}
-            {apiKeyProviders.length === 0 && !activeSubInfo ? (
+            {!hasAnyProvider ? (
               <p className="px-4 py-3 text-xs text-muted-foreground">
-                No API keys configured.
+                No providers available. Add an API key or subscription.
               </p>
             ) : (
-              apiKeyProviders.map((provider) => (
-                <div key={provider.id}>
+              apiKeyProviders.length > 0 && (
+                <div>
                   <p className="px-3 pt-2.5 pb-1 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
-                    {provider.name}
+                    API Key Providers
                   </p>
-                  {(availableModels[provider.id] || []).map(
-                    (model: ModelOption) => {
-                      const isActive =
-                        currentProvider === provider.id &&
-                        currentModel === model.id &&
-                        !activeSubscription;
-                      return (
-                        <button
-                          key={model.id}
-                          onClick={() => handleSelectApiKey(provider.id, model.id)}
-                          className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
-                            isActive
-                              ? "bg-primary/10 text-primary"
-                              : "text-foreground hover:bg-muted/30"
-                          }`}
-                        >
-                          {isActive ? (
-                            <Check className="w-3 h-3 flex-shrink-0" />
-                          ) : (
-                            <span className="w-3" />
-                          )}
-                          <span className="truncate">
-                            {model.label.split(" - ")[0]}
-                          </span>
-                          {model.recommended && recommendedIcon}
-                        </button>
-                      );
-                    },
-                  )}
+                  {apiKeyProviders.map((provider) => (
+                    <div key={provider.id}>
+                      <p className="px-3 pt-2.5 pb-1 text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+                        {provider.name}
+                      </p>
+                      {(availableModels[provider.id] || []).map(
+                        (model: ModelOption) => {
+                          const isActive =
+                            currentProvider === provider.id &&
+                            currentModel === model.id &&
+                            !activeSubscription;
+                          return (
+                            <button
+                              key={model.id}
+                              onClick={() => handleSelectApiKey(provider.id, model.id)}
+                              className={`w-full text-left px-3 py-1.5 text-xs flex items-center gap-2 transition-colors ${
+                                isActive
+                                  ? "bg-primary/10 text-primary"
+                                  : "text-foreground hover:bg-muted/30"
+                              }`}
+                            >
+                              {isActive ? (
+                                <Check className="w-3 h-3 flex-shrink-0" />
+                              ) : (
+                                <span className="w-3" />
+                              )}
+                              <span className="truncate">
+                                {model.label.split(" - ")[0]}
+                              </span>
+                              {model.recommended && recommendedIcon}
+                            </button>
+                          );
+                        },
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))
+              )
             )}
           </div>
 

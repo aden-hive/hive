@@ -65,10 +65,7 @@ def build_stage(spec: dict[str, Any]) -> PipelineStage:
     stage_type = spec["type"]
     if stage_type not in _STAGE_REGISTRY:
         available = ", ".join(sorted(_STAGE_REGISTRY)) or "(none)"
-        raise KeyError(
-            f"Unknown pipeline stage type '{stage_type}'. "
-            f"Available: {available}"
-        )
+        raise KeyError(f"Unknown pipeline stage type '{stage_type}'. Available: {available}")
     cls = _STAGE_REGISTRY[stage_type]
     config = spec.get("config", {})
     stage = cls(**config)

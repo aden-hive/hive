@@ -452,90 +452,6 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
         ["DEEPSEEK_API_KEY"]="deepseek"
     )
 
-    declare -A DEFAULT_MODELS=(
-        ["anthropic"]="claude-haiku-4-5-20251001"
-        ["openai"]="gpt-5-mini"
-        ["minimax"]="MiniMax-M2.5"
-        ["gemini"]="gemini-3-flash-preview"
-        ["groq"]="moonshotai/kimi-k2-instruct-0905"
-        ["cerebras"]="zai-glm-4.7"
-        ["mistral"]="mistral-large-latest"
-        ["together_ai"]="meta-llama/Llama-3.3-70B-Instruct-Turbo"
-        ["deepseek"]="deepseek-chat"
-    )
-
-    # Model choices per provider: composite-key associative arrays
-    # Keys: "provider:index" -> value
-    declare -A MODEL_CHOICES_ID=(
-        ["anthropic:0"]="claude-haiku-4-5-20251001"
-        ["anthropic:1"]="claude-sonnet-4-20250514"
-        ["anthropic:2"]="claude-sonnet-4-5-20250929"
-        ["anthropic:3"]="claude-opus-4-6"
-        ["openai:0"]="gpt-5-mini"
-        ["openai:1"]="gpt-5.2"
-        ["gemini:0"]="gemini-3-flash-preview"
-        ["gemini:1"]="gemini-3.1-pro-preview"
-        ["groq:0"]="moonshotai/kimi-k2-instruct-0905"
-        ["groq:1"]="openai/gpt-oss-120b"
-        ["cerebras:0"]="zai-glm-4.7"
-        ["cerebras:1"]="qwen3-235b-a22b-instruct-2507"
-    )
-
-    declare -A MODEL_CHOICES_LABEL=(
-        ["anthropic:0"]="Haiku 4.5 - Fast + cheap (recommended)"
-        ["anthropic:1"]="Sonnet 4 - Fast + capable"
-        ["anthropic:2"]="Sonnet 4.5 - Best balance"
-        ["anthropic:3"]="Opus 4.6 - Most capable"
-        ["openai:0"]="GPT-5 Mini - Fast + cheap (recommended)"
-        ["openai:1"]="GPT-5.2 - Most capable"
-        ["gemini:0"]="Gemini 3 Flash - Fast (recommended)"
-        ["gemini:1"]="Gemini 3.1 Pro - Best quality"
-        ["groq:0"]="Kimi K2 - Best quality (recommended)"
-        ["groq:1"]="GPT-OSS 120B - Fast reasoning"
-        ["cerebras:0"]="ZAI-GLM 4.7 - Best quality (recommended)"
-        ["cerebras:1"]="Qwen3 235B - Frontier reasoning"
-    )
-
-    declare -A MODEL_CHOICES_MAXTOKENS=(
-        ["anthropic:0"]=8192
-        ["anthropic:1"]=8192
-        ["anthropic:2"]=16384
-        ["anthropic:3"]=32768
-        ["openai:0"]=16384
-        ["openai:1"]=16384
-        ["gemini:0"]=8192
-        ["gemini:1"]=8192
-        ["groq:0"]=8192
-        ["groq:1"]=8192
-        ["cerebras:0"]=8192
-        ["cerebras:1"]=8192
-    )
-
-    # Max context tokens (input history budget) per model, based on actual context windows.
-    # Leave ~10% headroom for system prompt and output tokens.
-    declare -A MODEL_CHOICES_MAXCONTEXTTOKENS=(
-        ["anthropic:0"]=180000   # Claude Haiku 4.5 — 200k context window
-        ["anthropic:1"]=180000   # Claude Sonnet 4 — 200k context window
-        ["anthropic:2"]=180000   # Claude Sonnet 4.5 — 200k context window
-        ["anthropic:3"]=180000   # Claude Opus 4.6 — 200k context window
-        ["openai:0"]=120000      # GPT-5 Mini — 128k context window
-        ["openai:1"]=120000      # GPT-5.2 — 128k context window
-        ["gemini:0"]=900000      # Gemini 3 Flash — 1M context window
-        ["gemini:1"]=900000      # Gemini 3.1 Pro — 1M context window
-        ["groq:0"]=120000        # Kimi K2 — 128k context window
-        ["groq:1"]=120000        # GPT-OSS 120B — 128k context window
-        ["cerebras:0"]=120000    # ZAI-GLM 4.7 — 128k context window
-        ["cerebras:1"]=120000    # Qwen3 235B — 128k context window
-    )
-
-    declare -A MODEL_CHOICES_COUNT=(
-        ["anthropic"]=4
-        ["openai"]=2
-        ["gemini"]=2
-        ["groq"]=2
-        ["cerebras"]=2
-    )
-
     # Helper functions for Bash 4+
     get_provider_name() {
         echo "${PROVIDER_NAMES[$1]}"
@@ -544,39 +460,11 @@ if [ "$USE_ASSOC_ARRAYS" = true ]; then
     get_provider_id() {
         echo "${PROVIDER_IDS[$1]}"
     }
-
-    get_default_model() {
-        echo "${DEFAULT_MODELS[$1]}"
-    }
-
-    get_model_choice_count() {
-        echo "${MODEL_CHOICES_COUNT[$1]:-0}"
-    }
-
-    get_model_choice_id() {
-        echo "${MODEL_CHOICES_ID[$1:$2]}"
-    }
-
-    get_model_choice_label() {
-        echo "${MODEL_CHOICES_LABEL[$1:$2]}"
-    }
-
-    get_model_choice_maxtokens() {
-        echo "${MODEL_CHOICES_MAXTOKENS[$1:$2]}"
-    }
-
-    get_model_choice_maxcontexttokens() {
-        echo "${MODEL_CHOICES_MAXCONTEXTTOKENS[$1:$2]}"
-    }
 else
     # Bash 3.2 - use parallel indexed arrays
     PROVIDER_ENV_VARS=(ANTHROPIC_API_KEY OPENAI_API_KEY MINIMAX_API_KEY GEMINI_API_KEY GOOGLE_API_KEY GROQ_API_KEY CEREBRAS_API_KEY OPENROUTER_API_KEY MISTRAL_API_KEY TOGETHER_API_KEY DEEPSEEK_API_KEY)
     PROVIDER_DISPLAY_NAMES=("Anthropic (Claude)" "OpenAI (GPT)" "MiniMax" "Google Gemini" "Google AI" "Groq" "Cerebras" "OpenRouter" "Mistral" "Together AI" "DeepSeek")
     PROVIDER_ID_LIST=(anthropic openai minimax gemini google groq cerebras openrouter mistral together deepseek)
-
-    # Default models by provider id (parallel arrays)
-    MODEL_PROVIDER_IDS=(anthropic openai minimax gemini groq cerebras mistral together_ai deepseek)
-    MODEL_DEFAULTS=("claude-haiku-4-5-20251001" "gpt-5-mini" "MiniMax-M2.5" "gemini-3-flash-preview" "moonshotai/kimi-k2-instruct-0905" "zai-glm-4.7" "mistral-large-latest" "meta-llama/Llama-3.3-70B-Instruct-Turbo" "deepseek-chat")
 
     # Helper: get provider display name for an env var
     get_provider_name() {
@@ -603,116 +491,199 @@ else
             i=$((i + 1))
         done
     }
+fi
 
-    # Helper: get default model for a provider id
-    get_default_model() {
-        local provider_id="$1"
-        local i=0
-        while [ $i -lt ${#MODEL_PROVIDER_IDS[@]} ]; do
-            if [ "${MODEL_PROVIDER_IDS[$i]}" = "$provider_id" ]; then
-                echo "${MODEL_DEFAULTS[$i]}"
+MODEL_DEFAULT_ROWS=""
+MODEL_CHOICE_ROWS=""
+PRESET_ROWS=""
+PRESET_MODEL_CHOICE_ROWS=""
+
+load_model_catalog_rows() {
+    # Bash 3.2 has no native JSON parser, so we materialize the shared catalogue
+    # into simple tab-separated rows once and reuse them for the interactive flow.
+    local catalog_lines=""
+    catalog_lines="$(uv run python -c '
+from framework.llm.model_catalog import get_default_models, get_models_catalogue, get_presets
+
+for provider_id, default_model in sorted(get_default_models().items()):
+    print(f"DEFAULT\t{provider_id}\t{default_model}")
+
+for provider_id, models in sorted(get_models_catalogue().items()):
+    for model in models:
+        print(
+            "MODEL\t{provider}\t{id}\t{label}\t{max_tokens}\t{max_context_tokens}".format(
+                provider=provider_id,
+                id=model["id"],
+                label=model["label"],
+                max_tokens=model["max_tokens"],
+                max_context_tokens=model["max_context_tokens"],
+            )
+        )
+
+for preset_id, preset in sorted(get_presets().items()):
+    print(
+        "PRESET\t{preset_id}\t{provider}\t{model}\t{max_tokens}\t{max_context_tokens}\t{api_key_env_var}\t{api_base}".format(
+            preset_id=preset_id,
+            provider=preset["provider"],
+            model=preset.get("model", ""),
+            max_tokens=preset["max_tokens"],
+            max_context_tokens=preset["max_context_tokens"],
+            api_key_env_var=preset.get("api_key_env_var", ""),
+            api_base=preset.get("api_base", ""),
+        )
+    )
+    for choice in preset.get("model_choices", []):
+        print(
+            "PRESET_MODEL\t{preset_id}\t{id}\t{label}\t{recommended}".format(
+                preset_id=preset_id,
+                id=choice["id"],
+                label=choice["label"],
+                recommended=str(choice["recommended"]).lower(),
+            )
+        )
+' 2>/dev/null)" || return 1
+
+    MODEL_DEFAULT_ROWS=""
+    MODEL_CHOICE_ROWS=""
+    PRESET_ROWS=""
+    PRESET_MODEL_CHOICE_ROWS=""
+
+    while IFS=$'\t' read -r row_type field1 field2 field3 field4 field5 field6 field7; do
+        [ -n "$row_type" ] || continue
+        if [ "$row_type" = "DEFAULT" ]; then
+            MODEL_DEFAULT_ROWS+="${field1}"$'\t'"${field2}"$'\n'
+        elif [ "$row_type" = "MODEL" ]; then
+            MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\n'
+        elif [ "$row_type" = "PRESET" ]; then
+            PRESET_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\t'"${field5}"$'\t'"${field6}"$'\t'"${field7}"$'\n'
+        elif [ "$row_type" = "PRESET_MODEL" ]; then
+            PRESET_MODEL_CHOICE_ROWS+="${field1}"$'\t'"${field2}"$'\t'"${field3}"$'\t'"${field4}"$'\n'
+        fi
+    done <<< "$catalog_lines"
+}
+
+get_default_model() {
+    local provider_id="$1"
+    while IFS=$'\t' read -r row_provider row_model; do
+        [ -n "$row_provider" ] || continue
+        if [ "$row_provider" = "$provider_id" ]; then
+            echo "$row_model"
+            return
+        fi
+    done <<< "$MODEL_DEFAULT_ROWS"
+}
+
+get_model_choice_count() {
+    local provider_id="$1"
+    local count=0
+    while IFS=$'\t' read -r row_provider _; do
+        [ -n "$row_provider" ] || continue
+        if [ "$row_provider" = "$provider_id" ]; then
+            count=$((count + 1))
+        fi
+    done <<< "$MODEL_CHOICE_ROWS"
+    echo "$count"
+}
+
+get_model_choice_field() {
+    local provider_id="$1"
+    local idx="$2"
+    local field="$3"
+    local count=0
+    while IFS=$'\t' read -r row_provider row_id row_label row_max_tokens row_max_context_tokens; do
+        [ -n "$row_provider" ] || continue
+        if [ "$row_provider" = "$provider_id" ]; then
+            if [ "$count" -eq "$idx" ]; then
+                case "$field" in
+                    id) echo "$row_id" ;;
+                    label) echo "$row_label" ;;
+                    max_tokens) echo "$row_max_tokens" ;;
+                    max_context_tokens) echo "$row_max_context_tokens" ;;
+                esac
                 return
             fi
-            i=$((i + 1))
-        done
-    }
+            count=$((count + 1))
+        fi
+    done <<< "$MODEL_CHOICE_ROWS"
+}
 
-    # Model choices per provider - flat parallel arrays with provider offsets
-    # Provider order: anthropic(4), openai(2), gemini(2), groq(2), cerebras(2)
-    MC_PROVIDERS=(anthropic anthropic anthropic anthropic openai openai gemini gemini groq groq cerebras cerebras)
-    MC_IDS=("claude-haiku-4-5-20251001" "claude-sonnet-4-20250514" "claude-sonnet-4-5-20250929" "claude-opus-4-6" "gpt-5-mini" "gpt-5.2" "gemini-3-flash-preview" "gemini-3.1-pro-preview" "moonshotai/kimi-k2-instruct-0905" "openai/gpt-oss-120b" "zai-glm-4.7" "qwen3-235b-a22b-instruct-2507")
-    MC_LABELS=("Haiku 4.5 - Fast + cheap (recommended)" "Sonnet 4 - Fast + capable" "Sonnet 4.5 - Best balance" "Opus 4.6 - Most capable" "GPT-5 Mini - Fast + cheap (recommended)" "GPT-5.2 - Most capable" "Gemini 3 Flash - Fast (recommended)" "Gemini 3.1 Pro - Best quality" "Kimi K2 - Best quality (recommended)" "GPT-OSS 120B - Fast reasoning" "ZAI-GLM 4.7 - Best quality (recommended)" "Qwen3 235B - Frontier reasoning")
-    MC_MAXTOKENS=(8192 8192 16384 32768 16384 16384 8192 8192 8192 8192 8192 8192)
-    # Max context tokens per model (same order as MC_PROVIDERS/MC_IDS above)
-    # Based on actual context windows with ~10% headroom for system prompt + output.
-    MC_MAXCONTEXTTOKENS=(180000 180000 180000 180000 120000 120000 900000 900000 120000 120000 120000 120000)
+get_model_choice_id() {
+    get_model_choice_field "$1" "$2" "id"
+}
 
-    # Helper: get number of model choices for a provider
-    get_model_choice_count() {
-        local provider_id="$1"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                count=$((count + 1))
+get_model_choice_label() {
+    get_model_choice_field "$1" "$2" "label"
+}
+
+get_model_choice_maxtokens() {
+    get_model_choice_field "$1" "$2" "max_tokens"
+}
+
+get_model_choice_maxcontexttokens() {
+    get_model_choice_field "$1" "$2" "max_context_tokens"
+}
+
+get_preset_field() {
+    local preset_id="$1"
+    local field="$2"
+    while IFS=$'\t' read -r row_preset_id row_provider row_model row_max_tokens row_max_context_tokens row_env_var row_api_base; do
+        [ -n "$row_preset_id" ] || continue
+        if [ "$row_preset_id" = "$preset_id" ]; then
+            case "$field" in
+                provider) echo "$row_provider" ;;
+                model) echo "$row_model" ;;
+                max_tokens) echo "$row_max_tokens" ;;
+                max_context_tokens) echo "$row_max_context_tokens" ;;
+                api_key_env_var) echo "$row_env_var" ;;
+                api_base) echo "$row_api_base" ;;
+            esac
+            return
+        fi
+    done <<< "$PRESET_ROWS"
+}
+
+apply_preset() {
+    local preset_id="$1"
+    SELECTED_PROVIDER_ID="$(get_preset_field "$preset_id" "provider")"
+    SELECTED_MODEL="$(get_preset_field "$preset_id" "model")"
+    SELECTED_MAX_TOKENS="$(get_preset_field "$preset_id" "max_tokens")"
+    SELECTED_MAX_CONTEXT_TOKENS="$(get_preset_field "$preset_id" "max_context_tokens")"
+    SELECTED_ENV_VAR="$(get_preset_field "$preset_id" "api_key_env_var")"
+    SELECTED_API_BASE="$(get_preset_field "$preset_id" "api_base")"
+}
+
+get_preset_model_choice_count() {
+    local preset_id="$1"
+    local count=0
+    while IFS=$'\t' read -r row_preset_id _; do
+        [ -n "$row_preset_id" ] || continue
+        if [ "$row_preset_id" = "$preset_id" ]; then
+            count=$((count + 1))
+        fi
+    done <<< "$PRESET_MODEL_CHOICE_ROWS"
+    echo "$count"
+}
+
+get_preset_model_choice_field() {
+    local preset_id="$1"
+    local idx="$2"
+    local field="$3"
+    local count=0
+    while IFS=$'\t' read -r row_preset_id row_id row_label row_recommended; do
+        [ -n "$row_preset_id" ] || continue
+        if [ "$row_preset_id" = "$preset_id" ]; then
+            if [ "$count" -eq "$idx" ]; then
+                case "$field" in
+                    id) echo "$row_id" ;;
+                    label) echo "$row_label" ;;
+                    recommended) echo "$row_recommended" ;;
+                esac
+                return
             fi
-            i=$((i + 1))
-        done
-        echo "$count"
-    }
-
-    # Helper: get model choice id by provider and index (0-based within provider)
-    get_model_choice_id() {
-        local provider_id="$1"
-        local idx="$2"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                if [ $count -eq "$idx" ]; then
-                    echo "${MC_IDS[$i]}"
-                    return
-                fi
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-    }
-
-    # Helper: get model choice label by provider and index
-    get_model_choice_label() {
-        local provider_id="$1"
-        local idx="$2"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                if [ $count -eq "$idx" ]; then
-                    echo "${MC_LABELS[$i]}"
-                    return
-                fi
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-    }
-
-    # Helper: get model choice max_tokens by provider and index
-    get_model_choice_maxtokens() {
-        local provider_id="$1"
-        local idx="$2"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                if [ $count -eq "$idx" ]; then
-                    echo "${MC_MAXTOKENS[$i]}"
-                    return
-                fi
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-    }
-
-    # Helper: get model choice max_context_tokens by provider and index
-    get_model_choice_maxcontexttokens() {
-        local provider_id="$1"
-        local idx="$2"
-        local count=0
-        local i=0
-        while [ $i -lt ${#MC_PROVIDERS[@]} ]; do
-            if [ "${MC_PROVIDERS[$i]}" = "$provider_id" ]; then
-                if [ $count -eq "$idx" ]; then
-                    echo "${MC_MAXCONTEXTTOKENS[$i]}"
-                    return
-                fi
-                count=$((count + 1))
-            fi
-            i=$((i + 1))
-        done
-    }
-fi
+            count=$((count + 1))
+        fi
+    done <<< "$PRESET_MODEL_CHOICE_ROWS"
+}
 
 # Configuration directory
 HIVE_CONFIG_DIR="$HOME/.hive"
@@ -1100,6 +1071,12 @@ if ollama list >/dev/null 2>&1; then
     OLLAMA_DETECTED=true
 fi
 
+if ! load_model_catalog_rows; then
+    echo -e "${RED}Failed to load core/framework/llm/model_catalog.json.${NC}"
+    echo -e "${YELLOW}Please ensure your Python environment is set up, then rerun quickstart.${NC}"
+    exit 1
+fi
+
 # Detect API key providers
 if [ "$USE_ASSOC_ARRAYS" = true ]; then
     for env_var in "${!PROVIDER_NAMES[@]}"; do
@@ -1344,10 +1321,7 @@ case $choice in
             exit 1
         else
             SUBSCRIPTION_MODE="claude_code"
-            SELECTED_PROVIDER_ID="anthropic"
-            SELECTED_MODEL="claude-opus-4-6"
-            SELECTED_MAX_TOKENS=32768
-            SELECTED_MAX_CONTEXT_TOKENS=960000  # Claude — 1M context window
+            apply_preset "claude_code"
             echo ""
             echo -e "${GREEN}⬢${NC} Using Claude Code subscription"
         fi
@@ -1355,11 +1329,7 @@ case $choice in
     2)
         # ZAI Code Subscription
         SUBSCRIPTION_MODE="zai_code"
-        SELECTED_PROVIDER_ID="openai"
-        SELECTED_ENV_VAR="ZAI_API_KEY"
-        SELECTED_MODEL="glm-5"
-        SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=180000  # GLM-5 — 200k context window
+        apply_preset "zai_code"
         PROVIDER_NAME="ZAI"
         echo ""
         echo -e "${GREEN}⬢${NC} Using ZAI Code subscription"
@@ -1387,10 +1357,7 @@ case $choice in
         fi
         if [ "$CODEX_CRED_DETECTED" = true ]; then
             SUBSCRIPTION_MODE="codex"
-            SELECTED_PROVIDER_ID="openai"
-            SELECTED_MODEL="gpt-5.3-codex"
-            SELECTED_MAX_TOKENS=16384
-            SELECTED_MAX_CONTEXT_TOKENS=120000  # GPT Codex — 128k context window
+            apply_preset "codex"
             echo ""
             echo -e "${GREEN}⬢${NC} Using OpenAI Codex subscription"
         fi
@@ -1398,27 +1365,17 @@ case $choice in
     4)
         # MiniMax Coding Key
         SUBSCRIPTION_MODE="minimax_code"
-        SELECTED_ENV_VAR="MINIMAX_API_KEY"
-        SELECTED_PROVIDER_ID="minimax"
-        SELECTED_MODEL="MiniMax-M2.5"
-        SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=900000  # MiniMax M2.5 — 1M context window
-        SELECTED_API_BASE="https://api.minimax.io/v1"
+        apply_preset "minimax_code"
         PROVIDER_NAME="MiniMax"
         SIGNUP_URL="https://platform.minimax.io/user-center/basic-information/interface-key"
         echo ""
         echo -e "${GREEN}⬢${NC} Using MiniMax coding key"
-        echo -e "  ${DIM}Model: MiniMax-M2.5 | API: api.minimax.io${NC}"
+        echo -e "  ${DIM}Model: MiniMax-M2.7 | API: api.minimax.io${NC}"
         ;;
     5)
         # Kimi Code Subscription
         SUBSCRIPTION_MODE="kimi_code"
-        SELECTED_PROVIDER_ID="kimi"
-        SELECTED_ENV_VAR="KIMI_API_KEY"
-        SELECTED_MODEL="kimi-k2.5"
-        SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=240000  # Kimi K2.5 — 256k context window
-        SELECTED_API_BASE="https://api.kimi.com/coding"
+        apply_preset "kimi_code"
         PROVIDER_NAME="Kimi"
         SIGNUP_URL="https://www.kimi.com/code"
         echo ""
@@ -1428,28 +1385,38 @@ case $choice in
     6)
         # Hive LLM
         SUBSCRIPTION_MODE="hive_llm"
-        SELECTED_PROVIDER_ID="hive"
-        SELECTED_ENV_VAR="HIVE_API_KEY"
-        SELECTED_MAX_TOKENS=32768
-        SELECTED_MAX_CONTEXT_TOKENS=180000
-        SELECTED_API_BASE="$HIVE_LLM_ENDPOINT"
+        apply_preset "hive_llm"
         PROVIDER_NAME="Hive"
         SIGNUP_URL="https://discord.com/invite/hQdU7QDkgR"
         echo ""
         echo -e "${GREEN}⬢${NC} Using Hive LLM"
         echo ""
         echo -e "  Select a model:"
-        echo -e "  ${CYAN}1)${NC} queen              ${DIM}(default — Hive flagship)${NC}"
-        echo -e "  ${CYAN}2)${NC} kimi-2.5"
-        echo -e "  ${CYAN}3)${NC} GLM-5"
+        hive_choice_count="$(get_preset_model_choice_count "hive_llm")"
+        hive_default_choice=1
+        hive_idx=0
+        while [ "$hive_idx" -lt "$hive_choice_count" ]; do
+            hive_num=$((hive_idx + 1))
+            hive_model_id="$(get_preset_model_choice_field "hive_llm" "$hive_idx" "id")"
+            hive_recommended="$(get_preset_model_choice_field "hive_llm" "$hive_idx" "recommended")"
+            if [ "$hive_recommended" = "true" ]; then
+                echo -e "  ${CYAN}${hive_num})${NC} ${hive_model_id}              ${DIM}(default — Hive flagship)${NC}"
+                hive_default_choice="$hive_num"
+            else
+                echo -e "  ${CYAN}${hive_num})${NC} ${hive_model_id}"
+            fi
+            hive_idx=$((hive_idx + 1))
+        done
         echo ""
-        read -r -p "  Enter model choice (1-3) [1]: " hive_model_choice || true
-        hive_model_choice="${hive_model_choice:-1}"
-        case "$hive_model_choice" in
-            2) SELECTED_MODEL="kimi-2.5" ;;
-            3) SELECTED_MODEL="GLM-5" ;;
-            *) SELECTED_MODEL="queen" ;;
-        esac
+        while true; do
+            read -r -p "  Enter model choice (1-$hive_choice_count) [$hive_default_choice]: " hive_model_choice || true
+            hive_model_choice="${hive_model_choice:-$hive_default_choice}"
+            if [[ "$hive_model_choice" =~ ^[0-9]+$ ]] && [ "$hive_model_choice" -ge 1 ] && [ "$hive_model_choice" -le "$hive_choice_count" ]; then
+                SELECTED_MODEL="$(get_preset_model_choice_field "hive_llm" "$((hive_model_choice - 1))" "id")"
+                break
+            fi
+            echo -e "${RED}Invalid choice. Please enter 1-$hive_choice_count${NC}"
+        done
         echo -e "  ${DIM}Model: $SELECTED_MODEL | API: ${HIVE_LLM_ENDPOINT}${NC}"
         ;;
     7)
@@ -1480,10 +1447,7 @@ case $choice in
 
         if [ "$ANTIGRAVITY_CRED_DETECTED" = true ]; then
             SUBSCRIPTION_MODE="antigravity"
-            SELECTED_PROVIDER_ID="openai"
-            SELECTED_MODEL="gemini-3-flash"
-            SELECTED_MAX_TOKENS=32768
-            SELECTED_MAX_CONTEXT_TOKENS=1000000  # Gemini 3 Flash — 1M context window
+            apply_preset "antigravity"
             echo ""
             echo -e "${YELLOW}  ⚠ Using Antigravity can technically cause your account suspension. Please use at your own risk.${NC}"
             echo ""
@@ -1540,8 +1504,8 @@ case $choice in
         fi
         SELECTED_PROVIDER_ID="ollama"
         SELECTED_ENV_VAR=""
-        SELECTED_MAX_TOKENS=8192
-        SELECTED_MAX_CONTEXT_TOKENS=16384
+        SELECTED_MAX_TOKENS="$(get_preset_field "ollama_local" "max_tokens")"
+        SELECTED_MAX_CONTEXT_TOKENS="$(get_preset_field "ollama_local" "max_context_tokens")"
         OLLAMA_MODELS=()
         while IFS= read -r line; do
             [ -n "$line" ] && OLLAMA_MODELS+=("$line")
@@ -1559,7 +1523,7 @@ case $choice in
                 read -r -p "Enter choice (1-${#OLLAMA_MODELS[@]}): " model_choice
                 if [[ "$model_choice" =~ ^[0-9]+$ ]] && [ "$model_choice" -ge 1 ] && [ "$model_choice" -le ${#OLLAMA_MODELS[@]} ]; then
                     SELECTED_MODEL="${OLLAMA_MODELS[$((model_choice - 1))]}"
-                    SELECTED_API_BASE="http://localhost:11434"
+                    SELECTED_API_BASE="$(get_preset_field "ollama_local" "api_base")"
                     break
                 fi
                 echo -e "${RED}Invalid choice. Please enter 1-${#OLLAMA_MODELS[@]}${NC}"
@@ -1684,7 +1648,7 @@ if [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
             echo -e "${GREEN}⬢${NC} ZAI API key saved to $SHELL_RC_FILE"
             # Health check the new key
             echo -n "  Verifying ZAI API key... "
-            HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "zai" "$API_KEY" "https://api.z.ai/api/coding/paas/v4" 2>/dev/null) || true
+            HC_RESULT=$(uv run python "$SCRIPT_DIR/scripts/check_llm_key.py" "zai" "$API_KEY" "$SELECTED_API_BASE" 2>/dev/null) || true
             HC_VALID=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('valid',''))" 2>/dev/null) || true
             HC_MSG=$(echo "$HC_RESULT" | $PYTHON_CMD -c "import json,sys; print(json.loads(sys.stdin.read()).get('message',''))" 2>/dev/null) || true
             if [ "$HC_VALID" = "True" ]; then
@@ -1735,11 +1699,11 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     if [ "$SUBSCRIPTION_MODE" = "claude_code" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "true" "" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "codex" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "" "true" > /dev/null || SAVE_OK=false
+        save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" "true" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "antigravity" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "" "" "true" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "zai_code" ]; then
-        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "https://api.z.ai/api/coding/paas/v4" > /dev/null || SAVE_OK=false
+        save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "minimax_code" ]; then
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     elif [ "$SUBSCRIPTION_MODE" = "kimi_code" ]; then
@@ -1751,7 +1715,7 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     elif [ "$SELECTED_PROVIDER_ID" = "ollama" ]; then
         # Pass api_base explicitly — LiteLLM requires this to route ollama/* models
         # to the local Ollama server instead of trying to reach a remote endpoint.
-        save_configuration "ollama" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "http://localhost:11434" > /dev/null || SAVE_OK=false
+        save_configuration "ollama" "" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" "" "$SELECTED_API_BASE" > /dev/null || SAVE_OK=false
     else
         save_configuration "$SELECTED_PROVIDER_ID" "$SELECTED_ENV_VAR" "$SELECTED_MODEL" "$SELECTED_MAX_TOKENS" "$SELECTED_MAX_CONTEXT_TOKENS" > /dev/null || SAVE_OK=false
     fi
@@ -2128,8 +2092,6 @@ if [ -n "$SELECTED_PROVIDER_ID" ]; then
     else
         echo -e "  ${CYAN}$SELECTED_PROVIDER_ID${NC} → ${DIM}$SELECTED_MODEL${NC}"
     fi
-    echo -e "  ${DIM}To use a different model for worker agents, run:${NC}"
-    echo -e "     ${CYAN}./scripts/setup_worker_model.sh${NC}"
     echo ""
 fi
 

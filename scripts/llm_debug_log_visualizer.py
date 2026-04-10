@@ -1020,9 +1020,7 @@ def _discover_session_summaries(
     # Filter out test sessions if needed
     if not include_tests:
         by_session = {
-            eid: recs
-            for eid, recs in by_session.items()
-            if not _is_test_session(eid, recs)
+            eid: recs for eid, recs in by_session.items() if not _is_test_session(eid, recs)
         }
 
     summaries: list[SessionSummary] = []
@@ -1068,14 +1066,10 @@ def main() -> int:
     logs_dir = args.logs_dir.expanduser()
 
     # Only discover summaries, not full session data
-    summaries = _discover_session_summaries(
-        logs_dir, args.limit_files, args.include_tests
-    )
+    summaries = _discover_session_summaries(logs_dir, args.limit_files, args.include_tests)
 
     initial_session_id = args.session or (summaries[0].execution_id if summaries else "")
-    if initial_session_id and not any(
-        s.execution_id == initial_session_id for s in summaries
-    ):
+    if initial_session_id and not any(s.execution_id == initial_session_id for s in summaries):
         print(f"session not found: {initial_session_id}")
         return 1
 

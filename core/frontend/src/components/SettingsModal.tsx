@@ -147,18 +147,10 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
     </span>
   );
 
-  // Models available for selection (from connected API key providers + active subscription's provider)
+  // Models available for selection (only API key providers - subscriptions use fixed models)
   const selectableProviders = LLM_PROVIDERS.filter(
     (p) => connectedProviders.has(p.id) && availableModels[p.id]?.length,
   );
-
-  // Also include the active subscription's provider models if not already covered
-  const activeSubInfo = activeSubscription
-    ? subscriptions.find((s) => s.id === activeSubscription)
-    : null;
-  const subProviderInList = activeSubInfo
-    ? selectableProviders.some((p) => p.id === activeSubInfo.provider)
-    : true;
 
   const handleActivateSubscription = async (subId: string) => {
     try {
@@ -531,38 +523,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
 
                     {modelDropdownOpen && (
                       <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border/60 rounded-lg shadow-xl z-10 max-h-[280px] overflow-y-auto">
-                        {/* Subscription models (if active) */}
-                        {activeSubInfo && !subProviderInList && availableModels[activeSubInfo.provider]?.length > 0 && (
-                          <div>
-                            <p className="px-4 pt-3 pb-1 text-[11px] font-semibold text-purple-400/80 uppercase tracking-wider">
-                              {activeSubInfo.name} ({activeSubInfo.provider})
-                            </p>
-                            {(availableModels[activeSubInfo.provider] || []).map(
-                              (model: ModelOption) => {
-                                const isActive = currentModel === model.id;
-                                return (
-                                  <button
-                                    key={`sub-${model.id}`}
-                                    onClick={() =>
-                                      activateSubscription(activeSubscription!, model.id)
-                                    }
-                                    className={`w-full text-left px-4 py-2 text-sm flex items-center gap-2 transition-colors ${
-                                      isActive
-                                        ? "bg-primary/10 text-primary"
-                                        : "text-foreground hover:bg-muted/30"
-                                    }`}
-                                  >
-                                    {isActive && <Check className="w-3 h-3 flex-shrink-0" />}
-                                    <span className={isActive ? "" : "ml-5"}>{model.label}</span>
-                                    {model.recommended && recommendedIcon}
-                                  </button>
-                                );
-                              },
-                            )}
-                          </div>
-                        )}
-
-                        {selectableProviders.length === 0 && !activeSubInfo ? (
+                        {selectableProviders.length === 0 ? (
                           <p className="px-4 py-3 text-sm text-muted-foreground">
                             Add an API key or enable a subscription to see available models.
                           </p>

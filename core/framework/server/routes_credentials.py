@@ -316,7 +316,11 @@ async def handle_list_specs(request: web.Request) -> web.Response:
     try:
         from aden_tools.credentials import CREDENTIAL_SPECS
 
-        from framework.credentials.storage import CompositeStorage, EncryptedFileStorage, EnvVarStorage
+        from framework.credentials.storage import (
+            CompositeStorage,
+            EncryptedFileStorage,
+            EnvVarStorage,
+        )
         from framework.credentials.store import CredentialStore
         from framework.credentials.validation import _presync_aden_tokens, ensure_credential_key_env
 
@@ -328,8 +332,7 @@ async def handle_list_specs(request: web.Request) -> web.Response:
 
         # Build composite store (env → encrypted file)
         env_mapping = {
-            (spec.credential_id or name): spec.env_var
-            for name, spec in CREDENTIAL_SPECS.items()
+            (spec.credential_id or name): spec.env_var for name, spec in CREDENTIAL_SPECS.items()
         }
         env_storage = EnvVarStorage(env_mapping=env_mapping)
         if os.environ.get("HIVE_CREDENTIAL_KEY"):
@@ -366,20 +369,23 @@ async def handle_list_specs(request: web.Request) -> web.Response:
 
         # Include aden_api_key synthetic row if any spec uses Aden
         if any_aden:
-            specs.insert(0, {
-                "credential_name": "Aden Platform",
-                "credential_id": "aden_api_key",
-                "env_var": "ADEN_API_KEY",
-                "description": "API key from the Developers tab in Settings",
-                "help_url": "https://hive.adenhq.com/",
-                "api_key_instructions": "1. Go to hive.adenhq.com\n2. Open Settings > Developers\n3. Copy your API key",
-                "tools": [],
-                "aden_supported": True,
-                "direct_api_key_supported": True,
-                "credential_key": "api_key",
-                "credential_group": "",
-                "available": has_aden_key,
-            })
+            specs.insert(
+                0,
+                {
+                    "credential_name": "Aden Platform",
+                    "credential_id": "aden_api_key",
+                    "env_var": "ADEN_API_KEY",
+                    "description": "API key from the Developers tab in Settings",
+                    "help_url": "https://hive.adenhq.com/",
+                    "api_key_instructions": "1. Go to hive.adenhq.com\n2. Open Settings > Developers\n3. Copy your API key",
+                    "tools": [],
+                    "aden_supported": True,
+                    "direct_api_key_supported": True,
+                    "credential_key": "api_key",
+                    "credential_group": "",
+                    "available": has_aden_key,
+                },
+            )
 
         return web.json_response({"specs": specs, "has_aden_key": has_aden_key})
     except Exception as e:

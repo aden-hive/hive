@@ -33,6 +33,7 @@ class CredentialResolverStage(PipelineStage):
             from aden_tools.credentials.store_adapter import (
                 CredentialStoreAdapter,
             )
+
             from framework.orchestrator.prompting import build_accounts_prompt
 
             if self._credential_store is not None:
@@ -43,7 +44,8 @@ class CredentialResolverStage(PipelineStage):
             self.tool_provider_map = adapter.get_tool_provider_map()
             if self.accounts_data:
                 self.accounts_prompt = build_accounts_prompt(
-                    self.accounts_data, self.tool_provider_map,
+                    self.accounts_data,
+                    self.tool_provider_map,
                 )
             logger.info(
                 "[pipeline] CredentialResolverStage: %d accounts",
@@ -51,7 +53,8 @@ class CredentialResolverStage(PipelineStage):
             )
         except Exception:
             logger.debug(
-                "Credential resolution failed (non-fatal)", exc_info=True,
+                "Credential resolution failed (non-fatal)",
+                exc_info=True,
             )
 
     async def process(self, ctx: PipelineContext) -> PipelineResult:

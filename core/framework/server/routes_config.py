@@ -14,15 +14,20 @@ from pathlib import Path
 
 from aiohttp import web
 
+from framework.agents.queen.queen_memory_v2 import (
+    build_memory_document,
+    global_memory_dir,
+)
 from framework.config import (
+    _PROVIDER_CRED_MAP,
     HIVE_CONFIG_FILE,
     OPENROUTER_API_BASE,
-    _PROVIDER_CRED_MAP,
     get_hive_config,
 )
-from framework.agents.queen.queen_memory_v2 import (
-    global_memory_dir,
-    build_memory_document,
+from framework.llm.model_catalog import (
+    find_model,
+    get_models_catalogue,
+    get_preset,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,45 +52,78 @@ PROVIDER_ENV_VARS: dict[str, str] = {
     "deepseek": "DEEPSEEK_API_KEY",
 }
 
-# ---------------------------------------------------------------------------
-# Subscription metadata (mirrors quickstart.sh subscription modes)
-# ---------------------------------------------------------------------------
-
-SUBSCRIPTIONS: list[dict] = [
+_SUBSCRIPTION_DEFINITIONS: list[dict[str, str]] = [
     {
         "id": "claude_code",
         "name": "Claude Code Subscription",
         "description": "Use your Claude Max/Pro plan",
-        "provider": "anthropic",
         "flag": "use_claude_code_subscription",
-        "default_model": "claude-sonnet-4-20250514",
+    },
+    {
+        "id": "zai_code",
+        "name": "ZAI Code Subscription",
+        "description": "Use your ZAI Code plan",
+        "flag": "use_zai_code_subscription",
     },
     {
         "id": "codex",
         "name": "OpenAI Codex Subscription",
         "description": "Use your Codex/ChatGPT Plus plan",
-        "provider": "openai",
         "flag": "use_codex_subscription",
-        "default_model": "gpt-5.4",
-        "api_base": "https://chatgpt.com/backend-api/codex",
+    },
+    {
+        "id": "minimax_code",
+        "name": "MiniMax Coding Key",
+        "description": "Use your MiniMax coding key",
+        "flag": "use_minimax_code_subscription",
     },
     {
         "id": "kimi_code",
         "name": "Kimi Code Subscription",
         "description": "Use your Kimi Code plan",
-        "provider": "kimi",
         "flag": "use_kimi_code_subscription",
-        "default_model": "kimi/moonshot-v1",
+    },
+    {
+        "id": "hive_llm",
+        "name": "Hive LLM",
+        "description": "Use your Hive API key",
+        "flag": "use_hive_llm_subscription",
     },
     {
         "id": "antigravity",
         "name": "Antigravity Subscription",
         "description": "Use your Google/Gemini plan",
-        "provider": "antigravity",
         "flag": "use_antigravity_subscription",
-        "default_model": "antigravity/gemini-2.5-pro",
     },
 ]
+
+
+def _build_subscriptions() -> list[dict]:
+    subscriptions: list[dict] = []
+    for definition in _SUBSCRIPTION_DEFINITIONS:
+        preset = get_preset(definition["id"])
+        if not preset:
+            raise RuntimeError(f"Missing preset for subscription {definition['id']}")
+
+        subscriptions.append(
+            {
+                "id": definition["id"],
+                "name": definition["name"],
+                "description": definition["description"],
+                "provider": preset["provider"],
+                "flag": definition["flag"],
+                "default_model": preset.get("model", ""),
+                **({"api_base": preset["api_base"]} if preset.get("api_base") else {}),
+            }
+        )
+    return subscriptions
+
+
+# ---------------------------------------------------------------------------
+# Subscription metadata (mirrors quickstart subscription modes)
+# ---------------------------------------------------------------------------
+
+SUBSCRIPTIONS: list[dict] = _build_subscriptions()
 
 # All subscription config flags
 _ALL_SUBSCRIPTION_FLAGS = [s["flag"] for s in SUBSCRIPTIONS]
@@ -93,65 +131,8 @@ _ALL_SUBSCRIPTION_FLAGS = [s["flag"] for s in SUBSCRIPTIONS]
 # Map subscription ID → subscription metadata
 _SUBSCRIPTION_MAP = {s["id"]: s for s in SUBSCRIPTIONS}
 
-# Model catalogue — mirrors quickstart.sh MODEL_CHOICES_*
-MODELS_CATALOGUE: dict[str, list[dict]] = {
-    "anthropic": [
-        {"id": "claude-haiku-4-5-20251001", "label": "Haiku 4.5 - Fast + cheap", "recommended": False, "max_tokens": 8192, "max_context_tokens": 180000},
-        {"id": "claude-sonnet-4-20250514", "label": "Sonnet 4 - Fast + capable", "recommended": False, "max_tokens": 8192, "max_context_tokens": 180000},
-        {"id": "claude-sonnet-4-5-20250929", "label": "Sonnet 4.5 - Best balance", "recommended": False, "max_tokens": 16384, "max_context_tokens": 180000},
-        {"id": "claude-opus-4-6", "label": "Opus 4.6 - Most capable", "recommended": True, "max_tokens": 32768, "max_context_tokens": 180000},
-    ],
-    "openai": [
-        {"id": "gpt-5.4", "label": "GPT-5.4 - Best intelligence", "recommended": True, "max_tokens": 128000, "max_context_tokens": 960000},
-        {"id": "gpt-5.4-mini", "label": "GPT-5.4 Mini - Faster + cheaper", "recommended": False, "max_tokens": 128000, "max_context_tokens": 400000},
-        {"id": "gpt-5.4-nano", "label": "GPT-5.4 Nano - Cheapest high-volume", "recommended": False, "max_tokens": 128000, "max_context_tokens": 400000},
-    ],
-    "gemini": [
-        {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash - Fast", "recommended": False, "max_tokens": 8192, "max_context_tokens": 900000},
-        {"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro - Best quality", "recommended": True, "max_tokens": 8192, "max_context_tokens": 900000},
-    ],
-    "groq": [
-        {"id": "moonshotai/kimi-k2-instruct-0905", "label": "Kimi K2 - Best quality", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
-        {"id": "openai/gpt-oss-120b", "label": "GPT-OSS 120B - Fast reasoning", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "cerebras": [
-        {"id": "zai-glm-4.7", "label": "ZAI-GLM 4.7 - Best quality", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
-        {"id": "qwen3-235b-a22b-instruct-2507", "label": "Qwen3 235B - Frontier reasoning", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "minimax": [
-        {"id": "MiniMax-M2.5", "label": "MiniMax-M2.5", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "mistral": [
-        {"id": "mistral-large-latest", "label": "Mistral Large", "recommended": True, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "together": [
-        {"id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "label": "Llama 3.3 70B Turbo", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "deepseek": [
-        {"id": "deepseek-chat", "label": "DeepSeek Chat", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-    "openrouter": [
-        {"id": "google/gemini-2.5-pro", "label": "Gemini 2.5 Pro", "recommended": True, "max_tokens": 8192, "max_context_tokens": 900000},
-        {"id": "google/gemini-2.5-flash", "label": "Gemini 2.5 Flash", "recommended": False, "max_tokens": 8192, "max_context_tokens": 900000},
-        {"id": "anthropic/claude-sonnet-4", "label": "Claude Sonnet 4 (via OR)", "recommended": False, "max_tokens": 8192, "max_context_tokens": 180000},
-        {"id": "deepseek/deepseek-r1", "label": "DeepSeek R1", "recommended": False, "max_tokens": 8192, "max_context_tokens": 120000},
-    ],
-}
-
-# Default model per provider (matches quickstart DEFAULT_MODELS)
-DEFAULT_MODELS: dict[str, str] = {
-    "anthropic": "claude-haiku-4-5-20251001",
-    "openai": "gpt-5.4",
-    "minimax": "MiniMax-M2.5",
-    "gemini": "gemini-3-flash-preview",
-    "groq": "moonshotai/kimi-k2-instruct-0905",
-    "cerebras": "zai-glm-4.7",
-    "mistral": "mistral-large-latest",
-    "together": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    "deepseek": "deepseek-chat",
-    "openrouter": "google/gemini-2.5-pro",
-}
-
+# Model catalogue loaded from the shared JSON source of truth.
+MODELS_CATALOGUE: dict[str, list[dict]] = get_models_catalogue()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -167,18 +148,13 @@ def _get_api_base_for_provider(provider: str) -> str | None:
 
 def _find_model_info(provider: str, model_id: str) -> dict | None:
     """Look up a model in the catalogue to get its token limits."""
-    for m in MODELS_CATALOGUE.get(provider, []):
-        if m["id"] == model_id:
-            return m
-    return None
+    return find_model(provider, model_id)
 
 
 def _write_config_atomic(config: dict) -> None:
     """Write config to ~/.hive/configuration.json atomically."""
     HIVE_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
-        dir=str(HIVE_CONFIG_FILE.parent), suffix=".tmp"
-    )
+    fd, tmp_path = tempfile.mkstemp(dir=str(HIVE_CONFIG_FILE.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
@@ -215,30 +191,50 @@ def _detect_subscriptions() -> list[str]:
     # Claude Code subscription
     try:
         from framework.loader.agent_loader import get_claude_code_token
+
         if get_claude_code_token():
             detected.append("claude_code")
     except Exception:
         pass
 
+    # ZAI Code subscription (API key based)
+    if os.environ.get("ZAI_API_KEY"):
+        detected.append("zai_code")
+
     # Codex subscription
     try:
         from framework.loader.agent_loader import get_codex_token
+
         if get_codex_token():
             detected.append("codex")
     except Exception:
         pass
 
-    # Kimi Code subscription
+    # MiniMax Coding Key (API key based)
+    if os.environ.get("MINIMAX_API_KEY"):
+        detected.append("minimax_code")
+
+    # Kimi Code subscription (CLI config file or API key env var)
+    kimi_token = None
     try:
         from framework.loader.agent_loader import get_kimi_code_token
-        if get_kimi_code_token():
-            detected.append("kimi_code")
+
+        kimi_token = get_kimi_code_token()
     except Exception:
         pass
+    if not kimi_token:
+        kimi_token = os.environ.get("KIMI_API_KEY")
+    if kimi_token:
+        detected.append("kimi_code")
+
+    # Hive LLM (API key based)
+    if os.environ.get("HIVE_API_KEY"):
+        detected.append("hive_llm")
 
     # Antigravity subscription
     try:
         from framework.loader.agent_loader import get_antigravity_token
+
         if get_antigravity_token():
             detected.append("antigravity")
     except Exception:
@@ -259,20 +255,35 @@ def _get_subscription_token(sub_id: str) -> str | None:
     """Get the token for a subscription."""
     if sub_id == "claude_code":
         from framework.loader.agent_loader import get_claude_code_token
+
         return get_claude_code_token()
+    elif sub_id == "zai_code":
+        return os.environ.get("ZAI_API_KEY")
     elif sub_id == "codex":
         from framework.loader.agent_loader import get_codex_token
+
         return get_codex_token()
+    elif sub_id == "minimax_code":
+        return os.environ.get("MINIMAX_API_KEY")
     elif sub_id == "kimi_code":
         from framework.loader.agent_loader import get_kimi_code_token
-        return get_kimi_code_token()
+
+        token = get_kimi_code_token()
+        if not token:
+            token = os.environ.get("KIMI_API_KEY")
+        return token
+    elif sub_id == "hive_llm":
+        return os.environ.get("HIVE_API_KEY")
     elif sub_id == "antigravity":
         from framework.loader.agent_loader import get_antigravity_token
+
         return get_antigravity_token()
     return None
 
 
-def _hot_swap_sessions(request: web.Request, full_model: str, api_key: str | None, api_base: str | None) -> int:
+def _hot_swap_sessions(
+    request: web.Request, full_model: str, api_key: str | None, api_base: str | None
+) -> int:
     """Hot-swap the LLM on all running sessions. Returns count of swapped sessions."""
     from framework.server.session_manager import SessionManager
 
@@ -313,17 +324,19 @@ async def handle_get_llm_config(request: web.Request) -> web.Response:
     active_subscription = _get_active_subscription(llm)
     detected_subscriptions = _detect_subscriptions()
 
-    return web.json_response({
-        "provider": provider,
-        "model": model,
-        "has_api_key": has_key,
-        "max_tokens": llm.get("max_tokens"),
-        "max_context_tokens": llm.get("max_context_tokens"),
-        "connected_providers": connected,
-        "active_subscription": active_subscription,
-        "detected_subscriptions": detected_subscriptions,
-        "subscriptions": SUBSCRIPTIONS,
-    })
+    return web.json_response(
+        {
+            "provider": provider,
+            "model": model,
+            "has_api_key": has_key,
+            "max_tokens": llm.get("max_tokens"),
+            "max_context_tokens": llm.get("max_context_tokens"),
+            "connected_providers": connected,
+            "active_subscription": active_subscription,
+            "detected_subscriptions": detected_subscriptions,
+            "subscriptions": SUBSCRIPTIONS,
+        }
+    )
 
 
 async def handle_update_llm_config(request: web.Request) -> web.Response:
@@ -331,7 +344,7 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
 
     Accepts two modes:
     1. API key mode: {"provider": "anthropic", "model": "claude-sonnet-4-20250514"}
-    2. Subscription mode: {"subscription": "claude_code", "model": "claude-sonnet-4-20250514"}
+    2. Subscription mode: {"subscription": "claude_code"} (uses preset model)
     """
     try:
         body = await request.json()
@@ -348,21 +361,21 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
                 {"error": f"Unknown subscription: {subscription_id}"}, status=400
             )
 
-        model = body.get("model") or sub["default_model"]
+        preset = get_preset(subscription_id)
+        # Subscriptions use the fixed model from their preset (no model switching)
+        model = sub["default_model"]
         provider = sub["provider"]
         api_base = sub.get("api_base")
 
-        # Look up token limits
-        # Subscriptions use same models as their provider (e.g., claude_code → anthropic)
-        model_info = _find_model_info(provider, model)
-        if not model_info:
-            # Try looking up in the mapped provider's catalogue
-            for prov_id, models in MODELS_CATALOGUE.items():
-                model_info = next((m for m in models if m["id"] == model), None)
-                if model_info:
-                    break
-        max_tokens = model_info["max_tokens"] if model_info else 8192
-        max_context_tokens = model_info["max_context_tokens"] if model_info else 120000
+        # Look up token limits from preset
+        max_tokens: int | None = None
+        max_context_tokens: int | None = None
+        if preset:
+            max_tokens = int(preset["max_tokens"])
+            max_context_tokens = int(preset["max_context_tokens"])
+        else:
+            max_tokens = 8192
+            max_context_tokens = 120000
 
         # Update config: activate this subscription, clear others
         config = get_hive_config()
@@ -391,18 +404,22 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
 
         logger.info(
             "LLM config updated: subscription=%s model=%s, hot-swapped %d session(s)",
-            subscription_id, model, swapped,
+            subscription_id,
+            model,
+            swapped,
         )
 
-        return web.json_response({
-            "provider": provider,
-            "model": model,
-            "has_api_key": token is not None,
-            "max_tokens": max_tokens,
-            "max_context_tokens": max_context_tokens,
-            "sessions_swapped": swapped,
-            "active_subscription": subscription_id,
-        })
+        return web.json_response(
+            {
+                "provider": provider,
+                "model": model,
+                "has_api_key": token is not None,
+                "max_tokens": max_tokens,
+                "max_context_tokens": max_context_tokens,
+                "sessions_swapped": swapped,
+                "active_subscription": subscription_id,
+            }
+        )
 
     else:
         # ── API key mode ─────────────────────────────────────────────
@@ -448,46 +465,52 @@ async def handle_update_llm_config(request: web.Request) -> web.Response:
 
         logger.info(
             "LLM config updated: provider=%s model=%s, hot-swapped %d session(s)",
-            provider, model, swapped,
+            provider,
+            model,
+            swapped,
         )
 
-        return web.json_response({
-            "provider": provider,
-            "model": model,
-            "has_api_key": api_key is not None,
-            "max_tokens": max_tokens,
-            "max_context_tokens": max_context_tokens,
-            "sessions_swapped": swapped,
-            "active_subscription": None,
-        })
+        return web.json_response(
+            {
+                "provider": provider,
+                "model": model,
+                "has_api_key": api_key is not None,
+                "max_tokens": max_tokens,
+                "max_context_tokens": max_context_tokens,
+                "sessions_swapped": swapped,
+                "active_subscription": None,
+            }
+        )
 
 
 async def handle_get_profile(request: web.Request) -> web.Response:
     """GET /api/config/profile — user display name and about."""
     profile = get_hive_config().get("user_profile", {})
-    return web.json_response({
-        "displayName": profile.get("displayName", ""),
-        "about": profile.get("about", ""),
-        "theme": profile.get("theme", ""),
-    })
+    return web.json_response(
+        {
+            "displayName": profile.get("displayName", ""),
+            "about": profile.get("about", ""),
+            "theme": profile.get("theme", ""),
+        }
+    )
 
 
 def _update_user_profile_memory(display_name: str, about: str) -> None:
     """Sync user profile to global memory as a profile-type memory file.
-    
+
     Uses the canonical filename 'user-profile.md' — this is the single
     source of truth for user identity information, shared with the
     reflection agent.
-    
+
     Merges with existing content to preserve sections added by the reflection agent.
     """
     try:
         mem_dir = global_memory_dir()
         mem_dir.mkdir(parents=True, exist_ok=True)
-        
+
         profile_filename = "user-profile.md"
         memory_path = mem_dir / profile_filename
-        
+
         # Read existing content if present
         existing_body = ""
         if memory_path.exists():
@@ -497,16 +520,16 @@ def _update_user_profile_memory(display_name: str, about: str) -> None:
                 parts = existing_text.split("---\n", 2)
                 if len(parts) >= 3:
                     existing_body = parts[2].strip()
-        
+
         # Build Identity section from settings
         identity_lines = []
         if display_name:
             identity_lines.append(f"- **Name:** {display_name}")
         if about:
             identity_lines.append(f"- **About:** {about}")
-        
+
         identity_section = "## Identity\n" + "\n".join(identity_lines) if identity_lines else ""
-        
+
         # Merge: replace or prepend Identity section, keep rest
         if existing_body and "## Identity" in existing_body:
             # Replace existing Identity section
@@ -520,14 +543,16 @@ def _update_user_profile_memory(display_name: str, about: str) -> None:
         else:
             # Just Identity section
             new_body = identity_section
-        
+
         content = build_memory_document(
             name="User Profile",
-            description=f"User identity: {display_name}" if display_name else "User profile information",
+            description=f"User identity: {display_name}"
+            if display_name
+            else "User profile information",
             mem_type="profile",
             body=new_body if new_body else "No profile information yet.",
         )
-        
+
         memory_path.write_text(content, encoding="utf-8")
         logger.debug("User profile synced to global memory: %s", memory_path)
     except Exception as exc:
@@ -554,17 +579,16 @@ async def handle_update_profile(request: web.Request) -> web.Response:
     _write_config_atomic(config)
 
     # Sync to global memory (profile type)
-    _update_user_profile_memory(
-        profile.get("displayName", ""),
-        profile.get("about", "")
-    )
+    _update_user_profile_memory(profile.get("displayName", ""), profile.get("about", ""))
 
     logger.info("User profile updated: displayName=%s", profile.get("displayName", ""))
-    return web.json_response({
-        "displayName": profile.get("displayName", ""),
-        "about": profile.get("about", ""),
-        "theme": profile.get("theme", ""),
-    })
+    return web.json_response(
+        {
+            "displayName": profile.get("displayName", ""),
+            "about": profile.get("about", ""),
+            "theme": profile.get("theme", ""),
+        }
+    )
 
 
 async def handle_get_models(request: web.Request) -> web.Response:
