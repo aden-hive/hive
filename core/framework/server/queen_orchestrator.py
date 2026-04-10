@@ -17,6 +17,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def initialize_memory_scopes(session: Session, phase_state: Any) -> tuple[Path, Path]:
+    """Create and cache the global and queen-scoped memory directories."""
+    from framework.agents.queen.queen_memory_v2 import (
+        global_memory_dir,
+        init_memory_dir,
+        queen_memory_dir,
+    )
+
+    global_dir = global_memory_dir()
+    queen_dir = queen_memory_dir(session.queen_name)
+    init_memory_dir(global_dir)
+    init_memory_dir(queen_dir)
+    phase_state.global_memory_dir = global_dir
+    phase_state.queen_memory_dir = queen_dir
+    return global_dir, queen_dir
+
+
 async def materialize_queen_identity(
     session: Session,
     phase_state: Any,
@@ -238,15 +255,8 @@ async def create_queen(
         sorted(t.name for t in phase_state.independent_tools),
     )
 
-    # ---- Global memory -------------------------------------------------
-    from framework.agents.queen.queen_memory_v2 import (
-        global_memory_dir,
-        init_memory_dir,
-    )
-
-    global_dir = global_memory_dir()
-    init_memory_dir(global_dir)
-    phase_state.global_memory_dir = global_dir
+    # ---- Global + queen-scoped memory ----------------------------------
+    global_dir, queen_mem_dir = initialize_memory_scopes(session, phase_state)
 
     # ---- Compose phase-specific prompts ------------------------------
     from framework.agents.queen.nodes import queen_node as _orig_node
@@ -347,13 +357,18 @@ async def create_queen(
             return
         try:
             from framework.agents.queen.recall_selector import (
-                format_recall_injection,
-                select_memories,
+                build_scoped_recall_blocks,
             )
 
-            mem_dir = phase_state.global_memory_dir
-            selected = await select_memories(query, _session_llm, mem_dir)
-            phase_state._cached_global_recall_block = format_recall_injection(selected, mem_dir)
+            global_block, queen_block = await build_scoped_recall_blocks(
+                query,
+                _session_llm,
+                global_memory_dir=phase_state.global_memory_dir,
+                queen_memory_dir=phase_state.queen_memory_dir,
+                queen_id=phase_state.queen_id or session.queen_name,
+            )
+            phase_state._cached_global_recall_block = global_block
+            phase_state._cached_queen_recall_block = queen_block
         except Exception:
             logger.debug("recall: cache update failed", exc_info=True)
 
@@ -559,7 +574,9 @@ async def create_queen(
                 session.event_bus,
                 queen_dir,
                 session.llm,
-                memory_dir=global_dir,
+                global_memory_dir=global_dir,
+                queen_memory_dir=queen_mem_dir,
+                queen_id=session.queen_name,
             )
             session.memory_reflection_subs = _reflection_subs
 

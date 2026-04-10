@@ -753,9 +753,27 @@ class SessionManager:
         if session.queen_dir is not None:
             try:
                 from framework.agents.queen.reflection_agent import run_shutdown_reflection
+                from framework.agents.queen.queen_memory_v2 import (
+                    global_memory_dir,
+                    queen_memory_dir,
+                )
+
+                global_mem_dir = global_memory_dir()
+                queen_mem_dir = queen_memory_dir(session.queen_name)
+                if session.phase_state is not None:
+                    global_mem_dir = session.phase_state.global_memory_dir or global_mem_dir
+                    queen_mem_dir = session.phase_state.queen_memory_dir or queen_mem_dir
 
                 task = asyncio.create_task(
-                    asyncio.shield(run_shutdown_reflection(session.queen_dir, session.llm)),
+                    asyncio.shield(
+                        run_shutdown_reflection(
+                            session.queen_dir,
+                            session.llm,
+                            global_memory_dir_override=global_mem_dir,
+                            queen_memory_dir=queen_mem_dir,
+                            queen_id=session.queen_name,
+                        )
+                    ),
                     name=f"shutdown-reflect-{session_id}",
                 )
                 logger.info("Session '%s': shutdown reflection spawned", session_id)
