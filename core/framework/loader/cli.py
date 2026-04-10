@@ -94,10 +94,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     if getattr(args, "debug", False):
         configure_logging(level="DEBUG")
-    elif getattr(args, "verbose", False):
-        configure_logging(level="INFO")
     else:
-        configure_logging(level="WARNING")
+        configure_logging(level="INFO")
 
     model = getattr(args, "model", None)
     app = create_app(model=model)
