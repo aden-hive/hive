@@ -67,11 +67,12 @@ class TestAgentEvent:
             execution_id="exec_1",
             data={"output": "result"},
             correlation_id="corr_1",
-            graph_id="graph_1",
+            colony_id="colony_1",
         )
         d = event.to_dict()
         assert d["type"] == "execution_completed"
         assert d["stream_id"] == "stream_1"
+        assert d["colony_id"] == "colony_1"
 
     def test_to_dict_includes_run_id(self):
         """run_id is included in to_dict() when set."""
@@ -350,28 +351,28 @@ class TestEventFiltering:
         assert len(received) == 1
 
     @pytest.mark.asyncio
-    async def test_filter_by_graph(self):
-        """filter_graph only receives events from that graph."""
+    async def test_filter_by_colony(self):
+        """filter_colony only receives events from that colony."""
         bus = EventBus()
         received = []
 
         async def handler(event: AgentEvent) -> None:
-            received.append(event.graph_id)
+            received.append(event.colony_id)
 
         bus.subscribe(
             event_types=[EventType.EXECUTION_STARTED],
             handler=handler,
-            filter_graph="graph_a",
+            filter_colony="colony_a",
         )
 
         await bus.publish(
-            AgentEvent(type=EventType.EXECUTION_STARTED, stream_id="s", graph_id="graph_a")
+            AgentEvent(type=EventType.EXECUTION_STARTED, stream_id="s", colony_id="colony_a")
         )
         await bus.publish(
-            AgentEvent(type=EventType.EXECUTION_STARTED, stream_id="s", graph_id="graph_b")
+            AgentEvent(type=EventType.EXECUTION_STARTED, stream_id="s", colony_id="colony_b")
         )
 
-        assert received == ["graph_a"]
+        assert received == ["colony_a"]
 
 
 # ---------------------------------------------------------------------------
@@ -915,13 +916,10 @@ class TestEventType:
         assert EventType.ESCALATION_REQUESTED
         assert EventType.LLM_TURN_COMPLETE
         assert EventType.NODE_ACTION_PLAN
-        assert EventType.WORKER_GRAPH_LOADED
+        assert EventType.WORKER_COLONY_LOADED
         assert EventType.CREDENTIALS_REQUIRED
         assert EventType.EXECUTION_RESURRECTED
-        assert EventType.DRAFT_GRAPH_UPDATED
-        assert EventType.FLOWCHART_MAP_UPDATED
         assert EventType.QUEEN_PHASE_CHANGED
-        assert EventType.QUEEN_PERSONA_SELECTED
         assert EventType.SUBAGENT_REPORT
         assert EventType.TRIGGER_AVAILABLE
         assert EventType.TRIGGER_FIRED

@@ -413,7 +413,9 @@ class TestSessionCRUD:
             model=None,
             initial_prompt=None,
             queen_resume_from=None,
+            queen_name=None,
             initial_phase=None,
+            worker_name=None,
         )
 
     @pytest.mark.asyncio

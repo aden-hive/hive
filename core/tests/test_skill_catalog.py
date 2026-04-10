@@ -63,9 +63,16 @@ class TestSkillCatalog:
         assert catalog.to_prompt() == ""
 
     def test_to_prompt_framework_only(self):
-        """Framework-scope skills should NOT appear in the catalog prompt."""
+        """Framework-scope skills now appear in the catalog like any other scope.
+
+        The old design filtered framework skills out and surfaced them via
+        DefaultSkillManager only. The current design folds them into the
+        normal progressive-disclosure catalog.
+        """
         catalog = SkillCatalog([_make_skill(source_scope="framework")])
-        assert catalog.to_prompt() == ""
+        prompt = catalog.to_prompt()
+        assert "<available_skills>" in prompt
+        assert "<name>my-skill</name>" in prompt
 
     def test_to_prompt_xml_generation(self):
         skills = [
@@ -109,8 +116,8 @@ class TestSkillCatalog:
         assert "&lt;special&gt;" in prompt
         assert "&amp;" in prompt
 
-    def test_to_prompt_excludes_framework_includes_others(self):
-        """Mixed scopes: only framework skills are excluded from catalog."""
+    def test_to_prompt_includes_all_scopes(self):
+        """Mixed scopes: project, user, AND framework skills all appear in the catalog."""
         skills = [
             _make_skill("proj", "Project skill", "project"),
             _make_skill("usr", "User skill", "user"),
@@ -121,7 +128,7 @@ class TestSkillCatalog:
 
         assert "<name>proj</name>" in prompt
         assert "<name>usr</name>" in prompt
-        assert "fw" not in prompt
+        assert "<name>fw</name>" in prompt
 
     def test_to_prompt_contains_behavioral_instruction(self):
         catalog = SkillCatalog([_make_skill(source_scope="project")])

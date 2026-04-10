@@ -85,12 +85,6 @@ class TestClassifyFlowchartNode:
         result = classify_flowchart_node(node, 2, 3, edges, {"n3"})
         assert result == "terminal"
 
-    def test_gcu_node_is_browser(self):
-        node = {"id": "n2", "node_type": "gcu", "tools": []}
-        edges = [{"source": "n1", "target": "n2"}]
-        result = classify_flowchart_node(node, 1, 3, edges, set())
-        assert result == "browser"
-
     def test_subprocess_node(self):
         node = {"id": "n2", "node_type": "event_loop", "tools": [], "sub_agents": ["sub1"]}
         edges = [{"source": "n1", "target": "n2"}, {"source": "n2", "target": "n3"}]

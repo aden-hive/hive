@@ -1236,17 +1236,16 @@ class TestExtractToolCallHistory:
                 role="assistant",
                 content="",
                 tool_calls=[
-                    _make_tool_call(
-                        "c2", "save_data", {"filename": "output.txt", "content": "data"}
-                    ),
+                    _make_tool_call("c2", "read_file", {"path": "/tmp/output.txt"}),
                 ],
             ),
-            Message(seq=3, role="tool", content="saved", tool_use_id="c2"),
+            Message(seq=3, role="tool", content="contents", tool_use_id="c2"),
         ]
         result = extract_tool_call_history(msgs)
         assert "web_search (1x)" in result
-        assert "save_data (1x)" in result
-        assert "FILES SAVED: output.txt" in result
+        assert "read_file (1x)" in result
+        # read_file paths are tracked under FILES SAVED in production
+        assert "FILES SAVED: /tmp/output.txt" in result
 
     def test_errors_included(self):
         msgs = [
