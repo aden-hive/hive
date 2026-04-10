@@ -133,6 +133,10 @@ class EventType(StrEnum):
 
     # Colony lifecycle (session manager → frontend)
     WORKER_COLONY_LOADED = "worker_colony_loaded"
+    # Queen create_colony tool finished forking; carries colony_name +
+    # path so the frontend can render a system message linking to the
+    # new colony page at /colony/{colony_name}.
+    COLONY_CREATED = "colony_created"
     CREDENTIALS_REQUIRED = "credentials_required"
 
     # Queen phase changes (working <-> reviewing)

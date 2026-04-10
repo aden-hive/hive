@@ -704,10 +704,13 @@ Two-step flow:
      default skill for the full spec.
   2. create_colony(colony_name, task, skill_path) — Validate the skill \
      folder, install it under ~/.hive/skills/ if it's not already there, \
-     and fork this session into a new colony. The new colony's worker \
-     (which inherits ~/.hive/skills/) discovers the skill on its first \
-     scan, so it's born already knowing what you learned instead of \
-     re-doing your discovery work from scratch. ALWAYS prefer \
+     and fork this session into a new colony. NOTHING RUNS after this \
+     call: the task is baked into worker.json and the user starts the \
+     worker later from the new colony page. The task string still must \
+     be FULL and self-contained — when the user eventually runs it the \
+     worker has zero memory of your chat. The skill you wrote is \
+     installed under ~/.hive/skills/ so the worker discovers it on its \
+     first scan and starts informed instead of clueless. ALWAYS prefer \
      create_colony over a raw fork when ending a session that uncovered \
      reusable operational knowledge.
 

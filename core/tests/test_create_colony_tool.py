@@ -120,6 +120,49 @@ def _write_skill(
 
 
 @pytest.mark.asyncio
+async def test_happy_path_emits_colony_created_event(
+    tmp_path: Path, patched_home: Path, patched_fork: list[dict]
+) -> None:
+    """Successful create_colony must publish a COLONY_CREATED event."""
+    from framework.host.event_bus import AgentEvent, EventType
+
+    executor, session = _make_executor()
+
+    received: list[AgentEvent] = []
+
+    async def _on_colony_created(event: AgentEvent) -> None:
+        received.append(event)
+
+    session.event_bus.subscribe(
+        event_types=[EventType.COLONY_CREATED],
+        handler=_on_colony_created,
+    )
+
+    skill_src = _write_skill(
+        tmp_path / "scratch", dir_name="my-skill", fm_name="my-skill"
+    )
+    skill_src.parent.mkdir(parents=True, exist_ok=True)
+    # Re-create after parent mkdir
+    skill_src = _write_skill(
+        tmp_path / "scratch", dir_name="my-skill", fm_name="my-skill"
+    )
+
+    payload = await _call(
+        executor,
+        colony_name="event_check",
+        task="t",
+        skill_path=str(skill_src),
+    )
+    assert payload.get("status") == "created", payload
+    assert len(received) == 1
+    ev = received[0]
+    assert ev.type == EventType.COLONY_CREATED
+    assert ev.data.get("colony_name") == "event_check"
+    assert ev.data.get("skill_name") == "my-skill"
+    assert ev.data.get("is_new") is True
+
+
+@pytest.mark.asyncio
 async def test_happy_path_external_folder_is_copied_into_skills_root(
     tmp_path: Path, patched_home: Path, patched_fork: list[dict]
 ) -> None:

@@ -139,20 +139,6 @@ async def judge_turn(
             ),
         )
 
-    # Queen with no output keys → continuous interaction node.
-    # Inject tool-use pressure instead of auto-accepting.
-    if not output_keys and ctx.supports_direct_user_io:
-        return JudgeVerdict(
-            action="RETRY",
-            feedback=(
-                "STOP describing what you will do. "
-                "You have FULL access to all tools — file creation, "
-                "shell commands, MCP tools — and you CAN call them "
-                "directly in your response. Respond ONLY with tool "
-                "calls, no prose. Execute the task now."
-            ),
-        )
-
     # Level 2b: conversation-aware quality check (if success_criteria set)
     if ctx.agent_spec.success_criteria and ctx.llm:
         from framework.orchestrator.conversation_judge import evaluate_phase_completion

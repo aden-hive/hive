@@ -1327,7 +1327,15 @@ def register_queen_lifecycle_tools(
         task: str,
         skill_path: str,
     ) -> str:
-        """Create a colony after installing a pre-authored skill folder."""
+        """Create a colony after installing a pre-authored skill folder.
+
+        File-system only: copies the queen session into a new colony
+        directory and writes ``worker.json`` with the task baked in.
+        NOTHING RUNS after fork. The user navigates to the colony when
+        they're ready to start the worker — at that point the worker
+        reads the task from ``worker.json`` and the skill from
+        ``~/.hive/skills/`` and starts informed.
+        """
         if session is None:
             return json.dumps({"error": "No session bound to this tool registry."})
 
@@ -1365,10 +1373,12 @@ def register_queen_lifecycle_tools(
             installed_skill,
         )
 
-        # Fork the queen session into the colony. The fork inherits
-        # session.queen_ctx.skill_dirs which already includes
-        # ~/.hive/skills/, so the freshly installed skill is
-        # discovered on the worker's first scan.
+        # Fork the queen session into the colony directory. The fork
+        # copies conversations + writes worker.json + metadata.json.
+        # NO worker runs after this call. The new colony's worker
+        # inherits ~/.hive/skills/ on first run (whenever the user
+        # actually starts it), so the freshly installed skill is
+        # discoverable then.
         try:
             from framework.server.routes_execution import fork_session_into_colony
         except Exception as e:
@@ -1399,6 +1409,34 @@ def register_queen_lifecycle_tools(
                 }
             )
 
+        # Emit COLONY_CREATED so the frontend can render a system
+        # message in the queen DM with a link to the new colony.
+        # Without this the queen's text response is the only signal
+        # the user gets, and there's no clickable navigation.
+        bus = getattr(session, "event_bus", None)
+        if bus is not None:
+            try:
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.COLONY_CREATED,
+                        stream_id="queen",
+                        data={
+                            "colony_name": fork_result.get("colony_name", cn),
+                            "colony_path": fork_result.get("colony_path"),
+                            "queen_session_id": fork_result.get("queen_session_id"),
+                            "is_new": fork_result.get("is_new", True),
+                            "skill_installed": str(installed_skill),
+                            "skill_name": installed_skill.name if installed_skill else None,
+                            "task": (task or "").strip(),
+                        },
+                    )
+                )
+            except Exception:
+                logger.warning(
+                    "create_colony: failed to publish COLONY_CREATED event",
+                    exc_info=True,
+                )
+
         return json.dumps(
             {
                 "status": "created",
@@ -1421,6 +1459,13 @@ def register_queen_lifecycle_tools(
             "name+description valid, directory name matches frontmatter "
             "name), installs it under ~/.hive/skills/{name}/ if it's "
             "not already there, and then forks the session.\n\n"
+            "NOTHING RUNS AFTER FORK. This tool is file-system only: "
+            "it copies the queen session into a new colony directory "
+            "and writes worker.json with the task baked in. No worker "
+            "is started. The user navigates to the new colony when "
+            "they're ready to begin actual work — at that point the "
+            "worker reads the task from worker.json and the skill you "
+            "wrote here, and starts informed instead of clueless.\n\n"
             "TWO-STEP FLOW:\n\n"
             "  1. Use write_file (plus edit_file / list_directory as "
             "     needed) to create a skill folder. The folder must "
@@ -1461,9 +1506,17 @@ def register_queen_lifecycle_tools(
                 "task": {
                     "type": "string",
                     "description": (
-                        "FULL self-contained task description for the "
-                        "first worker run in the new colony. Worker "
-                        "has zero context — include everything."
+                        "FULL self-contained task description, baked "
+                        "into worker.json for the colony's first run. "
+                        "Nothing executes when create_colony returns — "
+                        "the task is stored, not run. The user starts "
+                        "the worker later from the new colony page. At "
+                        "that point the worker has zero memory of your "
+                        "chat, so this task string must contain "
+                        "everything: every requirement, constraint, "
+                        "and detail. Write it as if handing the work "
+                        "to a stranger who has never seen the user's "
+                        "request."
                     ),
                 },
                 "skill_path": {
@@ -3812,6 +3865,14 @@ def register_queen_lifecycle_tools(
                 agent_spec=spawn_spec,
                 tools=spawn_tools,
                 tool_executor=spawn_tool_executor,
+                # Use the legacy single-worker stream tag so events flow
+                # through the SSE filter into the queen DM chat. The
+                # default "worker:{uuid}" tag is reserved for parallel
+                # fan-out via run_parallel_workers and is filtered out
+                # of the queen DM by routes_events.py to keep the chat
+                # clean. The loaded primary worker is the user's
+                # main visible workstream and must NOT be filtered.
+                stream_id="worker",
             )
             new_worker_id = worker_ids[0] if worker_ids else ""
 

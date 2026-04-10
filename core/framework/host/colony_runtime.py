@@ -415,6 +415,7 @@ class ColonyRuntime:
         agent_spec: AgentSpec | None = None,
         tools: list[Any] | None = None,
         tool_executor: Callable | None = None,
+        stream_id: str | None = None,
     ) -> list[str]:
         """Spawn worker clones and start them in the background.
 
@@ -428,6 +429,16 @@ class ColonyRuntime:
         path that silently dropped ``user_request`` via the buffer
         filter.
 
+        ``stream_id`` controls the SSE stream tag the worker's events
+        publish under. Default is ``f"worker:{worker_id}"`` (the
+        per-spawn unique tag used by parallel fan-out, which the SSE
+        filter at routes_events.py drops to keep the queen DM clean
+        of worker noise). Pass an explicit value when you want the
+        worker's events to bypass that filter and stream to the queen
+        DM. ``run_agent_with_input`` passes ``"worker"`` (singular,
+        no colon) so the loaded primary worker's tool calls and LLM
+        deltas reach the user's chat tab.
+
         Returns list of worker IDs.
         """
         if not self._running:
@@ -440,6 +451,13 @@ class ColonyRuntime:
         spawn_spec = agent_spec or self._agent_spec
         spawn_tools = tools if tools is not None else self._tools
         spawn_executor = tool_executor or self._tool_executor
+
+        # Resolve the SSE stream_id once. When the caller didn't supply
+        # one we use the per-worker fan-out tag (filtered out by the
+        # SSE handler). When the caller passed an explicit value we
+        # honor it across the whole batch — typically count=1 for the
+        # primary loaded worker that needs to stream to the queen DM.
+        explicit_stream_id = stream_id
 
         worker_ids = []
         for i in range(count):
@@ -478,7 +496,7 @@ class ColonyRuntime:
                 protocols_prompt=self.protocols_prompt,
                 skill_dirs=self.skill_dirs,
                 execution_id=worker_id,
-                stream_id=f"worker:{worker_id}",
+                stream_id=explicit_stream_id or f"worker:{worker_id}",
             )
 
             worker = Worker(

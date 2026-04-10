@@ -365,6 +365,34 @@ export default function QueenDM() {
           break;
         }
 
+        case "colony_created": {
+          // Queen called create_colony() — surface a clickable system
+          // message linking to /colony/{colony_name} so the user can
+          // navigate to the new colony immediately.
+          const colonyName = (event.data?.colony_name as string) || "";
+          const isNew = (event.data?.is_new as boolean) ?? true;
+          const skillName = (event.data?.skill_name as string) || "";
+          if (!colonyName) break;
+          const msg: ChatMessage = {
+            id: makeId(),
+            agent: "System",
+            agentColor: "",
+            content: JSON.stringify({
+              kind: "colony_created",
+              colony_name: colonyName,
+              is_new: isNew,
+              skill_name: skillName,
+              href: `/colony/${colonyName}`,
+            }),
+            timestamp: "",
+            type: "colony_link",
+            thread: "queen-dm",
+            createdAt: Date.now(),
+          };
+          setMessages((prev) => [...prev, msg]);
+          break;
+        }
+
         case "tool_call_started": {
           const toolName = (event.data?.tool_name as string) || "unknown";
           const toolUseId = (event.data?.tool_use_id as string) || "";

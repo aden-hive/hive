@@ -85,3 +85,46 @@ def test_handler_module_exposes_allowlist_constant() -> None:
     assert EventType.SUBAGENT_REPORT.value in _WORKER_EVENT_ALLOWLIST
     assert EventType.EXECUTION_COMPLETED.value in _WORKER_EVENT_ALLOWLIST
     assert EventType.EXECUTION_FAILED.value in _WORKER_EVENT_ALLOWLIST
+
+
+def test_loaded_worker_stream_id_singular_passes_through() -> None:
+    """The loaded primary worker uses stream_id='worker' (no colon).
+
+    This is the stream tag run_agent_with_input passes to
+    ColonyRuntime.spawn. The SSE filter must NOT confuse it with the
+    parallel-fan-out 'worker:{uuid}' tag — otherwise the user's main
+    chat-visible workstream gets dropped from the queen DM.
+
+    Regression test for: 'why worker message no longer goes to the
+    frontend' after migrating run_agent_with_input from
+    AgentHost.trigger to ColonyRuntime.spawn.
+    """
+    from framework.server.routes_events import _is_worker_noise
+
+    # All of these are events from the LOADED worker (single primary
+    # worker spawned via run_agent_with_input). They must pass the
+    # filter — including high-frequency LLM deltas and tool calls,
+    # because the queen DM IS the visible chat for this worker.
+    for evt_type in [
+        EventType.LLM_TEXT_DELTA.value,
+        EventType.TOOL_CALL_STARTED.value,
+        EventType.TOOL_CALL_COMPLETED.value,
+        EventType.NODE_LOOP_ITERATION.value,
+        EventType.CLIENT_OUTPUT_DELTA.value,
+        EventType.EXECUTION_STARTED.value,
+        EventType.EXECUTION_COMPLETED.value,
+    ]:
+        evt = {"stream_id": "worker", "type": evt_type}
+        assert not _is_worker_noise(evt), (
+            f"loaded-worker event {evt_type} with stream_id='worker' was "
+            "filtered as worker noise — this regresses the queen DM "
+            "primary worker chat path"
+        )
+
+    # Sanity: the parallel fan-out tag is still filtered.
+    assert _is_worker_noise(
+        {
+            "stream_id": "worker:abc123",
+            "type": EventType.LLM_TEXT_DELTA.value,
+        }
+    )
