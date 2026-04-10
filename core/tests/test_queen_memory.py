@@ -15,7 +15,7 @@ from framework.agents.queen.recall_selector import (
     format_recall_injection,
     select_memories,
 )
-from framework.graph.prompting import build_system_prompt_for_node_context
+from framework.orchestrator.prompting import build_system_prompt_for_node_context
 from framework.tools.queen_lifecycle_tools import QueenPhaseState
 
 

@@ -1,6 +1,6 @@
 """Integration tests for the skill system — prompt composition and backward compatibility."""
 
-from framework.graph.prompt_composer import compose_system_prompt
+from framework.orchestrator.prompt_composer import compose_system_prompt
 from framework.skills.catalog import SkillCatalog
 from framework.skills.config import SkillsConfig
 from framework.skills.defaults import DefaultSkillManager

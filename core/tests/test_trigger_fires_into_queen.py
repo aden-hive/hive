@@ -4,7 +4,7 @@ Verifies that:
 - Timer triggers fire inject_trigger() on the queen node
 - Webhook triggers fire inject_trigger() via EventBus WEBHOOK_RECEIVED
 - Queen node unavailable → trigger skipped silently
-- graph_runtime=None → trigger discarded (gating)
+- colony_runtime=None → trigger discarded (gating)
 - remove_trigger cleans up webhook subscription
 - run_agent_with_input is in _QUEEN_RUNNING_TOOLS
 - System prompts reference run_agent_with_input, not start_graph()
@@ -18,8 +18,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from framework.runtime.event_bus import EventBus
-from framework.runtime.triggers import TriggerDefinition
+from framework.host.event_bus import EventBus
+from framework.host.triggers import TriggerDefinition
 from framework.server.session_manager import Session
 
 
@@ -34,12 +34,12 @@ def _make_executor(queen_node) -> SimpleNamespace:
 @pytest.mark.asyncio
 async def test_interval_timer_fires_inject_trigger_on_queen_node() -> None:
     """Timer with interval_minutes fires inject_trigger() on the queen node."""
-    from framework.graph.event_loop_node import TriggerEvent
+    from framework.agent_loop.agent_loop import TriggerEvent
     from framework.tools.queen_lifecycle_tools import _start_trigger_timer
 
     bus = EventBus()
     session = _make_session(bus)
-    session.graph_runtime = object()  # non-None → graph is loaded
+    session.colony_runtime = object()  # non-None → colony is loaded
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -82,7 +82,7 @@ async def test_timer_skipped_when_queen_node_unavailable() -> None:
 
     bus = EventBus()
     session = _make_session(bus)
-    session.graph_runtime = object()
+    session.colony_runtime = object()
     session.queen_executor = None  # queen not ready
 
     tdef = TriggerDefinition(
@@ -109,12 +109,12 @@ async def test_timer_skipped_when_queen_node_unavailable() -> None:
 @pytest.mark.asyncio
 async def test_webhook_trigger_fires_inject_trigger() -> None:
     """WEBHOOK_RECEIVED on EventBus → inject_trigger() on the queen node."""
-    from framework.graph.event_loop_node import TriggerEvent
+    from framework.agent_loop.agent_loop import TriggerEvent
     from framework.tools.queen_lifecycle_tools import _start_trigger_webhook
 
     bus = EventBus()
     session = _make_session(bus)
-    session.graph_runtime = object()
+    session.colony_runtime = object()
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -131,8 +131,8 @@ async def test_webhook_trigger_fires_inject_trigger() -> None:
     mock_server.is_running = False
     mock_server.add_route = MagicMock()
     mock_server.start = AsyncMock()
-    with patch("framework.runtime.webhook_server.WebhookServer", return_value=mock_server):
-        with patch("framework.runtime.webhook_server.WebhookServerConfig"):
+    with patch("framework.host.webhook_server.WebhookServer", return_value=mock_server):
+        with patch("framework.host.webhook_server.WebhookServerConfig"):
             await _start_trigger_webhook(session, "test-webhook", tdef)
 
     # Simulate an incoming webhook event on the EventBus
@@ -162,7 +162,7 @@ async def test_webhook_trigger_discarded_when_no_worker() -> None:
 
     bus = EventBus()
     session = _make_session(bus)
-    session.graph_runtime = None  # no graph
+    session.colony_runtime = None  # no colony
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -178,8 +178,8 @@ async def test_webhook_trigger_discarded_when_no_worker() -> None:
     mock_server.is_running = False
     mock_server.add_route = MagicMock()
     mock_server.start = AsyncMock()
-    with patch("framework.runtime.webhook_server.WebhookServer", return_value=mock_server):
-        with patch("framework.runtime.webhook_server.WebhookServerConfig"):
+    with patch("framework.host.webhook_server.WebhookServer", return_value=mock_server):
+        with patch("framework.host.webhook_server.WebhookServerConfig"):
             await _start_trigger_webhook(session, "no-worker-webhook", tdef)
 
     await bus.emit_webhook_received(
@@ -201,7 +201,7 @@ async def test_remove_trigger_cleans_up_webhook_subscription() -> None:
 
     bus = EventBus()
     session = _make_session(bus)
-    session.graph_runtime = object()
+    session.colony_runtime = object()
 
     queen_node = SimpleNamespace(inject_trigger=AsyncMock())
     session.queen_executor = _make_executor(queen_node)
@@ -217,8 +217,8 @@ async def test_remove_trigger_cleans_up_webhook_subscription() -> None:
     mock_server.is_running = False
     mock_server.add_route = MagicMock()
     mock_server.start = AsyncMock()
-    with patch("framework.runtime.webhook_server.WebhookServer", return_value=mock_server):
-        with patch("framework.runtime.webhook_server.WebhookServerConfig"):
+    with patch("framework.host.webhook_server.WebhookServer", return_value=mock_server):
+        with patch("framework.host.webhook_server.WebhookServerConfig"):
             await _start_trigger_webhook(session, "removable-webhook", tdef)
 
     # Manually unsubscribe (mirrors what remove_trigger does)

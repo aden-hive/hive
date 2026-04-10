@@ -11,5 +11,10 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"_is_context_too_large_error\" core/framework/agent_loop/agent_loop.py core/framework/agent_loop/internals/*.py)"
+    ]
   }
 }

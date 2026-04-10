@@ -90,19 +90,10 @@ if "--stdio" not in sys.argv:
     logger.info(f"Registered {len(tools)} tools: {tools}")
 
 
-@mcp.custom_route("/health", methods=["GET"])
-async def health_check(request: Request) -> PlainTextResponse:
-    """Health check endpoint for container orchestration."""
-    return PlainTextResponse("OK")
+@mcp.resource("health://status")
+def health_check() -> str:
+    return "OK"
 
-
-@mcp.custom_route("/", methods=["GET"])
-async def index(request: Request) -> PlainTextResponse:
-    """Landing page for browser visits."""
-    return PlainTextResponse("Welcome to the Hive MCP Server")
-
-
-def main() -> None:
     """Entry point for the MCP server."""
     parser = argparse.ArgumentParser(description="Aden Tools MCP Server")
     parser.add_argument(

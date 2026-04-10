@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from framework.runtime.event_bus import EventBus
+from framework.host.event_bus import EventBus
 from framework.server.session_manager import Session, SessionManager
 
 
@@ -145,7 +145,7 @@ async def test_load_worker_core_defaults_to_session_llm_model(monkeypatch, tmp_p
         load_calls.append({"agent_path": agent_path, "model": model, "kwargs": kwargs})
         return runner
 
-    monkeypatch.setattr("framework.runner.AgentRunner.load", fake_load)
+    monkeypatch.setattr("framework.loader.agent_loader.AgentLoader.load", fake_load)
     monkeypatch.setattr(manager, "_cleanup_stale_active_sessions", lambda *_args: None)
     monkeypatch.setattr(
         "framework.tools.queen_lifecycle_tools._read_agent_triggers_json",
@@ -179,7 +179,7 @@ async def test_load_worker_core_keeps_explicit_worker_model_override(monkeypatch
         load_calls.append({"agent_path": agent_path, "model": model, "kwargs": kwargs})
         return runner
 
-    monkeypatch.setattr("framework.runner.AgentRunner.load", fake_load)
+    monkeypatch.setattr("framework.loader.agent_loader.AgentLoader.load", fake_load)
     monkeypatch.setattr(manager, "_cleanup_stale_active_sessions", lambda *_args: None)
     monkeypatch.setattr(
         "framework.tools.queen_lifecycle_tools._read_agent_triggers_json",

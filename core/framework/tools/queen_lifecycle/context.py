@@ -25,8 +25,8 @@ class QueenToolContext:
     registry: Any = None  # ToolRegistry
 
     def get_runtime(self):
-        """Get current graph runtime from session (late-binding)."""
-        return getattr(self.session, "graph_runtime", None)
+        """Get current colony runtime from session (late-binding)."""
+        return getattr(self.session, "colony_runtime", None)
 
     def update_meta(self, updates: dict) -> None:
         """Update session metadata JSON."""

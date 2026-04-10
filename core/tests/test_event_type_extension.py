@@ -29,7 +29,7 @@ from framework.llm.stream_events import (
     ToolCallEvent,
     ToolResultEvent,
 )
-from framework.runtime.event_bus import AgentEvent, EventBus, EventType, Subscription
+from framework.host.event_bus import AgentEvent, EventBus, EventType, Subscription
 
 
 # ---------------------------------------------------------------------------

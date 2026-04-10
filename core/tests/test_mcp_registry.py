@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from framework.runner.mcp_registry import MCPRegistry
+from framework.loader.mcp_registry import MCPRegistry
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -387,7 +387,7 @@ def test_update_index_writes_cache(tmp_path: Path, monkeypatch):
         def raise_for_status(self):
             pass
 
-    monkeypatch.setattr("framework.runner.mcp_registry.httpx.get", lambda *a, **kw: MockResponse())
+    monkeypatch.setattr("framework.loader.mcp_registry.httpx.get", lambda *a, **kw: MockResponse())
     registry.update_index()
     cached = json.loads((base / "cache" / "registry_index.json").read_text())
     assert "jira" in cached["servers"]
@@ -402,7 +402,7 @@ def test_update_index_network_error(tmp_path: Path, monkeypatch):
     registry = MCPRegistry(base_path=base)
     registry.initialize()
     monkeypatch.setattr(
-        "framework.runner.mcp_registry.httpx.get",
+        "framework.loader.mcp_registry.httpx.get",
         lambda *a, **kw: (_ for _ in ()).throw(_httpx.ConnectError("fail")),
     )
     with pytest.raises(_httpx.ConnectError):
@@ -675,7 +675,7 @@ def test_run_health_check_healthy(tmp_path: Path, monkeypatch):
         def list_tools(self):
             return []
 
-    monkeypatch.setattr("framework.runner.mcp_registry.MCPClient", MockClient)
+    monkeypatch.setattr("framework.loader.mcp_registry.MCPClient", MockClient)
     result = registry.run_health_check("db")
     assert result["status"] == "healthy"
     assert registry._read_installed()["servers"]["db"]["last_health_check_at"] is not None
@@ -699,7 +699,7 @@ def test_health_check_public_api(tmp_path: Path, monkeypatch):
         def list_tools(self):
             return []
 
-    monkeypatch.setattr("framework.runner.mcp_registry.MCPClient", MockClient)
+    monkeypatch.setattr("framework.loader.mcp_registry.MCPClient", MockClient)
     result = registry.health_check("db")
     assert result["status"] == "healthy"
 
@@ -733,7 +733,7 @@ def test_health_check_prefers_pooled_connection(tmp_path: Path, monkeypatch):
 
     fake_manager = FakeManager()
     monkeypatch.setattr(
-        "framework.runner.mcp_registry.MCPConnectionManager.get_instance",
+        "framework.loader.mcp_registry.MCPConnectionManager.get_instance",
         lambda: fake_manager,
     )
 
@@ -741,7 +741,7 @@ def test_health_check_prefers_pooled_connection(tmp_path: Path, monkeypatch):
         def __init__(self, config):
             raise AssertionError("fresh MCPClient should not be constructed")
 
-    monkeypatch.setattr("framework.runner.mcp_registry.MCPClient", UnexpectedClient)
+    monkeypatch.setattr("framework.loader.mcp_registry.MCPClient", UnexpectedClient)
 
     result = registry.health_check("db")
     assert result["status"] == "healthy"
@@ -778,7 +778,7 @@ def test_health_check_uses_installed_transport_preference(tmp_path: Path, monkey
         def list_tools(self):
             return []
 
-    monkeypatch.setattr("framework.runner.mcp_registry.MCPClient", MockClient)
+    monkeypatch.setattr("framework.loader.mcp_registry.MCPClient", MockClient)
     result = registry.health_check("api")
     assert result["status"] == "healthy"
     assert seen_transport == ["http"]
@@ -799,7 +799,7 @@ def test_run_health_check_unhealthy(tmp_path: Path, monkeypatch):
         def __exit__(self, *a):
             pass
 
-    monkeypatch.setattr("framework.runner.mcp_registry.MCPClient", MockClient)
+    monkeypatch.setattr("framework.loader.mcp_registry.MCPClient", MockClient)
     result = registry.run_health_check("db")
     assert result["status"] == "unhealthy"
     assert "refused" in result["error"]
@@ -824,7 +824,7 @@ def test_run_health_check_list_tools_failure(tmp_path: Path, monkeypatch):
         def list_tools(self):
             raise RuntimeError("tools discovery failed")
 
-    monkeypatch.setattr("framework.runner.mcp_registry.MCPClient", MockClient)
+    monkeypatch.setattr("framework.loader.mcp_registry.MCPClient", MockClient)
     result = registry.run_health_check("db")
     assert result["status"] == "unhealthy"
     assert "tools discovery failed" in result["error"]
@@ -1051,7 +1051,7 @@ def test_run_health_check_all_servers(tmp_path: Path, monkeypatch):
         def list_tools(self):
             return []
 
-    monkeypatch.setattr("framework.runner.mcp_registry.MCPClient", MockClient)
+    monkeypatch.setattr("framework.loader.mcp_registry.MCPClient", MockClient)
 
     results = registry.run_health_check()
     assert isinstance(results, dict)
@@ -1130,7 +1130,7 @@ def test_get_hive_version_section_aware(tmp_path: Path, monkeypatch):
     """Version must come from [project], not from a [tool.*] section."""
     from importlib.metadata import PackageNotFoundError
 
-    import framework.runner.mcp_registry as mod
+    import framework.loader.mcp_registry as mod
 
     # Create directory structure so parents[2] of fake file -> tmp_path
     runner_dir = tmp_path / "framework" / "runner"
@@ -1145,7 +1145,7 @@ def test_get_hive_version_section_aware(tmp_path: Path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text(toml_content, encoding="utf-8")
 
     monkeypatch.setattr(
-        "framework.runner.mcp_registry.version",
+        "framework.loader.mcp_registry.version",
         lambda _pkg: (_ for _ in ()).throw(PackageNotFoundError()),
     )
     monkeypatch.setattr(mod, "__file__", str(fake_file))
@@ -1157,7 +1157,7 @@ def test_get_hive_version_missing_toml(tmp_path: Path, monkeypatch):
     """Returns 'unknown' when pyproject.toml does not exist."""
     from importlib.metadata import PackageNotFoundError
 
-    import framework.runner.mcp_registry as mod
+    import framework.loader.mcp_registry as mod
 
     runner_dir = tmp_path / "framework" / "runner"
     runner_dir.mkdir(parents=True)
@@ -1165,7 +1165,7 @@ def test_get_hive_version_missing_toml(tmp_path: Path, monkeypatch):
     fake_file.touch()
 
     monkeypatch.setattr(
-        "framework.runner.mcp_registry.version",
+        "framework.loader.mcp_registry.version",
         lambda _pkg: (_ for _ in ()).throw(PackageNotFoundError()),
     )
     monkeypatch.setattr(mod, "__file__", str(fake_file))

@@ -5,8 +5,8 @@ import threading
 import httpx
 import pytest
 
-from framework.runner.mcp_client import MCPServerConfig, MCPTool
-from framework.runner.mcp_connection_manager import MCPConnectionManager
+from framework.loader.mcp_client import MCPServerConfig, MCPTool
+from framework.loader.mcp_connection_manager import MCPConnectionManager
 
 
 class FakeMCPClient:
@@ -40,7 +40,7 @@ class FakeMCPClient:
 
 @pytest.fixture
 def manager(monkeypatch):
-    monkeypatch.setattr("framework.runner.mcp_connection_manager.MCPClient", FakeMCPClient)
+    monkeypatch.setattr("framework.loader.mcp_connection_manager.MCPClient", FakeMCPClient)
     monkeypatch.setattr(MCPConnectionManager, "_instance", None)
     FakeMCPClient.instances.clear()
     manager = MCPConnectionManager.get_instance()
@@ -159,7 +159,7 @@ def test_health_check_returns_false_when_server_is_unreachable(manager, monkeypa
         def get(self, _path: str):
             raise httpx.ConnectError("unreachable")
 
-    monkeypatch.setattr("framework.runner.mcp_connection_manager.httpx.Client", FailingHttpClient)
+    monkeypatch.setattr("framework.loader.mcp_connection_manager.httpx.Client", FailingHttpClient)
 
     assert manager.health_check("shared") is False
 
@@ -213,7 +213,7 @@ class FailingDisconnectClient(FakeMCPClient):
 
 def test_acquire_cleans_up_transition_when_connect_fails(monkeypatch):
     monkeypatch.setattr(
-        "framework.runner.mcp_connection_manager.MCPClient",
+        "framework.loader.mcp_connection_manager.MCPClient",
         FailingConnectClient,
     )
     monkeypatch.setattr(MCPConnectionManager, "_instance", None)
@@ -234,7 +234,7 @@ def test_acquire_cleans_up_transition_when_connect_fails(monkeypatch):
 
 def test_release_handles_disconnect_failure(monkeypatch):
     monkeypatch.setattr(
-        "framework.runner.mcp_connection_manager.MCPClient",
+        "framework.loader.mcp_connection_manager.MCPClient",
         FailingDisconnectClient,
     )
     monkeypatch.setattr(MCPConnectionManager, "_instance", None)
@@ -270,7 +270,7 @@ def test_reconnect_handles_old_client_disconnect_failure(monkeypatch):
                 raise RuntimeError("old disconnect failed")
 
     monkeypatch.setattr(
-        "framework.runner.mcp_connection_manager.MCPClient",
+        "framework.loader.mcp_connection_manager.MCPClient",
         FirstFailsThenWorks,
     )
     monkeypatch.setattr(MCPConnectionManager, "_instance", None)
@@ -292,7 +292,7 @@ def test_reconnect_handles_old_client_disconnect_failure(monkeypatch):
 
 def test_cleanup_all_handles_disconnect_failure(monkeypatch):
     monkeypatch.setattr(
-        "framework.runner.mcp_connection_manager.MCPClient",
+        "framework.loader.mcp_connection_manager.MCPClient",
         FailingDisconnectClient,
     )
     monkeypatch.setattr(MCPConnectionManager, "_instance", None)

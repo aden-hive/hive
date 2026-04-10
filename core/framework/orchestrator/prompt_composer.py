@@ -1,6 +1,9 @@
-"""Legacy compatibility wrapper around :mod:`framework.graph.prompting`.
+"""Compatibility wrapper around :mod:`framework.orchestrator.prompting`.
 
-New runtime code should import from ``framework.graph.prompting`` directly.
+Re-exports the prompt-composition primitives plus a few helpers
+(``compose_system_prompt``, ``build_transition_marker``) used by skills
+and queen tooling.  New code should import directly from
+``framework.orchestrator.prompting``.
 """
 
 from __future__ import annotations

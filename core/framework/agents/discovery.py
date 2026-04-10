@@ -143,16 +143,16 @@ def _count_runs(agent_name: str) -> int:
     return len(run_ids)
 
 
+_EXCLUDED_JSON_STEMS = {"agent", "flowchart", "triggers", "configuration", "metadata"}
+
+
 def _is_colony_dir(path: Path) -> bool:
     """Check if a directory is a colony with worker config files."""
     if not path.is_dir():
         return False
     return any(
         f.suffix == ".json"
-        and f.stem != "agent"
-        and f.stem != "flowchart"
-        and f.stem != "triggers"
-        and f.stem != "configuration"
+        and f.stem not in _EXCLUDED_JSON_STEMS
         for f in path.iterdir()
         if f.is_file()
     )
@@ -165,7 +165,7 @@ def _find_worker_configs(colony_dir: Path) -> list[Path]:
         for p in colony_dir.iterdir()
         if p.is_file()
         and p.suffix == ".json"
-        and p.stem not in ("agent", "flowchart", "triggers", "configuration")
+        and p.stem not in _EXCLUDED_JSON_STEMS
     )
 
 

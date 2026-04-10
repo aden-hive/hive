@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import pytest
 
-from framework.graph.event_loop.tool_result_handler import execute_tool
+from framework.agent_loop.internals.tool_result_handler import execute_tool
 from framework.llm.provider import ToolResult, ToolUse
-from framework.runner.tool_registry import _execution_context
+from framework.loader.tool_registry import _execution_context
 
 
 class _ToolCallEvent:

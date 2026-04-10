@@ -13,15 +13,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from framework.graph.conversation import NodeConversation
-from framework.graph.event_loop_node import (
-    EventLoopNode,
-    JudgeProtocol,
-    JudgeVerdict,
-    LoopConfig,
-    OutputAccumulator,
-)
-from framework.graph.node import DataBuffer, NodeContext, NodeProtocol, NodeSpec
+from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
+from framework.agent_loop.agent_loop import OutputAccumulator
+from framework.agent_loop.conversation import NodeConversation
+from framework.agent_loop.internals.types import JudgeProtocol, JudgeVerdict, LoopConfig
+from framework.host.event_bus import EventBus, EventType
 from framework.llm.provider import LLMProvider, LLMResponse, Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
     FinishEvent,
@@ -29,10 +25,10 @@ from framework.llm.stream_events import (
     TextDeltaEvent,
     ToolCallEvent,
 )
-from framework.runtime.core import Runtime
-from framework.runtime.event_bus import EventBus, EventType
+from framework.orchestrator.node import DataBuffer, NodeContext, NodeProtocol, NodeSpec
 from framework.server.session_manager import Session, SessionManager
 from framework.storage.conversation_store import FileConversationStore
+from framework.tracker.decision_tracker import DecisionTracker as Runtime
 
 # ---------------------------------------------------------------------------
 # Mock LLM that yields pre-programmed stream events
@@ -2425,7 +2421,7 @@ class TestExecutionId:
 
     def test_stream_runtime_adapter_exposes_execution_id(self):
         """StreamRuntimeAdapter.execution_id returns the value passed at construction."""
-        from framework.runtime.stream_runtime import StreamRuntimeAdapter
+        from framework.host.stream_runtime import StreamRuntimeAdapter
 
         mock_stream_runtime = MagicMock()
         adapter = StreamRuntimeAdapter(stream_runtime=mock_stream_runtime, execution_id="exec_456")

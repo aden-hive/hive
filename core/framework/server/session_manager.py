@@ -310,15 +310,16 @@ class SessionManager:
                     queen_resume_from=queen_resume_from,
                 )
 
-        # Reuse the original session ID when cold-restoring so the frontend
-        # sees one continuous session instead of a new one each time.
-        # If the session is already live (e.g. user navigated back to a
-        # colony that's still running), return the existing session.
+        # Use the colony's forked session ID as the live session ID.
+        # If it's already live (user navigated back), return it directly
+        # -- but only if it belongs to this colony.
         if queen_resume_from and queen_resume_from in self._sessions:
-            return self._sessions[queen_resume_from]
+            existing = self._sessions[queen_resume_from]
+            if existing.worker_path and str(existing.worker_path) == str(agent_path):
+                return existing
 
         session = await self._create_session_core(
-            session_id=queen_resume_from,
+            session_id=_colony_session_id or queen_resume_from,
             model=model,
         )
         session.queen_resume_from = queen_resume_from

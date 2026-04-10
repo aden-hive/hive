@@ -2,7 +2,7 @@
 
 import subprocess
 
-from framework.runner import cli as runner_cli
+from framework.loader import cli as runner_cli
 
 
 def _write_frontend_tree(tmp_path, *, with_dist: bool = False):

@@ -1338,7 +1338,7 @@ class AgentLoader:
             for p in agent_path.iterdir()
             if p.is_file()
             and p.suffix == ".json"
-            and p.stem not in ("agent", "flowchart", "triggers", "configuration")
+            and p.stem not in ("agent", "flowchart", "triggers", "configuration", "metadata")
         )
 
         if not worker_jsons:

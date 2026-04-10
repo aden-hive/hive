@@ -11,7 +11,7 @@ from datetime import datetime
 
 import pytest
 
-from framework.runtime.event_bus import (
+from framework.host.event_bus import (
     AgentEvent,
     EventBus,
     EventType,

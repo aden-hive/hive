@@ -70,7 +70,7 @@ class TestSkillDirsPropagation:
     def _make_ctx(self, **kwargs):
         from unittest.mock import MagicMock
 
-        from framework.graph.node import NodeContext
+        from framework.orchestrator.node import NodeContext
 
         return NodeContext(
             runtime=MagicMock(),

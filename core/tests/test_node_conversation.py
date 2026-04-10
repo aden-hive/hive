@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from framework.graph.conversation import (
+from framework.agent_loop.conversation import (
     Message,
     NodeConversation,
     extract_tool_call_history,
@@ -1273,7 +1273,7 @@ class TestExtractToolCallHistory:
 
 class TestIsContextTooLargeError:
     def test_context_window_class_name(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         class ContextWindowExceededError(Exception):
             pass
@@ -1281,25 +1281,25 @@ class TestIsContextTooLargeError:
         assert _is_context_too_large_error(ContextWindowExceededError("x"))
 
     def test_openai_context_length(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         err = RuntimeError("This model's maximum context length is 128000 tokens")
         assert _is_context_too_large_error(err)
 
     def test_anthropic_too_long(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         err = RuntimeError("prompt is too long: 150000 tokens > 100000")
         assert _is_context_too_large_error(err)
 
     def test_generic_exceeds_limit(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         err = ValueError("Request exceeds token limit")
         assert _is_context_too_large_error(err)
 
     def test_unrelated_error(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         assert not _is_context_too_large_error(ValueError("connection refused"))
         assert not _is_context_too_large_error(RuntimeError("timeout"))
@@ -1312,7 +1312,7 @@ class TestIsContextTooLargeError:
 
 class TestFormatMessagesForSummary:
     def test_user_assistant_messages(self):
-        from framework.graph.event_loop_node import EventLoopNode
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
 
         msgs = [
             Message(seq=0, role="user", content="Hello world"),
@@ -1323,7 +1323,7 @@ class TestFormatMessagesForSummary:
         assert "[assistant]: Hi there" in result
 
     def test_tool_result_truncated(self):
-        from framework.graph.event_loop_node import EventLoopNode
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
 
         msgs = [
             Message(seq=0, role="tool", content="x" * 1000, tool_use_id="c1"),
@@ -1335,7 +1335,7 @@ class TestFormatMessagesForSummary:
         assert len(result) < 600
 
     def test_assistant_with_tool_calls(self):
-        from framework.graph.event_loop_node import EventLoopNode
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
 
         tc = [_make_tool_call("c1", "web_search", {"query": "test"})]
         msgs = [
@@ -1356,7 +1356,8 @@ class TestLlmCompact:
 
     def _make_node(self):
         """Create a minimal EventLoopNode for testing."""
-        from framework.graph.event_loop_node import EventLoopNode, LoopConfig
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
+        from framework.agent_loop.internals.types import LoopConfig
 
         config = LoopConfig(max_context_tokens=32000)
         node = EventLoopNode.__new__(EventLoopNode)
@@ -1373,7 +1374,7 @@ class TestLlmCompact:
         """Create a mock NodeContext with controllable LLM."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from framework.graph.node import NodeSpec
+        from framework.orchestrator.node import NodeSpec
 
         spec = NodeSpec(
             id="test",

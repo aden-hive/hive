@@ -754,6 +754,17 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
             colony_session_id,
             colony_name,
         )
+        # Copy queen conversations into worker storage so the worker
+        # starts with the queen's full context.
+        worker_storage = Path.home() / ".hive" / "agents" / colony_name / worker_name
+        worker_storage.mkdir(parents=True, exist_ok=True)
+        worker_conv_dir = worker_storage / "conversations"
+        source_conv_dir = dest_queen_dir / "conversations"
+        if source_conv_dir.exists():
+            await asyncio.to_thread(
+                shutil.copytree, source_conv_dir, worker_conv_dir, dirs_exist_ok=True
+            )
+            logger.info("Copied queen conversations to worker storage %s", worker_conv_dir)
     else:
         logger.warning(
             "Queen session dir %s not found, colony will start fresh",

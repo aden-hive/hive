@@ -1063,9 +1063,9 @@ class TestIsLocalModel:
     )
     def test_local_models_return_true(self, model):
         """Local model prefixes should be recognized."""
-        from framework.runner.runner import AgentRunner
+        from framework.loader.agent_loader import AgentLoader
 
-        assert AgentRunner._is_local_model(model) is True
+        assert AgentLoader._is_local_model(model) is True
 
     @pytest.mark.parametrize(
         "model",
@@ -1084,9 +1084,9 @@ class TestIsLocalModel:
     )
     def test_cloud_models_return_false(self, model):
         """Cloud model prefixes should not be treated as local."""
-        from framework.runner.runner import AgentRunner
+        from framework.loader.agent_loader import AgentLoader
 
-        assert AgentRunner._is_local_model(model) is False
+        assert AgentLoader._is_local_model(model) is False
 
 
 # ---------------------------------------------------------------------------
