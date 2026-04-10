@@ -991,18 +991,74 @@ def register_queen_lifecycle_tools(
     # --- stop_worker -----------------------------------------------------------
 
     async def stop_worker(*, reason: str = "Stopped by queen") -> str:
-        """Stop all active workers in the colony."""
-        runtime = _get_runtime()
-        if runtime is None:
-            return json.dumps({"error": "No worker loaded in this session."})
+        """Stop all active workers in the session.
 
-        await runtime.stop_all_workers()
-        runtime.pause_timers()
+        Stops workers on BOTH the unified ColonyRuntime (``session.colony``
+        — where ``run_agent_with_input`` and ``run_parallel_workers``
+        spawn) AND the legacy ``session.colony_runtime`` (loaded
+        AgentHost — still tracks timers and any legacy triggers). A
+        previous version only stopped the legacy runtime, which meant
+        workers spawned via the new path kept running silently after
+        the queen called this tool.
+        """
+        stopped_unified = 0
+        stopped_legacy = 0
+        errors: list[str] = []
+
+        # 1. Stop everything on the unified ColonyRuntime. This is
+        # where run_agent_with_input and run_parallel_workers live.
+        colony = getattr(session, "colony", None)
+        if colony is not None:
+            try:
+                # Count live workers BEFORE stopping so we can report
+                # accurately — stop_all_workers clears the dict.
+                stopped_unified = sum(
+                    1 for w in colony.list_workers() if w.status.value in ("pending", "running")
+                )
+                await colony.stop_all_workers()
+            except Exception as e:
+                errors.append(f"unified: {e}")
+                logger.warning(
+                    "stop_worker: failed to stop unified colony workers",
+                    exc_info=True,
+                )
+
+        # 2. Stop the legacy runtime too (timers, old-path workers).
+        legacy = _get_runtime()
+        if legacy is not None:
+            try:
+                legacy_workers = legacy.list_workers()
+                stopped_legacy = len(legacy_workers) if isinstance(legacy_workers, list) else 0
+                await legacy.stop_all_workers()
+                legacy.pause_timers()
+            except Exception as e:
+                errors.append(f"legacy: {e}")
+                logger.warning(
+                    "stop_worker: failed to stop legacy runtime workers",
+                    exc_info=True,
+                )
+
+        if colony is None and legacy is None:
+            return json.dumps({"error": "No runtime on this session."})
+
+        total_stopped = stopped_unified + stopped_legacy
+        logger.info(
+            "stop_worker: stopped %d workers (unified=%d, legacy=%d). reason=%s",
+            total_stopped,
+            stopped_unified,
+            stopped_legacy,
+            reason,
+        )
 
         return json.dumps(
             {
                 "status": "stopped",
-                "timers_paused": True,
+                "workers_stopped": total_stopped,
+                "unified_stopped": stopped_unified,
+                "legacy_stopped": stopped_legacy,
+                "timers_paused": legacy is not None,
+                "reason": reason,
+                "errors": errors if errors else None,
             }
         )
 
