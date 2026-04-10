@@ -378,7 +378,10 @@ class MCPClient:
 
             tool_names = list(self._tools.keys())
             logger.info(
-                f"Discovered {len(self._tools)} tools from '{self.config.name}': {tool_names}"
+                f"Discovered {len(self._tools)} tools from '{self.config.name}'"
+            )
+            logger.debug(
+                f"Discovered tools from '{self.config.name}': {tool_names}"
             )
         except Exception as e:
             logger.error(f"Failed to discover tools from '{self.config.name}': {e}")

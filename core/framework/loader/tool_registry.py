@@ -510,6 +510,8 @@ class ToolRegistry:
         self._mcp_cred_snapshot = self._snapshot_credentials()
         self._mcp_aden_key_snapshot = os.environ.get("ADEN_API_KEY")
 
+        self._log_registry_snapshot("after load_mcp_config")
+
     def _register_mcp_server_with_retry(
         self,
         server_config: dict[str, Any],
@@ -676,8 +678,19 @@ class ToolRegistry:
             server_name = server_config["name"]
             if server_name not in self._mcp_server_tools:
                 self._mcp_server_tools[server_name] = set()
+
+            # Build admission gate: only admit MCP tools that are either
+            # (a) credential-backed *and* have a configured account, or
+            # (b) credential-less *and* listed in the verified manifest.
+            # Servers that don't expose `__aden_verified_manifest` (third-party
+            # MCP servers) bypass the gate entirely — preserves prior behavior.
+            admit = self._build_mcp_admission_gate(client)
+
             count = 0
+            admitted_names: list[str] = []
             for mcp_tool in client.list_tools():
+                if not admit(mcp_tool.name):
+                    continue
                 if tool_cap is not None and count >= tool_cap:
                     break
 
@@ -758,6 +771,7 @@ class ToolRegistry:
                 )
                 self._mcp_tool_names.add(mcp_tool.name)
                 self._mcp_server_tools[server_name].add(mcp_tool.name)
+                admitted_names.append(mcp_tool.name)
                 count += 1
 
             logger.info(
@@ -768,6 +782,12 @@ class ToolRegistry:
                     "tools_loaded": count,
                     "skipped_reason": None,
                 },
+            )
+            logger.info(
+                "MCP server '%s' admitted %d tool(s): %s",
+                config.name,
+                len(admitted_names),
+                sorted(admitted_names),
             )
             return count
 
@@ -793,6 +813,88 @@ class ToolRegistry:
             if tool_name in tool_names:
                 return server_name
         return None
+
+    def _log_registry_snapshot(self, context: str) -> None:
+        """Emit a one-line summary of the current tool registry.
+
+        Called after every tool-list mutation (initial load + resync) so that
+        operators can correlate "what tools does the queen have right now"
+        with credential changes and MCP server lifecycle events. Per-server
+        contents are already logged by `register_mcp_server`; this is just the
+        rollup so the resync path also gets a single anchor line.
+        """
+        per_server_counts = {
+            server: len(names) for server, names in self._mcp_server_tools.items()
+        }
+        non_mcp_count = len(self._tools) - len(self._mcp_tool_names)
+        logger.info(
+            "ToolRegistry snapshot (%s): total=%d, mcp=%d, non_mcp=%d, per_server=%s",
+            context,
+            len(self._tools),
+            len(self._mcp_tool_names),
+            non_mcp_count,
+            per_server_counts,
+        )
+
+    _MCP_VERIFIED_MANIFEST_TOOL = "__aden_verified_manifest"
+
+    def _build_mcp_admission_gate(self, client: Any) -> Callable[[str], bool]:
+        """Build a per-server predicate that filters MCP tools at registration.
+
+        Rules:
+          * The sentinel manifest tool itself is never admitted.
+          * Credential-backed tools (provider in `tool_provider_map`) are
+            admitted only when at least one account exists for that provider.
+          * Credential-less tools are admitted only when they appear in the
+            server's verified manifest.
+          * Servers that don't expose a manifest bypass the verified gate
+            entirely (third-party MCP servers behave as before).
+        """
+        verified_names: set[str] = set()
+        manifest_present = False
+        try:
+            raw = client.call_tool(self._MCP_VERIFIED_MANIFEST_TOOL, {})
+            parsed: Any = raw
+            if isinstance(raw, str):
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    parsed = None
+            if isinstance(parsed, list):
+                verified_names = {str(n) for n in parsed}
+                manifest_present = True
+        except Exception:
+            # Server doesn't expose the manifest — no verified gate applies.
+            pass
+
+        tool_provider_map: dict[str, str] = {}
+        live_providers: set[str] = set()
+        try:
+            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
+
+            adapter = CredentialStoreAdapter.default()
+            tool_provider_map = adapter.get_tool_provider_map()
+            live_providers = {
+                a.get("provider", "")
+                for a in adapter.get_all_account_info()
+                if a.get("provider")
+            }
+        except Exception:
+            logger.debug("Credential snapshot unavailable for MCP gate", exc_info=True)
+
+        def admit(tool_name: str) -> bool:
+            if tool_name == self._MCP_VERIFIED_MANIFEST_TOOL:
+                return False
+            provider = tool_provider_map.get(tool_name)
+            if provider:
+                # Credentialed tool — needs an account.
+                return provider in live_providers
+            if not manifest_present:
+                # Third-party MCP server: preserve legacy "admit everything".
+                return True
+            return tool_name in verified_names
+
+        return admit
 
     def _convert_mcp_tool_to_framework_tool(self, mcp_tool: Any) -> Tool:
         """
@@ -970,6 +1072,7 @@ class ToolRegistry:
             self.reload_registry_mcp_servers_after_resync()
 
         logger.info("MCP server resync complete")
+        self._log_registry_snapshot("after resync_mcp_servers_if_needed")
         return True
 
     def cleanup(self) -> None:
