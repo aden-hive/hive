@@ -17,6 +17,8 @@ class WorkerEntry:
     tool_count: int = 0
     task: str = ""
     spawned_at: str = ""
+    queen_name: str = ""
+    colony_name: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -26,6 +28,8 @@ class WorkerEntry:
             "tool_count": self.tool_count,
             "task": self.task,
             "spawned_at": self.spawned_at,
+            "queen_name": self.queen_name,
+            "colony_name": self.colony_name,
         }
 
 
@@ -214,6 +218,16 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
             name = config_fallback_name
             desc = ""
 
+            # Read colony metadata for queen provenance
+            colony_queen_name = ""
+            metadata_path = path / "metadata.json"
+            if metadata_path.exists():
+                try:
+                    mdata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                    colony_queen_name = mdata.get("queen_name", "")
+                except Exception:
+                    pass
+
             worker_entries: list[WorkerEntry] = []
             worker_configs = _find_worker_configs(path)
             for wc_path in worker_configs:
@@ -227,6 +241,8 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                             tool_count=len(data.get("tools", [])),
                             task=data.get("goal", {}).get("description", ""),
                             spawned_at=data.get("spawned_at", ""),
+                            queen_name=colony_queen_name,
+                            colony_name=path.name,
                         )
                         worker_entries.append(w)
                         if not desc:

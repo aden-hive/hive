@@ -64,15 +64,14 @@ export const executionApi = {
   goalProgress: (sessionId: string) =>
     api.get<GoalProgress>(`/sessions/${sessionId}/goal-progress`),
 
-  colonySpawn: (sessionId: string, colonyName: string, workerName: string, task?: string) =>
+  colonySpawn: (sessionId: string, colonyName: string, task?: string) =>
     api.post<{
       colony_path: string;
       colony_name: string;
-      worker_name: string;
-      worker_id: string;
+      queen_session_id: string;
       is_new: boolean;
     }>(
       `/sessions/${sessionId}/colony-spawn`,
-      { colony_name: colonyName, worker_name: workerName, task },
+      { colony_name: colonyName, task },
     ),
 };

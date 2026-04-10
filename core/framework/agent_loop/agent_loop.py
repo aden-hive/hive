@@ -364,6 +364,10 @@ class AgentLoop(AgentProtocol):
         # Worker auto-escalation: consecutive text-only turns.
         # After grace, auto-escalate to queen for guidance.
         _worker_text_only_streak = 0
+        # Silent worker detection: consecutive turns with tool calls
+        # but no user-facing text.  After the threshold, inject a
+        # nudge asking the agent to communicate progress.
+        _silent_tool_streak = 0
 
         # 1. Guard: LLM required
         if ctx.llm is None:
@@ -1202,6 +1206,36 @@ class AgentLoop(AgentProtocol):
             else:
                 # Text-only turn breaks the doom loop chain
                 recent_tool_fingerprints.clear()
+
+            # 6f'. Silent worker detection — tool calls without user-facing text.
+            #
+            # When the agent makes tool calls but produces no text for the
+            # user, it feels like a runaway process.  After a configurable
+            # number of consecutive silent turns, inject a nudge asking it
+            # to communicate what it's doing and why.
+            _has_tools_no_text = bool(real_tool_results) and not assistant_text
+            if _has_tools_no_text:
+                _silent_tool_streak += 1
+                if (
+                    _silent_tool_streak > 0
+                    and _silent_tool_streak % self._config.silent_tool_streak_threshold == 0
+                ):
+                    nudge = (
+                        "[SYSTEM] You have been calling tools for "
+                        f"{_silent_tool_streak} consecutive turns without "
+                        "any text output. Continue working, but include a "
+                        "brief explanation alongside your next tool calls "
+                        "so the user can see what you are doing."
+                    )
+                    await conversation.add_user_message(nudge)
+                    logger.info(
+                        "[%s] iter=%d: silent tool streak %d, injected communication nudge",
+                        node_id,
+                        iteration,
+                        _silent_tool_streak,
+                    )
+            else:
+                _silent_tool_streak = 0
 
             # 6g. Write cursor checkpoint (includes stall/doom state for resume)
             await self._write_cursor(

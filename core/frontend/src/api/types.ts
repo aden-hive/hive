@@ -56,6 +56,17 @@ export interface EntryPoint {
   next_fire_in?: number;
 }
 
+export interface WorkerEntry {
+  name: string;
+  config_path: string;
+  description: string;
+  tool_count: number;
+  task: string;
+  spawned_at: string;
+  queen_name: string;
+  colony_name: string;
+}
+
 export interface DiscoverEntry {
   path: string;
   name: string;
@@ -68,6 +79,7 @@ export interface DiscoverEntry {
   tags: string[];
   last_active: string | null;
   is_loaded: boolean;
+  workers: WorkerEntry[];
 }
 
 /** Keyed by category name. */

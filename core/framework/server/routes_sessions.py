@@ -129,6 +129,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
     model = body.get("model")
     initial_prompt = body.get("initial_prompt")
     queen_resume_from = body.get("queen_resume_from")
+    queen_name = body.get("queen_name")
     initial_phase = body.get("initial_phase")
     worker_name = body.get("worker_name")
 
@@ -147,6 +148,7 @@ async def handle_create_session(request: web.Request) -> web.Response:
                 model=model,
                 initial_prompt=initial_prompt,
                 queen_resume_from=queen_resume_from,
+                queen_name=queen_name,
                 initial_phase=initial_phase,
                 worker_name=worker_name,
             )

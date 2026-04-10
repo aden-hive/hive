@@ -572,21 +572,20 @@ async def handle_cancel_queen(request: web.Request) -> web.Response:
 
 
 async def handle_colony_spawn(request: web.Request) -> web.Response:
-    """POST /api/sessions/{session_id}/colony-spawn — clone queen to colony.
+    """POST /api/sessions/{session_id}/colony-spawn -- fork queen session into a colony.
 
-    Body: {"colony_name": "...", "worker_name": "...", "task": "..."}
-    Returns: {"colony_path": "...", "worker_name": "...", "worker_id": "..."}
+    Body: {"colony_name": "...", "task": "..."}
+    Returns: {"colony_path": "...", "colony_name": "...", "is_new": bool,
+              "queen_session_id": "..."}
 
-    Colony layout::
-
-        ~/.hive/colonies/{colony_name}/
-            agent.json                  ← colony manifest (name, description, workers list)
-            {worker_name}.json          ← per-worker config (system_prompt, tools, goal, etc.)
-            conversations/              ← copied from queen
-            data/
-
-    Full clone: copies queen conversation history, tools, tool executor,
-    system prompt, skills, memory, and loop config into a new colony worker.
+    The clone:
+    1. Creates a colony directory with a single worker config (``worker.json``)
+       holding the queen's current tools, prompts, skills, and loop config.
+    2. Duplicates the queen's full session (conversations + events) into a new
+       queen-session directory assigned to the colony so that cold-restoring
+       the colony resumes with the queen's entire conversation history.
+    3. Multiple independent sessions can be created against the same colony,
+       giving parallel execution capacity without separate worker configs.
     """
     session, err = resolve_session(request)
     if err:
@@ -600,7 +599,6 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
 
     body = await request.json()
     colony_name = body.get("colony_name", "").strip()
-    worker_name = body.get("worker_name", "").strip()
     task = body.get("task", "").strip()
 
     if not colony_name:
@@ -614,28 +612,16 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
             status=400,
         )
 
-    if not worker_name:
-        return web.json_response({"error": "worker_name is required"}, status=400)
-
-    if not re.match(r"^[a-z0-9_]+$", worker_name):
-        return web.json_response(
-            {"error": "worker_name must be lowercase alphanumeric with underscores"},
-            status=400,
-        )
-
     import asyncio
     import json
     import shutil
-    import uuid
     from datetime import datetime, timezone
     from pathlib import Path
 
     from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
     from framework.agent_loop.types import AgentContext, AgentSpec
-    from framework.host.worker import Worker
-    from framework.schemas.goal import Goal
+    from framework.server.session_manager import _queen_session_dir
     from framework.storage.conversation_store import FileConversationStore
-    from framework.tracker.decision_tracker import DecisionTracker
 
     queen_loop: AgentLoop = session.queen_executor.node_registry["queen"]
     queen_ctx: AgentContext = getattr(queen_loop, "_last_ctx", None)
@@ -645,49 +631,15 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
     colony_dir.mkdir(parents=True, exist_ok=True)
     (colony_dir / "data").mkdir(exist_ok=True)
 
-    worker_storage = Path.home() / ".hive" / "agents" / colony_name / worker_name
-    worker_storage.mkdir(parents=True, exist_ok=True)
+    # Fixed worker name -- sessions are the unit of parallelism, not workers
+    worker_name = "worker"
 
     worker_config_path = colony_dir / f"{worker_name}.json"
-    if worker_config_path.exists():
-        return web.json_response(
-            {"error": f"Worker '{worker_name}' already exists in colony '{colony_name}'"},
-            status=409,
-        )
 
-    # ── 1. Copy queen conversation → worker storage ──────────────
-    worker_conv_dir = worker_storage / "conversations"
-    queen_conv_store: FileConversationStore | None = getattr(
-        queen_loop, "_conversation_store", None
-    )
-    if queen_conv_store is not None:
-        queen_conv_base = queen_conv_store._base
-        if queen_conv_base.exists():
-            await asyncio.to_thread(
-                shutil.copytree, queen_conv_base, worker_conv_dir, dirs_exist_ok=True
-            )
-            logger.info("Copied queen conversation to %s", worker_conv_dir)
-    colony_conv_store = FileConversationStore(worker_conv_dir)
-
-    # ── 2. Clone queen AgentSpec ──────────────────────────────────
-    queen_spec = (
-        queen_ctx.agent_spec.model_copy()
-        if queen_ctx
-        else AgentSpec(
-            id="queen",
-            name="Queen",
-            description="Queen worker clone",
-            tools=[],
-            tool_access_policy="all",
-        )
-    )
-
-    # ── 3. Full tools + executor (shared reference, stateless) ────
+    # ── 1. Gather queen state ─────────────────────────────────────
     queen_tools: list = queen_ctx.available_tools if queen_ctx else []
-    queen_tool_executor = getattr(queen_loop, "_tool_executor", None)
     tool_names = [t.name for t in queen_tools]
 
-    # ── 4. System prompt from current phase state ─────────────────
     system_prompt = ""
     phase_state = getattr(session, "phase_state", None)
     if phase_state is not None:
@@ -703,7 +655,6 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
         except Exception:
             pass
 
-    # ── 5. Skills, memory, identity ───────────────────────────────
     queen_skills_catalog = queen_ctx.skills_catalog_prompt if queen_ctx else ""
     queen_protocols = queen_ctx.protocols_prompt if queen_ctx else ""
     queen_skill_dirs = queen_ctx.skill_dirs if queen_ctx else []
@@ -713,8 +664,7 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
         queen_identity = getattr(phase_state, "queen_identity_prompt", "") or ""
         queen_memory = getattr(phase_state, "_cached_global_recall_block", "") or ""
 
-    # ── 6. Loop config (same as queen) ────────────────────────────
-    queen_lc_config = {
+    queen_lc_config: dict = {
         "max_iterations": 999_999,
         "max_tool_calls_per_turn": 30,
         "max_context_tokens": 180_000,
@@ -725,66 +675,10 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
         queen_lc_config["max_tool_calls_per_turn"] = queen_config.max_tool_calls_per_turn
         queen_lc_config["max_context_tokens"] = queen_config.max_context_tokens
         queen_lc_config["max_tool_result_chars"] = queen_config.max_tool_result_chars
-        queen_lc_config["spillover_dir"] = str(colony_dir / "data")
-    worker_loop_config = LoopConfig(
-        max_iterations=queen_lc_config["max_iterations"],
-        max_tool_calls_per_turn=queen_lc_config["max_tool_calls_per_turn"],
-        max_context_tokens=queen_lc_config["max_context_tokens"],
-        max_tool_result_chars=queen_lc_config.get("max_tool_result_chars", 30_000),
-        spillover_dir=str(colony_dir / "data"),
-    )
 
-    # ── 7. Goal ───────────────────────────────────────────────────
     worker_task = task or "Continue the work from the queen's current session."
-    goal = Goal(
-        id=f"{colony_name}-{worker_name}",
-        name=worker_task[:60],
-        description=worker_task,
-    )
 
-    # ── 8. Build worker ───────────────────────────────────────────
-    worker_id = f"worker_{uuid.uuid4().hex[:12]}"
-    stream_id = f"worker:{worker_id}"
-
-    worker_loop = AgentLoop(
-        event_bus=session.event_bus,
-        config=worker_loop_config,
-        tool_executor=queen_tool_executor,
-        conversation_store=colony_conv_store,
-    )
-
-    worker_ctx = AgentContext(
-        runtime=DecisionTracker(worker_storage),
-        agent_id=worker_id,
-        agent_spec=queen_spec,
-        input_data={"task": worker_task},
-        llm=session.llm,
-        available_tools=queen_tools,
-        goal_context=goal.to_prompt_context(),
-        goal=goal,
-        max_tokens=queen_ctx.max_tokens if queen_ctx else 8192,
-        stream_id=stream_id,
-        execution_id=worker_id,
-        accounts_prompt=queen_ctx.accounts_prompt if queen_ctx else "",
-        identity_prompt=queen_identity,
-        memory_prompt=queen_memory,
-        skills_catalog_prompt=queen_skills_catalog,
-        protocols_prompt=queen_protocols,
-        skill_dirs=list(queen_skill_dirs),
-    )
-
-    worker = Worker(
-        worker_id=worker_id,
-        task=worker_task,
-        agent_loop=worker_loop,
-        context=worker_ctx,
-        event_bus=session.event_bus,
-        colony_id=colony_name,
-    )
-
-    await worker.start_background()
-
-    # ── 9. Write {worker_name}.json ───────────────────────────────
+    # ── 2. Write worker.json (create or update) ──────────────────
     worker_meta = {
         "name": worker_name,
         "version": "1.0.0",
@@ -811,21 +705,114 @@ async def handle_colony_spawn(request: web.Request) -> web.Response:
         json.dumps(worker_meta, indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
+    # ── 3. Duplicate queen session into colony ───────────────────
+    # Copy the queen's full session directory (conversations, events,
+    # meta) into a new queen-session dir assigned to this colony.
+    # This is the "brain fork" -- the colony queen starts with the
+    # full conversation history from the originating session.
+    #
+    # session.queen_dir is authoritative -- queen_orchestrator relocates
+    # it from default/ to the selected queen's dir on identity selection.
+    source_queen_dir = session.queen_dir
+    # Extract queen identity from the dir path: .../queens/{name}/sessions/xxx
+    queen_name = (
+        source_queen_dir.parent.parent.name
+        if source_queen_dir and source_queen_dir.exists()
+        else (session.queen_name or "default")
+    )
+
+    # Generate a colony-specific session ID so the colony has its own
+    # session identity while preserving the full conversation.
+    from framework.server.session_manager import _generate_session_id
+
+    colony_session_id = _generate_session_id()
+    dest_queen_dir = _queen_session_dir(colony_session_id, queen_name)
+
+    if source_queen_dir.exists():
+        await asyncio.to_thread(
+            shutil.copytree, source_queen_dir, dest_queen_dir, dirs_exist_ok=True
+        )
+        # Update the duplicated meta.json to point to the colony
+        dest_meta_path = dest_queen_dir / "meta.json"
+        dest_meta: dict = {}
+        if dest_meta_path.exists():
+            try:
+                dest_meta = json.loads(dest_meta_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
+        dest_meta["agent_path"] = str(colony_dir)
+        dest_meta["agent_name"] = colony_name.replace("_", " ").title()
+        dest_meta["queen_id"] = queen_name
+        dest_meta["forked_from"] = session.id
+        dest_meta["colony_fork"] = True  # exclude from queen DM history
+        dest_meta_path.write_text(
+            json.dumps(dest_meta, ensure_ascii=False), encoding="utf-8"
+        )
+        logger.info(
+            "Duplicated queen session %s -> %s for colony '%s'",
+            session.id,
+            colony_session_id,
+            colony_name,
+        )
+    else:
+        logger.warning(
+            "Queen session dir %s not found, colony will start fresh",
+            source_queen_dir,
+        )
+
+    # ── 4. Write metadata.json (queen provenance) ────────────────
+    metadata_path = colony_dir / "metadata.json"
+    metadata: dict = {}
+    if metadata_path.exists():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    metadata["colony_name"] = colony_name
+    metadata["queen_name"] = queen_name
+    metadata["queen_session_id"] = colony_session_id
+    metadata["source_session_id"] = session.id
+    metadata.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+    metadata["updated_at"] = datetime.now(timezone.utc).isoformat()
+    metadata.setdefault("workers", {})
+    metadata["workers"][worker_name] = {
+        "task": worker_task[:100],
+        "spawned_at": datetime.now(timezone.utc).isoformat(),
+    }
+    metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # ── 5. Update source queen session meta.json ─────────────────
+    # Link the originating session back to the colony for discovery.
+    source_meta_path = source_queen_dir / "meta.json"
+    if source_meta_path.exists():
+        try:
+            qmeta = json.loads(source_meta_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            qmeta = {}
+    else:
+        qmeta = {}
+    qmeta["agent_path"] = str(colony_dir)
+    qmeta["agent_name"] = colony_name.replace("_", " ").title()
+    try:
+        source_meta_path.parent.mkdir(parents=True, exist_ok=True)
+        source_meta_path.write_text(
+            json.dumps(qmeta, ensure_ascii=False), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
     logger.info(
-        "Cloned queen to colony '%s' worker '%s' (id=%s, new=%s, tools=%d, conv=%s)",
+        "Forked queen to colony '%s' (new=%s, tools=%d, session=%s)",
         colony_name,
-        worker_name,
-        worker_id,
         is_new,
         len(queen_tools),
-        "copied" if worker_conv_dir.exists() else "none",
+        colony_session_id,
     )
     return web.json_response(
         {
             "colony_path": str(colony_dir),
             "colony_name": colony_name,
-            "worker_name": worker_name,
-            "worker_id": worker_id,
+            "queen_session_id": colony_session_id,
             "is_new": is_new,
         }
     )

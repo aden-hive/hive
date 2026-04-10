@@ -25,6 +25,12 @@ from framework.host.triggers import TriggerDefinition
 logger = logging.getLogger(__name__)
 
 
+def _generate_session_id() -> str:
+    """Generate a unique session ID."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"session_{ts}_{uuid.uuid4().hex[:8]}"
+
+
 def _queen_session_dir(session_id: str, queen_name: str = "default") -> Path:
     """Return the on-disk directory for a queen session."""
     return QUEENS_DIR / queen_name / "sessions" / session_id
@@ -252,6 +258,33 @@ class SessionManager:
         agent_path = Path(agent_path)
         resolved_colony_id = agent_id or agent_path.name
 
+        # Read colony metadata.json for queen provenance (queen_name,
+        # queen_session_id) so we can restore the correct queen identity
+        # and resume from the originating session when no explicit
+        # queen_resume_from was provided.
+        _colony_metadata: dict = {}
+        _colony_metadata_path = agent_path / "metadata.json"
+        if _colony_metadata_path.exists():
+            try:
+                _colony_metadata = json.loads(
+                    _colony_metadata_path.read_text(encoding="utf-8")
+                )
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        if not queen_name:
+            queen_name = _colony_metadata.get("queen_name") or None
+
+        # Colony metadata's queen_session_id is the authoritative session
+        # for this colony (the forked session).  It takes priority over
+        # whatever the frontend found via history scan, which may be the
+        # source session instead of the fork.
+        _colony_session_id = _colony_metadata.get("queen_session_id")
+        if _colony_session_id:
+            queen_resume_from = _colony_session_id
+        elif not queen_resume_from:
+            queen_resume_from = None
+
         # When cold-restoring, check meta.json for the phase — if the agent
         # was still being built we must NOT try to load the worker (the code
         # is incomplete and will fail to import).
@@ -279,6 +312,11 @@ class SessionManager:
 
         # Reuse the original session ID when cold-restoring so the frontend
         # sees one continuous session instead of a new one each time.
+        # If the session is already live (e.g. user navigated back to a
+        # colony that's still running), return the existing session.
+        if queen_resume_from and queen_resume_from in self._sessions:
+            return self._sessions[queen_resume_from]
+
         session = await self._create_session_core(
             session_id=queen_resume_from,
             model=model,
@@ -1452,6 +1490,7 @@ class SessionManager:
             agent_name: str | None = None
             agent_path: str | None = None
             meta_path = d / "meta.json"
+            meta: dict = {}
             if meta_path.exists():
                 try:
                     meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -1460,6 +1499,11 @@ class SessionManager:
                     created_at = meta.get("created_at") or created_at
                 except (json.JSONDecodeError, OSError):
                     pass
+
+            # Skip colony-forked sessions -- these belong to colonies,
+            # not to the queen DM history.
+            if meta.get("colony_fork"):
+                continue
 
             # Build a quick preview of the last human/assistant exchange.
             # We read all conversation parts, filter to client-facing messages,

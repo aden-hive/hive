@@ -167,6 +167,7 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
         const sessionId = liveInfo?.sessionId ?? null;
         const isRunning = sessionId !== null;
         const queenProfileId = liveInfo?.queenId ?? historyQueenMap.get(slug) ?? null;
+        const queenName = agent.workers?.[0]?.queen_name || "";
 
         return {
           id: colonyId,
@@ -180,6 +181,7 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
           sessionId,
           sessionCount: agent.session_count,
           runCount: agent.run_count,
+          queenName,
         };
       });
 

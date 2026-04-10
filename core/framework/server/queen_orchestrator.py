@@ -354,6 +354,45 @@ async def create_queen(
         phase_state.queen_identity_prompt = identity_prompt
         # Route session storage to ~/.hive/agents/queens/{queen_id}/sessions/
         session.queen_name = queen_id
+
+        # Relocate session dir from default/ to the selected queen's dir
+        # so all writes (conversations, events) go to the correct queen.
+        if queen_id != "default" and session.queen_dir:
+            import json as _json
+            import shutil as _shutil
+
+            _old_dir = session.queen_dir
+            if _old_dir.exists() and _old_dir.parent.parent.name == "default":
+                from framework.config import QUEENS_DIR as _QD
+
+                _new_dir = _QD / queen_id / "sessions" / _old_dir.name
+                _new_dir.parent.mkdir(parents=True, exist_ok=True)
+                _shutil.move(str(_old_dir), str(_new_dir))
+                session.queen_dir = _new_dir
+                logger.info(
+                    "Relocated queen session dir: %s -> %s",
+                    _old_dir,
+                    _new_dir,
+                )
+                # Update meta.json queen_id
+                _meta_path = _new_dir / "meta.json"
+                if _meta_path.exists():
+                    try:
+                        _meta = _json.loads(_meta_path.read_text(encoding="utf-8"))
+                        _meta["queen_id"] = queen_id
+                        _meta_path.write_text(
+                            _json.dumps(_meta, ensure_ascii=False), encoding="utf-8"
+                        )
+                    except (OSError, _json.JSONDecodeError):
+                        pass
+                # Re-point event bus log to new location, preserving offset
+                _offset = getattr(
+                    session.event_bus, "_session_log_iteration_offset", 0
+                )
+                session.event_bus.set_session_log(
+                    _new_dir / "events.jsonl", iteration_offset=_offset
+                )
+
         if _session_event_bus is not None:
             await _session_event_bus.publish(
                 AgentEvent(

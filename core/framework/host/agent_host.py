@@ -190,7 +190,6 @@ class AgentHost:
         else:
             self._pipeline = self._load_pipeline_from_config()
 
-
         # --- Skill lifecycle: runtime owns the SkillsManager ---
         if skills_manager_config is not None:
             # New path: config-driven, runtime handles loading
@@ -535,9 +534,7 @@ class AgentHost:
                             cron = croniter(expr, datetime.now())
                             next_dt = cron.get_next(datetime)
                             sleep_secs = (next_dt - datetime.now()).total_seconds()
-                            self._timer_next_fire[entry_point_id] = (
-                                time.monotonic() + sleep_secs
-                            )
+                            self._timer_next_fire[entry_point_id] = time.monotonic() + sleep_secs
                             await asyncio.sleep(max(0, sleep_secs))
                         while self._running:
                             # Calculate next fire time upfront (used by skip paths too)
@@ -641,9 +638,7 @@ class AgentHost:
                             cron = croniter(expr, datetime.now())
                             next_dt = cron.get_next(datetime)
                             sleep_secs = (next_dt - datetime.now()).total_seconds()
-                            self._timer_next_fire[entry_point_id] = (
-                                time.monotonic() + sleep_secs
-                            )
+                            self._timer_next_fire[entry_point_id] = time.monotonic() + sleep_secs
                             await asyncio.sleep(max(0, sleep_secs))
 
                     return _cron_loop
@@ -676,9 +671,7 @@ class AgentHost:
                         interval_secs = mins * 60
                         _persistent_session_id: str | None = None
                         if not immediate:
-                            self._timer_next_fire[entry_point_id] = (
-                                time.monotonic() + interval_secs
-                            )
+                            self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
                             await asyncio.sleep(interval_secs)
                         while self._running:
                             # Gate: skip tick if timers are explicitly paused
@@ -771,9 +764,7 @@ class AgentHost:
                                     entry_point_id,
                                     exc_info=True,
                                 )
-                            self._timer_next_fire[entry_point_id] = (
-                                time.monotonic() + interval_secs
-                            )
+                            self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
                             await asyncio.sleep(interval_secs)
 
                     return _timer_loop
@@ -803,16 +794,15 @@ class AgentHost:
 
             # Register primary graph
             self._graphs[self._graph_id] = _GraphRegistration(
-            graph=self.graph,
-            goal=self.goal,
-            entry_points=dict(self._entry_points),
-            streams=dict(self._streams),
-            storage_subpath="",
-            event_subscriptions=list(self._event_subscriptions),
-            timer_tasks=list(self._timer_tasks),
-            timer_next_fire=self._timer_next_fire,
+                graph=self.graph,
+                goal=self.goal,
+                entry_points=dict(self._entry_points),
+                streams=dict(self._streams),
+                storage_subpath="",
+                event_subscriptions=list(self._event_subscriptions),
+                timer_tasks=list(self._timer_tasks),
+                timer_next_fire=self._timer_next_fire,
             )
-
 
     async def stop(self) -> None:
         """Stop the agent runtime and all streams."""
@@ -920,7 +910,6 @@ class AgentHost:
 
             if stage.skills_manager is not None:
                 self._skills_manager = stage.skills_manager
-
 
     @staticmethod
     def _load_pipeline_from_config():
@@ -1451,6 +1440,26 @@ class AgentHost:
         return self._graph_id
 
     @property
+    def colony_id(self) -> str:
+        """Colony compatibility — returns the primary graph ID."""
+        return self._graph_id
+
+    def list_workers(self) -> list[str]:
+        """Colony compatibility — returns registered graph IDs."""
+        return self.list_graphs()
+
+    def get_worker_registration(self, graph_id: str):
+        """Colony compatibility — returns self for the matching graph."""
+        if graph_id in self._graphs:
+            return self
+        return None
+
+    @property
+    def streams(self) -> dict:
+        """Colony compatibility — returns _streams dict."""
+        return self._streams
+
+    @property
     def active_graph_id(self) -> str:
         """The currently focused graph (for TUI routing)."""
         return self._active_graph_id
@@ -1916,5 +1925,3 @@ class AgentHost:
 
 
 # === CONVENIENCE FACTORY ===
-
-

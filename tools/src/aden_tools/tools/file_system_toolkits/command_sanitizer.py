@@ -105,12 +105,9 @@ _BLOCKED_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\bsudo\b", re.IGNORECASE),
     # su — switch user
     re.compile(r"\bsu\s+", re.IGNORECASE),
-    # python/python3 with -c flag (inline code execution)
-    re.compile(r"\bpython[23]?\s+-c(?=\s|['\"]|$)", re.IGNORECASE),
-    # ruby/perl/node with -e flag (inline code execution)
+    # ruby/perl with -e flag (inline code execution)
     re.compile(r"\bruby\s+-e\b", re.IGNORECASE),
     re.compile(r"\bperl\s+-e\b", re.IGNORECASE),
-    re.compile(r"\bnode\s+-e\b", re.IGNORECASE),
     # powershell encoded commands
     re.compile(r"\bpowershell\b.*-enc", re.IGNORECASE),
     # Reverse shell patterns

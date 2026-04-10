@@ -46,7 +46,6 @@ export default function QueenDM() {
   const [spawning, setSpawning] = useState(false);
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [cloneColonyName, setCloneColonyName] = useState("");
-  const [cloneWorkerName, setCloneWorkerName] = useState("");
   const [cloneTask, setCloneTask] = useState("");
 
   const turnCounterRef = useRef(0);
@@ -164,16 +163,15 @@ export default function QueenDM() {
   const handleColonySpawn = useCallback(async () => {
     if (!sessionId || spawning) return;
     const colony = cloneColonyName.trim();
-    const worker = cloneWorkerName.trim();
-    if (!colony || !worker) return;
+    if (!colony) return;
     setSpawning(true);
     try {
-      const result = await executionApi.colonySpawn(sessionId, colony, worker, cloneTask.trim() || undefined);
+      const result = await executionApi.colonySpawn(sessionId, colony, cloneTask.trim() || undefined);
       const msg: ChatMessage = {
         id: makeId(),
         agent: "System",
         agentColor: "",
-        content: `Cloned to colony "${result.colony_name}" / worker "${result.worker_name}"${result.is_new ? " (new)" : ""}`,
+        content: `Forked to colony "${result.colony_name}"${result.is_new ? " (new)" : ""} — session ${result.queen_session_id}`,
         timestamp: "",
         type: "system",
         thread: "queen-dm",
@@ -182,7 +180,6 @@ export default function QueenDM() {
       setMessages((prev) => [...prev, msg]);
       setCloneDialogOpen(false);
       setCloneColonyName("");
-      setCloneWorkerName("");
       setCloneTask("");
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -200,7 +197,7 @@ export default function QueenDM() {
     } finally {
       setSpawning(false);
     }
-  }, [sessionId, spawning, cloneColonyName, cloneWorkerName, cloneTask]);
+  }, [sessionId, spawning, cloneColonyName, cloneTask]);
 
   const handleSelectHistoricalSession = useCallback(
     (nextSessionId: string) => {
@@ -567,7 +564,10 @@ export default function QueenDM() {
             onClick={() => !spawning && setCloneDialogOpen(false)}
           />
           <div className="relative bg-card border border-border/60 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
-            <h2 className="text-sm font-semibold text-foreground">Clone Colony</h2>
+            <h2 className="text-sm font-semibold text-foreground">Fork to Colony</h2>
+            <p className="text-[11px] text-muted-foreground">
+              Forks the queen's full session into a new colony. Multiple sessions can run against it in parallel.
+            </p>
             <div className="space-y-3">
               <div>
                 <label className="block text-[11px] font-medium text-muted-foreground mb-1">
@@ -580,18 +580,6 @@ export default function QueenDM() {
                   placeholder="e.g. research_team"
                   className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
                   autoFocus
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-muted-foreground mb-1">
-                  Worker name
-                </label>
-                <input
-                  type="text"
-                  value={cloneWorkerName}
-                  onChange={(e) => setCloneWorkerName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
-                  placeholder="e.g. analyst"
-                  className="w-full rounded-md border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
               <div>
@@ -609,7 +597,7 @@ export default function QueenDM() {
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button
-                onClick={() => { setCloneDialogOpen(false); setCloneColonyName(""); setCloneWorkerName(""); setCloneTask(""); }}
+                onClick={() => { setCloneDialogOpen(false); setCloneColonyName(""); setCloneTask(""); }}
                 disabled={spawning}
                 className="px-3 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
               >
@@ -617,10 +605,10 @@ export default function QueenDM() {
               </button>
               <button
                 onClick={handleColonySpawn}
-                disabled={spawning || !cloneColonyName.trim() || !cloneWorkerName.trim()}
+                disabled={spawning || !cloneColonyName.trim()}
                 className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
-                {spawning ? "Cloning..." : "Clone"}
+                {spawning ? "Forking..." : "Fork"}
               </button>
             </div>
           </div>

