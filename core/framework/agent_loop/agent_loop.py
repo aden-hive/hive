@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -225,6 +226,44 @@ def _is_context_too_large_error(exc: BaseException) -> bool:
     if "ContextWindow" in cls:
         return True
     return bool(_CONTEXT_TOO_LARGE_RE.search(str(exc)))
+
+
+def _build_tool_error_result(tc: Any, exc: BaseException) -> ToolResult:
+    """Convert a tool exception into a ToolResult for the model.
+
+    Special-cases ``CredentialExpiredError`` so the agent receives a
+    structured ``credential_expired`` payload (with credential_id, provider,
+    alias, reauth_url) instead of an opaque error string. The agent's
+    behavior block recognizes this shape and prompts the user to reauthorize.
+    """
+    try:
+        from framework.credentials.models import CredentialExpiredError
+    except ImportError:
+        CredentialExpiredError = None  # type: ignore[assignment]
+
+    if CredentialExpiredError is not None and isinstance(exc, CredentialExpiredError):
+        payload: dict[str, Any] = {
+            "error": "credential_expired",
+            "credential_id": exc.credential_id,
+            "message": str(exc),
+        }
+        if exc.provider:
+            payload["provider"] = exc.provider
+        if exc.alias:
+            payload["alias"] = exc.alias
+        if exc.help_url:
+            payload["reauth_url"] = exc.help_url
+        return ToolResult(
+            tool_use_id=tc.tool_use_id,
+            content=json.dumps(payload),
+            is_error=True,
+        )
+
+    return ToolResult(
+        tool_use_id=tc.tool_use_id,
+        content=f"Tool '{tc.tool_name}' raised: {exc}",
+        is_error=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1224,6 +1263,7 @@ class AgentLoop(AgentProtocol):
                             reason="Tool doom loop detected",
                             context=doom_desc,
                             execution_id=execution_id,
+                            request_id=uuid.uuid4().hex,
                         )
                         await conversation.add_user_message(
                             "[SYSTEM] Escalated tool doom loop to queen for intervention."
@@ -1339,6 +1379,7 @@ class AgentLoop(AgentProtocol):
                     reason="Worker produced text-only turns without progress; auto-escalating",
                     context=assistant_text[:2000] if assistant_text else "",
                     execution_id=execution_id,
+                    request_id=uuid.uuid4().hex,
                 )
                 queen_input_requested = True
 
@@ -1679,6 +1720,7 @@ class AgentLoop(AgentProtocol):
                                 "Worker escalated but received no queen guidance before shutdown"
                             ),
                             execution_id=execution_id,
+                            request_id=uuid.uuid4().hex,
                         )
                     await self._publish_loop_completed(
                         stream_id, node_id, iteration + 1, execution_id
@@ -2590,6 +2632,7 @@ class AgentLoop(AgentProtocol):
                         reason=reason,
                         context=context,
                         execution_id=execution_id,
+                        request_id=uuid.uuid4().hex,
                     )
                     queen_input_requested = True
 
@@ -2709,11 +2752,7 @@ class AgentLoop(AgentProtocol):
                         "duration_s": _dur_s,
                     }
                     if isinstance(raw, BaseException):
-                        result = ToolResult(
-                            tool_use_id=tc.tool_use_id,
-                            content=f"Tool '{tc.tool_name}' raised: {raw}",
-                            is_error=True,
-                        )
+                        result = _build_tool_error_result(tc, raw)
                     else:
                         result = raw
                     results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)

@@ -104,6 +104,9 @@ class CredentialStoreAdapter:
 
         Raises:
             KeyError: If the credential name is not in specs
+            CredentialExpiredError: If the credential is expired and refresh failed.
+                Tool runners catch this and emit a structured ``credential_expired``
+                tool result so the agent can ask the user to reauthorize.
         """
         if name not in self._specs:
             raise KeyError(f"Unknown credential '{name}'. Available: {list(self._specs.keys())}")
@@ -118,7 +121,19 @@ class CredentialStoreAdapter:
             except Exception:
                 pass  # Fall through to standard store lookup
 
-        return self._store.get(name)
+        try:
+            return self._store.get(name, raise_on_refresh_failure=True)
+        except Exception as exc:
+            # CredentialExpiredError must propagate for the tool runner to
+            # convert into a structured result. Only enrich help_url here
+            # so the runner does not need to import specs.
+            from framework.credentials.models import CredentialExpiredError
+
+            if isinstance(exc, CredentialExpiredError) and exc.help_url is None:
+                spec = self._specs.get(name)
+                if spec is not None:
+                    exc.help_url = spec.help_url
+            raise
 
     def get_spec(self, name: str) -> CredentialSpec:
         """Get the spec for a credential."""
@@ -331,9 +346,31 @@ class CredentialStoreAdapter:
         return dict(self._tool_to_cred)
 
     def get_by_alias(self, provider_name: str, alias: str) -> str | None:
-        """Resolve a specific account's token by alias."""
+        """Resolve a specific account's token by alias.
+
+        Raises:
+            CredentialExpiredError: If the matched credential is expired and
+                refresh failed.
+        """
         cred = self._store.get_credential_by_alias(provider_name, alias)
-        return cred.get_default_key() if cred else None
+        if cred is None:
+            return None
+        # Re-fetch through get_credential so refresh-on-access fires with
+        # raise_on_refresh_failure semantics. Aliased lookups otherwise skip
+        # the refresh path.
+        try:
+            refreshed = self._store.get_credential(
+                cred.id, raise_on_refresh_failure=True
+            )
+        except Exception as exc:
+            from framework.credentials.models import CredentialExpiredError
+
+            if isinstance(exc, CredentialExpiredError) and exc.help_url is None:
+                spec = self._specs.get(provider_name)
+                if spec is not None:
+                    exc.help_url = spec.help_url
+            raise
+        return refreshed.get_default_key() if refreshed else None
 
     def get_by_identity(self, provider_name: str, label: str) -> str | None:
         """Alias for get_by_alias (backward compat)."""

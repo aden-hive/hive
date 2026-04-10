@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from framework.host.event_bus import EventBus
+from framework.host.event_bus import EventBus, EventType
+from framework.server.queen_orchestrator import install_worker_escalation_routing
 from framework.server.session_manager import Session, SessionManager
 
 
@@ -13,87 +14,96 @@ def _make_session(event_bus: EventBus, session_id: str = "session_handoff") -> S
     return Session(id=session_id, event_bus=event_bus, llm=object(), loaded_at=0.0)
 
 
-def _make_executor(queen_node) -> SimpleNamespace:
-    node_registry = {}
-    if queen_node is not None:
-        node_registry["queen"] = queen_node
-    return SimpleNamespace(node_registry=node_registry)
+def _attach_queen(session: Session, queen_node) -> None:
+    session.queen_executor = SimpleNamespace(node_registry={"queen": queen_node})
 
 
 @pytest.mark.asyncio
-async def test_worker_handoff_injects_formatted_request_into_queen() -> None:
+async def test_worker_handoff_injects_addressed_request_into_queen() -> None:
     bus = EventBus()
-    manager = SessionManager()
     session = _make_session(bus)
-
     queen_node = SimpleNamespace(inject_event=AsyncMock())
-    manager._subscribe_worker_handoffs(session, _make_executor(queen_node))
+    _attach_queen(session, queen_node)
+
+    sub_id = install_worker_escalation_routing(session)
+    assert sub_id is not None
+    session.worker_handoff_sub = sub_id
 
     await bus.emit_escalation_requested(
-        stream_id="worker_a",
+        stream_id="worker:abc123",
         node_id="research_node",
         reason="Credential wall",
         context="HTTP 401 while calling external API",
         execution_id="exec_123",
+        request_id="req-xyz",
     )
 
     queen_node.inject_event.assert_awaited_once()
     injected = queen_node.inject_event.await_args.args[0]
     kwargs = queen_node.inject_event.await_args.kwargs
 
-    assert "[WORKER_ESCALATION_REQUEST]" in injected
-    assert "stream_id: worker_a" in injected
+    assert "[WORKER_ESCALATION]" in injected
+    assert "request_id: req-xyz" in injected
+    assert "worker_id: abc123" in injected
     assert "node_id: research_node" in injected
     assert "reason: Credential wall" in injected
-    assert "context:\nHTTP 401 while calling external API" in injected
+    assert "HTTP 401 while calling external API" in injected
     assert kwargs["is_client_input"] is False
+    # Entry recorded so reply_to_worker can address it later.
+    assert "req-xyz" in session.pending_escalations
+    entry = session.pending_escalations["req-xyz"]
+    assert entry["worker_id"] == "abc123"
+    assert entry["reason"] == "Credential wall"
 
 
 @pytest.mark.asyncio
 async def test_worker_handoff_ignores_queen_stream() -> None:
     bus = EventBus()
-    manager = SessionManager()
     session = _make_session(bus)
-
     queen_node = SimpleNamespace(inject_event=AsyncMock())
-    manager._subscribe_worker_handoffs(session, _make_executor(queen_node))
+    _attach_queen(session, queen_node)
+
+    install_worker_escalation_routing(session)
 
     await bus.emit_escalation_requested(
         stream_id="queen",
         node_id="queen",
         reason="should be ignored",
+        request_id="req-ignored",
     )
 
     assert queen_node.inject_event.await_count == 0
+    assert "req-ignored" not in session.pending_escalations
 
 
 @pytest.mark.asyncio
-async def test_worker_handoff_resubscribe_replaces_previous_subscription() -> None:
+async def test_worker_handoff_queen_dead_falls_back_to_client_input() -> None:
+    """When the queen is not attached, the handoff should surface to the user."""
     bus = EventBus()
-    manager = SessionManager()
     session = _make_session(bus)
+    # No queen_executor attached.
 
-    old_queen_node = SimpleNamespace(inject_event=AsyncMock())
-    manager._subscribe_worker_handoffs(session, _make_executor(old_queen_node))
-    first_sub = session.worker_handoff_sub
-    assert first_sub is not None
+    captured = []
 
-    new_queen_node = SimpleNamespace(inject_event=AsyncMock())
-    manager._subscribe_worker_handoffs(session, _make_executor(new_queen_node))
-    second_sub = session.worker_handoff_sub
+    async def _capture(event):
+        captured.append(event)
 
-    assert second_sub is not None
-    assert second_sub != first_sub
-    assert first_sub not in bus._subscriptions
+    bus.subscribe(
+        event_types=[EventType.CLIENT_INPUT_REQUESTED],
+        handler=_capture,
+    )
+    install_worker_escalation_routing(session)
 
     await bus.emit_escalation_requested(
-        stream_id="worker_b",
-        node_id="planner",
+        stream_id="worker:w1",
+        node_id="node_1",
         reason="stuck",
+        request_id="req-dead",
     )
 
-    assert old_queen_node.inject_event.await_count == 0
-    new_queen_node.inject_event.assert_awaited_once()
+    assert any("[WORKER_ESCALATION]" in (e.data or {}).get("prompt", "") for e in captured)
+    # Entry still recorded — queen may come back online and drain it.
+    assert "req-dead" in session.pending_escalations
 
 
 @pytest.mark.asyncio
@@ -101,15 +111,17 @@ async def test_stop_session_unsubscribes_worker_handoff() -> None:
     bus = EventBus()
     manager = SessionManager()
     session = _make_session(bus, session_id="session_stop")
-
     queen_node = SimpleNamespace(inject_event=AsyncMock())
-    manager._subscribe_worker_handoffs(session, _make_executor(queen_node))
+    _attach_queen(session, queen_node)
+
+    session.worker_handoff_sub = install_worker_escalation_routing(session)
     manager._sessions[session.id] = session
 
     await bus.emit_escalation_requested(
-        stream_id="worker_main",
+        stream_id="worker:main",
         node_id="node_1",
         reason="before stop",
+        request_id="req-before",
     )
     assert queen_node.inject_event.await_count == 1
 
@@ -118,9 +130,10 @@ async def test_stop_session_unsubscribes_worker_handoff() -> None:
     assert session.worker_handoff_sub is None
 
     await bus.emit_escalation_requested(
-        stream_id="worker_main",
+        stream_id="worker:main",
         node_id="node_1",
         reason="after stop",
+        request_id="req-after",
     )
     assert queen_node.inject_event.await_count == 1
 
