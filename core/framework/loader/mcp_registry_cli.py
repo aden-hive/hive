@@ -381,6 +381,13 @@ def register_mcp_commands(subparsers) -> None:
     health_p.add_argument("--json", dest="output_json", action="store_true", help="Output as JSON")
     health_p.set_defaults(func=cmd_mcp_health)
 
+    # ── init ──
+    init_p = mcp_sub.add_parser(
+        "init",
+        help="Initialize the local MCP registry and seed built-in servers",
+    )
+    init_p.set_defaults(func=cmd_mcp_init)
+
     # ── update ──
     update_p = mcp_sub.add_parser(
         "update", help="Update installed servers or refresh the registry index"
@@ -783,6 +790,23 @@ def cmd_mcp_health(args) -> int:
         else:
             print()
 
+    return 0
+
+
+def cmd_mcp_init(args) -> int:
+    """Initialize the local MCP registry and seed built-in local servers."""
+    registry = _get_registry()
+    try:
+        added = registry.ensure_defaults()
+    except Exception as exc:
+        print(f"Error: failed to initialize MCP registry: {exc}", file=sys.stderr)
+        return 1
+
+    if added:
+        for name in added:
+            print(f"✓ Registered {name}")
+    else:
+        print("✓ MCP registry already initialized (no changes)")
     return 0
 
 

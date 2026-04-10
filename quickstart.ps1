@@ -2112,6 +2112,10 @@ if ($LASTEXITCODE -eq 0) { Write-Ok "ok" } else { Write-Warn "skipped" }
 Write-Host "  $([char]0x2B21) MCP config... " -NoNewline
 if (Test-Path (Join-Path $ScriptDir ".mcp.json")) { Write-Ok "ok" } else { Write-Warn "skipped" }
 
+Write-Host "  $([char]0x2B21) MCP registry... " -NoNewline
+& uv run hive mcp init *> $null
+if ($LASTEXITCODE -eq 0) { Write-Ok "ok" } else { Write-Warn "skipped" }
+
 Write-Host "  $([char]0x2B21) skills... " -NoNewline
 $skillsDir = Join-Path (Join-Path $ScriptDir ".claude") "skills"
 if (Test-Path $skillsDir) {

@@ -41,7 +41,7 @@ _DEFAULT_CONFIG = {
 # suite without having to run `hive mcp add` manually. ``cwd`` is filled in
 # at registration time with the absolute path to the ``tools/`` directory.
 _DEFAULT_LOCAL_SERVERS: dict[str, dict[str, Any]] = {
-    "hive-tools": {
+    "hive_tools": {
         "description": "Hive tools: web search, email, CRM, calendar, and 100+ integrations",
         "args": ["run", "python", "mcp_server.py", "--stdio"],
     },
@@ -53,6 +53,13 @@ _DEFAULT_LOCAL_SERVERS: dict[str, dict[str, Any]] = {
         "description": "File I/O: read, write, edit, search, list, run commands",
         "args": ["run", "python", "files_server.py", "--stdio"],
     },
+}
+
+# Aliases that earlier versions of ensure_defaults wrote under the wrong name.
+# When we see one of these stale entries, drop it before seeding the canonical
+# name so the active agents (queen, credential_tester) can find their tools.
+_STALE_DEFAULT_ALIASES: dict[str, str] = {
+    "hive_tools": "hive-tools",
 }
 
 
@@ -102,6 +109,22 @@ class MCPRegistry:
         data = self._read_installed()
         existing = data.get("servers", {})
         added: list[str] = []
+
+        # Drop stale aliases (from earlier versions that wrote the wrong name).
+        # Only remove the alias when the canonical name isn't already installed,
+        # so we never clobber a hand-edited entry the user cares about.
+        mutated = False
+        for canonical, stale in _STALE_DEFAULT_ALIASES.items():
+            if stale in existing and canonical not in existing:
+                logger.info(
+                    "MCPRegistry.ensure_defaults: removing stale alias '%s' (canonical: '%s')",
+                    stale,
+                    canonical,
+                )
+                del existing[stale]
+                mutated = True
+        if mutated:
+            self._write_installed(data)
 
         for name, spec in _DEFAULT_LOCAL_SERVERS.items():
             if name in existing:

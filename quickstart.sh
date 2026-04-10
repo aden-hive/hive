@@ -1963,6 +1963,13 @@ else
     echo -e "${YELLOW}--${NC}"
 fi
 
+echo -n "  ⬡ MCP registry... "
+if uv run hive mcp init > /dev/null 2>&1; then
+    echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}--${NC}"
+fi
+
 
 
 echo -n "  ⬡ credential store... "
