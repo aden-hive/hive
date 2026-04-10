@@ -71,14 +71,31 @@ def patched_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def patched_fork(monkeypatch):
-    """Stub out fork_session_into_colony so we don't need a real queen."""
+def patched_fork(tmp_path, monkeypatch):
+    """Stub out fork_session_into_colony so we don't need a real queen.
+
+    The stub creates a real colony directory under tmp_path and writes
+    a minimal ``worker.json`` so the create_colony tool can install the
+    skill colony-scoped and patch worker.json::skill_dirs.
+    """
     calls: list[dict] = []
+    fake_colonies_root = tmp_path / "fake_colonies"
+    fake_colonies_root.mkdir(parents=True, exist_ok=True)
 
     async def _stub_fork(*, session: Any, colony_name: str, task: str) -> dict:
         calls.append({"session": session, "colony_name": colony_name, "task": task})
+        colony_dir = fake_colonies_root / colony_name
+        colony_dir.mkdir(parents=True, exist_ok=True)
+        # Minimal worker.json with an existing skill_dirs list so the
+        # patch step has something to mutate.
+        worker_json = colony_dir / "worker.json"
+        if not worker_json.exists():
+            worker_json.write_text(
+                json.dumps({"name": "worker", "skill_dirs": []}),
+                encoding="utf-8",
+            )
         return {
-            "colony_path": f"/tmp/fake_colonies/{colony_name}",
+            "colony_path": str(colony_dir),
             "colony_name": colony_name,
             "queen_session_id": "session_fake_fork_id",
             "is_new": True,
@@ -120,6 +137,79 @@ def _write_skill(
 
 
 @pytest.mark.asyncio
+async def test_happy_path_installs_skill_colony_scoped(
+    tmp_path: Path, patched_home: Path, patched_fork: list[dict]
+) -> None:
+    """Skill authored in a scratch dir is installed under {colony}/skills/{name}/.
+
+    The user-global ~/.hive/skills/ path must NOT be touched — that
+    would leak the skill to every other agent on the machine.
+    """
+    executor, session = _make_executor()
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    skill_src = _write_skill(
+        scratch,
+        dir_name="honeycomb-api-protocol",
+        fm_name="honeycomb-api-protocol",
+        description=(
+            "How to query the HoneyComb staging API for ticker, pool, "
+            "and trade data. Covers auth, pagination, pool detail "
+            "shape. Use when fetching market data."
+        ),
+        body=(
+            "## HoneyComb API Operational Protocol\n\n"
+            "Auth: Bearer token from ~/.hive/credentials/honeycomb.json.\n"
+            "Pagination: ?page=1&page_size=50 (max 50 per page).\n"
+        ),
+    )
+
+    payload = await _call(
+        executor,
+        colony_name="honeycomb_research",
+        task="Build the daily report.",
+        skill_path=str(skill_src),
+    )
+
+    assert payload.get("status") == "created", f"Tool error: {payload}"
+    assert payload["colony_name"] == "honeycomb_research"
+    assert payload["skill_name"] == "honeycomb-api-protocol"
+    assert payload["skill_scope"] == "colony"
+
+    # Skill landed under {colony}/skills/, NOT under ~/.hive/skills/
+    colony_dir = tmp_path / "fake_colonies" / "honeycomb_research"
+    installed_skill_md = (
+        colony_dir / "skills" / "honeycomb-api-protocol" / "SKILL.md"
+    )
+    assert installed_skill_md.exists()
+    assert "HoneyComb API Operational Protocol" in installed_skill_md.read_text(
+        encoding="utf-8"
+    )
+
+    # Critically: ~/.hive/skills/ is NOT touched
+    user_global_path = (
+        patched_home / ".hive" / "skills" / "honeycomb-api-protocol"
+    )
+    assert not user_global_path.exists(), (
+        "Skill leaked into the user-global ~/.hive/skills/ — should be "
+        "colony-scoped only"
+    )
+
+    # worker.json::skill_dirs is patched to include the colony skills dir
+    worker_json = json.loads(
+        (colony_dir / "worker.json").read_text(encoding="utf-8")
+    )
+    skill_dirs = worker_json.get("skill_dirs", [])
+    assert str(colony_dir / "skills") in skill_dirs
+
+    # Fork was called with the right args
+    assert len(patched_fork) == 1
+    assert patched_fork[0]["colony_name"] == "honeycomb_research"
+    assert patched_fork[0]["session"] is session
+
+
+@pytest.mark.asyncio
 async def test_happy_path_emits_colony_created_event(
     tmp_path: Path, patched_home: Path, patched_fork: list[dict]
 ) -> None:
@@ -141,11 +231,6 @@ async def test_happy_path_emits_colony_created_event(
     skill_src = _write_skill(
         tmp_path / "scratch", dir_name="my-skill", fm_name="my-skill"
     )
-    skill_src.parent.mkdir(parents=True, exist_ok=True)
-    # Re-create after parent mkdir
-    skill_src = _write_skill(
-        tmp_path / "scratch", dir_name="my-skill", fm_name="my-skill"
-    )
 
     payload = await _call(
         executor,
@@ -160,91 +245,72 @@ async def test_happy_path_emits_colony_created_event(
     assert ev.data.get("colony_name") == "event_check"
     assert ev.data.get("skill_name") == "my-skill"
     assert ev.data.get("is_new") is True
+    # The event payload's skill_installed must point to the colony-scoped
+    # location, not ~/.hive/skills/
+    skill_installed = ev.data.get("skill_installed", "")
+    assert "fake_colonies/event_check/skills/my-skill" in skill_installed
 
 
 @pytest.mark.asyncio
-async def test_happy_path_external_folder_is_copied_into_skills_root(
-    tmp_path: Path, patched_home: Path, patched_fork: list[dict]
+async def test_worker_json_skill_dirs_prepends_for_precedence(
+    tmp_path: Path, patched_home: Path, monkeypatch
 ) -> None:
-    """Skill authored outside ~/.hive/skills/ is copied in on install."""
-    executor, session = _make_executor()
+    """Existing skill_dirs entries are preserved; the colony dir is prepended."""
+    calls: list[dict] = []
+    fake_colonies_root = tmp_path / "fake_colonies"
+    fake_colonies_root.mkdir(parents=True, exist_ok=True)
 
-    # Queen authors skill in a scratch dir, not under ~/.hive/skills/
-    scratch = tmp_path / "scratch"
-    scratch.mkdir()
-    skill_src = _write_skill(
-        scratch,
-        dir_name="honeycomb-api-protocol",
-        fm_name="honeycomb-api-protocol",
-        description=(
-            "How to query the HoneyComb staging API for ticker, pool, "
-            "and trade data. Covers auth, pagination, pool detail "
-            "shape. Use when fetching market data."
-        ),
-        body=(
-            "## HoneyComb API Operational Protocol\n\n"
-            "Auth: Bearer token from ~/.hive/credentials/honeycomb.json.\n"
-            "Pagination: ?page=1&page_size=50 (max 50 per page).\n"
-            "Endpoints:\n"
-            "- /api/ticker — list tickers\n"
-            "- /api/ticker/{id} — pool detail\n"
-        ),
+    async def _stub_fork(*, session: Any, colony_name: str, task: str) -> dict:
+        calls.append({"colony_name": colony_name})
+        colony_dir = fake_colonies_root / colony_name
+        colony_dir.mkdir(parents=True, exist_ok=True)
+        # Pre-existing skill dirs the queen had at fork time
+        (colony_dir / "worker.json").write_text(
+            json.dumps(
+                {
+                    "name": "worker",
+                    "skill_dirs": [
+                        "/framework/defaults",
+                        "/project/.hive/skills",
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return {
+            "colony_path": str(colony_dir),
+            "colony_name": colony_name,
+            "queen_session_id": "sid",
+            "is_new": True,
+        }
+
+    monkeypatch.setattr(
+        "framework.server.routes_execution.fork_session_into_colony",
+        _stub_fork,
     )
 
-    payload = await _call(
-        executor,
-        colony_name="honeycomb_research",
-        task=(
-            "Build a daily honeycomb market report covering top gainers, "
-            "losers, volume leaders, and category breakdowns."
-        ),
-        skill_path=str(skill_src),
-    )
-
-    assert payload.get("status") == "created", f"Tool error: {payload}"
-    assert payload["colony_name"] == "honeycomb_research"
-    assert payload["skill_name"] == "honeycomb-api-protocol"
-
-    # The skill was installed under ~/.hive/skills/
-    installed = patched_home / ".hive" / "skills" / "honeycomb-api-protocol" / "SKILL.md"
-    assert installed.exists()
-    assert "HoneyComb API Operational Protocol" in installed.read_text(encoding="utf-8")
-
-    # Fork was called with the right args
-    assert len(patched_fork) == 1
-    assert patched_fork[0]["colony_name"] == "honeycomb_research"
-    assert "honeycomb market report" in patched_fork[0]["task"]
-    assert patched_fork[0]["session"] is session
-
-
-@pytest.mark.asyncio
-async def test_happy_path_in_place_authored_skill(
-    patched_home: Path, patched_fork: list[dict]
-) -> None:
-    """Skill authored directly at ~/.hive/skills/{name}/ is accepted in-place."""
     executor, _ = _make_executor()
-
-    skills_root = patched_home / ".hive" / "skills"
-    skills_root.mkdir(parents=True)
     skill_src = _write_skill(
-        skills_root,
-        dir_name="in-place-skill",
-        fm_name="in-place-skill",
-        description="An in-place skill.",
-        body="Contents that are already at the right location." * 3,
+        tmp_path / "scratch", dir_name="precedence-skill", fm_name="precedence-skill"
     )
-
     payload = await _call(
         executor,
-        colony_name="in_place_colony",
-        task="task text",
+        colony_name="precedence_check",
+        task="t",
         skill_path=str(skill_src),
     )
-
     assert payload.get("status") == "created", payload
-    installed = skills_root / "in-place-skill" / "SKILL.md"
-    assert installed.exists()
-    assert len(patched_fork) == 1
+
+    colony_dir = fake_colonies_root / "precedence_check"
+    worker_json = json.loads(
+        (colony_dir / "worker.json").read_text(encoding="utf-8")
+    )
+    skill_dirs = worker_json["skill_dirs"]
+    # Colony dir prepended (highest precedence) and existing entries
+    # preserved in order after it.
+    assert skill_dirs[0] == str(colony_dir / "skills")
+    assert "/framework/defaults" in skill_dirs
+    assert "/project/.hive/skills" in skill_dirs
 
 
 # ---------------------------------------------------------------------------
@@ -385,10 +451,16 @@ async def test_invalid_colony_name_rejected(tmp_path, patched_home, patched_fork
 
 
 @pytest.mark.asyncio
-async def test_fork_failure_keeps_installed_skill(
+async def test_fork_failure_returns_clean_error(
     tmp_path, patched_home, monkeypatch
 ) -> None:
-    """If the fork raises, the installed skill stays under ~/.hive/skills/."""
+    """If the fork raises, no skill is installed and the error is reported.
+
+    The new flow is validate → fork → install, so a fork failure means
+    nothing has been installed yet — neither colony-scoped nor user-global.
+    The error message must say so and the user-global ~/.hive/skills/
+    must remain untouched.
+    """
 
     async def _failing_fork(**kwargs):
         raise RuntimeError("simulated fork crash")
@@ -411,7 +483,9 @@ async def test_fork_failure_keeps_installed_skill(
     )
     assert "error" in payload
     assert "fork failed" in payload["error"]
-    assert "skill_installed" in payload
-    installed = patched_home / ".hive" / "skills" / "durable-skill" / "SKILL.md"
-    assert installed.exists()
     assert "hint" in payload
+
+    # Critical: no leakage to ~/.hive/skills/ (the old behavior installed
+    # there before fork — that's now gone)
+    user_global = patched_home / ".hive" / "skills" / "durable-skill"
+    assert not user_global.exists()

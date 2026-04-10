@@ -715,26 +715,31 @@ a saved agent.
 
 ## Forking the session into a colony (with session-knowledge capture)
 Two-step flow:
-  1. AUTHOR THE SKILL FIRST. Use write_file to create a skill folder \
-     (recommended location: `~/.hive/skills/{skill-name}/SKILL.md`) \
-     capturing what you learned during THIS session — API endpoints, \
-     auth flow, response shapes, gotchas, conventions, query patterns. \
-     The SKILL.md needs YAML frontmatter with `name` (matching the \
-     directory name) and `description` (1-1024 chars including trigger \
-     keywords), followed by a markdown body. Optional subdirs: \
-     scripts/, references/, assets/. Read your writing-hive-skills \
-     default skill for the full spec.
+  1. AUTHOR THE SKILL FIRST in a SCRATCH location. Use write_file to \
+     create a skill folder somewhere temporary (e.g. `/tmp/{skill-name}/` \
+     or your working directory) capturing what you learned during THIS \
+     session — API endpoints, auth flow, response shapes, gotchas, \
+     conventions, query patterns. DO NOT author it under \
+     `~/.hive/skills/` directly — that path is user-global and would \
+     leak the skill to every other agent on the machine. The SKILL.md \
+     needs YAML frontmatter with `name` (matching the directory name) \
+     and `description` (1-1024 chars including trigger keywords), \
+     followed by a markdown body. Optional subdirs: scripts/, \
+     references/, assets/. Read your writing-hive-skills default \
+     skill for the full spec.
   2. create_colony(colony_name, task, skill_path) — Validate the skill \
-     folder, install it under ~/.hive/skills/ if it's not already there, \
-     and fork this session into a new colony. NOTHING RUNS after this \
-     call: the task is baked into worker.json and the user starts the \
-     worker later from the new colony page. The task string still must \
-     be FULL and self-contained — when the user eventually runs it the \
-     worker has zero memory of your chat. The skill you wrote is \
-     installed under ~/.hive/skills/ so the worker discovers it on its \
-     first scan and starts informed instead of clueless. ALWAYS prefer \
-     create_colony over a raw fork when ending a session that uncovered \
-     reusable operational knowledge.
+     folder, fork this session into a new colony, and install the \
+     skill COLONY-SCOPED at \
+     `~/.hive/colonies/{colony_name}/skills/{skill_name}/`. Only this \
+     colony's worker sees it, never any other agent. NOTHING RUNS \
+     after this call: the task is baked into worker.json and the user \
+     starts the worker later from the new colony page. The task \
+     string still must be FULL and self-contained — when the user \
+     eventually runs it the worker has zero memory of your chat. The \
+     worker.json::skill_dirs is patched so the colony-scoped skill is \
+     discovered on the worker's first scan. ALWAYS prefer create_colony \
+     over a raw fork when ending a session that uncovered reusable \
+     operational knowledge.
 
 ## Workflow summary
 1. Understand requirements → discover tools → design the layout

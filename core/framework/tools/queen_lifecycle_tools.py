@@ -1249,26 +1249,28 @@ def register_queen_lifecycle_tools(
     # Forks the current queen session into a colony. Requires the queen
     # to have ALREADY AUTHORED a skill folder capturing what she learned
     # during this session (using her write_file / edit_file tools), and
-    # pass the folder path to this tool. The tool validates the skill
-    # folder (SKILL.md exists, frontmatter has the required ``name`` +
-    # ``description`` fields, directory name matches frontmatter name),
-    # then forks. If the skill lives outside ``~/.hive/skills/`` the
-    # tool copies it in so the new colony's worker will discover it on
-    # its first skill scan.
+    # pass the folder path to this tool.
     #
-    # This is the codified version of the user's instruction:
+    # The skill is installed COLONY-SCOPED at:
     #
-    #   "When the queen agent needs to create a colony, it needs to
-    #    write down whatever it just learned from the current session
-    #    as an agent skill and put it in the ~/.hive/skills folder."
+    #     ~/.hive/colonies/{colony_name}/skills/{skill_name}/
+    #
+    # NOT at ~/.hive/skills/ (which is user-global and would leak to
+    # every other agent on the machine). After installing, the colony's
+    # worker.json::skill_dirs is patched to include the colony skills
+    # dir so the worker discovers the skill on its first scan, and only
+    # this colony sees it.
     #
     # Two-step flow for the queen LLM:
     #
-    #   1. Author the skill with write_file (or a sequence of writes
-    #      for scripts/references/assets subdirs) — she already knows
-    #      the format via the writing-hive-skills default skill.
+    #   1. Author the skill with write_file in a SCRATCH location
+    #      (anywhere — temp dir, /tmp, the queen's working directory).
+    #      Do NOT author it directly under ~/.hive/skills/ — that would
+    #      leak the skill to every other agent before create_colony
+    #      gets a chance to scope it.
     #   2. Call create_colony(colony_name, task, skill_path) pointing
-    #      at the folder she just wrote.
+    #      at the scratch folder. The tool copies it into the new
+    #      colony's own skills dir.
 
     import re as _re
     import shutil as _shutil
@@ -1276,42 +1278,44 @@ def register_queen_lifecycle_tools(
     _COLONY_NAME_RE = _re.compile(r"^[a-z0-9_]+$")
     _SKILL_NAME_RE = _re.compile(r"^[a-z0-9-]+$")
 
-    def _validate_and_install_skill(skill_path: str) -> tuple[Path | None, str | None]:
-        """Validate an authored skill folder and ensure it lives under ~/.hive/skills/.
+    def _validate_skill_folder(
+        skill_path: str,
+    ) -> tuple[Path | None, str | None, str | None]:
+        """Validate an authored skill folder WITHOUT installing it.
 
-        Returns ``(installed_path, error)``. On success ``error`` is
-        ``None`` and ``installed_path`` is the final location under
-        ``~/.hive/skills/{name}/``. On failure ``installed_path`` is
-        ``None`` and ``error`` is a human-readable reason suitable for
-        returning to the queen as a JSON error payload.
+        Returns ``(source_path, fm_name, error)``. On success ``error``
+        is ``None``, ``source_path`` is the validated source folder, and
+        ``fm_name`` is the SKILL.md frontmatter ``name`` field. On
+        failure ``error`` is a human-readable reason and the other two
+        fields are ``None``.
+
+        We separate validation from install because create_colony needs
+        to validate FIRST (before forking), then install only AFTER the
+        colony directory exists — the install target is colony-scoped.
         """
         if not skill_path or not isinstance(skill_path, str):
-            return None, "skill_path must be a non-empty string"
+            return None, None, "skill_path must be a non-empty string"
 
         src = Path(skill_path).expanduser().resolve()
         if not src.exists():
-            return None, f"skill_path does not exist: {src}"
+            return None, None, f"skill_path does not exist: {src}"
         if not src.is_dir():
-            return None, f"skill_path must be a directory, got file: {src}"
+            return None, None, f"skill_path must be a directory, got file: {src}"
 
         skill_md = src / "SKILL.md"
         if not skill_md.is_file():
-            return None, f"skill_path has no SKILL.md at {skill_md}"
+            return None, None, f"skill_path has no SKILL.md at {skill_md}"
 
-        # Parse the frontmatter to pull out the name and verify
-        # description exists. We don't need a full YAML parser — the
-        # writing-hive-skills protocol is rigid enough that a line-by-line
-        # scan of the first frontmatter block suffices for validation.
         try:
             content = skill_md.read_text(encoding="utf-8")
         except OSError as e:
-            return None, f"failed to read SKILL.md: {e}"
+            return None, None, f"failed to read SKILL.md: {e}"
 
         if not content.startswith("---"):
-            return None, "SKILL.md missing opening '---' frontmatter marker"
+            return None, None, "SKILL.md missing opening '---' frontmatter marker"
         after_open = content.split("---", 2)
         if len(after_open) < 3:
-            return None, "SKILL.md missing closing '---' frontmatter marker"
+            return None, None, "SKILL.md missing closing '---' frontmatter marker"
         frontmatter_text = after_open[1]
 
         fm_name: str | None = None
@@ -1326,57 +1330,61 @@ def register_queen_lifecycle_tools(
                 fm_description = line.split(":", 1)[1].strip().strip('"').strip("'")
 
         if not fm_name:
-            return None, "SKILL.md frontmatter missing 'name' field"
+            return None, None, "SKILL.md frontmatter missing 'name' field"
         if not fm_description:
-            return None, "SKILL.md frontmatter missing 'description' field"
+            return None, None, "SKILL.md frontmatter missing 'description' field"
         if not (1 <= len(fm_description) <= 1024):
-            return None, "SKILL.md 'description' must be 1–1024 chars"
+            return None, None, "SKILL.md 'description' must be 1–1024 chars"
         if not _SKILL_NAME_RE.match(fm_name):
-            return None, (
+            return None, None, (
                 f"SKILL.md 'name' field '{fm_name}' must match [a-z0-9-] "
                 "pattern"
             )
         if fm_name.startswith("-") or fm_name.endswith("-") or "--" in fm_name:
-            return None, (
+            return None, None, (
                 f"SKILL.md 'name' '{fm_name}' has leading/trailing/"
                 "consecutive hyphens"
             )
         if len(fm_name) > 64:
-            return None, f"SKILL.md 'name' '{fm_name}' exceeds 64 chars"
+            return None, None, f"SKILL.md 'name' '{fm_name}' exceeds 64 chars"
 
-        # The directory basename should match the frontmatter name —
-        # this is the writing-hive-skills convention. We ENFORCE it
-        # because the skill loader uses dir names as identity.
         if src.name != fm_name:
-            return None, (
+            return None, None, (
                 f"skill directory name '{src.name}' does not match "
                 f"SKILL.md frontmatter name '{fm_name}'. Rename the "
                 "folder or fix the frontmatter."
             )
 
-        # Install into ~/.hive/skills/{name}/ if not already there.
-        target_root = Path.home() / ".hive" / "skills"
-        target = target_root / fm_name
+        return src, fm_name, None
+
+    def _install_skill_to_colony(
+        src: Path,
+        colony_path: Path,
+        fm_name: str,
+    ) -> tuple[Path | None, str | None]:
+        """Copy the validated skill folder into the colony's skills dir.
+
+        Returns ``(installed_path, error)``. On success ``error`` is
+        ``None`` and ``installed_path`` is the final location at
+        ``{colony_path}/skills/{fm_name}/``.
+        """
+        skills_root = colony_path / "skills"
+        target = skills_root / fm_name
+
         try:
-            target_root.mkdir(parents=True, exist_ok=True)
+            skills_root.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            return None, f"failed to create skills root: {e}"
+            return None, f"failed to create colony skills root: {e}"
 
         try:
             if src.resolve() == target.resolve():
-                # Already in the right place — nothing to do.
+                # Source and target are the same — already in place.
                 return target, None
         except OSError:
             pass
 
         try:
             if target.exists():
-                # Overwrite existing — the queen is explicitly creating
-                # a new colony for this version, so her authored skill
-                # wins over any prior version. copytree with
-                # dirs_exist_ok handles subdirs (scripts/, references/,
-                # assets/) but does NOT delete files removed in the
-                # new version. For a clean overwrite we rmtree first.
                 _shutil.rmtree(target)
             _shutil.copytree(src, target)
         except OSError as e:
@@ -1384,20 +1392,66 @@ def register_queen_lifecycle_tools(
 
         return target, None
 
+    def _patch_worker_json_skill_dirs(
+        colony_path: Path,
+        new_skill_dir: Path,
+    ) -> str | None:
+        """Append the colony skills dir to worker.json::skill_dirs.
+
+        Returns an error string on failure, or None on success. Worker
+        config files for forked colonies live at ``{colony_path}/worker.json``.
+        We append rather than replace so the worker still inherits the
+        framework + project skill paths the queen had at fork time.
+        """
+        worker_json_path = colony_path / "worker.json"
+        if not worker_json_path.is_file():
+            return f"worker.json not found at {worker_json_path}"
+
+        try:
+            data = json.loads(worker_json_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            return f"failed to read/parse worker.json: {e}"
+
+        skill_dirs = data.get("skill_dirs")
+        if not isinstance(skill_dirs, list):
+            skill_dirs = []
+
+        new_dir_str = str(new_skill_dir)
+        if new_dir_str not in skill_dirs:
+            # Prepend so the colony scope wins over user-global skills
+            # of the same name (the loader picks the first match).
+            skill_dirs.insert(0, new_dir_str)
+            data["skill_dirs"] = skill_dirs
+            try:
+                worker_json_path.write_text(
+                    json.dumps(data, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            except OSError as e:
+                return f"failed to write worker.json: {e}"
+
+        return None
+
     async def create_colony(
         *,
         colony_name: str,
         task: str,
         skill_path: str,
     ) -> str:
-        """Create a colony after installing a pre-authored skill folder.
+        """Create a colony, installing the queen's authored skill colony-scoped.
 
-        File-system only: copies the queen session into a new colony
-        directory and writes ``worker.json`` with the task baked in.
-        NOTHING RUNS after fork. The user navigates to the colony when
-        they're ready to start the worker — at that point the worker
-        reads the task from ``worker.json`` and the skill from
-        ``~/.hive/skills/`` and starts informed.
+        Flow:
+        1. Validate the skill folder (without installing).
+        2. Fork the queen session into ~/.hive/colonies/{colony_name}/.
+        3. Install the skill at {colony_path}/skills/{skill_name}/.
+        4. Patch worker.json::skill_dirs so the new colony's worker
+           discovers the skill on its first scan — and ONLY this
+           colony's worker. Other agents on the machine never see it.
+
+        File-system only: NOTHING RUNS after fork. The user navigates
+        to the colony when they're ready to start the worker — at that
+        point the worker reads the task from ``worker.json`` and the
+        skill from ``{colony_path}/skills/`` and starts informed.
         """
         if session is None:
             return json.dumps({"error": "No session bound to this tool registry."})
@@ -1413,8 +1467,11 @@ def register_queen_lifecycle_tools(
                 }
             )
 
-        installed_skill, skill_err = _validate_and_install_skill(skill_path)
-        if skill_err is not None:
+        # 1. Validate the skill folder BEFORE forking. Cheap, fails
+        # fast, and avoids creating a half-baked colony if the queen's
+        # skill folder is malformed.
+        skill_src, fm_name, skill_err = _validate_skill_folder(skill_path)
+        if skill_err is not None or skill_src is None or fm_name is None:
             return json.dumps(
                 {
                     "error": skill_err,
@@ -1425,31 +1482,22 @@ def register_queen_lifecycle_tools(
                         "{name, description} — see your "
                         "writing-hive-skills default skill for the "
                         "format. Then call create_colony again with "
-                        "skill_path pointing at that folder."
+                        "skill_path pointing at that folder. Author it "
+                        "in a SCRATCH location, NOT under "
+                        "~/.hive/skills/ — that path is user-global "
+                        "and would leak the skill to every other agent."
                     ),
                 }
             )
 
-        logger.info(
-            "create_colony: installed skill from %s → %s",
-            skill_path,
-            installed_skill,
-        )
-
-        # Fork the queen session into the colony directory. The fork
-        # copies conversations + writes worker.json + metadata.json.
-        # NO worker runs after this call. The new colony's worker
-        # inherits ~/.hive/skills/ on first run (whenever the user
-        # actually starts it), so the freshly installed skill is
-        # discoverable then.
+        # 2. Fork the queen session into the colony directory. This
+        # creates ~/.hive/colonies/{cn}/ with worker.json + metadata.json
+        # and copies conversations.
         try:
             from framework.server.routes_execution import fork_session_into_colony
         except Exception as e:
             return json.dumps(
-                {
-                    "error": f"fork_session_into_colony import failed: {e}",
-                    "skill_installed": str(installed_skill),
-                }
+                {"error": f"fork_session_into_colony import failed: {e}"}
             )
 
         try:
@@ -1459,23 +1507,67 @@ def register_queen_lifecycle_tools(
                 task=(task or "").strip(),
             )
         except Exception as e:
-            logger.exception("create_colony: fork failed after installing skill")
+            logger.exception("create_colony: fork failed")
             return json.dumps(
                 {
                     "error": f"colony fork failed: {e}",
-                    "skill_installed": str(installed_skill),
                     "hint": (
-                        "The skill was installed but the fork failed. "
-                        "You can retry create_colony — re-installing "
-                        "the skill is idempotent."
+                        "Skill was validated but the fork failed. "
+                        "create_colony is idempotent — you can retry."
                     ),
                 }
             )
 
-        # Emit COLONY_CREATED so the frontend can render a system
+        colony_path_str = fork_result.get("colony_path")
+        if not colony_path_str:
+            return json.dumps(
+                {
+                    "error": (
+                        "fork_session_into_colony returned no colony_path; "
+                        "cannot install skill colony-scoped."
+                    )
+                }
+            )
+        colony_path = Path(colony_path_str)
+
+        # 3. Install the validated skill into the colony's own skills
+        # directory so it is colony-scoped, not user-global.
+        installed_skill, install_err = _install_skill_to_colony(
+            skill_src, colony_path, fm_name
+        )
+        if install_err is not None or installed_skill is None:
+            return json.dumps(
+                {
+                    "error": f"skill install failed: {install_err}",
+                    "colony_path": colony_path_str,
+                    "hint": (
+                        "Colony was forked but the skill could not be "
+                        "installed colony-scoped. The colony exists but "
+                        "its worker will not see your authored skill."
+                    ),
+                }
+            )
+
+        # 4. Patch worker.json::skill_dirs so the new colony's worker
+        # discovers the skill on first scan. We prepend so colony-scoped
+        # skills win over same-name framework defaults.
+        patch_err = _patch_worker_json_skill_dirs(
+            colony_path, colony_path / "skills"
+        )
+        if patch_err is not None:
+            logger.warning(
+                "create_colony: skill installed but worker.json patch failed: %s",
+                patch_err,
+            )
+
+        logger.info(
+            "create_colony: installed skill '%s' colony-scoped at %s",
+            fm_name,
+            installed_skill,
+        )
+
+        # 5. Emit COLONY_CREATED so the frontend can render a system
         # message in the queen DM with a link to the new colony.
-        # Without this the queen's text response is the only signal
-        # the user gets, and there's no clickable navigation.
         bus = getattr(session, "event_bus", None)
         if bus is not None:
             try:
@@ -1485,11 +1577,11 @@ def register_queen_lifecycle_tools(
                         stream_id="queen",
                         data={
                             "colony_name": fork_result.get("colony_name", cn),
-                            "colony_path": fork_result.get("colony_path"),
+                            "colony_path": colony_path_str,
                             "queen_session_id": fork_result.get("queen_session_id"),
                             "is_new": fork_result.get("is_new", True),
                             "skill_installed": str(installed_skill),
-                            "skill_name": installed_skill.name if installed_skill else None,
+                            "skill_name": fm_name,
                             "task": (task or "").strip(),
                         },
                     )
@@ -1504,11 +1596,12 @@ def register_queen_lifecycle_tools(
             {
                 "status": "created",
                 "colony_name": fork_result.get("colony_name", cn),
-                "colony_path": fork_result.get("colony_path"),
+                "colony_path": colony_path_str,
                 "queen_session_id": fork_result.get("queen_session_id"),
                 "is_new": fork_result.get("is_new", True),
                 "skill_installed": str(installed_skill),
-                "skill_name": installed_skill.name if installed_skill else None,
+                "skill_name": fm_name,
+                "skill_scope": "colony",
             }
         )
 
@@ -1520,8 +1613,10 @@ def register_queen_lifecycle_tools(
             "conversation, and pass its path to this tool. The tool "
             "validates the skill folder (SKILL.md present, frontmatter "
             "name+description valid, directory name matches frontmatter "
-            "name), installs it under ~/.hive/skills/{name}/ if it's "
-            "not already there, and then forks the session.\n\n"
+            "name), forks the session into a new colony, and installs "
+            "the skill COLONY-SCOPED at "
+            "~/.hive/colonies/{colony_name}/skills/{skill_name}/ — only "
+            "this colony's worker sees it, never any other agent.\n\n"
             "NOTHING RUNS AFTER FORK. This tool is file-system only: "
             "it copies the queen session into a new colony directory "
             "and writes worker.json with the task baked in. No worker "
@@ -1531,16 +1626,21 @@ def register_queen_lifecycle_tools(
             "wrote here, and starts informed instead of clueless.\n\n"
             "TWO-STEP FLOW:\n\n"
             "  1. Use write_file (plus edit_file / list_directory as "
-            "     needed) to create a skill folder. The folder must "
-            "     contain a SKILL.md with YAML frontmatter {name, "
-            "     description} and a markdown body. Optional subdirs: "
-            "     scripts/, references/, assets/. See your "
-            "     writing-hive-skills default skill for the spec. We "
-            "     recommend authoring it directly at "
-            "     ~/.hive/skills/{skill-name}/SKILL.md so no copy is "
-            "     needed.\n"
+            "     needed) to create a skill folder in a SCRATCH "
+            "     location — anywhere temporary like /tmp or your "
+            "     working directory. Do NOT author the skill directly "
+            "     under ~/.hive/skills/, that path is user-global and "
+            "     would leak the skill to every agent on the machine "
+            "     before this tool gets a chance to scope it. The "
+            "     folder must contain a SKILL.md with YAML frontmatter "
+            "     {name, description} and a markdown body. Optional "
+            "     subdirs: scripts/, references/, assets/. See your "
+            "     writing-hive-skills default skill for the spec.\n"
             "  2. Call create_colony(colony_name, task, skill_path) "
-            "     pointing at the folder you just wrote.\n\n"
+            "     pointing at the scratch folder. The tool COPIES it "
+            "     into the new colony's own skills directory and "
+            "     patches worker.json::skill_dirs so only this "
+            "     colony's worker discovers it.\n\n"
             "WHY THIS EXISTS: a fresh worker has zero memory of your "
             "chat with the user. If you spent the session figuring out "
             "an API auth flow, pagination, data shapes, and gotchas — "
@@ -1563,7 +1663,8 @@ def register_queen_lifecycle_tools(
                     "type": "string",
                     "description": (
                         "Lowercase alphanumeric+underscore name for "
-                        "the new colony (e.g. 'honeycomb_research')."
+                        "the new colony (e.g. 'honeycomb_research'). "
+                        "Becomes ~/.hive/colonies/{colony_name}/."
                     ),
                 },
                 "task": {
@@ -1586,12 +1687,14 @@ def register_queen_lifecycle_tools(
                     "type": "string",
                     "description": (
                         "Path to a pre-authored skill folder containing "
-                        "SKILL.md. May be absolute or ~-expanded. The "
-                        "directory basename MUST match the SKILL.md "
-                        "frontmatter 'name' field. If the path is "
-                        "outside ~/.hive/skills/ the folder is copied "
-                        "in. Example: '~/.hive/skills/honeycomb-api-"
-                        "protocol'."
+                        "SKILL.md. Author it in a SCRATCH location "
+                        "(temp dir, /tmp, working directory) — NOT "
+                        "under ~/.hive/skills/, which is user-global. "
+                        "This tool copies the folder into the new "
+                        "colony's own skills dir for colony scoping. "
+                        "The directory basename MUST match the "
+                        "SKILL.md frontmatter 'name' field. Example: "
+                        "'/tmp/honeycomb-api-protocol'."
                     ),
                 },
             },
