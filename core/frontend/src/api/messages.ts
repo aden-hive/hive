@@ -1,11 +1,7 @@
 import { api } from "./client";
 
-export interface NewMessageResult {
-  queen_id: string;
-  session_id: string;
-}
-
 export const messagesApi = {
-  newMessage: (message: string) =>
-    api.post<NewMessageResult>("/messages/new", { message }),
+  /** Classify a home-screen prompt to a queen_id (no session created). */
+  classify: (message: string) =>
+    api.post<{ queen_id: string }>("/messages/classify", { message }),
 };

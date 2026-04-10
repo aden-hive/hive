@@ -22,13 +22,17 @@ export default function Home() {
   const displayName = userProfile.displayName || "there";
 
   const startQueenSession = async (text: string) => {
-    if (!text.trim() || submitting) return;
+    const trimmed = text.trim();
+    if (!trimmed || submitting) return;
     setSubmitting(true);
-    setActivePrompt(text.trim());
+    setActivePrompt(trimmed);
     try {
-      const result = await messagesApi.newMessage(text.trim());
+      const { queen_id } = await messagesApi.classify(trimmed);
+      // Hand the first message to queen-dm via sessionStorage so it
+      // survives the navigation without leaking into the URL/history.
+      sessionStorage.setItem(`queenFirstMessage:${queen_id}`, trimmed);
       refresh();
-      navigate(`/queen/${result.queen_id}?session=${encodeURIComponent(result.session_id)}`);
+      navigate(`/queen/${queen_id}?new=1`);
     } catch {
       // Keep the user on home if bootstrap fails.
     } finally {

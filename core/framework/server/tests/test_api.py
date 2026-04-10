@@ -579,50 +579,40 @@ class TestSessionCRUD:
 
 class TestMessageBootstrap:
     @pytest.mark.asyncio
-    async def test_new_message_requires_non_empty_message(self):
+    async def test_classify_requires_non_empty_message(self):
         app = create_app()
         async with TestClient(TestServer(app)) as client:
-            resp = await client.post("/api/messages/new", json={"message": "   "})
+            resp = await client.post("/api/messages/classify", json={"message": "   "})
             assert resp.status == 400
 
     @pytest.mark.asyncio
-    async def test_new_message_selects_queen_and_creates_fresh_session(self, monkeypatch):
+    async def test_classify_returns_queen_id_without_touching_sessions(self, monkeypatch):
         app = create_app()
         manager = app["manager"]
+        # Pre-existing live session must NOT be stopped by classify.
         existing = _make_session(agent_id="live_session")
         existing.queen_name = "queen_growth"
         manager._sessions[existing.id] = existing
         manager.build_llm = MagicMock(return_value=MagicMock())
-        manager.stop_session = AsyncMock(side_effect=lambda sid: manager._sessions.pop(sid, None))
-        created = _make_session(agent_id="fresh_queen_session", with_queen=False)
-        created.queen_name = "queen_technology"
-        manager.create_session = AsyncMock(return_value=created)
+        manager.stop_session = AsyncMock()
+        manager.create_session = AsyncMock()
         monkeypatch.setattr(
             routes_messages, "select_queen", AsyncMock(return_value="queen_technology")
         )
 
         async with TestClient(TestServer(app)) as client:
-            resp = await client.post("/api/messages/new", json={"message": "Build me a scraper"})
+            resp = await client.post(
+                "/api/messages/classify", json={"message": "Build me a scraper"}
+            )
             assert resp.status == 200
             data = await resp.json()
-
-        assert data == {
-            "queen_id": "queen_technology",
-            "session_id": "fresh_queen_session",
-        }
-        routes_messages.select_queen.assert_awaited_once()
-        manager.stop_session.assert_awaited_once_with("live_session")
-        manager.create_session.assert_awaited_once_with(
-            initial_prompt="Build me a scraper",
-            queen_name="queen_technology",
-            initial_phase="independent",
-        )
-        published_event = created.event_bus.publish.await_args.args[0]
-        assert published_event.type.value == "client_input_received"
-        assert published_event.stream_id == "queen"
-        assert published_event.node_id == "queen"
-        assert published_event.execution_id == "fresh_queen_session"
-        assert published_event.data == {"content": "Build me a scraper", "image_count": 0}
+            # Assert inside the async-with so app shutdown (which stops
+            # sessions as cleanup) doesn't pollute the assertions.
+            assert data == {"queen_id": "queen_technology"}
+            routes_messages.select_queen.assert_awaited_once()
+            manager.stop_session.assert_not_awaited()
+            manager.create_session.assert_not_awaited()
+            assert "live_session" in manager._sessions
 
 
 class TestQueenSessionSelection:

@@ -775,10 +775,16 @@ async def create_queen(
             session.memory_reflection_subs = _reflection_subs
 
             # Set initial user message based on mode:
-            # - RESTORE: Empty -> AgentLoop restores from disk, waits for /chat
-            # - FRESH:   "Hello" or explicit prompt -> queen responds immediately
+            # - RESTORE:              None -> AgentLoop restores from disk, waits for /chat
+            # - FRESH + initial_prompt:     -> queen responds to the real prompt immediately
+            # - FRESH + no initial_prompt:  -> None -> AgentLoop waits for the first /chat
+            #
+            # The third case matters for the classify→createNewSession→chat
+            # bootstrap: if the frontend doesn't pass initial_prompt, we must
+            # NOT invent a phantom "Hello" — that used to concatenate with the
+            # real first chat message and confuse the model.
             ctx.input_data = {
-                "user_request": None if _is_restore_mode else (initial_prompt or "Hello")
+                "user_request": None if _is_restore_mode else (initial_prompt or None)
             }
 
             logger.info(

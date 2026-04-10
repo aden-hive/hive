@@ -139,19 +139,23 @@ async def judge_turn(
             ),
         )
 
-    # Queen with no output keys → continuous interaction node.
-    # Inject tool-use pressure instead of auto-accepting.
+    # Queen with no output keys → continuous interaction node (chat mode).
+    #
+    # Claude-Code-style: trust the model's choice between text and tools.
+    # A chat-mode node has nothing structural for the judge to evaluate —
+    # text output IS how the queen communicates with the user, and a
+    # turn without real tools is a legitimate conversational reply.
+    # The old behavior here was to RETRY with "no prose, only tool calls",
+    # which trained the queen into an ask_user loop that never let it
+    # just chat.  Drive "act, don't describe" via the system prompt,
+    # not via a post-hoc retry loop.
+    #
+    # Note: real tool calls were already handled at line 109 (early
+    # RETRY to continue the loop), so reaching here means the turn
+    # was either pure text, an ask_user call, or genuinely empty —
+    # all of which should resolve on the next user message.
     if not output_keys and ctx.supports_direct_user_io:
-        return JudgeVerdict(
-            action="RETRY",
-            feedback=(
-                "STOP describing what you will do. "
-                "You have FULL access to all tools — file creation, "
-                "shell commands, MCP tools — and you CAN call them "
-                "directly in your response. Respond ONLY with tool "
-                "calls, no prose. Execute the task now."
-            ),
-        )
+        return JudgeVerdict(action="ACCEPT", feedback="")
 
     # Level 2b: conversation-aware quality check (if success_criteria set)
     if ctx.agent_spec.success_criteria and ctx.llm:

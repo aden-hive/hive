@@ -25,6 +25,7 @@ export default function QueenDM() {
   const queenInfo = getQueenForAgent(queenId || "");
   const queenName = profileQueen?.name ?? colonyQueen?.name ?? queenInfo.name;
   const selectedSessionParam = searchParams.get("session");
+  const newSessionFlag = searchParams.get("new");
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -99,12 +100,33 @@ export default function QueenDM() {
     setLoading(true);
 
     let cancelled = false;
+    const isBootstrap = newSessionFlag === "1";
+    // Consume the pending first message up-front so this bootstrap is one-shot:
+    // a re-run after URL rewrite or a browser refresh won't re-send it.
+    const pendingFirstMessage = isBootstrap
+      ? sessionStorage.getItem(`queenFirstMessage:${queenId}`)
+      : null;
+    if (isBootstrap && pendingFirstMessage !== null) {
+      sessionStorage.removeItem(`queenFirstMessage:${queenId}`);
+    }
 
     (async () => {
       try {
-        const result = selectedSessionParam
-          ? await queensApi.selectSession(queenId, selectedSessionParam)
-          : await queensApi.getOrCreateSession(queenId, undefined, "independent");
+        let result;
+        if (isBootstrap) {
+          // Pass the home-screen prompt as initial_prompt so the server
+          // seeds the first turn with the real user message — not a phantom
+          // "Hello" fallback. One atomic call, no separate chat() race.
+          result = await queensApi.createNewSession(
+            queenId,
+            pendingFirstMessage ?? undefined,
+            "independent",
+          );
+        } else if (selectedSessionParam) {
+          result = await queensApi.selectSession(queenId, selectedSessionParam);
+        } else {
+          result = await queensApi.getOrCreateSession(queenId, undefined, "independent");
+        }
         if (cancelled) return;
 
         const sid = result.session_id;
@@ -113,7 +135,28 @@ export default function QueenDM() {
         // Show typing indicator while the queen initializes (identity hook + first turn)
         setIsTyping(true);
 
-        if (selectedSessionParam && selectedSessionParam !== sid) {
+        if (isBootstrap) {
+          // Optimistic render — the server already has the prompt as
+          // initial_prompt, so the queen is processing it. We just paint
+          // the user's bubble immediately instead of waiting for the
+          // event stream echo.
+          if (pendingFirstMessage && pendingFirstMessage.trim()) {
+            const optimisticUserMsg: ChatMessage = {
+              id: makeId(),
+              agent: "You",
+              agentColor: "",
+              content: pendingFirstMessage,
+              timestamp: "",
+              type: "user",
+              thread: "queen-dm",
+              createdAt: Date.now(),
+            };
+            setMessages((prev) => [...prev, optimisticUserMsg]);
+          }
+          // Swap ?new=1 for ?session={sid} so a browser refresh rehydrates
+          // this session instead of creating another new one.
+          setSearchParams({ session: sid }, { replace: true });
+        } else if (selectedSessionParam && selectedSessionParam !== sid) {
           setSearchParams({ session: sid }, { replace: true });
         }
         await restoreMessages(sid, () => cancelled);
@@ -132,7 +175,15 @@ export default function QueenDM() {
     return () => {
       cancelled = true;
     };
-  }, [queenId, selectedSessionParam, restoreMessages, refresh, resetViewState, setSearchParams]);
+  }, [
+    queenId,
+    selectedSessionParam,
+    newSessionFlag,
+    restoreMessages,
+    refresh,
+    resetViewState,
+    setSearchParams,
+  ]);
 
   useEffect(() => {
     if (!queenId) return;

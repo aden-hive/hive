@@ -97,12 +97,12 @@ from framework.tracker.llm_debug_logger import log_llm_turn
 
 logger = logging.getLogger(__name__)
 
-# Tags whose content is internal reasoning and must be stripped from
-# the user-visible stream.  Covers <think> and the 5-pillar character
-# assessment tags.
+# Tags that wrap internal reasoning and must be stripped from the
+# user-visible stream.  These are the 5-pillar character assessment
+# labels, written by the queen as a prefix to every response in either
+# closed (<tag>val</tag>) or bare (<tag> val) form.
 _INTERNAL_TAGS = frozenset(
     {
-        "think",
         "relationship",
         "context",
         "sentiment",
@@ -110,6 +110,8 @@ _INTERNAL_TAGS = frozenset(
         "tone",
     }
 )
+
+# Closed-block form: <tag>value</tag>
 _STRIP_RE = re.compile(
     r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>"
     r".*?"
@@ -117,11 +119,17 @@ _STRIP_RE = re.compile(
     re.DOTALL,
 )
 
+# Bare-label form: <tag> value-up-to-next-tag-or-newline.
+# The value cannot contain `<` or `\n` — those terminate the label.
+# Trailing whitespace (including the terminating newline) is consumed
+# so the visible text that follows starts cleanly.
+_LABEL_STRIP_RE = re.compile(
+    r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>[^<\n]*\s*"
+)
 
-_INTERNAL_OPEN_RE = re.compile(r"<(?:" + "|".join(_INTERNAL_TAGS) + r")>")
 # Matches a trailing `<` that could be the start of an internal tag.
 # We build a pattern that matches `<` followed by any prefix of any
-# internal tag name (e.g. `<so`, `<contex`, `<think`).
+# internal tag name (e.g. `<rela`, `<contex`).
 _PARTIAL_PREFIXES: set[str] = set()
 for _tag in _INTERNAL_TAGS:
     for _i in range(1, len(_tag) + 1):
@@ -137,20 +145,24 @@ _GENERIC_TAG_OR_PARTIAL_RE = re.compile(r"<[a-zA-Z_]|</[a-zA-Z_]|<$")
 
 
 def _strip_internal_tags_from_snapshot(snapshot: str) -> str:
-    """Remove all internal tag blocks from the full accumulated text.
+    """Remove internal tag blocks and bare labels from accumulated text.
 
-    Also truncates at any unclosed or partially-opened tag so partial
-    tags never leak to the frontend during streaming.
+    The 5-pillar character assessment tags appear in two forms:
+      1. Closed block: <relationship>neutral</relationship>
+      2. Bare label:   <relationship> neutral
+    Both are stripped.  Partial tags at the end of a streaming snapshot
+    are truncated so reasoning never leaks mid-stream.
     """
+    # Pass 1: closed <tag>...</tag> blocks
     cleaned = _STRIP_RE.sub("", snapshot)
-    # Truncate at any fully-opened but unclosed internal tag
-    m = _INTERNAL_OPEN_RE.search(cleaned)
+
+    # Pass 2: bare-label <tag> value pairs (value runs to next tag or newline)
+    cleaned = _LABEL_STRIP_RE.sub("", cleaned)
+
+    # Pass 3: trailing partial tag (e.g. `<rela`) — mid-stream guard
+    m = _PARTIAL_OPEN_RE.search(cleaned)
     if m:
         cleaned = cleaned[: m.start()]
-    # Truncate at any partial opening tag at the end (e.g. `<social` or `<co`)
-    m2 = _PARTIAL_OPEN_RE.search(cleaned)
-    if m2:
-        cleaned = cleaned[: m2.start()]
 
     # Generic pass: strip any remaining XML-like tags the LLM hallucinated
     # (e.g. <professional>, <staging>, </neutral>).  These are never
