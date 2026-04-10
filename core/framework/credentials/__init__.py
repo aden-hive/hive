@@ -51,6 +51,7 @@ from .key_storage import (
 from .models import (
     CredentialDecryptionError,
     CredentialError,
+    CredentialExpiredError,
     CredentialKey,
     CredentialKeyNotFoundError,
     CredentialNotFoundError,
@@ -136,6 +137,7 @@ __all__ = [
     "CredentialNotFoundError",
     "CredentialKeyNotFoundError",
     "CredentialRefreshError",
+    "CredentialExpiredError",
     "CredentialValidationError",
     "CredentialDecryptionError",
     # Key storage (bootstrap credentials)

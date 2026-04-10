@@ -153,6 +153,60 @@ def install_worker_escalation_routing(
     )
 
 
+# Cache TTL for the ambient credentials block. The block is rebuilt at most
+# once per this interval; routes_credentials.invalidate_credentials_cache()
+# forces an immediate rebuild on save/delete.
+_CREDENTIALS_BLOCK_TTL_SECONDS = 30.0
+
+
+def _build_credentials_provider() -> Any:
+    """Return a closure that renders the ambient credentials block.
+
+    The closure snapshots connected accounts via CredentialStoreAdapter and
+    feeds them to build_accounts_prompt(). Output is connectivity-only —
+    provider, alias, identity. No status / valid / expires_at fields, since
+    those mislead the Queen the moment they go stale (liveness is enforced
+    at tool-call time via CredentialExpiredError instead).
+    """
+    import time
+
+    state: dict[str, Any] = {"cached": "", "cached_at": 0.0}
+
+    def _provider() -> str:
+        now = time.monotonic()
+        if (
+            state["cached"]
+            and (now - state["cached_at"]) < _CREDENTIALS_BLOCK_TTL_SECONDS
+        ):
+            return state["cached"]
+
+        try:
+            from aden_tools.credentials.store_adapter import CredentialStoreAdapter
+            from framework.orchestrator.prompting import build_accounts_prompt
+
+            adapter = CredentialStoreAdapter.default()
+            accounts = adapter.get_all_account_info()
+            tool_provider_map = adapter.get_tool_provider_map()
+            rendered = build_accounts_prompt(
+                accounts,
+                tool_provider_map=tool_provider_map,
+                node_tool_names=None,
+            )
+        except Exception:
+            logger.debug("Failed to render ambient credentials block", exc_info=True)
+            rendered = ""
+
+        state["cached"] = rendered
+        state["cached_at"] = now
+        return rendered
+
+    def _invalidate() -> None:
+        state["cached_at"] = 0.0
+
+    _provider.invalidate = _invalidate  # type: ignore[attr-defined]
+    return _provider
+
+
 async def create_queen(
     session: Session,
     session_manager: Any,
@@ -254,6 +308,14 @@ async def create_queen(
     effective_phase = initial_phase or ("staging" if worker_identity else "planning")
     phase_state = QueenPhaseState(phase=effective_phase, event_bus=session.event_bus)
     session.phase_state = phase_state
+
+    # ---- Ambient credentials provider --------------------------------
+    # Renders the "Connected integrations" block injected into every Queen
+    # phase prompt so the Queen always knows which credentials are connected
+    # without having to call list_credentials. Cached briefly to keep the
+    # per-iteration prompt rebuild cheap; invalidated by routes_credentials
+    # when the user adds/removes an integration.
+    phase_state.credentials_prompt_provider = _build_credentials_provider()
 
     # ---- Track ask rounds during planning ----------------------------
     # Increment planning_ask_rounds each time the queen requests user
