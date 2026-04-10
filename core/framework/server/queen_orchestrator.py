@@ -882,7 +882,10 @@ async def create_queen(
             # Run the queen -- forever-alive conversation loop
             result = await agent_loop.execute(ctx)
 
-            if result.stop_reason == "complete":
+            # AgentResult doesn't have stop_reason — check success/error.
+            # The queen is expected to be forever-alive; a clean return
+            # means the loop hit max_iterations or decided to exit.
+            if result.success:
                 logger.warning("Queen returned (should be forever-alive)")
             elif result.error:
                 logger.error("Queen failed: %s", result.error)

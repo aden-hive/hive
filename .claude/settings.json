@@ -10,7 +10,9 @@
       "Bash(grep -n \"create_colony\\\\|colony-spawn\\\\|colony_spawn\" /home/timothy/aden/hive/core/framework/agents/queen/nodes/__init__.py /home/timothy/aden/hive/core/framework/tools/*.py)",
       "Bash(git stash:*)",
       "Bash(python3 -c \"import sys,json; d=json.loads\\(sys.stdin.read\\(\\)\\); print\\('keys:', list\\(d.keys\\(\\)\\)[:10]\\)\")",
-      "Bash(python3 -c ':*)"
+      "Bash(python3 -c ':*)",
+      "Bash(uv run:*)",
+      "Read(//tmp/**)"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills"

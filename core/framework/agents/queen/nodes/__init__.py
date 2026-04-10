@@ -53,11 +53,6 @@ _SHARED_TOOLS = [
     "undo_changes",
     # Meta-agent
     "list_agent_tools",
-    "validate_agent_package",
-    "list_agents",
-    "list_agent_sessions",
-    "list_agent_checkpoints",
-    "get_agent_checkpoint",
 ]
 
 # Queen phase-specific tool sets.
@@ -69,18 +64,6 @@ _QUEEN_PLANNING_TOOLS = [
     "list_directory",
     "search_files",
     "run_command",
-    # Discovery + design
-    "list_agent_tools",
-    "list_agents",
-    "list_agent_sessions",
-    "list_agent_checkpoints",
-    "get_agent_checkpoint",
-    # Draft layout (visual-only, no code) — new planning workflow
-    "save_agent_draft",
-    "confirm_and_build",
-    # Scaffold + transition to building (requires confirm_and_build first)
-    # Load existing agent (after user confirms)
-    "load_built_agent",
     # Parallel fan-out — use directly for one-off batch work the user
     # wants RIGHT NOW (without first designing an agent for it).
     "run_parallel_workers",
@@ -94,9 +77,7 @@ _QUEEN_PLANNING_TOOLS = [
 _QUEEN_BUILDING_TOOLS = _SHARED_TOOLS + [
     "load_built_agent",
     "list_credentials",
-    "replan_agent",
-    "save_agent_draft",  # Re-draft during building → auto-dissolves + updates flowchart
-]
+ ]
 
 # Staging phase: agent loaded but not yet running — inspect, configure, launch.
 # No backward transitions — staging only goes forward to running.
@@ -138,7 +119,6 @@ _QUEEN_RUNNING_TOOLS = [
     "list_worker_questions",
     "reply_to_worker",
     # Monitoring
-    "get_worker_health_summary",
     "set_trigger",
     "remove_trigger",
     "list_triggers",
@@ -163,7 +143,6 @@ _QUEEN_EDITING_TOOLS = [
     "list_worker_questions",
     "reply_to_worker",
     # Monitoring
-    "get_worker_health_summary",
     "set_trigger",
     "remove_trigger",
     "list_triggers",
