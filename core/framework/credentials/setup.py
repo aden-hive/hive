@@ -498,7 +498,11 @@ class CredentialSetupSession:
             store.save_credential(cred_obj)
             self._print(f"{Colors.GREEN}✓ Stored in ~/.hive/credentials/{Colors.NC}")
         except Exception as e:
-            logger.warning("Failed to store credential %s in credential store", cred.credential_id or cred.credential_name, exc_info=True)
+            logger.warning(
+                "Failed to store credential %s in credential store",
+                cred.credential_id or cred.credential_name,
+                exc_info=True,
+            )
             self._print(f"{Colors.YELLOW}⚠ Could not store in credential store: {e}{Colors.NC}")
 
         # Export to current session
