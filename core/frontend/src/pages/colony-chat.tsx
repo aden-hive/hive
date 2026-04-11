@@ -190,7 +190,7 @@ function defaultAgentState(): AgentState {
 export default function ColonyChat() {
   const { colonyId } = useParams<{ colonyId: string }>();
   const location = useLocation();
-  const { colonies, markVisited } = useColony();
+  const { colonies, markVisited, refresh: refreshColonies } = useColony();
   const { setActions } = useHeaderActions();
 
   // Route state from home page (new chat flow)
@@ -211,6 +211,23 @@ export default function ColonyChat() {
   useEffect(() => {
     if (colonyId) markVisited(colonyId);
   }, [colonyId, markVisited]);
+
+  // When the user navigates to a colony that isn't in the sidebar's
+  // cached list yet (e.g. immediately after the queen's create_colony
+  // tool emitted COLONY_CREATED and the user clicked the link before
+  // the 30s status poll), re-fetch the colony list so agentPath
+  // resolves and the session-load effect below can actually run.
+  // Without this the page gets stuck at a blank loading state until
+  // the user manually refreshes the browser.
+  const refreshAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (!colonyId || isNewChat) return;
+    if (colony) return; // already in cache
+    if (routeState.agentPath) return; // home-page new-chat flow already has the path
+    if (refreshAttemptedRef.current) return; // don't thrash
+    refreshAttemptedRef.current = true;
+    refreshColonies();
+  }, [colonyId, colony, isNewChat, routeState.agentPath, refreshColonies]);
 
   // ── Core state ───────────────────────────────────────────────────────────
 

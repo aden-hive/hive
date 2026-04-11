@@ -538,6 +538,10 @@ export default function QueenDM() {
             createdAt: Date.now(),
           };
           setMessages((prev) => [...prev, msg]);
+          // Refresh the sidebar's colony list so the new colony shows up
+          // under "Colonies" immediately (without requiring a page
+          // reload or the 30s status poll).
+          refresh();
           break;
         }
 
@@ -628,7 +632,7 @@ export default function QueenDM() {
           break;
       }
     },
-    [queenName],
+    [queenName, refresh],
   );
 
   const sseSessions = useMemo((): Record<string, string> => {
