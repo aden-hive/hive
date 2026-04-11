@@ -811,6 +811,44 @@ All browser tools are prefixed with `browser_` (browser_start, browser_navigate,
 browser_click, browser_fill, browser_snapshot, browser_screenshot, browser_scroll, \
 browser_tabs, browser_close, browser_evaluate, etc.).
 Follow the browser-automation skill protocol — activate it before using browser tools.
+
+## Parallel fan-out (one-off batch work)
+- run_parallel_workers(tasks, timeout?) — Spawn N workers concurrently and \
+wait for all reports. Use when the user asks for batch / parallel work \
+RIGHT NOW that can be split into independent subtasks (e.g. "fetch batches \
+1–5 from this API", "summarise these 10 PDFs", "compare these candidates"). \
+Each task is a dict `{"task": "...", "data"?: {...}}`. Workers have zero \
+context from your chat — each task string must be FULL and self-contained. \
+The tool returns aggregated `{worker_id, status, summary, data, error}` \
+reports. Read them on your next turn and write a single user-facing \
+synthesis.
+
+## Forking this session into a colony (with session-knowledge capture)
+When you've learned something reusable during this conversation — an API \
+auth flow, pagination rules, response shapes, gotchas, query patterns — \
+and the user wants a persistent colony to continue working on it, use \
+create_colony. Two-step flow:
+  1. AUTHOR THE SKILL FIRST in a SCRATCH location. Use write_file to \
+     create a skill folder somewhere temporary (e.g. `/tmp/{skill-name}/` \
+     or your working directory) capturing what you learned. DO NOT \
+     author it under `~/.hive/skills/` — that path is user-global and \
+     would leak the skill to every other agent. The SKILL.md needs YAML \
+     frontmatter with `name` (matching the directory name) and \
+     `description` (1-1024 chars including trigger keywords), followed \
+     by a markdown body. Optional subdirs: scripts/, references/, \
+     assets/. Read your writing-hive-skills default skill for the full \
+     spec.
+  2. create_colony(colony_name, task, skill_path) — Validates the skill \
+     folder, forks this session into a new colony, and installs the \
+     skill COLONY-SCOPED at \
+     `~/.hive/colonies/{colony_name}/skills/{skill_name}/`. Only that \
+     colony's worker sees it, no other agent. NOTHING RUNS after this \
+     call — the task is baked into worker.json and the user starts the \
+     worker later from the new colony page. The task string must be \
+     FULL and self-contained because the worker has zero memory of your \
+     chat when it eventually runs. ALWAYS prefer create_colony over \
+     telling the user to "start a new session" when you have reusable \
+     operational knowledge worth codifying.
 """
 
 _queen_behavior_editing = """
@@ -828,15 +866,34 @@ Report the last run's results to the user and ask what they want to do next.
 _queen_behavior_independent = """
 ## Independent — do the work yourself
 
-You are the agent. No worker — you execute directly.
+You are the agent. No pre-loaded worker — you execute directly.
 1. Understand the task from the user
 2. Plan your approach briefly (no flowcharts or agent design)
 3. Execute using your tools: file I/O, shell commands, browser automation
 4. Report results, iterate if needed
 
-You have NO lifecycle tools (no run_agent_with_input, stop_worker, confirm_and_build, etc.).
-If the task requires building a dedicated agent, tell the user to start a \
-new session without independent mode.
+## Scaling up from independent mode
+
+You have no pre-loaded worker in this phase, but you DO have two \
+lifecycle tools for spinning up work dynamically:
+
+- **run_parallel_workers(tasks)** — for one-off batch work the user \
+  wants results for RIGHT NOW. Fan out N subtasks concurrently and \
+  synthesize the aggregated reports. No colony is created; the \
+  workers exist only for this call.
+- **create_colony(colony_name, task, skill_path)** — when you've \
+  learned something reusable during this chat (API protocol, query \
+  patterns, gotchas) and the user wants a persistent colony to \
+  continue the work. You write a skill folder to scratch, then call \
+  this tool to fork the session and install the skill colony-scoped. \
+  Nothing runs after fork — the user starts the worker later from the \
+  new colony page.
+
+You do NOT have the agent-building lifecycle (no save_agent_draft, \
+confirm_and_build, load_built_agent, run_agent_with_input). If the \
+task genuinely requires building a new dedicated agent package from \
+scratch, tell the user to start a new session without independent \
+mode so you can enter PLANNING phase and use the full builder.
 """
 
 # -- Behavior shared across all phases --
