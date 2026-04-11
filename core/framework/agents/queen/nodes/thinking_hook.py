@@ -133,6 +133,8 @@ async def select_expert_persona(
         style_directive = _STYLE_DIRECTIVES.get(style_key, _STYLE_DIRECTIVES["peer-technical"])
         logger.info("Thinking hook: selected persona — %s, style — %s", role, style_key)
         return PersonaResult(persona_prefix=persona_prefix, style_directive=style_directive)
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except Exception:
         logger.warning("Thinking hook: persona classification failed", exc_info=True)
         return None

@@ -1,8 +1,11 @@
 """Node definitions for Queen agent."""
 
+import logging
 from pathlib import Path
 
 from framework.graph import NodeSpec
+
+logger = logging.getLogger(__name__)
 
 # Load reference docs at import time so they're always in the system prompt.
 # No voluntary read_file() calls needed — the LLM gets everything upfront.
@@ -18,7 +21,10 @@ def _is_gcu_enabled() -> bool:
         from framework.config import get_gcu_enabled
 
         return get_gcu_enabled()
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except Exception:
+        logger.debug("Failed to check GCU enabled status from config", exc_info=True)
         return False
 
 

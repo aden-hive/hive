@@ -1,8 +1,11 @@
 """Runtime configuration for Queen agent."""
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _load_preferred_model() -> str:
@@ -15,8 +18,10 @@ def _load_preferred_model() -> str:
             llm = config.get("llm", {})
             if llm.get("provider") and llm.get("model"):
                 return f"{llm['provider']}/{llm['model']}"
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
-            pass
+            logger.debug("Failed to load preferred model from %s", config_path, exc_info=True)
     return "anthropic/claude-sonnet-4-20250514"
 
 

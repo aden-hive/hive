@@ -44,7 +44,10 @@ def _default_max_context_tokens() -> int:
         from framework.config import get_max_context_tokens
 
         return get_max_context_tokens()
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except Exception:
+        logger.debug("Failed to load max_context_tokens from config, falling back to 32000", exc_info=True)
         return 32_000
 
 
@@ -299,6 +302,8 @@ class GraphExecutor:
 
             with atomic_write(state_path, encoding="utf-8") as f:
                 _json.dump(state_data, f, indent=2)
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             logger.warning(
                 "Failed to persist progress state to %s",

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,7 +52,10 @@ def _get_last_active(agent_path: Path) -> str | None:
                 ts = data.get("timestamps", {}).get("updated_at")
                 if ts and (latest is None or ts > latest):
                     latest = ts
+            except (KeyboardInterrupt, SystemExit):
+                raise
             except Exception:
+                logger.debug("Failed to read state file %s", state_file, exc_info=True)
                 continue
 
     # 2. Queen sessions
@@ -70,7 +76,10 @@ def _get_last_active(agent_path: Path) -> str | None:
                 ts = datetime.fromtimestamp(d.stat().st_mtime).isoformat()
                 if latest is None or ts > latest:
                     latest = ts
+            except (KeyboardInterrupt, SystemExit):
+                raise
             except Exception:
+                logger.debug("Failed to read queen session meta %s", meta_file, exc_info=True)
                 continue
 
     return latest
@@ -104,7 +113,10 @@ def _count_runs(agent_name: str) -> int:
                     rid = record.get("run_id")
                     if rid:
                         run_ids.add(rid)
+            except (KeyboardInterrupt, SystemExit):
+                raise
             except Exception:
+                logger.debug("Failed to read runs file %s", runs_file, exc_info=True)
                 continue
     return len(run_ids)
 
@@ -129,8 +141,10 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
                         if isinstance(target, ast.Name) and target.id == "nodes":
                             if isinstance(node.value, ast.List):
                                 node_count = len(node.value.elts)
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
-            pass
+            logger.debug("Failed to parse agent.py at %s", agent_py, exc_info=True)
 
     agent_json = agent_path / "agent.json"
     if agent_json.exists():
@@ -144,8 +158,10 @@ def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
                 tools.update(n.get("tools", []))
             tool_count = len(tools)
             tags = data.get("agent", {}).get("tags", [])
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
-            pass
+            logger.debug("Failed to parse agent.json at %s", agent_json, exc_info=True)
 
     return node_count, tool_count, tags
 
@@ -186,8 +202,10 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                         meta = data.get("agent", {})
                         name = meta.get("name", name)
                         desc = meta.get("description", desc)
+                    except (KeyboardInterrupt, SystemExit):
+                        raise
                     except Exception:
-                        pass
+                        logger.debug("Failed to read agent.json metadata at %s", agent_json, exc_info=True)
 
             entries.append(
                 AgentEntry(

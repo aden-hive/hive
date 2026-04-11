@@ -230,6 +230,8 @@ async def _reflection_loop(
         except asyncio.CancelledError:
             logger.warning("reflect: LLM call cancelled (task cancelled)")
             return False, changed_files, last_text
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except Exception:
             logger.warning("reflect: LLM call failed", exc_info=True)
             return False, changed_files, last_text
@@ -470,6 +472,8 @@ async def run_shutdown_reflection(
         logger.info("reflect: shutdown reflection completed for %s", session_dir)
     except asyncio.CancelledError:
         logger.warning("reflect: shutdown reflection cancelled for %s", session_dir)
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except Exception:
         logger.warning("reflect: shutdown reflection failed", exc_info=True)
         _write_error("shutdown reflection")
@@ -508,6 +512,8 @@ async def subscribe_reflection_triggers(
                     await run_long_reflection(llm, mem_dir)
                 else:
                     await run_short_reflection(session_dir, llm, mem_dir)
+            except (KeyboardInterrupt, SystemExit):
+                raise
             except Exception:
                 logger.warning("reflect: reflection failed", exc_info=True)
                 _write_error("short/long reflection")
@@ -516,6 +522,8 @@ async def subscribe_reflection_triggers(
         async with _lock:
             try:
                 await run_long_reflection(llm, mem_dir)
+            except (KeyboardInterrupt, SystemExit):
+                raise
             except Exception:
                 logger.warning("reflect: compaction-triggered reflection failed", exc_info=True)
                 _write_error("compaction reflection")
