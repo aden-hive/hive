@@ -56,8 +56,11 @@ def get_preferred_model() -> str:
         # OpenRouter quickstart stores raw model IDs; tolerate pasted "openrouter/<id>" too.
         if provider.lower() == "openrouter" and model.lower().startswith("openrouter/"):
             model = model[len("openrouter/") :]
-        if model:
+        # Avoid double-prefixing when model already includes the provider (e.g. "anthropic/claude-...").
+        if model and not model.lower().startswith(f"{provider.lower()}/"):
             return f"{provider}/{model}"
+        if model:
+            return model
     return "anthropic/claude-sonnet-4-20250514"
 
 
@@ -74,8 +77,11 @@ def get_preferred_worker_model() -> str | None:
         model = str(worker_llm["model"]).strip()
         if provider.lower() == "openrouter" and model.lower().startswith("openrouter/"):
             model = model[len("openrouter/") :]
-        if model:
+        # Avoid double-prefixing when model already includes the provider.
+        if model and not model.lower().startswith(f"{provider.lower()}/"):
             return f"{provider}/{model}"
+        if model:
+            return model
     return None
 
 

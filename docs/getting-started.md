@@ -227,7 +227,7 @@ echo $HIVE_API_KEY
 
 ```bash
 # Remove and reinstall
-pip uninstall -y framework tools
+uv pip uninstall -y framework tools
 ./quickstart.sh
 ```
 

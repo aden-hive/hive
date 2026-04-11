@@ -2166,10 +2166,12 @@ echo ""
 
 if [ "$FRONTEND_BUILT" = true ]; then
     echo -e "${BOLD}Launching dashboard...${NC}"
+    echo -e "${DIM}Dashboard available at: ${CYAN}http://localhost:8000${NC}"
     echo ""
     "$SCRIPT_DIR/hive" open
 else
     echo -e "${YELLOW}Frontend build was skipped or failed.${NC} Launch manually when ready:"
     echo -e "     ${CYAN}./hive open${NC}"
+    echo -e "${DIM}Dashboard available at: ${CYAN}http://localhost:8000${NC}"
     echo ""
 fi

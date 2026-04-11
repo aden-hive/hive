@@ -140,27 +140,43 @@ def print_running_prompt(worker_identity: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    import sys
+    import argparse
 
-    phase = sys.argv[1] if len(sys.argv) > 1 else "planning"
+    parser = argparse.ArgumentParser(
+        description="Print the queen's phase-specific prompts."
+    )
+    parser.add_argument(
+        "phase",
+        nargs="?",
+        default="planning",
+        choices=["planning", "building", "staging", "running", "all"],
+        help="Phase to print (default: planning)",
+    )
+    parser.add_argument(
+        "-w",
+        "--worker",
+        metavar="WORKER_IDENTITY",
+        default=None,
+        help="Worker identity string to inject into the prompt",
+    )
+    args = parser.parse_args()
+
+    phase = args.phase
+    worker = args.worker
 
     if phase == "all":
-        print_planning_prompt()
+        print_planning_prompt(worker)
         print("\n\n")
-        print_building_prompt()
+        print_building_prompt(worker)
         print("\n\n")
-        print_staging_prompt()
+        print_staging_prompt(worker)
         print("\n\n")
-        print_running_prompt()
+        print_running_prompt(worker)
     elif phase == "planning":
-        print_planning_prompt()
+        print_planning_prompt(worker)
     elif phase == "building":
-        print_building_prompt()
+        print_building_prompt(worker)
     elif phase == "staging":
-        print_staging_prompt()
+        print_staging_prompt(worker)
     elif phase == "running":
-        print_running_prompt()
-    else:
-        print(f"Unknown phase: {phase}")
-        print("Usage: uv run scripts/debug_queen_prompt.py [planning|building|staging|running|all]")
-        sys.exit(1)
+        print_running_prompt(worker)
