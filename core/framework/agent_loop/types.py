@@ -226,6 +226,16 @@ class AgentResult:
 
     conversation: Any = None
 
+    # Machine-readable reason the loop stopped (see LoopExitReason in
+    # agent_loop/internals/types.py). "?" means the loop didn't set one,
+    # which should itself be treated as a diagnostic.
+    exit_reason: str = "?"
+    # Counters for reliability events surfaced during this execution.
+    # Populated from the loop's TaskRegistry-style counters at return
+    # time so callers can spot recurring failure modes without tailing
+    # logs. Keys are stable strings; missing keys mean "zero".
+    reliability_stats: dict[str, int] = field(default_factory=dict)
+
     def to_summary(self, spec: Any = None) -> str:
         if not self.success:
             return f"Failed: {self.error}"

@@ -1679,7 +1679,11 @@ class BeelineBridge:
                 "Runtime.evaluate",
                 {"expression": script, "returnByValue": True},
             )
-            text = (result or {}).get("result", {}).get("result", {}).get("value")
+            # _cdp returns the raw CDP response {"result":{"type":...,"value":...}}.
+            # The extra .get("result") hop was dropping the value — every
+            # successful lookup was silently misreported as "not found" until
+            # the deadline fired.
+            text = (result or {}).get("result", {}).get("value")
             if text is not None:
                 return {"ok": True, "selector": selector, "text": text}
             await asyncio.sleep(0.1)
@@ -1706,7 +1710,9 @@ class BeelineBridge:
                 "Runtime.evaluate",
                 {"expression": script, "returnByValue": True},
             )
-            value = (result or {}).get("result", {}).get("result", {}).get("value")
+            # Same unwrap bug as get_text_by_selector — the response shape
+            # is {"result":{"type":...,"value":...}}, one "result", not two.
+            value = (result or {}).get("result", {}).get("value")
             if value is not None:
                 return {"ok": True, "selector": selector, "attribute": attribute, "value": value}
             await asyncio.sleep(0.1)
@@ -1747,7 +1753,8 @@ class BeelineBridge:
                             "returnByValue": True,
                         },
                     )
-                    rect = (rect_result or {}).get("result", {}).get("result", {}).get("value")
+                    # One "result" hop — see comment in the meta fetch below.
+                    rect = (rect_result or {}).get("result", {}).get("value")
                     if rect and rect.get("width") and rect.get("height"):
                         params["clip"] = {
                             "x": rect["x"],
@@ -1794,7 +1801,14 @@ class BeelineBridge:
                         "returnByValue": True,
                     },
                 )
-                meta = (meta_result or {}).get("result", {}).get("result", {}).get("value") or {}
+                # _cdp returns the raw CDP response body, which for Runtime.evaluate
+                # is {"result": {"type": ..., "value": <our returned object>}}. The
+                # previous code did .get("result").get("result").get("value") —
+                # that extra hop dropped everything, so cssWidth always defaulted
+                # to 0 and devicePixelRatio to 1.0. Which in turn collapsed
+                # physical_scale and css_scale into the same number and made
+                # post-screenshot clicks land at DPR× the intended coordinate.
+                meta = (meta_result or {}).get("result", {}).get("value") or {}
 
                 dpr = meta.get("dpr", 1.0)
                 css_w = meta.get("cssWidth", 0)

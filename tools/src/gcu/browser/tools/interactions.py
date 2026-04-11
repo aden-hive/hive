@@ -104,11 +104,18 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         button: Literal["left", "right", "middle"] = "left",
     ) -> dict:
         """
-        Click at specific viewport coordinates.
+        Click at specific viewport coordinates (CSS pixels).
+
+        Chrome DevTools Protocol's Input.dispatchMouseEvent operates in
+        **CSS pixels**, not physical pixels. If you have a screenshot
+        image coordinate, convert it with ``browser_coords(x, y)`` and
+        use the returned ``css_x`` / ``css_y`` — not ``physical_x/y``.
+        On a DPR=2 display, feeding physical coordinates lands the click
+        at 2× the intended position.
 
         Args:
-            x: X coordinate in the viewport
-            y: Y coordinate in the viewport
+            x: X coordinate in CSS pixels (viewport space)
+            y: Y coordinate in CSS pixels (viewport space)
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
             button: Mouse button to click (left, right, middle)

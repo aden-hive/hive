@@ -875,20 +875,42 @@ class ToolRegistry:
         """
         verified_names: set[str] = set()
         manifest_present = False
+        # Only probe the sentinel when the server actually advertises it.
+        # Calling ``__aden_verified_manifest`` unconditionally on every
+        # MCP server at registration time (a) causes a bogus tool call
+        # round-trip to every third-party server, (b) pollutes any
+        # call-capturing fakes in tests, and (c) risks side effects on
+        # servers that eagerly execute unknown tool names. Listing is
+        # cheap and cached by the client; this keeps the manifest gate
+        # active for aden-flavoured servers without penalising others.
+        sentinel_advertised = False
         try:
-            raw = client.call_tool(self._MCP_VERIFIED_MANIFEST_TOOL, {})
-            parsed: Any = raw
-            if isinstance(raw, str):
-                try:
-                    parsed = json.loads(raw)
-                except json.JSONDecodeError:
-                    parsed = None
-            if isinstance(parsed, list):
-                verified_names = {str(n) for n in parsed}
-                manifest_present = True
+            for t in client.list_tools():
+                if getattr(t, "name", None) == self._MCP_VERIFIED_MANIFEST_TOOL:
+                    sentinel_advertised = True
+                    break
         except Exception:
-            # Server doesn't expose the manifest — no verified gate applies.
-            pass
+            sentinel_advertised = False
+
+        if sentinel_advertised:
+            try:
+                raw = client.call_tool(self._MCP_VERIFIED_MANIFEST_TOOL, {})
+                parsed: Any = raw
+                if isinstance(raw, str):
+                    try:
+                        parsed = json.loads(raw)
+                    except json.JSONDecodeError:
+                        parsed = None
+                # Only treat the response as a manifest when it's a list
+                # of strings. A malformed response shouldn't flip the gate
+                # on and silently hide every real tool from the server.
+                if isinstance(parsed, list) and all(isinstance(n, str) for n in parsed):
+                    verified_names = set(parsed)
+                    manifest_present = True
+            except Exception:
+                # Server advertised the sentinel but errored when called
+                # — treat as no manifest; fall back to third-party bypass.
+                pass
 
         tool_provider_map: dict[str, str] = {}
         live_providers: set[str] = set()

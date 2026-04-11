@@ -375,6 +375,31 @@ class AgentLoop(AgentProtocol):
         # Set by the Worker's __init__ so the report_to_parent handler can
         # record the explicit report payload on the owning Worker instance.
         self._owner_worker: Any = None
+        # Reliability counters — populated throughout execute() and
+        # copied onto AgentResult.reliability_stats at return time.
+        # Kept on the instance so ``stats()`` can expose them externally
+        # without waiting for execute() to return. Keys are stable so
+        # dashboards can build aggregates over many runs.
+        self._counters: dict[str, int] = {}
+
+    def _bump(self, key: str, by: int = 1) -> None:
+        """Increment a reliability counter (creates the key on first use)."""
+        self._counters[key] = self._counters.get(key, 0) + by
+
+    def stats(self) -> dict[str, int]:
+        """Return a snapshot of reliability counters for this loop."""
+        return dict(self._counters)
+
+    def _finalize_result(self, result: AgentResult, reason: str) -> AgentResult:
+        """Stamp exit_reason + reliability_stats on an AgentResult before return.
+
+        Central point so every exit path in execute() carries the same
+        observability payload, and new counters show up in results
+        without touching every return site.
+        """
+        result.exit_reason = reason
+        result.reliability_stats = dict(self._counters)
+        return result
 
     def validate_input(self, ctx: AgentContext) -> list[str]:
         """Validate hard requirements only.
@@ -393,6 +418,41 @@ class AgentLoop(AgentProtocol):
     # -------------------------------------------------------------------
 
     async def execute(self, ctx: AgentContext) -> AgentResult:
+        """Run the event loop.
+
+        Thin wrapper around :meth:`_execute_impl` that stamps reliability
+        counters on whatever AgentResult the implementation returns, and
+        fills in a best-effort ``exit_reason`` from the result fields
+        when the implementation didn't set one explicitly. This way
+        every return path in ``_execute_impl`` automatically carries
+        telemetry without having to edit 13+ return sites.
+        """
+        result = await self._execute_impl(ctx)
+        # Always refresh counters at the outermost boundary, in case a
+        # nested return in _execute_impl used _finalize_result with a
+        # stale copy.
+        result.reliability_stats = dict(self._counters)
+        if result.exit_reason == "?":
+            # Best-effort classification from the AgentResult payload.
+            # _execute_impl can (and should) set reason explicitly at
+            # key sites via _finalize_result — this only handles the
+            # returns that weren't updated yet.
+            err = (result.error or "").lower()
+            if result.success:
+                result.exit_reason = "completed"
+            elif "max iterations" in err:
+                result.exit_reason = "max_iterations"
+            elif "input_validation_errors" in err or result.validation_errors:
+                result.exit_reason = "validation_error"
+            elif "timed out" in err or "timeout" in err:
+                result.exit_reason = "timeout"
+            elif "cancel" in err or "stopped" in err:
+                result.exit_reason = "cancelled"
+            else:
+                result.exit_reason = "failed"
+        return result
+
+    async def _execute_impl(self, ctx: AgentContext) -> AgentResult:
         """Run the event loop."""
         self._last_ctx = ctx
         logger.debug(
@@ -450,7 +510,9 @@ class AgentLoop(AgentProtocol):
                     output_tokens=0,
                     latency_ms=0,
                 )
-            return AgentResult(success=False, error=error_msg)
+            return self._finalize_result(
+                AgentResult(success=False, error=error_msg), "guard_failure"
+            )
 
         # 2. Restore or create new conversation + accumulator
         restored = await self._restore(ctx)
@@ -908,10 +970,12 @@ class AgentLoop(AgentProtocol):
                     # five attempts in ~1 minute and giving up. Each attempt
                     # still publishes a retry event so the UI can see us
                     # waiting (the "heartbeat" — no silent stalls).
+                    self._bump("llm_turn_exception")
                     if (
                         self._is_capacity_error(e)
                         and self._config.capacity_retry_max_seconds > 0
                     ):
+                        self._bump("capacity_error")
                         now = time.monotonic()
                         if _capacity_retry_started_at is None:
                             _capacity_retry_started_at = now
@@ -952,6 +1016,7 @@ class AgentLoop(AgentProtocol):
                         self._is_transient_error(e)
                         and _stream_retry_count < self._config.max_stream_retries
                     ):
+                        self._bump("llm_transient_retry")
                         _stream_retry_count += 1
                         delay = min(
                             self._config.stream_retry_backoff_base
@@ -2080,13 +2145,18 @@ class AgentLoop(AgentProtocol):
                 escalate_count=_escalate_count,
                 continue_count=_continue_count,
             )
-        return AgentResult(
-            success=False,
-            error=(f"Max iterations ({self._config.max_iterations}) reached without acceptance"),
-            output=accumulator.to_dict(),
-            tokens_used=total_input_tokens + total_output_tokens,
-            latency_ms=latency_ms,
-            conversation=None,
+        return self._finalize_result(
+            AgentResult(
+                success=False,
+                error=(
+                    f"Max iterations ({self._config.max_iterations}) reached without acceptance"
+                ),
+                output=accumulator.to_dict(),
+                tokens_used=total_input_tokens + total_output_tokens,
+                latency_ms=latency_ms,
+                conversation=None,
+            ),
+            "max_iterations",
         )
 
     async def inject_event(
@@ -2459,6 +2529,7 @@ class AgentLoop(AgentProtocol):
                                 idle,
                                 _inactivity_limit,
                             )
+                            self._bump("stream_inactivity_watchdog")
                             self._stream_task.cancel()
                             try:
                                 await self._stream_task
@@ -3152,6 +3223,7 @@ class AgentLoop(AgentProtocol):
                 is_last = attempt == max_attempts - 1
                 if not self._is_transient_error(e) or is_last:
                     if is_last and self._is_transient_error(e):
+                        self._bump("judge_fallback_accept")
                         logger.error(
                             "[judge] iter=%d: transient failure persisted across %d attempts "
                             "(%s) — skipping judgment and accepting the turn to keep moving: %s",
@@ -3169,6 +3241,7 @@ class AgentLoop(AgentProtocol):
                         )
                     # Non-transient — re-raise so the caller sees it.
                     raise
+                self._bump("judge_transient_retry")
                 delay = min(
                     self._config.stream_retry_backoff_base * (2**attempt),
                     self._config.stream_retry_max_delay,
@@ -3318,12 +3391,21 @@ class AgentLoop(AgentProtocol):
         sync executors (MCP STDIO tools that block on ``future.result()``)
         don't freeze the event loop.
         """
-        return await execute_tool(
+        result = await execute_tool(
             tool_executor=self._tool_executor,
             tc=tc,
             timeout=self._config.tool_call_timeout_seconds,
             skill_dirs=getattr(self, "_skill_dirs", []),
         )
+        # Cheap post-hoc classification: the timeout handler in
+        # execute_tool builds a canned error message we can recognise
+        # here without threading a callback through. Good enough for
+        # telemetry; the content format is stable framework-internal.
+        if result.is_error and "timed out after" in (result.content or ""):
+            self._bump("tool_call_timeout")
+        elif result.is_error:
+            self._bump("tool_error")
+        return result
 
     def _next_spill_filename(self, tool_name: str) -> str:
         """Return a short, monotonic filename for a tool result spill."""
