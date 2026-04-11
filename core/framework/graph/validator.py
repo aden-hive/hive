@@ -35,7 +35,12 @@ class OutputValidator:
 
     def _contains_code_indicators(self, value: str) -> bool:
         """
-        Check for code patterns in a string using sampling for efficiency.
+        Check for code patterns in a string using a two-tier scoring approach.
+
+        Strong indicators (unambiguous syntax) trigger detection on their own.
+        Weak indicators (keywords that also appear in natural language) require
+        at least two to be present before detection is triggered, reducing false
+        positives on ordinary prose.
 
         For strings under 10KB, checks the entire content.
         For longer strings, samples at strategic positions to balance
@@ -47,52 +52,93 @@ class OutputValidator:
         Returns:
             True if code indicators are found, False otherwise
         """
-        code_indicators = [
-            # Python
+        import re
+
+        # Strong indicators — unambiguous code syntax; one is enough to flag.
+        strong_patterns = [
+            # Python function/class definitions (require trailing space already)
             "def ",
-            "class ",
-            "import ",
-            "from ",
-            "if __name__",
             "async def ",
-            "await ",
-            "try:",
-            "except:",
-            # JavaScript/TypeScript
-            "function ",
-            "const ",
-            "let ",
-            "=> {",
-            "require(",
-            "export ",
-            # SQL
+            # Class keyword followed by a name (not "classify", "classical", etc.)
+            "class ",
+            # Code-fence blocks with a language tag  e.g. ```python
+            "```python",
+            "```javascript",
+            "```typescript",
+            "```js",
+            "```ts",
+            "```sql",
+            "```php",
+            "```bash",
+            "```sh",
+            "```ruby",
+            "```go",
+            "```rust",
+            "```java",
+            "```c",
+            "```cpp",
+            # HTML/server-side injection markers
+            "<script",
+            "<?php",
+            "<%",
+            # SQL data-manipulation commands (upper-case, space after keyword)
             "SELECT ",
             "INSERT ",
             "UPDATE ",
             "DELETE ",
             "DROP ",
-            # HTML/Script injection
-            "<script",
-            "<?php",
-            "<%",
+            # import at the *start* of a line (Python / JS module syntax)
         ]
 
-        # For strings under 10KB, check the entire content
-        if len(value) < 10000:
-            return any(indicator in value for indicator in code_indicators)
+        # Weak indicators — common English words that also appear in code;
+        # require at least two to be present before flagging.
+        weak_patterns = [
+            "import ",   # mid-sentence ("We need to import the data")
+            "from ",     # very common in English
+            "function ",
+            "const ",
+            "let ",
+            "return ",
+            "export ",
+            "require(",
+            "=> {",
+            "await ",
+            "try:",
+            "except:",
+            "if __name__",
+        ]
 
-        # For longer strings, sample at strategic positions
+        def _check_chunk(chunk: str) -> bool:
+            """Return True if chunk scores as code."""
+            # Any single strong indicator is sufficient.
+            for indicator in strong_patterns:
+                if indicator in chunk:
+                    return True
+
+            # A line-anchored import counts as strong regardless of position.
+            if re.search(r"^\s*import ", chunk, re.MULTILINE):
+                return True
+
+            # Weak indicators: need two or more.
+            weak_count = sum(1 for indicator in weak_patterns if indicator in chunk)
+            return weak_count >= 2
+
+        # For strings under 10KB check the entire content in one pass.
+        if len(value) < 10000:
+            return _check_chunk(value)
+
+        # For longer strings sample at strategic positions.
         sample_positions = [
             0,  # Start
-            len(value) // 4,  # 25%
-            len(value) // 2,  # 50%
-            3 * len(value) // 4,  # 75%
+            len(value) // 4,  # 25 %
+            len(value) // 2,  # 50 %
+            3 * len(value) // 4,  # 75 %
             max(0, len(value) - 2000),  # Near end
         ]
 
         for pos in sample_positions:
             chunk = value[pos : pos + 2000]
-            if any(indicator in chunk for indicator in code_indicators):
+            if _check_chunk(chunk):
                 return True
 
         return False

@@ -150,12 +150,43 @@ class TestOutputValidatorHallucinationDetection:
         """_contains_code_indicators should check the entire string."""
         validator = OutputValidator()
 
-        # Code at position 600 (was previously missed with [:500] check)
+        # Code at position 600 using a strong indicator (def keyword)
         padding = "A" * 600
-        code = "import os"
+        code = "def compute(): pass"
         content = padding + code
 
         assert validator._contains_code_indicators(content) is True
+
+    def test_contains_code_indicators_line_anchored_import(self):
+        """A line-anchored import should be treated as a strong indicator."""
+        validator = OutputValidator()
+
+        # import at the start of a line is unambiguous module syntax
+        content = "Some preamble.\nimport os\nMore text."
+        assert validator._contains_code_indicators(content) is True
+
+    def test_bare_import_mid_sentence_not_flagged(self):
+        """A bare 'import' embedded mid-sentence should NOT alone flag as code."""
+        validator = OutputValidator()
+
+        # Single weak indicator — should not trigger
+        content = "We need to import the data from the spreadsheet before processing."
+        assert validator._contains_code_indicators(content) is False
+
+    def test_two_weak_indicators_flagged(self):
+        """Two or more weak indicators together should be flagged."""
+        validator = OutputValidator()
+
+        # 'function' and 'return' are both weak; together they cross the threshold
+        content = "The function will return the processed result."
+        assert validator._contains_code_indicators(content) is True
+
+    def test_single_weak_indicator_not_flagged(self):
+        """A single weak indicator in isolation should not be flagged."""
+        validator = OutputValidator()
+
+        content = "Please return the signed document by end of day."
+        assert validator._contains_code_indicators(content) is False
 
     def test_contains_code_indicators_sampling(self):
         """_contains_code_indicators should sample for very long strings."""
@@ -181,17 +212,31 @@ class TestOutputValidatorHallucinationDetection:
         """Should detect code patterns from multiple programming languages."""
         validator = OutputValidator()
 
-        test_cases = [
-            "function test() {}",  # JavaScript
-            "const x = 5;",  # JavaScript
-            "SELECT * FROM users",  # SQL
-            "DROP TABLE data",  # SQL
-            "<script>",  # HTML
-            "<?php",  # PHP
+        # Strong indicators — each one alone is sufficient to flag as code.
+        strong_cases = [
+            "def compute(): pass",  # Python — strong
+            "async def handler(): pass",  # Python — strong
+            "class MyModel:",  # Python — strong
+            "```python\npass\n```",  # code fence — strong
+            "SELECT * FROM users",  # SQL — strong
+            "DROP TABLE data",  # SQL — strong
+            "<script>",  # HTML — strong
+            "<?php",  # PHP — strong
         ]
 
-        for code in test_cases:
+        for code in strong_cases:
             assert validator._contains_code_indicators(code) is True, f"Failed to detect: {code}"
+
+        # Weak indicator pairs — two or more together should be flagged.
+        weak_pair_cases = [
+            "function test() { return x; }",  # function + return — two weak
+            "const x = require('fs');",  # const + require( — two weak
+        ]
+
+        for code in weak_pair_cases:
+            assert validator._contains_code_indicators(code) is True, (
+                f"Failed to detect weak-pair: {code}"
+            )
 
 
 class TestEdgeCases:
