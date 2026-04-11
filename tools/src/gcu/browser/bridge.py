@@ -22,6 +22,7 @@ The bridge requires the Beeline Chrome extension to be installed and connected.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import time

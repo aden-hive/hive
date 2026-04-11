@@ -829,20 +829,24 @@ class TestCrashRecovery:
     @pytest.mark.asyncio
     @pytest.mark.skip(
         reason=(
-            "Test expects single-turn completion semantics that were "
-            "deliberately removed when the queen became a forever-alive "
-            "conversational node. A text-only turn now auto-blocks for "
-            "user input instead of being accepted by the implicit judge. "
-            "The underlying 'restore preserves legacy store' behavior is "
-            "still covered by other TestCrashRecovery tests; rewriting "
-            "this one needs an LLM scenario that emits a tool call so "
-            "the loop doesn't hit auto-block."
+            "Restore path for legacy unphased stores is not writing "
+            "messages into the LLM call — separate pre-existing bug. "
+            "The queen's forever-alive semantics (skip_judge=True) are "
+            "tested via test_session_manager_worker_handoff and the "
+            "live manual flow. Unskip once the legacy restore is fixed."
         )
     )
     async def test_restore_legacy_unphased_assistant_message_preserves_store(
         self, tmp_path, runtime, buffer
     ):
-        """Legacy queen stores without phase_id should resume instead of being cleared."""
+        """Legacy queen stores without phase_id should resume instead of being cleared.
+
+        The queen node uses skip_judge=True (forever-alive conversational
+        semantics), so a text-only turn auto-blocks on user input. We
+        pre-signal shutdown right after the LLM call so the loop exits
+        cleanly while still verifying the restore path injected the
+        stored messages into the conversation.
+        """
         store = FileConversationStore(tmp_path / "conv")
         await store.write_meta(
             {
@@ -868,6 +872,7 @@ class TestCrashRecovery:
             description="interactive queen",
             node_type="event_loop",
             output_keys=[],
+            skip_judge=True,
         )
         llm = MockStreamingLLM(scenarios=[text_scenario("Recovered after restore.")])
         node = EventLoopNode(
@@ -876,7 +881,24 @@ class TestCrashRecovery:
         )
         ctx = build_ctx(runtime, spec, buffer, llm, stream_id="queen")
 
-        result = await node.execute(ctx)
+        # Pre-signal shutdown once the LLM call has landed so the
+        # auto-block wait returns False and the loop exits cleanly
+        # with success=True instead of hanging on _input_ready.
+        import asyncio as _aio
+
+        async def _shutdown_after_first_turn():
+            for _ in range(50):
+                await _aio.sleep(0.01)
+                if llm.stream_calls:
+                    break
+            node.signal_shutdown()
+
+        _sd_task = _aio.create_task(_shutdown_after_first_turn())
+        try:
+            result = await node.execute(ctx)
+        finally:
+            if not _sd_task.done():
+                _sd_task.cancel()
 
         assert result.success is True
         assert len(llm.stream_calls) == 1

@@ -1651,27 +1651,10 @@ class AgentLoop(AgentProtocol):
                         continue
                     # All outputs set -- fall through to judge
 
-                # Auto-block (queen text-only conversational turn):
-                # the user has now replied, continue the loop to
-                # process the next turn. We deliberately skip the
-                # judge here — the queen has no output_keys and no
-                # success_criteria, so judging her conversational
-                # turns is meaningless and the default ACCEPT path
-                # would terminate this forever-alive node.
-                if _cf_auto:
-                    _cf_text_only_streak = 0
-                    _continue_count += 1
-                    self._log_skip_judge(
-                        ctx,
-                        node_id,
-                        iteration,
-                        "Auto-block unblocked (queen conversational turn)",
-                        logged_tool_calls,
-                        assistant_text,
-                        turn_tokens,
-                        iter_start,
-                    )
-                    continue
+                # Auto-block beyond grace -- fall through to judge (6i).
+                # The queen's runtime AgentSpec sets skip_judge=True in
+                # queen_orchestrator.py, so the judge short-circuits to
+                # RETRY (no feedback) and the loop continues cleanly.
 
             # 6h''. Worker wait for queen guidance
             # When a worker escalates, pause here and skip judge evaluation

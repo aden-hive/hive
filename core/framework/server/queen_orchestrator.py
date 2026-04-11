@@ -768,6 +768,15 @@ async def create_queen(
                 system_prompt="",
                 tools=[t.name for t in queen_tools],
                 tool_access_policy="all",
+                # Queen is a forever-alive conversational agent: bypass
+                # the implicit judge entirely. Without this, a text-only
+                # turn (greeting, clarifying question, summary) falls
+                # through to the default ACCEPT verdict in
+                # judge_pipeline.py, which terminates the loop and
+                # leaves session.queen_executor=None until the user
+                # reloads. Mirrors the static queen_node NodeSpec in
+                # framework.agents.queen.nodes which already sets this.
+                skip_judge=True,
             )
 
             ctx = AgentContext(

@@ -14,7 +14,8 @@
       "Bash(uv run:*)",
       "Read(//tmp/**)",
       "Bash(grep -n \"useColony\\\\|const { queens, queenProfiles\" /home/timothy/aden/hive/core/frontend/src/pages/queen-dm.tsx)",
-      "Bash(awk 'NR==385,/\\\\}, \\\\[/' /home/timothy/aden/hive/core/frontend/src/pages/queen-dm.tsx)"
+      "Bash(awk 'NR==385,/\\\\}, \\\\[/' /home/timothy/aden/hive/core/frontend/src/pages/queen-dm.tsx)",
+      "Bash(xargs -I{} sh -c 'if ! grep -q \"^import base64\\\\|^from base64\" \"{}\"; then echo \"MISSING: {}\"; fi')"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",
