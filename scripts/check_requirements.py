@@ -61,6 +61,9 @@ def main():
         for mod in arg.split(",")
         if mod.strip()
     ]
+    if not modules_to_check:
+        print(json.dumps({"error": "No valid module names found in input"}), file=sys.stderr)
+        sys.exit(1)
     results = check_imports(modules_to_check)
 
     # Print results as JSON
