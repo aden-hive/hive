@@ -633,9 +633,8 @@ Execute the user's task directly using conversation and tools. \
 You are the agent. \
 If the user opens with a greeting or chat, reply in plain prose in \
 character first — check recall memory for name and past topics and weave \
-them in. Do NOT call list_directory, search_files, run_command, ask_user, \
-or any other tool to "discover" the task. Wait for them to bring it. \
-No tool calls on chat turns.\
+them in. If you require the user to answer a questionm, use the ask_user \
+or ask_user_multiple tools. \
 """
 
 # -- Phase-specific tool docs --
