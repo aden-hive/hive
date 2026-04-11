@@ -12,7 +12,9 @@
       "Bash(python3 -c \"import sys,json; d=json.loads\\(sys.stdin.read\\(\\)\\); print\\('keys:', list\\(d.keys\\(\\)\\)[:10]\\)\")",
       "Bash(python3 -c ':*)",
       "Bash(uv run:*)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(grep -n \"useColony\\\\|const { queens, queenProfiles\" /home/timothy/aden/hive/core/frontend/src/pages/queen-dm.tsx)",
+      "Bash(awk 'NR==385,/\\\\}, \\\\[/' /home/timothy/aden/hive/core/frontend/src/pages/queen-dm.tsx)"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",
