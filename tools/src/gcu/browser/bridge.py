@@ -1065,8 +1065,12 @@ class BeelineBridge:
         await self.highlight_point(tab_id, x, y, label=f"{key} ({x},{y})")
         return {"ok": True, "action": "press_at", "x": x, "y": y, "key": key}
 
-    # Duration (ms) that injected highlights stay visible before fading out.
-    _HIGHLIGHT_DURATION_MS = 1500
+    # Duration (ms) that injected highlights stay visible before fading.
+    # Bumped from 1500 → 10000 so the overlay outlives typical agent turn
+    # latency (LLM streaming + tool batching often runs 3-8s). With the
+    # old 1.5s lifetime the overlay was already gone by the time the
+    # next ``browser_screenshot`` fired, which is why it looked "flaky".
+    _HIGHLIGHT_DURATION_MS = 10000
 
     async def highlight_rect(
         self,
@@ -1094,9 +1098,12 @@ class BeelineBridge:
 
         js = f"""
         (function() {{
-          // Remove any previous hive highlight
-          var old = document.getElementById('__hive_hl');
-          if (old) old.remove();
+          // Remove any previous hive highlight (including its observer).
+          var prev = document.getElementById('__hive_hl');
+          if (prev) {{
+            try {{ prev.__hiveStop && prev.__hiveStop(); }} catch(e) {{}}
+            prev.remove();
+          }}
 
           var box = document.createElement('div');
           box.id = '__hive_hl';
@@ -1117,16 +1124,52 @@ class BeelineBridge:
             box.appendChild(tag);
           }}
 
-          document.documentElement.appendChild(box);
-          setTimeout(function() {{ box.style.opacity = '0'; }}, {duration});
-          setTimeout(function() {{ box.remove(); }}, {duration + 500});
+          var parent = document.documentElement;
+          parent.appendChild(box);
+
+          // SPA re-mount protection: some frameworks (React/Vue/etc.) and
+          // some host pages run MutationObservers that strip unknown
+          // children from documentElement. Watch for our box being
+          // removed and re-attach it — but cap the retries so we don't
+          // get into a DOM-thrash loop with a hostile host observer.
+          var stopped = false;
+          var retries = 0;
+          var MAX_RETRIES = 5;
+          var obs = new MutationObserver(function() {{
+            if (stopped) return;
+            if (!document.getElementById('__hive_hl')) {{
+              if (retries >= MAX_RETRIES) {{
+                stopped = true;
+                try {{ obs.disconnect(); }} catch(e) {{}}
+                return;
+              }}
+              retries++;
+              try {{ parent.appendChild(box); }} catch(e) {{}}
+            }}
+          }});
+          try {{ obs.observe(parent, {{childList:true, subtree:false}}); }} catch(e) {{}}
+          box.__hiveStop = function() {{
+            stopped = true;
+            try {{ obs.disconnect(); }} catch(e) {{}}
+          }};
+
+          setTimeout(function() {{
+            if (box.isConnected) box.style.opacity = '0';
+          }}, {duration});
+          setTimeout(function() {{
+            stopped = true;
+            try {{ obs.disconnect(); }} catch(e) {{}}
+            box.remove();
+          }}, {duration + 500});
         }})();
         """
         try:
             await self.cdp_attach(tab_id)
             await self.evaluate(tab_id, js)
-        except Exception:
-            pass  # best-effort visual feedback
+        except Exception as exc:
+            # Best-effort visual feedback, but log rather than silently
+            # swallow so we can diagnose CSP / mid-navigation failures.
+            logger.debug("highlight_rect injection failed on tab %d: %s", tab_id, exc)
 
         _interaction_highlights[tab_id] = {
             "x": x,
@@ -1144,8 +1187,11 @@ class BeelineBridge:
 
         js = f"""
         (function() {{
-          var old = document.getElementById('__hive_hl');
-          if (old) old.remove();
+          var prev = document.getElementById('__hive_hl');
+          if (prev) {{
+            try {{ prev.__hiveStop && prev.__hiveStop(); }} catch(e) {{}}
+            prev.remove();
+          }}
 
           var dot = document.createElement('div');
           dot.id = '__hive_hl';
@@ -1165,16 +1211,46 @@ class BeelineBridge:
             dot.appendChild(tag);
           }}
 
-          document.documentElement.appendChild(dot);
-          setTimeout(function() {{ dot.style.opacity = '0'; }}, {duration});
-          setTimeout(function() {{ dot.remove(); }}, {duration + 500});
+          var parent = document.documentElement;
+          parent.appendChild(dot);
+
+          // SPA re-mount protection — see highlight_rect comment.
+          var stopped = false;
+          var retries = 0;
+          var MAX_RETRIES = 5;
+          var obs = new MutationObserver(function() {{
+            if (stopped) return;
+            if (!document.getElementById('__hive_hl')) {{
+              if (retries >= MAX_RETRIES) {{
+                stopped = true;
+                try {{ obs.disconnect(); }} catch(e) {{}}
+                return;
+              }}
+              retries++;
+              try {{ parent.appendChild(dot); }} catch(e) {{}}
+            }}
+          }});
+          try {{ obs.observe(parent, {{childList:true, subtree:false}}); }} catch(e) {{}}
+          dot.__hiveStop = function() {{
+            stopped = true;
+            try {{ obs.disconnect(); }} catch(e) {{}}
+          }};
+
+          setTimeout(function() {{
+            if (dot.isConnected) dot.style.opacity = '0';
+          }}, {duration});
+          setTimeout(function() {{
+            stopped = true;
+            try {{ obs.disconnect(); }} catch(e) {{}}
+            dot.remove();
+          }}, {duration + 500});
         }})();
         """
         try:
             await self.cdp_attach(tab_id)
             await self.evaluate(tab_id, js)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("highlight_point injection failed on tab %d: %s", tab_id, exc)
 
         _interaction_highlights[tab_id] = {
             "x": x,
