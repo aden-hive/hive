@@ -1255,10 +1255,16 @@ class AgentLoader:
         if tools_path.exists():
             self._tool_registry.discover_from_module(tools_path)
 
-        # Set environment variables for MCP subprocesses
-        # These are inherited by MCP servers (e.g., GCU browser tools)
-        os.environ["HIVE_AGENT_NAME"] = agent_path.name
-        os.environ["HIVE_STORAGE_PATH"] = str(self._storage_path)
+        # Per-agent env for MCP subprocesses. Stored on the registry so
+        # parallel workers in the same process don't clobber each other
+        # via the shared os.environ dict — the registry merges these
+        # into every MCPServerConfig.env at registration time.
+        self._tool_registry.set_mcp_extra_env(
+            {
+                "HIVE_AGENT_NAME": agent_path.name,
+                "HIVE_STORAGE_PATH": str(self._storage_path),
+            }
+        )
 
         # MCP tools are loaded by McpRegistryStage in the pipeline during AgentHost.start()
 

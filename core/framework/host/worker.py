@@ -348,7 +348,25 @@ class Worker:
 
     async def start_background(self) -> None:
         """Spawn the worker's run() as an asyncio background task."""
-        self._task_handle = asyncio.create_task(self.run())
+        self._task_handle = asyncio.create_task(
+            self.run(), name=f"worker:{self.id}"
+        )
+        # Surface any exception that escapes run(); without this callback
+        # a crash here only becomes visible when stop() eventually awaits
+        # the handle (and is silently lost if stop() is never called).
+        self._task_handle.add_done_callback(self._on_task_done)
+
+    def _on_task_done(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                "Worker '%s' background task crashed: %s",
+                self.id,
+                exc,
+                exc_info=exc,
+            )
 
     async def stop(self) -> None:
         """Cancel the worker's background task, if any."""

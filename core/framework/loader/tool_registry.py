@@ -66,8 +66,23 @@ class ToolRegistry:
         self._mcp_cred_snapshot: set[str] = set()  # Credential filenames at MCP load time
         self._mcp_aden_key_snapshot: str | None = None  # ADEN_API_KEY value at MCP load time
         self._mcp_server_tools: dict[str, set[str]] = {}  # server name -> tool names
+        # tool name -> owning MCPClient (for force-kill on timeout)
+        self._mcp_tool_clients: dict[str, Any] = {}
+        # Per-agent env injected into every MCP server config.env. Kept
+        # here (not on the process-wide os.environ) so parallel workers
+        # in the same interpreter don't clobber each other's identity.
+        self._mcp_extra_env: dict[str, str] = {}
         # Agent dir for re-loading registry MCP after credential resync.
         self._mcp_registry_agent_path: Path | None = None
+
+    def set_mcp_extra_env(self, env: dict[str, str]) -> None:
+        """Attach per-agent env vars to every MCPServerConfig this registry builds.
+
+        Use this instead of mutating ``os.environ`` — the global env dict
+        is shared across all workers in a single interpreter, so writes
+        from one worker race with MCP spawns from another.
+        """
+        self._mcp_extra_env = dict(env)
 
     def register(
         self,
@@ -326,6 +341,9 @@ class ToolRegistry:
                     is_error=True,
                 )
 
+        # Expose force-kill hook so the timeout handler can tear down a
+        # hung MCP subprocess (asyncio.wait_for alone cannot).
+        executor.kill_for_tool = registry_ref.kill_mcp_for_tool  # type: ignore[attr-defined]
         return executor
 
     def get_registered_names(self) -> list[str]:
@@ -646,13 +664,17 @@ class ToolRegistry:
             from framework.loader.mcp_client import MCPClient, MCPServerConfig
             from framework.loader.mcp_connection_manager import MCPConnectionManager
 
-            # Build config object
+            # Build config object. Merge per-agent env on top of the
+            # server's own env so MCP subprocesses receive the identity
+            # of the worker that spawned them (instead of whichever
+            # worker most recently wrote to os.environ).
+            merged_env = {**self._mcp_extra_env, **(server_config.get("env") or {})}
             config = MCPServerConfig(
                 name=server_config["name"],
                 transport=server_config["transport"],
                 command=server_config.get("command"),
                 args=server_config.get("args", []),
-                env=server_config.get("env", {}),
+                env=merged_env,
                 cwd=server_config.get("cwd"),
                 url=server_config.get("url"),
                 headers=server_config.get("headers", {}),
@@ -770,6 +792,7 @@ class ToolRegistry:
                     make_mcp_executor(client, mcp_tool.name, self, tool_params),
                 )
                 self._mcp_tool_names.add(mcp_tool.name)
+                self._mcp_tool_clients[mcp_tool.name] = client
                 self._mcp_server_tools[server_name].add(mcp_tool.name)
                 admitted_names.append(mcp_tool.name)
                 count += 1
@@ -1099,6 +1122,33 @@ class ToolRegistry:
         self._mcp_clients.clear()
         self._mcp_client_servers.clear()
         self._mcp_managed_clients.clear()
+        self._mcp_tool_clients.clear()
+
+    def kill_mcp_for_tool(self, tool_name: str) -> bool:
+        """Force-disconnect the MCP client that owns *tool_name*.
+
+        Called from the timeout handler in ``execute_tool`` when a tool
+        call hangs. Plain ``asyncio.wait_for`` cancellation cannot stop
+        a sync executor running inside a thread pool (and therefore
+        cannot stop the MCP subprocess), so we reach through to the
+        client here and tear it down. The next ``call_tool`` triggers
+        an automatic reconnect.
+
+        Returns True if a client was found and disconnect was attempted.
+        """
+        client = self._mcp_tool_clients.get(tool_name)
+        if client is None:
+            return False
+        try:
+            logger.warning(
+                "Force-disconnecting MCP client for hung tool '%s' on server '%s'",
+                tool_name,
+                getattr(client.config, "name", "?"),
+            )
+            client.disconnect()
+        except Exception as exc:
+            logger.warning("Error force-disconnecting MCP client for '%s': %s", tool_name, exc)
+        return True
 
     def __del__(self):
         """Destructor to ensure cleanup."""

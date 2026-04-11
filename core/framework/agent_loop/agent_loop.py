@@ -96,6 +96,7 @@ from framework.llm.stream_events import (
     ToolCallEvent,
 )
 from framework.tracker.llm_debug_logger import log_llm_turn
+from framework.utils.task_registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -362,6 +363,9 @@ class AgentLoop(AgentProtocol):
         self._tool_task: asyncio.Task | None = None  # gather task while tools run
         # Track which nodes already have an action plan emitted (skip on revisit)
         self._action_plan_emitted: set[str] = set()
+        # Tracked background tasks (action plan, etc.) — prevents GC loss
+        # and surfaces unhandled exceptions via the done callback.
+        self._bg_tasks: TaskRegistry = TaskRegistry(owner="AgentLoop")
         # Monotonic counter for spillover file naming (web_search_1.txt, etc.)
         self._spill_counter: int = 0
         # Set to True by the report_to_parent synthetic tool handler so the
@@ -584,7 +588,10 @@ class AgentLoop(AgentProtocol):
             and stream_id not in ("queen", "judge")
         ):
             self._action_plan_emitted.add(node_id)
-            asyncio.create_task(self._generate_action_plan(ctx, stream_id, node_id, execution_id))
+            self._bg_tasks.spawn(
+                self._generate_action_plan(ctx, stream_id, node_id, execution_id),
+                name=f"action_plan:{node_id}",
+            )
 
         # 5. Stall / doom loop detection state (restored from cursor if resuming)
         recent_responses: list[str] = _restored_recent_responses
@@ -787,6 +794,8 @@ class AgentLoop(AgentProtocol):
                 "[AgentLoop.execute] iteration=%d: entering _run_single_turn loop", iteration
             )
             _stream_retry_count = 0
+            _capacity_retry_started_at: float | None = None
+            _capacity_retry_attempt = 0
             _turn_cancelled = False
             _llm_turn_failed_waiting_input = False
             _turn_t0 = time.monotonic()
@@ -893,6 +902,51 @@ class AgentLoop(AgentProtocol):
                         type(e).__name__,
                         str(e)[:200],
                     )
+                    # Persistent retry for capacity errors (429/529/overloaded).
+                    # Unlike the bounded branch below, this one keeps trying
+                    # within a wall-clock budget instead of burning through
+                    # five attempts in ~1 minute and giving up. Each attempt
+                    # still publishes a retry event so the UI can see us
+                    # waiting (the "heartbeat" — no silent stalls).
+                    if (
+                        self._is_capacity_error(e)
+                        and self._config.capacity_retry_max_seconds > 0
+                    ):
+                        now = time.monotonic()
+                        if _capacity_retry_started_at is None:
+                            _capacity_retry_started_at = now
+                        elapsed = now - _capacity_retry_started_at
+                        if elapsed < self._config.capacity_retry_max_seconds:
+                            _capacity_retry_attempt += 1
+                            delay = min(
+                                self._config.stream_retry_backoff_base
+                                * (2 ** min(_capacity_retry_attempt - 1, 6)),
+                                self._config.capacity_retry_max_delay,
+                            )
+                            logger.warning(
+                                "[%s] iter=%d: capacity error (%s), persistent retry "
+                                "#%d after %.1fs (elapsed %.0fs / %.0fs budget): %s",
+                                node_id,
+                                iteration,
+                                type(e).__name__,
+                                _capacity_retry_attempt,
+                                delay,
+                                elapsed,
+                                self._config.capacity_retry_max_seconds,
+                                str(e)[:200],
+                            )
+                            if self._event_bus:
+                                await self._event_bus.emit_node_retry(
+                                    stream_id=stream_id,
+                                    node_id=node_id,
+                                    retry_count=_capacity_retry_attempt,
+                                    max_retries=-1,  # -1 == persistent / unbounded
+                                    error=str(e)[:500],
+                                    execution_id=execution_id,
+                                )
+                            await asyncio.sleep(delay)
+                            continue  # retry same iteration
+
                     # Retry transient errors with exponential backoff
                     if (
                         self._is_transient_error(e)
@@ -2151,6 +2205,13 @@ class AgentLoop(AgentProtocol):
         # without injecting, so the wait still blocks until the user types.
         self._input_ready.clear()
 
+        # Close the lost-wakeup window: a message can arrive between the
+        # pre-check above and the clear() we just did. Re-check the queues
+        # after clearing; if anything snuck in, skip the wait entirely.
+        # Same after emit (sync handlers may inject during the emit).
+        if not self._injection_queue.empty() or not self._trigger_queue.empty():
+            return True
+
         if emit_client_request and self._event_bus:
             await self._event_bus.emit_client_input_requested(
                 stream_id=ctx.stream_id or ctx.agent_id,
@@ -2160,6 +2221,9 @@ class AgentLoop(AgentProtocol):
                 options=options,
                 questions=questions,
             )
+
+        if not self._injection_queue.empty() or not self._trigger_queue.empty():
+            return True
 
         self._awaiting_input = True
         try:
@@ -2305,12 +2369,16 @@ class AgentLoop(AgentProtocol):
             # Stream LLM response in a child task so cancel_current_turn()
             # can kill it instantly without terminating the queen's main loop.
             # Capture loop-scoped variables as defaults to satisfy B023.
+            # _stream_last_event_at is bumped on every event; the watchdog
+            # below uses it to detect silently hung HTTP connections.
+            _stream_last_event_at = time.monotonic()
+
             async def _do_stream(
                 _msgs: list = messages,  # noqa: B006
                 _tc: list[ToolCallEvent] = tool_calls,  # noqa: B006
                 inner_turn: int = inner_turn,
             ) -> None:
-                nonlocal accumulated_text, _stream_error
+                nonlocal accumulated_text, _stream_error, _stream_last_event_at
                 _clean_snapshot = ""  # visible-only text for the frontend
 
                 async for event in ctx.llm.stream(
@@ -2319,6 +2387,7 @@ class AgentLoop(AgentProtocol):
                     tools=tools if tools else None,
                     max_tokens=ctx.max_tokens,
                 ):
+                    _stream_last_event_at = time.monotonic()
                     if isinstance(event, TextDeltaEvent):
                         accumulated_text = event.snapshot
                         # Strip internal reasoning tags from the full
@@ -2360,7 +2429,50 @@ class AgentLoop(AgentProtocol):
             logger.debug(
                 "[_run_single_turn] inner_turn=%d: Stream task created, waiting...", inner_turn
             )
+            _inactivity_limit = self._config.llm_stream_inactivity_timeout_seconds
             try:
+                if _inactivity_limit and _inactivity_limit > 0:
+                    # Heartbeat-aware wait: poll the task and cancel it if
+                    # no stream event has been observed within the window.
+                    # A silently dead HTTP connection otherwise hangs here
+                    # forever — no exception, no delta, no timeout.
+                    #
+                    # Must use asyncio.wait (not wait_for) so we can tell
+                    # "poll interval elapsed" apart from "task raised a
+                    # TimeoutError of its own" — wait_for conflates them.
+                    _check_interval = min(5.0, _inactivity_limit / 2)
+                    while True:
+                        done, _pending = await asyncio.wait(
+                            {self._stream_task}, timeout=_check_interval
+                        )
+                        if self._stream_task in done:
+                            # Let any exception the task raised propagate
+                            # naturally via the outer ``await`` below.
+                            break
+                        idle = time.monotonic() - _stream_last_event_at
+                        if idle >= _inactivity_limit:
+                            logger.warning(
+                                "[_run_single_turn] inner_turn=%d: "
+                                "stream inactivity %.0fs >= %.0fs — "
+                                "cancelling stream task",
+                                inner_turn,
+                                idle,
+                                _inactivity_limit,
+                            )
+                            self._stream_task.cancel()
+                            try:
+                                await self._stream_task
+                            except BaseException:
+                                pass
+                            raise ConnectionError(
+                                f"LLM stream idle for {idle:.0f}s "
+                                f"(inactivity limit {_inactivity_limit:.0f}s) — "
+                                "connection presumed dead"
+                            ) from None
+                        # Still active — keep polling.
+                # Re-raise any exception the stream task stored. When the
+                # watchdog loop exited via ``break`` the task is done, and
+                # ``await`` is the cheapest way to surface its exception.
                 await self._stream_task
                 logger.debug(
                     "[_run_single_turn] inner_turn=%d: Stream task completed normally", inner_turn
@@ -3096,6 +3208,40 @@ class AgentLoop(AgentProtocol):
     def _is_transient_error(exc: BaseException) -> bool:
         """Classify whether an exception is transient. Delegates to tool_result_handler module."""
         return is_transient_error(exc)
+
+    @staticmethod
+    def _is_capacity_error(exc: BaseException) -> bool:
+        """Detect provider-side capacity / rate-limit errors.
+
+        These are the errors that typically resolve on their own if we
+        just wait long enough — 429 rate limit, 529 overloaded, and the
+        equivalent provider-specific flavours. We treat these differently
+        from generic transient errors (network blips) and retry them
+        persistently within a wall-clock budget instead of giving up
+        after a fixed attempt count.
+        """
+        cls_name = type(exc).__name__.lower()
+        if "ratelimit" in cls_name or "overloaded" in cls_name:
+            return True
+        try:
+            from litellm.exceptions import RateLimitError, ServiceUnavailableError
+
+            if isinstance(exc, (RateLimitError, ServiceUnavailableError)):
+                return True
+        except ImportError:
+            pass
+        error_str = str(exc).lower()
+        keywords = (
+            "429",
+            "529",
+            "rate limit",
+            "rate_limit",
+            "overloaded",
+            "capacity",
+            "too many requests",
+            "service unavailable",
+        )
+        return any(kw in error_str for kw in keywords)
 
     @staticmethod
     def _fingerprint_tool_calls(

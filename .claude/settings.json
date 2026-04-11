@@ -15,7 +15,11 @@
       "Read(//tmp/**)",
       "Bash(grep -n \"useColony\\\\|const { queens, queenProfiles\" /home/timothy/aden/hive/core/frontend/src/pages/queen-dm.tsx)",
       "Bash(awk 'NR==385,/\\\\}, \\\\[/' /home/timothy/aden/hive/core/frontend/src/pages/queen-dm.tsx)",
-      "Bash(xargs -I{} sh -c 'if ! grep -q \"^import base64\\\\|^from base64\" \"{}\"; then echo \"MISSING: {}\"; fi')"
+      "Bash(xargs -I{} sh -c 'if ! grep -q \"^import base64\\\\|^from base64\" \"{}\"; then echo \"MISSING: {}\"; fi')",
+      "Bash(find /home/timothy/aden/hive/core/framework -name \"*.py\" -type f -exec grep -l \"FileConversationStore\\\\|class.*ConversationStore\" {} \\\\;)",
+      "Bash(find /home/timothy/aden/hive/core/framework -name \"*.py\" -exec grep -l \"run_parallel_workers\\\\|create_colony\" {} \\\\;)",
+      "Bash(awk '/^    async def execute\\\\\\(self, ctx: AgentContext\\\\\\)/,/^    async def [a-z_]+/ {print NR\": \"$0}' /home/timothy/aden/hive/core/framework/agent_loop/agent_loop.py)",
+      "Bash(grep -r \"max_concurrent_workers\\\\|max_depth\\\\|recursion\\\\|spawn.*bomb\" /home/timothy/aden/hive/core/framework/host/*.py)"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",

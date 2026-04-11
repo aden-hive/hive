@@ -380,8 +380,24 @@ class ColonyRuntime:
         async with self._lock:
             await self.stop_all_workers()
 
-            for task in self._timer_tasks:
+            # Cancel timer tasks and *wait* for them to finish. Without
+            # the wait the tasks are merely scheduled for cancellation —
+            # if the runtime (or its event loop) shuts down before they
+            # run their cleanup code, trigger state leaks.
+            pending_timers = [t for t in self._timer_tasks if not t.done()]
+            for task in pending_timers:
                 task.cancel()
+            if pending_timers:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*pending_timers, return_exceptions=True),
+                        timeout=5.0,
+                    )
+                except TimeoutError:
+                    logger.warning(
+                        "ColonyRuntime.stop: %d timer task(s) did not finish within 5s",
+                        sum(1 for t in pending_timers if not t.done()),
+                    )
             self._timer_tasks.clear()
 
             for sub_id in self._event_subscriptions:
@@ -397,6 +413,18 @@ class ColonyRuntime:
 
             self._running = False
             logger.info("ColonyRuntime stopped: colony_id=%s", self._colony_id)
+
+    def _on_timer_task_done(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                "Timer task '%s' crashed: %s",
+                task.get_name(),
+                exc,
+                exc_info=exc,
+            )
 
     def pause_timers(self) -> None:
         self._timers_paused = True
@@ -1016,7 +1044,11 @@ class ColonyRuntime:
             run_immediately = tc.get("run_immediately", False)
 
             if interval and interval > 0 and self._running:
-                task = asyncio.create_task(self._timer_loop(trig_id, interval, run_immediately))
+                task = asyncio.create_task(
+                    self._timer_loop(trig_id, interval, run_immediately),
+                    name=f"timer:{trig_id}",
+                )
+                task.add_done_callback(self._on_timer_task_done)
                 self._timer_tasks.append(task)
 
     async def _timer_loop(
