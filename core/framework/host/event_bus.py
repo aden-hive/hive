@@ -518,17 +518,35 @@ class EventBus:
 
         return True
 
+    # Per-handler wall-clock timeout. A subscriber that deadlocks or
+    # blocks on slow I/O would otherwise freeze the publisher (and via
+    # ``await publish(...)`` any coroutine that emits events) indefinitely.
+    # 15 s is generous for legitimate handlers and cheap to tune later.
+    _HANDLER_TIMEOUT_SECONDS: float = 15.0
+
     async def _execute_handlers(
         self,
         event: AgentEvent,
         handlers: list[EventHandler],
     ) -> None:
-        """Execute handlers concurrently with rate limiting."""
+        """Execute handlers concurrently with rate limiting + hard timeout."""
 
         async def run_handler(handler: EventHandler) -> None:
             async with self._semaphore:
                 try:
-                    await handler(event)
+                    await asyncio.wait_for(
+                        handler(event),
+                        timeout=self._HANDLER_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    handler_name = getattr(handler, "__qualname__", repr(handler))
+                    logger.error(
+                        "EventBus handler %s exceeded %.0fs on event %s — dropping; "
+                        "fix the handler or the publisher will stall",
+                        handler_name,
+                        self._HANDLER_TIMEOUT_SECONDS,
+                        getattr(event.type, "name", event.type),
+                    )
                 except Exception:
                     logger.exception(f"Handler error for {event.type}")
 

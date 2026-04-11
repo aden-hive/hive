@@ -1130,6 +1130,47 @@ def register_queen_lifecycle_tools(
                 {"error": "tasks must be a non-empty list of {task, data?} dicts"}
             )
 
+        # Hard ceiling on a single fan-out call. A runaway queen requesting
+        # thousands of parallel workers would starve memory and drown the
+        # event loop; reject early with a clear error instead.
+        _RUN_PARALLEL_HARD_CAP = 64
+        if len(tasks) > _RUN_PARALLEL_HARD_CAP:
+            return json.dumps(
+                {
+                    "error": (
+                        f"run_parallel_workers received {len(tasks)} tasks, "
+                        f"hard cap is {_RUN_PARALLEL_HARD_CAP}. Split the work "
+                        "into sequential batches or tighten the task list."
+                    )
+                }
+            )
+
+        # Global concurrency enforcement against ColonyConfig.max_concurrent_workers.
+        # The config field exists but was never checked anywhere — tracking
+        # it here so recursive fan-outs can't silently exceed the budget.
+        colony_cfg = getattr(colony, "_config", None) or getattr(colony, "config", None)
+        max_concurrent = getattr(colony_cfg, "max_concurrent_workers", None)
+        if max_concurrent and max_concurrent > 0:
+            active = 0
+            try:
+                workers = getattr(colony, "_workers", {}) or {}
+                for w in workers.values():
+                    handle = getattr(w, "_task_handle", None)
+                    if handle is not None and not handle.done():
+                        active += 1
+            except Exception:
+                active = 0
+            if active + len(tasks) > max_concurrent:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"run_parallel_workers would exceed max_concurrent_workers "
+                            f"({active} active + {len(tasks)} new > {max_concurrent}). "
+                            "Wait for existing workers to finish or reduce batch size."
+                        )
+                    }
+                )
+
         # Normalise: each entry must have a non-empty "task" string.
         normalised: list[dict] = []
         for i, spec in enumerate(tasks):

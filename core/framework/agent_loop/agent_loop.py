@@ -3124,19 +3124,67 @@ class AgentLoop(AgentProtocol):
         tool_results: list[dict],
         iteration: int,
     ) -> JudgeVerdict:
-        """Evaluate the current state. Delegates to judge_pipeline module."""
-        return await judge_turn(
-            mark_complete_flag=False,
-            judge=self._judge,
-            ctx=ctx,
-            conversation=conversation,
-            accumulator=accumulator,
-            assistant_text=assistant_text,
-            tool_results=tool_results,
-            iteration=iteration,
-            get_missing_output_keys_fn=self._get_missing_output_keys,
-            max_context_tokens=self._config.max_context_tokens,
-        )
+        """Evaluate the current state, with retry + fallback.
+
+        The judge makes its own LLM call, which can fail transiently
+        (network blip, 429/529, stream stall). Without a safety net here
+        a single hiccup in the judge would crash the whole loop — even
+        though the work under evaluation was perfectly fine. We retry
+        transient failures a few times, then fall back to ACCEPT so the
+        loop keeps moving instead of dying on a judge outage.
+        """
+        max_attempts = max(1, self._config.max_stream_retries)
+        for attempt in range(max_attempts):
+            try:
+                return await judge_turn(
+                    mark_complete_flag=False,
+                    judge=self._judge,
+                    ctx=ctx,
+                    conversation=conversation,
+                    accumulator=accumulator,
+                    assistant_text=assistant_text,
+                    tool_results=tool_results,
+                    iteration=iteration,
+                    get_missing_output_keys_fn=self._get_missing_output_keys,
+                    max_context_tokens=self._config.max_context_tokens,
+                )
+            except Exception as e:
+                is_last = attempt == max_attempts - 1
+                if not self._is_transient_error(e) or is_last:
+                    if is_last and self._is_transient_error(e):
+                        logger.error(
+                            "[judge] iter=%d: transient failure persisted across %d attempts "
+                            "(%s) — skipping judgment and accepting the turn to keep moving: %s",
+                            iteration,
+                            max_attempts,
+                            type(e).__name__,
+                            str(e)[:200],
+                        )
+                        return JudgeVerdict(
+                            action="ACCEPT",
+                            feedback=(
+                                f"[judge unavailable after {max_attempts} attempts: "
+                                f"{type(e).__name__}; accepting to avoid stalling the loop]"
+                            ),
+                        )
+                    # Non-transient — re-raise so the caller sees it.
+                    raise
+                delay = min(
+                    self._config.stream_retry_backoff_base * (2**attempt),
+                    self._config.stream_retry_max_delay,
+                )
+                logger.warning(
+                    "[judge] iter=%d: transient error (%s), retrying in %.1fs (%d/%d): %s",
+                    iteration,
+                    type(e).__name__,
+                    delay,
+                    attempt + 1,
+                    max_attempts,
+                    str(e)[:200],
+                )
+                await asyncio.sleep(delay)
+        # Unreachable — the loop above always returns or raises.
+        raise RuntimeError("_judge_turn retry loop exited unexpectedly")
 
     # -------------------------------------------------------------------
     # Helpers
