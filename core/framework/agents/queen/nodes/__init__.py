@@ -633,8 +633,8 @@ Execute the user's task directly using conversation and tools. \
 You are the agent. \
 If the user opens with a greeting or chat, reply in plain prose in \
 character first — check recall memory for name and past topics and weave \
-them in. If you require the user to answer a questionm, use the ask_user \
-or ask_user_multiple tools. \
+them in. If you ask the user a question, you MUST use the \
+ask_user or ask_user_multiple tools. \
 """
 
 # -- Phase-specific tool docs --
