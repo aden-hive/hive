@@ -16,10 +16,12 @@ import logging
 import os
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
+
+_T = TypeVar("_T")
 
 try:
     import litellm
@@ -750,7 +752,7 @@ class LiteLLMProvider(LLMProvider):
         raise RuntimeError("Exhausted rate limit retries")
 
     @staticmethod
-    def _run_async(coro):  # type: ignore[no-untyped-def]
+    def _run_async(coro: Coroutine[Any, Any, _T]) -> _T:
         """Run an async coroutine from a sync context safely.
 
         ``asyncio.run()`` raises ``RuntimeError: This event loop is already
