@@ -9,6 +9,7 @@ See: https://docs.litellm.ai/docs/providers
 
 import ast
 import asyncio
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -748,6 +749,19 @@ class LiteLLMProvider(LLMProvider):
         # unreachable, but satisfies type checker
         raise RuntimeError("Exhausted rate limit retries")
 
+    @staticmethod
+    def _run_async(coro):  # type: ignore[no-untyped-def]
+        """Run an async coroutine from a sync context safely.
+
+        ``asyncio.run()`` raises ``RuntimeError: This event loop is already
+        running`` when called from inside an existing event loop (e.g. FastAPI,
+        Jupyter).  Running the coroutine in a fresh thread gives it its own
+        event loop and avoids that conflict.
+        """
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result()
+
     def complete(
         self,
         messages: list[dict[str, Any]],
@@ -762,7 +776,7 @@ class LiteLLMProvider(LLMProvider):
         # Codex ChatGPT backend requires streaming — delegate to the unified
         # async streaming path which properly handles tool calls.
         if self._codex_backend:
-            return asyncio.run(
+            return self._run_async(
                 self.acomplete(
                     messages=messages,
                     system=system,
