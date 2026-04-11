@@ -79,3 +79,4 @@ core/tests/*dumps/*
 screenshots/*
 
 .gemini/*
+.coverage
