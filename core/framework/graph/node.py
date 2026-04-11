@@ -382,10 +382,9 @@ class DataBuffer:
 
         # Strong indicators — unambiguous code syntax; one is enough to flag.
         strong_patterns = [
-            # Python function/class definitions
+            # Python/JS function definitions
             "def ",
             "async def ",
-            "class ",
             # Code-fence blocks with a language tag  e.g. ```python
             "```python",
             "```javascript",
@@ -439,8 +438,10 @@ class DataBuffer:
                 if indicator in chunk:
                     return True
 
-            # A line-anchored import counts as strong regardless of position.
+            # Anchored syntax patterns: unambiguous declarations at line start.
             if re.search(r"^\s*import ", chunk, re.MULTILINE):
+                return True
+            if re.search(r"^\s*class\s+\w+[\s:(]", chunk, re.MULTILINE):
                 return True
 
             # Weak indicators: need two or more.

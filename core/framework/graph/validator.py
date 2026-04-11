@@ -56,11 +56,9 @@ class OutputValidator:
 
         # Strong indicators — unambiguous code syntax; one is enough to flag.
         strong_patterns = [
-            # Python function/class definitions (require trailing space already)
+            # Python/JS function definitions
             "def ",
             "async def ",
-            # Class keyword followed by a name (not "classify", "classical", etc.)
-            "class ",
             # Code-fence blocks with a language tag  e.g. ```python
             "```python",
             "```javascript",
@@ -115,8 +113,10 @@ class OutputValidator:
                 if indicator in chunk:
                     return True
 
-            # A line-anchored import counts as strong regardless of position.
+            # Anchored syntax patterns: unambiguous declarations at line start.
             if re.search(r"^\s*import ", chunk, re.MULTILINE):
+                return True
+            if re.search(r"^\s*class\s+\w+[\s:(]", chunk, re.MULTILINE):
                 return True
 
             # Weak indicators: need two or more.

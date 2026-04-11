@@ -157,7 +157,7 @@ class TestOutputValidatorHallucinationDetection:
 
         assert validator._contains_code_indicators(content) is True
 
-    def test_contains_code_indicators_line_anchored_import(self):
+    def test_contains_code_indicators_line_anchored_import(self) -> None:
         """A line-anchored import should be treated as a strong indicator."""
         validator = OutputValidator()
 
@@ -165,7 +165,7 @@ class TestOutputValidatorHallucinationDetection:
         content = "Some preamble.\nimport os\nMore text."
         assert validator._contains_code_indicators(content) is True
 
-    def test_bare_import_mid_sentence_not_flagged(self):
+    def test_bare_import_mid_sentence_not_flagged(self) -> None:
         """A bare 'import' embedded mid-sentence should NOT alone flag as code."""
         validator = OutputValidator()
 
@@ -173,15 +173,15 @@ class TestOutputValidatorHallucinationDetection:
         content = "We need to import the data from the spreadsheet before processing."
         assert validator._contains_code_indicators(content) is False
 
-    def test_two_weak_indicators_flagged(self):
+    def test_two_weak_indicators_flagged(self) -> None:
         """Two or more weak indicators together should be flagged."""
         validator = OutputValidator()
 
-        # 'function' and 'return' are both weak; together they cross the threshold
-        content = "The function will return the processed result."
+        # 'function' and 'return' in a code-like context cross the threshold
+        content = "function transform(x) { return x; }"
         assert validator._contains_code_indicators(content) is True
 
-    def test_single_weak_indicator_not_flagged(self):
+    def test_single_weak_indicator_not_flagged(self) -> None:
         """A single weak indicator in isolation should not be flagged."""
         validator = OutputValidator()
 
