@@ -116,7 +116,7 @@ If scripts fail with `^M` errors or unexpected token errors, Windows line ending
 
 ```bash
 git config core.autocrlf false
-# Re-checkout files to apply the setting to already-cloned files
+# ⚠️ The next two commands discard all uncommitted changes. Commit or stash first.
 git rm --cached -r .
 git reset --hard
 ```
@@ -150,7 +150,7 @@ node --version   # should print v18.x.x
 Then install frontend dependencies:
 
 ```bash
-cd <frontend-directory>
+cd core/frontend
 npm install
 npm run dev
 ```
