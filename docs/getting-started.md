@@ -5,9 +5,11 @@ This guide will help you set up the Aden Agent Framework and build your first ag
 ## Prerequisites
 
 - **Python 3.11+** ([Download](https://www.python.org/downloads/)) - Python 3.12 or 3.13 recommended
-- **pip** - Package installer for Python (comes with Python)
+- **uv** - Fast Python package manager used by this project ([Install](https://docs.astral.sh/uv/getting-started/installation/))
 - **git** - Version control
 - **Claude Code** ([Install](https://docs.anthropic.com/claude/docs/claude-code)) - Optional, for using building skills
+
+> **Package manager note:** This project uses `uv` for all package management and script execution. `uv` manages its own isolated virtual environment — do **not** use bare `pip` commands, as they will install packages outside the project's environment and lead to import errors.
 
 ## Quick Start
 
@@ -42,6 +44,16 @@ uv run python -c "import framework; import aden_tools; print('Setup complete')"
 ```
 
 > **Note:** On Windows, running `.\quickstart.ps1` requires PowerShell 5.1+. If you see a "running scripts is disabled" error, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first. Alternatively, use WSL — see [environment-setup.md](./environment-setup.md) for details.
+
+## Verify Your Setup
+
+After running `quickstart.sh` (or `quickstart.ps1` on Windows), confirm the core framework is importable:
+
+```bash
+uv run python -c "from framework.agents.queen import QueenAgent; print('Setup OK')"
+```
+
+You should see `Setup OK` printed. If you see an import error instead, re-run `./quickstart.sh` or check the [Troubleshooting](#troubleshooting) section below.
 
 ## Building Your First Agent
 
@@ -227,7 +239,7 @@ echo $HIVE_API_KEY
 
 ```bash
 # Remove and reinstall
-pip uninstall -y framework tools
+uv pip uninstall -y framework tools
 ./quickstart.sh
 ```
 
