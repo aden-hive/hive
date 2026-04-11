@@ -50,10 +50,10 @@ uv run python -c "import framework; import aden_tools; print('Setup complete')"
 After running `quickstart.sh` (or `quickstart.ps1` on Windows), confirm the core framework is importable:
 
 ```bash
-uv run python -c "from framework.agents.queen import QueenAgent; print('Setup OK')"
+uv run python -c "from framework.agents.queen import queen_goal; print('Setup OK')"
 ```
 
-You should see `Setup OK` printed. If you see an import error instead, re-run `./quickstart.sh` or check the [Troubleshooting](#troubleshooting) section below.
+You should see `Setup OK` printed. If you see an import error instead, re-run `./quickstart.sh` (macOS/Linux) or `.\quickstart.ps1` (Windows) or check the [Troubleshooting](#troubleshooting) section below.
 
 ## Building Your First Agent
 
