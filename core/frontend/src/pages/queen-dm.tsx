@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useParams, useSearchParams, useLocation } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { Loader2, Users } from "lucide-react";
 import ChatPanel, {
   type ChatMessage,
@@ -21,21 +21,7 @@ const makeId = () => Math.random().toString(36).slice(2, 9);
 export default function QueenDM() {
   const { queenId } = useParams<{ queenId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const location = useLocation();
   const { queens, queenProfiles, refresh } = useColony();
-
-  // Get initial prompt from route state (from Prompt Library)
-  const initialPromptRef = useRef(
-    (location.state as { prompt?: string } | null)?.prompt,
-  );
-  const promptSentRef = useRef(false);
-
-  // Clear location state immediately after reading to prevent re-sends on refresh
-  useEffect(() => {
-    if (location.state?.prompt) {
-      window.history.replaceState({}, document.title);
-    }
-  }, [location.state]);
   const { setActions } = useHeaderActions();
   const profileQueen = queenProfiles.find((q) => q.id === queenId);
   const colonyQueen = queens.find((q) => q.id === queenId);
@@ -66,6 +52,7 @@ export default function QueenDM() {
   );
   const [creatingNewSession, setCreatingNewSession] = useState(false);
   const [spawning, setSpawning] = useState(false);
+  const [initialDraft, setInitialDraft] = useState<string | null>(null);
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [cloneColonyName, setCloneColonyName] = useState("");
   const [cloneTask, setCloneTask] = useState("");
@@ -88,6 +75,7 @@ export default function QueenDM() {
     setAwaitingInput(false);
     setActiveToolCalls({});
     setQueenPhase("independent");
+    setInitialDraft(null);
     turnCounterRef.current = 0;
     queenIterTextRef.current = {};
   }, []);
@@ -125,25 +113,22 @@ export default function QueenDM() {
     let cancelled = false;
     const isBootstrap = newSessionFlag === "1";
     // Consume the pending first message up-front so this bootstrap is one-shot:
-    // a re-run after URL rewrite or a browser refresh won't re-send it.
+    // a re-run after URL rewrite or a browser refresh won't re-fill the composer.
     const pendingFirstMessage = isBootstrap
       ? sessionStorage.getItem(`queenFirstMessage:${queenId}`)
       : null;
     if (isBootstrap && pendingFirstMessage !== null) {
       sessionStorage.removeItem(`queenFirstMessage:${queenId}`);
+      setInitialDraft(pendingFirstMessage);
     }
 
     (async () => {
       try {
         if (isBootstrap) {
-          // Pass the home-screen prompt as initial_prompt so the server
-          // seeds the first turn with the real user message — not a phantom
-          // "Hello" fallback. One atomic call, no separate chat() race.
-          await queensApi.createNewSession(
-            queenId,
-            pendingFirstMessage ?? undefined,
-            "independent",
-          );
+          // Fresh session with no initial_prompt — the queen waits idle
+          // for the first /chat. The pending message is loaded into the
+          // composer (via initialDraft) so the user can edit before sending.
+          await queensApi.createNewSession(queenId, undefined, "independent");
         } else if (selectedSessionParam) {
           await queensApi.selectSession(queenId, selectedSessionParam);
         } else {
@@ -195,32 +180,17 @@ export default function QueenDM() {
           sid = result.session_id;
           setSessionId(sid);
           setQueenReady(true);
-          setIsTyping(true);
+          // Bootstrap sessions start idle (queen waits for the first chat),
+          // so don't show the typing indicator until the user actually sends.
+          if (!isBootstrap) setIsTyping(true);
 
-        if (isBootstrap) {
-          // Optimistic render — the server already has the prompt as
-          // initial_prompt, so the queen is processing it. We just paint
-          // the user's bubble immediately instead of waiting for the
-          // event stream echo.
-          if (pendingFirstMessage && pendingFirstMessage.trim()) {
-            const optimisticUserMsg: ChatMessage = {
-              id: makeId(),
-              agent: "You",
-              agentColor: "",
-              content: pendingFirstMessage,
-              timestamp: "",
-              type: "user",
-              thread: "queen-dm",
-              createdAt: Date.now(),
-            };
-            setMessages((prev) => [...prev, optimisticUserMsg]);
+          if (isBootstrap) {
+            // Swap ?new=1 for ?session={sid} so a browser refresh rehydrates
+            // this session instead of creating another new one.
+            setSearchParams({ session: sid }, { replace: true });
+          } else if (selectedSessionParam && selectedSessionParam !== sid) {
+            setSearchParams({ session: sid }, { replace: true });
           }
-          // Swap ?new=1 for ?session={sid} so a browser refresh rehydrates
-          // this session instead of creating another new one.
-          setSearchParams({ session: sid }, { replace: true });
-        } else if (selectedSessionParam && selectedSessionParam !== sid) {
-          setSearchParams({ session: sid }, { replace: true });
-        }
         }
 
         await restoreMessages(sid, () => cancelled);
@@ -706,25 +676,6 @@ export default function QueenDM() {
     }
   }, [sessionId]);
 
-  // Auto-send initial prompt from Prompt Library when session is ready
-  useEffect(() => {
-    const prompt = initialPromptRef.current;
-    if (
-      prompt &&
-      sessionId &&
-      queenReady &&
-      !promptSentRef.current &&
-      !loading
-    ) {
-      promptSentRef.current = true;
-      initialPromptRef.current = undefined; // Clear so refresh doesn't re-send
-      // Small delay to ensure SSE is connected
-      setTimeout(() => {
-        handleSend(prompt, "queen-dm");
-      }, 100);
-    }
-  }, [sessionId, queenReady, loading, handleSend]);
-
   return (
     <div className="flex flex-col h-full">
       {/* Chat */}
@@ -763,6 +714,7 @@ export default function QueenDM() {
             setPendingOptions(null);
           }}
           supportsImages={true}
+          initialDraft={initialDraft}
         />
       </div>
 

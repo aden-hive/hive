@@ -72,7 +72,8 @@ export default function PromptLibrary() {
 
   const handleUsePrompt = (content: string, category: string) => {
     const queenId = categoryToQueen[category];
-    navigate(`/queen/${queenId}`, { state: { prompt: content } });
+    sessionStorage.setItem(`queenFirstMessage:${queenId}`, content);
+    navigate(`/queen/${queenId}?new=1`);
   };
 
   return (

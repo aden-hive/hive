@@ -93,6 +93,8 @@ interface ChatPanelProps {
   showQueenPhaseBadge?: boolean;
   /** Context window usage for queen and workers */
   contextUsage?: Record<string, ContextUsageEntry>;
+  /** One-shot composer prefill. Applied to the textarea whenever the value changes. */
+  initialDraft?: string | null;
 }
 
 const queenColor = "hsl(45,95%,58%)";
@@ -394,6 +396,7 @@ export default function ChatPanel({
   showQueenPhaseBadge = true,
   contextUsage,
   supportsImages = true,
+  initialDraft,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<ImageContent[]>([]);
@@ -403,6 +406,21 @@ export default function ChatPanel({
   const stickToBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastAppliedDraftRef = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (!initialDraft || initialDraft === lastAppliedDraftRef.current) return;
+    lastAppliedDraftRef.current = initialDraft;
+    setInput(initialDraft);
+    setTimeout(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.style.height = "auto";
+      ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+      ta.selectionStart = ta.selectionEnd = ta.value.length;
+    }, 0);
+  }, [initialDraft]);
 
   const threadMessages = messages.filter((m) => {
     if (m.type === "system" && !m.thread) return false;
