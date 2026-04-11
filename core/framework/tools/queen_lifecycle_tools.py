@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING, Any
 
 from framework.credentials.models import CredentialError
 from framework.host.event_bus import AgentEvent, EventType
-from framework.loader.preload_validation import credential_errors_to_json, validate_credentials
+from framework.loader.preload_validation import credential_errors_to_json
 from framework.server.app import validate_agent_path
 from framework.tools.flowchart_utils import (
     FLOWCHART_TYPES,
@@ -3875,24 +3875,50 @@ def register_queen_lifecycle_tools(
             )
 
         try:
-            # Pre-flight: validate credentials and resync MCP servers.
-            # Still uses the legacy AgentHost handles because that's
-            # where credentials live; the actual run is via colony.
+            # Pre-flight: compute the set of tools whose credentials are
+            # NOT currently available, and resync MCP servers. We do NOT
+            # hard-fail on missing credentials anymore — instead we drop
+            # the affected tools from the worker's spawn_tools list a
+            # few lines below. Hard-failing here caused unrelated tools
+            # (e.g. GitHub tools leaking into a LinkedIn worker config)
+            # to block the whole spawn with a CredentialError; the fix
+            # is to treat unset credentials as "drop these tools" rather
+            # than "abort the worker".
+            #
+            # Note: the MCP admission gate (_build_mcp_admission_gate in
+            # tool_registry.py) already filters MCP tools at registration
+            # time. This preflight covers the non-MCP path — tools.py
+            # discoveries via discover_from_module — which has no
+            # credential gate of its own.
             loop = asyncio.get_running_loop()
+            unavailable_tools: set[str] = set()
 
             async def _preflight():
-                cred_error: CredentialError | None = None
+                nonlocal unavailable_tools
                 try:
-                    await loop.run_in_executor(
+                    from framework.credentials.validation import compute_unavailable_tools
+
+                    drop, messages = await loop.run_in_executor(
                         None,
-                        lambda: validate_credentials(
-                            legacy.graph.nodes,
-                            interactive=False,
-                            skip=False,
-                        ),
+                        lambda: compute_unavailable_tools(legacy.graph.nodes),
                     )
-                except CredentialError as e:
-                    cred_error = e
+                    unavailable_tools = drop
+                    if drop:
+                        logger.warning(
+                            "run_agent_with_input: dropping %d tool(s) with "
+                            "unavailable credentials from worker spawn: %s",
+                            len(drop),
+                            "; ".join(messages),
+                        )
+                except Exception as exc:
+                    # Validation itself failing (not a credential failure —
+                    # a code error in the validator) should not block the
+                    # spawn. Log and proceed as if nothing was dropped.
+                    logger.warning(
+                        "compute_unavailable_tools raised, proceeding without "
+                        "credential-based tool filtering: %s",
+                        exc,
+                    )
 
                 runner = getattr(session, "runner", None)
                 if runner:
@@ -3904,9 +3930,6 @@ def register_queen_lifecycle_tools(
                     except Exception as e:
                         logger.warning("MCP resync failed: %s", e)
 
-                if cred_error is not None:
-                    raise cred_error
-
             try:
                 await asyncio.wait_for(_preflight(), timeout=_START_PREFLIGHT_TIMEOUT)
             except TimeoutError:
@@ -3914,8 +3937,6 @@ def register_queen_lifecycle_tools(
                     "run_agent_with_input preflight timed out after %ds — proceeding",
                     _START_PREFLIGHT_TIMEOUT,
                 )
-            except CredentialError:
-                raise  # handled below
 
             # Build a per-spawn AgentSpec that mirrors the loaded
             # worker's entry-node identity. This is what makes the
@@ -3944,6 +3965,24 @@ def register_queen_lifecycle_tools(
                 else []
             )
 
+            # Drop any tool whose credential isn't available (GitHub
+            # tools when GITHUB_TOKEN is unset, etc). The preflight
+            # above populated ``unavailable_tools``; apply the filter
+            # HERE — before the AgentSpec is built — so the worker
+            # only sees tools it can actually run.
+            dropped_from_names: list[str] = []
+            if unavailable_tools:
+                original = worker_tool_names
+                worker_tool_names = [t for t in original if t not in unavailable_tools]
+                dropped_from_names = [t for t in original if t in unavailable_tools]
+                if dropped_from_names:
+                    logger.warning(
+                        "run_agent_with_input: dropped %d tool(s) from worker "
+                        "AgentSpec due to unavailable credentials: %s",
+                        len(dropped_from_names),
+                        ", ".join(dropped_from_names),
+                    )
+
             spawn_spec = AgentSpec(
                 id=f"loaded_worker:{getattr(graph, 'id', 'unknown')}",
                 name=getattr(graph, "id", "loaded_worker"),
@@ -3961,6 +4000,26 @@ def register_queen_lifecycle_tools(
             # MCP-loaded tools (browser, hubspot, honeycomb, etc.).
             spawn_tools = list(getattr(legacy, "_tools", []) or [])
             spawn_tool_executor = getattr(legacy, "_tool_executor", None)
+
+            # Same credential-based filter on the live Tool objects
+            # passed to the worker. Without this the worker would still
+            # receive the GitHub tool definitions in its registry —
+            # it just wouldn't see them in its AgentSpec, so the LLM
+            # wouldn't know to use them. Dropping from both lists
+            # makes the filter complete.
+            if unavailable_tools:
+                before = len(spawn_tools)
+                spawn_tools = [
+                    t for t in spawn_tools
+                    if getattr(t, "name", None) not in unavailable_tools
+                ]
+                dropped_count = before - len(spawn_tools)
+                if dropped_count:
+                    logger.info(
+                        "run_agent_with_input: dropped %d tool object(s) from "
+                        "spawn_tools (unavailable credentials)",
+                        dropped_count,
+                    )
 
             worker_ids = await colony.spawn(
                 task=task,

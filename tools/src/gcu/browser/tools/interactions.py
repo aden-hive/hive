@@ -178,18 +178,37 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         delay_ms: int = 0,
         clear_first: bool = True,
         timeout_ms: int = 30000,
+        use_insert_text: bool = True,
     ) -> dict:
         """
         Type text into an input element.
+
+        Automatically routes through a real CDP pointer click on the
+        element before inserting text — so that rich-text editors like
+        Lexical (Gmail, LinkedIn DMs), Draft.js (X compose), and
+        ProseMirror (Reddit) see a native focus event and enable their
+        submit buttons. See the gcu-browser skill for the full "click-
+        then-type" pattern.
+
+        By default uses CDP Input.insertText which is the most reliable
+        way to insert text into rich editors. Set
+        ``use_insert_text=False`` to fall back to per-character
+        keyDown/keyUp events (needed only for code editors that fire
+        on specific keystrokes, or when ``delay_ms`` typing animation
+        is required).
 
         Args:
             selector: CSS selector for the input element
             text: Text to type
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
-            delay_ms: Delay between keystrokes in ms (default: 0)
+            delay_ms: Delay between keystrokes in ms (default: 0).
+                      Forces the per-keystroke fallback when > 0.
             clear_first: Clear existing text before typing (default: True)
             timeout_ms: Timeout waiting for element (default: 30000)
+            use_insert_text: Use CDP Input.insertText (default: True) for
+                             reliable insertion into rich-text editors.
+                             Set False for per-keystroke dispatch.
 
         Returns:
             Dict with type result
@@ -223,6 +242,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
                 clear_first=clear_first,
                 delay_ms=delay_ms,
                 timeout_ms=timeout_ms,
+                use_insert_text=use_insert_text,
             )
             log_tool_call(
                 "browser_type",
@@ -277,21 +297,34 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         selector: str | None = None,
         tab_id: int | None = None,
         profile: str | None = None,
+        modifiers: list[str] | None = None,
     ) -> dict:
         """
-        Press a keyboard key.
+        Press a keyboard key, optionally with modifier keys held.
 
         Args:
-            key: Key to press (e.g., 'Enter', 'Tab', 'Escape', 'ArrowDown')
+            key: Key to press (e.g., 'Enter', 'Tab', 'Escape', 'ArrowDown',
+                 or a character like 'a')
             selector: Focus element first (optional)
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
+            modifiers: Hold these modifier keys while pressing ``key``. Accepted
+                values (case-insensitive): "alt", "ctrl"/"control", "meta"/"cmd",
+                "shift". Examples: ``modifiers=["ctrl"], key="a"`` = Ctrl+A
+                (select all); ``modifiers=["shift"], key="Tab"`` = Shift+Tab;
+                ``modifiers=["meta"], key="Enter"`` = Cmd+Enter.
 
         Returns:
             Dict with press result
         """
         start = time.perf_counter()
-        params = {"key": key, "selector": selector, "tab_id": tab_id, "profile": profile}
+        params = {
+            "key": key,
+            "selector": selector,
+            "tab_id": tab_id,
+            "profile": profile,
+            "modifiers": modifiers,
+        }
 
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
@@ -312,7 +345,9 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             return result
 
         try:
-            press_result = await bridge.press_key(target_tab, key, selector=selector)
+            press_result = await bridge.press_key(
+                target_tab, key, selector=selector, modifiers=modifiers
+            )
             log_tool_call(
                 "browser_press",
                 params,

@@ -19,11 +19,18 @@
       "Bash(find /home/timothy/aden/hive/core/framework -name \"*.py\" -type f -exec grep -l \"FileConversationStore\\\\|class.*ConversationStore\" {} \\\\;)",
       "Bash(find /home/timothy/aden/hive/core/framework -name \"*.py\" -exec grep -l \"run_parallel_workers\\\\|create_colony\" {} \\\\;)",
       "Bash(awk '/^    async def execute\\\\\\(self, ctx: AgentContext\\\\\\)/,/^    async def [a-z_]+/ {print NR\": \"$0}' /home/timothy/aden/hive/core/framework/agent_loop/agent_loop.py)",
-      "Bash(grep -r \"max_concurrent_workers\\\\|max_depth\\\\|recursion\\\\|spawn.*bomb\" /home/timothy/aden/hive/core/framework/host/*.py)"
+      "Bash(grep -r \"max_concurrent_workers\\\\|max_depth\\\\|recursion\\\\|spawn.*bomb\" /home/timothy/aden/hive/core/framework/host/*.py)",
+      "Bash(wc -l /home/timothy/aden/hive/tools/src/gcu/browser/*.py /home/timothy/aden/hive/tools/src/gcu/browser/tools/*.py)",
+      "Bash(file /tmp/gcu_verify/*.png)",
+      "Bash(ps -eo pid,cmd)",
+      "Bash(ps -o pid,lstart,cmd -p 746640)",
+      "Bash(kill 746636)",
+      "Bash(ps -eo pid,lstart,cmd)"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",
-      "/tmp"
+      "/tmp",
+      "/home/timothy/.hive/skills"
     ]
   },
   "hooks": {

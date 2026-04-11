@@ -123,6 +123,21 @@ class BeelineBridge:
             logger.warning("Bridge status server could not start on port %d: %s", status_port, e)
 
     async def stop(self) -> None:
+        # Cancel in-flight bridge requests so any caller stuck in _send
+        # sees CancelledError immediately instead of waiting the full
+        # 30s timeout. Mirrors the cleanup in _handle_connection's
+        # disconnect branch so both exit paths behave the same.
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.cancel()
+        self._pending.clear()
+        # Drop CDP attach cache — next run must re-attach fresh.
+        self._cdp_attached.clear()
+        # Drop highlight state — stale entries would otherwise carry
+        # over into a subsequent run and confuse screenshot annotation.
+        _interaction_highlights.clear()
+        self._ws = None
+
         if self._server:
             self._server.close()
             try:
@@ -222,7 +237,14 @@ class BeelineBridge:
                         fut.cancel()
                 self._pending.clear()
 
-    async def _send(self, type_: str, **params) -> dict:
+    # Default wait on a bridge command. Callers with known-slow ops
+    # (full-page screenshots on slow networks, AX tree on huge pages)
+    # can pass a longer value via _send(..., timeout=...). Using the
+    # same default as the old hard-coded value so existing call sites
+    # don't regress.
+    _DEFAULT_SEND_TIMEOUT_S: float = 30.0
+
+    async def _send(self, type_: str, *, timeout: float | None = None, **params) -> dict:
         """Send a command to the extension and wait for the result."""
         if not self._ws:
             raise RuntimeError("Extension not connected")
@@ -231,27 +253,58 @@ class BeelineBridge:
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
         self._pending[msg_id] = fut
         start = time.perf_counter()
+        effective_timeout = timeout if timeout is not None else self._DEFAULT_SEND_TIMEOUT_S
 
         log_bridge_message("send", type_, msg_id=msg_id, params=params)
 
         try:
             await self._ws.send(json.dumps({"id": msg_id, "type": type_, **params}))
-            result = await asyncio.wait_for(fut, timeout=30.0)
+            result = await asyncio.wait_for(fut, timeout=effective_timeout)
             duration_ms = (time.perf_counter() - start) * 1000
             log_bridge_message("send", type_, msg_id=msg_id, result=result, duration_ms=duration_ms)
             return result
         except TimeoutError:
             self._pending.pop(msg_id, None)
             log_bridge_message("send", type_, msg_id=msg_id, error="timeout")
-            raise RuntimeError(f"Bridge command '{type_}' timed out") from None
+            # Include which CDP method (if any) so the caller can see
+            # what actually hung — the generic 'cdp' type is useless
+            # when ten different CDP calls use the same type.
+            detail = f" method={params.get('method')}" if params.get("method") else ""
+            raise RuntimeError(
+                f"Bridge command '{type_}'{detail} timed out after {effective_timeout:.0f}s"
+            ) from None
         except BaseException:
             # CancelledError or any other exception — remove stale future so a late
             # response from the extension doesn't try to resolve a cancelled future.
             self._pending.pop(msg_id, None)
             raise
 
+    # Substrings that indicate Chrome detached the debugger out from
+    # under us (tab closed, user opened DevTools, cross-origin nav).
+    # Our in-memory _cdp_attached set is now stale; next call should
+    # re-attach rather than reporting a cryptic "Target not found".
+    _CDP_DEAD_SESSION_MARKERS = (
+        "target closed",
+        "target not found",
+        "not attached",
+        "session closed",
+        "inspector already attached",
+        "no target with given id",
+    )
+
+    def _is_cdp_dead_session(self, exc: BaseException) -> bool:
+        msg = str(exc).lower()
+        return any(m in msg for m in self._CDP_DEAD_SESSION_MARKERS)
+
     async def _cdp(self, tab_id: int, method: str, params: dict | None = None) -> dict:
-        """Send a CDP command to a tab."""
+        """Send a CDP command to a tab.
+
+        On a dead-session error (Chrome detached externally — tab closed,
+        DevTools opened, cross-origin nav), evict the stale attach
+        cache entry, reattach, and retry once. Without this the Python
+        side would keep assuming it's attached and every subsequent call
+        would hit the same error until someone restarted the bridge.
+        """
         start = time.perf_counter()
         try:
             result = await self._send("cdp", tabId=tab_id, method=method, params=params or {})
@@ -261,6 +314,33 @@ class BeelineBridge:
         except Exception as e:
             duration_ms = (time.perf_counter() - start) * 1000
             log_cdp_command(tab_id, method, params, error=str(e), duration_ms=duration_ms)
+            if self._is_cdp_dead_session(e):
+                logger.info(
+                    "CDP session for tab %d looks dead (%s) — re-attaching and retrying",
+                    tab_id,
+                    str(e)[:120],
+                )
+                self._cdp_attached.discard(tab_id)
+                try:
+                    reattach = await self._send("cdp.attach", tabId=tab_id)
+                    if reattach.get("ok"):
+                        self._cdp_attached.add(tab_id)
+                        retry_start = time.perf_counter()
+                        result = await self._send(
+                            "cdp", tabId=tab_id, method=method, params=params or {}
+                        )
+                        log_cdp_command(
+                            tab_id,
+                            method,
+                            params,
+                            result,
+                            duration_ms=(time.perf_counter() - retry_start) * 1000,
+                        )
+                        return result
+                except Exception as retry_exc:
+                    logger.debug(
+                        "CDP reattach+retry for tab %d failed: %s", tab_id, retry_exc
+                    )
             raise
 
     async def _try_enable_domain(self, tab_id: int, domain: str) -> None:
@@ -311,7 +391,14 @@ class BeelineBridge:
 
     async def close_tab(self, tab_id: int) -> dict:
         """Close a tab by ID."""
-        return await self._send("tab.close", tabId=tab_id)
+        result = await self._send("tab.close", tabId=tab_id)
+        # Drop per-tab state — the id may be reused by Chrome much
+        # later, and carrying a stale highlight or "attached" flag
+        # forward would misannotate screenshots or skip a needed
+        # reattach on the reused id.
+        self._cdp_attached.discard(tab_id)
+        _interaction_highlights.pop(tab_id, None)
+        return result
 
     async def list_tabs(self, group_id: int | None = None) -> dict:
         """List tabs, optionally filtered by group.
@@ -361,6 +448,11 @@ class BeelineBridge:
         if wait_until not in VALID_WAIT_UNTIL:
             wait_until = "load"
 
+        # Drop the stale interaction highlight before loading a new
+        # page — otherwise the next screenshot will annotate the new
+        # page with a rect from the previous page's coordinate system.
+        _interaction_highlights.pop(tab_id, None)
+
         # Attach debugger if needed
         await self.cdp_attach(tab_id)
 
@@ -382,9 +474,11 @@ class BeelineBridge:
                     "Runtime.evaluate",
                     {"expression": "document.readyState", "returnByValue": True},
                 )
-                ready_state = (
-                    (eval_result or {}).get("result", {}).get("result", {}).get("value", "")
-                )
+                # _cdp returns the CDP response body; Runtime.evaluate shape
+                # is {"result": {"type": ..., "value": ...}} — one "result"
+                # hop, not two. The extra hop was always returning "" and
+                # this entire lifecycle loop was running until the deadline.
+                ready_state = (eval_result or {}).get("result", {}).get("value", "")
 
                 if wait_until == "domcontentloaded" and ready_state in ("interactive", "complete"):
                     break
@@ -416,17 +510,31 @@ class BeelineBridge:
         return {
             "ok": True,
             "tabId": tab_id,
-            "url": (url_result or {}).get("result", {}).get("result", {}).get("value", ""),
-            "title": (title_result or {}).get("result", {}).get("result", {}).get("value", ""),
+            "url": (url_result or {}).get("result", {}).get("value", ""),
+            "title": (title_result or {}).get("result", {}).get("value", ""),
         }
 
     async def go_back(self, tab_id: int) -> dict:
-        """Navigate back in history."""
+        """Navigate back in history.
+
+        Uses ``history.back()`` via Runtime.evaluate — modern Chrome CDP
+        no longer exposes ``Page.goBack`` / ``Page.goForward`` (removed
+        in favour of ``Page.navigateToHistoryEntry``, which requires
+        first fetching the history list). ``history.back()`` is simpler,
+        works across every Chrome version, and matches what the user
+        expects when they call ``browser_go_back``.
+        """
+        _interaction_highlights.pop(tab_id, None)
         await self.cdp_attach(tab_id)
         await self._cdp(tab_id, "Page.enable")
-        await self._cdp(tab_id, "Page.goBack")
-
-        # Get current URL
+        await self._cdp(
+            tab_id,
+            "Runtime.evaluate",
+            {"expression": "history.back()", "returnByValue": True},
+        )
+        # Give the browser a beat to commit the navigation before we
+        # read the new URL.
+        await asyncio.sleep(0.3)
         result = await self._cdp(
             tab_id,
             "Runtime.evaluate",
@@ -435,15 +543,20 @@ class BeelineBridge:
         return {
             "ok": True,
             "action": "back",
-            "url": (result or {}).get("result", {}).get("result", {}).get("value", ""),
+            "url": (result or {}).get("result", {}).get("value", ""),
         }
 
     async def go_forward(self, tab_id: int) -> dict:
-        """Navigate forward in history."""
+        """Navigate forward in history. See go_back() for why we use JS."""
+        _interaction_highlights.pop(tab_id, None)
         await self.cdp_attach(tab_id)
         await self._cdp(tab_id, "Page.enable")
-        await self._cdp(tab_id, "Page.goForward")
-
+        await self._cdp(
+            tab_id,
+            "Runtime.evaluate",
+            {"expression": "history.forward()", "returnByValue": True},
+        )
+        await asyncio.sleep(0.3)
         result = await self._cdp(
             tab_id,
             "Runtime.evaluate",
@@ -452,11 +565,12 @@ class BeelineBridge:
         return {
             "ok": True,
             "action": "forward",
-            "url": (result or {}).get("result", {}).get("result", {}).get("value", ""),
+            "url": (result or {}).get("result", {}).get("value", ""),
         }
 
     async def reload(self, tab_id: int) -> dict:
         """Reload the page."""
+        _interaction_highlights.pop(tab_id, None)
         await self.cdp_attach(tab_id)
         await self._cdp(tab_id, "Page.enable")
         await self._cdp(tab_id, "Page.reload")
@@ -469,7 +583,7 @@ class BeelineBridge:
         return {
             "ok": True,
             "action": "reload",
-            "url": (result or {}).get("result", {}).get("result", {}).get("value", ""),
+            "url": (result or {}).get("result", {}).get("value", ""),
         }
 
     # ── Interaction ────────────────────────────────────────────────────────────
@@ -759,75 +873,150 @@ class BeelineBridge:
         clear_first: bool = True,
         delay_ms: int = 0,
         timeout_ms: int = 30000,
+        use_insert_text: bool = True,
     ) -> dict:
         """Type text into an element.
 
-        Uses JavaScript focus for reliability, then CDP key events.
+        Routes through a real CDP pointer click on the target rect BEFORE
+        inserting text. This is critical for rich-text editors (Draft.js,
+        Lexical, ProseMirror, React-controlled contenteditable): those
+        frameworks only register input as "real" after seeing a native
+        focus event sourced from a real pointer interaction — a
+        JS-sourced ``el.focus()`` is ignored, and the submit button
+        stays disabled because the framework's internal state never
+        updates. Sending a CDP click first fires the real
+        pointerdown/pointerup/click/focus sequence that every modern
+        framework listens to.
+
+        After clicking, we insert text via ``Input.insertText`` by
+        default (``use_insert_text=True``). insertText is a dedicated
+        CDP method that asks the browser to commit text into the
+        focused element as if IME just committed it — it works
+        cleanly on rich editors where per-character keyDown events
+        would otherwise be eaten or mis-timed (empirically verified
+        against LinkedIn's Lexical message composer 2026-04-11).
+        Playwright uses the same approach under the hood.
+
+        Set ``use_insert_text=False`` to get the old per-character
+        keyDown/keyUp path when an editor needs precise keystroke
+        timing (autocomplete triggers, code editors that fire on
+        specific chars, ``delay_ms`` typing animations).
         """
         await self.cdp_attach(tab_id)
         await self._try_enable_domain(tab_id, "DOM")
         await self._try_enable_domain(tab_id, "Input")
         await self._try_enable_domain(tab_id, "Runtime")
 
-        # First, scroll into view and focus via JavaScript (more reliable than CDP)
+        # Find + scroll + (optionally) clear via JS. We still need the
+        # rect, and clearing via `.value = ''` / `.textContent = ''`
+        # is the most reliable way to reset pre-existing content.
         focus_script = f"""
             (function() {{
                 const el = document.querySelector({json.dumps(selector)});
-                if (!el) return false;
+                if (!el) return null;
 
-                // Scroll into view
+                // Scroll into view so the click lands in-viewport.
                 el.scrollIntoView({{ block: 'center' }});
 
-                // Focus the element
-                el.focus();
-
-                // Clear if requested
+                // Clear if requested.
                 if ({str(clear_first).lower()}) {{
                     if (el.value !== undefined) {{
                         el.value = '';
+                        // Nudge React's onChange — the framework reads
+                        // .value via a setter hook, and without firing
+                        // an input event the component state remains
+                        // stale after our value assignment.
+                        el.dispatchEvent(new Event('input', {{bubbles: true}}));
                     }} else if (el.isContentEditable) {{
                         el.textContent = '';
+                        el.dispatchEvent(new Event('input', {{bubbles: true}}));
                     }}
                 }}
 
-                return true;
+                const r = el.getBoundingClientRect();
+                return {{
+                    x: r.left + r.width / 2,
+                    y: r.top + r.height / 2,
+                    w: r.width,
+                    h: r.height,
+                }};
             }})();
         """
 
         focus_result = await self.evaluate(tab_id, focus_script)
-        success = (focus_result or {}).get("result", False)
+        rect = (focus_result or {}).get("result")
 
-        if not success:
-            # Element not found - wait and retry
+        if not rect:
+            # Element not found — wait + retry until timeout.
             deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
             while asyncio.get_event_loop().time() < deadline:
                 result = await self.evaluate(tab_id, focus_script)
-                if result and (result or {}).get("result", False):
-                    success = True
+                rect = (result or {}).get("result") if result else None
+                if rect:
                     break
                 await asyncio.sleep(0.1)
 
-            if not success:
+            if not rect:
                 return {"ok": False, "error": f"Element not found: {selector}"}
 
-        await asyncio.sleep(0.05)  # Wait for focus to take effect
+        if not rect.get("w") or not rect.get("h"):
+            return {
+                "ok": False,
+                "error": f"Element has zero dimensions, can't click to focus: {selector}",
+            }
 
-        # Type each character using CDP key events
-        for char in text:
-            # Dispatch key down
-            await self._cdp(
-                tab_id,
-                "Input.dispatchKeyEvent",
-                {"type": "keyDown", "text": char},
-            )
-            # Dispatch key up
-            await self._cdp(
-                tab_id,
-                "Input.dispatchKeyEvent",
-                {"type": "keyUp", "text": char},
-            )
-            if delay_ms > 0:
-                await asyncio.sleep(delay_ms / 1000)
+        # Fire a real CDP pointer click at the element's center. This is
+        # what unblocks rich-text editors — JS el.focus() is not enough.
+        click_x = rect["x"]
+        click_y = rect["y"]
+        await self._cdp(
+            tab_id,
+            "Input.dispatchMouseEvent",
+            {"type": "mousePressed", "x": click_x, "y": click_y, "button": "left", "clickCount": 1},
+        )
+        await self._cdp(
+            tab_id,
+            "Input.dispatchMouseEvent",
+            {"type": "mouseReleased", "x": click_x, "y": click_y, "button": "left", "clickCount": 1},
+        )
+        await asyncio.sleep(0.15)  # Let focus / editor-init animations settle.
+
+        if use_insert_text and delay_ms <= 0:
+            # CDP Input.insertText is the most reliable way to insert
+            # text into a rich-text editor. It bypasses the keyboard
+            # event pipeline entirely and commits text into the focused
+            # element as if IME just committed it. Works on plain
+            # <input>/<textarea>, contenteditable, Lexical, Draft.js,
+            # ProseMirror, Monaco textarea buffers — verified empirically
+            # against LinkedIn's message composer (Lexical) on 2026-04-11
+            # where the per-char keyDown path left the editor empty.
+            await self._cdp(tab_id, "Input.insertText", {"text": text})
+        else:
+            # Fallback path: per-character keyDown/keyUp with full key,
+            # code, and text fields. Used when the caller explicitly
+            # wants per-keystroke dispatch (autocomplete testing, code
+            # editors that fire on specific chars, animated typing
+            # with ``delay_ms``). Populating ``code`` for ASCII is
+            # needed so frameworks that branch on ``event.code`` see
+            # the right values.
+            for char in text:
+                key_params: dict[str, Any] = {
+                    "type": "keyDown",
+                    "text": char,
+                    "key": char,
+                }
+                if len(char) == 1 and char.isalpha():
+                    key_params["code"] = f"Key{char.upper()}"
+                elif len(char) == 1 and char.isdigit():
+                    key_params["code"] = f"Digit{char}"
+                await self._cdp(tab_id, "Input.dispatchKeyEvent", key_params)
+
+                key_up = {"type": "keyUp", "key": char}
+                if "code" in key_params:
+                    key_up["code"] = key_params["code"]
+                await self._cdp(tab_id, "Input.dispatchKeyEvent", key_up)
+                if delay_ms > 0:
+                    await asyncio.sleep(delay_ms / 1000)
 
         # Highlight the element that was typed into
         rect_result = await self.evaluate(
@@ -844,12 +1033,47 @@ class BeelineBridge:
             )
         return {"ok": True, "action": "type", "selector": selector, "length": len(text)}
 
-    async def press_key(self, tab_id: int, key: str, selector: str | None = None) -> dict:
-        """Press a keyboard key.
+    # CDP Input.dispatchKeyEvent modifiers bitmask.
+    _CDP_MODIFIERS = {"alt": 1, "ctrl": 2, "control": 2, "meta": 4, "cmd": 4, "shift": 8}
+
+    # How Chrome expects each modifier key as its OWN keyDown event —
+    # name, code, and Windows virtual key code. Dispatched before the
+    # main key so Chrome sees the modifier as "held" during the main
+    # event, which is what actually triggers browser shortcuts like
+    # Ctrl+A, Cmd+L, Shift+Tab.
+    _MODIFIER_KEYS = {
+        "alt":     {"key": "Alt",     "code": "AltLeft",     "windowsVirtualKeyCode": 18},
+        "ctrl":    {"key": "Control", "code": "ControlLeft", "windowsVirtualKeyCode": 17},
+        "control": {"key": "Control", "code": "ControlLeft", "windowsVirtualKeyCode": 17},
+        "meta":    {"key": "Meta",    "code": "MetaLeft",    "windowsVirtualKeyCode": 91},
+        "cmd":     {"key": "Meta",    "code": "MetaLeft",    "windowsVirtualKeyCode": 91},
+        "shift":   {"key": "Shift",   "code": "ShiftLeft",   "windowsVirtualKeyCode": 16},
+    }
+
+    def _cdp_modifier_mask(self, modifiers: list[str] | None) -> int:
+        if not modifiers:
+            return 0
+        mask = 0
+        for m in modifiers:
+            mask |= self._CDP_MODIFIERS.get(m.lower(), 0)
+        return mask
+
+    async def press_key(
+        self,
+        tab_id: int,
+        key: str,
+        selector: str | None = None,
+        modifiers: list[str] | None = None,
+    ) -> dict:
+        """Press a keyboard key, optionally with modifier keys held.
 
         Args:
             key: Key name like 'Enter', 'Tab', 'Escape', 'ArrowDown', etc.
             selector: Optional selector to focus first
+            modifiers: Optional list of modifier keys to hold while pressing
+                ``key``. Accepted values: "alt", "ctrl"/"control", "meta"/"cmd",
+                "shift". Example: ``modifiers=["ctrl"]`` → Ctrl+key, which
+                enables shortcuts like Ctrl+A, Ctrl+L, Cmd+Enter, Shift+Tab.
         """
         await self.cdp_attach(tab_id)
         await self._try_enable_domain(tab_id, "Input")
@@ -882,19 +1106,110 @@ class BeelineBridge:
         }
 
         text, key_name = key_map.get(key, (key, key))
+        mod_mask = self._cdp_modifier_mask(modifiers)
 
-        await self._cdp(
-            tab_id,
-            "Input.dispatchKeyEvent",
-            {"type": "keyDown", "key": key_name, "text": text if text else None},
-        )
-        await self._cdp(
-            tab_id,
-            "Input.dispatchKeyEvent",
-            {"type": "keyUp", "key": key_name, "text": text if text else None},
-        )
+        # With modifiers held, suppress the printable text so that
+        # e.g. Ctrl+A doesn't also type the character "a" into the
+        # focused field (CDP will still fire the shortcut).
+        effective_text = text if (text and mod_mask == 0) else None
 
-        return {"ok": True, "action": "press", "key": key}
+        # Compute ``code`` and ``windowsVirtualKeyCode`` for the main
+        # key. These are MANDATORY for Chrome's shortcut dispatcher —
+        # without them, Ctrl+A etc. reach the DOM with ``code=""`` and
+        # ``which=0`` and Chrome doesn't recognise them as shortcuts.
+        # Verified empirically on chrome 131 against a real input.
+        main_code: str | None = None
+        main_vk: int | None = None
+        special_vk = {
+            "Enter": (13, "Enter"),
+            "Tab": (9, "Tab"),
+            "Escape": (27, "Escape"),
+            "Backspace": (8, "Backspace"),
+            "Delete": (46, "Delete"),
+            "ArrowUp": (38, "ArrowUp"),
+            "ArrowDown": (40, "ArrowDown"),
+            "ArrowLeft": (37, "ArrowLeft"),
+            "ArrowRight": (39, "ArrowRight"),
+            "Home": (36, "Home"),
+            "End": (35, "End"),
+            "PageUp": (33, "PageUp"),
+            "PageDown": (34, "PageDown"),
+        }
+        if key_name in special_vk:
+            main_vk, main_code = special_vk[key_name]
+        elif len(key_name) == 1 and key_name.isalpha():
+            main_code = f"Key{key_name.upper()}"
+            main_vk = ord(key_name.upper())  # 'A' = 65 ... 'Z' = 90
+        elif len(key_name) == 1 and key_name.isdigit():
+            main_code = f"Digit{key_name}"
+            main_vk = ord(key_name)  # '0' = 48 ... '9' = 57
+
+        # Press each modifier as a separate keyDown BEFORE the main
+        # key. Sending ``modifiers: mask`` on the main key alone isn't
+        # enough — Chrome's shortcut dispatcher looks for a held
+        # modifier event, not just a flag. Matches the Playwright /
+        # Puppeteer sequence. Release modifiers in reverse order after
+        # the main key so the "held" state is correct throughout.
+        pressed_mods: list[dict] = []
+        if modifiers:
+            for m in modifiers:
+                spec = self._MODIFIER_KEYS.get(m.lower())
+                if spec is None:
+                    continue
+                await self._cdp(
+                    tab_id,
+                    "Input.dispatchKeyEvent",
+                    {
+                        "type": "keyDown",
+                        "key": spec["key"],
+                        "code": spec["code"],
+                        "windowsVirtualKeyCode": spec["windowsVirtualKeyCode"],
+                        "modifiers": mod_mask,
+                    },
+                )
+                pressed_mods.append(spec)
+
+        main_down: dict[str, Any] = {
+            # Use rawKeyDown when a modifier is held so Chrome skips
+            # text insertion and routes the event to the shortcut
+            # dispatcher. For plain press_key without modifiers we can
+            # use regular keyDown.
+            "type": "rawKeyDown" if mod_mask else "keyDown",
+            "key": key_name,
+            "text": effective_text,
+            "modifiers": mod_mask,
+        }
+        main_up: dict[str, Any] = {
+            "type": "keyUp",
+            "key": key_name,
+            "text": effective_text,
+            "modifiers": mod_mask,
+        }
+        if main_code is not None:
+            main_down["code"] = main_code
+            main_up["code"] = main_code
+        if main_vk is not None:
+            main_down["windowsVirtualKeyCode"] = main_vk
+            main_up["windowsVirtualKeyCode"] = main_vk
+
+        await self._cdp(tab_id, "Input.dispatchKeyEvent", main_down)
+        await self._cdp(tab_id, "Input.dispatchKeyEvent", main_up)
+
+        # Release modifiers in reverse order.
+        for spec in reversed(pressed_mods):
+            await self._cdp(
+                tab_id,
+                "Input.dispatchKeyEvent",
+                {
+                    "type": "keyUp",
+                    "key": spec["key"],
+                    "code": spec["code"],
+                    "windowsVirtualKeyCode": spec["windowsVirtualKeyCode"],
+                    "modifiers": 0,
+                },
+            )
+
+        return {"ok": True, "action": "press", "key": key, "modifiers": modifiers or []}
 
     # Shared JS snippet: shadow-piercing querySelector via ">>>" separator
     _SHADOW_QUERY_JS = """
@@ -916,9 +1231,15 @@ class BeelineBridge:
         Example: '#interop-outlet >>> #ember37 >>> p'
         """
         await self.cdp_attach(tab_id)
+        # IMPORTANT: the whole script must be a single IIFE so that
+        # bridge.evaluate() detects it as "already wrapped" and returns
+        # its value. If you let evaluate() re-wrap a script that
+        # starts with a function declaration, the outer wrapper
+        # discards the inner IIFE's return and you always get None —
+        # which is exactly the bug this code had until 2026-04-11.
         script = (
-            f"{self._SHADOW_QUERY_JS}"
             f"(function(){{"
+            f"{self._SHADOW_QUERY_JS}"
             f"const el=_shadowQuery({json.dumps(selector)});"
             f"if(!el)return null;"
             f"const r=el.getBoundingClientRect();"
@@ -1945,7 +2266,10 @@ class BeelineBridge:
                 "Runtime.evaluate",
                 {"expression": script, "returnByValue": True},
             )
-            found = (result or {}).get("result", {}).get("result", {}).get("value", False)
+            # One "result" hop — see navigate() comment. This was silently
+            # returning False on every poll, so wait_for_selector always
+            # reported "not found" after the full timeout.
+            found = (result or {}).get("result", {}).get("value", False)
             if found:
                 return {"ok": True, "selector": selector}
             await asyncio.sleep(0.1)
@@ -1969,7 +2293,8 @@ class BeelineBridge:
                 "Runtime.evaluate",
                 {"expression": script, "returnByValue": True},
             )
-            found = (result or {}).get("result", {}).get("result", {}).get("value", False)
+            # Same unwrap bug as wait_for_selector.
+            found = (result or {}).get("result", {}).get("value", False)
             if found:
                 return {"ok": True, "text": text}
             await asyncio.sleep(0.1)
