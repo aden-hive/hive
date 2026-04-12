@@ -62,6 +62,7 @@ def register_tools(
                 headers={
                     "x-api-key": api_key,
                     "Content-Type": "application/json",
+                    "x-exa-integration": "hive",
                 },
                 timeout=30.0,
             )
