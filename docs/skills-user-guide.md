@@ -116,6 +116,17 @@ Use this skill when the user needs to extract text from PDFs or merge documents.
 | `metadata` | No | Arbitrary key-value pairs (author, version, etc.). |
 | `allowed-tools` | No | Space-delimited list of pre-approved tools. |
 
+**Note:**
+
+If the `name` field does not match the parent directory name:
+- The skill may fail to load correctly, or
+- It may be skipped or behave unexpectedly
+
+To avoid issues, always ensure both values are identical.
+
+**Common mistake:**  
+Renaming the folder without updating `SKILL.md` (or vice versa).
+
 ### Writing good descriptions
 
 The description is critical — it's what the agent uses to decide whether to activate a skill. Be specific:
