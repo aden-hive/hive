@@ -25,7 +25,11 @@
       "Bash(ps -eo pid,cmd)",
       "Bash(ps -o pid,lstart,cmd -p 746640)",
       "Bash(kill 746636)",
-      "Bash(ps -eo pid,lstart,cmd)"
+      "Bash(ps -eo pid,lstart,cmd)",
+      "Bash(grep -E \"^d|\\\\.py$\")",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "Bash(xargs cat:*)",
+      "Bash(find /home/timothy/aden/hive -path \"*/.venv\" -prune -o -name \"*.py\" -type f -exec grep -l \"frontend\\\\|UI\\\\|terminal\\\\|interactive\\\\|TUI\" {} \\\\;)"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",
