@@ -13,6 +13,31 @@ from framework.server.app import validate_agent_path
 
 logger = logging.getLogger(__name__)
 
+_llm_key_providers_cache: dict | None = None
+
+
+def _get_llm_key_providers() -> dict:
+    """Lazily load the PROVIDERS dict from scripts/check_llm_key.py (cached)."""
+    global _llm_key_providers_cache
+    if _llm_key_providers_cache is None:
+        import importlib.util
+        from pathlib import Path as _Path
+
+        script = _Path(__file__).resolve().parents[3] / "scripts" / "check_llm_key.py"
+        if not script.exists():
+            logger.warning("check_llm_key.py not found at %s — key validation disabled", script)
+            _llm_key_providers_cache = {}
+            return _llm_key_providers_cache
+        spec = importlib.util.spec_from_file_location("check_llm_key", script)
+        if spec is None or spec.loader is None:
+            logger.warning("Failed to load spec for %s — key validation disabled", script)
+            _llm_key_providers_cache = {}
+            return _llm_key_providers_cache
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _llm_key_providers_cache = mod.PROVIDERS
+    return _llm_key_providers_cache
+
 
 def _get_store(request: web.Request) -> CredentialStore:
     return request.app["credential_store"]
@@ -142,8 +167,18 @@ async def handle_delete_credential(request: web.Request) -> web.Response:
         return web.json_response({"deleted": True})
 
     store = _get_store(request)
-    deleted = store.delete_credential(credential_id)
-    if not deleted:
+    deleted_from_store = store.delete_credential(credential_id)
+
+    # Also clear the env var for this process so the key doesn't
+    # reappear via the env-var fallback in _resolve_api_key().
+    from framework.server.routes_config import PROVIDER_ENV_VARS
+
+    env_var = PROVIDER_ENV_VARS.get(credential_id.lower())
+    deleted_from_env = False
+    if env_var and os.environ.pop(env_var, None) is not None:
+        deleted_from_env = True
+
+    if not deleted_from_store and not deleted_from_env:
         return web.json_response({"error": f"Credential '{credential_id}' not found"}, status=404)
     _invalidate_queen_credentials_cache(request)
     return web.json_response({"deleted": True})
@@ -396,12 +431,53 @@ async def handle_list_specs(request: web.Request) -> web.Response:
         )
 
 
+async def handle_validate_key(request: web.Request) -> web.Response:
+    """POST /api/credentials/validate-key — health-check an LLM provider key.
+
+    Body: {"provider_id": "anthropic", "api_key": "sk-..."}
+    Returns: {"valid": bool|null, "message": str}
+
+    Runs the same checks as ``quickstart.sh`` (scripts/check_llm_key.py)
+    but in-process — no subprocess overhead.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    provider_id = body.get("provider_id", "").strip()
+    api_key = body.get("api_key", "").strip()
+
+    if not provider_id or not api_key:
+        return web.json_response(
+            {"error": "provider_id and api_key are required"}, status=400
+        )
+
+    try:
+        checker = _get_llm_key_providers().get(provider_id)
+        if not checker:
+            return web.json_response(
+                {"valid": True, "message": f"No health check for {provider_id}"}
+            )
+
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, lambda: checker(api_key))
+        return web.json_response(result)
+
+    except Exception as exc:
+        logger.warning("LLM key validation failed for %s: %s", provider_id, exc)
+        return web.json_response(
+            {"valid": None, "message": f"Validation error: {exc}"}
+        )
+
+
 def register_routes(app: web.Application) -> None:
     """Register credential routes on the application."""
     # specs and check-agent must be registered BEFORE the {credential_id} wildcard
     app.router.add_get("/api/credentials/specs", handle_list_specs)
     app.router.add_post("/api/credentials/check-agent", handle_check_agent)
     app.router.add_post("/api/credentials/resync", handle_resync_credentials)
+    app.router.add_post("/api/credentials/validate-key", handle_validate_key)
     app.router.add_get("/api/credentials", handle_list_credentials)
     app.router.add_post("/api/credentials", handle_save_credential)
     app.router.add_get("/api/credentials/{credential_id}", handle_get_credential)

@@ -81,4 +81,10 @@ export const credentialsApi = {
 
   resync: () =>
     api.post<ResyncResponse>("/credentials/resync", {}),
+
+  validateKey: (providerId: string, apiKey: string) =>
+    api.post<{ valid: boolean | null; message: string }>(
+      "/credentials/validate-key",
+      { provider_id: providerId, api_key: apiKey },
+    ),
 };
