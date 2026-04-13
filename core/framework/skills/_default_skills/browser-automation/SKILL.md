@@ -1,5 +1,5 @@
 ---
-name: browser-automation
+name: hive.browser-automation
 description: Drive a real Chrome browser via the GCU Beeline extension + Chrome DevTools Protocol. Navigation, clicks, typing, screenshots, shadow-DOM sites (LinkedIn / Reddit / X), keyboard shortcuts, CSP gotchas, rich-text editors. Verified against real production sites 2026-04-11.
 metadata:
   author: hive

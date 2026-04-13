@@ -29,7 +29,8 @@
       "Bash(grep -E \"^d|\\\\.py$\")",
       "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
       "Bash(xargs cat:*)",
-      "Bash(find /home/timothy/aden/hive -path \"*/.venv\" -prune -o -name \"*.py\" -type f -exec grep -l \"frontend\\\\|UI\\\\|terminal\\\\|interactive\\\\|TUI\" {} \\\\;)"
+      "Bash(find /home/timothy/aden/hive -path \"*/.venv\" -prune -o -name \"*.py\" -type f -exec grep -l \"frontend\\\\|UI\\\\|terminal\\\\|interactive\\\\|TUI\" {} \\\\;)",
+      "Bash(wc -l /home/timothy/.hive/backup/*/SKILL.md)"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",
