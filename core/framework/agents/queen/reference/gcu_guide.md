@@ -17,20 +17,41 @@ Use browser nodes (with `tools: {policy: "all"}`) when:
 ## Available Browser Tools
 
 All tools are prefixed with `browser_`:
-- `browser_start`, `browser_open` -- launch/navigate
-- `browser_click`, `browser_fill`, `browser_type` -- interact
-- `browser_snapshot` -- read page content (preferred over screenshot)
-- `browser_screenshot` -- visual capture
-- `browser_scroll`, `browser_wait` -- navigation helpers
-- `browser_evaluate` -- run JavaScript
+- `browser_start`, `browser_open`, `browser_navigate` — launch/navigate
+- `browser_click`, `browser_click_coordinate`, `browser_fill`, `browser_type` — interact
+- `browser_press` (with optional `modifiers=["ctrl"]` etc.) — keyboard shortcuts
+- `browser_snapshot` — compact accessibility-tree read (structured)
+- `browser_screenshot` — visual capture (annotated PNG)
+- `browser_shadow_query`, `browser_get_rect` — locate elements (shadow-piercing via `>>>`)
+- `browser_coords` — convert image pixels to CSS pixels (always use `css_x/y`, never `physical_x/y`)
+- `browser_scroll`, `browser_wait` — navigation helpers
+- `browser_evaluate` — run JavaScript
+- `browser_close`, `browser_close_finished` — tab cleanup
 
-## System Prompt Tips for Browser Nodes
+## Pick the right reading tool
+
+**`browser_snapshot`** — compact accessibility tree of interactive elements. Fast, cheap, good for static or form-heavy pages where the DOM matches what's visually rendered (documentation, simple dashboards, search results, settings pages).
+
+**`browser_screenshot`** — visual capture + metadata (`cssWidth`, `devicePixelRatio`, scale fields). **Use this on any complex SPA** — LinkedIn, Twitter/X, Reddit, Gmail, Notion, Slack, Discord, any site using shadow DOM, virtual scrolling, React reconciliation, or dynamic layout. On these pages, snapshot refs go stale in seconds, shadow contents aren't in the AX tree, and virtual-scrolled elements disappear from the tree entirely. Screenshot is the **only** reliable way to orient yourself.
+
+Neither tool is "preferred" universally — they're for different jobs. Default to snapshot on text-heavy static pages, screenshot on SPAs and anything shadow-DOM-heavy. Activate the `browser-automation` skill for the full decision tree.
+
+## Coordinate rule: always CSS pixels
+
+Chrome DevTools Protocol `Input.dispatchMouseEvent` takes **CSS pixels**, not physical pixels. After a screenshot, use `browser_coords(image_x, image_y)` and feed the returned `css_x/y` (NOT `physical_x/y`) to `browser_click_coordinate`, `browser_hover_coordinate`, `browser_press_at`. Feeding physical pixels on a HiDPI display (DPR=1.6, 2, or 3) overshoots by `DPR×` and clicks land in the wrong place. `getBoundingClientRect()` already returns CSS pixels — pass through unchanged, no DPR multiplication.
+
+## System prompt tips for browser nodes
 
 ```
-1. Use browser_snapshot() to read page content (NOT browser_get_text)
-2. Use browser_wait(seconds=2-3) after navigation for page load
-3. If you hit an auth wall, call set_output with an error and move on
-4. Keep tool calls per turn <= 10 for reliability
+1. On LinkedIn / X / Reddit / Gmail / any SPA — use browser_screenshot to orient,
+   not browser_snapshot. Shadow DOM and virtual scrolling make snapshots unreliable.
+2. For static pages (docs, forms, search results), browser_snapshot is fine.
+3. Before typing into a rich-text editor (X compose, LinkedIn DM, Gmail, Reddit),
+   click the input area first with browser_click_coordinate so React / Draft.js /
+   Lexical register a native focus event. Otherwise the send button stays disabled.
+4. Use browser_wait(seconds=2-3) after navigation for SPA hydration.
+5. If you hit an auth wall, call set_output with an error and move on.
+6. Keep tool calls per turn <= 10 for reliability.
 ```
 
 ## Example
@@ -43,7 +64,7 @@ All tools are prefixed with `browser_`:
   "tools": {"policy": "all"},
   "input_keys": ["search_url"],
   "output_keys": ["profiles"],
-  "system_prompt": "Navigate to the search URL, paginate through results..."
+  "system_prompt": "Navigate to the search URL via browser_navigate(wait_until='load', timeout_ms=20000). Wait 3s for SPA hydration. On LinkedIn, use browser_screenshot to see the page — browser_snapshot misses shadow-DOM and virtual-scrolled content. Paginate through results by scrolling and screenshotting; extract each profile card by reading its visible layout..."
 }
 ```
 
@@ -51,3 +72,7 @@ Connected via regular edges:
 ```
 search-setup -> scan-profiles -> process-results
 ```
+
+## Further detail
+
+For rich-text editor quirks (Lexical, Draft.js, ProseMirror), shadow-DOM shortcuts, `beforeunload` dialog neutralization, Trusted Types CSP on LinkedIn, keyboard shortcut dispatch, and per-site selector tables — **activate the `browser-automation` skill**. That skill has the full verified guidance and is refreshed against real production sites.
