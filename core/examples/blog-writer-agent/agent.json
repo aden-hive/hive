@@ -1,0 +1,89 @@
+{
+  "graph": {
+    "entry_node": "web-researcher",
+    "terminal_nodes": [
+      "blog-writer"
+    ],
+    "nodes": [
+      {
+        "id": "web-researcher",
+        "name": "Web Research",
+        "description": "Search the web for up-to-date information on the topic.",
+        "node_type": "llm_tool_use",
+        "system_prompt": "You are a meticulous researcher. The user wants to write a blog post about the following topic: {topic}.\nYour task:\n1. Formulate search queries based on the topic to find the most relevant, up-to-date information.\n2. Use the `web_search` tool to gather data.\n3. Synthesize your findings into a comprehensive research summary. Provide key facts, statistics, and interesting insights that would make a great blog post.\n\nOutput your compiled research findings.",
+        "tools": [
+          "web_search"
+        ],
+        "input_keys": [
+          "topic"
+        ],
+        "output_keys": [
+          "search_results"
+        ]
+      },
+      {
+        "id": "outline-creator",
+        "name": "Outline Creator",
+        "description": "Create a blog post outline based on research.",
+        "node_type": "llm_generate",
+        "system_prompt": "You are an expert content strategist.\nGiven the topic '{topic}' and the following research findings:\n{search_results}\n\nCreate a detailed, logical outline for a blog post.\nThe tone of the blog post should be: {tone}.\n\nYour outline should include:\n- A catchy title\n- Introduction\n- 3 to 5 main body sections (with sub-bullets of what to cover)\n- Conclusion\n\nRespond ONLY with the outline.",
+        "input_keys": [
+          "topic",
+          "tone",
+          "search_results"
+        ],
+        "output_keys": [
+          "outline"
+        ]
+      },
+      {
+        "id": "blog-writer",
+        "name": "Blog Writer",
+        "description": "Write the final blog post.",
+        "node_type": "llm_generate",
+        "system_prompt": "You are a professional blog writer. Here is everything you need:\nTopic: {topic}\nTone: {tone}\nTarget Word Count: {word_count}\n\nResearch Findings:\n{search_results}\n\nArticle Outline:\n{outline}\n\nYour task is to write the complete, full-length blog post.\nFollow the outline strictly. Adopt the specified tone. Ensure the structure flows logically, use headings/subheadings (Markdown format), and write engaging content. Make sure to hit the targeted word count as closely as possible.\n\nReturn the final blog post in Markdown format.",
+        "input_keys": [
+          "topic",
+          "tone",
+          "word_count",
+          "search_results",
+          "outline"
+        ],
+        "output_keys": [
+          "blog_post"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "id": "web-researcher_to_outline-creator",
+        "source": "web-researcher",
+        "target": "outline-creator"
+      },
+      {
+        "id": "outline-creator_to_blog-writer",
+        "source": "outline-creator",
+        "target": "blog-writer"
+      }
+    ]
+  },
+  "goal": {
+    "id": "blog-writer-goal",
+    "name": "Blog Writer Agent",
+    "description": "Research a topic and write a high-quality, structured blog post based on the findings.",
+    "success_criteria": [
+      {
+        "id": "thorough-research",
+        "description": "Conduct web research to gather factual information on the given topic."
+      },
+      {
+        "id": "structured-outline",
+        "description": "Create a structured outline covering the main points to be discussed."
+      },
+      {
+        "id": "final-blog-post",
+        "description": "Generate a complete, engaging blog post matching the specified tone."
+      }
+    ]
+  }
+}
