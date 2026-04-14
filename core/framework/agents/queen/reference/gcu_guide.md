@@ -20,7 +20,9 @@ All tools are prefixed with `browser_`:
 - `browser_start`, `browser_open` -- launch/navigate
 - `browser_click`, `browser_fill`, `browser_type` -- interact
 - `browser_snapshot` -- read page content (preferred over screenshot)
+<!-- vision-only -->
 - `browser_screenshot` -- visual capture
+<!-- /vision-only -->
 - `browser_scroll`, `browser_wait` -- navigation helpers
 - `browser_evaluate` -- run JavaScript
 
