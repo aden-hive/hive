@@ -67,9 +67,9 @@ _QUEEN_PLANNING_TOOLS = [
     # Parallel fan-out — use directly for one-off batch work the user
     # wants RIGHT NOW (without first designing an agent for it).
     "run_parallel_workers",
-    # Fork this session into a colony, writing a learned-skill file
-    # under ~/.hive/skills/ first so the new colony inherits the
-    # session's knowledge.
+    # Fork this session into a persistent colony so a headless /
+    # recurring / background job can run in parallel to this chat.
+    # Authors a skill first so the colony worker inherits context.
     "create_colony",
 ]
 
@@ -164,7 +164,9 @@ _QUEEN_INDEPENDENT_TOOLS = [
     "undo_changes",
     # Parallel fan-out (Phase 4 unified ColonyRuntime)
     "run_parallel_workers",
-    # Fork to colony — captures session knowledge as a skill first
+    # Fork this session into a persistent colony for headless /
+    # recurring / background work that needs to keep running in
+    # parallel to (or after) this chat.
     "create_colony",
 ]
 
@@ -691,28 +693,45 @@ write a single user-facing synthesis on your next turn. Prefer this over \
 designing a draft when the work is one-shot and the user wants results, not \
 a saved agent.
 
-## Forking the session into a colony (with session-knowledge capture)
-Two-step flow:
-  1. AUTHOR THE SKILL FIRST. Use write_file to create a skill folder \
-     (recommended location: `~/.hive/skills/{skill-name}/SKILL.md`) \
-     capturing what you learned during THIS session — API endpoints, \
-     auth flow, response shapes, gotchas, conventions, query patterns. \
-     The SKILL.md needs YAML frontmatter with `name` (matching the \
-     directory name) and `description` (1-1024 chars including trigger \
-     keywords), followed by a markdown body. Optional subdirs: \
-     scripts/, references/, assets/. Read your writing-hive-skills \
-     default skill for the full spec.
-  2. create_colony(colony_name, task, skill_path) — Validate the skill \
-     folder, install it under ~/.hive/skills/ if it's not already there, \
-     and fork this session into a new colony. NOTHING RUNS after this \
-     call: the task is baked into worker.json and the user starts the \
-     worker later from the new colony page. The task string still must \
-     be FULL and self-contained — when the user eventually runs it the \
-     worker has zero memory of your chat. The skill you wrote is \
-     installed under ~/.hive/skills/ so the worker discovers it on its \
-     first scan and starts informed instead of clueless. ALWAYS prefer \
-     create_colony over a raw fork when ending a session that uncovered \
-     reusable operational knowledge.
+## Forking the session into a persistent colony
+
+**When to use create_colony:** the user needs work to run \
+**headless, recurring, or in parallel to this chat** — something \
+that keeps going after you stop talking. Typical triggers:
+  - "run this every morning / every hour / on a cron"
+  - "keep monitoring X and alert me when Y"
+  - "fire this off in the background, I'll check on it later"
+  - "spin up a dedicated agent for this so I can keep working here"
+  - any task that should survive the current conversation ending
+
+**When NOT to use it:** if the user just wants results RIGHT NOW \
+in this chat, use `run_parallel_workers` instead. If they want to \
+iterate on an agent design, stay in the planning/building flow. \
+Don't create a colony just because you "learned something \
+reusable" — the trigger is operational (needs to keep running), \
+not epistemic (knowledge worth saving).
+
+**Two-step flow:**
+  1. AUTHOR A SKILL FIRST so the colony worker has the operational \
+     context it needs to run unattended. Use write_file to create a \
+     skill folder (recommended location: \
+     `~/.hive/skills/{skill-name}/SKILL.md`) capturing the \
+     procedure — API endpoints, auth flow, response shapes, \
+     gotchas, conventions, query patterns, rate limits. The \
+     SKILL.md needs YAML frontmatter with `name` (matching the \
+     directory name) and `description` (1-1024 chars including \
+     trigger keywords), followed by a markdown body. Optional \
+     subdirs: scripts/, references/, assets/. Read your \
+     writing-hive-skills default skill for the full spec.
+  2. create_colony(colony_name, task, skill_path) — Validates the \
+     skill folder, installs it under ~/.hive/skills/ if it isn't \
+     already there, and forks this session into a new colony. \
+     NOTHING RUNS after this call: the task is baked into \
+     worker.json and the user starts the worker (or wires up a \
+     trigger) later from the new colony page. The task string \
+     must be FULL and self-contained — when the worker eventually \
+     runs it has zero memory of your chat. The skill you wrote is \
+     discovered on first scan so the worker starts informed.
 
 ## Workflow summary
 1. Understand requirements → discover tools → design the layout
@@ -822,32 +841,49 @@ The tool returns aggregated `{worker_id, status, summary, data, error}` \
 reports. Read them on your next turn and write a single user-facing \
 synthesis.
 
-## Forking this session into a colony (with session-knowledge capture)
-When you've learned something reusable during this conversation — an API \
-auth flow, pagination rules, response shapes, gotchas, query patterns — \
-and the user wants a persistent colony to continue working on it, use \
-create_colony. Two-step flow:
-  1. AUTHOR THE SKILL FIRST in a SCRATCH location. Use write_file to \
-     create a skill folder somewhere temporary (e.g. `/tmp/{skill-name}/` \
-     or your working directory) capturing what you learned. DO NOT \
-     author it under `~/.hive/skills/` — that path is user-global and \
-     would leak the skill to every other agent. The SKILL.md needs YAML \
-     frontmatter with `name` (matching the directory name) and \
-     `description` (1-1024 chars including trigger keywords), followed \
-     by a markdown body. Optional subdirs: scripts/, references/, \
-     assets/. Read your writing-hive-skills default skill for the full \
+## Forking this session into a persistent colony
+
+**When to use create_colony:** the user needs work to run \
+**headless, recurring, or in parallel to this chat** — something \
+that should keep going after this conversation ends. Typical \
+triggers:
+  - "run this every morning / every hour / on a cron"
+  - "keep monitoring X and alert me when Y changes"
+  - "fire this off in the background so I can keep working here"
+  - "spin up a dedicated agent for this job"
+  - any task that needs to survive the current session
+
+**When NOT to use it:** if the user just wants results RIGHT NOW \
+in this chat, use `run_parallel_workers` instead. Don't create a \
+colony just because you "learned something reusable" — the \
+trigger is operational (needs to keep running), not epistemic \
+(knowledge worth saving).
+
+**Two-step flow:**
+  1. AUTHOR A SKILL FIRST in a SCRATCH location so the colony \
+     worker has the operational context it needs to run \
+     unattended. Use write_file to create a skill folder \
+     somewhere temporary (e.g. `/tmp/{skill-name}/` or your \
+     working directory) capturing the procedure — API endpoints, \
+     auth flow, pagination, gotchas, rate limits, response \
+     shapes. DO NOT author it under `~/.hive/skills/` — that path \
+     is user-global and would leak the skill to every other \
+     agent. The SKILL.md needs YAML frontmatter with `name` \
+     (matching the directory name) and `description` (1-1024 \
+     chars including trigger keywords), followed by a markdown \
+     body. Optional subdirs: scripts/, references/, assets/. \
+     Read your writing-hive-skills default skill for the full \
      spec.
-  2. create_colony(colony_name, task, skill_path) — Validates the skill \
-     folder, forks this session into a new colony, and installs the \
-     skill COLONY-SCOPED at \
-     `~/.hive/colonies/{colony_name}/skills/{skill_name}/`. Only that \
-     colony's worker sees it, no other agent. NOTHING RUNS after this \
-     call — the task is baked into worker.json and the user starts the \
-     worker later from the new colony page. The task string must be \
-     FULL and self-contained because the worker has zero memory of your \
-     chat when it eventually runs. ALWAYS prefer create_colony over \
-     telling the user to "start a new session" when you have reusable \
-     operational knowledge worth codifying.
+  2. create_colony(colony_name, task, skill_path) — Validates \
+     the skill folder, forks this session into a new colony, and \
+     installs the skill COLONY-SCOPED at \
+     `~/.hive/colonies/{colony_name}/skills/{skill_name}/`. Only \
+     that colony's worker sees it, no other agent. NOTHING RUNS \
+     after this call — the task is baked into worker.json and \
+     the user starts the worker (or wires up a trigger) later \
+     from the new colony page. The task string must be FULL and \
+     self-contained because the worker has zero memory of your \
+     chat when it eventually runs.
 """
 
 _queen_behavior_editing = """
@@ -880,13 +916,16 @@ lifecycle tools for spinning up work dynamically:
   wants results for RIGHT NOW. Fan out N subtasks concurrently and \
   synthesize the aggregated reports. No colony is created; the \
   workers exist only for this call.
-- **create_colony(colony_name, task, skill_path)** — when you've \
-  learned something reusable during this chat (API protocol, query \
-  patterns, gotchas) and the user wants a persistent colony to \
-  continue the work. You write a skill folder to scratch, then call \
-  this tool to fork the session and install the skill colony-scoped. \
-  Nothing runs after fork — the user starts the worker later from the \
-  new colony page.
+- **create_colony(colony_name, task, skill_path)** — when the user \
+  wants work to run **headless, recurring, or in parallel to this \
+  chat** (e.g. "run nightly", "keep monitoring X", "fire this off \
+  in the background"). Write a skill folder to scratch capturing \
+  the operational procedure, then call this to fork the session \
+  and install the skill colony-scoped. Nothing runs after fork — \
+  the user starts the worker (or sets a trigger) later from the \
+  new colony page. Do NOT use this just because you "learned \
+  something reusable" — the trigger is operational (needs to keep \
+  running), not epistemic.
 
 You do NOT have the agent-building lifecycle (no save_agent_draft, \
 confirm_and_build, load_built_agent, run_agent_with_input). If the \
