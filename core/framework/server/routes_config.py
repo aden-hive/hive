@@ -284,10 +284,16 @@ def _get_subscription_token(sub_id: str) -> str | None:
 def _hot_swap_sessions(
     request: web.Request, full_model: str, api_key: str | None, api_base: str | None
 ) -> int:
-    """Hot-swap the LLM on all running sessions. Returns count of swapped sessions."""
+    """Hot-swap the LLM on all running sessions. Returns count of swapped sessions.
+
+    Also refreshes the SessionManager's default model so that subsequent
+    one-shot LLM consumers (e.g. /messages/classify, new session bootstrap)
+    pick up the new provider/model instead of the stale startup override.
+    """
     from framework.server.session_manager import SessionManager
 
     manager: SessionManager = request.app["manager"]
+    manager._model = full_model
     swapped = 0
     for session in manager.list_sessions():
         llm_provider = getattr(session, "llm", None)
