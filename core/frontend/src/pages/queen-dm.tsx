@@ -95,7 +95,14 @@ export default function QueenDM() {
         if (restored.length > 0 && !cancelled()) {
           restored.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
           setMessages(restored);
-          setIsTyping(false);
+          // Only clear typing if the history contains a completed execution;
+          // during bootstrap the queen is still processing.
+          const hasCompleted = events.some(
+            (e: AgentEvent) => e.type === "execution_completed",
+          );
+          if (hasCompleted) {
+            setIsTyping(false);
+          }
         }
       } catch {
         // No history
@@ -678,7 +685,7 @@ export default function QueenDM() {
         setPendingOptions(null);
       }
 
-      const isQueenBusy = isTyping || isStreaming;
+      const isQueenBusy = isTyping;
       const userMsg: ChatMessage = {
         id: makeId(),
         agent: "You",
@@ -701,7 +708,7 @@ export default function QueenDM() {
         });
       }
     },
-    [sessionId, awaitingInput, isTyping, isStreaming],
+    [sessionId, awaitingInput, isTyping],
   );
 
   const handleQuestionAnswer = useCallback(
