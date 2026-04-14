@@ -797,3 +797,60 @@ def test_resync_returns_false_when_credentials_unchanged(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "_snapshot_credentials", lambda: set())
 
     assert registry.resync_mcp_servers_if_needed() is False
+
+
+# ---------------------------------------------------------------------------
+# Concurrency-safe flag propagation
+# ---------------------------------------------------------------------------
+
+
+def test_mcp_tool_conversion_marks_known_safe_tools():
+    """MCP tools whose names are in CONCURRENCY_SAFE_TOOLS become concurrency_safe."""
+    from framework.loader.mcp_client import MCPTool
+    registry = ToolRegistry()
+
+    safe_mcp = MCPTool(
+        name="read_file",
+        description="",
+        input_schema={"type": "object", "properties": {}, "required": []},
+        server_name="stub",
+    )
+    unsafe_mcp = MCPTool(
+        name="execute_command",
+        description="",
+        input_schema={"type": "object", "properties": {}, "required": []},
+        server_name="stub",
+    )
+
+    safe_tool = registry._convert_mcp_tool_to_framework_tool(safe_mcp)  # noqa: SLF001
+    unsafe_tool = registry._convert_mcp_tool_to_framework_tool(unsafe_mcp)  # noqa: SLF001
+
+    assert safe_tool.concurrency_safe is True
+    assert unsafe_tool.concurrency_safe is False
+
+
+def test_concurrency_safe_allowlist_is_conservative():
+    """Every listed name must denote a read-only operation.
+
+    This test is a guard against someone casually adding a write-capable
+    tool to the allowlist. If a new name is added here, justify it in the
+    comment above the set in tool_registry.py.
+    """
+    from framework.loader.tool_registry import ToolRegistry
+
+    allowlist = ToolRegistry.CONCURRENCY_SAFE_TOOLS
+
+    # Positive assertions: known-safe read operations are present.
+    for name in ("read_file", "grep", "glob", "list_directory", "web_search"):
+        assert name in allowlist, f"{name} should be concurrency-safe"
+
+    # Negative assertions: nothing that mutates state is allowed in.
+    for forbidden in (
+        "execute_command",
+        "write_file",
+        "hashline_edit",
+        "browser_click",
+        "browser_type",
+        "browser_navigate",
+    ):
+        assert forbidden not in allowlist, f"{forbidden} must not be concurrency-safe"

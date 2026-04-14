@@ -27,6 +27,12 @@ class Tool:
     name: str
     description: str
     parameters: dict[str, Any] = field(default_factory=dict)
+    # If True, this tool performs no filesystem/process/network writes and is
+    # safe to run concurrently with other safe-flagged tools inside the same
+    # assistant turn. Unsafe tools (writes, shell, browser actions) are always
+    # serialized after the safe batch. Default False - the conservative choice
+    # when a tool's behavior isn't explicitly vetted.
+    concurrency_safe: bool = False
 
 
 @dataclass

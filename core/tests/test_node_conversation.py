@@ -244,6 +244,61 @@ class TestNodeConversation:
         assert conv.needs_compaction() is True
 
     @pytest.mark.asyncio
+    async def test_needs_compaction_uses_buffer_when_set(self):
+        """Gap 7: a compaction_buffer_tokens overrides the multiplicative
+        threshold - compaction triggers when estimate + buffer would
+        cross the hard context limit, not at a fractional threshold."""
+        conv = NodeConversation(
+            max_context_tokens=1000,
+            compaction_threshold=0.9,  # would normally trigger at 900
+            compaction_buffer_tokens=300,  # buffer wants 700 hard cap
+        )
+        # 650 tokens is below the 700 budget - no compaction yet.
+        conv.update_token_count(650)
+        assert conv.needs_compaction() is False
+        # 700+ crosses the budget - compaction fires BEFORE reaching
+        # the hard 1000 limit, so the next turn's input has headroom.
+        conv.update_token_count(700)
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
+    async def test_compaction_warning_fires_before_hard_trigger(self):
+        """Gap 7: the warning threshold is meant to surface early signal
+        to telemetry without actually triggering compaction."""
+        conv = NodeConversation(
+            max_context_tokens=1000,
+            compaction_buffer_tokens=200,
+            compaction_warning_buffer_tokens=400,
+        )
+        conv.update_token_count(500)
+        assert conv.compaction_warning() is False
+        assert conv.needs_compaction() is False
+
+        # Cross 600 tokens: warning fires (1000 - 400) but compaction
+        # doesn't yet (1000 - 200 = 800 budget).
+        conv.update_token_count(650)
+        assert conv.compaction_warning() is True
+        assert conv.needs_compaction() is False
+
+        # Cross 800: both fire.
+        conv.update_token_count(820)
+        assert conv.compaction_warning() is True
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
+    async def test_legacy_threshold_rule_still_works_without_buffer(self):
+        """Without compaction_buffer_tokens, the old multiplicative rule
+        applies so existing callers keep behaving identically."""
+        conv = NodeConversation(
+            max_context_tokens=1000,
+            compaction_threshold=0.75,
+        )
+        conv.update_token_count(700)
+        assert conv.needs_compaction() is False
+        conv.update_token_count(800)
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
     async def test_compact_replaces_with_summary(self):
         """keep_recent=0 replaces all messages; empty conversation is a no-op."""
         conv = NodeConversation()

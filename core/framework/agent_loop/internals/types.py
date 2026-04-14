@@ -54,6 +54,17 @@ class LoopConfig:
     stall_detection_threshold: int = 3
     stall_similarity_threshold: float = 0.85
     max_context_tokens: int = 32_000
+    # Headroom reserved for the NEXT turn's input + output so that
+    # proactive compaction always finishes before the hard context limit
+    # is hit mid-stream. Scaled to match Claude Code's 13k-buffer-on-
+    # 200k-window ratio (~6.5%) applied to hive's default 32k window,
+    # with extra margin because hive's token estimator is char-based
+    # and less tight than Anthropic's own counting. Override via
+    # LoopConfig for larger windows.
+    compaction_buffer_tokens: int = 8_000
+    # Warning is emitted one buffer earlier so the user/telemetry gets
+    # a "we're close" signal without triggering a compaction pass.
+    compaction_warning_buffer_tokens: int = 12_000
     store_prefix: str = ""
 
     # Overflow margin for max_tool_calls_per_turn. Tool calls are only

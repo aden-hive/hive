@@ -381,10 +381,20 @@ class NodeConversation:
         output_keys: list[str] | None = None,
         store: ConversationStore | None = None,
         run_id: str | None = None,
+        compaction_buffer_tokens: int | None = None,
+        compaction_warning_buffer_tokens: int | None = None,
     ) -> None:
         self._system_prompt = system_prompt
         self._max_context_tokens = max_context_tokens
         self._compaction_threshold = compaction_threshold
+        # Buffer-based compaction trigger (Gap 7). When set, takes
+        # precedence over the multiplicative compaction_threshold so the
+        # loop reserves a fixed headroom for the next turn's input+output
+        # instead of trying to get exactly X% of the way to the hard
+        # limit. If left as None the legacy threshold-based rule is
+        # used, keeping old call sites behaving identically.
+        self._compaction_buffer_tokens = compaction_buffer_tokens
+        self._compaction_warning_buffer_tokens = compaction_warning_buffer_tokens
         self._output_keys = output_keys
         self._store = store
         self._messages: list[Message] = []
@@ -729,7 +739,36 @@ class NodeConversation:
         return self.estimate_tokens() / self._max_context_tokens
 
     def needs_compaction(self) -> bool:
+        """True when the conversation should be compacted before the
+        next LLM call.
+
+        Buffer-based rule (Gap 7): trigger when the current estimate
+        plus the configured buffer would exceed the hard context limit.
+        Prevents compaction from firing only AFTER we're already over
+        the wire and forced into a reactive binary-split pass.
+
+        When no buffer is configured, falls back to the multiplicative
+        threshold the old callers were built around.
+        """
+        if self._max_context_tokens <= 0:
+            return False
+        if self._compaction_buffer_tokens is not None:
+            budget = self._max_context_tokens - self._compaction_buffer_tokens
+            return self.estimate_tokens() >= max(0, budget)
         return self.estimate_tokens() >= self._max_context_tokens * self._compaction_threshold
+
+    def compaction_warning(self) -> bool:
+        """True when the conversation has crossed the warning threshold
+        but not yet the hard compaction trigger.
+
+        Used by telemetry / UI to show a "context getting tight" hint
+        before a compaction pass actually runs. Returns False when no
+        warning buffer is configured (legacy behaviour).
+        """
+        if self._max_context_tokens <= 0 or self._compaction_warning_buffer_tokens is None:
+            return False
+        warn_at = self._max_context_tokens - self._compaction_warning_buffer_tokens
+        return self.estimate_tokens() >= max(0, warn_at)
 
     # --- Output-key extraction ---------------------------------------------
 
@@ -1264,6 +1303,10 @@ class NodeConversation:
             "system_prompt": self._system_prompt,
             "max_context_tokens": self._max_context_tokens,
             "compaction_threshold": self._compaction_threshold,
+            "compaction_buffer_tokens": self._compaction_buffer_tokens,
+            "compaction_warning_buffer_tokens": (
+                self._compaction_warning_buffer_tokens
+            ),
             "output_keys": self._output_keys,
         }
         await self._store.write_meta(run_meta)
@@ -1311,6 +1354,10 @@ class NodeConversation:
             output_keys=meta.get("output_keys"),
             store=store,
             run_id=run_id,
+            compaction_buffer_tokens=meta.get("compaction_buffer_tokens"),
+            compaction_warning_buffer_tokens=meta.get(
+                "compaction_warning_buffer_tokens"
+            ),
         )
         conv._meta_persisted = True
 

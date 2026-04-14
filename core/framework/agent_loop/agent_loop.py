@@ -586,6 +586,10 @@ class AgentLoop(AgentProtocol):
                 output_keys=ctx.agent_spec.output_keys or None,
                 store=self._conversation_store,
                 run_id=ctx.effective_run_id,
+                compaction_buffer_tokens=self._config.compaction_buffer_tokens,
+                compaction_warning_buffer_tokens=(
+                    self._config.compaction_warning_buffer_tokens
+                ),
             )
             accumulator = OutputAccumulator(
                 store=self._conversation_store,
@@ -2411,6 +2415,33 @@ class AgentLoop(AgentProtocol):
             tool_calls: list[ToolCallEvent] = []
             _stream_error: StreamErrorEvent | None = None
 
+            # Gap 1 - Streaming tool execution. Any tool flagged as
+            # concurrency_safe is kicked off the moment its ToolCallEvent
+            # arrives in the stream, instead of waiting for the full
+            # assistant message stop event. The dispatch phase below
+            # reuses these already-running tasks so read_file / grep /
+            # glob overlap with whatever text the model is still
+            # generating. Unsafe tools (bash, edits, browser actions)
+            # still wait for FinishEvent so we don't race a write
+            # against a decision the model hasn't finished making.
+            _early_safe_names = {
+                t.name for t in tools if getattr(t, "concurrency_safe", False)
+            }
+            _early_tasks: dict[str, asyncio.Task] = {}
+
+            async def _timed_execute(
+                _tc: ToolCallEvent,
+            ) -> tuple[ToolResult | BaseException, str, float]:
+                """Execute a tool and return (result, start_iso, duration_s)."""
+                _s = time.time()
+                _iso = datetime.now(UTC).isoformat()
+                try:
+                    _r = await self._execute_tool(_tc)
+                except BaseException as _exc:
+                    _r = _exc
+                _dur = round(time.time() - _s, 3)
+                return _r, _iso, _dur
+
             logger.debug(
                 "[_run_single_turn] inner_turn=%d: Starting LLM stream with %d messages, %d tools",
                 inner_turn,
@@ -2447,6 +2478,9 @@ class AgentLoop(AgentProtocol):
                 _msgs: list = messages,  # noqa: B006
                 _tc: list[ToolCallEvent] = tool_calls,  # noqa: B006
                 inner_turn: int = inner_turn,
+                _safe_names: set = _early_safe_names,  # noqa: B006,B008
+                _tasks: dict = _early_tasks,  # noqa: B006,B008
+                _exec_fn=_timed_execute,
             ) -> None:
                 nonlocal accumulated_text, _stream_error, _stream_last_event_at
                 _clean_snapshot = ""  # visible-only text for the frontend
@@ -2480,6 +2514,18 @@ class AgentLoop(AgentProtocol):
 
                     elif isinstance(event, ToolCallEvent):
                         _tc.append(event)
+                        # Gap 1: start concurrency-safe tools immediately
+                        # while the rest of the stream is still arriving,
+                        # so read-heavy turns don't stall after the last
+                        # text delta. Unsafe tools wait for FinishEvent.
+                        if (
+                            event.tool_name in _safe_names
+                            and "_raw" not in event.tool_input
+                            and event.tool_use_id not in _tasks
+                        ):
+                            _tasks[event.tool_use_id] = asyncio.create_task(
+                                _exec_fn(event)
+                            )
 
                     elif isinstance(event, FinishEvent):
                         token_counts["input"] += event.input_tokens
@@ -2552,6 +2598,12 @@ class AgentLoop(AgentProtocol):
                 logger.debug("[_run_single_turn] inner_turn=%d: Stream task cancelled", inner_turn)
                 if accumulated_text:
                     await conversation.add_assistant_message(content=accumulated_text)
+                # Gap 1: kill any early-dispatched tool tasks too.
+                # Without this, a safe tool started during streaming
+                # would leak past cancellation and keep running.
+                for _early in _early_tasks.values():
+                    if not _early.done():
+                        _early.cancel()
                 # Distinguish cancel_current_turn() (cancels the child
                 # _stream_task) from stop_worker (cancels the parent
                 # execution task).  When the parent itself is cancelled,
@@ -2566,6 +2618,12 @@ class AgentLoop(AgentProtocol):
                 logger.exception(
                     "[_run_single_turn] inner_turn=%d: Stream task failed: %s", inner_turn, e
                 )
+                # Don't orphan early tool tasks on a stream failure
+                # either - the outer retry loop will re-emit the tool
+                # calls on the next attempt.
+                for _early in _early_tasks.values():
+                    if not _early.done():
+                        _early.cancel()
                 raise
             finally:
                 self._stream_task = None
@@ -2575,6 +2633,9 @@ class AgentLoop(AgentProtocol):
             # raise so the outer transient-error retry can handle it
             # with proper backoff instead of burning judge iterations.
             if _stream_error and not accumulated_text and not tool_calls:
+                for _early in _early_tasks.values():
+                    if not _early.done():
+                        _early.cancel()
                 raise ConnectionError(
                     f"Stream failed with recoverable error: {_stream_error.error}"
                 )
@@ -2945,39 +3006,116 @@ class AgentLoop(AgentProtocol):
                     else:
                         pending_real.append(tc)
 
-            # Phase 2a: execute real tools in parallel.
+            # Phase 2a: partition real tools by concurrency safety.
+            # Read-only tools flagged concurrency_safe run in one parallel
+            # batch (bounded by a semaphore). Everything else - shell, file
+            # writes, browser actions, unknown MCP tools - runs serially
+            # afterwards so we can't race an edit against a bash command
+            # that touches the same path. Result ordering is preserved via
+            # results_by_id below; the split only affects scheduling.
+            # Reuses the same _early_safe_names set the stream used for
+            # Gap 1 early dispatch, so "safe" means exactly the same
+            # thing in both places.
+            parallel_batch: list[ToolCallEvent] = []
+            serial_batch: list[ToolCallEvent] = []
+            for tc in pending_real:
+                if tc.tool_name in _early_safe_names:
+                    parallel_batch.append(tc)
+                else:
+                    serial_batch.append(tc)
+
             if pending_real:
+                # Cap on concurrent read-only tool executions. Ten matches
+                # Claude Code's StreamingToolExecutor default and keeps MCP
+                # server load bounded on turns where the model issues a
+                # big fan-out of reads.
+                _PARALLEL_CAP = 10
+                _parallel_sem = asyncio.Semaphore(_PARALLEL_CAP)
 
-                async def _timed_execute(
+                async def _capped(
                     _tc: ToolCallEvent,
+                    _sem: asyncio.Semaphore = _parallel_sem,  # noqa: B008,B023
                 ) -> tuple[ToolResult | BaseException, str, float]:
-                    """Execute a tool and return (result, start_iso, duration_s)."""
-                    _s = time.time()
-                    _iso = datetime.now(UTC).isoformat()
-                    try:
-                        _r = await self._execute_tool(_tc)
-                    except BaseException as _exc:
-                        _r = _exc
-                    _dur = round(time.time() - _s, 3)
-                    return _r, _iso, _dur
+                    async with _sem:
+                        return await _timed_execute(_tc)
 
-                self._tool_task = asyncio.ensure_future(
-                    asyncio.gather(
-                        *(_timed_execute(tc) for tc in pending_real),
-                        return_exceptions=True,
+                timed_results_by_id: dict[
+                    str, tuple[ToolResult | BaseException, str, float] | BaseException
+                ] = {}
+
+                # Phase 2b: resolve the concurrency-safe batch. Prefer
+                # any early task already started during streaming (Gap
+                # 1) so we don't accidentally execute the same tool
+                # twice; for everything else, schedule via the semaphore-
+                # capped wrapper as before.
+                if parallel_batch:
+                    _awaitables: list = []
+                    for tc in parallel_batch:
+                        early = _early_tasks.get(tc.tool_use_id)
+                        if early is not None:
+                            _awaitables.append(early)
+                        else:
+                            _awaitables.append(_capped(tc))
+                    self._tool_task = asyncio.ensure_future(
+                        asyncio.gather(*_awaitables, return_exceptions=True)
                     )
-                )
-                try:
-                    timed_results = await self._tool_task
-                finally:
-                    self._tool_task = None
-                # gather(return_exceptions=True) captures CancelledError
-                # as a return value instead of propagating it.  Re-raise
-                # so stop_worker actually stops the execution.
-                for entry in timed_results:
-                    if isinstance(entry, asyncio.CancelledError):
-                        raise entry
-                for tc, entry in zip(pending_real, timed_results, strict=True):
+                    try:
+                        parallel_timed = await self._tool_task
+                    finally:
+                        self._tool_task = None
+                    # gather(return_exceptions=True) captures CancelledError
+                    # as a return value instead of propagating it.  Re-raise
+                    # so stop_worker actually stops the execution.
+                    for entry in parallel_timed:
+                        if isinstance(entry, asyncio.CancelledError):
+                            raise entry
+                    for tc, entry in zip(parallel_batch, parallel_timed, strict=True):
+                        timed_results_by_id[tc.tool_use_id] = entry
+
+                # Phase 2c: run unsafe tools sequentially. On a raised
+                # exception, cancel the remaining siblings with a clear
+                # error so the model sees the cascade instead of a silent
+                # drop. A ToolResult with is_error=True is a normal return
+                # (e.g. "file not found") and does NOT trip the cascade -
+                # the model should see subsequent errors too.
+                _serial_cascade_broken = False
+                for tc in serial_batch:
+                    if _serial_cascade_broken:
+                        timed_results_by_id[tc.tool_use_id] = (
+                            ToolResult(
+                                tool_use_id=tc.tool_use_id,
+                                content=(
+                                    "Cancelled: an earlier non-concurrent tool "
+                                    "in this turn raised an exception. Re-issue "
+                                    "this call once the previous error is resolved."
+                                ),
+                                is_error=True,
+                            ),
+                            datetime.now(UTC).isoformat(),
+                            0.0,
+                        )
+                        continue
+
+                    self._tool_task = asyncio.ensure_future(_timed_execute(tc))
+                    try:
+                        entry = await self._tool_task
+                    finally:
+                        self._tool_task = None
+
+                    timed_results_by_id[tc.tool_use_id] = entry
+                    raw_check = entry[0] if isinstance(entry, tuple) else entry
+                    if isinstance(raw_check, BaseException) and not isinstance(
+                        raw_check, asyncio.CancelledError
+                    ):
+                        _serial_cascade_broken = True
+                    elif isinstance(raw_check, asyncio.CancelledError):
+                        raise raw_check
+
+                # Phase 2d: reassemble results in original call order so
+                # the rest of the loop sees no difference from the
+                # pre-partition world.
+                for tc in pending_real:
+                    entry = timed_results_by_id[tc.tool_use_id]
                     if isinstance(entry, BaseException):
                         raw = entry
                         _start_iso = datetime.now(UTC).isoformat()

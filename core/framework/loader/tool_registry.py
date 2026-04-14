@@ -50,6 +50,33 @@ class ToolRegistry:
     # and auto-injected at call time for tools that accept them.
     CONTEXT_PARAMS = frozenset({"agent_id", "data_dir", "profile"})
 
+    # Tools that perform no filesystem/process/network writes and are safe
+    # to run concurrently with other safe tools in the same assistant turn.
+    # Unknown tools default to unsafe (serialized) - adding a name here is
+    # an explicit promise about that tool's side effects. Keep this list
+    # conservative: anything that mutates state, writes to disk, issues
+    # POST/PUT/DELETE requests, or drives a browser MUST NOT be listed.
+    CONCURRENCY_SAFE_TOOLS = frozenset(
+        {
+            # File system reads
+            "read_file",
+            "list_directory",
+            "grep",
+            "glob",
+            # Web reads
+            "web_search",
+            "web_fetch",
+            # Browser read-only snapshots (mutate-free observations)
+            "browser_screenshot",
+            "browser_snapshot",
+            "browser_console",
+            "browser_get_text",
+            # Background bash polling - reads output buffers only, does
+            # not touch the subprocess itself.
+            "bash_output",
+        }
+    )
+
     # Credential directory used for change detection
     _CREDENTIAL_DIR = Path("~/.hive/credentials/credentials").expanduser()
 
@@ -152,6 +179,7 @@ class ToolRegistry:
                 "properties": properties,
                 "required": required,
             },
+            concurrency_safe=tool_name in self.CONCURRENCY_SAFE_TOOLS,
         )
 
         def executor(inputs: dict) -> Any:
@@ -970,6 +998,7 @@ class ToolRegistry:
                 "properties": properties,
                 "required": required,
             },
+            concurrency_safe=mcp_tool.name in self.CONCURRENCY_SAFE_TOOLS,
         )
 
         return tool

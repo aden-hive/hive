@@ -1837,3 +1837,299 @@ class TestSubagentAccumulatorMemory:
         # Should return None (not raise PermissionError)
         assert scoped.read("tweet_content") is None
         assert scoped.read("user_request") == "hi"
+
+
+# ---------------------------------------------------------------------------
+# Tool concurrency partitioning (Gap 5)
+# ---------------------------------------------------------------------------
+
+
+def _multi_tool_scenario(*calls: tuple[str, dict, str]) -> list:
+    """Build a stream scenario that emits multiple tool calls in one turn.
+
+    Each ``calls`` entry is ``(tool_name, tool_input, tool_use_id)``.
+    """
+    events: list = []
+    for name, inp, uid in calls:
+        events.append(
+            ToolCallEvent(tool_use_id=uid, tool_name=name, tool_input=inp)
+        )
+    events.append(
+        FinishEvent(stop_reason="tool_calls", input_tokens=10, output_tokens=5, model="mock")
+    )
+    return events
+
+
+class TestToolConcurrencyPartition:
+    """Gap 5: safe tools run in parallel, unsafe tools serialize after them."""
+
+    @pytest.mark.asyncio
+    async def test_safe_tools_overlap_unsafe_tools_do_not(
+        self, runtime, node_spec, buffer
+    ):
+        """A turn with (safe, safe, unsafe) schedules safes in parallel and
+        runs unsafe strictly after both safes have started."""
+        scenario = _multi_tool_scenario(
+            ("read_file", {"path": "/a"}, "call_1"),
+            ("read_file", {"path": "/b"}, "call_2"),
+            ("execute_command", {"command": "echo hi"}, "call_3"),
+        )
+        # Second turn emits plain text so the loop terminates.
+        llm = MockStreamingLLM(scenarios=[scenario, text_scenario("done")])
+        node_spec.output_keys = []
+
+        start_events: list[tuple[str, float]] = []
+        end_events: list[tuple[str, float]] = []
+
+        async def tool_exec(tool_use: ToolUse) -> ToolResult:
+            start_events.append((tool_use.id, asyncio.get_event_loop().time()))
+            # The two safes sleep long enough that a serial scheduler
+            # would show them end-before-start, but a parallel scheduler
+            # overlaps them. execute_command also sleeps so we can prove
+            # it started AFTER both safes started.
+            await asyncio.sleep(0.05)
+            end_events.append((tool_use.id, asyncio.get_event_loop().time()))
+            return ToolResult(tool_use_id=tool_use.id, content="ok", is_error=False)
+
+        tools = [
+            Tool(
+                name="read_file",
+                description="",
+                parameters={},
+                concurrency_safe=True,
+            ),
+            Tool(
+                name="execute_command",
+                description="",
+                parameters={},
+                concurrency_safe=False,
+            ),
+        ]
+
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            buffer,
+            llm,
+            tools=tools,
+            is_subagent_mode=True,
+        )
+        node = EventLoopNode(
+            tool_executor=tool_exec,
+            config=LoopConfig(max_iterations=3),
+        )
+        await node.execute(ctx)
+
+        # Build lookup dicts for readability.
+        starts = dict(start_events)
+        ends = dict(end_events)
+
+        # Both safe reads must start (approximately) together and before
+        # either has finished - proving they ran concurrently.
+        assert starts["call_1"] < ends["call_2"]
+        assert starts["call_2"] < ends["call_1"]
+
+        # The unsafe tool must start strictly AFTER both safes have ended -
+        # proving it was serialized after the parallel batch.
+        assert starts["call_3"] >= ends["call_1"]
+        assert starts["call_3"] >= ends["call_2"]
+
+    @pytest.mark.asyncio
+    async def test_serial_exception_cascades_cancel_siblings(
+        self, runtime, node_spec, buffer
+    ):
+        """When an unsafe tool raises, the remaining unsafe siblings are
+        cancelled with a clear error rather than silently executed."""
+        scenario = _multi_tool_scenario(
+            ("execute_command", {"command": "boom"}, "call_1"),
+            ("execute_command", {"command": "echo survivor"}, "call_2"),
+        )
+        llm = MockStreamingLLM(scenarios=[scenario, text_scenario("done")])
+        node_spec.output_keys = []
+
+        executed: list[str] = []
+
+        async def tool_exec(tool_use: ToolUse) -> ToolResult:
+            executed.append(tool_use.id)
+            if tool_use.id == "call_1":
+                raise RuntimeError("first tool exploded")
+            return ToolResult(tool_use_id=tool_use.id, content="ok", is_error=False)
+
+        tools = [
+            Tool(
+                name="execute_command",
+                description="",
+                parameters={},
+                concurrency_safe=False,
+            ),
+        ]
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            buffer,
+            llm,
+            tools=tools,
+            is_subagent_mode=True,
+        )
+        node = EventLoopNode(
+            tool_executor=tool_exec,
+            config=LoopConfig(max_iterations=3),
+        )
+        await node.execute(ctx)
+
+        # First tool ran (and raised); second tool must NOT have run.
+        assert executed == ["call_1"]
+
+    @pytest.mark.asyncio
+    async def test_safe_tool_starts_before_finish_event(
+        self, runtime, node_spec, buffer
+    ):
+        """Gap 1: a concurrency-safe tool must start executing while the
+        stream is still in flight, not after the final FinishEvent.
+
+        Builds a custom LLM that sleeps between the ToolCallEvent and
+        the FinishEvent. A well-behaved harness starts the tool as soon
+        as the ToolCallEvent arrives, so by the time FinishEvent lands
+        the tool has already been running for ~sleep_seconds.
+        """
+        from framework.llm.stream_events import FinishEvent, ToolCallEvent
+
+        delay = 0.25
+
+        class SlowStreamLLM(LLMProvider):
+            def __init__(self):
+                self._calls = 0
+
+            async def stream(self, messages, system="", tools=None, max_tokens=4096):
+                self._calls += 1
+                if self._calls == 1:
+                    # Emit the tool call, stall, then finish.
+                    yield ToolCallEvent(
+                        tool_use_id="call_1",
+                        tool_name="read_file",
+                        tool_input={"path": "/a"},
+                    )
+                    await asyncio.sleep(delay)
+                    yield FinishEvent(
+                        stop_reason="tool_calls",
+                        input_tokens=10,
+                        output_tokens=5,
+                        model="mock",
+                    )
+                else:
+                    # Turn 2 needs to match text_scenario shape so the
+                    # outer loop terminates cleanly (needs a text delta
+                    # before the finish event; empty turns are treated
+                    # as worker silence and fall into the escalation
+                    # grace window).
+                    yield TextDeltaEvent(content="done", snapshot="done")
+                    yield FinishEvent(
+                        stop_reason="stop",
+                        input_tokens=1,
+                        output_tokens=1,
+                        model="mock",
+                    )
+
+            def complete(self, messages, system="", **kwargs) -> LLMResponse:
+                return LLMResponse(content="", model="mock", stop_reason="stop")
+
+        tool_started_at: list[float] = []
+        tool_finished_at: list[float] = []
+
+        async def tool_exec(tool_use: ToolUse) -> ToolResult:
+            tool_started_at.append(asyncio.get_event_loop().time())
+            # Short simulated work so the tool finishes before the stream
+            # does; this proves the tool was running concurrently with
+            # the sleep inside the LLM stream.
+            await asyncio.sleep(0.05)
+            tool_finished_at.append(asyncio.get_event_loop().time())
+            return ToolResult(tool_use_id=tool_use.id, content="ok", is_error=False)
+
+        tools = [
+            Tool(
+                name="read_file",
+                description="",
+                parameters={},
+                concurrency_safe=True,
+            ),
+        ]
+        node_spec.output_keys = []
+        llm = SlowStreamLLM()
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            buffer,
+            llm,
+            tools=tools,
+            is_subagent_mode=True,
+        )
+        node = EventLoopNode(
+            tool_executor=tool_exec,
+            config=LoopConfig(max_iterations=3),
+        )
+        turn_started = asyncio.get_event_loop().time()
+        await node.execute(ctx)
+        turn_ended = asyncio.get_event_loop().time()
+
+        assert tool_started_at, "tool never ran"
+        # The tool must have STARTED within the LLM's sleep window -
+        # i.e. before turn_started + delay, not after. A post-stream
+        # dispatcher would start the tool at turn_started + delay or
+        # later.
+        assert tool_started_at[0] < turn_started + delay, (
+            f"tool started at +{tool_started_at[0] - turn_started:.3f}s, "
+            f"but the stream sleep was {delay}s - the harness is still "
+            f"waiting for FinishEvent before dispatching."
+        )
+        # Sanity: the whole turn took at least the sleep window (the
+        # stream had to drain before dispatch).
+        assert turn_ended - turn_started >= delay
+
+    @pytest.mark.asyncio
+    async def test_soft_error_does_not_cascade(
+        self, runtime, node_spec, buffer
+    ):
+        """A ToolResult with is_error=True (e.g. 'file not found') is a
+        normal return and must NOT cancel subsequent serial siblings - the
+        model needs to see all tool errors to decide what to do next."""
+        scenario = _multi_tool_scenario(
+            ("execute_command", {"command": "false"}, "call_1"),
+            ("execute_command", {"command": "echo two"}, "call_2"),
+        )
+        llm = MockStreamingLLM(scenarios=[scenario, text_scenario("done")])
+        node_spec.output_keys = []
+
+        executed: list[str] = []
+
+        async def tool_exec(tool_use: ToolUse) -> ToolResult:
+            executed.append(tool_use.id)
+            return ToolResult(
+                tool_use_id=tool_use.id,
+                content="soft error" if tool_use.id == "call_1" else "ok",
+                is_error=(tool_use.id == "call_1"),
+            )
+
+        tools = [
+            Tool(
+                name="execute_command",
+                description="",
+                parameters={},
+                concurrency_safe=False,
+            ),
+        ]
+        ctx = build_ctx(
+            runtime,
+            node_spec,
+            buffer,
+            llm,
+            tools=tools,
+            is_subagent_mode=True,
+        )
+        node = EventLoopNode(
+            tool_executor=tool_exec,
+            config=LoopConfig(max_iterations=3),
+        )
+        await node.execute(ctx)
+
+        # Both tools must have run: soft errors don't cascade.
+        assert executed == ["call_1", "call_2"]

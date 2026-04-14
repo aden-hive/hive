@@ -30,7 +30,11 @@
       "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
       "Bash(xargs cat:*)",
       "Bash(find /home/timothy/aden/hive -path \"*/.venv\" -prune -o -name \"*.py\" -type f -exec grep -l \"frontend\\\\|UI\\\\|terminal\\\\|interactive\\\\|TUI\" {} \\\\;)",
-      "Bash(wc -l /home/timothy/.hive/backup/*/SKILL.md)"
+      "Bash(wc -l /home/timothy/.hive/backup/*/SKILL.md)",
+      "Bash(awk -F'::' '{print $1}')",
+      "Bash(wait)",
+      "Bash(pkill -f \"pytest.*test_event_loop_node\")",
+      "Bash(pkill -f \"pytest.*TestToolConcurrency\")"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",
