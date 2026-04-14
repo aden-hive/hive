@@ -880,6 +880,21 @@ async def create_queen(
                 "user_request": None if _is_restore_mode else (initial_prompt or None)
             }
 
+            # Publish the initial prompt as a CLIENT_INPUT_RECEIVED event so
+            # it appears in the SSE stream and persists to events.jsonl for
+            # session resume.  The /chat endpoint does the same for injected
+            # messages; this covers the session-creation-with-prompt path.
+            if initial_prompt and not _is_restore_mode:
+                await session.event_bus.publish(
+                    AgentEvent(
+                        type=EventType.CLIENT_INPUT_RECEIVED,
+                        stream_id="queen",
+                        node_id="queen",
+                        execution_id=session.id,
+                        data={"content": initial_prompt},
+                    )
+                )
+
             logger.info(
                 "Queen %s in %s phase with %d tools: %s",
                 "restoring" if _is_restore_mode else "starting",

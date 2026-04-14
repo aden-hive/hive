@@ -119,16 +119,18 @@ export default function QueenDM() {
       : null;
     if (isBootstrap && pendingFirstMessage !== null) {
       sessionStorage.removeItem(`queenFirstMessage:${queenId}`);
-      setInitialDraft(pendingFirstMessage);
     }
 
     (async () => {
       try {
         if (isBootstrap) {
-          // Fresh session with no initial_prompt — the queen waits idle
-          // for the first /chat. The pending message is loaded into the
-          // composer (via initialDraft) so the user can edit before sending.
-          await queensApi.createNewSession(queenId, undefined, "independent");
+          // Pass the pending message as initial_prompt so the queen
+          // processes it immediately (no phantom "Hello" greeting).
+          await queensApi.createNewSession(
+            queenId,
+            pendingFirstMessage ?? undefined,
+            "independent",
+          );
         } else if (selectedSessionParam) {
           await queensApi.selectSession(queenId, selectedSessionParam);
         } else {
@@ -180,15 +182,33 @@ export default function QueenDM() {
           sid = result.session_id;
           setSessionId(sid);
           setQueenReady(true);
-          // Bootstrap sessions start idle (queen waits for the first chat),
-          // so don't show the typing indicator until the user actually sends.
-          if (!isBootstrap) setIsTyping(true);
 
           if (isBootstrap) {
             // Swap ?new=1 for ?session={sid} so a browser refresh rehydrates
             // this session instead of creating another new one.
             setSearchParams({ session: sid }, { replace: true });
-          } else if (selectedSessionParam && selectedSessionParam !== sid) {
+
+            // Message was passed as initial_prompt so the queen is already
+            // processing it. Show the user bubble and typing indicator.
+            if (pendingFirstMessage && !cancelled) {
+              const userMsg: ChatMessage = {
+                id: makeId(),
+                agent: "You",
+                agentColor: "",
+                content: pendingFirstMessage,
+                timestamp: "",
+                type: "user",
+                thread: "queen-dm",
+                createdAt: Date.now(),
+              };
+              setMessages((prev) => [...prev, userMsg]);
+              setIsTyping(true);
+            }
+          } else {
+            setIsTyping(true);
+          }
+
+          if (!isBootstrap && selectedSessionParam && selectedSessionParam !== sid) {
             setSearchParams({ session: sid }, { replace: true });
           }
         }
