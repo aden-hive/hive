@@ -61,7 +61,7 @@ def _session_to_live_dict(session) -> dict:
         "intro_message": getattr(session.runner, "intro_message", "") or "",
         "queen_phase": phase_state.phase
         if phase_state
-        else ("staging" if session.colony_runtime else "planning"),
+        else ("staging" if session.colony_runtime else "independent"),
         "queen_supports_images": supports_image_tool_results(queen_model) if queen_model else True,
         "queen_id": getattr(phase_state, "queen_id", None) if phase_state else None,
         "queen_name": (phase_state.queen_profile or {}).get("name") if phase_state else None,

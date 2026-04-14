@@ -39,7 +39,13 @@
       "Bash(bun run:*)",
       "Bash(npx eslint:*)",
       "Bash(npm run:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(grep -E \"\\\\.tsx$|^d\")",
+      "Bash(grep -E \"test_.*\\\\.py$\")",
+      "Bash(grep \"\\\\.py$\")",
+      "Bash(grep -l \"save_agent_draft\\\\|confirm_and_build\\\\|replan_agent\\\\|load_built_agent\\\\|planning\\\\|building\\\\|staging\" /home/timothy/aden/hive/core/framework/agents/queen/reference/*.md)",
+      "Bash(grep -E \"\\\\.tsx$|\\\\.ts$\")",
+      "Bash(find /home/timothy/aden/hive/core/framework/tools -name \"*.py\" -exec grep -l \"switch_to_\" {} \\\\;)"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",

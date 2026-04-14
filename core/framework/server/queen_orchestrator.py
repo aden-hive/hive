@@ -279,38 +279,25 @@ async def create_queen(
         queen_loop_config as _base_loop_config,
     )
     from framework.agents.queen.nodes import (
-        _QUEEN_BUILDING_TOOLS,
         _QUEEN_EDITING_TOOLS,
         _QUEEN_INDEPENDENT_TOOLS,
-        _QUEEN_PLANNING_TOOLS,
         _QUEEN_RUNNING_TOOLS,
         _QUEEN_STAGING_TOOLS,
-        _appendices,
-        _building_knowledge,
-        _planning_knowledge,
         _queen_behavior_always,
-        _queen_behavior_building,
         _queen_behavior_editing,
         _queen_behavior_independent,
-        _queen_behavior_planning,
         _queen_behavior_running,
         _queen_behavior_staging,
         _queen_character_core,
         _queen_identity_editing,
-        _queen_phase_7,
-        _queen_role_building,
         _queen_role_independent,
-        _queen_role_planning,
         _queen_role_running,
         _queen_role_staging,
         _queen_style,
-        _queen_tools_building,
         _queen_tools_editing,
         _queen_tools_independent,
-        _queen_tools_planning,
         _queen_tools_running,
         _queen_tools_staging,
-        _shared_building_knowledge,
     )
     from framework.host.event_bus import AgentEvent, EventType
     from framework.loader.mcp_registry import MCPRegistry
@@ -359,7 +346,7 @@ async def create_queen(
             logger.warning("Queen: MCP registry config failed to load", exc_info=True)
 
     # ---- Phase state --------------------------------------------------
-    effective_phase = initial_phase or ("staging" if worker_identity else "planning")
+    effective_phase = initial_phase or ("staging" if worker_identity else "independent")
     phase_state = QueenPhaseState(phase=effective_phase, event_bus=session.event_bus)
     session.phase_state = phase_state
 
@@ -370,28 +357,6 @@ async def create_queen(
     # per-iteration prompt rebuild cheap; invalidated by routes_credentials
     # when the user adds/removes an integration.
     phase_state.credentials_prompt_provider = _build_credentials_provider()
-
-    # ---- Track ask rounds during planning ----------------------------
-    # Increment planning_ask_rounds each time the queen requests user
-    # input (ask_user or ask_user_multiple) while in the planning phase.
-    async def _track_planning_asks(event: AgentEvent) -> None:
-        if phase_state.phase != "planning":
-            return
-        # Only count explicit ask_user / ask_user_multiple calls, not
-        # auto-block (text-only turns emit CLIENT_INPUT_REQUESTED with
-        # an empty prompt and no options/questions).
-        data = event.data or {}
-        has_prompt = bool(data.get("prompt"))
-        has_questions = bool(data.get("questions"))
-        has_options = bool(data.get("options"))
-        if has_prompt or has_questions or has_options:
-            phase_state.planning_ask_rounds += 1
-
-    session.event_bus.subscribe(
-        [EventType.CLIENT_INPUT_REQUESTED],
-        _track_planning_asks,
-        filter_stream="queen",
-    )
 
     # ---- Lifecycle tools (always registered) --------------------------
     register_queen_lifecycle_tools(
@@ -428,35 +393,21 @@ async def create_queen(
     session._queen_tool_executor = queen_tool_executor  # type: ignore[attr-defined]
 
     # ---- Partition tools by phase ------------------------------------
-    planning_names = set(_QUEEN_PLANNING_TOOLS)
-    building_names = set(_QUEEN_BUILDING_TOOLS)
     staging_names = set(_QUEEN_STAGING_TOOLS)
     running_names = set(_QUEEN_RUNNING_TOOLS)
     editing_names = set(_QUEEN_EDITING_TOOLS)
     independent_names = set(_QUEEN_INDEPENDENT_TOOLS)
 
     registered_names = {t.name for t in queen_tools}
-    missing_building = building_names - registered_names
-    if missing_building:
-        logger.warning(
-            "Queen: %d/%d building tools NOT registered: %s",
-            len(missing_building),
-            len(building_names),
-            sorted(missing_building),
-        )
     logger.info("Queen: registered tools: %s", sorted(registered_names))
 
-    phase_state.planning_tools = [t for t in queen_tools if t.name in planning_names]
-    phase_state.building_tools = [t for t in queen_tools if t.name in building_names]
     phase_state.staging_tools = [t for t in queen_tools if t.name in staging_names]
     phase_state.running_tools = [t for t in queen_tools if t.name in running_names]
     phase_state.editing_tools = [t for t in queen_tools if t.name in editing_names]
 
     # Independent phase gets core tools + all MCP tools not claimed by any
     # other phase (coder-tools file I/O, gcu-tools browser, etc.).
-    all_phase_names = (
-        planning_names | building_names | staging_names | running_names | editing_names
-    )
+    all_phase_names = staging_names | running_names | editing_names
     mcp_tools = [t for t in queen_tools if t.name not in all_phase_names]
     phase_state.independent_tools = [
         t for t in queen_tools if t.name in independent_names
@@ -489,33 +440,6 @@ async def create_queen(
             "according to your current phase."
         )
 
-    _planning_body = (
-        _queen_character_core
-        + _queen_role_planning
-        + _queen_style
-        + _shared_building_knowledge
-        + _queen_tools_planning
-        + _queen_behavior_always
-        + _queen_behavior_planning
-        + _planning_knowledge
-        + worker_identity
-    )
-    phase_state.prompt_planning = _planning_body
-
-    _building_body = (
-        _queen_character_core
-        + _queen_role_building
-        + _queen_style
-        + _shared_building_knowledge
-        + _queen_tools_building
-        + _queen_behavior_always
-        + _queen_behavior_building
-        + _building_knowledge
-        + _queen_phase_7
-        + _appendices
-        + worker_identity
-    )
-    phase_state.prompt_building = _building_body
     phase_state.prompt_staging = (
         _queen_character_core
         + _queen_role_staging

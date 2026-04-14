@@ -383,17 +383,10 @@ class SessionManager:
                     _resume_queen_id = _meta.get("queen_id")
                 except (json.JSONDecodeError, OSError):
                     pass
-            if _resume_phase in ("building", "planning"):
-                # Fall back to queen-only session — cold resume handler in
-                # _start_queen will set phase_state.agent_path and switch to
-                # the correct phase.
-                return await self.create_session(
-                    session_id=session_id,
-                    model=model,
-                    initial_prompt=initial_prompt,
-                    queen_resume_from=queen_resume_from,
-                    queen_name=queen_name or _resume_queen_id,
-                )
+            # NOTE: legacy planning/building phases are not resumable; they
+            # were removed when the design-then-build flow was retired.
+            # Cold sessions resume into staging/running/editing/independent
+            # via the phase-resume block in _start_queen below.
 
         # Use the colony's forked session ID as the live session ID.
         # If it's already live (user navigated back), return it directly
@@ -1408,22 +1401,18 @@ class SessionManager:
                     _phase = _meta.get("phase")
 
                     if _agent_path and Path(_agent_path).exists():
-                        if _phase in ("staging", "running", None):
-                            # Agent fully built — load worker and resume
-                            await self.load_colony(session.id, _agent_path)
-                            if session.phase_state:
-                                await session.phase_state.switch_to_staging(source="auto")
-                            logger.info("Cold restore: auto-loaded worker from %s", _agent_path)
-                        elif _phase == "building":
-                            # Agent folder exists but incomplete — resume building
-                            if session.phase_state:
-                                session.phase_state.agent_path = _agent_path
-                                await session.phase_state.switch_to_building(source="auto")
-                            logger.info("Cold restore: resumed BUILDING phase for %s", _agent_path)
-                        elif _phase == "planning":
-                            if session.phase_state:
-                                session.phase_state.agent_path = _agent_path
-                            logger.info("Cold restore: PLANNING phase for %s", _agent_path)
+                        # Any cold session that has an agent_path resumes
+                        # into staging (worker loaded, ready to run).
+                        # Legacy planning/building phases are no longer
+                        # supported and are silently mapped to staging.
+                        await self.load_colony(session.id, _agent_path)
+                        if session.phase_state:
+                            await session.phase_state.switch_to_staging(source="auto")
+                        logger.info(
+                            "Cold restore: auto-loaded worker from %s (was phase=%s)",
+                            _agent_path,
+                            _phase,
+                        )
                 except Exception:
                     logger.warning("Cold restore: failed to auto-load worker", exc_info=True)
 

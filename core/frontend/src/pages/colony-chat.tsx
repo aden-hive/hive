@@ -89,19 +89,10 @@ interface AgentState {
   error: string | null;
   displayName: string | null;
   awaitingInput: boolean;
-  workerInputMessageId: string | null;
   queenPhase: "planning" | "building" | "staging" | "running" | "independent";
   agentPath: string | null;
   currentRunId: string | null;
   nodeLogs: Record<string, string[]>;
-  nodeActionPlans: Record<string, string>;
-  subagentReports: {
-    subagent_id: string;
-    message: string;
-    data?: Record<string, unknown>;
-    timestamp: string;
-  }[];
-  isTyping: boolean;
   isStreaming: boolean;
   queenIsTyping: boolean;
   workerIsTyping: boolean;
@@ -127,14 +118,10 @@ function defaultAgentState(): AgentState {
     error: null,
     displayName: null,
     awaitingInput: false,
-    workerInputMessageId: null,
     queenPhase: "planning",
     agentPath: null,
     currentRunId: null,
     nodeLogs: {},
-    nodeActionPlans: {},
-    subagentReports: [],
-    isTyping: false,
     isStreaming: false,
     queenIsTyping: false,
     workerIsTyping: false,
@@ -488,7 +475,6 @@ export default function ColonyChat() {
           if (isQueen) {
             turnCounterRef.current[turnKey] = currentTurn + 1;
             updateState({
-              isTyping: true,
               queenIsTyping: true,
               ...(shouldMarkQueenReady && { queenReady: true }),
             });
@@ -510,13 +496,11 @@ export default function ColonyChat() {
             }
             turnCounterRef.current[turnKey] = currentTurn + 1;
             updateState({
-              isTyping: true,
               isStreaming: false,
               workerIsTyping: true,
               awaitingInput: false,
               currentRunId: incomingRunId,
               nodeLogs: {},
-              subagentReports: [],
               llmSnapshots: {},
               activeToolCalls: {},
               pendingQuestion: null,
@@ -531,14 +515,12 @@ export default function ColonyChat() {
         case "execution_completed":
           if (isQueen) {
             suppressIntroRef.current = false;
-            updateState({ isTyping: false, queenIsTyping: false });
+            updateState({ queenIsTyping: false });
           } else {
             updateState({
-              isTyping: false,
               isStreaming: false,
               workerIsTyping: false,
               awaitingInput: false,
-              workerInputMessageId: null,
               llmSnapshots: {},
               pendingQuestion: null,
               pendingOptions: null,
@@ -616,7 +598,6 @@ export default function ColonyChat() {
               const prompt = (event.data?.prompt as string) || "";
               updateState({
                 awaitingInput: true,
-                isTyping: false,
                 isStreaming: false,
                 queenIsTyping: false,
                 pendingQuestion: prompt || null,
@@ -629,7 +610,6 @@ export default function ColonyChat() {
 
           if (event.type === "execution_paused") {
             updateState({
-              isTyping: false,
               isStreaming: false,
               queenIsTyping: false,
               workerIsTyping: false,
@@ -646,7 +626,6 @@ export default function ColonyChat() {
 
           if (event.type === "execution_failed") {
             updateState({
-              isTyping: false,
               isStreaming: false,
               queenIsTyping: false,
               workerIsTyping: false,
@@ -670,7 +649,7 @@ export default function ColonyChat() {
 
         case "node_loop_started":
           turnCounterRef.current[turnKey] = currentTurn + 1;
-          updateState({ isTyping: true, activeToolCalls: {} });
+          updateState({ activeToolCalls: {} });
           if (!isQueen && event.node_id) {
             const existing = graphNodes.find((n) => n.id === event.node_id);
             const isRevisit = existing?.status === "complete";
@@ -1022,7 +1001,7 @@ export default function ColonyChat() {
     if (!agentState.sessionId) return;
     try {
       await executionApi.cancelQueen(agentState.sessionId);
-      updateState({ isTyping: false, isStreaming: false, queenIsTyping: false });
+      updateState({ isStreaming: false, queenIsTyping: false });
     } catch {
       // fire-and-forget
     }
@@ -1052,7 +1031,7 @@ export default function ColonyChat() {
       };
       setMessages((prev) => [...prev, userMsg]);
       suppressIntroRef.current = false;
-      updateState({ isTyping: true, queenIsTyping: true });
+      updateState({ queenIsTyping: true });
 
       if (agentState.sessionId && agentState.ready) {
         executionApi.chat(agentState.sessionId, text, images).catch((err: unknown) => {
@@ -1067,7 +1046,7 @@ export default function ColonyChat() {
             thread: agentPath,
             createdAt: Date.now(),
           });
-          updateState({ isTyping: false, isStreaming: false, queenIsTyping: false });
+          updateState({ isStreaming: false, queenIsTyping: false });
         });
       }
     },

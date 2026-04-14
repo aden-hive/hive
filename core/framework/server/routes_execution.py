@@ -50,18 +50,6 @@ _WORKER_INHERITED_TOOLS: frozenset[str] = frozenset(
 )
 
 
-# Queen-lifecycle tools that are registered into the queen's tool registry
-# but NOT listed in any _QUEEN_*_TOOLS phase list (they're reachable only via
-# explicit registration, not phase-based gating). These must still be stripped
-# from forked worker configs.
-_QUEEN_LIFECYCLE_EXTRAS: frozenset[str] = frozenset(
-    {
-        "stop_worker_and_plan",
-        "stop_worker_and_review",
-    }
-)
-
-
 def _resolve_queen_only_tools() -> frozenset[str]:
     """Compute the set of queen-lifecycle tool names to strip on fork.
 
@@ -69,34 +57,27 @@ def _resolve_queen_only_tools() -> frozenset[str]:
     any tool listed in any ``_QUEEN_*_TOOLS`` set that is NOT in
     :data:`_WORKER_INHERITED_TOOLS` is a queen-only tool. Browser and MCP
     tools are not in the queen phase lists (they're added dynamically),
-    so they pass through untouched. Supplemented by
-    :data:`_QUEEN_LIFECYCLE_EXTRAS` for tools registered without phase
-    gating.
+    so they pass through untouched.
 
     Computed lazily so this module can be imported before the queen
     nodes package is loaded.
     """
     from framework.agents.queen.nodes import (
-        _QUEEN_BUILDING_TOOLS,
         _QUEEN_EDITING_TOOLS,
         _QUEEN_INDEPENDENT_TOOLS,
-        _QUEEN_PLANNING_TOOLS,
         _QUEEN_RUNNING_TOOLS,
         _QUEEN_STAGING_TOOLS,
     )
 
     union: set[str] = set()
     for tool_list in (
-        _QUEEN_PLANNING_TOOLS,
-        _QUEEN_BUILDING_TOOLS,
         _QUEEN_STAGING_TOOLS,
         _QUEEN_RUNNING_TOOLS,
         _QUEEN_EDITING_TOOLS,
         _QUEEN_INDEPENDENT_TOOLS,
     ):
         union.update(tool_list)
-    derived = union - _WORKER_INHERITED_TOOLS
-    return frozenset(derived | _QUEEN_LIFECYCLE_EXTRAS)
+    return frozenset(union - _WORKER_INHERITED_TOOLS)
 
 
 async def handle_trigger(request: web.Request) -> web.Response:
