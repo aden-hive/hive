@@ -212,6 +212,211 @@ function ToolActivityRow({ content }: { content: string }) {
   );
 }
 
+// --- Inline ask_user fallback ---------------------------------------------
+// Sometimes the model prints the ask_user / ask_user_multiple payload as
+// regular assistant text instead of invoking the tool. We detect that
+// payload here and render a QuestionWidget / MultiQuestionWidget inline so
+// the user still gets the nice button UI. Submissions are sent back as a
+// regular user message via onSend (there is no pending backend state to
+// fulfill, so we treat it like the user answering in chat).
+
+type AskUserInlinePayload =
+  | { kind: "single"; question: string; options: string[] }
+  | {
+      kind: "multi";
+      questions: { id: string; prompt: string; options?: string[] }[];
+    };
+
+function detectAskUserPayload(content: string): AskUserInlinePayload | null {
+  if (!content) return null;
+  let text = content.trim();
+  if (!text) return null;
+  // Strip an optional ```json ... ``` / ``` ... ``` code fence
+  const fence = text.match(/^```(?:json|JSON)?\s*([\s\S]*?)\s*```$/);
+  if (fence) text = fence[1].trim();
+  // Strip surrounding double quotes that fully wrap a JSON object
+  if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+    const inner = text.slice(1, -1).trim();
+    if (inner.startsWith("{") && inner.endsWith("}")) text = inner;
+  }
+  if (!text.startsWith("{") || !text.endsWith("}")) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as Record<string, unknown>;
+
+  // ask_user_multiple: { questions: [{ id, prompt, options? }, ...] }
+  if (Array.isArray(obj.questions)) {
+    const raw = obj.questions as unknown[];
+    if (raw.length < 1 || raw.length > 8) return null;
+    const questions: { id: string; prompt: string; options?: string[] }[] = [];
+    for (let i = 0; i < raw.length; i++) {
+      const q = raw[i];
+      if (!q || typeof q !== "object") return null;
+      const qo = q as Record<string, unknown>;
+      const prompt =
+        typeof qo.prompt === "string"
+          ? qo.prompt
+          : typeof qo.question === "string"
+            ? qo.question
+            : null;
+      if (!prompt) return null;
+      const id = typeof qo.id === "string" && qo.id ? qo.id : `q${i}`;
+      let options: string[] | undefined;
+      if (
+        Array.isArray(qo.options) &&
+        qo.options.every((o) => typeof o === "string")
+      ) {
+        options = qo.options as string[];
+      }
+      questions.push({ id, prompt, options });
+    }
+    return { kind: "multi", questions };
+  }
+
+  // ask_user: { question: string, options: string[] }
+  const question = typeof obj.question === "string" ? obj.question : null;
+  const options =
+    Array.isArray(obj.options) &&
+    obj.options.every((o) => typeof o === "string")
+      ? (obj.options as string[])
+      : null;
+  if (!question || !options || options.length < 2) return null;
+  return { kind: "single", question, options };
+}
+
+function InlineAskUserBubble({
+  msg,
+  payload,
+  activeThread,
+  onSend,
+  queenPhase,
+  showQueenPhaseBadge = true,
+}: {
+  msg: ChatMessage;
+  payload: AskUserInlinePayload;
+  activeThread: string;
+  onSend: (
+    message: string,
+    thread: string,
+    images?: ImageContent[],
+  ) => void;
+  queenPhase?: "planning" | "building" | "staging" | "running" | "independent";
+  showQueenPhaseBadge?: boolean;
+}) {
+  const [state, setState] = useState<"pending" | "submitted" | "dismissed">(
+    "pending",
+  );
+
+  // Once the user submits an answer via the inline widget, hide the whole
+  // bubble — their reply appears right after as a normal user message.
+  if (state === "submitted") return null;
+
+  // If the user dismissed without answering, fall back to the regular
+  // MarkdownContent rendering so they can still see what the model said.
+  if (state === "dismissed") {
+    return (
+      <MessageBubble
+        msg={msg}
+        queenPhase={queenPhase}
+        showQueenPhaseBadge={showQueenPhaseBadge}
+      />
+    );
+  }
+
+  const isQueen = msg.role === "queen";
+  const color = getColor(msg.agent, msg.role);
+  const thread = msg.thread || activeThread;
+
+  const handleSingle = (answer: string) => {
+    setState("submitted");
+    onSend(answer, thread);
+  };
+
+  const handleMulti = (answers: Record<string, string>) => {
+    setState("submitted");
+    if (payload.kind !== "multi") return;
+    // Format answers as a readable, numbered list for the outgoing message.
+    const lines = payload.questions.map((q, i) => {
+      const a = answers[q.id] ?? "";
+      return `${i + 1}. ${q.prompt}\n   ${a}`;
+    });
+    onSend(lines.join("\n"), thread);
+  };
+
+  return (
+    <div className="flex gap-3">
+      <div
+        className={`flex-shrink-0 ${isQueen ? "w-9 h-9" : "w-7 h-7"} rounded-xl flex items-center justify-center`}
+        style={{
+          backgroundColor: `${color}18`,
+          border: `1.5px solid ${color}35`,
+          boxShadow: isQueen ? `0 0 12px ${color}20` : undefined,
+        }}
+      >
+        {isQueen ? (
+          <Crown className="w-4 h-4" style={{ color }} />
+        ) : (
+          <Cpu className="w-3.5 h-3.5" style={{ color }} />
+        )}
+      </div>
+      <div
+        className={`flex-1 min-w-0 ${isQueen ? "max-w-[85%]" : "max-w-[75%]"}`}
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <span
+            className={`font-medium ${isQueen ? "text-sm" : "text-xs"}`}
+            style={{ color }}
+          >
+            {msg.agent}
+          </span>
+          {(!isQueen || showQueenPhaseBadge) && (
+            <span
+              className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
+                isQueen
+                  ? "bg-primary/15 text-primary"
+                  : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {isQueen
+                ? (msg.phase ?? queenPhase) === "independent"
+                  ? "independent"
+                  : (msg.phase ?? queenPhase) === "running"
+                    ? "running"
+                    : (msg.phase ?? queenPhase) === "staging"
+                      ? "staging"
+                      : (msg.phase ?? queenPhase) === "planning"
+                        ? "planning"
+                        : "building"
+                : "Worker"}
+            </span>
+          )}
+        </div>
+        {payload.kind === "single" ? (
+          <QuestionWidget
+            inline
+            question={payload.question}
+            options={payload.options}
+            onSubmit={handleSingle}
+            onDismiss={() => setState("dismissed")}
+          />
+        ) : (
+          <MultiQuestionWidget
+            inline
+            questions={payload.questions}
+            onSubmit={handleMulti}
+            onDismiss={() => setState("dismissed")}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 const MessageBubble = memo(
   function MessageBubble({
     msg,
@@ -596,24 +801,51 @@ export default function ChatPanel({
         onScroll={handleScroll}
         className="flex-1 overflow-auto px-5 py-4 space-y-3"
       >
-        {renderItems.map((item) =>
-          item.kind === "parallel" ? (
-            <div key={item.groupId}>
-              <ParallelSubagentBubble
-                groupId={item.groupId}
-                groups={item.groups}
-              />
-            </div>
-          ) : (
-            <div key={item.msg.id}>
+        {renderItems.map((item) => {
+          if (item.kind === "parallel") {
+            return (
+              <div key={item.groupId}>
+                <ParallelSubagentBubble
+                  groupId={item.groupId}
+                  groups={item.groups}
+                />
+              </div>
+            );
+          }
+          const msg = item.msg;
+          // Detect misformatted ask_user payloads emitted as plain text and
+          // substitute the nicer widget-based bubble.  Only inspect regular
+          // agent messages — skip system rows, tool status, dividers, etc.
+          const askPayload =
+            (msg.role === "queen" || msg.role === "worker") &&
+            !msg.type &&
+            msg.content
+              ? detectAskUserPayload(msg.content)
+              : null;
+          if (askPayload) {
+            return (
+              <div key={msg.id}>
+                <InlineAskUserBubble
+                  msg={msg}
+                  payload={askPayload}
+                  activeThread={activeThread}
+                  onSend={onSend}
+                  queenPhase={queenPhase}
+                  showQueenPhaseBadge={showQueenPhaseBadge}
+                />
+              </div>
+            );
+          }
+          return (
+            <div key={msg.id}>
               <MessageBubble
-                msg={item.msg}
+                msg={msg}
                 queenPhase={queenPhase}
                 showQueenPhaseBadge={showQueenPhaseBadge}
               />
             </div>
-          ),
-        )}
+          );
+        })}
 
         {/* Show typing indicator while waiting for first queen response (disabled + empty chat) */}
         {(isWaiting || (disabled && threadMessages.length === 0)) && (
