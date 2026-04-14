@@ -14,7 +14,7 @@ import type { AgentEvent, HistorySession } from "@/api/types";
 import { sseEventToChatMessage } from "@/lib/chat-helpers";
 import { useColony } from "@/context/ColonyContext";
 import { useHeaderActions } from "@/context/HeaderActionsContext";
-import { getQueenForAgent } from "@/lib/colony-registry";
+import { getQueenForAgent, slugToColonyId } from "@/lib/colony-registry";
 
 const makeId = () => Math.random().toString(36).slice(2, 9);
 
@@ -491,6 +491,10 @@ export default function QueenDM() {
           const isNew = (event.data?.is_new as boolean) ?? true;
           const skillName = (event.data?.skill_name as string) || "";
           if (!colonyName) break;
+          // ColonyContext keys colonies by slugToColonyId(slug), not by the
+          // raw snake_case directory name. Apply the same transform so the
+          // /colony/:colonyId route lookup in colony-chat.tsx resolves.
+          const routeId = slugToColonyId(colonyName);
           const msg: ChatMessage = {
             id: makeId(),
             agent: "System",
@@ -500,7 +504,7 @@ export default function QueenDM() {
               colony_name: colonyName,
               is_new: isNew,
               skill_name: skillName,
-              href: `/colony/${colonyName}`,
+              href: `/colony/${routeId}`,
             }),
             timestamp: "",
             type: "colony_link",

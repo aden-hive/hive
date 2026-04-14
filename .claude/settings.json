@@ -34,7 +34,9 @@
       "Bash(awk -F'::' '{print $1}')",
       "Bash(wait)",
       "Bash(pkill -f \"pytest.*test_event_loop_node\")",
-      "Bash(pkill -f \"pytest.*TestToolConcurrency\")"
+      "Bash(pkill -f \"pytest.*TestToolConcurrency\")",
+      "Bash(grep -n \"def.*discover\\\\|/api/agents\\\\|agents_discover\" /home/timothy/aden/hive/core/framework/server/*.py)",
+      "Bash(bun run:*)"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",
