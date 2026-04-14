@@ -83,6 +83,13 @@
           "max_context_tokens": 1048576
         },
         {
+          "id": "gemini-3.1-pro-preview-customtools",
+          "label": "Gemini 3.1 Pro (Custom Tools) - API key only",
+          "recommended": false,
+          "max_tokens": 32768,
+          "max_context_tokens": 1048576
+        },
+        {
           "id": "gemini-3-flash-preview",
           "label": "Gemini 3 Flash - Fast",
           "recommended": false,
@@ -475,6 +482,11 @@
           "id": "gemini-3.1-pro-preview",
           "label": "Gemini 3.1 Pro - Best quality",
           "recommended": true
+        },
+        {
+          "id": "gemini-3.1-pro-preview-customtools",
+          "label": "Gemini 3.1 Pro (Custom Tools) - API key only",
+          "recommended": false
         },
         {
           "id": "gemini-3-flash-preview",

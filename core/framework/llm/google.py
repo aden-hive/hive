@@ -164,6 +164,22 @@ def get_google_client_secret() -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _select_active_account(accounts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return the "current" account: most recently refreshed among enabled.
+
+    ``cmd_account_add`` appends a new account entry when the user signs in
+    with a different Google email, and leaves previous accounts enabled. If
+    we picked the first-enabled entry we'd keep using the old account (with
+    its stale cached project and exhausted rate-limit bucket) even after a
+    fresh re-auth. Tie-breaking on ``expires`` means whichever account was
+    most recently auth'd or refreshed wins.
+    """
+    enabled = [a for a in accounts if a.get("enabled", True) is not False]
+    if not enabled:
+        return accounts[0] if accounts else None
+    return max(enabled, key=lambda a: int(a.get("expires", 0) or 0))
+
+
 def _load_accounts_from_json() -> tuple[str | None, str | None, float]:
     """Read credentials from ``~/.hive/google-gemini-cli-accounts.json``.
 
@@ -179,11 +195,10 @@ def _load_accounts_from_json() -> tuple[str | None, str | None, float]:
         logger.debug("Failed to read Google Gemini CLI accounts file: %s", exc)
         return None, None, 0.0
 
-    accounts = data.get("accounts", [])
-    if not accounts:
+    account = _select_active_account(data.get("accounts", []))
+    if not account:
         return None, None, 0.0
 
-    account = next((a for a in accounts if a.get("enabled", True) is not False), accounts[0])
     refresh_str = account.get("refresh", "")
     refresh_token = refresh_str.split("|")[0] if refresh_str else None
 
@@ -197,6 +212,195 @@ def _load_accounts_from_json() -> tuple[str | None, str | None, float]:
         expires_at = 0.0
 
     return access_token, refresh_token, expires_at
+
+
+def _load_cached_project() -> str | None:
+    """Return the cached Code Assist project id for the active account, if any."""
+    if not _ACCOUNTS_FILE.exists():
+        return None
+    try:
+        with open(_ACCOUNTS_FILE, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return None
+    account = _select_active_account(data.get("accounts", []))
+    if not account:
+        return None
+    project = account.get("project")
+    return project if isinstance(project, str) and project else None
+
+
+def _save_cached_project(project_id: str) -> None:
+    """Persist the resolved Code Assist project id back into the accounts file."""
+    if not _ACCOUNTS_FILE.exists():
+        return
+    try:
+        with open(_ACCOUNTS_FILE, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.debug("Failed to read accounts file for project cache: %s", exc)
+        return
+    account = _select_active_account(data.get("accounts", []))
+    if not account:
+        return
+    if account.get("project") == project_id:
+        return
+    account["project"] = project_id
+    try:
+        with open(_ACCOUNTS_FILE, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+    except OSError as exc:
+        logger.debug("Failed to write cached project id: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Code Assist onboarding (loadCodeAssist → onboardUser → LRO poll)
+#
+# Required before the first :generateContent call on a fresh Google account.
+# Ported from google-gemini/gemini-cli/packages/core/src/code_assist/setup.ts.
+# ---------------------------------------------------------------------------
+
+_CLIENT_METADATA: dict[str, str] = {
+    "ideType": "IDE_UNSPECIFIED",
+    "platform": "PLATFORM_UNSPECIFIED",
+    "pluginType": "GEMINI",
+}
+
+_TIER_FREE = "free-tier"
+_TIER_LEGACY = "legacy-tier"
+_TIER_STANDARD = "standard-tier"
+
+
+def _code_assist_post(method: str, token: str, body: dict[str, Any]) -> dict[str, Any]:
+    """POST a Code Assist method (:loadCodeAssist, :onboardUser) and return JSON."""
+    import urllib.error  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    url = f"{_CLOUD_CODE_ASSIST_BASE_URL}:{method}"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        try:
+            err_body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            err_body = "(unreadable)"
+        raise RuntimeError(
+            f"Code Assist {method} HTTP {exc.code}: {err_body}"
+        ) from exc
+
+
+def _code_assist_get_operation(name: str, token: str) -> dict[str, Any]:
+    """GET a Code Assist long-running operation by its full resource name."""
+    import urllib.error  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    url = f"{_CLOUD_CODE_ASSIST_BASE_URL}/{name}"
+    req = urllib.request.Request(
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        try:
+            err_body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            err_body = "(unreadable)"
+        raise RuntimeError(
+            f"Code Assist getOperation HTTP {exc.code}: {err_body}"
+        ) from exc
+
+
+def _pick_onboard_tier(load_res: dict[str, Any]) -> str:
+    """Select the tier id to pass to :onboardUser from a :loadCodeAssist response."""
+    for tier in load_res.get("allowedTiers", []) or []:
+        if tier.get("isDefault"):
+            tid = tier.get("id")
+            if isinstance(tid, str) and tid:
+                return tid
+    return _TIER_LEGACY
+
+
+def _resolve_code_assist_project(token: str) -> str | None:
+    """Run the loadCodeAssist/onboardUser handshake and return the project id.
+
+    Mirrors gemini-cli's ``setupUser``:
+      1. POST :loadCodeAssist. If the response already carries a
+         ``cloudaicompanionProject`` and ``currentTier``, the account is
+         already onboarded and we return that project id.
+      2. Otherwise POST :onboardUser with the selected tier. For the
+         free tier, ``cloudaicompanionProject`` must be omitted from the
+         request body (not set to null), otherwise Google returns
+         "Precondition Failed".
+      3. Poll the returned long-running operation every 5 s until done and
+         extract ``response.cloudaicompanionProject.id``.
+
+    ``GOOGLE_CLOUD_PROJECT`` / ``GOOGLE_CLOUD_PROJECT_ID`` environment
+    variables act as a seed project id (used for non-free-tier onboards and
+    as a fallback if the LRO response omits a project).
+    """
+    seed_project = (
+        os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or os.environ.get("GOOGLE_CLOUD_PROJECT_ID")
+        or None
+    )
+
+    load_body: dict[str, Any] = {
+        "metadata": {**_CLIENT_METADATA},
+    }
+    if seed_project:
+        load_body["cloudaicompanionProject"] = seed_project
+        load_body["metadata"]["duetProject"] = seed_project
+
+    load_res = _code_assist_post("loadCodeAssist", token, load_body)
+
+    # Already onboarded: trust the server's project association.
+    current_tier = load_res.get("currentTier")
+    existing_project = (load_res.get("cloudaicompanionProject") or {})
+    if current_tier and isinstance(existing_project, dict) and existing_project.get("id"):
+        return existing_project["id"]
+    if current_tier and seed_project:
+        return seed_project
+
+    tier_id = _pick_onboard_tier(load_res)
+    onboard_body: dict[str, Any] = {
+        "tierId": tier_id,
+        "metadata": {**_CLIENT_METADATA},
+    }
+    if tier_id != _TIER_FREE and seed_project:
+        onboard_body["cloudaicompanionProject"] = seed_project
+        onboard_body["metadata"]["duetProject"] = seed_project
+
+    lro = _code_assist_post("onboardUser", token, onboard_body)
+    # LRO polling (5 s fixed interval, matches gemini-cli).
+    deadline = time.time() + 120.0
+    while not lro.get("done"):
+        op_name = lro.get("name")
+        if not op_name:
+            break
+        if time.time() > deadline:
+            raise RuntimeError("Code Assist onboardUser LRO timed out")
+        time.sleep(5.0)
+        lro = _code_assist_get_operation(op_name, token)
+
+    response = lro.get("response") or {}
+    project_obj = response.get("cloudaicompanionProject") or {}
+    project_id = project_obj.get("id") if isinstance(project_obj, dict) else None
+    if isinstance(project_id, str) and project_id:
+        return project_id
+    return seed_project
 
 
 def _do_token_refresh(refresh_token: str) -> tuple[str, float] | None:
@@ -383,16 +587,78 @@ def _parse_complete_response(raw: dict[str, Any], model: str) -> LLMResponse:
     )
 
 
+def _events_from_payload(
+    payload: dict[str, Any],
+    state: dict[str, Any],
+    on_thought_signature: Callable[[str, str], None] | None,
+) -> Iterator[StreamEvent]:
+    """Convert one Gemini response payload into StreamEvents.
+
+    ``state`` carries ``accumulated``, ``input_tokens``, ``output_tokens``,
+    and ``finish_reason`` across calls so the enclosing parser can emit the
+    final ``TextEndEvent``/``FinishEvent`` at the end of the stream.
+    """
+    usage = payload.get("usageMetadata", {})
+    if usage:
+        state["input_tokens"] = usage.get("promptTokenCount", state["input_tokens"])
+        state["output_tokens"] = usage.get("candidatesTokenCount", state["output_tokens"])
+
+    for candidate in payload.get("candidates", []):
+        fr = candidate.get("finishReason", "")
+        if fr:
+            state["finish_reason"] = fr
+
+        for part in candidate.get("content", {}).get("parts", []):
+            if "text" in part and not part.get("thought"):
+                delta: str = part["text"]
+                state["accumulated"] += delta
+                yield TextDeltaEvent(content=delta, snapshot=state["accumulated"])
+            elif "functionCall" in part:
+                fc: dict[str, Any] = part["functionCall"]
+                tool_use_id = fc.get("id") or str(uuid.uuid4())
+                thought_sig = part.get("thoughtSignature", "")
+                if thought_sig and on_thought_signature:
+                    on_thought_signature(tool_use_id, thought_sig)
+                args = fc.get("args", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {}
+                yield ToolCallEvent(
+                    tool_use_id=tool_use_id,
+                    tool_name=fc.get("name", ""),
+                    tool_input=args,
+                )
+
+
+def _new_stream_state() -> dict[str, Any]:
+    return {
+        "accumulated": "",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "finish_reason": "",
+    }
+
+
+def _final_stream_events(state: dict[str, Any], model: str) -> Iterator[StreamEvent]:
+    if state["accumulated"]:
+        yield TextEndEvent(full_text=state["accumulated"])
+    yield FinishEvent(
+        stop_reason=_map_finish_reason(state["finish_reason"]),
+        input_tokens=state["input_tokens"],
+        output_tokens=state["output_tokens"],
+        model=model,
+    )
+
+
 def _parse_sse_stream(
     response: Any,
     model: str,
     on_thought_signature: Callable[[str, str], None] | None = None,
 ) -> Iterator[StreamEvent]:
-    """Parse Gemini SSE response → StreamEvents."""
-    accumulated = ""
-    input_tokens = 0
-    output_tokens = 0
-    finish_reason = ""
+    """Parse Gemini SSE response → StreamEvents (used by the API-key path)."""
+    state = _new_stream_state()
 
     for raw_line in response:
         line: str = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
@@ -408,48 +674,51 @@ def _parse_sse_stream(
 
         # Gemini API returns directly; Antigravity wraps in {"response": ...}.
         payload: dict[str, Any] = data.get("response", data)
+        yield from _events_from_payload(payload, state, on_thought_signature)
 
-        usage = payload.get("usageMetadata", {})
-        if usage:
-            input_tokens = usage.get("promptTokenCount", input_tokens)
-            output_tokens = usage.get("candidatesTokenCount", output_tokens)
+    yield from _final_stream_events(state, model)
 
-        for candidate in payload.get("candidates", []):
-            fr = candidate.get("finishReason", "")
-            if fr:
-                finish_reason = fr
 
-            for part in candidate.get("content", {}).get("parts", []):
-                if "text" in part and not part.get("thought"):
-                    delta: str = part["text"]
-                    accumulated += delta
-                    yield TextDeltaEvent(content=delta, snapshot=accumulated)
-                elif "functionCall" in part:
-                    fc: dict[str, Any] = part["functionCall"]
-                    tool_use_id = fc.get("id") or str(uuid.uuid4())
-                    thought_sig = part.get("thoughtSignature", "")
-                    if thought_sig and on_thought_signature:
-                        on_thought_signature(tool_use_id, thought_sig)
-                    args = fc.get("args", {})
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except json.JSONDecodeError:
-                            args = {}
-                    yield ToolCallEvent(
-                        tool_use_id=tool_use_id,
-                        tool_name=fc.get("name", ""),
-                        tool_input=args,
-                    )
+def _parse_code_assist_json_stream(
+    response: Any,
+    model: str,
+    on_thought_signature: Callable[[str, str], None] | None = None,
+) -> Iterator[StreamEvent]:
+    """Parse a Code Assist streaming JSON-array response → StreamEvents.
 
-    if accumulated:
-        yield TextEndEvent(full_text=accumulated)
-    yield FinishEvent(
-        stop_reason=_map_finish_reason(finish_reason),
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        model=model,
-    )
+    ``cloudcode-pa.googleapis.com:streamGenerateContent`` does NOT return
+    server-sent events. It returns a JSON array that is flushed chunk by
+    chunk, e.g. ``[{...},\\n{...},\\n...]``. This parser peels complete
+    objects off a growing byte buffer using ``json.JSONDecoder.raw_decode``
+    and emits ``StreamEvent``s as soon as each object is complete.
+    """
+    state = _new_stream_state()
+    decoder = json.JSONDecoder()
+    buf = ""
+
+    while True:
+        chunk = response.read(4096)
+        if not chunk:
+            break
+        buf += chunk.decode("utf-8", errors="replace")
+
+        # Trim any leading array brackets / separators / whitespace.
+        while True:
+            buf = buf.lstrip(" \t\r\n,[")
+            if not buf or buf[0] == "]":
+                break
+            try:
+                obj, idx = decoder.raw_decode(buf)
+            except json.JSONDecodeError:
+                # Not enough data for a full object yet — wait for more.
+                break
+            buf = buf[idx:]
+
+            if isinstance(obj, dict):
+                payload: dict[str, Any] = obj.get("response", obj)
+                yield from _events_from_payload(payload, state, on_thought_signature)
+
+    yield from _final_stream_events(state, model)
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +731,13 @@ class _GoogleBaseProvider(LLMProvider):
 
     model: str
     _thought_sigs: dict[str, str]
+
+    # Streaming parser used by this provider. The default is the SSE parser
+    # for the public Gemini API; the Code Assist OAuth provider overrides
+    # this with a JSON-array parser because cloudcode-pa streams differently.
+    _stream_parser: Callable[..., Iterator[StreamEvent]] = staticmethod(
+        _parse_sse_stream
+    )
 
     def _get_auth_headers(self) -> dict[str, str]:
         raise NotImplementedError
@@ -602,7 +878,7 @@ class _GoogleBaseProvider(LLMProvider):
             try:
                 body = self._build_body(messages, system, tools, max_tokens)
                 http_resp = self._post(body, streaming=True)
-                for event in _parse_sse_stream(
+                for event in type(self)._stream_parser(
                     http_resp, self.model, self._thought_sigs.__setitem__
                 ):
                     loop.call_soon_threadsafe(queue.put_nowait, event)
@@ -663,6 +939,9 @@ class GoogleApiKeyProvider(_GoogleBaseProvider):
 class GoogleGeminiCliProvider(_GoogleBaseProvider):
     """Google Gemini provider authenticated with Google OAuth tokens."""
 
+    # cloudcode-pa streams as a JSON array, not server-sent events.
+    _stream_parser = staticmethod(_parse_code_assist_json_stream)
+
     def __init__(self, model: str = "gemini-3-flash-preview") -> None:
         if "/" in model:
             model = model.split("/", 1)[1]
@@ -671,6 +950,11 @@ class GoogleGeminiCliProvider(_GoogleBaseProvider):
         self._refresh_token: str | None = None
         self._token_expires_at: float = 0.0
         self._thought_sigs: dict[str, str] = {}
+        # Code Assist onboarding state. ``_project_id`` is lazily resolved via
+        # loadCodeAssist/onboardUser on the first request. ``_session_id`` is
+        # stable across calls on this instance (like one CLI session).
+        self._project_id: str | None = _load_cached_project()
+        self._session_id: str = str(uuid.uuid4())
         self._init_credentials()
 
     def _init_credentials(self) -> None:
@@ -682,6 +966,25 @@ class GoogleGeminiCliProvider(_GoogleBaseProvider):
 
     def has_credentials(self) -> bool:
         return bool(self._access_token or self._refresh_token)
+
+    def _ensure_project(self) -> str | None:
+        """Resolve the Code Assist project id for this account (cached)."""
+        if self._project_id:
+            return self._project_id
+        try:
+            token = self._ensure_token()
+        except Exception as exc:
+            logger.debug("Cannot resolve project without token: %s", exc)
+            return None
+        try:
+            project_id = _resolve_code_assist_project(token)
+        except Exception as exc:
+            logger.warning("Code Assist onboarding failed: %s", exc)
+            return None
+        if project_id:
+            self._project_id = project_id
+            _save_cached_project(project_id)
+        return project_id
 
     def _ensure_token(self) -> str:
         if (
@@ -733,10 +1036,20 @@ class GoogleGeminiCliProvider(_GoogleBaseProvider):
         if streaming:
             headers["Accept"] = "text/event-stream"
 
-        wrapped_body = {
-            "model": f"models/{model_id}",
-            "request": body,
+        # Code Assist requires a project binding (resolved via loadCodeAssist
+        # /onboardUser on first use) and a session_id inside the inner request.
+        project_id = self._ensure_project()
+        inner_request = dict(body)
+        inner_request["session_id"] = self._session_id
+
+        wrapped_body: dict[str, Any] = {
+            "model": model_id,
+            "user_prompt_id": str(uuid.uuid4()),
+            "request": inner_request,
         }
+        if project_id:
+            wrapped_body["project"] = project_id
+
         body_bytes = json.dumps(wrapped_body).encode("utf-8")
         max_retries = 3
         last_exc: Exception | None = None
