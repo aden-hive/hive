@@ -383,6 +383,11 @@ export default function QueenDM() {
           setIsTyping(true);
           setQueenReady(true);
           setActiveToolCalls({});
+          // Clear queued flag on all user messages now that the queen is processing
+          setMessages((prev) => {
+            if (!prev.some((m) => m.queued)) return prev;
+            return prev.map((m) => (m.queued ? { ...m, queued: undefined } : m));
+          });
           break;
 
         case "execution_completed":
@@ -540,6 +545,9 @@ export default function QueenDM() {
           const toolUseId = (event.data?.tool_use_id as string) || "";
           const sid = event.stream_id;
           const execId = event.execution_id || "exec";
+          const eventCreatedAt = event.timestamp
+            ? new Date(event.timestamp).getTime()
+            : Date.now();
 
           setActiveToolCalls((prev) => {
             const newActive = {
@@ -561,16 +569,29 @@ export default function QueenDM() {
               type: "tool_status",
               role: "queen",
               thread: "queen-dm",
-              createdAt: Date.now(),
+              createdAt: eventCreatedAt,
               nodeId: event.node_id || undefined,
               executionId: event.execution_id || undefined,
             };
             setMessages((prevMsgs) => {
               const idx = prevMsgs.findIndex((m) => m.id === msgId);
               if (idx >= 0) {
-                return prevMsgs.map((m, i) => (i === idx ? toolMsg : m));
+                return prevMsgs.map((m, i) =>
+                  i === idx ? { ...toolMsg, createdAt: m.createdAt ?? toolMsg.createdAt } : m,
+                );
               }
-              return [...prevMsgs, toolMsg];
+              // Insert in sorted position by createdAt
+              const ts = toolMsg.createdAt ?? Date.now();
+              let insertIdx = prevMsgs.length - 1;
+              while (insertIdx >= 0 && (prevMsgs[insertIdx].createdAt ?? 0) > ts) {
+                insertIdx--;
+              }
+              if (insertIdx === -1 || insertIdx === prevMsgs.length - 1) {
+                return [...prevMsgs, toolMsg];
+              }
+              const next = [...prevMsgs];
+              next.splice(insertIdx + 1, 0, toolMsg);
+              return next;
             });
             return newActive;
           });
@@ -581,6 +602,9 @@ export default function QueenDM() {
           const toolUseId = (event.data?.tool_use_id as string) || "";
           const sid = event.stream_id;
           const execId = event.execution_id || "exec";
+          const eventCreatedAt = event.timestamp
+            ? new Date(event.timestamp).getTime()
+            : Date.now();
 
           setActiveToolCalls((prev) => {
             const updated = { ...prev };
@@ -602,16 +626,29 @@ export default function QueenDM() {
               type: "tool_status",
               role: "queen",
               thread: "queen-dm",
-              createdAt: Date.now(),
+              createdAt: eventCreatedAt,
               nodeId: event.node_id || undefined,
               executionId: event.execution_id || undefined,
             };
             setMessages((prevMsgs) => {
               const idx = prevMsgs.findIndex((m) => m.id === msgId);
               if (idx >= 0) {
-                return prevMsgs.map((m, i) => (i === idx ? toolMsg : m));
+                return prevMsgs.map((m, i) =>
+                  i === idx ? { ...toolMsg, createdAt: m.createdAt ?? toolMsg.createdAt } : m,
+                );
               }
-              return [...prevMsgs, toolMsg];
+              // Insert in sorted position by createdAt
+              const ts = toolMsg.createdAt ?? Date.now();
+              let insertIdx = prevMsgs.length - 1;
+              while (insertIdx >= 0 && (prevMsgs[insertIdx].createdAt ?? 0) > ts) {
+                insertIdx--;
+              }
+              if (insertIdx === -1 || insertIdx === prevMsgs.length - 1) {
+                return [...prevMsgs, toolMsg];
+              }
+              const next = [...prevMsgs];
+              next.splice(insertIdx + 1, 0, toolMsg);
+              return next;
             });
             return updated;
           });
@@ -641,6 +678,7 @@ export default function QueenDM() {
         setPendingOptions(null);
       }
 
+      const isQueenBusy = isTyping || isStreaming;
       const userMsg: ChatMessage = {
         id: makeId(),
         agent: "You",
@@ -651,6 +689,7 @@ export default function QueenDM() {
         thread: "queen-dm",
         createdAt: Date.now(),
         images,
+        queued: isQueenBusy || undefined,
       };
       setMessages((prev) => [...prev, userMsg]);
       setIsTyping(true);
@@ -662,7 +701,7 @@ export default function QueenDM() {
         });
       }
     },
-    [sessionId, awaitingInput],
+    [sessionId, awaitingInput, isTyping, isStreaming],
   );
 
   const handleQuestionAnswer = useCallback(
@@ -695,6 +734,12 @@ export default function QueenDM() {
       await executionApi.cancelQueen(sessionId);
       setIsTyping(false);
       setIsStreaming(false);
+      setActiveToolCalls({});
+      // Clear queued flags since the queen is now idle
+      setMessages((prev) => {
+        if (!prev.some((m) => m.queued)) return prev;
+        return prev.map((m) => (m.queued ? { ...m, queued: undefined } : m));
+      });
     } catch {
       // ignore
     }

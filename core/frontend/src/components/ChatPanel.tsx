@@ -56,6 +56,8 @@ export interface ChatMessage {
   nodeId?: string;
   /** Backend execution_id for this message */
   executionId?: string;
+  /** True when the message was sent while the queen was still processing */
+  queued?: boolean;
 }
 
 interface ChatPanelProps {
@@ -289,7 +291,9 @@ const MessageBubble = memo(
     if (isUser) {
       return (
         <div className="flex justify-end">
-          <div className="max-w-[75%] bg-primary text-primary-foreground text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3">
+          <div
+            className={`max-w-[75%] bg-primary text-primary-foreground text-sm leading-relaxed rounded-2xl rounded-br-md px-4 py-3${msg.queued ? " animate-pulse opacity-80" : ""}`}
+          >
             {msg.images && msg.images.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
                 {msg.images.map((img, i) => (
@@ -304,6 +308,11 @@ const MessageBubble = memo(
             )}
             {msg.content && (
               <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+            )}
+            {msg.queued && (
+              <span className="block text-[10px] opacity-60 mt-1 text-right">
+                queued
+              </span>
             )}
           </div>
         </div>

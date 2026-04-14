@@ -2800,9 +2800,34 @@ class AgentLoop(AgentProtocol):
                 # gather(return_exceptions=True) captures CancelledError
                 # as a return value instead of propagating it.  Re-raise
                 # so stop_worker actually stops the execution.
+                # Distinguish cancel_current_turn() (cancels only _tool_task)
+                # from stop_worker (cancels the parent execution task).
+                # When the parent itself is cancelled, cancelling() > 0 —
+                # propagate.  Otherwise convert to TurnCancelled so the
+                # queen event loop continues.
                 for entry in timed_results:
                     if isinstance(entry, asyncio.CancelledError):
-                        raise entry
+                        task = asyncio.current_task()
+                        if task and task.cancelling() > 0:
+                            raise entry
+                        # Add stub tool results for all pending tools so the
+                        # conversation doesn't have dangling tool_use blocks.
+                        for _tc in pending_real:
+                            await conversation.add_tool_result(
+                                tool_use_id=_tc.tool_use_id,
+                                content="[Tool call cancelled by user]",
+                                is_error=True,
+                            )
+                            await self._publish_tool_completed(
+                                stream_id,
+                                node_id,
+                                _tc.tool_use_id,
+                                _tc.tool_name,
+                                "[Tool call cancelled by user]",
+                                is_error=True,
+                                execution_id=execution_id,
+                            )
+                        raise TurnCancelled() from None
                 for tc, entry in zip(pending_real, timed_results, strict=True):
                     if isinstance(entry, BaseException):
                         raw = entry

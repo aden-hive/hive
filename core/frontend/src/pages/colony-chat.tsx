@@ -312,7 +312,19 @@ export default function ColonyChat() {
             return prev.map((m, i) => (i === lastIdx ? { ...m, id: chatMsg.id } : m));
           }
         }
-        return [...prev, chatMsg];
+        // Insert in sorted position by createdAt so tool pills and queen
+        // messages interleave correctly when multiple arrive out of order.
+        const ts = chatMsg.createdAt ?? Date.now();
+        let insertIdx = prev.length - 1;
+        while (insertIdx >= 0 && (prev[insertIdx].createdAt ?? 0) > ts) {
+          insertIdx--;
+        }
+        if (insertIdx === -1 || insertIdx === prev.length - 1) {
+          return [...prev, chatMsg];
+        }
+        const next = [...prev];
+        next.splice(insertIdx + 1, 0, chatMsg);
+        return next;
       });
     },
     [],
