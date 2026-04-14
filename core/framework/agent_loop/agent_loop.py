@@ -2722,9 +2722,18 @@ class AgentLoop(AgentProtocol):
             real_tool_results: list[dict] = []
             limit_hit = False
             executed_in_batch = 0
-            hard_limit = int(
-                self._config.max_tool_calls_per_turn * (1 + self._config.tool_call_overflow_margin)
-            )
+            # hard_limit <= 0 disables the per-turn cap entirely. Some
+            # models routinely emit 50+ tool calls per turn during wide
+            # fan-out scenarios (browser exploration, bulk code reads);
+            # capping them strands work mid-turn and the next turn just
+            # re-emits the discarded calls, which is strictly worse.
+            if self._config.max_tool_calls_per_turn > 0:
+                hard_limit = int(
+                    self._config.max_tool_calls_per_turn
+                    * (1 + self._config.tool_call_overflow_margin)
+                )
+            else:
+                hard_limit = 0  # disabled
 
             # Phase 1: triage — handle framework tools immediately,
             # queue real tools for parallel execution.
@@ -2736,7 +2745,7 @@ class AgentLoop(AgentProtocol):
 
             for tc in tool_calls:
                 tool_call_count += 1
-                if tool_call_count > hard_limit:
+                if hard_limit > 0 and tool_call_count > hard_limit:
                     limit_hit = True
                     break
                 executed_in_batch += 1

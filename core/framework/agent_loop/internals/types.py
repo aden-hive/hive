@@ -49,7 +49,13 @@ class LoopConfig:
     """Configuration for the event loop."""
 
     max_iterations: int = 50
-    max_tool_calls_per_turn: int = 30
+    # 0 (or any non-positive value) disables the per-turn hard limit,
+    # letting a single assistant turn fan out arbitrarily many tool
+    # calls. Models like Gemini 3.1 Pro routinely emit 40-80 tool
+    # calls in one turn during browser exploration; capping them
+    # strands work half-finished and makes the next turn repeat the
+    # discarded calls, which is worse than just running them.
+    max_tool_calls_per_turn: int = 0
     judge_every_n_turns: int = 1
     stall_detection_threshold: int = 3
     stall_similarity_threshold: float = 0.85
@@ -67,8 +73,10 @@ class LoopConfig:
     compaction_warning_buffer_tokens: int = 12_000
     store_prefix: str = ""
 
-    # Overflow margin for max_tool_calls_per_turn. Tool calls are only
-    # discarded when the count exceeds max_tool_calls_per_turn * (1 + margin).
+    # Overflow margin for max_tool_calls_per_turn. When the limit is
+    # enabled (>0), tool calls are only discarded when the count
+    # exceeds max_tool_calls_per_turn * (1 + margin). Ignored when
+    # max_tool_calls_per_turn is 0.
     tool_call_overflow_margin: float = 0.5
 
     # Tool result context management.
