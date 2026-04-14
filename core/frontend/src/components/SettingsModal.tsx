@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Eye, EyeOff, Check, Trash2, ChevronDown, Zap, ThumbsUp } from "lucide-react";
+import { X, Eye, EyeOff, Check, Pencil, ChevronDown, Zap, ThumbsUp, Loader2, AlertCircle } from "lucide-react";
 import { useColony } from "@/context/ColonyContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useModel, LLM_PROVIDERS } from "@/context/ModelContext";
+import { credentialsApi } from "@/api/credentials";
 import type { ModelOption } from "@/api/config";
 
 interface SettingsModalProps {
@@ -21,7 +22,6 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
     availableModels,
     setModel,
     saveProviderKey,
-    removeProviderKey,
     subscriptions,
     detectedSubscriptions,
     activeSubscription,
@@ -39,6 +39,11 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
   const [keyInput, setKeyInput] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Validation state per provider: "validating" | {valid, message}
+  const [validation, setValidation] = useState<
+    Record<string, "validating" | { valid: boolean | null; message: string }>
+  >({});
 
   // Model selection state
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
@@ -75,26 +80,71 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
   };
 
   const handleSaveKey = async (providerId: string) => {
-    if (!keyInput.trim()) return;
+    const trimmedKey = keyInput.trim();
+    if (!trimmedKey) return;
     setSaving(true);
+    setValidation((v) => ({ ...v, [providerId]: "validating" }));
+
+    // Validate first — only persist the key if validation passes or is inconclusive.
+    const validateResult = await credentialsApi
+      .validateKey(providerId, trimmedKey)
+      .catch(() => ({ valid: null as boolean | null, message: "Could not verify key" }));
+
+    if (validateResult.valid === false) {
+      // Key is definitively invalid — don't save it.
+      setSaving(false);
+      setValidation((v) => ({
+        ...v,
+        [providerId]: { valid: false, message: validateResult.message },
+      }));
+      setTimeout(() => {
+        setValidation((v) => {
+          const next = { ...v };
+          delete next[providerId];
+          return next;
+        });
+      }, 4000);
+      return;
+    }
+
+    // Validation passed or was inconclusive — save the key.
     try {
-      await saveProviderKey(providerId, keyInput.trim());
-      setEditingProvider(null);
-      setKeyInput("");
-      setShowKey(false);
+      await saveProviderKey(providerId, trimmedKey);
     } catch (err) {
       console.error("Failed to save key:", err);
-    } finally {
       setSaving(false);
+      setValidation((v) => ({
+        ...v,
+        [providerId]: { valid: false, message: "Failed to save key" },
+      }));
+      setTimeout(() => {
+        setValidation((v) => {
+          const next = { ...v };
+          delete next[providerId];
+          return next;
+        });
+      }, 4000);
+      return;
     }
-  };
 
-  const handleRemoveKey = async (providerId: string) => {
-    try {
-      await removeProviderKey(providerId);
-    } catch (err) {
-      console.error("Failed to remove key:", err);
-    }
+    setSaving(false);
+    setEditingProvider(null);
+    setKeyInput("");
+    setShowKey(false);
+
+    setValidation((v) => ({
+      ...v,
+      [providerId]: { valid: validateResult.valid, message: validateResult.message },
+    }));
+
+    // Auto-clear validation result after 4s
+    setTimeout(() => {
+      setValidation((v) => {
+        const next = { ...v };
+        delete next[providerId];
+        return next;
+      });
+    }, 4000);
   };
 
   const handleSelectModel = async (provider: string, modelId: string) => {
@@ -391,6 +441,7 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                     {LLM_PROVIDERS.map((provider) => {
                       const isConnected = connectedProviders.has(provider.id);
                       const isEditing = editingProvider === provider.id;
+                      const providerValidation = validation[provider.id];
 
                       return (
                         <div key={provider.id}>
@@ -415,16 +466,37 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
                             {/* Action */}
                             {isConnected && !isEditing ? (
                               <div className="flex items-center gap-2">
-                                <span className="flex items-center gap-1 text-xs text-green-500 font-medium">
-                                  <Check className="w-3 h-3" />
-                                  Connected
-                                </span>
+                                {providerValidation === "validating" ? (
+                                  <span className="flex items-center gap-1 text-xs text-muted-foreground font-medium">
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    Verifying...
+                                  </span>
+                                ) : providerValidation && typeof providerValidation === "object" && providerValidation.valid === false ? (
+                                  <span className="flex items-center gap-1 text-xs text-red-400 font-medium" title={providerValidation.message}>
+                                    <AlertCircle className="w-3 h-3" />
+                                    Invalid key
+                                  </span>
+                                ) : providerValidation && typeof providerValidation === "object" && providerValidation.valid === true ? (
+                                  <span className="flex items-center gap-1 text-xs text-green-500 font-medium">
+                                    <Check className="w-3 h-3" />
+                                    Verified
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center gap-1 text-xs text-green-500 font-medium">
+                                    <Check className="w-3 h-3" />
+                                    Connected
+                                  </span>
+                                )}
                                 <button
-                                  onClick={() => handleRemoveKey(provider.id)}
-                                  className="p-1 rounded text-muted-foreground/40 hover:text-red-400 transition-colors"
-                                  title="Remove key"
+                                  onClick={() => {
+                                    setEditingProvider(provider.id);
+                                    setKeyInput("");
+                                    setShowKey(false);
+                                  }}
+                                  className="p-1 rounded text-muted-foreground/40 hover:text-foreground transition-colors"
+                                  title="Change key"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <Pencil className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             ) : !isEditing ? (
@@ -443,50 +515,65 @@ export default function SettingsModal({ open, onClose, initialSection }: Setting
 
                           {/* Inline key entry */}
                           {isEditing && (
-                            <div className="ml-12 mr-2 mb-2 flex items-center gap-2">
-                              <div className="relative flex-1">
-                                <input
-                                  type={showKey ? "text" : "password"}
-                                  value={keyInput}
-                                  onChange={(e) => setKeyInput(e.target.value)}
-                                  placeholder={`Enter ${provider.name} API key`}
-                                  autoFocus
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") handleSaveKey(provider.id);
-                                    if (e.key === "Escape") {
-                                      setEditingProvider(null);
-                                      setKeyInput("");
-                                    }
-                                  }}
-                                  className="w-full bg-muted/30 border border-border/50 rounded-lg px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 font-mono"
-                                />
+                            <div className="ml-12 mr-2 mb-2 flex flex-col gap-1.5">
+                              <div className="flex items-center gap-2">
+                                <div className="relative flex-1">
+                                  <input
+                                    type={showKey ? "text" : "password"}
+                                    value={keyInput}
+                                    onChange={(e) => setKeyInput(e.target.value)}
+                                    placeholder={`Enter ${provider.name} API key`}
+                                    autoFocus
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") handleSaveKey(provider.id);
+                                      if (e.key === "Escape") {
+                                        setEditingProvider(null);
+                                        setKeyInput("");
+                                      }
+                                    }}
+                                    className="w-full bg-muted/30 border border-border/50 rounded-lg px-3 py-2 pr-9 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 font-mono"
+                                  />
+                                  <button
+                                    onClick={() => setShowKey(!showKey)}
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground transition-colors"
+                                  >
+                                    {showKey ? (
+                                      <EyeOff className="w-3.5 h-3.5" />
+                                    ) : (
+                                      <Eye className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                </div>
                                 <button
-                                  onClick={() => setShowKey(!showKey)}
-                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground transition-colors"
+                                  onClick={() => handleSaveKey(provider.id)}
+                                  disabled={!keyInput.trim() || saving}
+                                  className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                  {showKey ? (
-                                    <EyeOff className="w-3.5 h-3.5" />
-                                  ) : (
-                                    <Eye className="w-3.5 h-3.5" />
-                                  )}
+                                  {saving ? "..." : "Save"}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingProvider(null);
+                                    setKeyInput("");
+                                  }}
+                                  className="px-3 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
+                                >
+                                  Cancel
                                 </button>
                               </div>
-                              <button
-                                onClick={() => handleSaveKey(provider.id)}
-                                disabled={!keyInput.trim() || saving}
-                                className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {saving ? "..." : "Save"}
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setEditingProvider(null);
-                                  setKeyInput("");
-                                }}
-                                className="px-3 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/30 transition-colors"
-                              >
-                                Cancel
-                              </button>
+                              {/* Validation feedback inside editing mode */}
+                              {providerValidation === "validating" && (
+                                <span className="flex items-center gap-1 text-xs text-muted-foreground font-medium">
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  Verifying...
+                                </span>
+                              )}
+                              {providerValidation && typeof providerValidation === "object" && providerValidation.valid === false && (
+                                <span className="flex items-center gap-1 text-xs text-red-400 font-medium">
+                                  <AlertCircle className="w-3 h-3" />
+                                  {providerValidation.message}
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>

@@ -973,11 +973,20 @@ class AgentLoop(AgentProtocol):
                                 error=str(e)[:500],
                                 execution_id=execution_id,
                             )
-                        # Inject the error as an assistant message so the
-                        # user sees it, then block for their next message.
-                        await conversation.add_assistant_message(
-                            f"[Error: {error_msg}. Please try again.]"
-                        )
+                        # Emit the error via SSE so the frontend renders
+                        # it in the chat, then persist it in the conversation.
+                        visible_error = f"[Error: {error_msg}. Please try again.]"
+                        if self._event_bus and ctx.emits_client_io:
+                            await self._event_bus.emit_client_output_delta(
+                                stream_id=stream_id,
+                                node_id=node_id,
+                                content=visible_error,
+                                snapshot=visible_error,
+                                execution_id=execution_id,
+                                iteration=iteration,
+                                inner_turn=0,
+                            )
+                        await conversation.add_assistant_message(visible_error)
                         await self._await_user_input(ctx, prompt="")
                         _llm_turn_failed_waiting_input = True
                         break  # exit retry loop, continue outer iteration
