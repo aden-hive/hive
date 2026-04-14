@@ -467,6 +467,22 @@ async def execute_tool(
             result = await _run()
     except TimeoutError:
         logger.warning("Tool '%s' timed out after %.0fs", tc.tool_name, timeout)
+        # asyncio.wait_for cancels the awaiting coroutine, but the sync
+        # executor running inside run_in_executor keeps going — and so
+        # does any MCP subprocess it is blocked on. Reach through to the
+        # owning MCPClient and force-disconnect it so the subprocess is
+        # torn down. Next call_tool triggers a reconnect. Without this
+        # the executor thread and MCP child leak on every timeout.
+        kill_for_tool = getattr(tool_executor, "kill_for_tool", None)
+        if callable(kill_for_tool):
+            try:
+                await asyncio.to_thread(kill_for_tool, tc.tool_name)
+            except Exception as exc:  # defensive — never let cleanup crash the loop
+                logger.warning(
+                    "kill_for_tool('%s') raised during timeout handling: %s",
+                    tc.tool_name,
+                    exc,
+                )
         return ToolResult(
             tool_use_id=tc.tool_use_id,
             content=(

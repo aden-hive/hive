@@ -702,14 +702,27 @@ class Orchestrator:
         self.logger.info(f"   Goal: {goal.description}")
         self.logger.info(f"   Entry node: {graph.entry_node}")
 
-        # Set per-execution data_dir so data tools and spillover files
-        # share the same session-scoped directory.
+        # Set per-execution data_dir and agent_id so data tools and
+        # spillover files share the same session-scoped directory, and
+        # so MCP tools whose server-side schemas mark agent_id as a
+        # required field (list_dir, hashline_edit, replace_file_content,
+        # execute_command_tool, …) get a valid value injected even on
+        # registry instances where agent_loader.setup() didn't populate
+        # the session_context. Without this, FastMCP rejects those
+        # calls with "agent_id is a required property".
         _ctx_token = None
         if self._storage_path:
             from framework.loader.tool_registry import ToolRegistry
 
             _ctx_token = ToolRegistry.set_execution_context(
                 data_dir=str(self._storage_path / "data"),
+                agent_id=graph.id,
+            )
+        else:
+            from framework.loader.tool_registry import ToolRegistry
+
+            _ctx_token = ToolRegistry.set_execution_context(
+                agent_id=graph.id,
             )
 
         try:

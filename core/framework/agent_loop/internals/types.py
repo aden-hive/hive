@@ -49,15 +49,34 @@ class LoopConfig:
     """Configuration for the event loop."""
 
     max_iterations: int = 50
-    max_tool_calls_per_turn: int = 30
+    # 0 (or any non-positive value) disables the per-turn hard limit,
+    # letting a single assistant turn fan out arbitrarily many tool
+    # calls. Models like Gemini 3.1 Pro routinely emit 40-80 tool
+    # calls in one turn during browser exploration; capping them
+    # strands work half-finished and makes the next turn repeat the
+    # discarded calls, which is worse than just running them.
+    max_tool_calls_per_turn: int = 0
     judge_every_n_turns: int = 1
     stall_detection_threshold: int = 3
     stall_similarity_threshold: float = 0.85
     max_context_tokens: int = 32_000
+    # Headroom reserved for the NEXT turn's input + output so that
+    # proactive compaction always finishes before the hard context limit
+    # is hit mid-stream. Scaled to match Claude Code's 13k-buffer-on-
+    # 200k-window ratio (~6.5%) applied to hive's default 32k window,
+    # with extra margin because hive's token estimator is char-based
+    # and less tight than Anthropic's own counting. Override via
+    # LoopConfig for larger windows.
+    compaction_buffer_tokens: int = 8_000
+    # Warning is emitted one buffer earlier so the user/telemetry gets
+    # a "we're close" signal without triggering a compaction pass.
+    compaction_warning_buffer_tokens: int = 12_000
     store_prefix: str = ""
 
-    # Overflow margin for max_tool_calls_per_turn. Tool calls are only
-    # discarded when the count exceeds max_tool_calls_per_turn * (1 + margin).
+    # Overflow margin for max_tool_calls_per_turn. When the limit is
+    # enabled (>0), tool calls are only discarded when the count
+    # exceeds max_tool_calls_per_turn * (1 + margin). Ignored when
+    # max_tool_calls_per_turn is 0.
     tool_call_overflow_margin: float = 0.5
 
     # Tool result context management.
@@ -71,6 +90,13 @@ class LoopConfig:
     max_stream_retries: int = 5
     stream_retry_backoff_base: float = 2.0
     stream_retry_max_delay: float = 60.0
+    # Persistent retry for capacity-class errors (429, 529, overloaded).
+    # Unlike the bounded retry above, these keep trying until the wall-clock
+    # budget below is exhausted — modelled after claude-code's withRetry.
+    # The loop still publishes a retry event each attempt so the UI can
+    # see progress. Set to 0 to disable and fall back to bounded retry.
+    capacity_retry_max_seconds: float = 600.0
+    capacity_retry_max_delay: float = 60.0
 
     # Tool doom loop detection.
     tool_doom_loop_threshold: int = 3
@@ -86,6 +112,14 @@ class LoopConfig:
 
     # Per-tool-call timeout.
     tool_call_timeout_seconds: float = 60.0
+
+    # LLM stream inactivity watchdog. If no stream event (delta, tool call,
+    # finish) arrives within this many seconds, the stream task is cancelled
+    # and a transient error is raised so the retry loop can back off and
+    # reconnect. Prevents agents from hanging forever on a silently dead
+    # HTTP connection (no provider heartbeat, no exception, just silence).
+    # Set to 0 to disable.
+    llm_stream_inactivity_timeout_seconds: float = 120.0
 
     # Subagent delegation timeout (wall-clock max).
     subagent_timeout_seconds: float = 3600.0

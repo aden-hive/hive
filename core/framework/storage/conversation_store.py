@@ -29,6 +29,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from framework.utils.io import atomic_write
+
 
 class FileConversationStore:
     """File-per-part ConversationStore.
@@ -45,8 +47,10 @@ class FileConversationStore:
     # --- sync helpers --------------------------------------------------------
 
     def _write_json(self, path: Path, data: dict) -> None:
+        # Atomic tmp+rename with fsync — a crash mid-write would otherwise
+        # leave a corrupt cursor.json and silently reset the iteration counter.
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        with atomic_write(path) as f:
             json.dump(data, f)
 
     def _read_json(self, path: Path) -> dict | None:

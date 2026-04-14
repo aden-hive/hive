@@ -166,13 +166,24 @@ async def handle_events(request: web.Request) -> web.StreamResponse:
     # Replay buffered events that were published before this SSE connected.
     # The EventBus keeps a history ring-buffer; we replay the subset that
     # produces visible chat messages so the frontend never misses early
-    # queen output.  Lifecycle events are NOT replayed to avoid duplicate
-    # state transitions (turn counter increments, etc.).
+    # queen output.  Execution/node lifecycle events are NOT replayed to
+    # avoid duplicate state transitions (turn counter increments, etc.).
+    #
+    # Trigger lifecycle events ARE replayed: they're idempotent state
+    # setters (this trigger exists / is active / was deactivated) and
+    # they're published during session load — BEFORE the frontend's
+    # SSE subscription is established. Without replay, a freshly-opened
+    # colony would never see its own triggers.
     _REPLAY_TYPES = {
         EventType.CLIENT_OUTPUT_DELTA.value,
         EventType.EXECUTION_STARTED.value,
         EventType.CLIENT_INPUT_REQUESTED.value,
         EventType.CLIENT_INPUT_RECEIVED.value,
+        EventType.TRIGGER_AVAILABLE.value,
+        EventType.TRIGGER_ACTIVATED.value,
+        EventType.TRIGGER_DEACTIVATED.value,
+        EventType.TRIGGER_REMOVED.value,
+        EventType.TRIGGER_UPDATED.value,
     }
     event_type_values = {et.value for et in event_types}
     replay_types = _REPLAY_TYPES & event_type_values

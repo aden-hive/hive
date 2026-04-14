@@ -20,7 +20,12 @@ Your existing Chrome browser
 - Each subagent → one `chrome.tabGroups` entry, colour-coded in your tab bar
 - `context.destroy` closes the group's tabs; Chrome stays alive
 
-## Install (unpacked extension)
+## Install
+
+Install from the Chrome Web Store:
+https://chromewebstore.google.com/detail/hive-browser-bridge/jkpcegnbfimimjodblcemoheedidnppm
+
+### Developer install (unpacked)
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**

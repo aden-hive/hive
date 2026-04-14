@@ -467,8 +467,11 @@ class MCPClient:
             )
 
         if self.config.transport == "stdio":
-            with self._stdio_call_lock:
-                return self._run_async(self._call_tool_stdio_async(tool_name, arguments))
+            def _stdio_call() -> Any:
+                with self._stdio_call_lock:
+                    return self._run_async(self._call_tool_stdio_async(tool_name, arguments))
+
+            return self._call_tool_with_retry(_stdio_call)
         elif self.config.transport == "sse":
             return self._call_tool_with_retry(
                 lambda: self._run_async(self._call_tool_stdio_async(tool_name, arguments))
@@ -478,10 +481,70 @@ class MCPClient:
         else:
             return self._call_tool_http(tool_name, arguments)
 
+    # Exceptions that indicate the STDIO session/subprocess is dead and
+    # needs a fresh connect(). Keep this narrow — we don't want to mask
+    # tool-level errors as transport errors.
+    _STDIO_DEAD_SESSION_ERRORS = (
+        BrokenPipeError,
+        ConnectionError,
+        ConnectionResetError,
+        EOFError,
+    )
+
+    def _is_stdio_dead_session_error(self, exc: BaseException) -> bool:
+        if isinstance(exc, self._STDIO_DEAD_SESSION_ERRORS):
+            return True
+        # mcp SDK frequently wraps transport errors in RuntimeError with a
+        # readable message — match on the common signals.
+        if isinstance(exc, RuntimeError):
+            msg = str(exc).lower()
+            for needle in (
+                "broken pipe",
+                "connection closed",
+                "connection reset",
+                "stream closed",
+                "session not initialized",
+                "transport closed",
+                "anyio.closedresourceerror",
+                "read operation was cancelled",
+            ):
+                if needle in msg:
+                    return True
+        return False
+
     def _call_tool_with_retry(self, call: Any) -> Any:
-        """Retry transient MCP transport failures once after reconnecting."""
+        """Retry once after reconnecting when the transport looks dead.
+
+        Applies to all transports:
+        - **stdio**: if the subprocess died (broken pipe, closed stream,
+          session not initialized), tear it down and start a fresh one.
+        - **sse / unix / http** (httpx-backed): same treatment for
+          ``httpx.ConnectError`` / ``httpx.ReadTimeout``.
+        """
         if self.config.transport == "stdio":
-            return call()
+            try:
+                return call()
+            except BaseException as original_error:
+                if not self._is_stdio_dead_session_error(original_error):
+                    raise
+                logger.warning(
+                    "Retrying MCP STDIO tool call after dead-session signal from '%s': %s",
+                    self.config.name,
+                    original_error,
+                )
+                try:
+                    self._reconnect()
+                except Exception as reconnect_error:
+                    logger.warning(
+                        "Reconnect failed for MCP STDIO server '%s': %s",
+                        self.config.name,
+                        reconnect_error,
+                    )
+                    raise original_error from reconnect_error
+                try:
+                    return call()
+                except BaseException as retry_error:
+                    raise original_error from retry_error
 
         if self.config.transport not in {"unix", "sse"}:
             return call()

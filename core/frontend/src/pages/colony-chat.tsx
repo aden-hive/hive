@@ -2,25 +2,18 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { Loader2, WifiOff, KeyRound, FolderOpen, X } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
-import DraftGraph from "@/components/DraftGraph";
+import TriggersPanel from "@/components/TriggersPanel";
+import TriggerDetailPanel from "@/components/TriggerDetailPanel";
 import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
-import NodeDetailPanel from "@/components/NodeDetailPanel";
 import CredentialsModal, {
   type Credential,
   clearCredentialCache,
 } from "@/components/CredentialsModal";
 import { executionApi } from "@/api/execution";
-import { workersApi } from "@/api/workers";
 import { sessionsApi } from "@/api/sessions";
 import { useMultiSSE } from "@/hooks/use-sse";
-import type {
-  LiveSession,
-  AgentEvent,
-  NodeSpec,
-  DraftGraph as DraftGraphData,
-} from "@/api/types";
+import type { LiveSession, AgentEvent } from "@/api/types";
 import { sseEventToChatMessage, formatAgentDisplayName } from "@/lib/chat-helpers";
-import { topologyToGraphNodes } from "@/lib/graph-converter";
 import { cronToLabel } from "@/lib/graphUtils";
 import { ApiError } from "@/api/client";
 import { useColony } from "@/context/ColonyContext";
@@ -48,8 +41,6 @@ function truncate(s: string, max: number): string {
 type SessionRestoreResult = {
   messages: ChatMessage[];
   restoredPhase: "planning" | "building" | "staging" | "running" | "independent" | null;
-  flowchartMap: Record<string, string[]> | null;
-  originalDraft: DraftGraphData | null;
 };
 
 async function restoreSessionMessages(
@@ -62,8 +53,6 @@ async function restoreSessionMessages(
     if (events.length > 0) {
       const messages: ChatMessage[] = [];
       let runningPhase: ChatMessage["phase"] = undefined;
-      let flowchartMap: Record<string, string[]> | null = null;
-      let originalDraft: DraftGraphData | null = null;
       for (const evt of events) {
         const p =
           evt.type === "queen_phase_changed"
@@ -74,14 +63,6 @@ async function restoreSessionMessages(
         if (p && ["planning", "building", "staging", "running"].includes(p)) {
           runningPhase = p as ChatMessage["phase"];
         }
-        if (evt.type === "custom" && (evt.data as Record<string, unknown>)?.event === "flowchart_updated" && evt.data) {
-          const mapData = evt.data as {
-            map?: Record<string, string[]>;
-            original_draft?: DraftGraphData;
-          };
-          flowchartMap = mapData.map ?? null;
-          originalDraft = mapData.original_draft ?? null;
-        }
         const msg = sseEventToChatMessage(evt, thread, agentDisplayName);
         if (!msg) continue;
         if (evt.stream_id === "queen") {
@@ -90,12 +71,12 @@ async function restoreSessionMessages(
         }
         messages.push(msg);
       }
-      return { messages, restoredPhase: runningPhase ?? null, flowchartMap, originalDraft };
+      return { messages, restoredPhase: runningPhase ?? null };
     }
   } catch {
     // Event log not available
   }
-  return { messages: [], restoredPhase: null, flowchartMap: null, originalDraft: null };
+  return { messages: [], restoredPhase: null };
 }
 
 // ── Agent backend state ──────────────────────────────────────────────────────
@@ -107,18 +88,10 @@ interface AgentState {
   queenReady: boolean;
   error: string | null;
   displayName: string | null;
-  colonyId: string | null;  nodeSpecs: NodeSpec[];
   awaitingInput: boolean;
   workerInputMessageId: string | null;
-  queenBuilding: boolean;
   queenPhase: "planning" | "building" | "staging" | "running" | "independent";
-  designingDraft: boolean;
-  draftGraph: DraftGraphData | null;
-  originalDraft: DraftGraphData | null;
-  flowchartMap: Record<string, string[]> | null;
   agentPath: string | null;
-  workerRunState: "idle" | "deploying" | "running";
-  currentExecutionId: string | null;
   currentRunId: string | null;
   nodeLogs: Record<string, string[]>;
   nodeActionPlans: Record<string, string>;
@@ -153,19 +126,10 @@ function defaultAgentState(): AgentState {
     queenReady: false,
     error: null,
     displayName: null,
-    colonyId: null,
-    nodeSpecs: [],
     awaitingInput: false,
     workerInputMessageId: null,
-    queenBuilding: false,
     queenPhase: "planning",
-    designingDraft: false,
-    draftGraph: null,
-    originalDraft: null,
-    flowchartMap: null,
     agentPath: null,
-    workerRunState: "idle",
-    currentExecutionId: null,
     currentRunId: null,
     nodeLogs: {},
     nodeActionPlans: {},
@@ -239,9 +203,6 @@ export default function ColonyChat() {
   const [credentialAgentPath, setCredentialAgentPath] = useState<string | null>(null);
   const [dismissedBanner, setDismissedBanner] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [graphPanelPct, setGraphPanelPct] = useState(30);
-  const savedGraphPanelPct = useRef(30);
-  const resizing = useRef(false);
 
   // ── Header actions (Credentials, Data, Browser) ─────────────────────────
   useEffect(() => {
@@ -287,8 +248,6 @@ export default function ColonyChat() {
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
   const suppressIntroRef = useRef(false);
   const loadingRef = useRef(false);
-  const designingDraftSinceRef = useRef(0);
-  const designingDraftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -364,70 +323,10 @@ export default function ColonyChat() {
     }));
   }, []);
 
-  // ── Drag-to-resize graph panel ──────────────────────────────────────────
-
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (!resizing.current) return;
-      const sidebarWidth = 240;
-      const pct = 100 - ((e.clientX - sidebarWidth) / (window.innerWidth - sidebarWidth)) * 100;
-      setGraphPanelPct(Math.max(15, Math.min(50, pct)));
-    };
-    const onMouseUp = () => {
-      resizing.current = false;
-      document.body.style.cursor = "";
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-  }, []);
-
-  const nodeIsSelected = selectedNode !== null;
-  useEffect(() => {
-    if (nodeIsSelected) {
-      savedGraphPanelPct.current = graphPanelPct;
-      setGraphPanelPct((prev) => Math.min(prev, 30));
-    } else {
-      setGraphPanelPct(savedGraphPanelPct.current);
-    }
-  }, [nodeIsSelected]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Reset dismissed banner when the error clears
   useEffect(() => {
     if (!agentState.error) setDismissedBanner(null);
   }, [agentState.error]);
-
-  // ── Graph fetching ─────────────────────────────────────────────────────
-
-  const fetchGraph = useCallback(
-    async (sessionId: string, knownGraphId?: string) => {
-      try {
-        let colonyId = knownGraphId;
-        if (!colonyId) {
-          // Try session detail first (colony_id is always set when worker is loaded)
-          try {
-            const detail = await sessionsApi.get(sessionId);
-            colonyId = detail.colony_id ?? undefined;
-          } catch { /* fall through */ }
-        }
-        if (!colonyId) {
-          const { colonies } = await sessionsApi.colonies(sessionId);
-          if (!colonies.length) return;
-          colonyId = colonies[0];
-        }
-        const topology = await workersApi.nodes(sessionId, colonyId);
-        updateState({ colonyId, nodeSpecs: topology.nodes });
-        const nodes = topologyToGraphNodes(topology);
-        if (nodes.length > 0) setGraphNodes(nodes);
-      } catch {
-        // Graph fetch failed
-      }
-    },
-    [updateState],
-  );
 
   // ── Session loading ────────────────────────────────────────────────────
 
@@ -491,8 +390,6 @@ export default function ColonyChat() {
       }
 
       let restoredPhase: "planning" | "building" | "staging" | "running" | "independent" | null = null;
-      let restoredFlowchartMap: Record<string, string[]> | null = null;
-      let restoredOriginalDraft: DraftGraphData | null = null;
 
       if (!liveSession) {
         // Pre-fetch messages from cold session
@@ -502,8 +399,6 @@ export default function ColonyChat() {
           const restored = await restoreSessionMessages(coldRestoreId, agentPath, displayName);
           preRestoredMsgs = restored.messages;
           restoredPhase = restored.restoredPhase;
-          restoredFlowchartMap = restored.flowchartMap;
-          restoredOriginalDraft = restored.originalDraft;
         }
 
         if (coldRestoreId || preRestoredMsgs.length > 0) {
@@ -529,10 +424,7 @@ export default function ColonyChat() {
         sessionId: session.session_id,
         displayName,
         queenPhase: initialPhase,
-        queenBuilding: initialPhase === "building",
         queenSupportsImages: session.queen_supports_images !== false,
-        ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
-        ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
       });
 
       // Restore messages for live resume
@@ -546,10 +438,6 @@ export default function ColonyChat() {
           restored.messages.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
           setMessages(restored.messages);
         }
-        if (restored.flowchartMap && !restoredFlowchartMap) {
-          restoredFlowchartMap = restored.flowchartMap;
-          restoredOriginalDraft = restored.originalDraft;
-        }
       }
 
       const hasRestoredContent = isResumedSession || !!coldRestoreId;
@@ -561,8 +449,6 @@ export default function ColonyChat() {
         ready: true,
         loading: false,
         queenReady: hasRestoredContent,
-        ...(restoredFlowchartMap ? { flowchartMap: restoredFlowchartMap } : {}),
-        ...(restoredOriginalDraft ? { originalDraft: restoredOriginalDraft, draftGraph: null } : {}),
       });
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 424) {
@@ -596,13 +482,6 @@ export default function ColonyChat() {
       loadSession();
     }
   }, [agentPath, isNewChat]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Fetch graph when session becomes ready
-  useEffect(() => {
-    if (agentState.sessionId && agentState.ready && !agentState.colonyId) {
-      fetchGraph(agentState.sessionId);
-    }
-  }, [agentState.sessionId, agentState.ready, agentState.colonyId, fetchGraph]);
 
   // ── SSE event handler ──────────────────────────────────────────────────
 
@@ -654,8 +533,6 @@ export default function ColonyChat() {
               isStreaming: false,
               workerIsTyping: true,
               awaitingInput: false,
-              workerRunState: "running",
-              currentExecutionId: event.execution_id || state.currentExecutionId || null,
               currentRunId: incomingRunId,
               nodeLogs: {},
               subagentReports: [],
@@ -681,8 +558,6 @@ export default function ColonyChat() {
               workerIsTyping: false,
               awaitingInput: false,
               workerInputMessageId: null,
-              workerRunState: "idle",
-              currentExecutionId: null,
               llmSnapshots: {},
               pendingQuestion: null,
               pendingOptions: null,
@@ -690,7 +565,6 @@ export default function ColonyChat() {
               pendingQuestionSource: null,
             });
             markAllNodesAs(["running", "looping"], "complete");
-            if (state.sessionId) fetchGraph(state.sessionId, state.colonyId || undefined);
           }
           break;
 
@@ -764,7 +638,6 @@ export default function ColonyChat() {
                 isTyping: false,
                 isStreaming: false,
                 queenIsTyping: false,
-                queenBuilding: false,
                 pendingQuestion: prompt || null,
                 pendingOptions: options,
                 pendingQuestions: questions,
@@ -786,7 +659,6 @@ export default function ColonyChat() {
               pendingQuestionSource: null,
             });
             if (!isQueen) {
-              updateState({ workerRunState: "idle", currentExecutionId: null });
               markAllNodesAs(["running", "looping"], "pending");
             }
           }
@@ -804,7 +676,6 @@ export default function ColonyChat() {
               pendingQuestionSource: null,
             });
             if (!isQueen) {
-              updateState({ workerRunState: "idle", currentExecutionId: null });
               if (event.node_id) {
                 updateGraphNodeStatus(event.node_id, "error");
                 const errMsg = (event.data?.error as string) || "unknown error";
@@ -916,12 +787,6 @@ export default function ColonyChat() {
 
             const toolName = (event.data?.tool_name as string) || "unknown";
             const toolUseId = (event.data?.tool_use_id as string) || "";
-
-            if (isQueen && toolName === "save_agent_draft") {
-              designingDraftSinceRef.current = Date.now();
-              if (designingDraftTimerRef.current) clearTimeout(designingDraftTimerRef.current);
-              updateState({ designingDraft: true });
-            }
 
             const sid = event.stream_id;
             // Track which pill message this tool belongs to so deferred
@@ -1070,7 +935,7 @@ export default function ColonyChat() {
         }
 
         case "credentials_required": {
-          updateState({ workerRunState: "idle", error: "credentials_required" });
+          updateState({ error: "credentials_required" });
           const credAgentPath = event.data?.agent_path as string | undefined;
           if (credAgentPath) setCredentialAgentPath(credAgentPath);
           setCredentialsOpen(true);
@@ -1093,45 +958,8 @@ export default function ColonyChat() {
           queenPhaseRef.current = newPhase;
           updateState({
             queenPhase: newPhase,
-            queenBuilding: newPhase === "building",
-            workerRunState: newPhase === "running" ? "running" : "idle",
-            ...(newPhase === "planning" ? { originalDraft: null, flowchartMap: null } : {}),
             ...(eventAgentPath ? { agentPath: eventAgentPath } : {}),
           });
-          break;
-        }
-
-        case "custom": {
-          const customEvent = event.data as Record<string, unknown>;
-          if (customEvent?.event === "draft_updated") {
-            const draft = customEvent as unknown as DraftGraphData | undefined;
-            if (draft?.nodes) {
-              const MIN_SPINNER_MS = 600;
-              const since = designingDraftSinceRef.current;
-              const elapsed = Date.now() - since;
-              const remaining = Math.max(0, MIN_SPINNER_MS - elapsed);
-              if (remaining > 0 && since > 0) {
-                updateState({ draftGraph: draft });
-                designingDraftTimerRef.current = setTimeout(() => {
-                  updateState({ designingDraft: false });
-                }, remaining);
-              } else {
-                updateState({ draftGraph: draft, designingDraft: false });
-              }
-            }
-          } else if (customEvent?.event === "flowchart_updated") {
-            const mapData = customEvent as {
-              map?: Record<string, string[]>;
-              original_draft?: DraftGraphData;
-            };
-            if (mapData) {
-              updateState({
-                flowchartMap: mapData.map ?? null,
-                originalDraft: mapData.original_draft ?? null,
-                draftGraph: null,
-              });
-            }
-          }
           break;
         }
 
@@ -1140,30 +968,39 @@ export default function ColonyChat() {
           const agentPathFromEvent = event.data?.agent_path as string | undefined;
           const dn = formatAgentDisplayName(graphName || agentSlug(agentPath));
           clearCredentialCache(agentPathFromEvent);
-          updateState({
-            displayName: dn,
-            queenBuilding: false,
-            workerRunState: "idle",
-            colonyId: null,
-            nodeSpecs: [],
-          });
+          updateState({ displayName: dn });
           setGraphNodes([]);
           // Remove old worker messages
           setMessages((prev) => prev.filter((m) => m.role !== "worker"));
-          if (state.sessionId) fetchGraph(state.sessionId);
           break;
         }
 
+        case "trigger_available":
         case "trigger_activated": {
+          // Available = defined in triggers.json but not running yet.
+          // Activated = running (just activated or restored after server
+          // restart). Both get surfaced as cards in the TriggersPanel; the
+          // only difference is the status.
+          const isActive = event.type === "trigger_activated";
           const triggerId = event.data?.trigger_id as string;
           if (triggerId) {
             const nodeId = `__trigger_${triggerId}`;
             setGraphNodes((prev) => {
               const exists = prev.some((n) => n.id === nodeId);
               if (exists) {
-                return prev.map((n) =>
-                  n.id === nodeId ? { ...n, status: "running" as NodeStatus } : n,
-                );
+                // Upgrade an existing inactive card to active without
+                // clobbering the trigger_config fields the activated event
+                // may carry (e.g. next_fire_in).
+                return prev.map((n) => {
+                  if (n.id !== nodeId) return n;
+                  const incomingConfig =
+                    (event.data?.trigger_config as Record<string, unknown>) || undefined;
+                  return {
+                    ...n,
+                    status: (isActive ? "running" : "pending") as NodeStatus,
+                    ...(incomingConfig ? { triggerConfig: incomingConfig } : {}),
+                  };
+                });
               }
               const triggerType = (event.data?.trigger_type as string) || "timer";
               const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
@@ -1181,7 +1018,7 @@ export default function ColonyChat() {
               const newNode: GraphNode = {
                 id: nodeId,
                 label: computedLabel,
-                status: "running",
+                status: isActive ? "running" : "pending",
                 nodeType: "trigger",
                 triggerType,
                 triggerConfig,
@@ -1233,7 +1070,7 @@ export default function ColonyChat() {
           break;
       }
     },
-    [agentPath, queenInfo.name, updateState, upsertMessage, updateGraphNodeStatus, markAllNodesAs, appendNodeLog, fetchGraph, graphNodes],
+    [agentPath, queenInfo.name, updateState, upsertMessage, updateGraphNodeStatus, markAllNodesAs, appendNodeLog, graphNodes],
   );
 
   // ── SSE subscription ───────────────────────────────────────────────────
@@ -1248,46 +1085,6 @@ export default function ColonyChat() {
   useMultiSSE({ sessions: sseSessions, onEvent: handleSSEEvent });
 
   // ── Action handlers ────────────────────────────────────────────────────
-
-  const handleRun = useCallback(async () => {
-    if (!agentState.sessionId || !agentState.ready) return;
-    setDismissedBanner(null);
-    try {
-      updateState({ workerRunState: "deploying" });
-      const result = await executionApi.trigger(agentState.sessionId, "default", {});
-      updateState({ currentExecutionId: result.execution_id });
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 424) {
-        const errBody = (err as ApiError).body as Record<string, unknown>;
-        const credPath = (errBody?.agent_path as string) || null;
-        if (credPath) setCredentialAgentPath(credPath);
-        updateState({ workerRunState: "idle", error: "credentials_required" });
-        setCredentialsOpen(true);
-        return;
-      }
-      const errMsg = err instanceof Error ? err.message : String(err);
-      upsertMessage({
-        id: makeId(),
-        agent: "System",
-        agentColor: "",
-        content: `Failed to trigger run: ${errMsg}`,
-        timestamp: "",
-        type: "system",
-        thread: agentPath,
-        createdAt: Date.now(),
-      });
-      updateState({ workerRunState: "idle" });
-    }
-  }, [agentState.sessionId, agentState.ready, agentPath, updateState, upsertMessage]);
-
-  const handlePause = useCallback(async () => {
-    if (!agentState.sessionId || !agentState.currentExecutionId) return;
-    try {
-      await executionApi.pause(agentState.sessionId, agentState.currentExecutionId);
-    } catch {
-      // fire-and-forget
-    }
-  }, [agentState.sessionId, agentState.currentExecutionId]);
 
   const handleCancelQueen = useCallback(async () => {
     if (!agentState.sessionId) return;
@@ -1392,6 +1189,11 @@ export default function ColonyChat() {
   const liveSelectedNode = selectedNode && graphNodes.find((n) => n.id === selectedNode.id);
   const resolvedSelectedNode = liveSelectedNode || selectedNode;
 
+  const triggers = useMemo(
+    () => graphNodes.filter((n) => n.nodeType === "trigger"),
+    [graphNodes],
+  );
+
   // ── Render ─────────────────────────────────────────────────────────────
 
   if (!colony && !isNewChat && !agentState.loading) {
@@ -1484,56 +1286,25 @@ export default function ColonyChat() {
           />
         </div>
 
-        {/* Pipeline graph panel */}
-        <div
-          className="bg-card/30 flex flex-col border-l border-border/30 relative"
-          style={{ width: `${graphPanelPct}%`, minWidth: 240, flexShrink: 0 }}
-        >
-          <div className="flex-1 min-h-0">
-            <DraftGraph
-              key={colonyId}
-              draft={agentState.originalDraft ?? agentState.draftGraph ?? null}
-              originalDraft={agentState.originalDraft ?? null}
-              loadingMessage={
-                agentState.designingDraft
-                  ? "Designing flowchart..."
-                  : !agentState.originalDraft &&
-                    !agentState.draftGraph &&
-                    agentState.queenPhase !== "planning"
-                  ? "Loading flowchart..."
-                  : null
+        {/* Triggers sidebar — only rendered when the colony actually has triggers */}
+        {triggers.length > 0 && (
+          <div className="w-[260px] flex-shrink-0">
+            <TriggersPanel
+              triggers={triggers}
+              selectedId={resolvedSelectedNode?.id ?? null}
+              onSelect={(trigger) =>
+                setSelectedNode((prev) => (prev?.id === trigger.id ? null : trigger))
               }
-              building={agentState.queenBuilding}
-              onRun={handleRun}
-              onPause={handlePause}
-              runState={agentState.workerRunState}
-              flowchartMap={agentState.flowchartMap ?? undefined}
-              runtimeNodes={graphNodes}
-              onRuntimeNodeClick={(runtimeNodeId) => {
-                const node = graphNodes.find((n) => n.id === runtimeNodeId);
-                if (node) setSelectedNode((prev) => (prev?.id === node.id ? null : node));
-              }}
             />
           </div>
-          {/* Resize handle */}
-          <div
-            className="absolute top-0 left-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/40 transition-colors z-10"
-            onMouseDown={() => {
-              resizing.current = true;
-              document.body.style.cursor = "col-resize";
-            }}
-          />
-        </div>
+        )}
 
-        {/* Node detail panel */}
-        {resolvedSelectedNode && (
-          <div className="w-[480px] min-w-[400px] flex-shrink-0">
-            <NodeDetailPanel
-              node={resolvedSelectedNode}
+        {/* Trigger detail panel */}
+        {resolvedSelectedNode && resolvedSelectedNode.nodeType === "trigger" && (
+          <div className="w-[380px] min-w-[320px] flex-shrink-0">
+            <TriggerDetailPanel
+              trigger={resolvedSelectedNode}
               sessionId={agentState.sessionId || ""}
-              colonyId={agentState.colonyId || ""}
-              nodeLogs={agentState.nodeLogs[resolvedSelectedNode.id] || []}
-              actionPlan={agentState.nodeActionPlans[resolvedSelectedNode.id]}
               onClose={() => setSelectedNode(null)}
             />
           </div>

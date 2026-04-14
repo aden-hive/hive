@@ -236,6 +236,46 @@ def _presync_aden_tokens(credential_specs: dict, *, force: bool = False) -> None
             )
 
 
+def compute_unavailable_tools(nodes: list) -> tuple[set[str], list[str]]:
+    """Return (tool_names_to_drop, human_messages).
+
+    Runs credential validation *without* raising, collects every tool
+    bound to a failed credential (missing / invalid / Aden-not-connected
+    and no alternative provider available), and returns the set of tool
+    names that should be silently dropped from the worker's effective
+    tool list.
+
+    Use this at every worker-spawn preflight so missing credentials
+    filter tools out of the graph instead of hard-failing the whole
+    spawn. Only affects non-MCP tools — the MCP admission gate
+    (``_build_mcp_admission_gate``) already handles MCP tools at
+    registration time.
+    """
+    try:
+        result = validate_agent_credentials(nodes, verify=False, raise_on_error=False)
+    except Exception as exc:
+        logger.debug("compute_unavailable_tools: validation raised: %s", exc)
+        return set(), []
+
+    drop: set[str] = set()
+    messages: list[str] = []
+    for status in result.failed:
+        if not status.tools:
+            continue
+        drop.update(status.tools)
+        reason = "missing"
+        if status.aden_not_connected:
+            reason = "aden_not_connected"
+        elif status.available and status.valid is False:
+            reason = "invalid"
+        messages.append(
+            f"{status.env_var} ({reason}) → drops {len(status.tools)} tool(s): "
+            f"{', '.join(status.tools[:6])}"
+            + (f" +{len(status.tools) - 6} more" if len(status.tools) > 6 else "")
+        )
+    return drop, messages
+
+
 def validate_agent_credentials(
     nodes: list,
     quiet: bool = False,

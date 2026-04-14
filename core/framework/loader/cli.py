@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -85,6 +86,10 @@ def _register_open(subparsers: argparse._SubParsersAction) -> None:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     """Start the HTTP API server (the runtime hub)."""
+    import atexit
+    import logging
+    import signal
+
     from aiohttp import web
 
     _build_frontend()
@@ -97,11 +102,67 @@ def cmd_serve(args: argparse.Namespace) -> int:
     else:
         configure_logging(level="INFO")
 
+    # Last-resort MCP cleanup. Runs on any process exit path, including
+    # crashes — so hung MCP subprocesses don't outlive the server. The
+    # graceful shutdown path below also disconnects clients; atexit is
+    # belt-and-braces and no-ops if already cleaned.
+    def _atexit_cleanup_mcp() -> None:
+        try:
+            from framework.loader.mcp_connection_manager import MCPConnectionManager
+
+            MCPConnectionManager.get_instance().cleanup_all()
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).debug("atexit MCP cleanup failed: %s", exc)
+
+    atexit.register(_atexit_cleanup_mcp)
+
     model = getattr(args, "model", None)
     app = create_app(model=model)
 
     async def run_server() -> None:
         manager = app["manager"]
+        shutdown_event = asyncio.Event()
+        signal_count = {"n": 0}
+
+        def _request_shutdown(signame: str) -> None:
+            signal_count["n"] += 1
+            if signal_count["n"] == 1:
+                print(
+                    f"\nReceived {signame}, shutting down gracefully… "
+                    "(press Ctrl+C again to force quit)"
+                )
+                shutdown_event.set()
+            else:
+                # Second Ctrl+C (or SIGTERM) — the user is done waiting.
+                # Skip the graceful teardown and exit immediately. os._exit
+                # bypasses atexit handlers, so fire the MCP cleanup manually
+                # first to avoid leaking subprocesses.
+                print(f"\nReceived {signame} again — force quitting.")
+                try:
+                    from framework.loader.mcp_connection_manager import (
+                        MCPConnectionManager,
+                    )
+
+                    MCPConnectionManager.get_instance().cleanup_all()
+                except Exception:  # noqa: BLE001
+                    pass
+                os._exit(130)
+
+        # Register SIGTERM (and explicit SIGINT) so container orchestrators
+        # and plain Ctrl-C both route through the same graceful path —
+        # manager.shutdown_all() flushes state and disconnects MCP clients.
+        loop = asyncio.get_running_loop()
+        for signame in ("SIGINT", "SIGTERM"):
+            try:
+                loop.add_signal_handler(
+                    getattr(signal, signame),
+                    _request_shutdown,
+                    signame,
+                )
+            except (NotImplementedError, AttributeError):
+                # Windows / restricted environments — fall back to default
+                # handlers (KeyboardInterrupt for SIGINT; SIGTERM kills).
+                pass
 
         # Preload colonies specified via --colony
         for colony_arg in getattr(args, "colony", []) or []:
@@ -143,7 +204,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             _open_browser(dashboard_url)
 
         try:
-            await asyncio.Event().wait()
+            await shutdown_event.wait()
         except asyncio.CancelledError:
             pass
         finally:

@@ -41,6 +41,42 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _format_spawn_task_message(task: str, input_data: dict[str, Any]) -> str:
+    """Render the spawn task into the worker's next user message.
+
+    Spawned workers inherit the queen's conversation via
+    ``ColonyRuntime._fork_parent_conversation``; this helper builds
+    the content of the trailing user message that carries the new
+    task. The queen's chat already provides the context for the
+    task, so we frame this as an explicit hand-off.
+
+    Additional keys from ``input_data`` (other than the task itself)
+    are rendered below the hand-off line so the worker sees them as
+    structured hand-off data. This mirrors the fresh-path
+    ``AgentLoop._build_initial_message`` shape so worker prompts look
+    roughly the same whether or not inheritance fired.
+    """
+    lines = [
+        "# New task delegated by the queen",
+        "",
+        "The queen's conversation up to this point is visible above. "
+        "Use it as context (who the user is, what was already decided, "
+        "which skills apply). Your own system prompt and tool set are "
+        "set by the framework — the queen's tools may differ from "
+        "yours, so treat her prior tool calls as history only.",
+        "",
+        f"task: {task}",
+    ]
+    for key, value in (input_data or {}).items():
+        if key in ("task", "user_request"):
+            # Already rendered above; don't duplicate.
+            continue
+        if value is None:
+            continue
+        lines.append(f"{key}: {value}")
+    return "\n".join(lines)
+
+
 @dataclass
 class ColonyConfig:
     max_concurrent_workers: int = 100
@@ -380,8 +416,24 @@ class ColonyRuntime:
         async with self._lock:
             await self.stop_all_workers()
 
-            for task in self._timer_tasks:
+            # Cancel timer tasks and *wait* for them to finish. Without
+            # the wait the tasks are merely scheduled for cancellation —
+            # if the runtime (or its event loop) shuts down before they
+            # run their cleanup code, trigger state leaks.
+            pending_timers = [t for t in self._timer_tasks if not t.done()]
+            for task in pending_timers:
                 task.cancel()
+            if pending_timers:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*pending_timers, return_exceptions=True),
+                        timeout=5.0,
+                    )
+                except TimeoutError:
+                    logger.warning(
+                        "ColonyRuntime.stop: %d timer task(s) did not finish within 5s",
+                        sum(1 for t in pending_timers if not t.done()),
+                    )
             self._timer_tasks.clear()
 
             for sub_id in self._event_subscriptions:
@@ -398,11 +450,148 @@ class ColonyRuntime:
             self._running = False
             logger.info("ColonyRuntime stopped: colony_id=%s", self._colony_id)
 
+    def _on_timer_task_done(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(
+                "Timer task '%s' crashed: %s",
+                task.get_name(),
+                exc,
+                exc_info=exc,
+            )
+
     def pause_timers(self) -> None:
         self._timers_paused = True
 
     def resume_timers(self) -> None:
         self._timers_paused = False
+
+    async def _fork_parent_conversation(
+        self,
+        dest_conv_dir: Path,
+        *,
+        task: str,
+        input_data: dict[str, Any] | None = None,
+    ) -> None:
+        """Fork the colony's parent queen conversation into ``dest_conv_dir``.
+
+        Copies the queen's ``parts/*.json`` and ``meta.json`` into the
+        worker's fresh conversation dir, then appends a synthetic user
+        message carrying the new task. The worker's subsequent
+        ``AgentLoop._restore`` reads this conversation via the usual
+        path — the queen's history is visible as prior turns, the task
+        appears as the most recent user message, and the worker starts
+        acting on it with full context.
+
+        This is a no-op if the colony runtime doesn't own a parent
+        queen conversation (e.g. a standalone colony started without a
+        queen wrapper).
+
+        Notes on filtering compatibility:
+          - Queen parts have ``phase_id=None``. When the worker's
+            restore applies its own phase filter, the backward-compat
+            fallback in NodeConversation.restore kicks in: an
+            all-None-phased store bypasses the filter. See
+            ``conversation.py:1369-1378``.
+          - ``cursor.json`` is deliberately NOT copied. The worker
+            should start fresh at iteration 0; copying the queen's
+            cursor would make the worker think it had already done
+            work.
+          - The queen's ``meta.json`` is copied but the AgentLoop
+            immediately rebuilds ``system_prompt`` from the worker's
+            own context post-restore (see agent_loop.py:533-535), so
+            the queen's system prompt does not leak into the worker.
+        """
+        # Resolve the queen's own conversation dir. For a queen-backed
+        # ColonyRuntime, storage_path points at the queen's session dir
+        # and conversations/ lives inside it. For standalone runtimes
+        # (tests, legacy fork path under ~/.hive/agents/{name}/worker/)
+        # there's no parent conversation — fall through to the fresh
+        # spawn path.
+        src_conv_dir = self._storage_path / "conversations"
+        src_parts_dir = src_conv_dir / "parts"
+        if not src_parts_dir.exists():
+            # No queen conversation to inherit — the worker starts with
+            # only the task, same as the pre-fork behavior. AgentLoop's
+            # fresh-conversation branch will call _build_initial_message
+            # and render input_data into the worker's first user message.
+            return
+
+        def _copy_and_append() -> None:
+            dest_parts = dest_conv_dir / "parts"
+            dest_parts.mkdir(parents=True, exist_ok=True)
+
+            # Copy each queen part. Use json.dumps round-trip (not raw
+            # file copy) so we can be defensive about unreadable files —
+            # a corrupted queen part file shouldn't take down the worker
+            # spawn, just drop that one part.
+            max_seq = -1
+            for part_file in sorted(src_parts_dir.glob("*.json")):
+                try:
+                    data = json.loads(part_file.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError) as exc:
+                    logger.warning(
+                        "spawn fork: skipping unreadable queen part %s: %s",
+                        part_file.name,
+                        exc,
+                    )
+                    continue
+                seq = data.get("seq")
+                if isinstance(seq, int) and seq > max_seq:
+                    max_seq = seq
+                (dest_parts / part_file.name).write_text(
+                    json.dumps(data, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+
+            # Copy the queen's meta.json so the worker's restore finds
+            # the conversation during its first run. The meta fields
+            # (system_prompt, max_context_tokens, etc.) get overridden
+            # by the worker's own AgentLoop config + context after
+            # restore, so nothing here bleeds into runtime behavior.
+            src_meta = src_conv_dir / "meta.json"
+            if src_meta.exists():
+                try:
+                    meta_data = json.loads(src_meta.read_text(encoding="utf-8"))
+                    (dest_conv_dir / "meta.json").write_text(
+                        json.dumps(meta_data, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                except (json.JSONDecodeError, OSError) as exc:
+                    logger.warning(
+                        "spawn fork: failed to copy queen meta.json: %s", exc
+                    )
+
+            # Append the task as the next user message so the worker's
+            # LLM sees it as the most recent turn in the conversation
+            # after restore. This replaces the fresh-path call to
+            # _build_initial_message for spawned workers.
+            task_content = _format_spawn_task_message(task, input_data or {})
+            next_seq = max_seq + 1
+            task_part = {
+                "seq": next_seq,
+                "role": "user",
+                "content": task_content,
+                # phase_id omitted (None) so the backward-compat
+                # fallback in NodeConversation.restore keeps it visible
+                # to both queen-style and phase-filtered restores.
+                # run_id omitted so the worker's run_id filter (off by
+                # default since ctx.run_id is empty) doesn't reject it.
+            }
+            task_filename = f"{next_seq:010d}.json"
+            (dest_parts / task_filename).write_text(
+                json.dumps(task_part, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            logger.info(
+                "spawn fork: inherited %d queen parts + appended task at seq %d",
+                max_seq + 1,
+                next_seq,
+            )
+
+        await asyncio.to_thread(_copy_and_append)
 
     # ── Worker Spawning ─────────────────────────────────────────
 
@@ -469,6 +658,22 @@ class ColonyRuntime:
             # (worse) the process CWD.
             worker_storage = self._storage_path / "workers" / worker_id
             worker_storage.mkdir(parents=True, exist_ok=True)
+
+            # Fork the queen's conversation into the worker's store.
+            # The queen already accumulated the user chat, read relevant
+            # skills, and made decisions about how to approach the task;
+            # the worker would repeat that discovery work (and often
+            # mis-step — see the 2026-04-14 "dummy-target" incident)
+            # if spawned with a blank store. We snapshot the queen's
+            # parts + meta at spawn time, then append the task as the
+            # next user message so the worker's AgentLoop restores into
+            # a conversation that already ends with its new instruction.
+            await self._fork_parent_conversation(
+                worker_storage / "conversations",
+                task=task,
+                input_data=input_data,
+            )
+
             worker_conv_store = FileConversationStore(
                 worker_storage / "conversations"
             )
@@ -1016,7 +1221,11 @@ class ColonyRuntime:
             run_immediately = tc.get("run_immediately", False)
 
             if interval and interval > 0 and self._running:
-                task = asyncio.create_task(self._timer_loop(trig_id, interval, run_immediately))
+                task = asyncio.create_task(
+                    self._timer_loop(trig_id, interval, run_immediately),
+                    name=f"timer:{trig_id}",
+                )
+                task.add_done_callback(self._on_timer_task_done)
                 self._timer_tasks.append(task)
 
     async def _timer_loop(

@@ -564,6 +564,134 @@ async def handle_update_trigger_task(request: web.Request) -> web.Response:
     )
 
 
+async def handle_activate_trigger(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/triggers/{trigger_id}/activate — start a trigger."""
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    trigger_id = request.match_info["trigger_id"]
+    available = getattr(session, "available_triggers", {})
+    tdef = available.get(trigger_id)
+    if tdef is None:
+        return web.json_response(
+            {"error": f"Trigger '{trigger_id}' not found"},
+            status=404,
+        )
+
+    if trigger_id in getattr(session, "active_trigger_ids", set()):
+        return web.json_response(
+            {"status": "already_active", "trigger_id": trigger_id}
+        )
+
+    from framework.tools.queen_lifecycle_tools import (
+        _persist_active_triggers,
+        _start_trigger_timer,
+        _start_trigger_webhook,
+    )
+
+    try:
+        if tdef.trigger_type == "timer":
+            await _start_trigger_timer(session, trigger_id, tdef)
+        elif tdef.trigger_type == "webhook":
+            await _start_trigger_webhook(session, trigger_id, tdef)
+        else:
+            return web.json_response(
+                {"error": f"Unsupported trigger type: {tdef.trigger_type}"},
+                status=400,
+            )
+    except Exception as exc:  # noqa: BLE001
+        return web.json_response(
+            {"error": f"Failed to start trigger: {exc}"},
+            status=500,
+        )
+
+    tdef.active = True
+    session.active_trigger_ids.add(trigger_id)
+    session_id = request.match_info["session_id"]
+    await _persist_active_triggers(session, session_id)
+
+    bus = getattr(session, "event_bus", None)
+    if bus:
+        from framework.host.event_bus import AgentEvent, EventType
+
+        runner = getattr(session, "runner", None)
+        colony_entry = runner.graph.entry_node if runner else None
+        await bus.publish(
+            AgentEvent(
+                type=EventType.TRIGGER_ACTIVATED,
+                stream_id="queen",
+                data={
+                    "trigger_id": trigger_id,
+                    "trigger_type": tdef.trigger_type,
+                    "trigger_config": tdef.trigger_config,
+                    "name": tdef.description or trigger_id,
+                    **({"entry_node": colony_entry} if colony_entry else {}),
+                },
+            )
+        )
+
+    return web.json_response({"status": "activated", "trigger_id": trigger_id})
+
+
+async def handle_deactivate_trigger(request: web.Request) -> web.Response:
+    """POST /api/sessions/{session_id}/triggers/{trigger_id}/deactivate — stop a trigger.
+
+    Cancels the running timer / webhook subscription but KEEPS the trigger
+    definition in triggers.json so the user can re-activate later.
+    """
+    session, err = resolve_session(request)
+    if err:
+        return err
+
+    trigger_id = request.match_info["trigger_id"]
+    if trigger_id not in getattr(session, "active_trigger_ids", set()):
+        return web.json_response(
+            {"status": "already_inactive", "trigger_id": trigger_id}
+        )
+
+    task = session.active_timer_tasks.pop(trigger_id, None)
+    if task and not task.done():
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    getattr(session, "trigger_next_fire", {}).pop(trigger_id, None)
+
+    webhook_subs = getattr(session, "active_webhook_subs", {})
+    if sub_id := webhook_subs.pop(trigger_id, None):
+        with contextlib.suppress(Exception):
+            session.event_bus.unsubscribe(sub_id)
+
+    session.active_trigger_ids.discard(trigger_id)
+
+    available = getattr(session, "available_triggers", {})
+    tdef = available.get(trigger_id)
+    if tdef:
+        tdef.active = False
+
+    from framework.tools.queen_lifecycle_tools import _persist_active_triggers
+
+    session_id = request.match_info["session_id"]
+    await _persist_active_triggers(session, session_id)
+
+    bus = getattr(session, "event_bus", None)
+    if bus:
+        from framework.host.event_bus import AgentEvent, EventType
+
+        await bus.publish(
+            AgentEvent(
+                type=EventType.TRIGGER_DEACTIVATED,
+                stream_id="queen",
+                data={
+                    "trigger_id": trigger_id,
+                    "name": (tdef.description or trigger_id) if tdef else trigger_id,
+                },
+            )
+        )
+
+    return web.json_response({"status": "deactivated", "trigger_id": trigger_id})
+
+
 async def handle_session_colonies(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/colonies — list loaded colonies."""
     manager = _get_manager(request)
@@ -806,6 +934,14 @@ def register_routes(app: web.Application) -> None:
     app.router.add_get("/api/sessions/{session_id}/entry-points", handle_session_entry_points)
     app.router.add_patch(
         "/api/sessions/{session_id}/triggers/{trigger_id}", handle_update_trigger_task
+    )
+    app.router.add_post(
+        "/api/sessions/{session_id}/triggers/{trigger_id}/activate",
+        handle_activate_trigger,
+    )
+    app.router.add_post(
+        "/api/sessions/{session_id}/triggers/{trigger_id}/deactivate",
+        handle_deactivate_trigger,
     )
     app.router.add_get("/api/sessions/{session_id}/colonies", handle_session_colonies)
 

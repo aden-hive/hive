@@ -37,6 +37,8 @@ def build_prompt_spec(
     narrative: str | None = None,
     memory_prompt: str | None = None,
 ) -> PromptSpec:
+    from framework.skills.tool_gating import augment_catalog_for_tools
+
     resolved_memory = memory_prompt
     if resolved_memory is None:
         resolved_memory = getattr(ctx, "memory_prompt", "") or ""
@@ -46,6 +48,17 @@ def build_prompt_spec(
                 resolved_memory = dynamic() or ""
             except Exception:
                 resolved_memory = getattr(ctx, "memory_prompt", "") or ""
+
+    # Tool-gated pre-activation: inject full body of default skills whose
+    # trigger tools are present in this agent's tool list (e.g. browser_*
+    # pulls in hive.browser-automation). Keeps non-browser agents lean.
+    tool_names = [
+        getattr(t, "name", "") for t in (getattr(ctx, "available_tools", None) or [])
+    ]
+    skills_catalog_prompt = augment_catalog_for_tools(
+        ctx.skills_catalog_prompt or "", tool_names
+    )
+
     return PromptSpec(
         identity_prompt=ctx.identity_prompt or "",
         focus_prompt=focus_prompt
@@ -53,7 +66,7 @@ def build_prompt_spec(
         else (ctx.agent_spec.system_prompt or ""),
         narrative=narrative if narrative is not None else (ctx.narrative or ""),
         accounts_prompt=ctx.accounts_prompt or "",
-        skills_catalog_prompt=ctx.skills_catalog_prompt or "",
+        skills_catalog_prompt=skills_catalog_prompt,
         protocols_prompt=ctx.protocols_prompt or "",
         memory_prompt=resolved_memory,
         agent_type=ctx.agent_spec.agent_type,

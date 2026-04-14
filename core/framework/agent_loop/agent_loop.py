@@ -96,6 +96,7 @@ from framework.llm.stream_events import (
     ToolCallEvent,
 )
 from framework.tracker.llm_debug_logger import log_llm_turn
+from framework.utils.task_registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -362,6 +363,9 @@ class AgentLoop(AgentProtocol):
         self._tool_task: asyncio.Task | None = None  # gather task while tools run
         # Track which nodes already have an action plan emitted (skip on revisit)
         self._action_plan_emitted: set[str] = set()
+        # Tracked background tasks (action plan, etc.) — prevents GC loss
+        # and surfaces unhandled exceptions via the done callback.
+        self._bg_tasks: TaskRegistry = TaskRegistry(owner="AgentLoop")
         # Monotonic counter for spillover file naming (web_search_1.txt, etc.)
         self._spill_counter: int = 0
         # Set to True by the report_to_parent synthetic tool handler so the
@@ -371,6 +375,31 @@ class AgentLoop(AgentProtocol):
         # Set by the Worker's __init__ so the report_to_parent handler can
         # record the explicit report payload on the owning Worker instance.
         self._owner_worker: Any = None
+        # Reliability counters — populated throughout execute() and
+        # copied onto AgentResult.reliability_stats at return time.
+        # Kept on the instance so ``stats()`` can expose them externally
+        # without waiting for execute() to return. Keys are stable so
+        # dashboards can build aggregates over many runs.
+        self._counters: dict[str, int] = {}
+
+    def _bump(self, key: str, by: int = 1) -> None:
+        """Increment a reliability counter (creates the key on first use)."""
+        self._counters[key] = self._counters.get(key, 0) + by
+
+    def stats(self) -> dict[str, int]:
+        """Return a snapshot of reliability counters for this loop."""
+        return dict(self._counters)
+
+    def _finalize_result(self, result: AgentResult, reason: str) -> AgentResult:
+        """Stamp exit_reason + reliability_stats on an AgentResult before return.
+
+        Central point so every exit path in execute() carries the same
+        observability payload, and new counters show up in results
+        without touching every return site.
+        """
+        result.exit_reason = reason
+        result.reliability_stats = dict(self._counters)
+        return result
 
     def validate_input(self, ctx: AgentContext) -> list[str]:
         """Validate hard requirements only.
@@ -389,6 +418,41 @@ class AgentLoop(AgentProtocol):
     # -------------------------------------------------------------------
 
     async def execute(self, ctx: AgentContext) -> AgentResult:
+        """Run the event loop.
+
+        Thin wrapper around :meth:`_execute_impl` that stamps reliability
+        counters on whatever AgentResult the implementation returns, and
+        fills in a best-effort ``exit_reason`` from the result fields
+        when the implementation didn't set one explicitly. This way
+        every return path in ``_execute_impl`` automatically carries
+        telemetry without having to edit 13+ return sites.
+        """
+        result = await self._execute_impl(ctx)
+        # Always refresh counters at the outermost boundary, in case a
+        # nested return in _execute_impl used _finalize_result with a
+        # stale copy.
+        result.reliability_stats = dict(self._counters)
+        if result.exit_reason == "?":
+            # Best-effort classification from the AgentResult payload.
+            # _execute_impl can (and should) set reason explicitly at
+            # key sites via _finalize_result — this only handles the
+            # returns that weren't updated yet.
+            err = (result.error or "").lower()
+            if result.success:
+                result.exit_reason = "completed"
+            elif "max iterations" in err:
+                result.exit_reason = "max_iterations"
+            elif "input_validation_errors" in err or result.validation_errors:
+                result.exit_reason = "validation_error"
+            elif "timed out" in err or "timeout" in err:
+                result.exit_reason = "timeout"
+            elif "cancel" in err or "stopped" in err:
+                result.exit_reason = "cancelled"
+            else:
+                result.exit_reason = "failed"
+        return result
+
+    async def _execute_impl(self, ctx: AgentContext) -> AgentResult:
         """Run the event loop."""
         self._last_ctx = ctx
         logger.debug(
@@ -446,7 +510,9 @@ class AgentLoop(AgentProtocol):
                     output_tokens=0,
                     latency_ms=0,
                 )
-            return AgentResult(success=False, error=error_msg)
+            return self._finalize_result(
+                AgentResult(success=False, error=error_msg), "guard_failure"
+            )
 
         # 2. Restore or create new conversation + accumulator
         restored = await self._restore(ctx)
@@ -520,6 +586,10 @@ class AgentLoop(AgentProtocol):
                 output_keys=ctx.agent_spec.output_keys or None,
                 store=self._conversation_store,
                 run_id=ctx.effective_run_id,
+                compaction_buffer_tokens=self._config.compaction_buffer_tokens,
+                compaction_warning_buffer_tokens=(
+                    self._config.compaction_warning_buffer_tokens
+                ),
             )
             accumulator = OutputAccumulator(
                 store=self._conversation_store,
@@ -591,7 +661,10 @@ class AgentLoop(AgentProtocol):
             and stream_id not in ("queen", "judge")
         ):
             self._action_plan_emitted.add(node_id)
-            asyncio.create_task(self._generate_action_plan(ctx, stream_id, node_id, execution_id))
+            self._bg_tasks.spawn(
+                self._generate_action_plan(ctx, stream_id, node_id, execution_id),
+                name=f"action_plan:{node_id}",
+            )
 
         # 5. Stall / doom loop detection state (restored from cursor if resuming)
         recent_responses: list[str] = _restored_recent_responses
@@ -794,6 +867,8 @@ class AgentLoop(AgentProtocol):
                 "[AgentLoop.execute] iteration=%d: entering _run_single_turn loop", iteration
             )
             _stream_retry_count = 0
+            _capacity_retry_started_at: float | None = None
+            _capacity_retry_attempt = 0
             _turn_cancelled = False
             _llm_turn_failed_waiting_input = False
             _turn_t0 = time.monotonic()
@@ -900,11 +975,59 @@ class AgentLoop(AgentProtocol):
                         type(e).__name__,
                         str(e)[:200],
                     )
+                    # Persistent retry for capacity errors (429/529/overloaded).
+                    # Unlike the bounded branch below, this one keeps trying
+                    # within a wall-clock budget instead of burning through
+                    # five attempts in ~1 minute and giving up. Each attempt
+                    # still publishes a retry event so the UI can see us
+                    # waiting (the "heartbeat" — no silent stalls).
+                    self._bump("llm_turn_exception")
+                    if (
+                        self._is_capacity_error(e)
+                        and self._config.capacity_retry_max_seconds > 0
+                    ):
+                        self._bump("capacity_error")
+                        now = time.monotonic()
+                        if _capacity_retry_started_at is None:
+                            _capacity_retry_started_at = now
+                        elapsed = now - _capacity_retry_started_at
+                        if elapsed < self._config.capacity_retry_max_seconds:
+                            _capacity_retry_attempt += 1
+                            delay = min(
+                                self._config.stream_retry_backoff_base
+                                * (2 ** min(_capacity_retry_attempt - 1, 6)),
+                                self._config.capacity_retry_max_delay,
+                            )
+                            logger.warning(
+                                "[%s] iter=%d: capacity error (%s), persistent retry "
+                                "#%d after %.1fs (elapsed %.0fs / %.0fs budget): %s",
+                                node_id,
+                                iteration,
+                                type(e).__name__,
+                                _capacity_retry_attempt,
+                                delay,
+                                elapsed,
+                                self._config.capacity_retry_max_seconds,
+                                str(e)[:200],
+                            )
+                            if self._event_bus:
+                                await self._event_bus.emit_node_retry(
+                                    stream_id=stream_id,
+                                    node_id=node_id,
+                                    retry_count=_capacity_retry_attempt,
+                                    max_retries=-1,  # -1 == persistent / unbounded
+                                    error=str(e)[:500],
+                                    execution_id=execution_id,
+                                )
+                            await asyncio.sleep(delay)
+                            continue  # retry same iteration
+
                     # Retry transient errors with exponential backoff
                     if (
                         self._is_transient_error(e)
                         and _stream_retry_count < self._config.max_stream_retries
                     ):
+                        self._bump("llm_transient_retry")
                         _stream_retry_count += 1
                         delay = min(
                             self._config.stream_retry_backoff_base
@@ -2042,13 +2165,18 @@ class AgentLoop(AgentProtocol):
                 escalate_count=_escalate_count,
                 continue_count=_continue_count,
             )
-        return AgentResult(
-            success=False,
-            error=(f"Max iterations ({self._config.max_iterations}) reached without acceptance"),
-            output=accumulator.to_dict(),
-            tokens_used=total_input_tokens + total_output_tokens,
-            latency_ms=latency_ms,
-            conversation=None,
+        return self._finalize_result(
+            AgentResult(
+                success=False,
+                error=(
+                    f"Max iterations ({self._config.max_iterations}) reached without acceptance"
+                ),
+                output=accumulator.to_dict(),
+                tokens_used=total_input_tokens + total_output_tokens,
+                latency_ms=latency_ms,
+                conversation=None,
+            ),
+            "max_iterations",
         )
 
     async def inject_event(
@@ -2167,6 +2295,13 @@ class AgentLoop(AgentProtocol):
         # without injecting, so the wait still blocks until the user types.
         self._input_ready.clear()
 
+        # Close the lost-wakeup window: a message can arrive between the
+        # pre-check above and the clear() we just did. Re-check the queues
+        # after clearing; if anything snuck in, skip the wait entirely.
+        # Same after emit (sync handlers may inject during the emit).
+        if not self._injection_queue.empty() or not self._trigger_queue.empty():
+            return True
+
         if emit_client_request and self._event_bus:
             await self._event_bus.emit_client_input_requested(
                 stream_id=ctx.stream_id or ctx.agent_id,
@@ -2176,6 +2311,9 @@ class AgentLoop(AgentProtocol):
                 options=options,
                 questions=questions,
             )
+
+        if not self._injection_queue.empty() or not self._trigger_queue.empty():
+            return True
 
         self._awaiting_input = True
         try:
@@ -2293,6 +2431,33 @@ class AgentLoop(AgentProtocol):
             tool_calls: list[ToolCallEvent] = []
             _stream_error: StreamErrorEvent | None = None
 
+            # Gap 1 - Streaming tool execution. Any tool flagged as
+            # concurrency_safe is kicked off the moment its ToolCallEvent
+            # arrives in the stream, instead of waiting for the full
+            # assistant message stop event. The dispatch phase below
+            # reuses these already-running tasks so read_file / grep /
+            # glob overlap with whatever text the model is still
+            # generating. Unsafe tools (bash, edits, browser actions)
+            # still wait for FinishEvent so we don't race a write
+            # against a decision the model hasn't finished making.
+            _early_safe_names = {
+                t.name for t in tools if getattr(t, "concurrency_safe", False)
+            }
+            _early_tasks: dict[str, asyncio.Task] = {}
+
+            async def _timed_execute(
+                _tc: ToolCallEvent,
+            ) -> tuple[ToolResult | BaseException, str, float]:
+                """Execute a tool and return (result, start_iso, duration_s)."""
+                _s = time.time()
+                _iso = datetime.now(UTC).isoformat()
+                try:
+                    _r = await self._execute_tool(_tc)
+                except BaseException as _exc:
+                    _r = _exc
+                _dur = round(time.time() - _s, 3)
+                return _r, _iso, _dur
+
             logger.debug(
                 "[_run_single_turn] inner_turn=%d: Starting LLM stream with %d messages, %d tools",
                 inner_turn,
@@ -2321,12 +2486,19 @@ class AgentLoop(AgentProtocol):
             # Stream LLM response in a child task so cancel_current_turn()
             # can kill it instantly without terminating the queen's main loop.
             # Capture loop-scoped variables as defaults to satisfy B023.
+            # _stream_last_event_at is bumped on every event; the watchdog
+            # below uses it to detect silently hung HTTP connections.
+            _stream_last_event_at = time.monotonic()
+
             async def _do_stream(
                 _msgs: list = messages,  # noqa: B006
                 _tc: list[ToolCallEvent] = tool_calls,  # noqa: B006
                 inner_turn: int = inner_turn,
+                _safe_names: set = _early_safe_names,  # noqa: B006,B008
+                _tasks: dict = _early_tasks,  # noqa: B006,B008
+                _exec_fn=_timed_execute,
             ) -> None:
-                nonlocal accumulated_text, _stream_error
+                nonlocal accumulated_text, _stream_error, _stream_last_event_at
                 _clean_snapshot = ""  # visible-only text for the frontend
 
                 async for event in ctx.llm.stream(
@@ -2335,6 +2507,7 @@ class AgentLoop(AgentProtocol):
                     tools=tools if tools else None,
                     max_tokens=ctx.max_tokens,
                 ):
+                    _stream_last_event_at = time.monotonic()
                     if isinstance(event, TextDeltaEvent):
                         accumulated_text = event.snapshot
                         # Strip internal reasoning tags from the full
@@ -2357,6 +2530,18 @@ class AgentLoop(AgentProtocol):
 
                     elif isinstance(event, ToolCallEvent):
                         _tc.append(event)
+                        # Gap 1: start concurrency-safe tools immediately
+                        # while the rest of the stream is still arriving,
+                        # so read-heavy turns don't stall after the last
+                        # text delta. Unsafe tools wait for FinishEvent.
+                        if (
+                            event.tool_name in _safe_names
+                            and "_raw" not in event.tool_input
+                            and event.tool_use_id not in _tasks
+                        ):
+                            _tasks[event.tool_use_id] = asyncio.create_task(
+                                _exec_fn(event)
+                            )
 
                     elif isinstance(event, FinishEvent):
                         token_counts["input"] += event.input_tokens
@@ -2376,7 +2561,51 @@ class AgentLoop(AgentProtocol):
             logger.debug(
                 "[_run_single_turn] inner_turn=%d: Stream task created, waiting...", inner_turn
             )
+            _inactivity_limit = self._config.llm_stream_inactivity_timeout_seconds
             try:
+                if _inactivity_limit and _inactivity_limit > 0:
+                    # Heartbeat-aware wait: poll the task and cancel it if
+                    # no stream event has been observed within the window.
+                    # A silently dead HTTP connection otherwise hangs here
+                    # forever — no exception, no delta, no timeout.
+                    #
+                    # Must use asyncio.wait (not wait_for) so we can tell
+                    # "poll interval elapsed" apart from "task raised a
+                    # TimeoutError of its own" — wait_for conflates them.
+                    _check_interval = min(5.0, _inactivity_limit / 2)
+                    while True:
+                        done, _pending = await asyncio.wait(
+                            {self._stream_task}, timeout=_check_interval
+                        )
+                        if self._stream_task in done:
+                            # Let any exception the task raised propagate
+                            # naturally via the outer ``await`` below.
+                            break
+                        idle = time.monotonic() - _stream_last_event_at
+                        if idle >= _inactivity_limit:
+                            logger.warning(
+                                "[_run_single_turn] inner_turn=%d: "
+                                "stream inactivity %.0fs >= %.0fs — "
+                                "cancelling stream task",
+                                inner_turn,
+                                idle,
+                                _inactivity_limit,
+                            )
+                            self._bump("stream_inactivity_watchdog")
+                            self._stream_task.cancel()
+                            try:
+                                await self._stream_task
+                            except BaseException:
+                                pass
+                            raise ConnectionError(
+                                f"LLM stream idle for {idle:.0f}s "
+                                f"(inactivity limit {_inactivity_limit:.0f}s) — "
+                                "connection presumed dead"
+                            ) from None
+                        # Still active — keep polling.
+                # Re-raise any exception the stream task stored. When the
+                # watchdog loop exited via ``break`` the task is done, and
+                # ``await`` is the cheapest way to surface its exception.
                 await self._stream_task
                 logger.debug(
                     "[_run_single_turn] inner_turn=%d: Stream task completed normally", inner_turn
@@ -2385,6 +2614,12 @@ class AgentLoop(AgentProtocol):
                 logger.debug("[_run_single_turn] inner_turn=%d: Stream task cancelled", inner_turn)
                 if accumulated_text:
                     await conversation.add_assistant_message(content=accumulated_text)
+                # Gap 1: kill any early-dispatched tool tasks too.
+                # Without this, a safe tool started during streaming
+                # would leak past cancellation and keep running.
+                for _early in _early_tasks.values():
+                    if not _early.done():
+                        _early.cancel()
                 # Distinguish cancel_current_turn() (cancels the child
                 # _stream_task) from stop_worker (cancels the parent
                 # execution task).  When the parent itself is cancelled,
@@ -2399,6 +2634,12 @@ class AgentLoop(AgentProtocol):
                 logger.exception(
                     "[_run_single_turn] inner_turn=%d: Stream task failed: %s", inner_turn, e
                 )
+                # Don't orphan early tool tasks on a stream failure
+                # either - the outer retry loop will re-emit the tool
+                # calls on the next attempt.
+                for _early in _early_tasks.values():
+                    if not _early.done():
+                        _early.cancel()
                 raise
             finally:
                 self._stream_task = None
@@ -2408,6 +2649,9 @@ class AgentLoop(AgentProtocol):
             # raise so the outer transient-error retry can handle it
             # with proper backoff instead of burning judge iterations.
             if _stream_error and not accumulated_text and not tool_calls:
+                for _early in _early_tasks.values():
+                    if not _early.done():
+                        _early.cancel()
                 raise ConnectionError(
                     f"Stream failed with recoverable error: {_stream_error.error}"
                 )
@@ -2485,9 +2729,18 @@ class AgentLoop(AgentProtocol):
             real_tool_results: list[dict] = []
             limit_hit = False
             executed_in_batch = 0
-            hard_limit = int(
-                self._config.max_tool_calls_per_turn * (1 + self._config.tool_call_overflow_margin)
-            )
+            # hard_limit <= 0 disables the per-turn cap entirely. Some
+            # models routinely emit 50+ tool calls per turn during wide
+            # fan-out scenarios (browser exploration, bulk code reads);
+            # capping them strands work mid-turn and the next turn just
+            # re-emits the discarded calls, which is strictly worse.
+            if self._config.max_tool_calls_per_turn > 0:
+                hard_limit = int(
+                    self._config.max_tool_calls_per_turn
+                    * (1 + self._config.tool_call_overflow_margin)
+                )
+            else:
+                hard_limit = 0  # disabled
 
             # Phase 1: triage — handle framework tools immediately,
             # queue real tools for parallel execution.
@@ -2499,7 +2752,7 @@ class AgentLoop(AgentProtocol):
 
             for tc in tool_calls:
                 tool_call_count += 1
-                if tool_call_count > hard_limit:
+                if hard_limit > 0 and tool_call_count > hard_limit:
                     limit_hit = True
                     break
                 executed_in_batch += 1
@@ -2778,64 +3031,157 @@ class AgentLoop(AgentProtocol):
                     else:
                         pending_real.append(tc)
 
-            # Phase 2a: execute real tools in parallel.
+            # Phase 2a: partition real tools by concurrency safety.
+            # Read-only tools flagged concurrency_safe run in one parallel
+            # batch (bounded by a semaphore). Everything else - shell, file
+            # writes, browser actions, unknown MCP tools - runs serially
+            # afterwards so we can't race an edit against a bash command
+            # that touches the same path. Result ordering is preserved via
+            # results_by_id below; the split only affects scheduling.
+            # Reuses the same _early_safe_names set the stream used for
+            # Gap 1 early dispatch, so "safe" means exactly the same
+            # thing in both places.
+            parallel_batch: list[ToolCallEvent] = []
+            serial_batch: list[ToolCallEvent] = []
+            for tc in pending_real:
+                if tc.tool_name in _early_safe_names:
+                    parallel_batch.append(tc)
+                else:
+                    serial_batch.append(tc)
+
             if pending_real:
+                # Cap on concurrent read-only tool executions. Ten matches
+                # Claude Code's StreamingToolExecutor default and keeps MCP
+                # server load bounded on turns where the model issues a
+                # big fan-out of reads.
+                _PARALLEL_CAP = 10
+                _parallel_sem = asyncio.Semaphore(_PARALLEL_CAP)
 
-                async def _timed_execute(
+                async def _capped(
                     _tc: ToolCallEvent,
+                    _sem: asyncio.Semaphore = _parallel_sem,  # noqa: B008,B023
                 ) -> tuple[ToolResult | BaseException, str, float]:
-                    """Execute a tool and return (result, start_iso, duration_s)."""
-                    _s = time.time()
-                    _iso = datetime.now(UTC).isoformat()
-                    try:
-                        _r = await self._execute_tool(_tc)
-                    except BaseException as _exc:
-                        _r = _exc
-                    _dur = round(time.time() - _s, 3)
-                    return _r, _iso, _dur
+                    async with _sem:
+                        return await _timed_execute(_tc)
 
-                self._tool_task = asyncio.ensure_future(
-                    asyncio.gather(
-                        *(_timed_execute(tc) for tc in pending_real),
-                        return_exceptions=True,
+                timed_results_by_id: dict[
+                    str, tuple[ToolResult | BaseException, str, float] | BaseException
+                ] = {}
+
+                async def _cancel_turn_with_stubs(
+                    _pending: list[ToolCallEvent] = pending_real,  # noqa: B006,B008
+                ) -> None:
+                    """Populate [Tool call cancelled by user] stubs for
+                    every pending tool so the conversation doesn't end
+                    up with dangling tool_use blocks, then raise
+                    TurnCancelled so the queen event loop continues
+                    cleanly. Shared between the parallel and serial
+                    phases because either can observe CancelledError.
+                    """
+                    for _tc in _pending:
+                        await conversation.add_tool_result(
+                            tool_use_id=_tc.tool_use_id,
+                            content="[Tool call cancelled by user]",
+                            is_error=True,
+                        )
+                        await self._publish_tool_completed(
+                            stream_id,
+                            node_id,
+                            _tc.tool_use_id,
+                            _tc.tool_name,
+                            "[Tool call cancelled by user]",
+                            is_error=True,
+                            execution_id=execution_id,
+                        )
+                    raise TurnCancelled() from None
+
+                # Phase 2b: resolve the concurrency-safe batch. Prefer
+                # any early task already started during streaming (Gap
+                # 1) so we don't accidentally execute the same tool
+                # twice; for everything else, schedule via the semaphore-
+                # capped wrapper as before.
+                if parallel_batch:
+                    _awaitables: list = []
+                    for tc in parallel_batch:
+                        early = _early_tasks.get(tc.tool_use_id)
+                        if early is not None:
+                            _awaitables.append(early)
+                        else:
+                            _awaitables.append(_capped(tc))
+                    self._tool_task = asyncio.ensure_future(
+                        asyncio.gather(*_awaitables, return_exceptions=True)
                     )
-                )
-                try:
-                    timed_results = await self._tool_task
-                finally:
-                    self._tool_task = None
-                # gather(return_exceptions=True) captures CancelledError
-                # as a return value instead of propagating it.  Re-raise
-                # so stop_worker actually stops the execution.
-                # Distinguish cancel_current_turn() (cancels only _tool_task)
-                # from stop_worker (cancels the parent execution task).
-                # When the parent itself is cancelled, cancelling() > 0 —
-                # propagate.  Otherwise convert to TurnCancelled so the
-                # queen event loop continues.
-                for entry in timed_results:
-                    if isinstance(entry, asyncio.CancelledError):
+                    try:
+                        parallel_timed = await self._tool_task
+                    finally:
+                        self._tool_task = None
+                    # gather(return_exceptions=True) captures CancelledError
+                    # as a return value instead of propagating it.
+                    # Distinguish cancel_current_turn() (cancels only
+                    # _tool_task) from stop_worker (cancels the parent
+                    # execution task). When the parent itself is
+                    # cancelled, cancelling() > 0 — propagate so the
+                    # executor can save state. Otherwise convert to
+                    # TurnCancelled so the queen event loop continues,
+                    # writing cancellation stubs for every pending tool
+                    # first so the conversation has no dangling
+                    # tool_use blocks.
+                    for entry in parallel_timed:
+                        if isinstance(entry, asyncio.CancelledError):
+                            task = asyncio.current_task()
+                            if task and task.cancelling() > 0:
+                                raise entry
+                            await _cancel_turn_with_stubs()
+                    for tc, entry in zip(parallel_batch, parallel_timed, strict=True):
+                        timed_results_by_id[tc.tool_use_id] = entry
+
+                # Phase 2c: run unsafe tools sequentially. On a raised
+                # exception, cancel the remaining siblings with a clear
+                # error so the model sees the cascade instead of a silent
+                # drop. A ToolResult with is_error=True is a normal return
+                # (e.g. "file not found") and does NOT trip the cascade -
+                # the model should see subsequent errors too.
+                # CancelledError is handled separately via the shared
+                # user-cancel helper above.
+                _serial_cascade_broken = False
+                for tc in serial_batch:
+                    if _serial_cascade_broken:
+                        timed_results_by_id[tc.tool_use_id] = (
+                            ToolResult(
+                                tool_use_id=tc.tool_use_id,
+                                content=(
+                                    "Cancelled: an earlier non-concurrent tool "
+                                    "in this turn raised an exception. Re-issue "
+                                    "this call once the previous error is resolved."
+                                ),
+                                is_error=True,
+                            ),
+                            datetime.now(UTC).isoformat(),
+                            0.0,
+                        )
+                        continue
+
+                    self._tool_task = asyncio.ensure_future(_timed_execute(tc))
+                    try:
+                        entry = await self._tool_task
+                    finally:
+                        self._tool_task = None
+
+                    timed_results_by_id[tc.tool_use_id] = entry
+                    raw_check = entry[0] if isinstance(entry, tuple) else entry
+                    if isinstance(raw_check, asyncio.CancelledError):
                         task = asyncio.current_task()
                         if task and task.cancelling() > 0:
-                            raise entry
-                        # Add stub tool results for all pending tools so the
-                        # conversation doesn't have dangling tool_use blocks.
-                        for _tc in pending_real:
-                            await conversation.add_tool_result(
-                                tool_use_id=_tc.tool_use_id,
-                                content="[Tool call cancelled by user]",
-                                is_error=True,
-                            )
-                            await self._publish_tool_completed(
-                                stream_id,
-                                node_id,
-                                _tc.tool_use_id,
-                                _tc.tool_name,
-                                "[Tool call cancelled by user]",
-                                is_error=True,
-                                execution_id=execution_id,
-                            )
-                        raise TurnCancelled() from None
-                for tc, entry in zip(pending_real, timed_results, strict=True):
+                            raise raw_check
+                        await _cancel_turn_with_stubs()
+                    elif isinstance(raw_check, BaseException):
+                        _serial_cascade_broken = True
+
+                # Phase 2d: reassemble results in original call order so
+                # the rest of the loop sees no difference from the
+                # pre-partition world.
+                for tc in pending_real:
+                    entry = timed_results_by_id[tc.tool_use_id]
                     if isinstance(entry, BaseException):
                         raw = entry
                         _start_iso = datetime.now(UTC).isoformat()
@@ -3053,19 +3399,69 @@ class AgentLoop(AgentProtocol):
         tool_results: list[dict],
         iteration: int,
     ) -> JudgeVerdict:
-        """Evaluate the current state. Delegates to judge_pipeline module."""
-        return await judge_turn(
-            mark_complete_flag=False,
-            judge=self._judge,
-            ctx=ctx,
-            conversation=conversation,
-            accumulator=accumulator,
-            assistant_text=assistant_text,
-            tool_results=tool_results,
-            iteration=iteration,
-            get_missing_output_keys_fn=self._get_missing_output_keys,
-            max_context_tokens=self._config.max_context_tokens,
-        )
+        """Evaluate the current state, with retry + fallback.
+
+        The judge makes its own LLM call, which can fail transiently
+        (network blip, 429/529, stream stall). Without a safety net here
+        a single hiccup in the judge would crash the whole loop — even
+        though the work under evaluation was perfectly fine. We retry
+        transient failures a few times, then fall back to ACCEPT so the
+        loop keeps moving instead of dying on a judge outage.
+        """
+        max_attempts = max(1, self._config.max_stream_retries)
+        for attempt in range(max_attempts):
+            try:
+                return await judge_turn(
+                    mark_complete_flag=False,
+                    judge=self._judge,
+                    ctx=ctx,
+                    conversation=conversation,
+                    accumulator=accumulator,
+                    assistant_text=assistant_text,
+                    tool_results=tool_results,
+                    iteration=iteration,
+                    get_missing_output_keys_fn=self._get_missing_output_keys,
+                    max_context_tokens=self._config.max_context_tokens,
+                )
+            except Exception as e:
+                is_last = attempt == max_attempts - 1
+                if not self._is_transient_error(e) or is_last:
+                    if is_last and self._is_transient_error(e):
+                        self._bump("judge_fallback_accept")
+                        logger.error(
+                            "[judge] iter=%d: transient failure persisted across %d attempts "
+                            "(%s) — skipping judgment and accepting the turn to keep moving: %s",
+                            iteration,
+                            max_attempts,
+                            type(e).__name__,
+                            str(e)[:200],
+                        )
+                        return JudgeVerdict(
+                            action="ACCEPT",
+                            feedback=(
+                                f"[judge unavailable after {max_attempts} attempts: "
+                                f"{type(e).__name__}; accepting to avoid stalling the loop]"
+                            ),
+                        )
+                    # Non-transient — re-raise so the caller sees it.
+                    raise
+                self._bump("judge_transient_retry")
+                delay = min(
+                    self._config.stream_retry_backoff_base * (2**attempt),
+                    self._config.stream_retry_max_delay,
+                )
+                logger.warning(
+                    "[judge] iter=%d: transient error (%s), retrying in %.1fs (%d/%d): %s",
+                    iteration,
+                    type(e).__name__,
+                    delay,
+                    attempt + 1,
+                    max_attempts,
+                    str(e)[:200],
+                )
+                await asyncio.sleep(delay)
+        # Unreachable — the loop above always returns or raises.
+        raise RuntimeError("_judge_turn retry loop exited unexpectedly")
 
     # -------------------------------------------------------------------
     # Helpers
@@ -3139,6 +3535,40 @@ class AgentLoop(AgentProtocol):
         return is_transient_error(exc)
 
     @staticmethod
+    def _is_capacity_error(exc: BaseException) -> bool:
+        """Detect provider-side capacity / rate-limit errors.
+
+        These are the errors that typically resolve on their own if we
+        just wait long enough — 429 rate limit, 529 overloaded, and the
+        equivalent provider-specific flavours. We treat these differently
+        from generic transient errors (network blips) and retry them
+        persistently within a wall-clock budget instead of giving up
+        after a fixed attempt count.
+        """
+        cls_name = type(exc).__name__.lower()
+        if "ratelimit" in cls_name or "overloaded" in cls_name:
+            return True
+        try:
+            from litellm.exceptions import RateLimitError, ServiceUnavailableError
+
+            if isinstance(exc, (RateLimitError, ServiceUnavailableError)):
+                return True
+        except ImportError:
+            pass
+        error_str = str(exc).lower()
+        keywords = (
+            "429",
+            "529",
+            "rate limit",
+            "rate_limit",
+            "overloaded",
+            "capacity",
+            "too many requests",
+            "service unavailable",
+        )
+        return any(kw in error_str for kw in keywords)
+
+    @staticmethod
     def _fingerprint_tool_calls(
         tool_results: list[dict],
     ) -> list[tuple[str, str]]:
@@ -3165,12 +3595,21 @@ class AgentLoop(AgentProtocol):
         sync executors (MCP STDIO tools that block on ``future.result()``)
         don't freeze the event loop.
         """
-        return await execute_tool(
+        result = await execute_tool(
             tool_executor=self._tool_executor,
             tc=tc,
             timeout=self._config.tool_call_timeout_seconds,
             skill_dirs=getattr(self, "_skill_dirs", []),
         )
+        # Cheap post-hoc classification: the timeout handler in
+        # execute_tool builds a canned error message we can recognise
+        # here without threading a callback through. Good enough for
+        # telemetry; the content format is stable framework-internal.
+        if result.is_error and "timed out after" in (result.content or ""):
+            self._bump("tool_call_timeout")
+        elif result.is_error:
+            self._bump("tool_error")
+        return result
 
     def _next_spill_filename(self, tool_name: str) -> str:
         """Return a short, monotonic filename for a tool result spill."""

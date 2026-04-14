@@ -18,6 +18,8 @@ from aden_tools.hashline import (
     validate_anchor,
 )
 
+from aden_tools.file_state_cache import Freshness, check_fresh, record_read
+
 from ..security import get_sandboxed_path
 
 
@@ -86,6 +88,29 @@ def register_tools(mcp: FastMCP) -> None:
                 return {"error": f"File not found at {path}"}
             if not os.path.isfile(secure_path):
                 return {"error": f"Path is not a file: {path}"}
+
+            # Stale-edit guard: refuse to edit unless we have a recent
+            # read recorded in the file-state cache and the file on disk
+            # still matches it. This catches the case where the user
+            # saved the file in their editor between the model's Read
+            # and Edit, which would otherwise cause the model to write
+            # against a stale mental model.
+            fresh = check_fresh(agent_id, secure_path)
+            if fresh.status is Freshness.UNREAD:
+                return {
+                    "error": (
+                        f"Refusing to edit '{path}': you must call "
+                        f"read_file('{path}') first so the harness can "
+                        f"track its state before you edit it."
+                    )
+                }
+            if fresh.status is Freshness.STALE:
+                return {
+                    "error": (
+                        f"Refusing to edit '{path}': {fresh.detail}. "
+                        f"Re-read the file with read_file before editing."
+                    )
+                }
 
             with open(secure_path, "rb") as f:
                 raw_head = f.read(8192)
@@ -404,6 +429,15 @@ def register_tools(mcp: FastMCP) -> None:
                 raise
         except Exception as e:
             return {"error": f"Failed to write file: {e}"}
+
+        # Re-record the new file state so a second edit in the same turn
+        # sees the post-write hash instead of tripping the stale guard.
+        try:
+            record_read(agent_id, secure_path, content_bytes=joined.encode(encoding))
+        except Exception:
+            # Hash record is best-effort; a failure here must not break
+            # the edit that already succeeded on disk.
+            pass
 
         # 10. Build response
         updated_lines = joined.splitlines()

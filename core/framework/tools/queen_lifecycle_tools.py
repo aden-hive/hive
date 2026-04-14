@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING, Any
 
 from framework.credentials.models import CredentialError
 from framework.host.event_bus import AgentEvent, EventType
-from framework.loader.preload_validation import credential_errors_to_json, validate_credentials
+from framework.loader.preload_validation import credential_errors_to_json
 from framework.server.app import validate_agent_path
 from framework.tools.flowchart_utils import (
     FLOWCHART_TYPES,
@@ -1130,6 +1130,47 @@ def register_queen_lifecycle_tools(
                 {"error": "tasks must be a non-empty list of {task, data?} dicts"}
             )
 
+        # Hard ceiling on a single fan-out call. A runaway queen requesting
+        # thousands of parallel workers would starve memory and drown the
+        # event loop; reject early with a clear error instead.
+        _RUN_PARALLEL_HARD_CAP = 64
+        if len(tasks) > _RUN_PARALLEL_HARD_CAP:
+            return json.dumps(
+                {
+                    "error": (
+                        f"run_parallel_workers received {len(tasks)} tasks, "
+                        f"hard cap is {_RUN_PARALLEL_HARD_CAP}. Split the work "
+                        "into sequential batches or tighten the task list."
+                    )
+                }
+            )
+
+        # Global concurrency enforcement against ColonyConfig.max_concurrent_workers.
+        # The config field exists but was never checked anywhere — tracking
+        # it here so recursive fan-outs can't silently exceed the budget.
+        colony_cfg = getattr(colony, "_config", None) or getattr(colony, "config", None)
+        max_concurrent = getattr(colony_cfg, "max_concurrent_workers", None)
+        if max_concurrent and max_concurrent > 0:
+            active = 0
+            try:
+                workers = getattr(colony, "_workers", {}) or {}
+                for w in workers.values():
+                    handle = getattr(w, "_task_handle", None)
+                    if handle is not None and not handle.done():
+                        active += 1
+            except Exception:
+                active = 0
+            if active + len(tasks) > max_concurrent:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"run_parallel_workers would exceed max_concurrent_workers "
+                            f"({active} active + {len(tasks)} new > {max_concurrent}). "
+                            "Wait for existing workers to finish or reduce batch size."
+                        )
+                    }
+                )
+
         # Normalise: each entry must have a non-empty "task" string.
         normalised: list[dict] = []
         for i, spec in enumerate(tasks):
@@ -1515,9 +1556,20 @@ def register_queen_lifecycle_tools(
     _create_colony_tool = Tool(
         name="create_colony",
         description=(
-            "Fork this session into a colony — but FIRST author a "
-            "Hive Skill folder capturing what you learned during this "
-            "conversation, and pass its path to this tool. The tool "
+            "Fork this session into a persistent colony for work "
+            "that needs to run HEADLESS, RECURRING, or IN PARALLEL "
+            "to the current chat. Typical triggers: 'run this every "
+            "morning / on a cron', 'keep monitoring X and alert me', "
+            "'fire this off in the background so I can keep working "
+            "here', 'spin up a dedicated agent for this job'. The "
+            "criterion is operational — the work needs to keep "
+            "running (or needs to survive this conversation ending). "
+            "Do NOT use this just because you learned something "
+            "reusable; if the user wants results right now in this "
+            "chat, use run_parallel_workers instead.\n\n"
+            "Before forking, you author a Hive Skill folder capturing "
+            "the operational procedure the colony worker needs to run "
+            "unattended, and pass its path to this tool. The tool "
             "validates the skill folder (SKILL.md present, frontmatter "
             "name+description valid, directory name matches frontmatter "
             "name), installs it under ~/.hive/skills/{name}/ if it's "
@@ -1526,9 +1578,10 @@ def register_queen_lifecycle_tools(
             "it copies the queen session into a new colony directory "
             "and writes worker.json with the task baked in. No worker "
             "is started. The user navigates to the new colony when "
-            "they're ready to begin actual work — at that point the "
-            "worker reads the task from worker.json and the skill you "
-            "wrote here, and starts informed instead of clueless.\n\n"
+            "they're ready to begin actual work (or wires up a "
+            "trigger) — at that point the worker reads the task from "
+            "worker.json and the skill you wrote here, and starts "
+            "informed instead of clueless.\n\n"
             "TWO-STEP FLOW:\n\n"
             "  1. Use write_file (plus edit_file / list_directory as "
             "     needed) to create a skill folder. The folder must "
@@ -1541,20 +1594,21 @@ def register_queen_lifecycle_tools(
             "     needed.\n"
             "  2. Call create_colony(colony_name, task, skill_path) "
             "     pointing at the folder you just wrote.\n\n"
-            "WHY THIS EXISTS: a fresh worker has zero memory of your "
-            "chat with the user. If you spent the session figuring out "
-            "an API auth flow, pagination, data shapes, and gotchas — "
-            "that knowledge must live in a skill, not in your private "
-            "context, or the worker will repeat your discovery work "
-            "from scratch.\n\n"
+            "WHY THE SKILL IS REQUIRED: a fresh worker running "
+            "unattended has zero memory of your chat with the user. "
+            "Whatever you figured out during this session — API auth "
+            "flow, pagination, data shapes, gotchas, rate limits — "
+            "must live in the skill, or the worker will repeat your "
+            "discovery work every run.\n\n"
             "WHAT TO PUT IN THE SKILL BODY: the operational protocol "
-            "the next worker needs to do this work. Include API "
-            "endpoints with example requests, the exact auth flow, "
-            "response shapes you observed, gotchas you hit (rate "
-            "limits, pagination quirks, edge cases), conventions you "
-            "settled on, and pre-baked queries/commands. Write it as "
-            "if onboarding a new engineer who has never seen this "
-            "system. Realistic target: 300–2000 chars of body."
+            "the colony worker needs to do this work on its own. "
+            "Include API endpoints with example requests, the exact "
+            "auth flow, response shapes you observed, gotchas you hit "
+            "(rate limits, pagination quirks, edge cases), "
+            "conventions you settled on, and pre-baked "
+            "queries/commands. Write it as if onboarding a new "
+            "engineer who has never seen this system. Realistic "
+            "target: 300–2000 chars of body."
         ),
         parameters={
             "type": "object",
@@ -3834,24 +3888,50 @@ def register_queen_lifecycle_tools(
             )
 
         try:
-            # Pre-flight: validate credentials and resync MCP servers.
-            # Still uses the legacy AgentHost handles because that's
-            # where credentials live; the actual run is via colony.
+            # Pre-flight: compute the set of tools whose credentials are
+            # NOT currently available, and resync MCP servers. We do NOT
+            # hard-fail on missing credentials anymore — instead we drop
+            # the affected tools from the worker's spawn_tools list a
+            # few lines below. Hard-failing here caused unrelated tools
+            # (e.g. GitHub tools leaking into a LinkedIn worker config)
+            # to block the whole spawn with a CredentialError; the fix
+            # is to treat unset credentials as "drop these tools" rather
+            # than "abort the worker".
+            #
+            # Note: the MCP admission gate (_build_mcp_admission_gate in
+            # tool_registry.py) already filters MCP tools at registration
+            # time. This preflight covers the non-MCP path — tools.py
+            # discoveries via discover_from_module — which has no
+            # credential gate of its own.
             loop = asyncio.get_running_loop()
+            unavailable_tools: set[str] = set()
 
             async def _preflight():
-                cred_error: CredentialError | None = None
+                nonlocal unavailable_tools
                 try:
-                    await loop.run_in_executor(
+                    from framework.credentials.validation import compute_unavailable_tools
+
+                    drop, messages = await loop.run_in_executor(
                         None,
-                        lambda: validate_credentials(
-                            legacy.graph.nodes,
-                            interactive=False,
-                            skip=False,
-                        ),
+                        lambda: compute_unavailable_tools(legacy.graph.nodes),
                     )
-                except CredentialError as e:
-                    cred_error = e
+                    unavailable_tools = drop
+                    if drop:
+                        logger.warning(
+                            "run_agent_with_input: dropping %d tool(s) with "
+                            "unavailable credentials from worker spawn: %s",
+                            len(drop),
+                            "; ".join(messages),
+                        )
+                except Exception as exc:
+                    # Validation itself failing (not a credential failure —
+                    # a code error in the validator) should not block the
+                    # spawn. Log and proceed as if nothing was dropped.
+                    logger.warning(
+                        "compute_unavailable_tools raised, proceeding without "
+                        "credential-based tool filtering: %s",
+                        exc,
+                    )
 
                 runner = getattr(session, "runner", None)
                 if runner:
@@ -3863,9 +3943,6 @@ def register_queen_lifecycle_tools(
                     except Exception as e:
                         logger.warning("MCP resync failed: %s", e)
 
-                if cred_error is not None:
-                    raise cred_error
-
             try:
                 await asyncio.wait_for(_preflight(), timeout=_START_PREFLIGHT_TIMEOUT)
             except TimeoutError:
@@ -3873,8 +3950,6 @@ def register_queen_lifecycle_tools(
                     "run_agent_with_input preflight timed out after %ds — proceeding",
                     _START_PREFLIGHT_TIMEOUT,
                 )
-            except CredentialError:
-                raise  # handled below
 
             # Build a per-spawn AgentSpec that mirrors the loaded
             # worker's entry-node identity. This is what makes the
@@ -3903,6 +3978,24 @@ def register_queen_lifecycle_tools(
                 else []
             )
 
+            # Drop any tool whose credential isn't available (GitHub
+            # tools when GITHUB_TOKEN is unset, etc). The preflight
+            # above populated ``unavailable_tools``; apply the filter
+            # HERE — before the AgentSpec is built — so the worker
+            # only sees tools it can actually run.
+            dropped_from_names: list[str] = []
+            if unavailable_tools:
+                original = worker_tool_names
+                worker_tool_names = [t for t in original if t not in unavailable_tools]
+                dropped_from_names = [t for t in original if t in unavailable_tools]
+                if dropped_from_names:
+                    logger.warning(
+                        "run_agent_with_input: dropped %d tool(s) from worker "
+                        "AgentSpec due to unavailable credentials: %s",
+                        len(dropped_from_names),
+                        ", ".join(dropped_from_names),
+                    )
+
             spawn_spec = AgentSpec(
                 id=f"loaded_worker:{getattr(graph, 'id', 'unknown')}",
                 name=getattr(graph, "id", "loaded_worker"),
@@ -3920,6 +4013,26 @@ def register_queen_lifecycle_tools(
             # MCP-loaded tools (browser, hubspot, honeycomb, etc.).
             spawn_tools = list(getattr(legacy, "_tools", []) or [])
             spawn_tool_executor = getattr(legacy, "_tool_executor", None)
+
+            # Same credential-based filter on the live Tool objects
+            # passed to the worker. Without this the worker would still
+            # receive the GitHub tool definitions in its registry —
+            # it just wouldn't see them in its AgentSpec, so the LLM
+            # wouldn't know to use them. Dropping from both lists
+            # makes the filter complete.
+            if unavailable_tools:
+                before = len(spawn_tools)
+                spawn_tools = [
+                    t for t in spawn_tools
+                    if getattr(t, "name", None) not in unavailable_tools
+                ]
+                dropped_count = before - len(spawn_tools)
+                if dropped_count:
+                    logger.info(
+                        "run_agent_with_input: dropped %d tool object(s) from "
+                        "spawn_tools (unavailable credentials)",
+                        dropped_count,
+                    )
 
             worker_ids = await colony.spawn(
                 task=task,

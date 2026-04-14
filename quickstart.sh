@@ -1851,75 +1851,33 @@ fi
 echo ""
 
 # ============================================================
-# Step 4b: Load browser extension into Chrome (one-time setup)
+# Step 4b: Install browser extension from Chrome Web Store
 # ============================================================
 
-echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Setting up browser extension...${NC}"
+echo -e "${YELLOW}⬢${NC} ${BLUE}${BOLD}Installing browser extension...${NC}"
 echo ""
 
-EXTENSION_PATH="$SCRIPT_DIR/tools/browser-extension"
-CHROME_BIN=""
-CHROME_LAUNCHED=false
+EXTENSION_URL="https://chromewebstore.google.com/detail/hive-browser-bridge/jkpcegnbfimimjodblcemoheedidnppm"
+EXTENSION_INSTALLED=false
 
-# Find Chrome binary
-for _bin in "google-chrome" "google-chrome-stable" "chromium" "chromium-browser" "microsoft-edge" "microsoft-edge-stable"; do
-    if command -v "$_bin" &> /dev/null; then
-        CHROME_BIN="$_bin"
-        break
-    fi
-done
-# macOS
-if [ -z "$CHROME_BIN" ]; then
-    for _path in \
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-        "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"; do
-        if [ -e "$_path" ]; then
-            CHROME_BIN="$_path"
-            break
-        fi
-    done
-fi
+echo -e "  Install ${BOLD}Hive Browser Bridge${NC} from the Chrome Web Store, then click ${BOLD}Add to Chrome${NC}."
+echo -e "  ${DIM}${EXTENSION_URL}${NC}"
+echo ""
+read -r -p "  Press Enter to open the Web Store... " _dummy || true
 
-if [ ! -d "$EXTENSION_PATH" ]; then
-    echo -e "${YELLOW}  Extension not found at $EXTENSION_PATH — skipping${NC}"
-elif [ -z "$CHROME_BIN" ]; then
-    echo -e "${YELLOW}  Chrome not found — skipping${NC}"
-    echo -e "${DIM}    Install Chrome, then load: $EXTENSION_PATH via chrome://extensions${NC}"
+if [[ "$OSTYPE" == darwin* ]]; then
+    open "$EXTENSION_URL" 2>/dev/null
+elif command -v xdg-open &> /dev/null; then
+    xdg-open "$EXTENSION_URL" > /dev/null 2>&1 &
+elif command -v wslview &> /dev/null; then
+    wslview "$EXTENSION_URL" > /dev/null 2>&1 &
 else
-    # Copy path to clipboard (best-effort)
-    if command -v xclip &> /dev/null; then
-        printf '%s' "$EXTENSION_PATH" | xclip -selection clipboard 2>/dev/null && _copied=true
-    elif command -v xsel &> /dev/null; then
-        printf '%s' "$EXTENSION_PATH" | xsel --clipboard --input 2>/dev/null && _copied=true
-    elif command -v pbcopy &> /dev/null; then
-        printf '%s' "$EXTENSION_PATH" | pbcopy 2>/dev/null && _copied=true
-    fi
-
-    read -r -p "  Press Enter when you are ready to set up the Chrome extension... " _dummy || true
-    echo ""
-
-    # Open setup guide in default browser
-    SETUP_URL="file://$SCRIPT_DIR/docs/browser-extension-setup.html?path=$(printf '%s' "$EXTENSION_PATH" | sed 's/ /%20/g')"
-    echo -e "  Opening browser extension setup guide..."
-    if [ "${_copied:-false}" = "true" ]; then
-        echo -e "  ${DIM}(extension path copied to clipboard — paste it in the folder picker)${NC}"
-    fi
-    if [[ "$OSTYPE" == darwin* ]]; then
-        open "$SETUP_URL" 2>/dev/null
-    elif command -v xdg-open &> /dev/null; then
-        xdg-open "$SETUP_URL" > /dev/null 2>&1 &
-    elif command -v wslview &> /dev/null; then
-        wslview "$SETUP_URL" > /dev/null 2>&1 &
-    else
-        echo -e "  ${DIM}Could not open browser automatically. Visit:${NC}"
-        echo -e "  ${BOLD}$SETUP_URL${NC}"
-    fi
-
-    echo ""
-    read -r -p "  Press Enter once you've finished the extension setup... " _dummy || true
-    CHROME_LAUNCHED=true
+    echo -e "  ${DIM}Could not open browser automatically — open the URL above in Chrome.${NC}"
 fi
+
+echo ""
+read -r -p "  Press Enter once the extension is installed... " _dummy || true
+EXTENSION_INSTALLED=true
 
 echo ""
 
@@ -1987,12 +1945,8 @@ else
 fi
 
 echo -n "  ⬡ browser extension... "
-if [ "$CHROME_LAUNCHED" = true ]; then
+if [ "$EXTENSION_INSTALLED" = true ]; then
     echo -e "${GREEN}ok${NC}"
-elif [ -d "$EXTENSION_PATH" ] && [ -n "$CHROME_BIN" ]; then
-    echo -e "${GREEN}ok${NC}"
-elif [ -d "$EXTENSION_PATH" ]; then
-    echo -e "${YELLOW}-- (Chrome not found)${NC}"
 else
     echo -e "${YELLOW}--${NC}"
 fi

@@ -168,13 +168,18 @@ async def compact(
     """
     conv_id = id(conversation)
 
-    # Circuit breaker: stop auto-compacting after repeated failures
-    if _failure_counts.get(conv_id, 0) >= MAX_CONSECUTIVE_FAILURES:
+    # Circuit breaker: stop LLM-based compaction after repeated failures,
+    # but still fall through to the emergency deterministic summary so
+    # the conversation doesn't silently grow past the context window.
+    # Without this, a persistent LLM outage during compaction would
+    # leave the agent stuck sending oversized prompts until the API 400s.
+    _llm_compaction_skipped = _failure_counts.get(conv_id, 0) >= MAX_CONSECUTIVE_FAILURES
+    if _llm_compaction_skipped:
         logger.warning(
-            "Circuit breaker: skipping compaction after %d consecutive failures",
+            "Circuit breaker: LLM compaction disabled after %d failures — "
+            "skipping straight to emergency summary",
             _failure_counts[conv_id],
         )
-        return
 
     # Recompaction detection
     now = time.monotonic()
@@ -256,7 +261,7 @@ async def compact(
         return
 
     # --- Step 3: LLM summary compaction ---
-    if ctx.llm is not None:
+    if ctx.llm is not None and not _llm_compaction_skipped:
         logger.info(
             "LLM summary compaction triggered (%.0f%% usage)",
             conversation.usage_ratio() * 100,

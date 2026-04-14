@@ -191,6 +191,14 @@ def _ensure_ollama_chat_prefix(model: str) -> str:
 RATE_LIMIT_MAX_RETRIES = 10
 RATE_LIMIT_BACKOFF_BASE = 2  # seconds
 RATE_LIMIT_MAX_DELAY = 120  # seconds - cap to prevent absurd waits
+# Separate, much lower cap for "empty response, finish_reason=stop"
+# scenarios. Unlike a real 429, these are rarely transient: Gemini
+# returns stop+empty on silently-filtered safety blocks, poisoned
+# conversation state (dangling tool_result after compaction), or
+# malformed tool schemas. Waiting minutes doesn't fix any of those, so
+# give up after 3 attempts (2+4+8 = 14s) and surface an actionable
+# error instead of burning 12+ minutes on exponential backoff.
+EMPTY_RESPONSE_MAX_RETRIES = 3
 MINIMAX_API_BASE = "https://api.minimax.io/v1"
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 
@@ -872,22 +880,31 @@ class LiteLLMProvider(LLMProvider):
                         )
                         return response
 
-                    if attempt == retries:
+                    empty_cap = min(retries, EMPTY_RESPONSE_MAX_RETRIES)
+                    if attempt >= empty_cap:
                         logger.error(
-                            f"[retry] GAVE UP on {model} after {retries + 1} "
-                            f"attempts — empty response "
+                            f"[retry] GAVE UP on {model} after "
+                            f"{attempt + 1} attempts — empty response "
                             f"(finish_reason={finish_reason}, "
-                            f"choices={len(response.choices) if response.choices else 0})"
+                            f"choices={len(response.choices) if response.choices else 0}). "
+                            f"This is almost never a rate limit despite the "
+                            f"earlier log message — check the dumped request "
+                            f"at {dump_path} for poisoned conversation state "
+                            f"(dangling tool_result after compaction), a "
+                            f"safety-filter trigger in the prompt, or a "
+                            f"malformed tool schema."
                         )
                         return response
                     wait = _compute_retry_delay(attempt)
                     logger.warning(
                         f"[retry] {model} returned empty response "
                         f"(finish_reason={finish_reason}, "
-                        f"choices={len(response.choices) if response.choices else 0}) — "
-                        f"likely rate limited or quota exceeded. "
+                        f"choices={len(response.choices) if response.choices else 0}). "
                         f"Retrying in {wait}s "
-                        f"(attempt {attempt + 1}/{retries})"
+                        f"(attempt {attempt + 1}/{empty_cap}). "
+                        f"Note: empty-response retries are capped at "
+                        f"{EMPTY_RESPONSE_MAX_RETRIES} because this is rarely "
+                        f"a transient rate limit on small payloads."
                     )
                     time.sleep(wait)
                     continue
@@ -1097,22 +1114,35 @@ class LiteLLMProvider(LLMProvider):
                         )
                         return response
 
-                    if attempt == retries:
+                    # Use a much lower retry cap for empty-response
+                    # recoveries than for real exceptions. These are
+                    # almost never transient (see EMPTY_RESPONSE_MAX_RETRIES
+                    # rationale at the top of the file).
+                    empty_cap = min(retries, EMPTY_RESPONSE_MAX_RETRIES)
+                    if attempt >= empty_cap:
                         logger.error(
-                            f"[async-retry] GAVE UP on {model} after {retries + 1} "
-                            f"attempts — empty response "
+                            f"[async-retry] GAVE UP on {model} after "
+                            f"{attempt + 1} attempts — empty response "
                             f"(finish_reason={finish_reason}, "
-                            f"choices={len(response.choices) if response.choices else 0})"
+                            f"choices={len(response.choices) if response.choices else 0}). "
+                            f"This is almost never a rate limit despite the "
+                            f"earlier log message — check the dumped request "
+                            f"at {dump_path} for poisoned conversation state "
+                            f"(dangling tool_result after compaction), a "
+                            f"safety-filter trigger in the prompt, or a "
+                            f"malformed tool schema."
                         )
                         return response
                     wait = _compute_retry_delay(attempt)
                     logger.warning(
                         f"[async-retry] {model} returned empty response "
                         f"(finish_reason={finish_reason}, "
-                        f"choices={len(response.choices) if response.choices else 0}) — "
-                        f"likely rate limited or quota exceeded. "
+                        f"choices={len(response.choices) if response.choices else 0}). "
                         f"Retrying in {wait}s "
-                        f"(attempt {attempt + 1}/{retries})"
+                        f"(attempt {attempt + 1}/{empty_cap}). "
+                        f"Note: empty-response retries are capped at "
+                        f"{EMPTY_RESPONSE_MAX_RETRIES} because this is rarely "
+                        f"a transient rate limit on small payloads."
                     )
                     await asyncio.sleep(wait)
                     continue

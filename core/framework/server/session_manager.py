@@ -761,8 +761,20 @@ class SessionManager:
             runtime = runner._agent_runtime
 
             # Load triggers from the agent's triggers.json definition file.
-            from framework.tools.queen_lifecycle_tools import _read_agent_triggers_json
+            # triggers.json is written exclusively by set_trigger, so the
+            # presence of an entry means the user explicitly activated this
+            # trigger in a previous session. We treat the file as the
+            # source of truth and auto-start each trigger on colony load
+            # so the user doesn't have to re-activate after every restart.
+            # The per-session active_triggers tracking still functions, but
+            # is no longer the only path to "running" status.
+            from framework.tools.queen_lifecycle_tools import (
+                _read_agent_triggers_json,
+                _start_trigger_timer,
+                _start_trigger_webhook,
+            )
 
+            triggers_to_autostart: list[str] = []
             for tdata in _read_agent_triggers_json(agent_path):
                 tid = tdata.get("id", "")
                 ttype = tdata.get("trigger_type", "")
@@ -774,10 +786,55 @@ class SessionManager:
                         description=tdata.get("name", tid),
                         task=tdata.get("task", ""),
                     )
+                    triggers_to_autostart.append(tid)
                     logger.info("Loaded trigger '%s' (%s) from triggers.json", tid, ttype)
 
+            # Auto-start every trigger discovered in triggers.json. The
+            # frontend listens for TRIGGER_ACTIVATED to render the active
+            # state; per-session active_triggers tracking still happens
+            # via _persist_active_triggers below.
+            for tid in triggers_to_autostart:
+                tdef = session.available_triggers[tid]
+                try:
+                    if tdef.trigger_type == "timer":
+                        await _start_trigger_timer(session, tid, tdef)
+                    elif tdef.trigger_type == "webhook":
+                        await _start_trigger_webhook(session, tid, tdef)
+                    tdef.active = True
+                    session.active_trigger_ids.add(tid)
+                    logger.info("Auto-started trigger '%s' on colony load", tid)
+                except Exception:
+                    logger.warning(
+                        "Failed to auto-start trigger '%s' on colony load",
+                        tid,
+                        exc_info=True,
+                    )
+
+            if session.active_trigger_ids:
+                # Persist the auto-started set so a subsequent restart
+                # finds them in state.active_triggers and the existing
+                # _restore_active_triggers path also keeps working.
+                from framework.tools.queen_lifecycle_tools import (
+                    _persist_active_triggers,
+                )
+
+                await _persist_active_triggers(session, session.id)
+
             if session.available_triggers:
+                # Emit AVAILABLE for every trigger (so the UI knows the
+                # definition exists) and ACTIVATED for the ones we just
+                # auto-started. The frontend handler treats them as the
+                # same case and uses the latter to flip the card to
+                # active.
                 await self._emit_trigger_events(session, "available", session.available_triggers)
+                if session.active_trigger_ids:
+                    activated = {
+                        tid: session.available_triggers[tid]
+                        for tid in session.active_trigger_ids
+                        if tid in session.available_triggers
+                    }
+                    if activated:
+                        await self._emit_trigger_events(session, "activated", activated)
 
             # Start runtime on event loop
             if runtime and not runtime.is_running:
@@ -914,6 +971,10 @@ class SessionManager:
                     _start_trigger_webhook,
                 )
 
+                from framework.host.event_bus import AgentEvent, EventType
+
+                runner = getattr(session, "runner", None)
+                colony_entry = runner.graph.entry_node if runner else None
                 saved_tasks = getattr(state, "trigger_tasks", {}) or {}
                 for tid in state.active_triggers:
                     tdef = session.available_triggers.get(tid)
@@ -930,6 +991,29 @@ class SessionManager:
                         elif tdef.trigger_type == "webhook":
                             await _start_trigger_webhook(session, tid, tdef)
                             logger.info("Restored webhook trigger '%s'", tid)
+                        # Emit TRIGGER_ACTIVATED so the frontend knows this
+                        # trigger is running after a server restart. Without
+                        # this, the previously-available event is the only
+                        # signal the UI ever gets, and the trigger appears
+                        # inactive forever.
+                        if session.event_bus:
+                            await session.event_bus.publish(
+                                AgentEvent(
+                                    type=EventType.TRIGGER_ACTIVATED,
+                                    stream_id="queen",
+                                    data={
+                                        "trigger_id": tdef.id,
+                                        "trigger_type": tdef.trigger_type,
+                                        "trigger_config": tdef.trigger_config,
+                                        "name": tdef.description or tdef.id,
+                                        **(
+                                            {"entry_node": colony_entry}
+                                            if colony_entry
+                                            else {}
+                                        ),
+                                    },
+                                )
+                            )
                     else:
                         logger.warning(
                             "Saved trigger '%s' not found in worker entry points, skipping",
@@ -1492,12 +1576,15 @@ class SessionManager:
         kind: str,
         triggers: dict[str, TriggerDefinition],
     ) -> None:
-        """Emit TRIGGER_AVAILABLE or TRIGGER_REMOVED events for each trigger."""
+        """Emit TRIGGER_AVAILABLE / ACTIVATED / REMOVED events for each trigger."""
         from framework.host.event_bus import AgentEvent, EventType
 
-        event_type = (
-            EventType.TRIGGER_AVAILABLE if kind == "available" else EventType.TRIGGER_REMOVED
-        )
+        if kind == "activated":
+            event_type = EventType.TRIGGER_ACTIVATED
+        elif kind == "removed":
+            event_type = EventType.TRIGGER_REMOVED
+        else:
+            event_type = EventType.TRIGGER_AVAILABLE
         # Resolve entry node for trigger target
         runner = getattr(session, "runner", None)
         colony_entry = runner.graph.entry_node if runner else None

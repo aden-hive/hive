@@ -381,10 +381,20 @@ class NodeConversation:
         output_keys: list[str] | None = None,
         store: ConversationStore | None = None,
         run_id: str | None = None,
+        compaction_buffer_tokens: int | None = None,
+        compaction_warning_buffer_tokens: int | None = None,
     ) -> None:
         self._system_prompt = system_prompt
         self._max_context_tokens = max_context_tokens
         self._compaction_threshold = compaction_threshold
+        # Buffer-based compaction trigger (Gap 7). When set, takes
+        # precedence over the multiplicative compaction_threshold so the
+        # loop reserves a fixed headroom for the next turn's input+output
+        # instead of trying to get exactly X% of the way to the hard
+        # limit. If left as None the legacy threshold-based rule is
+        # used, keeping old call sites behaving identically.
+        self._compaction_buffer_tokens = compaction_buffer_tokens
+        self._compaction_warning_buffer_tokens = compaction_warning_buffer_tokens
         self._output_keys = output_keys
         self._store = store
         self._messages: list[Message] = []
@@ -491,6 +501,27 @@ class NodeConversation:
         image_content: list[dict[str, Any]] | None = None,
         is_skill_content: bool = False,
     ) -> Message:
+        # Dedup guard: reject a second tool_result for the same tool_use_id.
+        # Anthropic's API only accepts one result per tool_call, and a duplicate
+        # causes a hard 400 two turns later ("messages with role 'tool' must
+        # be a response to a preceding message with 'tool_calls'"). Duplicates
+        # can arise when a tool_call_timeout fires and records a placeholder
+        # error, then the real executor thread eventually delivers the actual
+        # result (the thread kept running inside run_in_executor — see
+        # tool_result_handler.execute_tool).  We keep the FIRST result to
+        # preserve whatever state the agent already reasoned about.
+        for existing in reversed(self._messages):
+            if existing.role == "tool" and existing.tool_use_id == tool_use_id:
+                import logging as _logging
+
+                _logging.getLogger(__name__).warning(
+                    "add_tool_result: dropping duplicate result for tool_use_id=%s "
+                    "(first result preserved, %d chars; new result ignored, %d chars)",
+                    tool_use_id,
+                    len(existing.content),
+                    len(content),
+                )
+                return existing
         msg = Message(
             seq=self._next_seq,
             role="tool",
@@ -567,11 +598,18 @@ class NodeConversation:
     ) -> list[dict[str, Any]]:
         """Ensure tool_call / tool_result pairs are consistent.
 
-        1. **Orphaned tool results** (tool_result with no preceding tool_use)
-           are dropped.  This happens when compaction removes an assistant
-           message but leaves its tool-result messages behind.
-        2. **Orphaned tool calls** (tool_use with no following tool_result)
-           get a synthetic error result appended.  This happens when a loop
+        1. **Orphaned tool results** (tool_result with no matching tool_use
+           anywhere) are dropped.  Happens after compaction removes the
+           parent assistant message.
+        2. **Positionally orphaned tool results** (tool_result separated
+           from its parent by a non-tool message, e.g. a user injection)
+           are dropped.  The Anthropic API requires tool messages to
+           follow immediately after the assistant message that issued
+           the matching tool_call.
+        3. **Duplicate tool results** (same tool_call_id appearing more
+           than once) are dropped; only the first is kept.
+        4. **Orphaned tool calls** (tool_use with no following tool_result)
+           get a synthetic error result appended.  Happens when the loop
            is cancelled mid-tool-execution.
         """
         # Pass 1: collect all tool_call IDs from assistant messages so we
@@ -584,41 +622,75 @@ class NodeConversation:
                     if tc_id:
                         all_tool_call_ids.add(tc_id)
 
-        # Pass 2: build repaired list — drop orphaned tool results, patch
-        # missing tool results.
+        # Pass 2: build repaired list — drop orphaned tool results, drop
+        # positional orphans and duplicates, patch missing tool results.
+        #
+        # ``open_tool_calls`` holds the tool_call IDs we're still expecting
+        # results for: it's populated when we emit an assistant-with-tool_calls
+        # and drained as matching tool messages follow. Any tool message
+        # whose id is not currently open is positionally invalid and gets
+        # dropped — that closes the gap that caused the tool-after-user
+        # 400 errors.
         repaired: list[dict[str, Any]] = []
-        for i, m in enumerate(msgs):
-            # Drop tool-result messages whose tool_call_id has no matching
-            # tool_use in any assistant message (orphaned by compaction).
-            if m.get("role") == "tool":
-                tid = m.get("tool_call_id")
-                if tid and tid not in all_tool_call_ids:
-                    continue  # skip orphaned result
+        open_tool_calls: set[str] = set()
+        seen_tool_ids: set[str] = set()
+        for m in msgs:
+            role = m.get("role")
 
-            repaired.append(m)
-            tool_calls = m.get("tool_calls")
-            if m.get("role") != "assistant" or not tool_calls:
+            if role == "tool":
+                tid = m.get("tool_call_id")
+                # Drop tool results with no matching tool_use anywhere.
+                if not tid or tid not in all_tool_call_ids:
+                    continue
+                # Drop duplicates (same id appearing twice) — keep first.
+                if tid in seen_tool_ids:
+                    continue
+                # Drop positional orphans — tool messages whose parent
+                # assistant isn't the still-open assistant block.
+                if tid not in open_tool_calls:
+                    continue
+                open_tool_calls.discard(tid)
+                seen_tool_ids.add(tid)
+                repaired.append(m)
                 continue
-            # Collect IDs of tool results that follow this assistant message
-            answered: set[str] = set()
-            for j in range(i + 1, len(msgs)):
-                if msgs[j].get("role") == "tool":
-                    tid = msgs[j].get("tool_call_id")
-                    if tid:
-                        answered.add(tid)
-                else:
-                    break  # stop at first non-tool message
-            # Patch any missing results
-            for tc in tool_calls:
-                tc_id = tc.get("id")
-                if tc_id and tc_id not in answered:
+
+            # Any non-tool message closes the current assistant tool block.
+            # If the previous assistant left tool_calls unanswered, patch
+            # synthetic error results before emitting this message so the
+            # API sees a complete pairing.
+            if open_tool_calls:
+                for stale_id in list(open_tool_calls):
                     repaired.append(
                         {
                             "role": "tool",
-                            "tool_call_id": tc_id,
+                            "tool_call_id": stale_id,
                             "content": "ERROR: Tool execution was interrupted.",
                         }
                     )
+                    seen_tool_ids.add(stale_id)
+                open_tool_calls.clear()
+
+            repaired.append(m)
+
+            if role == "assistant":
+                for tc in m.get("tool_calls") or []:
+                    tc_id = tc.get("id")
+                    if tc_id and tc_id not in seen_tool_ids:
+                        open_tool_calls.add(tc_id)
+
+        # Tail: if the conversation ends with an assistant that issued
+        # tool_calls and no results followed, patch them so the next
+        # turn's first message can be a valid assistant/user response.
+        if open_tool_calls:
+            for stale_id in list(open_tool_calls):
+                repaired.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": stale_id,
+                        "content": "ERROR: Tool execution was interrupted.",
+                    }
+                )
+
         return repaired
 
     def estimate_tokens(self) -> int:
@@ -667,7 +739,36 @@ class NodeConversation:
         return self.estimate_tokens() / self._max_context_tokens
 
     def needs_compaction(self) -> bool:
+        """True when the conversation should be compacted before the
+        next LLM call.
+
+        Buffer-based rule (Gap 7): trigger when the current estimate
+        plus the configured buffer would exceed the hard context limit.
+        Prevents compaction from firing only AFTER we're already over
+        the wire and forced into a reactive binary-split pass.
+
+        When no buffer is configured, falls back to the multiplicative
+        threshold the old callers were built around.
+        """
+        if self._max_context_tokens <= 0:
+            return False
+        if self._compaction_buffer_tokens is not None:
+            budget = self._max_context_tokens - self._compaction_buffer_tokens
+            return self.estimate_tokens() >= max(0, budget)
         return self.estimate_tokens() >= self._max_context_tokens * self._compaction_threshold
+
+    def compaction_warning(self) -> bool:
+        """True when the conversation has crossed the warning threshold
+        but not yet the hard compaction trigger.
+
+        Used by telemetry / UI to show a "context getting tight" hint
+        before a compaction pass actually runs. Returns False when no
+        warning buffer is configured (legacy behaviour).
+        """
+        if self._max_context_tokens <= 0 or self._compaction_warning_buffer_tokens is None:
+            return False
+        warn_at = self._max_context_tokens - self._compaction_warning_buffer_tokens
+        return self.estimate_tokens() >= max(0, warn_at)
 
     # --- Output-key extraction ---------------------------------------------
 
@@ -1202,6 +1303,10 @@ class NodeConversation:
             "system_prompt": self._system_prompt,
             "max_context_tokens": self._max_context_tokens,
             "compaction_threshold": self._compaction_threshold,
+            "compaction_buffer_tokens": self._compaction_buffer_tokens,
+            "compaction_warning_buffer_tokens": (
+                self._compaction_warning_buffer_tokens
+            ),
             "output_keys": self._output_keys,
         }
         await self._store.write_meta(run_meta)
@@ -1249,6 +1354,10 @@ class NodeConversation:
             output_keys=meta.get("output_keys"),
             store=store,
             run_id=run_id,
+            compaction_buffer_tokens=meta.get("compaction_buffer_tokens"),
+            compaction_warning_buffer_tokens=meta.get(
+                "compaction_warning_buffer_tokens"
+            ),
         )
         conv._meta_persisted = True
 
