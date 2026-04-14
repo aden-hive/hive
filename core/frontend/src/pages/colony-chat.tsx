@@ -277,6 +277,12 @@ export default function ColonyChat() {
   agentStateRef.current = agentState;
 
   const turnCounterRef = useRef<Record<string, number>>({});
+  // Maps tool_use_id → the pill message ID and tool name that was created for it.
+  // Survives turn counter resets so deferred completions (e.g. ask_user) can
+  // find and update the correct pill even after the counter changes.
+  const toolUseToPillRef = useRef<
+    Record<string, { msgId: string; name: string }>
+  >({});
   const queenPhaseRef = useRef<string>("planning");
   const queenIterTextRef = useRef<Record<string, Record<number, string>>>({});
   const suppressIntroRef = useRef(false);
@@ -582,6 +588,7 @@ export default function ColonyChat() {
       setGraphNodes([]);
       setAgentState(defaultAgentState());
       turnCounterRef.current = {};
+      toolUseToPillRef.current = {};
       queenPhaseRef.current = "planning";
       queenIterTextRef.current = {};
       suppressIntroRef.current = false;
@@ -917,6 +924,12 @@ export default function ColonyChat() {
             }
 
             const sid = event.stream_id;
+            // Track which pill message this tool belongs to so deferred
+            // completions (ask_user) can find it after the turn counter changes.
+            toolUseToPillRef.current[toolUseId] = {
+              msgId: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
+              name: toolName,
+            };
             setAgentState((prev) => {
               const newActive = {
                 ...prev.activeToolCalls,
@@ -961,30 +974,73 @@ export default function ColonyChat() {
               appendNodeLog(event.node_id, `${ts} INFO  ${toolName} done${resultStr}`);
             }
 
+            // Look up the original pill message this tool belongs to.
+            // For deferred completions (ask_user), the turn counter and
+            // activeToolCalls have already been reset, so we rely on the
+            // ref recorded during tool_call_started.
+            const tracked = toolUseToPillRef.current[toolUseId];
+            delete toolUseToPillRef.current[toolUseId];
+
             const sid = event.stream_id;
+
+            // Mark done in activeToolCalls if still present (normal case)
             setAgentState((prev) => {
-              const updated = { ...prev.activeToolCalls };
-              if (updated[toolUseId]) {
-                updated[toolUseId] = { ...updated[toolUseId], done: true };
+              if (!prev.activeToolCalls[toolUseId]) return prev;
+              return {
+                ...prev,
+                activeToolCalls: {
+                  ...prev.activeToolCalls,
+                  [toolUseId]: {
+                    ...prev.activeToolCalls[toolUseId],
+                    done: true,
+                  },
+                },
+              };
+            });
+
+            // Determine the correct pill message ID
+            const pillMsgId =
+              tracked?.msgId ??
+              `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`;
+            const trackedName = tracked?.name;
+
+            // Update the pill message content directly
+            setMessages((prevMsgs) => {
+              const idx = prevMsgs.findIndex((m) => m.id === pillMsgId);
+              if (idx < 0) return prevMsgs;
+
+              try {
+                const parsed = JSON.parse(prevMsgs[idx].content);
+                const tools: { name: string; done: boolean }[] =
+                  parsed.tools || [];
+
+                if (trackedName) {
+                  let marked = false;
+                  for (let i = 0; i < tools.length; i++) {
+                    if (
+                      tools[i].name === trackedName &&
+                      !tools[i].done &&
+                      !marked
+                    ) {
+                      tools[i] = { ...tools[i], done: true };
+                      marked = true;
+                    }
+                  }
+                }
+
+                const allDone =
+                  tools.length > 0 && tools.every((t) => t.done);
+                return prevMsgs.map((m, i) =>
+                  i === idx
+                    ? {
+                        ...m,
+                        content: JSON.stringify({ tools, allDone }),
+                      }
+                    : m,
+                );
+              } catch {
+                return prevMsgs;
               }
-              const tools = Object.values(updated)
-                .filter((t) => t.streamId === sid)
-                .map((t) => ({ name: t.name, done: t.done }));
-              const allDone = tools.length > 0 && tools.every((t) => t.done);
-              upsertMessage({
-                id: `tool-pill-${sid}-${event.execution_id || "exec"}-${currentTurn}`,
-                agent: agentDisplayName || event.node_id || "Agent",
-                agentColor: "",
-                content: JSON.stringify({ tools, allDone }),
-                timestamp: "",
-                type: "tool_status",
-                role,
-                thread: agentPath,
-                createdAt: eventCreatedAt,
-                nodeId: event.node_id || undefined,
-                executionId: event.execution_id || undefined,
-              });
-              return { ...prev, activeToolCalls: updated };
             });
           }
           break;
