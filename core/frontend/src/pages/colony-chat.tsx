@@ -907,16 +907,32 @@ export default function ColonyChat() {
           break;
         }
 
+        case "trigger_available":
         case "trigger_activated": {
+          // Available = defined in triggers.json but not running yet.
+          // Activated = running (just activated or restored after server
+          // restart). Both get surfaced as cards in the TriggersPanel; the
+          // only difference is the status.
+          const isActive = event.type === "trigger_activated";
           const triggerId = event.data?.trigger_id as string;
           if (triggerId) {
             const nodeId = `__trigger_${triggerId}`;
             setGraphNodes((prev) => {
               const exists = prev.some((n) => n.id === nodeId);
               if (exists) {
-                return prev.map((n) =>
-                  n.id === nodeId ? { ...n, status: "running" as NodeStatus } : n,
-                );
+                // Upgrade an existing inactive card to active without
+                // clobbering the trigger_config fields the activated event
+                // may carry (e.g. next_fire_in).
+                return prev.map((n) => {
+                  if (n.id !== nodeId) return n;
+                  const incomingConfig =
+                    (event.data?.trigger_config as Record<string, unknown>) || undefined;
+                  return {
+                    ...n,
+                    status: (isActive ? "running" : "pending") as NodeStatus,
+                    ...(incomingConfig ? { triggerConfig: incomingConfig } : {}),
+                  };
+                });
               }
               const triggerType = (event.data?.trigger_type as string) || "timer";
               const triggerConfig = (event.data?.trigger_config as Record<string, unknown>) || {};
@@ -934,7 +950,7 @@ export default function ColonyChat() {
               const newNode: GraphNode = {
                 id: nodeId,
                 label: computedLabel,
-                status: "running",
+                status: isActive ? "running" : "pending",
                 nodeType: "trigger",
                 triggerType,
                 triggerConfig,
@@ -1220,6 +1236,7 @@ export default function ColonyChat() {
           <div className="w-[380px] min-w-[320px] flex-shrink-0">
             <TriggerDetailPanel
               trigger={resolvedSelectedNode}
+              sessionId={agentState.sessionId || ""}
               onClose={() => setSelectedNode(null)}
             />
           </div>

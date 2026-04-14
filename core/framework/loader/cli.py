@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -121,10 +122,31 @@ def cmd_serve(args: argparse.Namespace) -> int:
     async def run_server() -> None:
         manager = app["manager"]
         shutdown_event = asyncio.Event()
+        signal_count = {"n": 0}
 
         def _request_shutdown(signame: str) -> None:
-            print(f"\nReceived {signame}, shutting down…")
-            shutdown_event.set()
+            signal_count["n"] += 1
+            if signal_count["n"] == 1:
+                print(
+                    f"\nReceived {signame}, shutting down gracefully… "
+                    "(press Ctrl+C again to force quit)"
+                )
+                shutdown_event.set()
+            else:
+                # Second Ctrl+C (or SIGTERM) — the user is done waiting.
+                # Skip the graceful teardown and exit immediately. os._exit
+                # bypasses atexit handlers, so fire the MCP cleanup manually
+                # first to avoid leaking subprocesses.
+                print(f"\nReceived {signame} again — force quitting.")
+                try:
+                    from framework.loader.mcp_connection_manager import (
+                        MCPConnectionManager,
+                    )
+
+                    MCPConnectionManager.get_instance().cleanup_all()
+                except Exception:  # noqa: BLE001
+                    pass
+                os._exit(130)
 
         # Register SIGTERM (and explicit SIGINT) so container orchestrators
         # and plain Ctrl-C both route through the same graceful path —

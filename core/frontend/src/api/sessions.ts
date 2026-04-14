@@ -74,6 +74,16 @@ export const sessionsApi = {
       patch,
     ),
 
+  activateTrigger: (sessionId: string, triggerId: string) =>
+    api.post<{ status: string; trigger_id: string }>(
+      `/sessions/${sessionId}/triggers/${triggerId}/activate`,
+    ),
+
+  deactivateTrigger: (sessionId: string, triggerId: string) =>
+    api.post<{ status: string; trigger_id: string }>(
+      `/sessions/${sessionId}/triggers/${triggerId}/deactivate`,
+    ),
+
   colonies: (sessionId: string) =>
     api.get<{ colonies: string[] }>(`/sessions/${sessionId}/colonies`),
 

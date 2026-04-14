@@ -1,9 +1,12 @@
-import { X, Webhook, Clock, Activity, ArrowRight, Zap } from "lucide-react";
+import { useState } from "react";
+import { X, Webhook, Clock, Activity, ArrowRight, Zap, Play, Square, Loader2 } from "lucide-react";
 import type { GraphNode } from "./graph-types";
 import { cronToLabel } from "@/lib/graphUtils";
+import { sessionsApi } from "@/api/sessions";
 
 interface TriggerDetailPanelProps {
   trigger: GraphNode;
+  sessionId: string;
   onClose: () => void;
 }
 
@@ -32,12 +35,35 @@ function formatCountdown(seconds: number): string {
   return `${s}s`;
 }
 
-export default function TriggerDetailPanel({ trigger, onClose }: TriggerDetailPanelProps) {
+export default function TriggerDetailPanel({ trigger, sessionId, onClose }: TriggerDetailPanelProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const isActive = trigger.status === "running" || trigger.status === "complete";
   const config = (trigger.triggerConfig || {}) as Record<string, unknown>;
   const cron = config.cron as string | undefined;
   const interval = config.interval_minutes as number | undefined;
   const nextFireIn = config.next_fire_in as number | undefined;
+  const triggerId = trigger.id.replace(/^__trigger_/, "");
+
+  const handleToggle = async () => {
+    if (!sessionId || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (isActive) {
+        await sessionsApi.deactivateTrigger(sessionId, triggerId);
+      } else {
+        await sessionsApi.activateTrigger(sessionId, triggerId);
+      }
+      // The SSE TRIGGER_ACTIVATED / TRIGGER_DEACTIVATED event will flip
+      // the card status; we don't need to set local state here.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const schedule = cron
     ? cronToLabel(cron)
@@ -147,10 +173,38 @@ export default function TriggerDetailPanel({ trigger, onClose }: TriggerDetailPa
           </p>
           <div className="rounded-lg border border-border/30 bg-background/60 px-3 py-2.5">
             <p className="text-[11px] text-muted-foreground font-mono break-all">
-              {trigger.id.replace(/^__trigger_/, "")}
+              {triggerId}
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Footer with start/stop control */}
+      <div className="px-4 py-3 border-t border-border/30 flex-shrink-0 space-y-2">
+        {error && (
+          <p className="text-[10.5px] text-red-400 leading-snug">{error}</p>
+        )}
+        <button
+          type="button"
+          onClick={handleToggle}
+          disabled={busy || !sessionId}
+          className={[
+            "w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
+            isActive
+              ? "bg-muted/50 text-foreground hover:bg-muted/70 border border-border/30"
+              : "bg-primary/15 text-primary hover:bg-primary/25 border border-primary/30",
+          ].join(" ")}
+        >
+          {busy ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : isActive ? (
+            <Square className="w-3.5 h-3.5" />
+          ) : (
+            <Play className="w-3.5 h-3.5" />
+          )}
+          {busy ? "Working…" : isActive ? "Stop trigger" : "Start trigger"}
+        </button>
       </div>
     </div>
   );
