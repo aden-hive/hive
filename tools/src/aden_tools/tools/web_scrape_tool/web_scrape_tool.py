@@ -255,9 +255,10 @@ def register_tools(mcp: FastMCP) -> None:
             # Clean up whitespace
             text = " ".join(text.split())
 
-            # Truncate if needed
+            # Truncate if needed (reserve 3 chars for the ellipsis so the
+            # final string stays within max_length)
             if len(text) > max_length:
-                text = text[:max_length] + "..."
+                text = text[: max_length - 3] + "..."
 
             result: dict[str, Any] = {
                 "url": url,

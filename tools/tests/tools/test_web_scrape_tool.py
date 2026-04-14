@@ -116,6 +116,24 @@ class TestWebScrapeTool:
     @pytest.mark.asyncio
     @patch(_STEALTH_PATH)
     @patch(_PW_PATH)
+    async def test_truncation_respects_max_length(self, mock_pw, mock_stealth, web_scrape_fn):
+        """Truncated content (including the ellipsis) must not exceed max_length."""
+        # max_length is clamped to >=1000, so build content larger than that
+        long_text = "a" * 5000
+        html = f"<html><body>{long_text}</body></html>"
+        mock_cm, _, _ = _make_playwright_mocks(html, final_url="https://example.com")
+        mock_pw.return_value = mock_cm
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+
+        result = await web_scrape_fn(url="https://example.com", max_length=1000)
+        assert "error" not in result
+        assert len(result["content"]) <= 1000
+        assert result["content"].endswith("...")
+        assert result["length"] == len(result["content"])
+
+    @pytest.mark.asyncio
+    @patch(_STEALTH_PATH)
+    @patch(_PW_PATH)
     async def test_include_links_option(self, mock_pw, mock_stealth, web_scrape_fn):
         """include_links parameter is accepted."""
         html = '<html><body><a href="/link">Link</a></body></html>'
