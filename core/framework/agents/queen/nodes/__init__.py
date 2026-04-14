@@ -1,5 +1,6 @@
 """Node definitions for Queen agent."""
 
+import re
 from pathlib import Path
 
 from framework.orchestrator import NodeSpec
@@ -30,6 +31,29 @@ def _build_appendices() -> str:
         + _anti_patterns
     )
     return parts
+
+
+# Wraps prompt sections that should only be shown to vision-capable models.
+# Content inside `<!-- vision-only -->...<!-- /vision-only -->` is kept for
+# vision models and stripped for text-only models. Applied once per session
+# in queen_orchestrator.create_queen.
+_VISION_ONLY_BLOCK_RE = re.compile(
+    r"<!-- vision-only -->(.*?)<!-- /vision-only -->",
+    re.DOTALL,
+)
+
+
+def finalize_queen_prompt(text: str, has_vision: bool) -> str:
+    """Resolve `<!-- vision-only -->` blocks based on model capability.
+
+    For vision-capable models the markers are stripped and the inner
+    content is kept. For text-only models the whole block (markers +
+    content) is removed so the queen is never nudged toward tools it
+    cannot usefully invoke.
+    """
+    if has_vision:
+        return _VISION_ONLY_BLOCK_RE.sub(r"\1", text)
+    return _VISION_ONLY_BLOCK_RE.sub("", text)
 
 
 # Shared appendices — appended to every coding node's system prompt.
@@ -502,7 +526,7 @@ The queen writes final production-ready system prompts directly.
 
 MCP servers are loaded from the global registry by name. Available servers:
 - `hive_tools` — web search, email, CRM, calendar, 100+ integrations
-- `gcu-tools` — browser automation (click, type, navigate, screenshot)
+- `gcu-tools` — browser automation (click, type, navigate<!-- vision-only -->, screenshot<!-- /vision-only -->)
 - `files-tools` — file I/O (read, write, edit, search, list)
 
 **Template variables:** Add a `variables:` section at the top of agent.json \
@@ -807,7 +831,7 @@ search_files, run_command, undo_changes
 
 ## Browser Automation (gcu-tools MCP)
 All browser tools are prefixed with `browser_` (browser_start, browser_navigate, \
-browser_click, browser_fill, browser_snapshot, browser_screenshot, browser_scroll, \
+browser_click, browser_fill, browser_snapshot, <!-- vision-only -->browser_screenshot, <!-- /vision-only -->browser_scroll, \
 browser_tabs, browser_close, browser_evaluate, etc.).
 Follow the browser-automation skill protocol — activate it before using browser tools.
 

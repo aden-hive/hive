@@ -311,7 +311,9 @@ async def create_queen(
         _queen_tools_running,
         _queen_tools_staging,
         _shared_building_knowledge,
+        finalize_queen_prompt,
     )
+    from framework.llm.capabilities import supports_image_tool_results
     from framework.host.event_bus import AgentEvent, EventType
     from framework.loader.mcp_registry import MCPRegistry
     from framework.loader.tool_registry import ToolRegistry
@@ -489,6 +491,13 @@ async def create_queen(
             "according to your current phase."
         )
 
+    # Resolve vision-only prompt sections based on the session's LLM.
+    # session.llm is immutable for the session's lifetime, so this check
+    # is stable — prompts never need to be recomposed mid-session.
+    _has_vision = bool(
+        session.llm and supports_image_tool_results(getattr(session.llm, "model", ""))
+    )
+
     _planning_body = (
         _queen_character_core
         + _queen_role_planning
@@ -500,7 +509,7 @@ async def create_queen(
         + _planning_knowledge
         + worker_identity
     )
-    phase_state.prompt_planning = _planning_body
+    phase_state.prompt_planning = finalize_queen_prompt(_planning_body, _has_vision)
 
     _building_body = (
         _queen_character_core
@@ -515,40 +524,52 @@ async def create_queen(
         + _appendices
         + worker_identity
     )
-    phase_state.prompt_building = _building_body
-    phase_state.prompt_staging = (
-        _queen_character_core
-        + _queen_role_staging
-        + _queen_style
-        + _queen_tools_staging
-        + _queen_behavior_always
-        + _queen_behavior_staging
-        + worker_identity
+    phase_state.prompt_building = finalize_queen_prompt(_building_body, _has_vision)
+    phase_state.prompt_staging = finalize_queen_prompt(
+        (
+            _queen_character_core
+            + _queen_role_staging
+            + _queen_style
+            + _queen_tools_staging
+            + _queen_behavior_always
+            + _queen_behavior_staging
+            + worker_identity
+        ),
+        _has_vision,
     )
-    phase_state.prompt_running = (
-        _queen_character_core
-        + _queen_role_running
-        + _queen_style
-        + _queen_tools_running
-        + _queen_behavior_always
-        + _queen_behavior_running
-        + worker_identity
+    phase_state.prompt_running = finalize_queen_prompt(
+        (
+            _queen_character_core
+            + _queen_role_running
+            + _queen_style
+            + _queen_tools_running
+            + _queen_behavior_always
+            + _queen_behavior_running
+            + worker_identity
+        ),
+        _has_vision,
     )
-    phase_state.prompt_editing = (
-        _queen_identity_editing
-        + _queen_style
-        + _queen_tools_editing
-        + _queen_behavior_always
-        + _queen_behavior_editing
-        + worker_identity
+    phase_state.prompt_editing = finalize_queen_prompt(
+        (
+            _queen_identity_editing
+            + _queen_style
+            + _queen_tools_editing
+            + _queen_behavior_always
+            + _queen_behavior_editing
+            + worker_identity
+        ),
+        _has_vision,
     )
-    phase_state.prompt_independent = (
-        _queen_character_core
-        + _queen_role_independent
-        + _queen_style
-        + _queen_tools_independent
-        + _queen_behavior_always
-        + _queen_behavior_independent
+    phase_state.prompt_independent = finalize_queen_prompt(
+        (
+            _queen_character_core
+            + _queen_role_independent
+            + _queen_style
+            + _queen_tools_independent
+            + _queen_behavior_always
+            + _queen_behavior_independent
+        ),
+        _has_vision,
     )
 
     # ---- Default skill protocols -------------------------------------

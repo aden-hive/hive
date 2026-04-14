@@ -7,6 +7,7 @@ import inspect
 import json
 import logging
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,16 @@ from framework.llm.provider import Tool, ToolResult, ToolUse
 logger = logging.getLogger(__name__)
 
 _INPUT_LOG_MAX_LEN = 500
+
+# Tools whose names match this pattern are assumed to return ImageContent.
+# Matched against the bare tool name (case-insensitive). Used to mark MCP
+# tools with produces_image=True so they can be filtered out for text-only
+# models before the schema is ever shown to the LLM (avoids wasted calls
+# and "screenshot failed" entries polluting memory).
+_IMAGE_TOOL_NAME_RE = re.compile(
+    r"(screenshot|screen_capture|capture_image|render_image|get_image|snapshot_image)",
+    re.IGNORECASE,
+)
 
 # Per-execution context overrides.  Each asyncio task (and thus each
 # concurrent graph execution) gets its own copy, so there are no races
@@ -925,6 +936,7 @@ class ToolRegistry:
                 "properties": properties,
                 "required": required,
             },
+            produces_image=bool(_IMAGE_TOOL_NAME_RE.search(mcp_tool.name or "")),
         )
 
         return tool

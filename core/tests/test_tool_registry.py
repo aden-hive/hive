@@ -797,3 +797,52 @@ def test_resync_returns_false_when_credentials_unchanged(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "_snapshot_credentials", lambda: set())
 
     assert registry.resync_mcp_servers_if_needed() is False
+
+
+class TestMcpToolProducesImageFlag:
+    """Verify _convert_mcp_tool_to_framework_tool sets produces_image from the name.
+
+    This is the detection step that the filter in AgentLoop depends on —
+    if the regex regresses, text-only models will start seeing screenshot
+    tools they can't use.
+    """
+
+    @staticmethod
+    def _mcp_tool(name: str):
+        return SimpleNamespace(
+            name=name,
+            description=f"{name} description",
+            input_schema={"type": "object", "properties": {}, "required": []},
+            server_name="test",
+        )
+
+    def test_screenshot_flagged(self):
+        registry = ToolRegistry()
+        mcp = self._mcp_tool("browser_screenshot")
+        tool = registry._convert_mcp_tool_to_framework_tool(mcp)  # noqa: SLF001
+        assert tool.produces_image is True
+
+    def test_snapshot_not_flagged(self):
+        """browser_snapshot returns a DOM tree, not an image — must not match."""
+        registry = ToolRegistry()
+        mcp = self._mcp_tool("browser_snapshot")
+        tool = registry._convert_mcp_tool_to_framework_tool(mcp)  # noqa: SLF001
+        assert tool.produces_image is False
+
+    def test_case_insensitive_match(self):
+        registry = ToolRegistry()
+        mcp = self._mcp_tool("TakeScreenshot")
+        tool = registry._convert_mcp_tool_to_framework_tool(mcp)  # noqa: SLF001
+        assert tool.produces_image is True
+
+    def test_plain_tool_not_flagged(self):
+        registry = ToolRegistry()
+        mcp = self._mcp_tool("read_file")
+        tool = registry._convert_mcp_tool_to_framework_tool(mcp)  # noqa: SLF001
+        assert tool.produces_image is False
+
+    def test_image_suffix_variants_flagged(self):
+        registry = ToolRegistry()
+        for name in ("capture_image", "render_image", "get_image", "snapshot_image"):
+            tool = registry._convert_mcp_tool_to_framework_tool(self._mcp_tool(name))  # noqa: SLF001
+            assert tool.produces_image is True, f"{name} should be flagged"

@@ -87,7 +87,7 @@ from framework.agent_loop.internals.types import (
 )
 from framework.agent_loop.types import AgentContext, AgentProtocol, AgentResult
 from framework.host.event_bus import EventBus
-from framework.llm.capabilities import supports_image_tool_results
+from framework.llm.capabilities import filter_tools_for_model, supports_image_tool_results
 from framework.llm.provider import Tool, ToolResult, ToolUse
 from framework.llm.stream_events import (
     FinishEvent,
@@ -562,13 +562,20 @@ class AgentLoop(AgentProtocol):
         if isinstance(stream_id, str) and stream_id.startswith("worker:"):
             tools.append(build_report_to_parent_tool())
 
+        # Hide image-producing tools from text-only models so they never try
+        # to call them. Avoids wasted turns + "screenshot failed" lessons
+        # getting saved to memory. See framework.llm.capabilities.
+        _llm_model = ctx.llm.model if ctx.llm else ""
+        tools, _hidden_image_tools = filter_tools_for_model(tools, _llm_model)
+
         logger.info(
-            "[%s] Tools available (%d): %s | direct_user_io=%s | judge=%s",
+            "[%s] Tools available (%d): %s | direct_user_io=%s | judge=%s | hidden_image_tools=%s",
             node_id,
             len(tools),
             [t.name for t in tools],
             ctx.supports_direct_user_io,
             type(self._judge).__name__ if self._judge else "None",
+            _hidden_image_tools,
         )
 
         # 4. Publish loop started

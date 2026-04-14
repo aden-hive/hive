@@ -27,6 +27,9 @@ class Tool:
     name: str
     description: str
     parameters: dict[str, Any] = field(default_factory=dict)
+    # If True, the tool may return ImageContent in its result. Text-only models
+    # (e.g. glm-5, deepseek-chat) have this hidden from their schema entirely.
+    produces_image: bool = False
 
 
 @dataclass
