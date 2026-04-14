@@ -3052,6 +3052,33 @@ class AgentLoop(AgentProtocol):
                     str, tuple[ToolResult | BaseException, str, float] | BaseException
                 ] = {}
 
+                async def _cancel_turn_with_stubs(
+                    _pending: list[ToolCallEvent] = pending_real,  # noqa: B006,B008
+                ) -> None:
+                    """Populate [Tool call cancelled by user] stubs for
+                    every pending tool so the conversation doesn't end
+                    up with dangling tool_use blocks, then raise
+                    TurnCancelled so the queen event loop continues
+                    cleanly. Shared between the parallel and serial
+                    phases because either can observe CancelledError.
+                    """
+                    for _tc in _pending:
+                        await conversation.add_tool_result(
+                            tool_use_id=_tc.tool_use_id,
+                            content="[Tool call cancelled by user]",
+                            is_error=True,
+                        )
+                        await self._publish_tool_completed(
+                            stream_id,
+                            node_id,
+                            _tc.tool_use_id,
+                            _tc.tool_name,
+                            "[Tool call cancelled by user]",
+                            is_error=True,
+                            execution_id=execution_id,
+                        )
+                    raise TurnCancelled() from None
+
                 # Phase 2b: resolve the concurrency-safe batch. Prefer
                 # any early task already started during streaming (Gap
                 # 1) so we don't accidentally execute the same tool
@@ -3073,11 +3100,22 @@ class AgentLoop(AgentProtocol):
                     finally:
                         self._tool_task = None
                     # gather(return_exceptions=True) captures CancelledError
-                    # as a return value instead of propagating it.  Re-raise
-                    # so stop_worker actually stops the execution.
+                    # as a return value instead of propagating it.
+                    # Distinguish cancel_current_turn() (cancels only
+                    # _tool_task) from stop_worker (cancels the parent
+                    # execution task). When the parent itself is
+                    # cancelled, cancelling() > 0 — propagate so the
+                    # executor can save state. Otherwise convert to
+                    # TurnCancelled so the queen event loop continues,
+                    # writing cancellation stubs for every pending tool
+                    # first so the conversation has no dangling
+                    # tool_use blocks.
                     for entry in parallel_timed:
                         if isinstance(entry, asyncio.CancelledError):
-                            raise entry
+                            task = asyncio.current_task()
+                            if task and task.cancelling() > 0:
+                                raise entry
+                            await _cancel_turn_with_stubs()
                     for tc, entry in zip(parallel_batch, parallel_timed, strict=True):
                         timed_results_by_id[tc.tool_use_id] = entry
 
@@ -3087,6 +3125,8 @@ class AgentLoop(AgentProtocol):
                 # drop. A ToolResult with is_error=True is a normal return
                 # (e.g. "file not found") and does NOT trip the cascade -
                 # the model should see subsequent errors too.
+                # CancelledError is handled separately via the shared
+                # user-cancel helper above.
                 _serial_cascade_broken = False
                 for tc in serial_batch:
                     if _serial_cascade_broken:
@@ -3113,12 +3153,13 @@ class AgentLoop(AgentProtocol):
 
                     timed_results_by_id[tc.tool_use_id] = entry
                     raw_check = entry[0] if isinstance(entry, tuple) else entry
-                    if isinstance(raw_check, BaseException) and not isinstance(
-                        raw_check, asyncio.CancelledError
-                    ):
+                    if isinstance(raw_check, asyncio.CancelledError):
+                        task = asyncio.current_task()
+                        if task and task.cancelling() > 0:
+                            raise raw_check
+                        await _cancel_turn_with_stubs()
+                    elif isinstance(raw_check, BaseException):
                         _serial_cascade_broken = True
-                    elif isinstance(raw_check, asyncio.CancelledError):
-                        raise raw_check
 
                 # Phase 2d: reassemble results in original call order so
                 # the rest of the loop sees no difference from the
