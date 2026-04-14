@@ -1,6 +1,6 @@
 ---
 name: hive.linkedin-automation
-description: Drive LinkedIn via the browser-automation toolchain. Verified flows for profile messaging, connection-request acceptance, feed composition, and search. Includes every site-specific quirk we've hit (Trusted Types CSP, #interop-outlet shadow root, Lexical composer, beforeunload draft dialog, rate limits). Verified against logged-in production 2026-04-11.
+description: Read before automating LinkedIn with browser_* tools. LinkedIn combines shadow DOM (#interop-outlet), strict Trusted Types CSP that silently drops innerHTML, Lexical composer, native beforeunload dialogs that hang the bridge, and aggressive spam filters — each has bitten us at least once. Verified flows for profile messaging, connection-request acceptance, feed composition, and search. Requires hive.browser-automation. Verified against logged-in production 2026-04-11.
 metadata:
   author: hive
   type: default-skill

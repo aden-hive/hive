@@ -1,6 +1,6 @@
 ---
 name: hive.x-automation
-description: Drive X / Twitter via the browser-automation toolchain. Verified flows for posting, replying, deleting, search-and-engage, and the compose composer's Draft.js quirks. Includes the daily-reply and job-market-reply patterns distilled from the backed-up x-daily-replies and x-job-market-replies skills. Verified 2026-04-11.
+description: Read before automating X / Twitter with browser_* tools. Verified flows for post, reply, delete, search-and-engage, plus the Draft.js compose quirks that silently disable the send button. Includes the daily-reply and job-market-reply playbooks. Requires hive.browser-automation for the underlying screenshot + coordinate workflow. Verified 2026-04-11.
 metadata:
   author: hive
   type: default-skill

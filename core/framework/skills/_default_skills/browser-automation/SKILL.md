@@ -1,6 +1,6 @@
 ---
 name: hive.browser-automation
-description: Drive a real Chrome browser via the GCU Beeline extension + Chrome DevTools Protocol. Navigation, clicks, typing, screenshots, shadow-DOM sites (LinkedIn / Reddit / X), keyboard shortcuts, CSP gotchas, rich-text editors. Verified against real production sites 2026-04-11.
+description: Required before any browser_* tool call. Teaches the screenshot + browser_click_coordinate workflow that reaches shadow-DOM inputs selectors can't see, the CSS-pixel coordinate rule (not physical px), rich-text editor quirks ("send button stays disabled" failures), and CSP gotchas. Covers Chrome via CDP through the GCU Beeline extension. Skipping this causes repeated failures on LinkedIn / Reddit / X. Verified against real production sites 2026-04-11.
 metadata:
   author: hive
   type: default-skill
