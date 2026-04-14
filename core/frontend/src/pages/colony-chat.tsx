@@ -3,8 +3,8 @@ import { useParams, useLocation } from "react-router-dom";
 import { Loader2, WifiOff, KeyRound, FolderOpen, X } from "lucide-react";
 import type { GraphNode, NodeStatus } from "@/components/graph-types";
 import TriggersPanel from "@/components/TriggersPanel";
+import TriggerDetailPanel from "@/components/TriggerDetailPanel";
 import ChatPanel, { type ChatMessage, type ImageContent } from "@/components/ChatPanel";
-import NodeDetailPanel from "@/components/NodeDetailPanel";
 import CredentialsModal, {
   type Credential,
   clearCredentialCache,
@@ -1105,6 +1105,11 @@ export default function ColonyChat() {
   const liveSelectedNode = selectedNode && graphNodes.find((n) => n.id === selectedNode.id);
   const resolvedSelectedNode = liveSelectedNode || selectedNode;
 
+  const triggers = useMemo(
+    () => graphNodes.filter((n) => n.nodeType === "trigger"),
+    [graphNodes],
+  );
+
   // ── Render ─────────────────────────────────────────────────────────────
 
   if (!colony && !isNewChat && !agentState.loading) {
@@ -1197,25 +1202,24 @@ export default function ColonyChat() {
           />
         </div>
 
-        {/* Triggers sidebar */}
-        <div className="w-[260px] flex-shrink-0">
-          <TriggersPanel
-            triggers={graphNodes.filter((n) => n.nodeType === "trigger")}
-            selectedId={resolvedSelectedNode?.id ?? null}
-            onSelect={(trigger) =>
-              setSelectedNode((prev) => (prev?.id === trigger.id ? null : trigger))
-            }
-          />
-        </div>
+        {/* Triggers sidebar — only rendered when the colony actually has triggers */}
+        {triggers.length > 0 && (
+          <div className="w-[260px] flex-shrink-0">
+            <TriggersPanel
+              triggers={triggers}
+              selectedId={resolvedSelectedNode?.id ?? null}
+              onSelect={(trigger) =>
+                setSelectedNode((prev) => (prev?.id === trigger.id ? null : trigger))
+              }
+            />
+          </div>
+        )}
 
-        {/* Node detail panel */}
-        {resolvedSelectedNode && (
-          <div className="w-[480px] min-w-[400px] flex-shrink-0">
-            <NodeDetailPanel
-              node={resolvedSelectedNode}
-              sessionId={agentState.sessionId || ""}
-              nodeLogs={agentState.nodeLogs[resolvedSelectedNode.id] || []}
-              actionPlan={agentState.nodeActionPlans[resolvedSelectedNode.id]}
+        {/* Trigger detail panel */}
+        {resolvedSelectedNode && resolvedSelectedNode.nodeType === "trigger" && (
+          <div className="w-[380px] min-w-[320px] flex-shrink-0">
+            <TriggerDetailPanel
+              trigger={resolvedSelectedNode}
               onClose={() => setSelectedNode(null)}
             />
           </div>
