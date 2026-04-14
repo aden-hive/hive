@@ -176,56 +176,6 @@ export interface GraphTopology {
   entry_points?: EntryPoint[];
 }
 
-// --- Draft graph types (planning phase) ---
-
-export interface DraftNode {
-  id: string;
-  name: string;
-  description: string;
-  node_type: string;
-  tools: string[];
-  input_keys: string[];
-  output_keys: string[];
-  success_criteria: string;
-  sub_agents: string[];
-  /** For decision nodes: the yes/no question evaluated during dissolution. */
-  decision_clause?: string;
-  flowchart_type: string;
-  flowchart_shape: string;
-  flowchart_color: string;
-}
-
-export interface DraftEdge {
-  id: string;
-  source: string;
-  target: string;
-  condition: string;
-  description: string;
-  /** Short label shown on the flowchart edge (e.g. "Yes", "No"). */
-  label?: string;
-}
-
-export interface DraftGraph {
-  agent_name: string;
-  goal: string;
-  description: string;
-  success_criteria: string[];
-  constraints: string[];
-  nodes: DraftNode[];
-  edges: DraftEdge[];
-  entry_node: string;
-  terminal_nodes: string[];
-  flowchart_legend: Record<string, { shape: string; color: string }>;
-}
-
-/** Mapping from runtime graph nodes → original flowchart draft nodes. */
-export interface FlowchartMap {
-  /** runtime_node_id → list of original draft node IDs it absorbed. */
-  map: Record<string, string[]> | null;
-  /** Original draft graph preserved before planning-node dissolution (decision + subagent). */
-  original_draft: DraftGraph | null;
-}
-
 export interface NodeCriteria {
   node_id: string;
   success_criteria: string | null;

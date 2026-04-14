@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 
 // ── Shared graph utilities ──
-// Common helpers used by both AgentGraph and DraftGraph.
-// AgentGraph still has its own copies for now (separate cleanup PR).
+// Shared helpers for graph-like components (TriggersPanel, etc.).
 
 /** Read a CSS custom property value (space-separated HSL components). */
 export function cssVar(name: string): string {
