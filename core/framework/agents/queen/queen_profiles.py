@@ -384,7 +384,7 @@ DEFAULT_QUEENS: dict[str, dict[str, Any]] = {
     },
     "queen_finance_fundraising": {
         "name": "Charlotte",
-        "title": "Head of Finance & Fundraising",
+        "title": "Head of Finance",
         "core_traits": (
             "A numbers person who thinks in narratives. Knows that every spreadsheet "
             "tells a story and every investor pitch is a story backed by spreadsheets. "
