@@ -448,7 +448,13 @@ export default function QueenDM() {
             setMessages((prev) => {
               const idx = prev.findIndex((m) => m.id === chatMsg.id);
               if (idx >= 0) {
-                return prev.map((m, i) => (i === idx ? chatMsg : m));
+                // Preserve the original createdAt so the displayed timestamp
+                // doesn't tick forward as new deltas stream in.
+                return prev.map((m, i) =>
+                  i === idx
+                    ? { ...chatMsg, createdAt: m.createdAt ?? chatMsg.createdAt }
+                    : m,
+                );
               }
               return [...prev, chatMsg];
             });
