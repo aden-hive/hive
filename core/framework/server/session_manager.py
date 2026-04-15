@@ -1749,9 +1749,6 @@ class SessionManager:
         except OSError:
             return []
 
-        # Sort all sessions by mtime, newest first
-        all_session_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-
         results: list[dict] = []
         for d in all_session_dirs:
             if not d.is_dir():
@@ -1783,6 +1780,13 @@ class SessionManager:
             # and return the last assistant message content as a snippet.
             last_message: str | None = None
             message_count: int = 0
+            # Last-activity timestamp — mtime of the latest client-facing message.
+            # Falls back to session creation time for empty sessions. NOTE: the
+            # session directory's own mtime is NOT reliable here — POSIX dir mtime
+            # only updates when direct entries change, and conversation parts are
+            # nested under conversations/parts/, so writing a new part does not
+            # bubble up to the session dir.
+            last_active_at: float = float(created_at) if isinstance(created_at, (int, float)) else 0.0
             convs_dir = d / "conversations"
             if convs_dir.exists():
                 try:
@@ -1818,6 +1822,13 @@ class SessionManager:
                     ]
                     client_msgs.sort(key=lambda m: m.get("created_at", m.get("seq", 0)))
                     message_count = len(client_msgs)
+                    # Take the latest message's timestamp as the activity marker.
+                    # _collect_parts sets created_at via setdefault to the part
+                    # file's mtime, so this is always a valid float.
+                    if client_msgs:
+                        latest_ts = client_msgs[-1].get("created_at")
+                        if isinstance(latest_ts, (int, float)) and latest_ts > last_active_at:
+                            last_active_at = float(latest_ts)
                     # Last assistant message as preview snippet
                     for msg in reversed(client_msgs):
                         content = msg.get("content") or ""
@@ -1844,6 +1855,7 @@ class SessionManager:
                     "live": False,
                     "has_messages": convs_dir.exists() and message_count > 0,
                     "created_at": created_at,
+                    "last_active_at": last_active_at,
                     "agent_name": agent_name,
                     "agent_path": agent_path,
                     "last_message": last_message,
@@ -1852,6 +1864,11 @@ class SessionManager:
                 }
             )
 
+        # Sort by last-activity timestamp, newest first. This is the order
+        # callers (including /api/sessions/history and colony-chat cold resume)
+        # rely on — don't use raw directory mtime, which doesn't update when
+        # nested conversation parts are written.
+        results.sort(key=lambda r: r.get("last_active_at") or 0.0, reverse=True)
         return results
 
     async def shutdown_all(self) -> None:
