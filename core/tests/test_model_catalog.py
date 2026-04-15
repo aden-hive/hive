@@ -150,7 +150,7 @@ def test_openrouter_catalog_tracks_current_frontier_set():
         "openai/gpt-5.4",
         "anthropic/claude-sonnet-4.6",
         "anthropic/claude-opus-4.6",
-        "google/gemini-3.1-pro-preview",
+        "google/gemini-3.1-pro-preview-customtools",
         "deepseek/deepseek-v3.2",
     ]
     assert openrouter_models[0]["max_tokens"] == 128000
