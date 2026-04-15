@@ -127,7 +127,7 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
         agentsApi.discover(),
         sessionsApi.list().catch(() => ({ sessions: [] as LiveSession[] })),
         queensApi.list().catch(() => ({ queens: [] as QueenProfileSummary[] })),
-        sessionsApi.history().catch(() => ({ sessions: [] as { agent_path?: string | null; queen_id?: string | null }[] })),
+        sessionsApi.history().catch(() => ({ sessions: [] as { agent_path?: string | null; queen_id?: string | null; created_at?: number; last_active_at?: number }[] })),
       ]);
 
       // Skip "Framework" agents — those are internal to the hive runtime
@@ -156,6 +156,16 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
             historyQueenMap.set(slug, s.queen_id);
           }
         }
+      }
+
+      // queen_id → max last_active_at across that queen's history sessions.
+      // Used to sort the sidebar Queen Bees list by most recent conversation.
+      const queenLastActive = new Map<string, number>();
+      for (const s of historyResult.sessions) {
+        if (!s.queen_id) continue;
+        const ts = s.last_active_at ?? s.created_at ?? 0;
+        const prev = queenLastActive.get(s.queen_id);
+        if (prev === undefined || ts > prev) queenLastActive.set(s.queen_id, ts);
       }
 
       const unreadCounts = loadJson<Record<string, number>>(UNREAD_KEY, {});
@@ -192,7 +202,15 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
           .map((s) => s.queen_id as string),
       );
 
-      const newQueens: QueenBee[] = queenProfilesResult.queens.map((qp) => ({
+      // Sort queens by most recent DM activity (newest first). Stable tiebreak
+      // by original API order keeps no-history queens at the bottom and prevents
+      // flicker between renders when timestamps tie.
+      const sortedQueens = queenProfilesResult.queens
+        .map((qp, idx) => ({ qp, idx, ts: queenLastActive.get(qp.id) ?? -Infinity }))
+        .sort((a, b) => (b.ts - a.ts) || (a.idx - b.idx))
+        .map((x) => x.qp);
+
+      const newQueens: QueenBee[] = sortedQueens.map((qp) => ({
         id: qp.id,
         name: qp.name,
         role: qp.title,
@@ -201,7 +219,7 @@ export function ColonyProvider({ children }: { children: ReactNode }) {
 
       setColonies(newColonies);
       setQueens(newQueens);
-      setQueenProfiles(queenProfilesResult.queens);
+      setQueenProfiles(sortedQueens);
     } catch {
       // Silently fail — colonies will be empty
     } finally {
