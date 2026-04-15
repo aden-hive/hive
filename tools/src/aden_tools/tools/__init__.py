@@ -49,6 +49,7 @@ from .cloudinary_tool import register_tools as register_cloudinary
 from .confluence_tool import register_tools as register_confluence
 from .csv_tool import register_tools as register_csv
 from .databricks_tool import register_tools as register_databricks
+from .datadog_tool import register_tools as register_datadog
 from .discord_tool import register_tools as register_discord
 from .dns_security_scanner import register_tools as register_dns_security_scanner
 from .docker_hub_tool import register_tools as register_docker_hub
@@ -264,6 +265,7 @@ def _register_unverified(
     register_cloudinary(mcp, credentials=credentials)
     register_confluence(mcp, credentials=credentials)
     register_databricks(mcp, credentials=credentials)
+    register_datadog(mcp, credentials=credentials)
     register_docker_hub(mcp, credentials=credentials)
     register_gitlab(mcp, credentials=credentials)
     register_google_analytics(mcp, credentials=credentials)
