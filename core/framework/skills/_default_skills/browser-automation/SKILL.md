@@ -344,6 +344,51 @@ Reddit's search input lives **two shadow levels deep** inside `reddit-search-lar
 
 After submitting, press Escape to close the composer.
 
+## File uploads — use `browser_upload`, never click the upload button
+
+**Clicking an `<input type="file">` or the button that triggers one (X's photo button, LinkedIn's attach button, Gmail's paperclip) opens Chrome's native OS file picker. That dialog is rendered by the operating system, NOT the page, so CDP cannot see it, cannot interact with it, and the automation wedges.** This is the single most common way to lock up a browser session on any "compose with media" flow.
+
+**The only correct pattern:** call `browser_upload(selector, file_paths)`. It uses the CDP `DOM.setFileInputFiles` method, which sets the files directly on the input element's internal state as if the user had picked them — no OS dialog ever opens.
+
+```
+# WRONG — opens the native file picker, agent gets stuck
+browser_click_coordinate(photo_button_x, photo_button_y)   # ❌
+
+# RIGHT — sets the file programmatically, no dialog
+browser_upload(
+    selector="input[type='file']",          # the underlying file input
+    file_paths=["/absolute/path/to/image.png"],
+)
+```
+
+**Finding the file input.** On most modern SPAs the visible "Add photo" / "Attach" button is a styled `<button>` or `<label>`, and the real `<input type="file">` is hidden (often `display:none` or `opacity:0`, positioned offscreen, wrapped in a `<label for="...">`, or injected on click). Use `browser_evaluate` to enumerate ALL file inputs on the page first:
+
+```python
+browser_evaluate("""
+  (function(){
+    const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+    return inputs.map(el => ({
+      name: el.name || '',
+      accept: el.accept || '',
+      multiple: el.multiple,
+      id: el.id || '',
+      inViewport: (() => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      })(),
+    }));
+  })();
+""")
+```
+
+Then pass the most specific selector that uniquely identifies the right input (e.g. `input[type='file'][accept*='image']` for a photo-only upload). `browser_upload` doesn't care if the input is hidden or offscreen — `DOM.setFileInputFiles` works on any valid file input node, visible or not.
+
+**X / LinkedIn / Twitter pattern.** On X (`x.com/compose/post`), the photo upload input is `input[data-testid='fileInput']` — hidden, reachable via `browser_upload`. On LinkedIn feed compose, look for `input[type='file'][accept*='image']` inside the post-creation modal after clicking "Add media" (clicking the Add-media button reveals the input but does NOT open the dialog; only clicking the SECOND layer — the "From computer" entry — would trigger the picker. Stop at the first layer, find the input, call `browser_upload`).
+
+**Verification after upload.** `DOM.setFileInputFiles` dispatches a `change` event on the input but NOT the `click` / `focus` events that some sites gate their UI on. Always verify the upload actually took effect by screenshotting the composer (the uploaded image should appear as a preview) or by checking for a "preview" / "remove" element that only exists post-upload. If verification fails, the site may be reading the file via some other bridge — fall back to reading the file bytes and pasting them via the clipboard (`navigator.clipboard.write` with a `ClipboardItem`) through `browser_evaluate`.
+
+**If a native file picker DOES open** (you clicked the wrong thing): there is no recovery via CDP. Press Escape via `browser_press("Escape")` immediately — this dismisses the OS dialog in Chrome on Linux/macOS. Then find the actual `<input type='file'>` and use `browser_upload`.
+
 ## Common pitfalls
 
 - **Typing into a rich-text editor without clicking first → send button stays disabled.** Draft.js (X), Lexical (Gmail, LinkedIn DMs), ProseMirror (Reddit), and React-controlled `contenteditable` elements only register input as "real" when the element received a native focus event — JS-sourced `.focus()` is not enough. `browser_type` now does this automatically via a real CDP pointer click before inserting text, but always verify the submit button's `disabled` state before clicking send. See the "ALWAYS click before typing" section above.
@@ -354,6 +399,7 @@ After submitting, press Escape to close the composer.
 - **Relying on `innerHTML` in injected scripts on LinkedIn.** Silently discarded. Use `createElement` + `appendChild`.
 - **Not waiting for SPA hydration.** `wait_until="load"` fires before React/Vue rendering on many sites. Add a 2–3 s sleep before querying for chrome elements.
 - **Using `browser_type(selector)` on LinkedIn DMs or any shadow-DOM input.** Won't find the element. Fall back to click-to-focus + `browser_press` per character.
+- **Clicking a "Photo" / "Attach" / "Upload" button to pick a file.** This opens Chrome's NATIVE OS file picker, which is rendered outside the web page and cannot be interacted with via CDP. Your automation will hang staring at an unreachable dialog. ALWAYS use `browser_upload(selector, file_paths)` against the underlying `<input type='file'>` element — see the "File uploads" section above for the full pattern. This is the single most common way to wedge a browser session on compose-with-media flows (X/LinkedIn/Gmail).
 - **Keyboard shortcuts without the `code` field.** Chrome's shortcut dispatcher ignores keyboard events that lack a `code` or `windowsVirtualKeyCode`. `browser_press(..., modifiers=[...])` populates these automatically; raw `Input.dispatchKeyEvent` calls from `browser_evaluate` may not.
 - **Taking a screenshot more than 10s after the last interaction** and expecting the highlight to still be visible. The overlay fades after 10s. Take the screenshot sooner, or re-trigger the interaction.
 - **Expecting `browser_navigate` to return when you specified `wait_until="networkidle"` on a busy site.** networkidle is approximate — some sites keep a websocket or analytics beacon open forever. Use `"load"` or `"domcontentloaded"` for reliable timing.

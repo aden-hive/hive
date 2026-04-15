@@ -6,6 +6,7 @@ All operations go through the Beeline extension via CDP - no Playwright required
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
@@ -277,9 +278,20 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             if annotate and target_tab in _interaction_highlights:
                 highlights = [_interaction_highlights[target_tab]]
 
-            # Normalize to 800px wide and annotate
-            data, physical_scale, css_scale = _resize_and_annotate(
-                data, css_width, dpr=dpr, highlights=highlights, width=width
+            # Normalize to 800px wide and annotate. Offloaded to a
+            # thread because PIL Image.open/resize/ImageDraw/composite on
+            # a 2-megapixel PNG blocks for ~150-300ms of CPU — plenty to
+            # freeze the asyncio event loop and delay every concurrent
+            # tool call during a screenshot. The function is reentrant
+            # (fresh PIL Image per call, no shared state), so to_thread
+            # is safe.
+            data, physical_scale, css_scale = await asyncio.to_thread(
+                _resize_and_annotate,
+                data,
+                css_width,
+                dpr,
+                highlights,
+                width,
             )
             _screenshot_scales[target_tab] = physical_scale
             _screenshot_css_scales[target_tab] = css_scale

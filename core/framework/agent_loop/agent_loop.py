@@ -3196,7 +3196,9 @@ class AgentLoop(AgentProtocol):
                         result = _build_tool_error_result(tc, raw)
                     else:
                         result = raw
-                    results_by_id[tc.tool_use_id] = self._truncate_tool_result(result, tc.tool_name)
+                    results_by_id[tc.tool_use_id] = await self._truncate_tool_result(
+                        result, tc.tool_name
+                    )
 
             # Phase 3: record results into conversation in original order,
             # build logged/real lists, and publish completed events.
@@ -3330,6 +3332,24 @@ class AgentLoop(AgentProtocol):
                     final_messages,
                     False,
                 )
+
+            # --- Image eviction: strip old screenshot image_content ---
+            # Screenshots from browser_screenshot are inlined as base64
+            # data URLs in message.image_content. Each screenshot costs
+            # ~250k tokens when the provider counts base64 as text
+            # (gemini, most non-Anthropic providers). Four screenshots
+            # in one conversation blew through gemini's 1M context in
+            # session_20260415_104727_5c4ed7ff and caused garbage
+            # output ("协日" as the final assistant text). We evict
+            # aggressively after every tool batch — independent of the
+            # char-based usage_ratio, which severely underestimates
+            # image cost (counts each image as ~2000 tokens vs the
+            # ~250k actually billed). Text metadata stays on the
+            # evicted messages so the agent can still reason about
+            # "I took a screenshot at step N".
+            _max_imgs = self._config.max_retained_screenshots
+            if _max_imgs >= 0:
+                await conversation.evict_old_images(keep_latest=_max_imgs)
 
             # --- Mid-turn pruning: prevent context blowup within a single turn ---
             if conversation.usage_ratio() >= 0.6:
@@ -3655,7 +3675,7 @@ class AgentLoop(AgentProtocol):
             max_chars=max_chars,
         )
 
-    def _truncate_tool_result(
+    async def _truncate_tool_result(
         self,
         result: ToolResult,
         tool_name: str,
@@ -3671,8 +3691,33 @@ class AgentLoop(AgentProtocol):
         - Large results (> limit): preview + file reference
         - Errors: pass through unchanged
         - read_file results: truncate with pagination hint (no re-spill)
+
+        For large results this does a synchronous JSON round-trip
+        (``json.loads`` + pretty-print ``json.dumps(indent=2)``) plus a
+        file write. On big payloads — web_search, web_fetch, full-page
+        extractions — this can block the event loop for hundreds of ms
+        per call. We offload to a worker thread so concurrent tool
+        executions keep running while one large result is being
+        pretty-printed and spilled to disk.
         """
-        return truncate_tool_result(
+        # Fast path: small results don't need thread offload. The
+        # function only touches disk / does heavy JSON work when the
+        # result exceeds either the truncation or spillover threshold,
+        # so cheap pass-throughs stay on the main loop.
+        needs_offload = (
+            len(result.content) > 10_000
+            and not result.is_error
+        )
+        if not needs_offload:
+            return truncate_tool_result(
+                result=result,
+                tool_name=tool_name,
+                max_tool_result_chars=self._config.max_tool_result_chars,
+                spillover_dir=self._config.spillover_dir,
+                next_spill_filename_fn=self._next_spill_filename,
+            )
+        return await asyncio.to_thread(
+            truncate_tool_result,
             result=result,
             tool_name=tool_name,
             max_tool_result_chars=self._config.max_tool_result_chars,

@@ -42,6 +42,39 @@ BRIDGE_PORT = 9229
 # CDP wait_until values
 VALID_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
 
+# Fast-fail polling default for element / text waits. 5 seconds is long
+# enough to cover normal SPA render latency on loaded pages, short enough
+# that a bad selector or hallucinated element fails fast instead of
+# burning 30 wall-clock seconds per miss (the old behavior — see the
+# 2026-04-14 gemini-3-flash x.com session where 7 of 14 browser_click
+# calls each hit the 30s deadline for ~210s wasted total).
+#
+# navigate() keeps a longer default (30s) because real page loads can
+# legitimately take that long.
+DEFAULT_WAIT_TIMEOUT_MS: int = 5000
+
+# Longer default for bridge _send calls that wrap genuinely slow ops
+# (full-page screenshot, accessibility tree, navigate). Individual
+# callers can pass their own value via _send(..., timeout=...).
+_LONG_SEND_TIMEOUT_S: float = 60.0
+
+
+async def _adaptive_poll_sleep(elapsed_s: float) -> None:
+    """Sleep between DOM polls with an adaptive backoff.
+
+    Early polls are snappy (50ms) so a quickly-appearing element is
+    reported in ~100ms. Later polls back off (200ms, 500ms) so a
+    missing element doesn't thrash CDP with 300+ querySelector calls
+    before the deadline fires.
+    """
+    if elapsed_s < 1.0:
+        await asyncio.sleep(0.05)
+    elif elapsed_s < 5.0:
+        await asyncio.sleep(0.2)
+    else:
+        await asyncio.sleep(0.5)
+
+
 # Last interaction highlight per tab_id: {x, y, w, h, label, kind}
 # kind: "rect" (element) or "point" (coordinate)
 _interaction_highlights: dict[int, dict] = {}
@@ -296,8 +329,22 @@ class BeelineBridge:
         msg = str(exc).lower()
         return any(m in msg for m in self._CDP_DEAD_SESSION_MARKERS)
 
-    async def _cdp(self, tab_id: int, method: str, params: dict | None = None) -> dict:
+    async def _cdp(
+        self,
+        tab_id: int,
+        method: str,
+        params: dict | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> dict:
         """Send a CDP command to a tab.
+
+        ``timeout`` (seconds) overrides the default bridge send timeout.
+        Pass a larger value for genuinely slow operations (full-page
+        screenshots over slow networks, accessibility tree on huge
+        pages) so they don't spuriously fail at the 30s floor. Pass a
+        smaller value for fast probes ("is this element present right
+        now") to fail fast.
 
         On a dead-session error (Chrome detached externally — tab closed,
         DevTools opened, cross-origin nav), evict the stale attach
@@ -307,7 +354,13 @@ class BeelineBridge:
         """
         start = time.perf_counter()
         try:
-            result = await self._send("cdp", tabId=tab_id, method=method, params=params or {})
+            result = await self._send(
+                "cdp",
+                tabId=tab_id,
+                method=method,
+                params=params or {},
+                timeout=timeout,
+            )
             duration_ms = (time.perf_counter() - start) * 1000
             log_cdp_command(tab_id, method, params, result, duration_ms=duration_ms)
             return result
@@ -327,7 +380,11 @@ class BeelineBridge:
                         self._cdp_attached.add(tab_id)
                         retry_start = time.perf_counter()
                         result = await self._send(
-                            "cdp", tabId=tab_id, method=method, params=params or {}
+                            "cdp",
+                            tabId=tab_id,
+                            method=method,
+                            params=params or {},
+                            timeout=timeout,
                         )
                         log_cdp_command(
                             tab_id,
@@ -594,9 +651,15 @@ class BeelineBridge:
         selector: str,
         button: str = "left",
         click_count: int = 1,
-        timeout_ms: int = 30000,
+        timeout_ms: int = DEFAULT_WAIT_TIMEOUT_MS,
     ) -> dict:
         """Click an element by selector.
+
+        ``timeout_ms`` controls how long we poll for the element to
+        appear in the DOM. Defaults to :data:`DEFAULT_WAIT_TIMEOUT_MS`
+        (5 s) so a missing or hallucinated selector fails fast. Pass a
+        larger value when the target genuinely needs longer to render
+        (e.g. post-navigation SPA hydration).
 
         Uses multiple fallback methods for robustness:
         1. CDP mouse events with JavaScript bounds
@@ -612,8 +675,12 @@ class BeelineBridge:
         doc = await self._cdp(tab_id, "DOM.getDocument")
         root_id = doc.get("root", {}).get("nodeId")
 
-        # Wait for element to appear
-        deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
+        # Wait for element to appear. Adaptive polling:
+        # - first 1 s at 50 ms intervals (responsive on fast pages)
+        # - next 4 s at 200 ms
+        # - rest at 500 ms
+        poll_start = asyncio.get_event_loop().time()
+        deadline = poll_start + timeout_ms / 1000
         node_id = None
         while asyncio.get_event_loop().time() < deadline:
             result = await self._cdp(
@@ -622,7 +689,7 @@ class BeelineBridge:
             node_id = result.get("nodeId")
             if node_id:
                 break
-            await asyncio.sleep(0.1)
+            await _adaptive_poll_sleep(asyncio.get_event_loop().time() - poll_start)
 
         if not node_id:
             # Check if the element might be inside a Shadow DOM container
@@ -773,7 +840,11 @@ class BeelineBridge:
             )
             await asyncio.sleep(0.05)
 
-            # Mouse down
+            # Mouse down — if this hangs past the short wait budget we
+            # CANNOT claim success. The prior code swallowed TimeoutError
+            # with `pass` and returned ok=true further down, which is why
+            # the 2026-04-14 gemini session saw 7 clicks land at exactly
+            # 30s with status=ok even though the click had not landed.
             try:
                 await asyncio.wait_for(
                     self._cdp(
@@ -787,14 +858,24 @@ class BeelineBridge:
                             "clickCount": click_count,
                         },
                     ),
-                    timeout=1.0,
+                    timeout=2.0,
                 )
             except TimeoutError:
-                pass  # Continue even if timeout
+                return {
+                    "ok": False,
+                    "error": (
+                        f"CDP mousePressed timed out for '{selector}' — "
+                        "the click did not land. Consider browser_click_coordinate "
+                        "with an explicit rect from browser_get_rect."
+                    ),
+                }
 
             await asyncio.sleep(0.08)
 
-            # Mouse up
+            # Mouse up — same non-silent failure handling. A stuck
+            # mouseReleased means the press is still "held down" in
+            # Chrome's input state; we must surface the failure so the
+            # caller can retry or switch strategy.
             try:
                 await asyncio.wait_for(
                     self._cdp(
@@ -811,7 +892,14 @@ class BeelineBridge:
                     timeout=3.0,
                 )
             except TimeoutError:
-                pass  # Continue even if timeout
+                return {
+                    "ok": False,
+                    "error": (
+                        f"CDP mouseReleased timed out for '{selector}' — "
+                        "the press event fired but release did not. The page "
+                        "may be in a stuck input state; try browser_click_coordinate."
+                    ),
+                }
 
             w = bounds_value.get("width", 0)
             h = bounds_value.get("height", 0)
@@ -2174,7 +2262,19 @@ class BeelineBridge:
                         "scale": 1,
                     }
 
-                result = await self._cdp(tab_id, "Page.captureScreenshot", params)
+                # Pass the outer screenshot timeout budget to the
+                # underlying CDP call. Full-page screenshots over slow
+                # networks can legitimately take 20-40s; the default 30s
+                # _send floor used to make them fail spuriously right at
+                # the boundary. We give the CDP call the full timeout_s
+                # budget so the outer `asyncio.timeout(timeout_s)` is
+                # the only authority on how long we wait.
+                result = await self._cdp(
+                    tab_id,
+                    "Page.captureScreenshot",
+                    params,
+                    timeout=timeout_s,
+                )
                 data = result.get("data")
 
                 if not data:
@@ -2249,8 +2349,18 @@ class BeelineBridge:
             logger.error("Screenshot failed: %s", e)
             return {"ok": False, "error": str(e)}
 
-    async def wait_for_selector(self, tab_id: int, selector: str, timeout_ms: int = 30000) -> dict:
-        """Wait for an element to appear."""
+    async def wait_for_selector(
+        self,
+        tab_id: int,
+        selector: str,
+        timeout_ms: int = DEFAULT_WAIT_TIMEOUT_MS,
+    ) -> dict:
+        """Wait for an element to appear.
+
+        Default 5 s fast-fail. Callers that need to wait longer (e.g.
+        a known slow post-navigation render) should pass an explicit
+        ``timeout_ms``.
+        """
         await self.cdp_attach(tab_id)
 
         script = f"""
@@ -2259,7 +2369,8 @@ class BeelineBridge:
             }})()
         """
 
-        deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
+        poll_start = asyncio.get_event_loop().time()
+        deadline = poll_start + timeout_ms / 1000
         while asyncio.get_event_loop().time() < deadline:
             result = await self._cdp(
                 tab_id,
@@ -2272,12 +2383,21 @@ class BeelineBridge:
             found = (result or {}).get("result", {}).get("value", False)
             if found:
                 return {"ok": True, "selector": selector}
-            await asyncio.sleep(0.1)
+            await _adaptive_poll_sleep(asyncio.get_event_loop().time() - poll_start)
 
         return {"ok": False, "error": f"Element not found within timeout: {selector}"}
 
-    async def wait_for_text(self, tab_id: int, text: str, timeout_ms: int = 30000) -> dict:
-        """Wait for text to appear on the page."""
+    async def wait_for_text(
+        self,
+        tab_id: int,
+        text: str,
+        timeout_ms: int = DEFAULT_WAIT_TIMEOUT_MS,
+    ) -> dict:
+        """Wait for text to appear on the page.
+
+        Default 5 s fast-fail. Same fast-fail rationale as
+        :meth:`wait_for_selector`.
+        """
         await self.cdp_attach(tab_id)
 
         script = f"""
@@ -2286,7 +2406,8 @@ class BeelineBridge:
             }})()
         """
 
-        deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
+        poll_start = asyncio.get_event_loop().time()
+        deadline = poll_start + timeout_ms / 1000
         while asyncio.get_event_loop().time() < deadline:
             result = await self._cdp(
                 tab_id,
@@ -2297,7 +2418,7 @@ class BeelineBridge:
             found = (result or {}).get("result", {}).get("value", False)
             if found:
                 return {"ok": True, "text": text}
-            await asyncio.sleep(0.1)
+            await _adaptive_poll_sleep(asyncio.get_event_loop().time() - poll_start)
 
         return {"ok": False, "error": f"Text not found within timeout: {text}"}
 

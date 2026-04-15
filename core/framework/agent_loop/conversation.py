@@ -162,10 +162,17 @@ def update_run_cursor(
 def _extract_spillover_filename(content: str) -> str | None:
     """Extract spillover filename from a tool result annotation.
 
-    Matches patterns produced by EventLoopNode._truncate_tool_result():
-        - Large result:  "saved to 'web_search_1.txt'"
-        - Small result:  "[Saved to 'web_search_1.txt']"
+    Matches patterns produced by ``truncate_tool_result``:
+        - New large-result header: "Full result saved at: /abs/path/file.txt"
+        - Legacy bracketed trailer: "[Saved to 'file.txt']"  (pre-2026-04-15,
+          retained here so cold conversations still resolve)
     """
+    # New prose format — ``saved at: <absolute path>``, terminated by
+    # newline or end-of-string.
+    match = re.search(r"[Ss]aved at:\s*(\S+)", content)
+    if match:
+        return match.group(1)
+    # Legacy format.
     match = re.search(r"[Ss]aved to '([^']+)'", content)
     return match.group(1) if match else None
 
@@ -878,12 +885,14 @@ class NodeConversation:
 
             if spillover:
                 placeholder = (
-                    f"[Pruned tool result: {orig_len} chars. "
-                    f"Full data in '{spillover}'. "
-                    f"Use read_file('{spillover}') to retrieve.]"
+                    f"Pruned tool result ({orig_len:,} chars) cleared from context. "
+                    f"Full data saved at: {spillover}\n"
+                    f"Read the complete data with read_file(path='{spillover}')."
                 )
             else:
-                placeholder = f"[Pruned tool result: {orig_len} chars cleared from context.]"
+                placeholder = (
+                    f"Pruned tool result ({orig_len:,} chars) cleared from context."
+                )
 
             self._messages[i] = Message(
                 seq=msg.seq,
@@ -904,6 +913,81 @@ class NodeConversation:
         # Reset token estimate — content lengths changed
         self._last_api_input_tokens = None
         return count
+
+    async def evict_old_images(self, keep_latest: int = 2) -> int:
+        """Strip ``image_content`` from older messages, keeping the most recent.
+
+        Screenshots from ``browser_screenshot`` are inlined into the
+        message's ``image_content`` as base64 data URLs. Each screenshot
+        costs ~250k tokens when the provider counts the base64 as
+        text — four screenshots push a conversation over gemini's 1M
+        context limit and trigger out-of-context garbage output (see
+        ``session_20260415_104727_5c4ed7ff`` for the terminal case
+        where the model emitted ``协日`` as its final text then stopped).
+
+        This method walks backward through messages and keeps
+        ``image_content`` intact on the most recent ``keep_latest``
+        messages that have images. Older messages get their
+        ``image_content`` nulled out — the text content (metadata
+        like url, dimensions, scale hints) stays, but the raw bytes
+        are dropped. Storage is updated too so cold-restore sees the
+        same evicted state.
+
+        Run this right after every tool result is recorded so image
+        context stays bounded even within a single iteration (the
+        compaction pipeline only fires at iteration boundaries, too
+        late for a single turn that takes 4 screenshots).
+
+        Returns the number of messages whose image_content was evicted.
+        """
+        if not self._messages or keep_latest < 0:
+            return 0
+
+        # Find messages carrying images, walking newest → oldest.
+        image_indices: list[int] = []
+        for i in range(len(self._messages) - 1, -1, -1):
+            if self._messages[i].image_content:
+                image_indices.append(i)
+
+        # Nothing to evict if we have ≤ keep_latest images total.
+        if len(image_indices) <= keep_latest:
+            return 0
+
+        # Evict everything past the first keep_latest (newest) entries.
+        to_evict = image_indices[keep_latest:]
+        evicted = 0
+        for idx in to_evict:
+            msg = self._messages[idx]
+            self._messages[idx] = Message(
+                seq=msg.seq,
+                role=msg.role,
+                content=msg.content,
+                tool_use_id=msg.tool_use_id,
+                tool_calls=msg.tool_calls,
+                is_error=msg.is_error,
+                phase_id=msg.phase_id,
+                is_transition_marker=msg.is_transition_marker,
+                is_client_input=msg.is_client_input,
+                image_content=None,  # ← dropped
+                is_skill_content=msg.is_skill_content,
+                run_id=msg.run_id,
+            )
+            evicted += 1
+            if self._store:
+                await self._store.write_part(
+                    msg.seq, self._messages[idx].to_storage_dict()
+                )
+
+        if evicted:
+            # Reset token estimate — image blocks no longer contribute.
+            self._last_api_input_tokens = None
+            logger.info(
+                "evict_old_images: dropped image_content from %d message(s), "
+                "kept %d most recent",
+                evicted,
+                keep_latest,
+            )
+        return evicted
 
     async def compact(
         self,
@@ -1165,16 +1249,18 @@ class NodeConversation:
             # Nothing to save — skip file creation
             conv_filename = ""
 
-        # Build reference message
+        # Build reference message. Prose format (no brackets) — see the
+        # poison-pattern note on truncate_tool_result. Frontier models
+        # autocomplete `[...']` trailers into their own text turns.
         ref_parts: list[str] = []
         if conv_filename:
             full_path = str((spill_path / conv_filename).resolve())
             ref_parts.append(
-                f"[Previous conversation saved to '{full_path}'. "
-                f"Use read_file('{conv_filename}') to review if needed.]"
+                f"Previous conversation saved at: {full_path}\n"
+                f"Read the full transcript with read_file('{conv_filename}')."
             )
         elif not collapsed_msgs:
-            ref_parts.append("[Previous freeform messages compacted.]")
+            ref_parts.append("(Previous freeform messages compacted.)")
 
         # Aggressive: add collapsed tool-call history to the reference
         if collapsed_msgs:

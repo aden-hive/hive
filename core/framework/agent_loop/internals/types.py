@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -82,6 +83,23 @@ class LoopConfig:
     # Tool result context management.
     max_tool_result_chars: int = 30_000
     spillover_dir: str | None = None
+
+    # Image retention in conversation history.
+    # Screenshots from ``browser_screenshot`` are inlined as base64
+    # data URLs inside message ``image_content``. Each full-page
+    # screenshot costs ~250k tokens when the provider counts the
+    # base64 as text (gemini, most non-Anthropic providers). Four
+    # screenshots in one conversation push gemini's 1M context over
+    # the limit and the model starts emitting garbage.
+    #
+    # The framework strips image_content from older messages after
+    # every tool-result batch, keeping only the most recent N
+    # screenshots. The text metadata on evicted messages (url, size,
+    # scale hints) is preserved so the agent can still reason about
+    # "I took a screenshot at step N that showed the compose modal".
+    # Raise this only if you genuinely need longer visual history AND
+    # you know your provider is using native image tokenization.
+    max_retained_screenshots: int = 2
 
     # set_output value spilling.
     max_output_value_chars: int = 2_000
@@ -166,7 +184,7 @@ class OutputAccumulator:
 
     async def set(self, key: str, value: Any) -> None:
         """Set a key-value pair, auto-spilling large values to files."""
-        value = self._auto_spill(key, value)
+        value = await self._auto_spill(key, value)
         self.values[key] = value
         if self.store:
             cursor = await self.store.read_cursor() or {}
@@ -175,41 +193,67 @@ class OutputAccumulator:
             cursor["outputs"] = outputs
             await self.store.write_cursor(cursor)
 
-    def _auto_spill(self, key: str, value: Any) -> Any:
-        """Save large values to a file and return a reference string."""
+    async def _auto_spill(self, key: str, value: Any) -> Any:
+        """Save large values to a file and return a reference string.
+
+        Runs the JSON serialization and file write on a worker thread
+        so they don't block the asyncio event loop. For a 100k-char
+        dict this used to freeze every concurrent tool call for ~50ms
+        of ``json.dumps(indent=2)`` + a sync disk write; for bigger
+        payloads or slow storage (NFS, networked FS) the freeze was
+        proportionally worse.
+        """
         if self.max_value_chars <= 0 or not self.spillover_dir:
             return value
 
-        val_str = json.dumps(value, ensure_ascii=False) if not isinstance(value, str) else value
-        if len(val_str) <= self.max_value_chars:
+        # Cheap size probe first — if the value is already a short
+        # string we can skip both the JSON round-trip and the thread
+        # hop entirely.
+        if isinstance(value, str) and len(value) <= self.max_value_chars:
             return value
 
-        spill_path = Path(self.spillover_dir)
-        spill_path.mkdir(parents=True, exist_ok=True)
-        ext = ".json" if isinstance(value, (dict, list)) else ".txt"
-        filename = f"output_{key}{ext}"
-        write_content = (
-            json.dumps(value, indent=2, ensure_ascii=False)
-            if isinstance(value, (dict, list))
-            else str(value)
-        )
-        file_path = spill_path / filename
-        file_path.write_text(write_content, encoding="utf-8")
-        file_size = file_path.stat().st_size
-        logger.info(
-            "set_output value auto-spilled: key=%s, %d chars -> %s (%d bytes)",
-            key,
-            len(val_str),
-            filename,
-            file_size,
-        )
-        # Use absolute path so parent agents can find files from subagents
-        abs_path = str(file_path.resolve())
-        return (
-            f"[Saved to '{abs_path}' ({file_size:,} bytes). "
-            f"Use read_file(path='{abs_path}') "
-            f"to access full data.]"
-        )
+        def _spill_sync() -> Any:
+            # JSON serialization for size check (only for non-strings).
+            if isinstance(value, str):
+                val_str = value
+            else:
+                val_str = json.dumps(value, ensure_ascii=False)
+            if len(val_str) <= self.max_value_chars:
+                return value
+
+            spill_path = Path(self.spillover_dir)
+            spill_path.mkdir(parents=True, exist_ok=True)
+            ext = ".json" if isinstance(value, (dict, list)) else ".txt"
+            filename = f"output_{key}{ext}"
+            write_content = (
+                json.dumps(value, indent=2, ensure_ascii=False)
+                if isinstance(value, (dict, list))
+                else str(value)
+            )
+            file_path = spill_path / filename
+            file_path.write_text(write_content, encoding="utf-8")
+            file_size = file_path.stat().st_size
+            logger.info(
+                "set_output value auto-spilled: key=%s, %d chars -> %s (%d bytes)",
+                key,
+                len(val_str),
+                filename,
+                file_size,
+            )
+            # Use absolute path so parent agents can find files from subagents.
+            #
+            # Prose format (no brackets) — same fix as tool_result_handler:
+            # frontier pattern-matching models autocomplete bracketed
+            # `[Saved to '...']` trailers into their own assistant turns,
+            # eventually degenerating into echoing the file path as text.
+            # Keep the path accessible but frame it as plain prose.
+            abs_path = str(file_path.resolve())
+            return (
+                f"Output saved at: {abs_path} ({file_size:,} bytes). "
+                f"Read the full data with read_file(path='{abs_path}')."
+            )
+
+        return await asyncio.to_thread(_spill_sync)
 
     def get(self, key: str) -> Any | None:
         return self.values.get(key)

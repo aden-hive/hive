@@ -79,6 +79,61 @@ if state['found'] and not state['disabled']:
     browser_press("Escape")  # close any leftover modal
 ```
 
+## Posting a tweet WITH an image
+
+**Critical: NEVER click the photo button.** On `x.com/compose/post` the media button is a styled `<button>` that triggers Chrome's native OS file picker when clicked — that dialog is unreachable via CDP and will wedge the automation. Instead, set the file directly on the hidden `<input type='file'>` element using `browser_upload`:
+
+```python
+# 1. Open the compose modal as usual
+browser_press("n")
+sleep(1.5)
+browser_click_coordinate(ta_rect.cx, ta_rect.cy)
+sleep(0.5)
+browser_type("[data-testid='tweetTextarea_0']", tweet_text)
+
+# 2. Find the hidden file input X uses for media uploads.
+#    X's input is marked with data-testid='fileInput' and accepts
+#    image/*,video/*. It's hidden (display:none) but still mounted.
+inputs = browser_evaluate("""
+  (function(){
+    return Array.from(document.querySelectorAll('input[type="file"]'))
+      .map(el => ({
+        testid: el.getAttribute('data-testid') || '',
+        accept: el.accept || '',
+        multiple: el.multiple,
+      }));
+  })();
+""")
+# Expect to see: [{testid: 'fileInput', accept: 'image/jpeg,...', multiple: true}]
+
+# 3. Set the file WITHOUT opening any dialog
+browser_upload(
+    selector="input[data-testid='fileInput']",
+    file_paths=["/absolute/path/to/photo.png"],
+)
+sleep(2)  # X takes ~1-2s to show the preview thumbnail
+
+# 4. Verify the preview rendered before posting — if not, the upload
+#    didn't land and Post button will fail.
+preview = browser_evaluate("""
+  (function(){
+    // X renders uploaded media as an <img> with data-testid='attachments'
+    // (or similar) inside the composer.
+    const att = document.querySelector('[data-testid="attachments"] img');
+    return { hasPreview: !!att };
+  })();
+""")
+if not preview['hasPreview']:
+    raise Exception("Upload didn't render in composer — do NOT click Post")
+
+# 5. Now click Post as usual
+browser_click("[data-testid='tweetButton']")
+sleep(3)  # media upload + post takes longer than text-only
+browser_press("Escape")
+```
+
+If you don't already have the image file on disk, write it first: `write_file("/tmp/x_upload.png", base64_bytes)` or copy from a known location. `browser_upload` requires an absolute file path — relative paths and `~` expansion are not supported.
+
 ## Reply to a post flow
 
 The reply flow is the same shape as posting, with a few scroll / find-and-click steps before.
