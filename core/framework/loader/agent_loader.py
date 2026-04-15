@@ -1421,7 +1421,18 @@ class AgentLoader:
             credential_store=credential_store,
         )
         runner._agent_default_skills = None
-        runner._agent_skills = None
+        # Colony workers attached to a SQLite task queue get the
+        # colony-progress-tracker skill pre-activated so its full
+        # claim / step / SOP-gate protocol lands in the system prompt
+        # on turn 0, bypassing the progressive-disclosure catalog
+        # lookup. Triggered by the presence of ``input_data.db_path``
+        # in worker.json (written by fork_session_into_colony and
+        # backfilled by ensure_progress_db for pre-existing colonies).
+        _preactivate: list[str] = []
+        _input_data = first_worker.get("input_data") or {}
+        if isinstance(_input_data, dict) and _input_data.get("db_path"):
+            _preactivate.append("hive.colony-progress-tracker")
+        runner._agent_skills = _preactivate or None
         return runner
 
     def register_tool(

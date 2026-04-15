@@ -641,6 +641,43 @@ class ColonyRuntime:
         spawn_tools = tools if tools is not None else self._tools
         spawn_executor = tool_executor or self._tool_executor
 
+        # Colony progress tracker: when the caller supplied a db_path
+        # in input_data, this worker is part of a SQLite task queue
+        # and must see the hive.colony-progress-tracker skill body in
+        # its system prompt from turn 0. Rebuild the catalog with the
+        # skill pre-activated; falls back to the colony default when
+        # no db_path is present.
+        _spawn_catalog = self.skills_catalog_prompt
+        _spawn_skill_dirs = self.skill_dirs
+        if isinstance(input_data, dict) and input_data.get("db_path"):
+            try:
+                from framework.skills.config import SkillsConfig
+                from framework.skills.manager import SkillsManager, SkillsManagerConfig
+
+                _pre = SkillsManager(
+                    SkillsManagerConfig(
+                        skills_config=SkillsConfig.from_agent_vars(
+                            skills=["hive.colony-progress-tracker"],
+                        ),
+                    )
+                )
+                _pre.load()
+                _spawn_catalog = _pre.skills_catalog_prompt
+                _spawn_skill_dirs = list(_pre.allowlisted_dirs) if hasattr(_pre, "allowlisted_dirs") else self.skill_dirs
+                logger.info(
+                    "spawn: pre-activated hive.colony-progress-tracker "
+                    "(catalog %d → %d chars) for worker with db_path=%s",
+                    len(self.skills_catalog_prompt),
+                    len(_spawn_catalog),
+                    input_data.get("db_path"),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "spawn: failed to pre-activate colony-progress-tracker "
+                    "skill, falling back to base catalog: %s",
+                    exc,
+                )
+
         # Resolve the SSE stream_id once. When the caller didn't supply
         # one we use the per-worker fan-out tag (filtered out by the
         # SSE handler). When the caller passed an explicit value we
@@ -697,9 +734,9 @@ class ColonyRuntime:
                 llm=self._llm,
                 available_tools=list(spawn_tools),
                 accounts_prompt=self._accounts_prompt,
-                skills_catalog_prompt=self.skills_catalog_prompt,
+                skills_catalog_prompt=_spawn_catalog,
                 protocols_prompt=self.protocols_prompt,
-                skill_dirs=self.skill_dirs,
+                skill_dirs=_spawn_skill_dirs,
                 execution_id=worker_id,
                 stream_id=explicit_stream_id or f"worker:{worker_id}",
             )

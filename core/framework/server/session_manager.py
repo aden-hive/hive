@@ -141,6 +141,24 @@ class SessionManager:
         except Exception:
             logger.warning("v2 migration failed (non-fatal)", exc_info=True)
 
+        # Ensure every existing colony has an up-to-date progress.db
+        # (schema v1, WAL mode) and reclaim any stale claims left behind
+        # by crashed workers from the previous run.  Idempotent and
+        # fast; runs synchronously because the event loop hasn't
+        # started yet at __init__ time.
+        from framework.host.progress_db import ensure_all_colony_dbs
+
+        try:
+            ensured = ensure_all_colony_dbs()
+            if ensured:
+                logger.info(
+                    "progress_db: ensured %d colony DB(s) at startup", len(ensured)
+                )
+        except Exception:
+            logger.warning(
+                "progress_db: backfill at startup failed (non-fatal)", exc_info=True
+            )
+
     def build_llm(self, model: str | None = None):
         """Construct an LLM provider using the server's configured defaults."""
         from framework.config import RuntimeConfig, get_hive_config

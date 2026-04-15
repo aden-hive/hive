@@ -19,10 +19,10 @@ _DEFAULT_SKILLS_DIR = (
 
 
 class TestDefaultSkillFiles:
-    """Verify all 6 built-in SKILL.md files parse correctly."""
+    """Verify all built-in SKILL.md files parse correctly."""
 
-    def test_all_six_skills_exist(self):
-        assert len(SKILL_REGISTRY) == 6
+    def test_all_skills_exist(self):
+        assert len(SKILL_REGISTRY) == 8
 
     @pytest.mark.parametrize("skill_name,dir_name", list(SKILL_REGISTRY.items()))
     def test_skill_parses(self, skill_name, dir_name):
@@ -37,7 +37,13 @@ class TestDefaultSkillFiles:
         assert parsed.source_scope == "framework"
 
     def test_combined_token_budget(self):
-        """All default skill bodies combined should be under 2000 tokens (~8000 chars)."""
+        """All default skill bodies combined should stay within the protocols budget.
+
+        Ceiling is 5000 tokens (~20000 chars): the prompt-injection path
+        appends every registered skill body to the system prompt, so
+        uncontrolled growth would balloon every LLM call. 5000 gives
+        headroom over today's ~3500 while still catching obvious bloat.
+        """
         total_chars = 0
         for dir_name in SKILL_REGISTRY.values():
             path = _DEFAULT_SKILLS_DIR / dir_name / "SKILL.md"
@@ -46,9 +52,9 @@ class TestDefaultSkillFiles:
             total_chars += len(parsed.body)
 
         approx_tokens = total_chars // 4
-        assert approx_tokens < 2000, (
+        assert approx_tokens < 5000, (
             f"Combined default skill bodies are ~{approx_tokens} tokens "
-            f"({total_chars} chars), exceeding the 2000 token budget"
+            f"({total_chars} chars), exceeding the 5000 token budget"
         )
 
     def test_data_buffer_keys_all_prefixed(self):
@@ -62,7 +68,7 @@ class TestDefaultSkillManager:
         manager = DefaultSkillManager()
         manager.load()
 
-        assert len(manager.active_skill_names) == 6
+        assert len(manager.active_skill_names) == 8
         for name in SKILL_REGISTRY:
             assert name in manager.active_skill_names
 
@@ -101,7 +107,7 @@ class TestDefaultSkillManager:
         manager.load()
 
         assert "hive.quality-monitor" not in manager.active_skill_names
-        assert len(manager.active_skill_names) == 5
+        assert len(manager.active_skill_names) == len(SKILL_REGISTRY) - 1
 
     def test_disable_all_via_convention(self):
         config = SkillsConfig.from_agent_vars(default_skills={"_all": {"enabled": False}})

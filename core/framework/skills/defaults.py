@@ -77,6 +77,7 @@ SKILL_REGISTRY: dict[str, str] = {
     "hive.quality-monitor": "quality-monitor",
     "hive.error-recovery": "error-recovery",
     "hive.task-decomposition": "task-decomposition",
+    "hive.colony-progress-tracker": "colony-progress-tracker",
     "hive.writing-hive-skills": "writing-hive-skills",
 }
 
