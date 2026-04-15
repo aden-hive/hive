@@ -2,15 +2,15 @@
 
 from pathlib import Path
 
-from framework.graph import EdgeCondition, EdgeSpec, Goal, SuccessCriterion, Constraint
-from framework.graph.checkpoint_config import CheckpointConfig
-from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult, GraphExecutor
+from framework.orchestrator import EdgeCondition, EdgeSpec, Goal, SuccessCriterion, Constraint
+from framework.orchestrator.checkpoint_config import CheckpointConfig
+from framework.orchestrator.edge import GraphSpec
+from framework.orchestrator.orchestrator import ExecutionResult, Orchestrator
 from framework.llm import LiteLLMProvider
-from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import create_agent_runtime
-from framework.runtime.event_bus import EventBus
-from framework.runtime.execution_stream import EntryPointSpec
+from framework.loader.tool_registry import ToolRegistry
+from framework.host.agent_host import AgentHost
+from framework.host.event_bus import EventBus
+from framework.host.execution_manager import EntryPointSpec
 
 from .config import default_config, metadata
 from .nodes import (
@@ -190,7 +190,7 @@ class EmailInboxManagementAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
-        self._executor: GraphExecutor | None = None
+        self._executor: Orchestrator | None = None
         self._graph: GraphSpec | None = None
         self._event_bus: EventBus | None = None
         self._tool_registry: ToolRegistry | None = None
@@ -264,7 +264,7 @@ class EmailInboxManagementAgent:
             ),
         ]
 
-        self._agent_runtime = create_agent_runtime(
+        self._agent_runtime = AgentHost(
             graph=self._graph,
             goal=self.goal,
             storage_path=self._storage_path,

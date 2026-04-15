@@ -389,7 +389,7 @@ def list_agent_tools(
 
     Args:
         server_config_path: Path to mcp_servers.json. Default: tools/mcp_servers.json
-            (the standard hive-tools server). Can also point to an agent's config
+            (the standard hive_tools server). Can also point to an agent's config
             to see what tools that specific agent has access to.
         output_schema: Controls verbosity of the response.
             "summary" (default) — provider list with tool counts + credential status. Very compact.
@@ -456,8 +456,8 @@ def list_agent_tools(
     try:
         from pathlib import Path
 
-        from framework.runner.mcp_client import MCPClient, MCPServerConfig
-        from framework.runner.tool_registry import ToolRegistry
+        from framework.loader.mcp_client import MCPClient, MCPServerConfig
+        from framework.loader.tool_registry import ToolRegistry
     except ImportError:
         return json.dumps({"error": "Cannot import MCPClient"})
 
@@ -806,8 +806,8 @@ def _validate_agent_tools_impl(agent_path: str) -> dict:
     try:
         from pathlib import Path
 
-        from framework.runner.mcp_client import MCPClient, MCPServerConfig
-        from framework.runner.tool_registry import ToolRegistry
+        from framework.loader.mcp_client import MCPClient, MCPServerConfig
+        from framework.loader.tool_registry import ToolRegistry
     except ImportError:
         return {"error": "Cannot import MCPClient"}
 
@@ -845,27 +845,52 @@ def _validate_agent_tools_impl(agent_path: str) -> dict:
             discovery_errors.append({"server": server_name, "error": str(e)})
 
     # --- Load agent nodes and extract declared tools ---
+    agent_json_file = os.path.join(agent_dir, "agent.json")
     agent_py = os.path.join(agent_dir, "agent.py")
-    if not os.path.isfile(agent_py):
-        return {"error": f"No agent.py found in {agent_path}"}
 
-    import importlib
-    import importlib.util
-    import sys
+    nodes = None
+    if os.path.isfile(agent_json_file):
+        # Declarative JSON agent
+        try:
+            with open(agent_json_file, encoding="utf-8") as f:
+                data = json.load(f)
 
-    package_name = os.path.basename(agent_dir)
-    parent_dir = os.path.dirname(os.path.abspath(agent_dir))
-    if parent_dir not in sys.path:
-        sys.path.insert(0, parent_dir)
+            # Build lightweight node stubs with .tools and .id/.name
+            class _NodeStub:
+                def __init__(self, d):
+                    self.id = d.get("id", "?")
+                    self.name = d.get("name", self.id)
+                    t = d.get("tools", {})
+                    if isinstance(t, dict):
+                        self.tools = t.get("allowed", [])
+                    elif isinstance(t, list):
+                        self.tools = t
+                    else:
+                        self.tools = []
 
-    try:
-        agent_module = importlib.import_module(package_name)
-    except Exception as e:
-        return {"error": f"Failed to import agent: {e}"}
+            nodes = [_NodeStub(n) for n in data.get("nodes", [])]
+        except Exception as e:
+            return {"error": f"Failed to parse agent.json: {e}"}
+    elif os.path.isfile(agent_py):
+        # Legacy Python agent
+        import importlib
+        import importlib.util
+        import sys
 
-    nodes = getattr(agent_module, "nodes", None)
+        package_name = os.path.basename(agent_dir)
+        parent_dir = os.path.dirname(os.path.abspath(agent_dir))
+        if parent_dir not in sys.path:
+            sys.path.insert(0, parent_dir)
+        try:
+            agent_module = importlib.import_module(package_name)
+        except Exception as e:
+            return {"error": f"Failed to import agent: {e}"}
+        nodes = getattr(agent_module, "nodes", None)
+    else:
+        return {"error": f"No agent.json or agent.py found in {agent_path}"}
+
     if not nodes:
-        return {"error": "Agent module has no 'nodes' attribute"}
+        return {"error": "Agent has no nodes defined"}
 
     # --- Validate declared vs available ---
     missing_by_node: dict[str, list[str]] = {}
@@ -951,37 +976,46 @@ def list_agents() -> str:
             if not os.path.isdir(agent_dir):
                 continue
 
-            # Must have agent.py to be considered an agent package
-            if not os.path.isfile(os.path.join(agent_dir, "agent.py")):
+            # Must have agent.json (declarative) or agent.py (legacy)
+            has_json = os.path.isfile(os.path.join(agent_dir, "agent.json"))
+            has_py = os.path.isfile(os.path.join(agent_dir, "agent.py"))
+            if not has_json and not has_py:
                 continue
 
             info = {
                 "name": entry,
                 "path": os.path.relpath(agent_dir, PROJECT_ROOT),
                 "source": source,
-                "has_nodes": os.path.isdir(os.path.join(agent_dir, "nodes")),
-                "has_tests": os.path.isdir(os.path.join(agent_dir, "tests")),
+                "format": "json" if has_json else "python",
                 "has_mcp_config": os.path.isfile(os.path.join(agent_dir, "mcp_servers.json")),
             }
 
-            # Read description from __init__.py docstring
-            init_path = os.path.join(agent_dir, "__init__.py")
-            if os.path.isfile(init_path):
+            # Read description from agent.json or __init__.py
+            if has_json:
                 try:
-                    with open(init_path, encoding="utf-8") as f:
-                        content = f.read(2000)
-                    # Extract module docstring
-                    for quote in ['"""', "'''"]:
-                        start = content.find(quote)
-                        if start != -1:
-                            end = content.find(quote, start + 3)
-                            if end != -1:
-                                info["description"] = (
-                                    content[start + 3 : end].strip().split("\n")[0]
-                                )
-                                break
-                except OSError:
+                    with open(os.path.join(agent_dir, "agent.json"), encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict) and data.get("description"):
+                        info["description"] = data["description"]
+                except Exception:
                     pass
+            else:
+                init_path = os.path.join(agent_dir, "__init__.py")
+                if os.path.isfile(init_path):
+                    try:
+                        with open(init_path, encoding="utf-8") as f:
+                            content = f.read(2000)
+                        for quote in ['"""', "'''"]:
+                            start = content.find(quote)
+                            if start != -1:
+                                end = content.find(quote, start + 3)
+                                if end != -1:
+                                    info["description"] = (
+                                        content[start + 3 : end].strip().split("\n")[0]
+                                    )
+                                    break
+                    except OSError:
+                        pass
 
             # Check runtime data
             runtime_dir = hive_agents_dir / entry
@@ -1266,8 +1300,8 @@ def _run_agent_tests_impl(
 
     if not tests_dir.exists():
         return {
-            "error": f"No tests directory: exports/{agent_name}/tests/",
-            "hint": "Create test files in the tests/ directory first.",
+            "skipped": True,
+            "summary": "No tests directory (OK for declarative agents)",
         }
 
     # Parse test types
@@ -1446,13 +1480,11 @@ def run_agent_tests(
 def validate_agent_package(agent_name: str) -> str:
     """Run structural validation checks on a built agent package in one call.
 
-    Executes 5 steps and reports all results (does not stop on first failure):
-      1. Class validation — checks graph structure and entry_points contract
-      2. Node completeness — every NodeSpec in nodes/ must be in the nodes list,
-         and GCU nodes must be referenced in a parent's sub_agents
-      3. Graph validation — loads the agent graph without credential checks
-      4. Tool validation — checks declared tools exist in MCP servers
-      5. Tests — runs the agent's pytest suite
+    Executes validation steps and reports all results:
+      1. Schema validation — loads agent.json via load_agent_config
+      2. Graph validation — loads the agent graph via AgentLoader
+      3. Tool validation — checks declared tools exist in MCP servers
+      4. Tests — runs the agent's pytest suite (skipped if no tests/)
 
     Note: Credential validation is intentionally skipped here (building phase).
     Credentials are validated at run time by run_agent_with_input() preflight.
@@ -1477,137 +1509,91 @@ def validate_agent_package(agent_name: str) -> str:
         path_parts.append(pythonpath)
     env["PYTHONPATH"] = os.pathsep.join(path_parts)
 
-    # Step 0: Module contract — __init__.py must expose goal, nodes, edges
-    try:
-        _contract_script = textwrap.dedent("""\
-            import importlib, json
-            mod = importlib.import_module('{agent_name}')
-            missing = [a for a in ('goal', 'nodes', 'edges') if getattr(mod, a, None) is None]
-            if missing:
+    # Detect agent format
+    _is_json = os.path.isfile(os.path.join(PROJECT_ROOT, agent_path, "agent.json"))
+
+    if _is_json:
+        # JSON agents: validate via load_agent_config (schema + round-trip)
+        try:
+            _json_script = textwrap.dedent("""\
+                import json, pathlib
+                from framework.loader.agent_loader import load_agent_config
+                data = json.loads(
+                    pathlib.Path('exports/{agent_name}/agent.json').read_text()
+                )
+                g, goal = load_agent_config(data)
                 print(json.dumps({{
-                    'valid': False,
-                    'error': (
-                        "Module '{agent_name}' is missing module-level attributes: "
-                        + ", ".join(missing) + ". "
-                        "Fix: in {agent_name}/__init__.py, add "
-                        "'from .agent import " + ", ".join(missing) + "' "
-                        "so that 'import {agent_name}' exposes them at package level."
-                    )
+                    'valid': True,
+                    'nodes': len(g.nodes),
+                    'edges': len(g.edges),
+                    'entry': g.entry_node,
+                    'errors': errors,
                 }}))
+            """).format(agent_name=agent_name)
+            proc = subprocess.run(
+                ["uv", "run", "python", "-c", _json_script],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env,
+                cwd=PROJECT_ROOT,
+                stdin=subprocess.DEVNULL,
+            )
+            if proc.returncode == 0:
+                result = json.loads(proc.stdout.strip())
+                steps["schema_validation"] = {
+                    "passed": result["valid"],
+                    "output": (
+                        f"{result['nodes']} nodes, {result['edges']} edges, entry={result['entry']}"
+                    ),
+                }
+                if result.get("errors"):
+                    steps["schema_validation"]["errors"] = result["errors"]
             else:
-                print(json.dumps({{'valid': True}}))
-        """).format(agent_name=agent_name)
-        proc = subprocess.run(
-            ["uv", "run", "python", "-c", _contract_script],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env=env,
-            cwd=PROJECT_ROOT,
-            stdin=subprocess.DEVNULL,
-        )
-        if proc.returncode == 0:
-            result = json.loads(proc.stdout.strip())
-            steps["module_contract"] = {
-                "passed": result["valid"],
-                "output": result.get("error", "goal, nodes, edges exported correctly"),
-            }
-        else:
-            steps["module_contract"] = {
-                "passed": False,
-                "error": (
-                    f"Failed to import '{agent_name}': {proc.stderr.strip()[:1000]}. "
-                    f"Fix: ensure {agent_name}/__init__.py exists and can be imported "
-                    f"without errors (check syntax, missing dependencies, relative imports)."
-                ),
-            }
-    except Exception as e:
-        steps["module_contract"] = {"passed": False, "error": str(e)}
-
-    # Step A: Class validation (subprocess for import isolation)
-    try:
-        proc = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-c",
-                f"from {agent_name} import default_agent; print(default_agent.validate())",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env=env,
-            cwd=PROJECT_ROOT,
-            stdin=subprocess.DEVNULL,
-        )
-        passed = proc.returncode == 0
-        steps["class_validation"] = {
-            "passed": passed,
-            "output": (proc.stdout.strip() or proc.stderr.strip())[:2000],
-        }
-        if not passed:
-            steps["class_validation"]["error"] = proc.stderr.strip()[:2000]
-    except Exception as e:
-        steps["class_validation"] = {"passed": False, "error": str(e)}
-
-    # Step A2: Node completeness — every NodeSpec in nodes/ must be in the nodes list
-    try:
-        _check_template = textwrap.dedent("""\
-            import importlib, json
-            agent = importlib.import_module('{agent_name}')
-            nodes_mod = importlib.import_module('{agent_name}.nodes')
-            graph_ids = {{n.id for n in agent.nodes}}
-            defined = {{}}
-            for attr in dir(nodes_mod):
-                obj = getattr(nodes_mod, attr)
-                if hasattr(obj, 'id') and hasattr(obj, 'node_type'):
-                    defined[obj.id] = attr
-            orphaned = set(defined) - graph_ids
-            errors = [
-                f"Node '{{nid}}' ({{defined[nid]}}) defined in nodes/ but not in nodes list"
-                for nid in sorted(orphaned)
-            ]
-            sub_refs = set()
-            for n in agent.nodes:
-                for sa in getattr(n, 'sub_agents', []) or []:
-                    sub_refs.add(sa)
-            for n in agent.nodes:
-                if n.node_type == 'gcu' and n.id not in sub_refs:
-                    errors.append(
-                        f"GCU node '{{n.id}}' not referenced in any node's sub_agents list"
-                    )
-            print(json.dumps({{'valid': len(errors) == 0, 'errors': errors}}))
-        """)
-        check_script = _check_template.format(agent_name=agent_name)
-        proc = subprocess.run(
-            ["uv", "run", "python", "-c", check_script],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env=env,
-            cwd=PROJECT_ROOT,
-            stdin=subprocess.DEVNULL,
-        )
-        if proc.returncode == 0:
-            result = json.loads(proc.stdout.strip())
-            steps["node_completeness"] = {
-                "passed": result["valid"],
-                "output": (
-                    "; ".join(result["errors"])
-                    if result["errors"]
-                    else "All defined nodes are in the graph"
-                ),
-            }
-            if not result["valid"]:
-                steps["node_completeness"]["errors"] = result["errors"]
-        else:
-            steps["node_completeness"] = {
-                "passed": False,
-                "error": proc.stderr.strip()[:2000],
-            }
-    except Exception as e:
-        steps["node_completeness"] = {"passed": False, "error": str(e)}
+                steps["schema_validation"] = {
+                    "passed": False,
+                    "error": proc.stderr.strip()[:2000],
+                }
+        except Exception as e:
+            steps["schema_validation"] = {"passed": False, "error": str(e)}
+    else:
+        # Legacy Python agents: module contract + class validation
+        try:
+            _contract_script = textwrap.dedent("""\
+                import importlib, json
+                mod = importlib.import_module('{agent_name}')
+                missing = [
+                    a for a in ('goal', 'nodes', 'edges')
+                    if getattr(mod, a, None) is None
+                ]
+                print(json.dumps({{'valid': len(missing) == 0, 'missing': missing}}))
+            """).format(agent_name=agent_name)
+            proc = subprocess.run(
+                ["uv", "run", "python", "-c", _contract_script],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env,
+                cwd=PROJECT_ROOT,
+                stdin=subprocess.DEVNULL,
+            )
+            if proc.returncode == 0:
+                result = json.loads(proc.stdout.strip())
+                steps["module_contract"] = {
+                    "passed": result["valid"],
+                    "output": (
+                        f"Missing: {result['missing']}"
+                        if result.get("missing")
+                        else "goal, nodes, edges exported correctly"
+                    ),
+                }
+            else:
+                steps["module_contract"] = {
+                    "passed": False,
+                    "error": proc.stderr.strip()[:1000],
+                }
+        except Exception as e:
+            steps["module_contract"] = {"passed": False, "error": str(e)}
 
     # Step B: Graph validation (subprocess for import isolation)
     # Credentials are checked at run time (run_agent_with_input preflight),
@@ -1619,10 +1605,10 @@ def validate_agent_package(agent_name: str) -> str:
                 "run",
                 "python",
                 "-c",
-                f"from framework.runner.runner import AgentRunner; "
-                f'r = AgentRunner.load("exports/{agent_name}", '
+                f"from framework.loader.agent_loader import AgentLoader; "
+                f'r = AgentLoader.load("exports/{agent_name}", '
                 f"skip_credential_validation=True); "
-                f'print("AgentRunner.load (graph-only): OK")',
+                f'print("AgentLoader.load (graph-only): OK")',
             ],
             capture_output=True,
             text=True,
@@ -1659,7 +1645,9 @@ def validate_agent_package(agent_name: str) -> str:
     # Step D: Tests (direct call)
     try:
         test_result = _run_agent_tests_impl(agent_name)
-        if "error" in test_result:
+        if test_result.get("skipped"):
+            steps["tests"] = {"passed": True, "output": "No tests (skipped)"}
+        elif "error" in test_result:
             steps["tests"] = {"passed": False, "error": test_result["error"]}
         else:
             all_passed = test_result.get("failed", 0) == 0 and test_result.get("errors", 0) == 0
@@ -1695,703 +1683,6 @@ def validate_agent_package(agent_name: str) -> str:
 
 
 # ── Meta-agent: Package initialization ─────────────────────────────────────
-
-
-def _snake_to_camel(name: str) -> str:
-    """Convert snake_case to CamelCase."""
-    return "".join(word.capitalize() for word in name.split("_"))
-
-
-def _node_var_name(node_id: str) -> str:
-    """Convert node id to a Python variable name."""
-    return node_id.replace("-", "_") + "_node"
-
-
-@mcp.tool()
-def initialize_and_build_agent(
-    agent_name: str,
-    nodes: str | None = None,
-    _draft: dict | None = None,
-) -> str:
-    """Scaffold a new agent package with placeholder files.
-
-    Creates exports/{agent_name}/ with all files needed for a runnable agent:
-    config.py, nodes/__init__.py, agent.py, __init__.py, __main__.py,
-    mcp_servers.json, tests/conftest.py.
-
-    After initialization, customize the generated files:
-    - System prompts and node logic in nodes/__init__.py
-    - Goal and edges in agent.py
-    - CLI options in __main__.py
-
-    Args:
-        agent_name: Name for the agent package. Must be snake_case (e.g. 'my_agent').
-        nodes: Comma-separated node names (snake_case or kebab-case).
-               If omitted, a single 'start' node is created.
-               Example: 'intake,process,review'
-        _draft: Internal. Draft graph metadata from planning phase, used to
-                pre-populate descriptions, goals, and node metadata.
-
-    Returns:
-        JSON with files written and next steps.
-    """
-    import re
-
-    if not re.match(r"^[a-z][a-z0-9_]*$", agent_name):
-        return json.dumps(
-            {
-                "success": False,
-                "error": (
-                    f"Invalid agent_name '{agent_name}'. Must be snake_case: "
-                    "lowercase letters, numbers, underscores, starting with a letter."
-                ),
-            }
-        )
-
-    node_list = [n.strip() for n in nodes.split(",") if n.strip()] if nodes else ["start"]
-
-    # Build draft node lookup for pre-populating metadata from planning phase
-    _draft_nodes: dict[str, dict] = {}
-    if _draft and _draft.get("nodes"):
-        for dn in _draft["nodes"]:
-            _draft_nodes[dn.get("id", "")] = dn
-
-    # Extract top-level draft metadata early so it's available for all templates
-    _draft_desc = (_draft.get("description") or "") if _draft else ""
-
-    class_name = _snake_to_camel(agent_name)
-    human_name = agent_name.replace("_", " ").title()
-    entry_node = node_list[0]
-
-    exports_dir = os.path.join(PROJECT_ROOT, "exports", agent_name)
-    nodes_dir = os.path.join(exports_dir, "nodes")
-    tests_dir = os.path.join(exports_dir, "tests")
-    os.makedirs(nodes_dir, exist_ok=True)
-    os.makedirs(tests_dir, exist_ok=True)
-
-    files_written: dict[str, dict] = {}
-
-    def _write(rel_path: str, content: str) -> None:
-        full = os.path.join(exports_dir, rel_path)
-        os.makedirs(os.path.dirname(full), exist_ok=True)
-        with open(full, "w", encoding="utf-8") as f:
-            f.write(content)
-        files_written[rel_path] = {
-            "path": f"exports/{agent_name}/{rel_path}",
-            "size_bytes": os.path.getsize(full),
-        }
-
-    # -- config.py --
-    _write(
-        "config.py",
-        f'''\
-"""Runtime configuration."""
-
-import json
-from dataclasses import dataclass, field
-from pathlib import Path
-
-
-def _load_preferred_model() -> str:
-    """Load preferred model from ~/.hive/configuration.json."""
-    config_path = Path.home() / ".hive" / "configuration.json"
-    if config_path.exists():
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
-            llm = config.get("llm", {{}})
-            if llm.get("provider") and llm.get("model"):
-                return f"{{llm[\'provider\']}}/{{llm[\'model\']}}"
-        except Exception:
-            pass
-    return "anthropic/claude-sonnet-4-20250514"
-
-
-@dataclass
-class RuntimeConfig:
-    model: str = field(default_factory=_load_preferred_model)
-    temperature: float = 0.7
-    max_tokens: int = 40000
-    api_key: str | None = None
-    api_base: str | None = None
-
-
-default_config = RuntimeConfig()
-
-
-@dataclass
-class AgentMetadata:
-    name: str = "{human_name}"
-    version: str = "1.0.0"
-    description: str = "{_draft_desc or "TODO: Add agent description."}"
-    intro_message: str = "TODO: Add intro message."
-
-
-metadata = AgentMetadata()
-''',
-    )
-
-    # -- nodes/__init__.py --
-    node_specs = []
-    node_var_names = []
-    for node_id in node_list:
-        var = _node_var_name(node_id)
-        node_var_names.append(var)
-        is_first = node_id == entry_node
-
-        # Use draft metadata to pre-populate if available
-        dn = _draft_nodes.get(node_id, {})
-        node_name = dn.get("name") or node_id.replace("_", " ").replace("-", " ").title()
-        node_desc = dn.get("description") or "TODO: Describe what this node does."
-        node_type = dn.get("node_type") or "event_loop"
-        node_tools = dn.get("tools") or []
-        node_input_keys = dn.get("input_keys") or []
-        node_output_keys = dn.get("output_keys") or []
-        node_sc = dn.get("success_criteria") or "TODO: Define success criteria."
-
-        node_specs.append(f'''\
-{var} = NodeSpec(
-    id="{node_id}",
-    name="{node_name}",
-    description="{node_desc}",
-    node_type="{node_type}",
-    client_facing={is_first},
-    max_node_visits=0,
-    input_keys={node_input_keys!r},
-    output_keys={node_output_keys!r},
-    nullable_output_keys=[],
-    success_criteria="{node_sc}",
-    system_prompt="""\\
-TODO: Add system prompt for this node.
-""",
-    tools={node_tools!r},
-)''')
-
-    nodes_init = f'''\
-"""Node definitions for {human_name}."""
-
-from framework.graph import NodeSpec
-
-{chr(10).join(node_specs)}
-
-__all__ = {node_var_names!r}
-'''
-    _write("nodes/__init__.py", nodes_init)
-
-    # -- agent.py --
-    node_imports = ", ".join(node_var_names)
-    nodes_list = ", ".join(node_var_names)
-
-    # Use draft edges if available, otherwise generate linear edges
-    _draft_edges = _draft.get("edges", []) if _draft else []
-    edge_defs = []
-    if _draft_edges:
-        for de in _draft_edges:
-            eid = de.get("id", f"{de.get('source', '')}-to-{de.get('target', '')}")
-            src = de.get("source", "")
-            tgt = de.get("target", "")
-            cond = de.get("condition", "on_success").upper()
-            desc = de.get("description", "")
-            desc_line = f'\n        description="{desc}",' if desc else ""
-            edge_defs.append(f"""\
-    EdgeSpec(
-        id="{eid}",
-        source="{src}",
-        target="{tgt}",
-        condition=EdgeCondition.{cond},{desc_line}
-        priority=1,
-    ),""")
-    else:
-        for i in range(len(node_list) - 1):
-            src, tgt = node_list[i], node_list[i + 1]
-            edge_defs.append(f"""\
-    EdgeSpec(
-        id="{src}-to-{tgt}",
-        source="{src}",
-        target="{tgt}",
-        condition=EdgeCondition.ON_SUCCESS,
-        priority=1,
-    ),""")
-    edges_str = "\n".join(edge_defs) if edge_defs else "    # TODO: Add edges"
-
-    # Pre-populate goal from draft metadata
-    _draft_goal = (
-        (_draft.get("goal") or "TODO: Describe the agent's goal.")
-        if _draft
-        else "TODO: Describe the agent's goal."
-    )
-    _draft_sc = (_draft.get("success_criteria") or []) if _draft else []
-    _draft_constraints = (_draft.get("constraints") or []) if _draft else []
-
-    # Build success criteria entries
-    if _draft_sc:
-        sc_entries = "\n".join(
-            f"""\
-        SuccessCriterion(
-            id="sc-{i + 1}",
-            description="{sc}",
-            metric="TODO",
-            target="TODO",
-            weight=1.0,
-        ),"""
-            for i, sc in enumerate(_draft_sc)
-        )
-    else:
-        sc_entries = """\
-        SuccessCriterion(
-            id="sc-1",
-            description="TODO: Define success criterion.",
-            metric="TODO",
-            target="TODO",
-            weight=1.0,
-        ),"""
-
-    # Build constraint entries
-    if _draft_constraints:
-        constraint_entries = "\n".join(
-            f"""\
-        Constraint(
-            id="c-{i + 1}",
-            description="{c}",
-            constraint_type="hard",
-            category="functional",
-        ),"""
-            for i, c in enumerate(_draft_constraints)
-        )
-    else:
-        constraint_entries = """\
-        Constraint(
-            id="c-1",
-            description="TODO: Define constraint.",
-            constraint_type="hard",
-            category="functional",
-        ),"""
-
-    _write(
-        "agent.py",
-        f'''\
-"""Agent graph construction for {human_name}."""
-
-from pathlib import Path
-
-from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
-from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult
-from framework.graph.checkpoint_config import CheckpointConfig
-from framework.llm import LiteLLMProvider
-from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import create_agent_runtime
-from framework.runtime.execution_stream import EntryPointSpec
-
-from .config import default_config, metadata
-from .nodes import {node_imports}
-
-# Goal definition
-goal = Goal(
-    id="{agent_name}-goal",
-    name="{human_name}",
-    description="{_draft_goal}",
-    success_criteria=[
-{sc_entries}
-    ],
-    constraints=[
-{constraint_entries}
-    ],
-)
-
-# Node list
-nodes = [{nodes_list}]
-
-# Edge definitions
-edges = [
-{edges_str}
-]
-
-# Graph configuration
-entry_node = "{entry_node}"
-entry_points = {{"start": "{entry_node}"}}
-pause_nodes = []
-terminal_nodes = []
-
-conversation_mode = "continuous"
-identity_prompt = "TODO: Add identity prompt."
-loop_config = {{
-    "max_iterations": 100,
-    "max_tool_calls_per_turn": 30,
-    "max_history_tokens": 32000,
-}}
-
-
-class {class_name}:
-    def __init__(self, config=None):
-        self.config = config or default_config
-        self.goal = goal
-        self.nodes = nodes
-        self.edges = edges
-        self.entry_node = entry_node
-        self.entry_points = entry_points
-        self.pause_nodes = pause_nodes
-        self.terminal_nodes = terminal_nodes
-        self._graph = None
-        self._agent_runtime = None
-        self._tool_registry = None
-        self._storage_path = None
-
-    def _build_graph(self):
-        return GraphSpec(
-            id="{agent_name}-graph",
-            goal_id=self.goal.id,
-            version="1.0.0",
-            entry_node=self.entry_node,
-            entry_points=self.entry_points,
-            terminal_nodes=self.terminal_nodes,
-            pause_nodes=self.pause_nodes,
-            nodes=self.nodes,
-            edges=self.edges,
-            default_model=self.config.model,
-            max_tokens=self.config.max_tokens,
-            loop_config=loop_config,
-            conversation_mode=conversation_mode,
-            identity_prompt=identity_prompt,
-        )
-
-    def _setup(self):
-        self._storage_path = Path.home() / ".hive" / "agents" / "{agent_name}"
-        self._storage_path.mkdir(parents=True, exist_ok=True)
-        self._tool_registry = ToolRegistry()
-        mcp_config = Path(__file__).parent / "mcp_servers.json"
-        if mcp_config.exists():
-            self._tool_registry.load_mcp_config(mcp_config)
-        llm = LiteLLMProvider(
-            model=self.config.model,
-            api_key=self.config.api_key,
-            api_base=self.config.api_base,
-        )
-        tools = list(self._tool_registry.get_tools().values())
-        tool_executor = self._tool_registry.get_executor()
-        self._graph = self._build_graph()
-        self._agent_runtime = create_agent_runtime(
-            graph=self._graph,
-            goal=self.goal,
-            storage_path=self._storage_path,
-            entry_points=[
-                EntryPointSpec(
-                    id="default",
-                    name="Default",
-                    entry_node=self.entry_node,
-                    trigger_type="manual",
-                    isolation_level="shared",
-                ),
-            ],
-            llm=llm,
-            tools=tools,
-            tool_executor=tool_executor,
-            checkpoint_config=CheckpointConfig(
-                enabled=True,
-                checkpoint_on_node_complete=True,
-                checkpoint_max_age_days=7,
-                async_checkpoint=True,
-            ),
-        )
-
-    async def start(self):
-        if self._agent_runtime is None:
-            self._setup()
-        if not self._agent_runtime.is_running:
-            await self._agent_runtime.start()
-
-    async def stop(self):
-        if self._agent_runtime and self._agent_runtime.is_running:
-            await self._agent_runtime.stop()
-        self._agent_runtime = None
-
-    async def trigger_and_wait(
-        self,
-        entry_point="default",
-        input_data=None,
-        timeout=None,
-        session_state=None,
-    ):
-        if self._agent_runtime is None:
-            raise RuntimeError("Agent not started. Call start() first.")
-        return await self._agent_runtime.trigger_and_wait(
-            entry_point_id=entry_point,
-            input_data=input_data or {{}},
-            session_state=session_state,
-        )
-
-    async def run(self, context, session_state=None):
-        await self.start()
-        try:
-            result = await self.trigger_and_wait(
-                "default", context, session_state=session_state
-            )
-            return result or ExecutionResult(success=False, error="Execution timeout")
-        finally:
-            await self.stop()
-
-    def info(self):
-        return {{
-            "name": metadata.name,
-            "version": metadata.version,
-            "description": metadata.description,
-            "goal": {{
-                "name": self.goal.name,
-                "description": self.goal.description,
-            }},
-            "nodes": [n.id for n in self.nodes],
-            "edges": [e.id for e in self.edges],
-            "entry_node": self.entry_node,
-            "entry_points": self.entry_points,
-            "terminal_nodes": self.terminal_nodes,
-            "client_facing_nodes": [n.id for n in self.nodes if n.client_facing],
-        }}
-
-    def validate(self):
-        errors, warnings = [], []
-        node_ids = {{n.id for n in self.nodes}}
-        for e in self.edges:
-            if e.source not in node_ids:
-                errors.append(f"Edge {{e.id}}: source '{{e.source}}' not found")
-            if e.target not in node_ids:
-                errors.append(f"Edge {{e.id}}: target '{{e.target}}' not found")
-        if self.entry_node not in node_ids:
-            errors.append(f"Entry node '{{self.entry_node}}' not found")
-        for t in self.terminal_nodes:
-            if t not in node_ids:
-                errors.append(f"Terminal node '{{t}}' not found")
-        for ep_id, nid in self.entry_points.items():
-            if nid not in node_ids:
-                errors.append(f"Entry point '{{ep_id}}' references unknown node '{{nid}}'")
-
-        return {{"valid": len(errors) == 0, "errors": errors, "warnings": warnings}}
-
-
-default_agent = {class_name}()
-''',
-    )
-
-    # -- __init__.py --
-    _write(
-        "__init__.py",
-        f'''\
-"""{human_name} — TODO: Add description."""
-
-from .agent import (
-    {class_name},
-    default_agent,
-    goal,
-    nodes,
-    edges,
-    entry_node,
-    entry_points,
-    pause_nodes,
-    terminal_nodes,
-    conversation_mode,
-    identity_prompt,
-    loop_config,
-)
-from .config import default_config, metadata
-
-__all__ = [
-    "{class_name}",
-    "default_agent",
-    "goal",
-    "nodes",
-    "edges",
-    "entry_node",
-    "entry_points",
-    "pause_nodes",
-    "terminal_nodes",
-    "conversation_mode",
-    "identity_prompt",
-    "loop_config",
-    "default_config",
-    "metadata",
-]
-''',
-    )
-
-    # -- __main__.py --
-    _write(
-        "__main__.py",
-        f'''\
-"""CLI entry point for {human_name}."""
-
-import asyncio
-import json
-import logging
-import sys
-
-import click
-
-from .agent import default_agent, {class_name}
-
-
-def setup_logging(verbose=False, debug=False):
-    if debug:
-        level, fmt = logging.DEBUG, "%(asctime)s %(name)s: %(message)s"
-    elif verbose:
-        level, fmt = logging.INFO, "%(message)s"
-    else:
-        level, fmt = logging.WARNING, "%(levelname)s: %(message)s"
-    logging.basicConfig(level=level, format=fmt, stream=sys.stderr)
-
-
-@click.group()
-@click.version_option(version="1.0.0")
-def cli():
-    """{human_name}."""
-    pass
-
-
-@cli.command()
-@click.option("--verbose", "-v", is_flag=True)
-def run(verbose):
-    """Execute the agent."""
-    setup_logging(verbose=verbose)
-    result = asyncio.run(default_agent.run({{}}))
-    click.echo(
-        json.dumps(
-            {{"success": result.success, "output": result.output}},
-            indent=2,
-            default=str,
-        )
-    )
-    sys.exit(0 if result.success else 1)
-
-
-@cli.command()
-def info():
-    """Show agent info."""
-    data = default_agent.info()
-    click.echo(
-        f"Agent: {{data[\'name\']}}\n"
-        f"Version: {{data[\'version\']}}\n"
-        f"Description: {{data[\'description\']}}"
-    )
-    click.echo(f"Nodes: {{', '.join(data[\'nodes\'])}}")
-    click.echo(f"Client-facing: {{', '.join(data[\'client_facing_nodes\'])}}")
-
-
-@cli.command()
-def validate():
-    """Validate agent structure."""
-    v = default_agent.validate()
-    if v["valid"]:
-        click.echo("Agent is valid")
-    else:
-        click.echo("Errors:")
-        for e in v["errors"]:
-            click.echo(f"  {{e}}")
-    sys.exit(0 if v["valid"] else 1)
-
-
-if __name__ == "__main__":
-    cli()
-''',
-    )
-
-    # -- mcp_servers.json --
-    mcp_config: dict = {
-        "hive-tools": {
-            "transport": "stdio",
-            "command": "uv",
-            "args": ["run", "python", "mcp_server.py", "--stdio"],
-            "cwd": "../../tools",
-            "description": "Hive tools MCP server",
-        },
-        "gcu-tools": {
-            "transport": "stdio",
-            "command": "uv",
-            "args": ["run", "python", "-m", "gcu.server", "--stdio"],
-            "cwd": "../../tools",
-            "description": "GCU browser automation tools",
-        },
-    }
-
-    _write("mcp_servers.json", json.dumps(mcp_config, indent=2))
-
-    # -- tests/conftest.py --
-    _write(
-        "tests/conftest.py",
-        '''\
-"""Test fixtures."""
-
-import sys
-from pathlib import Path
-
-import pytest
-
-_repo_root = Path(__file__).resolve().parents[3]
-for _p in ["exports", "core"]:
-    _path = str(_repo_root / _p)
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
-
-AGENT_PATH = str(Path(__file__).resolve().parents[1])
-
-
-@pytest.fixture(scope="session")
-def agent_module():
-    """Import the agent package for structural validation."""
-    import importlib
-
-    return importlib.import_module(Path(AGENT_PATH).name)
-
-
-@pytest.fixture(scope="session")
-def runner_loaded():
-    """Load the agent through AgentRunner (structural only, no LLM needed)."""
-    from framework.runner.runner import AgentRunner
-
-    return AgentRunner.load(AGENT_PATH)
-''',
-    )
-
-    # Build list of all generated file paths for the caller.
-    all_file_paths = [info["path"] for info in files_written.values()]
-
-    return json.dumps(
-        {
-            "success": True,
-            "agent_name": agent_name,
-            "class_name": class_name,
-            "entry_node": entry_node,
-            "nodes": node_list,
-            "files_written": files_written,
-            "file_count": len(files_written),
-            "files": all_file_paths,
-            "next_steps": [
-                (
-                    "IMPORTANT: All generated files are structurally complete "
-                    "with correct imports, class definition, validate() method, "
-                    "and __init__.py exports. Use edit_file to customize TODO "
-                    "placeholders — do NOT use write_file to rewrite entire files, "
-                    "as this will break imports and structure."
-                ),
-                (
-                    f"Use edit_file to customize system prompts, tools, "
-                    f"input_keys, output_keys, and success_criteria in "
-                    f"exports/{agent_name}/nodes/__init__.py"
-                ),
-                (
-                    f"Use edit_file to customize goal description, "
-                    f"success_criteria values, constraint values, edge "
-                    f"definitions, and identity_prompt in "
-                    f"exports/{agent_name}/agent.py"
-                ),
-                (
-                    "Do NOT modify: imports at top of agent.py, the class "
-                    "definition, validate() method, _build_graph()/_setup()/"
-                    "lifecycle methods, or __init__.py exports — they are "
-                    "already correct."
-                ),
-                f'Run validate_agent_package("{agent_name}") to verify structure',
-            ],
-        },
-        indent=2,
-    )
 
 
 # ── Main ──────────────────────────────────────────────────────────────────

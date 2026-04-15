@@ -8,6 +8,32 @@ from pathlib import Path
 
 
 @dataclass
+class WorkerEntry:
+    """A single worker within a colony."""
+
+    name: str
+    config_path: Path
+    description: str = ""
+    tool_count: int = 0
+    task: str = ""
+    spawned_at: str = ""
+    queen_name: str = ""
+    colony_name: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "config_path": str(self.config_path),
+            "description": self.description,
+            "tool_count": self.tool_count,
+            "task": self.task,
+            "spawned_at": self.spawned_at,
+            "queen_name": self.queen_name,
+            "colony_name": self.colony_name,
+        }
+
+
+@dataclass
 class AgentEntry:
     """Lightweight agent metadata for the picker / API discover endpoint."""
 
@@ -21,14 +47,15 @@ class AgentEntry:
     tool_count: int = 0
     tags: list[str] = field(default_factory=list)
     last_active: str | None = None
+    workers: list[WorkerEntry] = field(default_factory=list)
 
 
 def _get_last_active(agent_path: Path) -> str | None:
     """Return the most recent updated_at timestamp across all sessions.
 
     Checks both worker sessions (``~/.hive/agents/{name}/sessions/``) and
-    queen sessions (``~/.hive/queen/session/``) whose ``meta.json`` references
-    the same *agent_path*.
+    queen sessions (``~/.hive/agents/queens/default/sessions/``) whose
+    ``meta.json`` references the same *agent_path*.
     """
     from datetime import datetime
 
@@ -52,26 +79,33 @@ def _get_last_active(agent_path: Path) -> str | None:
             except Exception:
                 continue
 
-    # 2. Queen sessions
-    queen_sessions_dir = Path.home() / ".hive" / "queen" / "session"
-    if queen_sessions_dir.exists():
+    # 2. Queen sessions (scan all queen identity directories)
+    from framework.config import QUEENS_DIR
+
+    if QUEENS_DIR.exists():
         resolved = agent_path.resolve()
-        for d in queen_sessions_dir.iterdir():
-            if not d.is_dir():
+        for queen_dir in QUEENS_DIR.iterdir():
+            if not queen_dir.is_dir():
                 continue
-            meta_file = d / "meta.json"
-            if not meta_file.exists():
+            sessions_dir = queen_dir / "sessions"
+            if not sessions_dir.exists():
                 continue
-            try:
-                meta = json.loads(meta_file.read_text(encoding="utf-8"))
-                stored = meta.get("agent_path")
-                if not stored or Path(stored).resolve() != resolved:
+            for d in sessions_dir.iterdir():
+                if not d.is_dir():
                     continue
-                ts = datetime.fromtimestamp(d.stat().st_mtime).isoformat()
-                if latest is None or ts > latest:
-                    latest = ts
-            except Exception:
-                continue
+                meta_file = d / "meta.json"
+                if not meta_file.exists():
+                    continue
+                try:
+                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+                    stored = meta.get("agent_path")
+                    if not stored or Path(stored).resolve() != resolved:
+                        continue
+                    ts = datetime.fromtimestamp(d.stat().st_mtime).isoformat()
+                    if latest is None or ts > latest:
+                        latest = ts
+                except Exception:
+                    continue
 
     return latest
 
@@ -109,85 +143,118 @@ def _count_runs(agent_name: str) -> int:
     return len(run_ids)
 
 
+_EXCLUDED_JSON_STEMS = {"agent", "flowchart", "triggers", "configuration", "metadata"}
+
+
+def _is_colony_dir(path: Path) -> bool:
+    """Check if a directory is a colony with worker config files."""
+    if not path.is_dir():
+        return False
+    return any(
+        f.suffix == ".json"
+        and f.stem not in _EXCLUDED_JSON_STEMS
+        for f in path.iterdir()
+        if f.is_file()
+    )
+
+
+def _find_worker_configs(colony_dir: Path) -> list[Path]:
+    """Find all worker config JSON files in a colony directory."""
+    return sorted(
+        p
+        for p in colony_dir.iterdir()
+        if p.is_file()
+        and p.suffix == ".json"
+        and p.stem not in _EXCLUDED_JSON_STEMS
+    )
+
+
 def _extract_agent_stats(agent_path: Path) -> tuple[int, int, list[str]]:
-    """Extract node count, tool count, and tags from an agent directory.
+    """Extract worker count, tool count, and tags from a colony directory."""
+    tool_count, tags = 0, []
 
-    Prefers agent.py (AST-parsed) over agent.json for node/tool counts
-    since agent.json may be stale.  Tags are only available from agent.json.
-    """
-    import ast
+    worker_configs = _find_worker_configs(agent_path)
+    if worker_configs:
+        all_tools: set[str] = set()
+        for wc_path in worker_configs:
+            try:
+                data = json.loads(wc_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    tools = data.get("tools", [])
+                    if isinstance(tools, list):
+                        all_tools.update(tools)
+            except Exception:
+                pass
+        return len(worker_configs), len(all_tools), tags
 
-    node_count, tool_count, tags = 0, 0, []
-
-    agent_py = agent_path / "agent.py"
-    if agent_py.exists():
-        try:
-            tree = ast.parse(agent_py.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Assign):
-                    for target in node.targets:
-                        if isinstance(target, ast.Name) and target.id == "nodes":
-                            if isinstance(node.value, ast.List):
-                                node_count = len(node.value.elts)
-        except Exception:
-            pass
-
-    agent_json = agent_path / "agent.json"
-    if agent_json.exists():
-        try:
-            data = json.loads(agent_json.read_text(encoding="utf-8"))
-            json_nodes = data.get("graph", {}).get("nodes", []) or data.get("nodes", [])
-            if node_count == 0:
-                node_count = len(json_nodes)
-            tools: set[str] = set()
-            for n in json_nodes:
-                tools.update(n.get("tools", []))
-            tool_count = len(tools)
-            tags = data.get("agent", {}).get("tags", [])
-        except Exception:
-            pass
-
-    return node_count, tool_count, tags
+    return 0, 0, tags
 
 
 def discover_agents() -> dict[str, list[AgentEntry]]:
     """Discover agents from all known sources grouped by category."""
-    from framework.runner.cli import (
-        _extract_python_agent_metadata,
-        _get_framework_agents_dir,
-        _is_valid_agent_dir,
-    )
+    from framework.config import COLONIES_DIR
 
     groups: dict[str, list[AgentEntry]] = {}
     sources = [
-        ("Your Agents", Path("exports")),
-        ("Framework", _get_framework_agents_dir()),
-        ("Examples", Path("examples/templates")),
+        ("Your Agents", COLONIES_DIR),
     ]
+
+    # Track seen agent directory names to avoid duplicates when the same
+    # agent exists in both colonies/ and exports/ (colonies takes priority).
+    _seen_agent_names: set[str] = set()
 
     for category, base_dir in sources:
         if not base_dir.exists():
             continue
         entries: list[AgentEntry] = []
         for path in sorted(base_dir.iterdir(), key=lambda p: p.name):
-            if not _is_valid_agent_dir(path):
+            if not _is_colony_dir(path):
                 continue
+            if path.name in _seen_agent_names:
+                continue
+            _seen_agent_names.add(path.name)
 
-            name, desc = _extract_python_agent_metadata(path)
             config_fallback_name = path.name.replace("_", " ").title()
-            used_config = name != config_fallback_name
+            name = config_fallback_name
+            desc = ""
 
-            node_count, tool_count, tags = _extract_agent_stats(path)
-            if not used_config:
-                agent_json = path / "agent.json"
-                if agent_json.exists():
-                    try:
-                        data = json.loads(agent_json.read_text(encoding="utf-8"))
-                        meta = data.get("agent", {})
-                        name = meta.get("name", name)
-                        desc = meta.get("description", desc)
-                    except Exception:
-                        pass
+            # Read colony metadata for queen provenance
+            colony_queen_name = ""
+            metadata_path = path / "metadata.json"
+            if metadata_path.exists():
+                try:
+                    mdata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                    colony_queen_name = mdata.get("queen_name", "")
+                except Exception:
+                    pass
+
+            worker_entries: list[WorkerEntry] = []
+            worker_configs = _find_worker_configs(path)
+            for wc_path in worker_configs:
+                try:
+                    data = json.loads(wc_path.read_text(encoding="utf-8"))
+                    if isinstance(data, dict):
+                        w = WorkerEntry(
+                            name=data.get("name", wc_path.stem),
+                            config_path=wc_path,
+                            description=data.get("description", ""),
+                            tool_count=len(data.get("tools", [])),
+                            task=data.get("goal", {}).get("description", ""),
+                            spawned_at=data.get("spawned_at", ""),
+                            queen_name=colony_queen_name,
+                            colony_name=path.name,
+                        )
+                        worker_entries.append(w)
+                        if not desc:
+                            desc = data.get("description", "")
+                except Exception:
+                    pass
+
+            node_count = len(worker_entries)
+            all_tools: set[str] = set()
+            for w in worker_entries:
+                pass  # tool_count already per-worker
+            tool_count = max((w.tool_count for w in worker_entries), default=0)
 
             entries.append(
                 AgentEntry(
@@ -199,11 +266,14 @@ def discover_agents() -> dict[str, list[AgentEntry]]:
                     run_count=_count_runs(path.name),
                     node_count=node_count,
                     tool_count=tool_count,
-                    tags=tags,
+                    tags=[],
                     last_active=_get_last_active(path),
+                    workers=worker_entries,
                 )
             )
         if entries:
-            groups[category] = entries
+            existing = groups.get(category, [])
+            existing.extend(entries)
+            groups[category] = existing
 
     return groups

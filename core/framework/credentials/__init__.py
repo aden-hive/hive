@@ -51,6 +51,7 @@ from .key_storage import (
 from .models import (
     CredentialDecryptionError,
     CredentialError,
+    CredentialExpiredError,
     CredentialKey,
     CredentialKeyNotFoundError,
     CredentialNotFoundError,
@@ -84,6 +85,7 @@ from .template import TemplateResolver
 from .validation import (
     CredentialStatus,
     CredentialValidationResult,
+    compute_unavailable_tools,
     ensure_credential_key_env,
     validate_agent_credentials,
 )
@@ -136,6 +138,7 @@ __all__ = [
     "CredentialNotFoundError",
     "CredentialKeyNotFoundError",
     "CredentialRefreshError",
+    "CredentialExpiredError",
     "CredentialValidationError",
     "CredentialDecryptionError",
     # Key storage (bootstrap credentials)
@@ -148,6 +151,7 @@ __all__ = [
     # Validation
     "ensure_credential_key_env",
     "validate_agent_credentials",
+    "compute_unavailable_tools",
     "CredentialStatus",
     "CredentialValidationResult",
     # Interactive setup

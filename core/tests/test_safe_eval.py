@@ -9,8 +9,8 @@ AST nodes, disallowed function calls).
 
 import pytest
 
-import framework.graph.safe_eval as safe_eval_module
-from framework.graph.safe_eval import safe_eval
+import framework.orchestrator.safe_eval as safe_eval_module
+from framework.orchestrator.safe_eval import safe_eval
 
 # ---------------------------------------------------------------------------
 # Literals and constants

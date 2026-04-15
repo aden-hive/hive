@@ -1,6 +1,6 @@
 """Node definitions for Twitter News Digest."""
 
-from framework.graph import NodeSpec
+from framework.orchestrator import NodeSpec
 
 # Node 1: Browser subagent (GCU) to fetch tweets
 fetch_node = NodeSpec(

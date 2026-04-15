@@ -1,8 +1,8 @@
-"""Queen lifecycle tools for graph management.
+"""Queen lifecycle tools for colony management.
 
-These tools give the Queen agent control over the loaded graph's lifecycle.
-They close over a session-like object that provides ``graph_runtime``,
-allowing late-binding access to the graph (which may be loaded/unloaded
+These tools give the Queen agent control over colony workers.
+They close over a session-like object that provides ``colony_runtime``,
+allowing late-binding access to the runtime (which may be loaded/unloaded
 dynamically).
 
 Usage::
@@ -20,7 +20,7 @@ Usage::
     from framework.tools.queen_lifecycle_tools import WorkerSessionAdapter
 
     adapter = WorkerSessionAdapter(
-        graph_runtime=runtime,
+        colony_runtime=runtime,
         event_bus=event_bus,
         worker_path=storage_path,
     )
@@ -43,8 +43,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from framework.credentials.models import CredentialError
-from framework.runner.preload_validation import credential_errors_to_json, validate_credentials
-from framework.runtime.event_bus import AgentEvent, EventType
+from framework.host.event_bus import AgentEvent, EventType
+from framework.loader.preload_validation import credential_errors_to_json
 from framework.server.app import validate_agent_path
 from framework.tools.flowchart_utils import (
     FLOWCHART_TYPES,
@@ -55,22 +55,39 @@ from framework.tools.flowchart_utils import (
 )
 
 if TYPE_CHECKING:
-    from framework.runner.tool_registry import ToolRegistry
-    from framework.runtime.agent_runtime import AgentRuntime
-    from framework.runtime.event_bus import EventBus
+    from framework.loader.tool_registry import ToolRegistry
+    from framework.host.colony_runtime import ColonyRuntime
+    from framework.host.event_bus import EventBus
+    from framework.loader.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def _render_credentials_block(provider: Any) -> str:
+    """Call a credentials_prompt_provider safely and return its output.
+
+    Returns "" if no provider is set or if it raises (the Queen prompt must
+    never fail to render because credential discovery hit a hiccup).
+    """
+    if provider is None:
+        return ""
+    try:
+        result = provider()
+    except Exception:
+        logger.debug("credentials_prompt_provider raised", exc_info=True)
+        return ""
+    return result or ""
 
 
 @dataclass
 class WorkerSessionAdapter:
     """Adapter for TUI compatibility.
 
-    Wraps bare graph_runtime + event_bus + storage_path into a
+    Wraps bare colony_runtime + event_bus + storage_path into a
     session-like object that queen lifecycle tools can use.
     """
 
-    graph_runtime: Any  # AgentRuntime
+    colony_runtime: Any  # ColonyRuntime
     event_bus: Any  # EventBus
     worker_path: Path | None = None
 
@@ -79,22 +96,151 @@ class WorkerSessionAdapter:
 class QueenPhaseState:
     """Mutable state container for queen operating phase.
 
-    Five phases: planning → building → staging → running → editing.
-    EDITING is entered after worker execution completes. The worker
-    stays loaded — queen can tweak config and re-run without rebuilding.
-    RUNNING cannot go directly to BUILDING or PLANNING; it must pass
-    through EDITING first.
+    Three phases: independent, working, reviewing.
+    INDEPENDENT: queen acts as a standalone agent with MCP tools, no colony workers.
+    WORKING: colony workers are running autonomously.
+    REVIEWING: workers have completed, queen reviews results.
 
     Shared between the dynamic_tools_provider callback and tool handlers
     that trigger phase transitions.
     """
 
-    phase: str = "building"  # "planning", "building", "staging", "running", or "editing"
+    phase: str = "independent"  # "independent", "working", or "reviewing"
+    working_tools: list = field(default_factory=list)  # list[Tool]
+    reviewing_tools: list = field(default_factory=list)  # list[Tool]
+    independent_tools: list = field(default_factory=list)  # list[Tool]
+    inject_notification: Any = None  # async (str) -> None
+    event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
+
+    # Agent path — set after scaffolding so the frontend can query credentials
+    agent_path: str | None = None
+
+    # Phase-specific prompts (set by session_manager after construction)
+    prompt_working: str = ""
+    prompt_reviewing: str = ""
+    prompt_independent: str = ""
+
+    # Default skill operational protocols — appended to every phase prompt
+    protocols_prompt: str = ""
+    # Community skills catalog (XML) — appended after protocols
+    skills_catalog_prompt: str = ""
+
+    # Provider for the ambient "Connected integrations" block. The orchestrator
+    # wires this to a function that snapshots CredentialStoreAdapter accounts
+    # and renders them via build_accounts_prompt(). Called on every prompt
+    # rebuild so newly added/deleted credentials show up without restart.
+    credentials_prompt_provider: Any = None  # Callable[[], str] | None
+
+    # Queen identity (set once at session start by queen identity hook,
+    # persisted here so it survives dynamic prompt refreshes across iterations).
+    queen_id: str | None = None
+    queen_profile: dict | None = None
+    queen_identity_prompt: str = ""
+
+    # Cached global recall block — populated async by recall_selector after each turn.
+    _cached_global_recall_block: str = ""
+    # Global memory directory.
+    global_memory_dir: Path | None = None
+
+    def get_current_tools(self) -> list:
+        """Return tools for the current phase."""
+        if self.phase == "independent":
+            return list(self.independent_tools)
+        if self.phase == "working":
+            return list(self.working_tools)
+        if self.phase == "reviewing":
+            return list(self.reviewing_tools)
+        return list(self.independent_tools)
+
+    def get_current_prompt(self) -> str:
+        """Return the system prompt for the current phase."""
+        if self.phase == "independent":
+            base = self.prompt_independent
+        elif self.phase == "working":
+            base = self.prompt_working
+        elif self.phase == "reviewing":
+            base = self.prompt_reviewing
+        else:
+            base = self.prompt_independent
+
+        parts = []
+        if self.queen_identity_prompt:
+            parts.append(self.queen_identity_prompt)
+        parts.append(base)
+        credentials_block = _render_credentials_block(self.credentials_prompt_provider)
+        if credentials_block:
+            parts.append(credentials_block)
+        if self.skills_catalog_prompt:
+            parts.append(self.skills_catalog_prompt)
+        if self.protocols_prompt:
+            parts.append(self.protocols_prompt)
+        if self._cached_global_recall_block:
+            parts.append(self._cached_global_recall_block)
+        return "\n\n".join(parts)
+
+    async def _emit_phase_event(self) -> None:
+        """Publish a QUEEN_PHASE_CHANGED event so the frontend updates the tag."""
+        if self.event_bus is not None:
+            data: dict = {"phase": self.phase}
+            if self.agent_path:
+                data["agent_path"] = self.agent_path
+            await self.event_bus.publish(
+                AgentEvent(
+                    type=EventType.QUEEN_PHASE_CHANGED,
+                    stream_id="queen",
+                    data=data,
+                )
+            )
+
+    async def switch_to_working(self, source: str = "tool") -> None:
+        if self.phase == "working":
+            return
+        self.phase = "working"
+        tool_names = [t.name for t in self.working_tools]
+        logger.info("Queen phase -> working (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
+        if self.inject_notification and source != "tool":
+            await self.inject_notification(
+                "[PHASE CHANGE] Switched to WORKING phase. "
+                "Colony workers are running. You have monitoring tools: "
+                + ", ".join(tool_names)
+                + "."
+            )
+
+    async def switch_to_reviewing(self, source: str = "tool") -> None:
+        if self.phase == "reviewing":
+            return
+        self.phase = "reviewing"
+        tool_names = [t.name for t in self.reviewing_tools]
+        logger.info("Queen phase -> reviewing (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
+        if self.inject_notification and source != "tool":
+            await self.inject_notification(
+                "[PHASE CHANGE] Switched to REVIEWING phase. "
+                "Workers have completed. Review results and decide next steps. "
+                "Available tools: " + ", ".join(tool_names) + "."
+            )
+
+    async def switch_to_independent(self, source: str = "tool") -> None:
+        if self.phase == "independent":
+            return
+        self.phase = "independent"
+        tool_names = [t.name for t in self.independent_tools]
+        logger.info("Queen phase -> independent (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
+        if self.inject_notification and source != "tool":
+            await self.inject_notification(
+                "[PHASE CHANGE] Switched to INDEPENDENT mode. "
+                "You are the agent — execute the task directly. "
+                "Available tools: " + ", ".join(tool_names) + "."
+            )
+
     planning_tools: list = field(default_factory=list)  # list[Tool]
     building_tools: list = field(default_factory=list)  # list[Tool]
     staging_tools: list = field(default_factory=list)  # list[Tool]
     running_tools: list = field(default_factory=list)  # list[Tool]
     editing_tools: list = field(default_factory=list)  # list[Tool]
+    independent_tools: list = field(default_factory=list)  # list[Tool]
     inject_notification: Any = None  # async (str) -> None
     event_bus: Any = None  # EventBus — for emitting QUEEN_PHASE_CHANGED events
 
@@ -122,24 +268,36 @@ class QueenPhaseState:
     prompt_staging: str = ""
     prompt_running: str = ""
     prompt_editing: str = ""
+    prompt_independent: str = ""
 
     # Default skill operational protocols — appended to every phase prompt
     protocols_prompt: str = ""
     # Community skills catalog (XML) — appended after protocols
     skills_catalog_prompt: str = ""
 
-    # Persona and communication style (set once at session start by persona hook,
-    # persisted here so they survive dynamic prompt refreshes across iterations).
-    persona_prefix: str = ""  # e.g. "You are a CFO. I am a CFO with 20 years..."
-    style_directive: str = ""  # e.g. "## Communication Style: Peer\n\n..."
+    # Provider for the ambient "Connected integrations" block. See
+    # docstring on the simpler QueenPhaseState above.
+    credentials_prompt_provider: Any = None  # Callable[[], str] | None
+
+    # Queen identity (set once at session start by queen identity hook,
+    # persisted here so it survives dynamic prompt refreshes across iterations).
+    queen_id: str | None = None
+    queen_profile: dict | None = None
+    queen_identity_prompt: str = ""
 
     # Cached global recall block — populated async by recall_selector after each turn.
     _cached_global_recall_block: str = ""
+    # Cached queen-scoped recall block — populated async by recall_selector after each turn.
+    _cached_queen_recall_block: str = ""
     # Global memory directory.
     global_memory_dir: Path | None = None
+    # Queen-scoped memory directory.
+    queen_memory_dir: Path | None = None
 
     def get_current_tools(self) -> list:
         """Return tools for the current phase."""
+        if self.phase == "independent":
+            return list(self.independent_tools)
         if self.phase == "planning":
             return list(self.planning_tools)
         if self.phase == "running":
@@ -152,7 +310,9 @@ class QueenPhaseState:
 
     def get_current_prompt(self) -> str:
         """Return the system prompt for the current phase."""
-        if self.phase == "planning":
+        if self.phase == "independent":
+            base = self.prompt_independent
+        elif self.phase == "planning":
             base = self.prompt_planning
         elif self.phase == "running":
             base = self.prompt_running
@@ -164,17 +324,20 @@ class QueenPhaseState:
             base = self.prompt_building
 
         parts = []
-        if self.persona_prefix:
-            parts.append(self.persona_prefix)
+        if self.queen_identity_prompt:
+            parts.append(self.queen_identity_prompt)
         parts.append(base)
-        if self.style_directive:
-            parts.append(self.style_directive)
+        credentials_block = _render_credentials_block(self.credentials_prompt_provider)
+        if credentials_block:
+            parts.append(credentials_block)
         if self.skills_catalog_prompt:
             parts.append(self.skills_catalog_prompt)
         if self.protocols_prompt:
             parts.append(self.protocols_prompt)
         if self._cached_global_recall_block:
             parts.append(self._cached_global_recall_block)
+        if self._cached_queen_recall_block:
+            parts.append(self._cached_queen_recall_block)
         return "\n\n".join(parts)
 
     async def _emit_phase_event(self) -> None:
@@ -191,7 +354,7 @@ class QueenPhaseState:
                 )
             )
 
-    async def switch_to_editing(self, source: str = "tool") -> None:
+    async def switch_to_reviewing(self, source: str = "tool") -> None:
         """Switch to editing phase — worker stays loaded, queen can tweak and re-run.
 
         Args:
@@ -322,18 +485,34 @@ class QueenPhaseState:
                 "Available tools: " + ", ".join(tool_names) + "."
             )
 
+    async def switch_to_independent(self, source: str = "tool") -> None:
+        """Switch to independent phase — queen acts as standalone agent.
 
-def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = None) -> str:
-    """Build a worker capability profile from its graph/goal definition.
+        Args:
+            source: Who triggered the switch — "tool", "frontend", or "auto".
+        """
+        if self.phase == "independent":
+            return
+        self.phase = "independent"
+        tool_names = [t.name for t in self.independent_tools]
+        logger.info("Queen phase → independent (source=%s, tools: %s)", source, tool_names)
+        await self._emit_phase_event()
+        if self.inject_notification and source != "tool":
+            await self.inject_notification(
+                "[PHASE CHANGE] Switched to INDEPENDENT mode. "
+                "You are the agent — execute the task directly. "
+                "Available tools: " + ", ".join(tool_names) + "."
+            )
 
-    Injected into the queen's system prompt so it knows what the worker
-    can and cannot do — enabling correct delegation decisions.
-    """
-    graph = runtime.graph
-    goal = runtime.goal
+
+def build_worker_profile(runtime: Any, agent_path: Path | str | None = None) -> str:
+    """Build a worker capability profile from the runtime's spec and goal."""
+    goal = runtime._goal if hasattr(runtime, "_goal") else runtime.goal
 
     lines = ["\n\n# Worker Profile"]
-    lines.append(f"Agent: {runtime.graph_id}")
+    colony_id = getattr(runtime, "colony_id", None) or ""
+    if colony_id:
+        lines.append(f"Agent: {colony_id}")
     if agent_path:
         lines.append(f"Path: {agent_path}")
     lines.append(f"Goal: {goal.name}")
@@ -350,17 +529,9 @@ def build_worker_profile(runtime: AgentRuntime, agent_path: Path | str | None = 
         for c in goal.constraints:
             lines.append(f"- {c.description}")
 
-    if graph.nodes:
-        lines.append("\n## Processing Stages")
-        for node in graph.nodes:
-            lines.append(f"- {node.id}: {node.description or node.name}")
-
-    all_tools: set[str] = set()
-    for node in graph.nodes:
-        if node.tools:
-            all_tools.update(node.tools)
-    if all_tools:
-        lines.append(f"\n## Worker Tools\n{', '.join(sorted(all_tools))}")
+    spec = getattr(runtime, "_agent_spec", None)
+    if spec and hasattr(spec, "tools") and spec.tools:
+        lines.append(f"\n## Worker Tools\n{', '.join(sorted(spec.tools))}")
 
     lines.append("\nStatus at session start: idle (not started).")
     return "\n".join(lines)
@@ -424,7 +595,7 @@ def _remove_trigger_from_agent(session: Any, trigger_id: str) -> None:
 
 async def _persist_active_triggers(session: Any, session_id: str) -> None:
     """Persist the set of active trigger IDs (and their tasks) to SessionState."""
-    runtime = getattr(session, "graph_runtime", None)
+    runtime = getattr(session, "colony_runtime", None)
     if runtime is None:
         return
     store = getattr(runtime, "_session_store", None)
@@ -452,7 +623,7 @@ async def _persist_active_triggers(session: Any, session_id: str) -> None:
 
 async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None:
     """Start an asyncio background task that fires the trigger on a timer."""
-    from framework.graph.event_loop_node import TriggerEvent
+    from framework.agent_loop.agent_loop import TriggerEvent
 
     cron_expr = tdef.trigger_config.get("cron")
     interval_minutes = tdef.trigger_config.get("interval_minutes")
@@ -480,7 +651,7 @@ async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None
                     fire_times[trigger_id] = time.monotonic() + _next_delay
 
                 # Gate on a graph being loaded
-                if getattr(session, "graph_runtime", None) is None:
+                if getattr(session, "colony_runtime", None) is None:
                     continue
 
                 # Fire into queen node
@@ -513,8 +684,8 @@ async def _start_trigger_timer(session: Any, trigger_id: str, tdef: Any) -> None
 
 async def _start_trigger_webhook(session: Any, trigger_id: str, tdef: Any) -> None:
     """Subscribe to WEBHOOK_RECEIVED events and route matching ones to the queen."""
-    from framework.graph.event_loop_node import TriggerEvent
-    from framework.runtime.webhook_server import WebhookRoute, WebhookServer, WebhookServerConfig
+    from framework.agent_loop.agent_loop import TriggerEvent
+    from framework.host.webhook_server import WebhookRoute, WebhookServer, WebhookServerConfig
 
     bus = session.event_bus
     path = tdef.trigger_config.get("path", "")
@@ -527,7 +698,7 @@ async def _start_trigger_webhook(session: Any, trigger_id: str, tdef: Any) -> No
         if data.get("method", "").upper() not in methods:
             return
         # Gate on a graph being loaded
-        if getattr(session, "graph_runtime", None) is None:
+        if getattr(session, "colony_runtime", None) is None:
             return
         executor = getattr(session, "queen_executor", None)
         if executor is None:
@@ -722,54 +893,6 @@ def _dissolve_planning_nodes(
         nodes[:] = [n for n in nodes if n["id"] != d_id]
         del node_by_id[d_id]
 
-    # ── Dissolve sub-agent nodes ──────────────────────────────
-    # Sub-agent nodes are leaf delegates: parent -> subagent (no outgoing).
-    # Dissolution adds the subagent's ID to parent's sub_agents list.
-    subagent_ids = [
-        n["id"]
-        for n in nodes
-        if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
-    ]
-
-    for sa_id in subagent_ids:
-        sa_node = node_by_id.get(sa_id)
-        if sa_node is None:
-            continue
-
-        in_edges = _incoming(sa_id)
-        out_edges = _outgoing(sa_id)
-
-        # Validate: sub-agent nodes must be leaves (no outgoing edges)
-        if out_edges:
-            logger.warning(
-                "Sub-agent node '%s' has outgoing edges — they will be dropped "
-                "during dissolution. Sub-agent nodes should be leaf nodes.",
-                sa_id,
-            )
-
-        # Attach to each predecessor's sub_agents list
-        for ie in in_edges:
-            pred_id = ie["source"]
-            pred = node_by_id.get(pred_id)
-            if pred is None:
-                continue
-
-            existing_subs = pred.get("sub_agents") or []
-            if sa_id not in existing_subs:
-                existing_subs.append(sa_id)
-            pred["sub_agents"] = existing_subs
-
-            # Record absorption
-            prev_absorbed = absorbed.get(pred_id, [pred_id])
-            if sa_id not in prev_absorbed:
-                prev_absorbed.append(sa_id)
-            absorbed[pred_id] = prev_absorbed
-
-        # Remove sub-agent node and all its edges
-        edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
-        nodes[:] = [n for n in nodes if n["id"] != sa_id]
-        del node_by_id[sa_id]
-
     # Build complete flowchart_map (identity for non-absorbed nodes)
     flowchart_map: dict[str, list[str]] = {}
     for n in nodes:
@@ -799,8 +922,11 @@ def _update_meta_json(session_manager, manager_session_id, updates: dict) -> Non
     srv_session = session_manager.get_session(manager_session_id)
     if not srv_session:
         return
+    from framework.config import QUEENS_DIR
+
     storage_sid = getattr(srv_session, "queen_resume_from", None) or srv_session.id
-    meta_path = Path.home() / ".hive" / "queen" / "session" / storage_sid / "meta.json"
+    queen_name = getattr(srv_session, "queen_name", "default")
+    meta_path = QUEENS_DIR / queen_name / "sessions" / storage_sid / "meta.json"
     try:
         existing = {}
         if meta_path.exists():
@@ -816,7 +942,7 @@ def register_queen_lifecycle_tools(
     session: Any = None,
     session_id: str | None = None,
     # Legacy params — used by TUI when not passing a session object
-    graph_runtime: AgentRuntime | None = None,
+    colony_runtime: ColonyRuntime | None = None,
     event_bus: EventBus | None = None,
     storage_path: Path | None = None,
     # Server context — enables load_built_agent tool
@@ -828,30 +954,28 @@ def register_queen_lifecycle_tools(
     """Register queen lifecycle tools.
 
     Args:
-        session: A Session or WorkerSessionAdapter with ``graph_runtime``
-            attribute. The tools read ``session.graph_runtime`` on each
-            call, supporting late-binding (graph loaded/unloaded).
-        session_id: Shared session ID so the graph uses the same session
+        session: A Session or WorkerSessionAdapter with ``colony_runtime``
+            attribute. The tools read ``session.colony_runtime`` on each
+            call, supporting late-binding.
+        session_id: Shared session ID so the colony uses the same session
             scope as the queen and judge.
-        graph_runtime: (Legacy) Direct runtime reference. If ``session``
+        colony_runtime: (Legacy) Direct runtime reference. If ``session``
             is not provided, a WorkerSessionAdapter is created from
-            graph_runtime + event_bus + storage_path.
+            colony_runtime + event_bus + storage_path.
         session_manager: (Server only) The SessionManager instance, needed
-            for ``load_built_agent`` to hot-load a graph.
-        manager_session_id: (Server only) The session's ID in the manager,
-            used with ``session_manager.load_graph()``.
-        phase_state: (Optional) Mutable phase state for building/running
-            phase switching. When provided, load_built_agent switches to
-            running phase and stop_graph_and_edit switches to building phase.
+            for ``load_built_agent`` to hot-load a colony.
+        manager_session_id: (Server only) The session's ID in the manager.
+        phase_state: (Optional) Mutable phase state for working/reviewing
+            phase switching.
 
     Returns the number of tools registered.
     """
     # Build session adapter from legacy params if needed
     if session is None:
-        if graph_runtime is None:
-            raise ValueError("Either session or graph_runtime must be provided")
+        if colony_runtime is None:
+            raise ValueError("Either session or colony_runtime must be provided")
         session = WorkerSessionAdapter(
-            graph_runtime=graph_runtime,
+            colony_runtime=colony_runtime,
             event_bus=event_bus,
             worker_path=storage_path,
         )
@@ -861,207 +985,692 @@ def register_queen_lifecycle_tools(
     tools_registered = 0
 
     def _get_runtime():
-        """Get current graph runtime from session (late-binding)."""
-        return getattr(session, "graph_runtime", None)
+        """Get current colony runtime from session (late-binding)."""
+        return getattr(session, "colony_runtime", None)
 
-    # --- start_graph ----------------------------------------------------------
-
-    # How long to wait for credential validation + MCP resync before
-    # proceeding with trigger anyway.  These are pre-flight checks that
-    # should not block the queen indefinitely.
+    # ``start_worker`` was removed in the Phase 4 unification — its
+    # bare-bones spawn duplicated ``run_agent_with_input`` (which has
+    # credential preflight, concurrency guard, and phase tracking on
+    # top). The shared preflight timeout below is still used by
+    # ``run_agent_with_input``.
     _START_PREFLIGHT_TIMEOUT = 15  # seconds
 
-    async def start_graph(task: str) -> str:
-        """Start the loaded graph with a task description.
+    # --- stop_worker -----------------------------------------------------------
 
-        Triggers the worker's default entry point with the given task.
-        Returns immediately — the worker runs asynchronously.
+    async def stop_worker(*, reason: str = "Stopped by queen") -> str:
+        """Stop all active workers in the session.
+
+        Stops workers on BOTH the unified ColonyRuntime (``session.colony``
+        — where ``run_agent_with_input`` and ``run_parallel_workers``
+        spawn) AND the legacy ``session.colony_runtime`` (loaded
+        AgentHost — still tracks timers and any legacy triggers). A
+        previous version only stopped the legacy runtime, which meant
+        workers spawned via the new path kept running silently after
+        the queen called this tool.
         """
-        runtime = _get_runtime()
-        if runtime is None:
-            return json.dumps({"error": "No worker loaded in this session."})
+        stopped_unified = 0
+        stopped_legacy = 0
+        errors: list[str] = []
 
-        try:
-            # Pre-flight: validate credentials and resync MCP servers.
-            # Both are blocking I/O (HTTP health-checks, subprocess spawns)
-            # so they run in a thread-pool executor.  We cap the total
-            # preflight time so the queen never hangs waiting.
-            loop = asyncio.get_running_loop()
-
-            async def _preflight():
-                cred_error: CredentialError | None = None
-                try:
-                    await loop.run_in_executor(
-                        None,
-                        lambda: validate_credentials(
-                            runtime.graph.nodes,
-                            interactive=False,
-                            skip=False,
-                        ),
-                    )
-                except CredentialError as e:
-                    cred_error = e
-
-                runner = getattr(session, "runner", None)
-                if runner:
-                    try:
-                        await loop.run_in_executor(
-                            None,
-                            lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
-                        )
-                    except Exception as e:
-                        logger.warning("MCP resync failed: %s", e)
-
-                # Re-raise CredentialError after MCP resync so both steps
-                # get a chance to run before we bail.
-                if cred_error is not None:
-                    raise cred_error
-
+        # 1. Stop everything on the unified ColonyRuntime. This is
+        # where run_agent_with_input and run_parallel_workers live.
+        colony = getattr(session, "colony", None)
+        if colony is not None:
             try:
-                await asyncio.wait_for(_preflight(), timeout=_START_PREFLIGHT_TIMEOUT)
-            except TimeoutError:
+                # Count live workers BEFORE stopping so we can report
+                # accurately — stop_all_workers clears the dict.
+                stopped_unified = sum(
+                    1 for w in colony.list_workers() if w.status.value in ("pending", "running")
+                )
+                await colony.stop_all_workers()
+            except Exception as e:
+                errors.append(f"unified: {e}")
                 logger.warning(
-                    "start_graph preflight timed out after %ds — proceeding with trigger",
-                    _START_PREFLIGHT_TIMEOUT,
+                    "stop_worker: failed to stop unified colony workers",
+                    exc_info=True,
                 )
-            except CredentialError:
-                raise  # handled below
 
-            # Resume timers in case they were paused by a previous stop_graph
-            runtime.resume_timers()
-
-            # Get session state from any prior execution for memory continuity
-            session_state = runtime._get_primary_session_state("default") or {}
-
-            # Use the shared session ID so queen, judge, and worker all
-            # scope their conversations to the same session.
-            if session_id:
-                session_state["resume_session_id"] = session_id
-
-            exec_id = await runtime.trigger(
-                entry_point_id="default",
-                input_data={"user_request": task},
-                session_state=session_state,
-            )
-            return json.dumps(
-                {
-                    "status": "started",
-                    "execution_id": exec_id,
-                    "task": task,
-                }
-            )
-        except CredentialError as e:
-            # Build structured error with per-credential details so the
-            # queen can report exactly what's missing and how to fix it.
-            error_payload = credential_errors_to_json(e)
-            error_payload["agent_path"] = str(getattr(session, "worker_path", "") or "")
-
-            # Emit SSE event so the frontend opens the credentials modal
-            bus = getattr(session, "event_bus", None)
-            if bus is not None:
-                await bus.publish(
-                    AgentEvent(
-                        type=EventType.CREDENTIALS_REQUIRED,
-                        stream_id="queen",
-                        data=error_payload,
-                    )
+        # 2. Stop the legacy runtime too (timers, old-path workers).
+        legacy = _get_runtime()
+        if legacy is not None:
+            try:
+                legacy_workers = legacy.list_workers()
+                stopped_legacy = len(legacy_workers) if isinstance(legacy_workers, list) else 0
+                await legacy.stop_all_workers()
+                legacy.pause_timers()
+            except Exception as e:
+                errors.append(f"legacy: {e}")
+                logger.warning(
+                    "stop_worker: failed to stop legacy runtime workers",
+                    exc_info=True,
                 )
-            return json.dumps(error_payload)
-        except Exception as e:
-            return json.dumps({"error": f"Failed to start graph: {e}"})
 
-    _start_tool = Tool(
-        name="start_graph",
-        description=(
-            "Start the loaded graph with a task description. The graph runs "
-            "autonomously in the background. Returns an execution ID for tracking."
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": "Description of the task for the graph to perform",
-                },
-            },
-            "required": ["task"],
-        },
-    )
-    registry.register("start_graph", _start_tool, lambda inputs: start_graph(**inputs))
-    tools_registered += 1
+        if colony is None and legacy is None:
+            return json.dumps({"error": "No runtime on this session."})
 
-    # --- stop_graph -----------------------------------------------------------
-
-    async def stop_graph(*, reason: str = "Stopped by queen") -> str:
-        """Cancel all active graph executions across all graphs.
-
-        Stops the worker immediately. Returns the IDs of cancelled executions.
-        """
-        runtime = _get_runtime()
-        if runtime is None:
-            return json.dumps({"error": "No worker loaded in this session."})
-
-        cancelled = []
-
-        # Iterate ALL registered graphs — multiple entrypoint requests
-        # can spawn executions in different graphs within the same session.
-        for graph_id in runtime.list_graphs():
-            reg = runtime.get_graph_registration(graph_id)
-            if reg is None:
-                continue
-
-            for _ep_id, stream in reg.streams.items():
-                # Signal shutdown on all active EventLoopNodes first so they
-                # exit cleanly and cancel their in-flight LLM streams.
-                for executor in stream._active_executors.values():
-                    for node in executor.node_registry.values():
-                        if hasattr(node, "signal_shutdown"):
-                            node.signal_shutdown()
-                        if hasattr(node, "cancel_current_turn"):
-                            node.cancel_current_turn()
-
-                for exec_id in list(stream.active_execution_ids):
-                    try:
-                        ok = await stream.cancel_execution(exec_id, reason=reason)
-                        if ok:
-                            cancelled.append(exec_id)
-                    except Exception as e:
-                        logger.warning("Failed to cancel %s: %s", exec_id, e)
-
-        # Pause timers so the next tick doesn't restart execution
-        runtime.pause_timers()
+        total_stopped = stopped_unified + stopped_legacy
+        logger.info(
+            "stop_worker: stopped %d workers (unified=%d, legacy=%d). reason=%s",
+            total_stopped,
+            stopped_unified,
+            stopped_legacy,
+            reason,
+        )
 
         return json.dumps(
             {
-                "status": "stopped" if cancelled else "no_active_executions",
-                "cancelled": cancelled,
-                "timers_paused": True,
+                "status": "stopped",
+                "workers_stopped": total_stopped,
+                "unified_stopped": stopped_unified,
+                "legacy_stopped": stopped_legacy,
+                "timers_paused": legacy is not None,
+                "reason": reason,
+                "errors": errors if errors else None,
             }
         )
 
     _stop_tool = Tool(
-        name="stop_graph",
+        name="stop_worker",
         description=(
-            "Cancel the loaded graph's active execution and pause its timers. "
-            "The graph stops gracefully. No parameters needed."
+            "Cancel all active colony workers and pause timers. "
+            "Workers stop gracefully. No parameters needed."
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register("stop_graph", _stop_tool, lambda inputs: stop_graph())
+    registry.register("stop_worker", _stop_tool, lambda inputs: stop_worker())
     tools_registered += 1
 
-    # --- switch_to_editing ----------------------------------------------------
+    # --- run_parallel_workers --------------------------------------------------
+    #
+    # Phase 4 fan-out tool. Reads the unified ColonyRuntime from
+    # ``session.colony`` (built by SessionManager._start_unified_colony_runtime),
+    # spawns one Worker per task spec via spawn_batch, then blocks on
+    # wait_for_worker_reports until every worker has reported (or the
+    # timeout fires and stragglers are force-stopped). Returns a JSON
+    # array of structured reports {worker_id, status, summary, data,
+    # error, duration_seconds, tokens_used} that the queen reads on its
+    # next turn and aggregates into a user-facing summary.
+    #
+    # Worker SUBAGENT_REPORT events flow through session.event_bus, so
+    # the existing SSE pipeline surfaces them automatically. Workers'
+    # individual LLM deltas / tool calls also publish to the same bus
+    # under stream_id="worker:{worker_id}"; SSE filtering for those is
+    # Phase 5 — for now they reach the queen DM channel.
 
-    async def switch_to_editing_tool() -> str:
+    _RUN_PARALLEL_DEFAULT_TIMEOUT = 600.0  # 10 minutes per batch
+
+    def _get_unified_colony():
+        """Read the unified ColonyRuntime (Phase 2 wiring) from session."""
+        return getattr(session, "colony", None)
+
+    async def run_parallel_workers(
+        *,
+        tasks: list[dict],
+        timeout: float | None = None,
+    ) -> str:
+        """Spawn N parallel workers and wait for all reports.
+
+        Each task is a dict ``{"task": str, "data": dict | None}``.
+        Returns a JSON array of structured reports in input order.
+        """
+        colony = _get_unified_colony()
+        if colony is None:
+            return json.dumps(
+                {
+                    "error": (
+                        "No unified ColonyRuntime on this session. "
+                        "Phase 2 wiring expects session.colony to be set "
+                        "by SessionManager._start_unified_colony_runtime."
+                    )
+                }
+            )
+
+        if not isinstance(tasks, list) or not tasks:
+            return json.dumps(
+                {"error": "tasks must be a non-empty list of {task, data?} dicts"}
+            )
+
+        # Hard ceiling on a single fan-out call. A runaway queen requesting
+        # thousands of parallel workers would starve memory and drown the
+        # event loop; reject early with a clear error instead.
+        _RUN_PARALLEL_HARD_CAP = 64
+        if len(tasks) > _RUN_PARALLEL_HARD_CAP:
+            return json.dumps(
+                {
+                    "error": (
+                        f"run_parallel_workers received {len(tasks)} tasks, "
+                        f"hard cap is {_RUN_PARALLEL_HARD_CAP}. Split the work "
+                        "into sequential batches or tighten the task list."
+                    )
+                }
+            )
+
+        # Global concurrency enforcement against ColonyConfig.max_concurrent_workers.
+        # The config field exists but was never checked anywhere — tracking
+        # it here so recursive fan-outs can't silently exceed the budget.
+        colony_cfg = getattr(colony, "_config", None) or getattr(colony, "config", None)
+        max_concurrent = getattr(colony_cfg, "max_concurrent_workers", None)
+        if max_concurrent and max_concurrent > 0:
+            active = 0
+            try:
+                workers = getattr(colony, "_workers", {}) or {}
+                for w in workers.values():
+                    handle = getattr(w, "_task_handle", None)
+                    if handle is not None and not handle.done():
+                        active += 1
+            except Exception:
+                active = 0
+            if active + len(tasks) > max_concurrent:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"run_parallel_workers would exceed max_concurrent_workers "
+                            f"({active} active + {len(tasks)} new > {max_concurrent}). "
+                            "Wait for existing workers to finish or reduce batch size."
+                        )
+                    }
+                )
+
+        # Normalise: each entry must have a non-empty "task" string.
+        normalised: list[dict] = []
+        for i, spec in enumerate(tasks):
+            if not isinstance(spec, dict):
+                return json.dumps(
+                    {"error": f"tasks[{i}] is not a dict: {type(spec).__name__}"}
+                )
+            task_text = str(spec.get("task", "")).strip()
+            if not task_text:
+                return json.dumps({"error": f"tasks[{i}].task is empty"})
+            normalised.append(
+                {
+                    "task": task_text,
+                    "data": spec.get("data") if isinstance(spec.get("data"), dict) else None,
+                }
+            )
+
+        try:
+            worker_ids = await colony.spawn_batch(normalised)
+        except Exception as e:
+            return json.dumps({"error": f"spawn_batch failed: {e}"})
+
+        try:
+            reports = await colony.wait_for_worker_reports(
+                worker_ids,
+                timeout=timeout if timeout is not None else _RUN_PARALLEL_DEFAULT_TIMEOUT,
+            )
+        except Exception as e:
+            return json.dumps(
+                {
+                    "error": f"wait_for_worker_reports failed: {e}",
+                    "worker_ids": worker_ids,
+                }
+            )
+
+        return json.dumps(
+            {
+                "worker_count": len(reports),
+                "reports": reports,
+            }
+        )
+
+    _run_parallel_tool = Tool(
+        name="run_parallel_workers",
+        description=(
+            "Fan out a batch of tasks to parallel workers and wait for all "
+            "reports. Use this when you can split the work into independent "
+            "subtasks that can run concurrently (e.g. fetching N batches "
+            "from an API, processing M files, comparing K candidates).\n\n"
+            "CRITICAL: each worker is a FRESH process with NO memory of "
+            "your conversation. Every task string must be FULLY "
+            "self-contained — include the API endpoint, the exact "
+            "parameters, the expected output format, and any "
+            "constraints. Workers cannot ask the user follow-up "
+            "questions and cannot see your chat history. Write each "
+            "task as if handing it to a stranger.\n\n"
+            "Each worker runs in isolation with its own AgentLoop and "
+            "reports back via the report_to_parent tool. The call "
+            "blocks until every worker has reported or the timeout "
+            "fires. Returns a JSON object with a 'reports' array; each "
+            "report has worker_id, status "
+            "(success|partial|failed|timeout|stopped), summary, data, "
+            "error, duration_seconds, and tokens_used. Read the "
+            "summaries on your next turn and synthesize a user-facing "
+            "result. Default timeout is 600 seconds (10 minutes)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "description": (
+                        "List of task specs to fan out. Each spec is "
+                        '{"task": "<description>", "data": {<optional structured input>}}. '
+                        "The 'task' string becomes the worker's initial "
+                        "user message. 'data' is merged into the worker's "
+                        "AgentContext.input_data so structured fields are "
+                        "available to the worker's first turn."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "task": {
+                                "type": "string",
+                                "description": "Task description for the worker.",
+                            },
+                            "data": {
+                                "type": "object",
+                                "description": "Optional structured input fields.",
+                            },
+                        },
+                        "required": ["task"],
+                    },
+                    "minItems": 1,
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": (
+                        "Per-batch timeout in seconds. Workers still "
+                        "running when the timeout fires are force-stopped "
+                        "and reported as status='timeout'. Default 600."
+                    ),
+                },
+            },
+            "required": ["tasks"],
+        },
+    )
+    registry.register(
+        "run_parallel_workers",
+        _run_parallel_tool,
+        lambda inputs: run_parallel_workers(**inputs),
+    )
+    tools_registered += 1
+
+    # --- create_colony ---------------------------------------------------------
+    #
+    # Forks the current queen session into a colony. Requires the queen
+    # to have ALREADY AUTHORED a skill folder capturing what she learned
+    # during this session (using her write_file / edit_file tools), and
+    # pass the folder path to this tool. The tool validates the skill
+    # folder (SKILL.md exists, frontmatter has the required ``name`` +
+    # ``description`` fields, directory name matches frontmatter name),
+    # then forks. If the skill lives outside ``~/.hive/skills/`` the
+    # tool copies it in so the new colony's worker will discover it on
+    # its first skill scan.
+    #
+    # This is the codified version of the user's instruction:
+    #
+    #   "When the queen agent needs to create a colony, it needs to
+    #    write down whatever it just learned from the current session
+    #    as an agent skill and put it in the ~/.hive/skills folder."
+    #
+    # Two-step flow for the queen LLM:
+    #
+    #   1. Author the skill with write_file (or a sequence of writes
+    #      for scripts/references/assets subdirs) — she already knows
+    #      the format via the writing-hive-skills default skill.
+    #   2. Call create_colony(colony_name, task, skill_path) pointing
+    #      at the folder she just wrote.
+
+    import re as _re
+    import shutil as _shutil
+
+    _COLONY_NAME_RE = _re.compile(r"^[a-z0-9_]+$")
+    _SKILL_NAME_RE = _re.compile(r"^[a-z0-9-]+$")
+
+    def _validate_and_install_skill(skill_path: str) -> tuple[Path | None, str | None]:
+        """Validate an authored skill folder and ensure it lives under ~/.hive/skills/.
+
+        Returns ``(installed_path, error)``. On success ``error`` is
+        ``None`` and ``installed_path`` is the final location under
+        ``~/.hive/skills/{name}/``. On failure ``installed_path`` is
+        ``None`` and ``error`` is a human-readable reason suitable for
+        returning to the queen as a JSON error payload.
+        """
+        if not skill_path or not isinstance(skill_path, str):
+            return None, "skill_path must be a non-empty string"
+
+        src = Path(skill_path).expanduser().resolve()
+        if not src.exists():
+            return None, f"skill_path does not exist: {src}"
+        if not src.is_dir():
+            return None, f"skill_path must be a directory, got file: {src}"
+
+        skill_md = src / "SKILL.md"
+        if not skill_md.is_file():
+            return None, f"skill_path has no SKILL.md at {skill_md}"
+
+        # Parse the frontmatter to pull out the name and verify
+        # description exists. We don't need a full YAML parser — the
+        # writing-hive-skills protocol is rigid enough that a line-by-line
+        # scan of the first frontmatter block suffices for validation.
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except OSError as e:
+            return None, f"failed to read SKILL.md: {e}"
+
+        if not content.startswith("---"):
+            return None, "SKILL.md missing opening '---' frontmatter marker"
+        after_open = content.split("---", 2)
+        if len(after_open) < 3:
+            return None, "SKILL.md missing closing '---' frontmatter marker"
+        frontmatter_text = after_open[1]
+
+        fm_name: str | None = None
+        fm_description: str | None = None
+        for raw_line in frontmatter_text.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("name:"):
+                fm_name = line.split(":", 1)[1].strip().strip('"').strip("'")
+            elif line.startswith("description:"):
+                fm_description = line.split(":", 1)[1].strip().strip('"').strip("'")
+
+        if not fm_name:
+            return None, "SKILL.md frontmatter missing 'name' field"
+        if not fm_description:
+            return None, "SKILL.md frontmatter missing 'description' field"
+        if not (1 <= len(fm_description) <= 1024):
+            return None, "SKILL.md 'description' must be 1–1024 chars"
+        if not _SKILL_NAME_RE.match(fm_name):
+            return None, (
+                f"SKILL.md 'name' field '{fm_name}' must match [a-z0-9-] "
+                "pattern"
+            )
+        if fm_name.startswith("-") or fm_name.endswith("-") or "--" in fm_name:
+            return None, (
+                f"SKILL.md 'name' '{fm_name}' has leading/trailing/"
+                "consecutive hyphens"
+            )
+        if len(fm_name) > 64:
+            return None, f"SKILL.md 'name' '{fm_name}' exceeds 64 chars"
+
+        # The directory basename should match the frontmatter name —
+        # this is the writing-hive-skills convention. We ENFORCE it
+        # because the skill loader uses dir names as identity.
+        if src.name != fm_name:
+            return None, (
+                f"skill directory name '{src.name}' does not match "
+                f"SKILL.md frontmatter name '{fm_name}'. Rename the "
+                "folder or fix the frontmatter."
+            )
+
+        # Install into ~/.hive/skills/{name}/ if not already there.
+        target_root = Path.home() / ".hive" / "skills"
+        target = target_root / fm_name
+        try:
+            target_root.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            return None, f"failed to create skills root: {e}"
+
+        try:
+            if src.resolve() == target.resolve():
+                # Already in the right place — nothing to do.
+                return target, None
+        except OSError:
+            pass
+
+        try:
+            if target.exists():
+                # Overwrite existing — the queen is explicitly creating
+                # a new colony for this version, so her authored skill
+                # wins over any prior version. copytree with
+                # dirs_exist_ok handles subdirs (scripts/, references/,
+                # assets/) but does NOT delete files removed in the
+                # new version. For a clean overwrite we rmtree first.
+                _shutil.rmtree(target)
+            _shutil.copytree(src, target)
+        except OSError as e:
+            return None, f"failed to install skill into {target}: {e}"
+
+        return target, None
+
+    async def create_colony(
+        *,
+        colony_name: str,
+        task: str,
+        skill_path: str,
+    ) -> str:
+        """Create a colony after installing a pre-authored skill folder.
+
+        File-system only: copies the queen session into a new colony
+        directory and writes ``worker.json`` with the task baked in.
+        NOTHING RUNS after fork. The user navigates to the colony when
+        they're ready to start the worker — at that point the worker
+        reads the task from ``worker.json`` and the skill from
+        ``~/.hive/skills/`` and starts informed.
+        """
+        if session is None:
+            return json.dumps({"error": "No session bound to this tool registry."})
+
+        cn = (colony_name or "").strip()
+        if not _COLONY_NAME_RE.match(cn):
+            return json.dumps(
+                {
+                    "error": (
+                        "colony_name must be lowercase alphanumeric "
+                        "with underscores (e.g. 'honeycomb_research')."
+                    )
+                }
+            )
+
+        installed_skill, skill_err = _validate_and_install_skill(skill_path)
+        if skill_err is not None:
+            return json.dumps(
+                {
+                    "error": skill_err,
+                    "hint": (
+                        "Author the skill folder first using write_file "
+                        "(and edit_file for follow-ups). The folder must "
+                        "contain a SKILL.md with YAML frontmatter "
+                        "{name, description} — see your "
+                        "writing-hive-skills default skill for the "
+                        "format. Then call create_colony again with "
+                        "skill_path pointing at that folder."
+                    ),
+                }
+            )
+
+        logger.info(
+            "create_colony: installed skill from %s → %s",
+            skill_path,
+            installed_skill,
+        )
+
+        # Fork the queen session into the colony directory. The fork
+        # copies conversations + writes worker.json + metadata.json.
+        # NO worker runs after this call. The new colony's worker
+        # inherits ~/.hive/skills/ on first run (whenever the user
+        # actually starts it), so the freshly installed skill is
+        # discoverable then.
+        try:
+            from framework.server.routes_execution import fork_session_into_colony
+        except Exception as e:
+            return json.dumps(
+                {
+                    "error": f"fork_session_into_colony import failed: {e}",
+                    "skill_installed": str(installed_skill),
+                }
+            )
+
+        try:
+            fork_result = await fork_session_into_colony(
+                session=session,
+                colony_name=cn,
+                task=(task or "").strip(),
+            )
+        except Exception as e:
+            logger.exception("create_colony: fork failed after installing skill")
+            return json.dumps(
+                {
+                    "error": f"colony fork failed: {e}",
+                    "skill_installed": str(installed_skill),
+                    "hint": (
+                        "The skill was installed but the fork failed. "
+                        "You can retry create_colony — re-installing "
+                        "the skill is idempotent."
+                    ),
+                }
+            )
+
+        # Emit COLONY_CREATED so the frontend can render a system
+        # message in the queen DM with a link to the new colony.
+        # Without this the queen's text response is the only signal
+        # the user gets, and there's no clickable navigation.
+        bus = getattr(session, "event_bus", None)
+        if bus is not None:
+            try:
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.COLONY_CREATED,
+                        stream_id="queen",
+                        data={
+                            "colony_name": fork_result.get("colony_name", cn),
+                            "colony_path": fork_result.get("colony_path"),
+                            "queen_session_id": fork_result.get("queen_session_id"),
+                            "is_new": fork_result.get("is_new", True),
+                            "skill_installed": str(installed_skill),
+                            "skill_name": installed_skill.name if installed_skill else None,
+                            "task": (task or "").strip(),
+                        },
+                    )
+                )
+            except Exception:
+                logger.warning(
+                    "create_colony: failed to publish COLONY_CREATED event",
+                    exc_info=True,
+                )
+
+        return json.dumps(
+            {
+                "status": "created",
+                "colony_name": fork_result.get("colony_name", cn),
+                "colony_path": fork_result.get("colony_path"),
+                "queen_session_id": fork_result.get("queen_session_id"),
+                "is_new": fork_result.get("is_new", True),
+                "skill_installed": str(installed_skill),
+                "skill_name": installed_skill.name if installed_skill else None,
+            }
+        )
+
+    _create_colony_tool = Tool(
+        name="create_colony",
+        description=(
+            "Fork this session into a persistent colony for work "
+            "that needs to run HEADLESS, RECURRING, or IN PARALLEL "
+            "to the current chat. Typical triggers: 'run this every "
+            "morning / on a cron', 'keep monitoring X and alert me', "
+            "'fire this off in the background so I can keep working "
+            "here', 'spin up a dedicated agent for this job'. The "
+            "criterion is operational — the work needs to keep "
+            "running (or needs to survive this conversation ending). "
+            "Do NOT use this just because you learned something "
+            "reusable; if the user wants results right now in this "
+            "chat, use run_parallel_workers instead.\n\n"
+            "Before forking, you author a Hive Skill folder capturing "
+            "the operational procedure the colony worker needs to run "
+            "unattended, and pass its path to this tool. The tool "
+            "validates the skill folder (SKILL.md present, frontmatter "
+            "name+description valid, directory name matches frontmatter "
+            "name), installs it under ~/.hive/skills/{name}/ if it's "
+            "not already there, and then forks the session.\n\n"
+            "NOTHING RUNS AFTER FORK. This tool is file-system only: "
+            "it copies the queen session into a new colony directory "
+            "and writes worker.json with the task baked in. No worker "
+            "is started. The user navigates to the new colony when "
+            "they're ready to begin actual work (or wires up a "
+            "trigger) — at that point the worker reads the task from "
+            "worker.json and the skill you wrote here, and starts "
+            "informed instead of clueless.\n\n"
+            "TWO-STEP FLOW:\n\n"
+            "  1. Use write_file (plus edit_file / list_directory as "
+            "     needed) to create a skill folder. The folder must "
+            "     contain a SKILL.md with YAML frontmatter {name, "
+            "     description} and a markdown body. Optional subdirs: "
+            "     scripts/, references/, assets/. See your "
+            "     writing-hive-skills default skill for the spec. We "
+            "     recommend authoring it directly at "
+            "     ~/.hive/skills/{skill-name}/SKILL.md so no copy is "
+            "     needed.\n"
+            "  2. Call create_colony(colony_name, task, skill_path) "
+            "     pointing at the folder you just wrote.\n\n"
+            "WHY THE SKILL IS REQUIRED: a fresh worker running "
+            "unattended has zero memory of your chat with the user. "
+            "Whatever you figured out during this session — API auth "
+            "flow, pagination, data shapes, gotchas, rate limits — "
+            "must live in the skill, or the worker will repeat your "
+            "discovery work every run.\n\n"
+            "WHAT TO PUT IN THE SKILL BODY: the operational protocol "
+            "the colony worker needs to do this work on its own. "
+            "Include API endpoints with example requests, the exact "
+            "auth flow, response shapes you observed, gotchas you hit "
+            "(rate limits, pagination quirks, edge cases), "
+            "conventions you settled on, and pre-baked "
+            "queries/commands. Write it as if onboarding a new "
+            "engineer who has never seen this system. Realistic "
+            "target: 300–2000 chars of body."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "colony_name": {
+                    "type": "string",
+                    "description": (
+                        "Lowercase alphanumeric+underscore name for "
+                        "the new colony (e.g. 'honeycomb_research')."
+                    ),
+                },
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "FULL self-contained task description, baked "
+                        "into worker.json for the colony's first run. "
+                        "Nothing executes when create_colony returns — "
+                        "the task is stored, not run. The user starts "
+                        "the worker later from the new colony page. At "
+                        "that point the worker has zero memory of your "
+                        "chat, so this task string must contain "
+                        "everything: every requirement, constraint, "
+                        "and detail. Write it as if handing the work "
+                        "to a stranger who has never seen the user's "
+                        "request."
+                    ),
+                },
+                "skill_path": {
+                    "type": "string",
+                    "description": (
+                        "Path to a pre-authored skill folder containing "
+                        "SKILL.md. May be absolute or ~-expanded. The "
+                        "directory basename MUST match the SKILL.md "
+                        "frontmatter 'name' field. If the path is "
+                        "outside ~/.hive/skills/ the folder is copied "
+                        "in. Example: '~/.hive/skills/honeycomb-api-"
+                        "protocol'."
+                    ),
+                },
+            },
+            "required": ["colony_name", "task", "skill_path"],
+        },
+    )
+    registry.register(
+        "create_colony",
+        _create_colony_tool,
+        lambda inputs: create_colony(**inputs),
+    )
+    tools_registered += 1
+
+    # --- switch_to_reviewing ----------------------------------------------------
+
+    async def switch_to_reviewing_tool() -> str:
         """Stop the worker and switch to editing phase for config tweaks.
 
         The worker stays loaded. You can re-run with different input,
         inject config adjustments, or escalate to building/planning.
         """
-        stop_result = await stop_graph()
+        stop_result = await stop_worker()
 
         if phase_state is not None:
-            await phase_state.switch_to_editing()
+            await phase_state.switch_to_reviewing()
             _update_meta_json(session_manager, manager_session_id, {"phase": "editing"})
 
         result = json.loads(stop_result)
@@ -1074,7 +1683,7 @@ def register_queen_lifecycle_tools(
         return json.dumps(result)
 
     _switch_editing_tool = Tool(
-        name="switch_to_editing",
+        name="switch_to_reviewing",
         description=(
             "Stop the running worker and switch to editing phase. "
             "The worker stays loaded — you can tweak config and re-run. "
@@ -1083,17 +1692,17 @@ def register_queen_lifecycle_tools(
         parameters={"type": "object", "properties": {}},
     )
     registry.register(
-        "switch_to_editing",
+        "switch_to_reviewing",
         _switch_editing_tool,
-        lambda inputs: switch_to_editing_tool(),
+        lambda inputs: switch_to_reviewing_tool(),
     )
     tools_registered += 1
 
-    # --- stop_graph_and_edit --------------------------------------------------
+    # --- stop_worker_and_review --------------------------------------------------
 
-    async def stop_graph_and_edit() -> str:
+    async def stop_worker_and_review() -> str:
         """Stop the loaded graph and switch to building phase for editing the agent."""
-        stop_result = await stop_graph()
+        stop_result = await stop_worker()
 
         # Switch to building phase
         if phase_state is not None:
@@ -1115,7 +1724,7 @@ def register_queen_lifecycle_tools(
         return json.dumps(result)
 
     _stop_edit_tool = Tool(
-        name="stop_graph_and_edit",
+        name="stop_worker_and_review",
         description=(
             "Stop the running graph and switch to building phase. "
             "Use this when you need to modify the agent's code, nodes, or configuration. "
@@ -1123,14 +1732,16 @@ def register_queen_lifecycle_tools(
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register("stop_graph_and_edit", _stop_edit_tool, lambda inputs: stop_graph_and_edit())
+    registry.register(
+        "stop_worker_and_review", _stop_edit_tool, lambda inputs: stop_worker_and_review()
+    )
     tools_registered += 1
 
-    # --- stop_graph_and_plan (Running/Staging → Planning) ---------------------
+    # --- stop_worker_and_plan (Running/Staging → Planning) ---------------------
 
-    async def stop_graph_and_plan() -> str:
+    async def stop_worker_and_plan() -> str:
         """Stop the loaded graph and switch to planning phase for diagnosis."""
-        stop_result = await stop_graph()
+        stop_result = await stop_worker()
 
         # Switch to planning phase
         if phase_state is not None:
@@ -1147,7 +1758,7 @@ def register_queen_lifecycle_tools(
         return json.dumps(result)
 
     _stop_plan_tool = Tool(
-        name="stop_graph_and_plan",
+        name="stop_worker_and_plan",
         description=(
             "Stop the graph and switch to planning phase for diagnosis. "
             "Use this when you need to investigate an issue before fixing it. "
@@ -1155,7 +1766,9 @@ def register_queen_lifecycle_tools(
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register("stop_graph_and_plan", _stop_plan_tool, lambda inputs: stop_graph_and_plan())
+    registry.register(
+        "stop_worker_and_plan", _stop_plan_tool, lambda inputs: stop_worker_and_plan()
+    )
     tools_registered += 1
 
     # --- replan_agent (Building → Planning) -----------------------------------
@@ -1186,9 +1799,9 @@ def register_queen_lifecycle_tools(
                 try:
                     await bus.publish(
                         AgentEvent(
-                            type=EventType.DRAFT_GRAPH_UPDATED,
+                            type=EventType.CUSTOM,
                             stream_id="queen",
-                            data=phase_state.draft_graph,
+                            data={"event": "draft_updated", **phase_state.draft_graph},
                         )
                     )
                 except Exception:
@@ -1225,18 +1838,7 @@ def register_queen_lifecycle_tools(
     registry.register("replan_agent", _replan_tool, lambda inputs: replan_agent())
     tools_registered += 1
 
-    # --- Flowchart utilities ---------------------------------------------------
-    # Flowchart persistence, classification, and synthesis functions are now in
-    # framework.tools.flowchart_utils. Local aliases for backward compatibility
-    # within this closure:
-    _save_flowchart_file = save_flowchart_file
-    _load_flowchart_file = load_flowchart_file
-    _synthesize_draft_from_runtime = synthesize_draft_from_runtime
-    _classify_flowchart_node = classify_flowchart_node
-
-    # --- save_agent_draft (Planning phase — declarative graph preview) ---------
-    # Creates a lightweight draft graph with nodes, edges, and business metadata.
-    # Loose validation: only requires names and descriptions. Emits an event
+    # --- save_agent_draft (Planning phase — declarative preview) ----------------
     # so the frontend can render the graph during planning (before any code).
 
     def _dissolve_planning_nodes(
@@ -1388,81 +1990,6 @@ def register_queen_lifecycle_tools(
             nodes[:] = [n for n in nodes if n["id"] != d_id]
             del node_by_id[d_id]
 
-        # ── Dissolve sub-agent nodes ──────────────────────────────
-        # Sub-agent nodes are leaf delegates: parent → subagent (no outgoing).
-        # Dissolution adds the subagent's ID to parent's sub_agents list.
-        subagent_ids = [
-            n["id"]
-            for n in nodes
-            if n.get("flowchart_type") == "browser" or n.get("node_type") == "gcu"
-        ]
-
-        for sa_id in subagent_ids:
-            sa_node = node_by_id.get(sa_id)
-            if sa_node is None:
-                continue
-
-            in_edges = _incoming(sa_id)
-            out_edges = _outgoing(sa_id)
-
-            # Validate: sub-agent nodes must be leaves (no outgoing edges)
-            if out_edges:
-                logger.warning(
-                    "Sub-agent node '%s' has outgoing edges — they will be dropped "
-                    "during dissolution. Sub-agent nodes should be leaf nodes.",
-                    sa_id,
-                )
-
-            # Attach to each predecessor's sub_agents list
-            for ie in in_edges:
-                pred_id = ie["source"]
-                pred = node_by_id.get(pred_id)
-                if pred is None:
-                    continue
-
-                existing_subs = pred.get("sub_agents") or []
-                if sa_id not in existing_subs:
-                    existing_subs.append(sa_id)
-                pred["sub_agents"] = existing_subs
-
-                # Record absorption
-                prev_absorbed = absorbed.get(pred_id, [pred_id])
-                if sa_id not in prev_absorbed:
-                    prev_absorbed.append(sa_id)
-                absorbed[pred_id] = prev_absorbed
-
-            # Remove sub-agent node and all its edges
-            edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
-            nodes[:] = [n for n in nodes if n["id"] != sa_id]
-            del node_by_id[sa_id]
-
-        # ── Dissolve implicit sub-agents ─────────────────────────
-        # Nodes that appear in another node's sub_agents list but weren't
-        # caught above (e.g. GCU nodes with flowchart_type="browser" where
-        # the queen set sub_agents directly on the parent).
-        implicit_sa_ids: list[str] = []
-        for n in nodes:
-            for sa_id in n.get("sub_agents") or []:
-                if sa_id in node_by_id and sa_id != n["id"]:
-                    implicit_sa_ids.append(sa_id)
-
-        for sa_id in implicit_sa_ids:
-            if sa_id not in node_by_id:
-                continue  # already removed
-
-            # Find which parent(s) reference this sub-agent
-            for n in nodes:
-                if sa_id in (n.get("sub_agents") or []) and n["id"] != sa_id:
-                    prev_absorbed = absorbed.get(n["id"], [n["id"]])
-                    if sa_id not in prev_absorbed:
-                        prev_absorbed.append(sa_id)
-                    absorbed[n["id"]] = prev_absorbed
-
-            # Remove the sub-agent node and its edges
-            edges[:] = [e for e in edges if e["source"] != sa_id and e["target"] != sa_id]
-            nodes[:] = [n for n in nodes if n["id"] != sa_id]
-            del node_by_id[sa_id]
-
         # Build complete flowchart_map (identity for non-absorbed nodes)
         flowchart_map: dict[str, list[str]] = {}
         for n in nodes:
@@ -1470,14 +1997,9 @@ def register_queen_lifecycle_tools(
             flowchart_map[nid] = absorbed.get(nid, [nid])
 
         # Rebuild terminal_nodes (decision targets may have changed).
-        # Sub-agent nodes are leaf helpers, not endpoints — exclude them.
-        post_sa_ids: set[str] = set()
-        for n in nodes:
-            for sa_id in n.get("sub_agents") or []:
-                post_sa_ids.add(sa_id)
         sources = {e["source"] for e in edges}
         all_ids = {n["id"] for n in nodes}
-        terminal_ids = all_ids - sources - post_sa_ids
+        terminal_ids = all_ids - sources
         if not terminal_ids and nodes:
             terminal_ids = {nodes[-1]["id"]}
 
@@ -1563,7 +2085,6 @@ def register_queen_lifecycle_tools(
                     "input_keys": n.get("input_keys", []),
                     "output_keys": n.get("output_keys", []),
                     "success_criteria": n.get("success_criteria", ""),
-                    "sub_agents": n.get("sub_agents", []),
                     # Decision nodes: the yes/no question to evaluate
                     "decision_clause": n.get("decision_clause", ""),
                     # Explicit flowchart override (preserved for classification)
@@ -1601,219 +2122,7 @@ def register_queen_lifecycle_tools(
                     }
                 )
 
-        # ── GCU nodes cannot be children of decision nodes ─────────
-        # Decision nodes dissolve into their predecessor. If a GCU node
-        # is a decision child, after dissolution it would become a
-        # conditional workflow step — violating the leaf sub-agent rule.
-        # Rewire: move the GCU to the decision's predecessor as a
-        # sub-agent and remove the decision → GCU edge.
-        node_by_id_v = {n["id"]: n for n in validated_nodes}
-        decision_node_ids = {
-            n["id"] for n in validated_nodes if n.get("flowchart_type") == "decision"
-        }
-        gcu_node_ids = {
-            n["id"]
-            for n in validated_nodes
-            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "browser"
-        }
         topology_corrections: list[str] = []
-        if decision_node_ids and gcu_node_ids:
-            for d_id in decision_node_ids:
-                gcu_children = [
-                    e
-                    for e in validated_edges
-                    if e["source"] == d_id and e["target"] in gcu_node_ids
-                ]
-                if not gcu_children:
-                    continue
-                d_parents = [e["source"] for e in validated_edges if e["target"] == d_id]
-                for gc_edge in gcu_children:
-                    gc_id = gc_edge["target"]
-                    logger.warning(
-                        "GCU node '%s' is a child of decision node '%s' "
-                        "— moving it to the decision's predecessor.",
-                        gc_id,
-                        d_id,
-                    )
-                    topology_corrections.append(
-                        f"GCU node '{gc_id}' was a child of decision "
-                        f"node '{d_id}' — invalid because decision "
-                        f"nodes dissolve at build time. Moved "
-                        f"'{gc_id}' to predecessor as a sub-agent."
-                    )
-                    # Remove the decision → GCU edge
-                    validated_edges[:] = [
-                        e
-                        for e in validated_edges
-                        if not (e["source"] == d_id and e["target"] == gc_id)
-                    ]
-                    # Remove any outgoing edges from the GCU node
-                    # (keep report edges back to predecessors)
-                    validated_edges[:] = [
-                        e
-                        for e in validated_edges
-                        if e["source"] != gc_id or e["target"] in set(d_parents)
-                    ]
-                    # Assign GCU as sub-agent of predecessor(s)
-                    for pid in d_parents:
-                        parent = node_by_id_v.get(pid)
-                        if parent is None:
-                            continue
-                        existing = parent.get("sub_agents") or []
-                        if gc_id not in existing:
-                            existing.append(gc_id)
-                        parent["sub_agents"] = existing
-
-        # ── Enforce GCU / subagent leaf constraint ────────────────
-        # GCU nodes and nodes with flowchart_type "subagent" are leaf
-        # delegates: they can only receive a delegate edge IN from
-        # their parent and send a report edge OUT back to that parent.
-        # Any other outgoing edges are design errors — strip them and
-        # auto-assign the node as a sub-agent of its predecessor.
-        leaf_node_ids: set[str] = set()
-        for n in validated_nodes:
-            if n.get("node_type") == "gcu" or n.get("flowchart_type") == "browser":
-                leaf_node_ids.add(n["id"])
-        if leaf_node_ids:
-            for leaf_id in leaf_node_ids:
-                # Find edges where this leaf node is the source
-                out_edges = [e for e in validated_edges if e["source"] == leaf_id]
-                in_edges = [e for e in validated_edges if e["target"] == leaf_id]
-
-                # Identify the parent (predecessor that connects IN)
-                parent_ids = [e["source"] for e in in_edges]
-
-                if not out_edges:
-                    # Already a proper leaf — still ensure sub_agents is set
-                    for pid in parent_ids:
-                        parent = node_by_id_v.get(pid)
-                        if parent is None:
-                            continue
-                        existing = parent.get("sub_agents") or []
-                        if leaf_id not in existing:
-                            existing.append(leaf_id)
-                        parent["sub_agents"] = existing
-                    continue
-
-                # Strip all outgoing edges from the leaf node that
-                # don't go back to a parent (report edges are OK)
-                illegal_targets: list[str] = []
-                for oe in out_edges:
-                    if oe["target"] not in parent_ids:
-                        illegal_targets.append(oe["target"])
-
-                if illegal_targets:
-                    logger.warning(
-                        "GCU/subagent node '%s' has illegal outgoing "
-                        "edges to %s — stripping them. GCU nodes "
-                        "must be leaf sub-agents.",
-                        leaf_id,
-                        illegal_targets,
-                    )
-                    topology_corrections.append(
-                        f"GCU node '{leaf_id}' had illegal edges to "
-                        f"{illegal_targets} — stripped. GCU nodes MUST "
-                        f"be leaf sub-agents, never in the linear flow."
-                    )
-                    # Rewire: predecessor → leaf's targets (skip leaf)
-                    for parent_id in parent_ids:
-                        for tgt_id in illegal_targets:
-                            validated_edges.append(
-                                {
-                                    "id": f"edge-rewire-{len(validated_edges)}",
-                                    "source": parent_id,
-                                    "target": tgt_id,
-                                    "condition": "on_success",
-                                    "description": "",
-                                    "label": "",
-                                }
-                            )
-                    # Remove the illegal edges
-                    validated_edges[:] = [
-                        e
-                        for e in validated_edges
-                        if not (e["source"] == leaf_id and e["target"] in set(illegal_targets))
-                    ]
-
-                # Ensure the leaf is in its parent's sub_agents list
-                for pid in parent_ids:
-                    parent = node_by_id_v.get(pid)
-                    if parent is None:
-                        continue
-                    existing = parent.get("sub_agents") or []
-                    if leaf_id not in existing:
-                        existing.append(leaf_id)
-                    parent["sub_agents"] = existing
-
-        # ── Remove orphaned GCU / subagent nodes ──────────────────
-        # After enforcing the leaf constraint, any GCU/subagent node
-        # that has zero edges AND is not in any parent's sub_agents
-        # list is orphaned — remove it and warn the queen.
-        all_edge_node_ids = set()
-        for e in validated_edges:
-            all_edge_node_ids.add(e["source"])
-            all_edge_node_ids.add(e["target"])
-        all_sa_refs: set[str] = set()
-        for n in validated_nodes:
-            for sa_id in n.get("sub_agents") or []:
-                all_sa_refs.add(sa_id)
-
-        orphaned_ids: list[str] = []
-        for lid in leaf_node_ids:
-            if lid not in all_edge_node_ids and lid not in all_sa_refs:
-                orphaned_ids.append(lid)
-
-        if orphaned_ids:
-            for oid in orphaned_ids:
-                logger.warning(
-                    "GCU/subagent node '%s' is orphaned (no edges, "
-                    "not in any parent's sub_agents) — removing it.",
-                    oid,
-                )
-                topology_corrections.append(
-                    f"GCU node '{oid}' was orphaned (no edges, not "
-                    f"assigned as a sub-agent of any parent node) — "
-                    f"removed. Add it to a parent node's sub_agents "
-                    f"list and re-save the draft."
-                )
-            validated_nodes[:] = [n for n in validated_nodes if n["id"] not in set(orphaned_ids)]
-            node_by_id_v = {n["id"]: n for n in validated_nodes}
-
-        # Synthesize visual edges for sub-agents that are referenced in
-        # a parent's sub_agents list but have no connecting edge yet.
-        node_id_set = {n["id"] for n in validated_nodes}
-        existing_edge_pairs = {(e["source"], e["target"]) for e in validated_edges}
-        edge_counter = len(validated_edges)
-        for n in validated_nodes:
-            for sa_id in n.get("sub_agents") or []:
-                if sa_id not in node_id_set:
-                    continue
-                if (n["id"], sa_id) not in existing_edge_pairs:
-                    validated_edges.append(
-                        {
-                            "id": f"edge-subagent-{edge_counter}",
-                            "source": n["id"],
-                            "target": sa_id,
-                            "condition": "always",
-                            "description": "sub-agent delegation",
-                            "label": "delegate",
-                        }
-                    )
-                    edge_counter += 1
-                    existing_edge_pairs.add((n["id"], sa_id))
-                if (sa_id, n["id"]) not in existing_edge_pairs:
-                    validated_edges.append(
-                        {
-                            "id": f"edge-subagent-{edge_counter}",
-                            "source": sa_id,
-                            "target": n["id"],
-                            "condition": "always",
-                            "description": "sub-agent report back",
-                            "label": "report",
-                        }
-                    )
-                    edge_counter += 1
-                    existing_edge_pairs.add((sa_id, n["id"]))
 
         # ── Validate graph connectivity ─────────────────────────────
         # Every node must be reachable from the entry node. Disconnected
@@ -1879,7 +2188,7 @@ def register_queen_lifecycle_tools(
         # Classify each node into a flowchart component type with color
         total = len(validated_nodes)
         for i, node in enumerate(validated_nodes):
-            fc_type = _classify_flowchart_node(
+            fc_type = classify_flowchart_node(
                 node,
                 i,
                 total,
@@ -1928,10 +2237,12 @@ def register_queen_lifecycle_tools(
                     # Worker not loaded yet — resolve from draft name
                     draft_name = draft.get("agent_name", "")
                     if draft_name:
-                        candidate = Path("exports") / draft_name
+                        from framework.config import COLONIES_DIR
+
+                        candidate = COLONIES_DIR / draft_name
                         if candidate.is_dir():
                             save_path = candidate
-                _save_flowchart_file(
+                save_flowchart_file(
                     save_path,
                     phase_state.original_draft_graph,
                     fmap,
@@ -1944,20 +2255,22 @@ def register_queen_lifecycle_tools(
         # Emit events so the frontend can render
         if bus is not None:
             if is_building:
-                # Send dissolved draft for runtime display
                 await bus.publish(
                     AgentEvent(
-                        type=EventType.DRAFT_GRAPH_UPDATED,
-                        stream_id="queen",
-                        data=phase_state.draft_graph if phase_state else draft,
-                    )
-                )
-                # Send original draft + map for flowchart overlay
-                await bus.publish(
-                    AgentEvent(
-                        type=EventType.FLOWCHART_MAP_UPDATED,
+                        type=EventType.CUSTOM,
                         stream_id="queen",
                         data={
+                            "event": "draft_updated",
+                            **(phase_state.draft_graph if phase_state else draft),
+                        },
+                    )
+                )
+                await bus.publish(
+                    AgentEvent(
+                        type=EventType.CUSTOM,
+                        stream_id="queen",
+                        data={
+                            "event": "flowchart_updated",
                             "map": phase_state.flowchart_map if phase_state else None,
                             "original_draft": phase_state.original_draft_graph
                             if phase_state
@@ -1968,9 +2281,9 @@ def register_queen_lifecycle_tools(
             else:
                 await bus.publish(
                     AgentEvent(
-                        type=EventType.DRAFT_GRAPH_UPDATED,
+                        type=EventType.CUSTOM,
                         stream_id="queen",
-                        data=draft,
+                        data={"event": "draft_updated", **draft},
                     )
                 )
 
@@ -2195,12 +2508,12 @@ def register_queen_lifecycle_tools(
     # Explicit user confirmation is required before transitioning from planning
     # to building. This tool records that confirmation and proceeds.
 
-    async def confirm_and_build() -> str:
-        """Confirm the draft and transition from planning to building phase.
+    async def confirm_and_build(*, agent_name: str | None = None) -> str:
+        """Confirm the draft, create agent directory, and transition to building.
 
         This tool should ONLY be called after the user has explicitly approved
-        the draft graph design via ask_user. It gates the planning→building
-        transition so the user always has a chance to review before code is written.
+        the draft graph design via ask_user. It creates the agent directory and
+        transitions to BUILDING phase. The queen then writes agent.json directly.
         """
         if phase_state is None:
             return json.dumps({"error": "Phase state not available."})
@@ -2238,11 +2551,13 @@ def register_queen_lifecycle_tools(
 
         # Create agent folder early so flowchart and agent_path are available
         # throughout the entire BUILDING phase.
-        _agent_name = phase_state.draft_graph.get("agent_name", "").strip()
+        _agent_name = agent_name or phase_state.draft_graph.get("agent_name", "").strip()
         if _agent_name:
-            _agent_folder = Path("exports") / _agent_name
+            from framework.config import COLONIES_DIR
+
+            _agent_folder = COLONIES_DIR / _agent_name
             _agent_folder.mkdir(parents=True, exist_ok=True)
-            _save_flowchart_file(_agent_folder, original_copy, fmap)
+            save_flowchart_file(_agent_folder, original_copy, fmap)
             phase_state.agent_path = str(_agent_folder)
             _update_meta_json(
                 session_manager,
@@ -2271,20 +2586,28 @@ def register_queen_lifecycle_tools(
                 f"{subagent_count} sub-agent node(s) dissolved into predecessor sub_agents"
             )
 
+        # Transition to BUILDING phase
+        await phase_state.switch_to_building(source="tool")
+        _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
+        phase_state.build_confirmed = False
+
+        # No injection here -- the return message tells the queen what to do.
+        # Injecting would queue a BUILDING message that drains AFTER the queen
+        # may have already moved to STAGING via load_built_agent.
+
         return json.dumps(
             {
                 "status": "confirmed",
-                "agent_name": phase_state.draft_graph.get("agent_name", ""),
+                "phase": "building",
+                "agent_name": _agent_name,
+                "agent_path": str(_agent_folder),
                 "planning_nodes_dissolved": dissolved_count,
-                "decision_nodes_dissolved": decision_count,
-                "subagent_nodes_dissolved": subagent_count,
                 "flowchart_map": fmap,
                 "message": (
-                    "User has confirmed the design. "
+                    "Design confirmed and directory created. "
                     + ("; ".join(dissolution_parts) + ". " if dissolution_parts else "")
-                    + "Now call initialize_and_build_agent(agent_name, nodes) to scaffold the "
-                    "agent package and start building. The draft metadata will be "
-                    "used to pre-populate the generated files."
+                    + f"Now write the complete agent config to {_agent_folder}/agent.json "
+                    "using write_file(). Include all system prompts, tools, edges, and goal."
                 ),
             }
         )
@@ -2292,190 +2615,40 @@ def register_queen_lifecycle_tools(
     _confirm_tool = Tool(
         name="confirm_and_build",
         description=(
-            "Confirm the draft graph design and approve transition to building phase. "
+            "Confirm the draft graph design, create agent directory, and transition to building phase. "
             "ONLY call this after the user has explicitly approved the design via ask_user. "
-            "After confirmation, call initialize_and_build_agent() to scaffold and build."
+            "After confirmation, write the complete agent.json using write_file()."
         ),
-        parameters={"type": "object", "properties": {}},
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_name": {
+                    "type": "string",
+                    "description": "Snake_case name for the agent (e.g. 'linkedin_outreach'). "
+                    "If omitted, uses the name from save_agent_draft().",
+                },
+            },
+        },
     )
     registry.register(
         "confirm_and_build",
         _confirm_tool,
-        lambda inputs: confirm_and_build(),
+        lambda inputs: confirm_and_build(
+            agent_name=inputs.get("agent_name"),
+        ),
     )
     tools_registered += 1
 
-    # --- initialize_and_build_agent wrapper (Planning → Building) -------------
-    # With agent_name: scaffold a new agent via MCP tool, then switch to building.
-    # Without agent_name: just switch to building (for fixing an existing loaded agent).
+    # --- stop_worker (Running → Staging) --------------------------------------
 
-    _existing_init = registry._tools.get("initialize_and_build_agent")
-    if _existing_init is not None:
-        _orig_init_executor = _existing_init.executor
-
-        async def initialize_and_build_agent_wrapper(inputs: dict) -> str:
-            """Wrapper: scaffold or just switch to building phase."""
-            agent_name = (inputs.get("agent_name") or "").strip()
-
-            # Gate: when in planning phase and creating a new agent,
-            # require the user to have confirmed the draft first.
-            if (
-                agent_name
-                and phase_state is not None
-                and phase_state.phase == "planning"
-                and not phase_state.build_confirmed
-            ):
-                if phase_state.draft_graph is None:
-                    return json.dumps(
-                        {
-                            "error": (
-                                "Cannot transition to building without a draft. "
-                                "Call save_agent_draft() first to create a visual draft of the "
-                                "graph, present it to the user for review, then call "
-                                "confirm_and_build() after the user approves."
-                            )
-                        }
-                    )
-                return json.dumps(
-                    {
-                        "error": (
-                            "The user has not confirmed the draft design yet. "
-                            "Present the draft to the user and call ask_user() to get "
-                            "their approval. Then call confirm_and_build() before "
-                            "calling initialize_and_build_agent()."
-                        )
-                    }
-                )
-
-            # No agent_name → try to fall back to the session's current agent,
-            # or fail with actionable guidance.
-            if not agent_name:
-                # Try to resolve agent_name from the current session
-                fallback_path = getattr(session, "worker_path", None)
-                if fallback_path is not None:
-                    agent_name = Path(fallback_path).name
-                else:
-                    # Server path: check SessionManager
-                    if session_manager is not None and manager_session_id:
-                        srv_session = session_manager.get_session(manager_session_id)
-                        if srv_session and getattr(srv_session, "worker_path", None):
-                            fallback_path = srv_session.worker_path
-                            agent_name = Path(fallback_path).name
-
-                if not agent_name:
-                    return json.dumps(
-                        {
-                            "error": (
-                                "No agent_name provided and no agent loaded in this session. "
-                                "To fix: call list_agents() to find the agent name, then call "
-                                "initialize_and_build_agent(agent_name='<name>') to scaffold it."
-                            )
-                        }
-                    )
-
-                # Fall back succeeded — switch to building without scaffolding
-                logger.info(
-                    "initialize_and_build_agent: no agent_name provided, "
-                    "falling back to session agent '%s'",
-                    agent_name,
-                )
-                if phase_state is not None:
-                    if fallback_path:
-                        phase_state.agent_path = str(fallback_path)
-                    await phase_state.switch_to_building(source="tool")
-                    _update_meta_json(session_manager, manager_session_id, {"phase": "building"})
-                    if phase_state.inject_notification:
-                        await phase_state.inject_notification(
-                            "[PHASE CHANGE] Switched to BUILDING phase. "
-                            "Start implementing the fix now."
-                        )
-                return json.dumps(
-                    {
-                        "status": "editing",
-                        "phase": "building",
-                        "agent_name": agent_name,
-                        "warning": (
-                            f"No agent_name provided — using session agent '{agent_name}'. "
-                            f"Agent files are at exports/{agent_name}/."
-                        ),
-                        "message": (
-                            "Switched to BUILDING phase. Full coding tools restored. "
-                            "Implement the fix, then call load_built_agent(path) to reload."
-                        ),
-                    }
-                )
-
-            # Has agent_name → scaffold via MCP tool.
-            # If a draft exists, pass its metadata so the scaffolder can
-            # pre-populate descriptions, goals, and node metadata.
-            scaffold_inputs = dict(inputs)
-            draft = phase_state.draft_graph if phase_state else None
-            if draft and draft.get("agent_name") == agent_name:
-                scaffold_inputs["_draft"] = draft
-
-            result = _orig_init_executor(scaffold_inputs)
-            # Handle both sync and async executors
-            if asyncio.iscoroutine(result) or asyncio.isfuture(result):
-                result = await result
-            # If result is a ToolResult, extract the text content
-            result_str = str(result)
-            if hasattr(result, "content"):
-                result_str = str(result.content)
-            try:
-                parsed = json.loads(result_str)
-                if parsed.get("success", True):
-                    if phase_state is not None:
-                        # Set agent_path so the frontend can query credentials
-                        phase_state.agent_path = phase_state.agent_path or str(
-                            Path("exports") / agent_name
-                        )
-                        await phase_state.switch_to_building(source="tool")
-                        _update_meta_json(
-                            session_manager, manager_session_id, {"phase": "building"}
-                        )
-                        # Reset draft state after successful scaffolding
-                        phase_state.build_confirmed = False
-                        # Persist flowchart now that the agent folder exists
-                        if phase_state.original_draft_graph and phase_state.flowchart_map:
-                            _save_flowchart_file(
-                                Path("exports") / agent_name,
-                                phase_state.original_draft_graph,
-                                phase_state.flowchart_map,
-                            )
-                        # Inject a continuation message so the queen starts
-                        # building immediately instead of blocking for user input.
-                        draft_hint = ""
-                        if draft:
-                            draft_hint = (
-                                " The draft metadata has been used to pre-populate "
-                                "node descriptions, goal, and success criteria. "
-                                "Review and refine the generated files."
-                            )
-                        if phase_state.inject_notification:
-                            await phase_state.inject_notification(
-                                "[PHASE CHANGE] Agent scaffolded and switched to BUILDING phase. "
-                                "Start implementing the agent nodes now." + draft_hint
-                            )
-            except (json.JSONDecodeError, KeyError, TypeError):
-                pass
-            return result_str
-
-        registry.register(
-            "initialize_and_build_agent",
-            _existing_init.tool,
-            lambda inputs: initialize_and_build_agent_wrapper(inputs),
-        )
-
-    # --- stop_graph (Running → Staging) --------------------------------------
-
-    async def stop_graph_to_staging() -> str:
+    async def stop_worker_to_staging() -> str:
         """Stop the running graph and switch to staging phase.
 
         After stopping, ask the user whether they want to:
         1. Re-run the agent with new input → call run_agent_with_input(task)
-        2. Edit the agent code → call stop_graph_and_edit() to go to building phase
+        2. Edit the agent code → call stop_worker_and_review() to go to building phase
         """
-        stop_result = await stop_graph()
+        stop_result = await stop_worker()
 
         # Switch to staging phase
         if phase_state is not None:
@@ -2492,7 +2665,7 @@ def register_queen_lifecycle_tools(
         return json.dumps(result)
 
     _stop_worker_tool = Tool(
-        name="stop_graph",
+        name="stop_worker",
         description=(
             "Stop the running graph and switch to staging phase. "
             "After stopping, ask the user whether they want to re-run "
@@ -2500,10 +2673,10 @@ def register_queen_lifecycle_tools(
         ),
         parameters={"type": "object", "properties": {}},
     )
-    registry.register("stop_graph", _stop_worker_tool, lambda inputs: stop_graph_to_staging())
+    registry.register("stop_worker", _stop_worker_tool, lambda inputs: stop_worker_to_staging())
     tools_registered += 1
 
-    # --- get_graph_status -----------------------------------------------------
+    # --- get_worker_status -----------------------------------------------------
 
     def _get_event_bus():
         """Get the session's event bus for querying history."""
@@ -2554,7 +2727,7 @@ def register_queen_lifecycle_tools(
         return s
 
     def _build_preamble(
-        runtime: AgentRuntime,
+        runtime: AgentHost,
     ) -> dict[str, Any]:
         """Build the lightweight preamble: status, node, elapsed, iteration.
 
@@ -2565,8 +2738,8 @@ def register_queen_lifecycle_tools(
         - _active_execs (internal, stripped before return)
         """
 
-        graph_id = runtime.graph_id
-        reg = runtime.get_graph_registration(graph_id)
+        colony_id = runtime.colony_id
+        reg = runtime.get_worker_registration(colony_id)
         if reg is None:
             return {"status": "not_loaded"}
 
@@ -2607,7 +2780,7 @@ def register_queen_lifecycle_tools(
                     if prompt:
                         preamble["pending_question"] = prompt[:200]
 
-            edge_events = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=1)
+            edge_events = bus.get_history(event_type=EventType.NODE_RETRY, limit=1)
             if edge_events:
                 target = edge_events[0].data.get("target_node")
                 if target:
@@ -2699,7 +2872,7 @@ def register_queen_lifecycle_tools(
                 lines.append(f'Last LLM output: "{snippet}"')
 
         # Recent node transitions
-        edges = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=last_n)
+        edges = bus.get_history(event_type=EventType.NODE_RETRY, limit=last_n)
         if edges:
             lines.append("")
             lines.append("Recent transitions:")
@@ -2712,9 +2885,9 @@ def register_queen_lifecycle_tools(
 
         return "\n".join(lines)
 
-    async def _format_memory(runtime: AgentRuntime) -> str:
+    async def _format_memory(runtime: AgentHost) -> str:
         """Format the worker's shared buffer snapshot and recent changes."""
-        from framework.runtime.shared_state import IsolationLevel
+        from framework.host.isolation import IsolationLevel
 
         lines = []
         active_streams = runtime.get_active_streams()
@@ -2865,7 +3038,7 @@ def register_queen_lifecycle_tools(
         header = f"{total} issue(s) detected."
         return header + "\n\n" + "\n".join(lines)
 
-    async def _format_progress(runtime: AgentRuntime, bus: EventBus) -> str:
+    async def _format_progress(runtime: AgentHost, bus: EventBus) -> str:
         """Format goal progress, token consumption, and execution outcomes."""
         lines = []
 
@@ -2921,18 +3094,18 @@ def register_queen_lifecycle_tools(
         return "\n".join(lines)
 
     def _build_full_json(
-        runtime: AgentRuntime,
+        runtime: AgentHost,
         bus: EventBus,
         preamble: dict[str, Any],
         last_n: int,
     ) -> dict[str, Any]:
         """Build the legacy full JSON response (backward compat for focus='full')."""
 
-        graph_id = runtime.graph_id
+        colony_id = runtime.colony_id
         goal = runtime.goal
         result: dict[str, Any] = {
-            "worker_graph_id": graph_id,
-            "worker_goal": getattr(goal, "name", graph_id),
+            "worker_colony_id": colony_id,
+            "worker_goal": getattr(goal, "name", colony_id),
             "status": preamble["status"],
         }
 
@@ -2985,7 +3158,7 @@ def register_queen_lifecycle_tools(
             result["recent_tool_calls"] = recent_calls
 
         # Node transitions
-        edges = bus.get_history(event_type=EventType.EDGE_TRAVERSED, limit=last_n)
+        edges = bus.get_history(event_type=EventType.NODE_RETRY, limit=last_n)
         if edges:
             result["node_transitions"] = [
                 {
@@ -3096,7 +3269,7 @@ def register_queen_lifecycle_tools(
 
         return result
 
-    async def get_graph_status(focus: str | None = None, last_n: int = 20) -> str:
+    async def get_worker_status(focus: str | None = None, last_n: int = 20) -> str:
         """Check on the loaded graph with progressive disclosure.
 
         Without arguments, returns a brief prose summary. Use ``focus`` to
@@ -3140,13 +3313,8 @@ def register_queen_lifecycle_tools(
         # --- Runtime check ---
         runtime = _get_runtime()
         if runtime is None:
-            return "No worker loaded."
+            return "No colony running."
 
-        reg = runtime.get_graph_registration(runtime.graph_id)
-        if reg is None:
-            return "No worker loaded."
-
-        # --- Build preamble (always cheap) ---
         preamble = _build_preamble(runtime)
 
         bus = _get_event_bus()
@@ -3189,11 +3357,11 @@ def register_queen_lifecycle_tools(
                     "Valid options: activity, memory, tools, issues, progress, full."
                 )
         except Exception as exc:
-            logger.exception("get_graph_status error")
+            logger.exception("get_worker_status error")
             return f"Error retrieving status: {exc}"
 
     _status_tool = Tool(
-        name="get_graph_status",
+        name="get_worker_status",
         description=(
             "Check on the loaded graph. Returns a brief prose summary by default. "
             "Use 'focus' to drill into specifics:\n"
@@ -3222,7 +3390,7 @@ def register_queen_lifecycle_tools(
             "required": [],
         },
     )
-    registry.register("get_graph_status", _status_tool, lambda inputs: get_graph_status(**inputs))
+    registry.register("get_worker_status", _status_tool, lambda inputs: get_worker_status(**inputs))
     tools_registered += 1
 
     # --- inject_message -------------------------------------------------------
@@ -3235,12 +3403,12 @@ def register_queen_lifecycle_tools(
         """
         runtime = _get_runtime()
         if runtime is None:
-            return json.dumps({"error": "No graph loaded in this session."})
+            return json.dumps({"error": "No colony running in this session."})
 
-        graph_id = runtime.graph_id
-        reg = runtime.get_graph_registration(graph_id)
+        colony_id = runtime.colony_id
+        reg = runtime.get_worker_registration(colony_id)
         if reg is None:
-            return json.dumps({"error": "Graph not found"})
+            return json.dumps({"error": "Colony not found"})
 
         # Prefer nodes that are actively waiting (e.g. escalation receivers
         # blocked on queen guidance) over the main event-loop node.
@@ -3463,7 +3631,7 @@ def register_queen_lifecycle_tools(
             runtime = _get_runtime()
             if runtime is not None:
                 try:
-                    await session_manager.unload_graph(manager_session_id)
+                    await session_manager.unload_colony(manager_session_id)
                 except Exception as e:
                     logger.error("Failed to unload existing graph: %s", e, exc_info=True)
                     return json.dumps({"error": f"Failed to unload existing graph: {e}"})
@@ -3475,86 +3643,89 @@ def register_queen_lifecycle_tools(
             if not resolved_path.exists():
                 return json.dumps({"error": f"Agent path does not exist: {agent_path}"})
 
-            # Pre-check: verify the module exports goal/nodes/edges before
-            # attempting the full load.  This gives the queen an actionable
-            # error message instead of a cryptic ImportError or TypeError.
-            try:
-                import importlib
-                import sys as _sys
+            # Pre-check: verify the agent can be loaded before attempting
+            # the full session load.  Declarative (agent.json) agents skip
+            # the Python import check since AgentRunner.load() handles them.
+            _has_yaml = (resolved_path / "agent.json").exists()
+            if not _has_yaml:
+                # Legacy Python agent: verify module exports goal/nodes/edges
+                try:
+                    import importlib
+                    import sys as _sys
 
-                pkg_name = resolved_path.name
-                parent_dir = str(resolved_path.resolve().parent)
-                # Temporarily put parent on sys.path for import
-                if parent_dir not in _sys.path:
-                    _sys.path.insert(0, parent_dir)
-                # Evict stale cached modules
-                stale = [n for n in _sys.modules if n == pkg_name or n.startswith(f"{pkg_name}.")]
-                for n in stale:
-                    del _sys.modules[n]
+                    pkg_name = resolved_path.name
+                    parent_dir = str(resolved_path.resolve().parent)
+                    if parent_dir not in _sys.path:
+                        _sys.path.insert(0, parent_dir)
+                    stale = [
+                        n for n in _sys.modules if n == pkg_name or n.startswith(f"{pkg_name}.")
+                    ]
+                    for n in stale:
+                        del _sys.modules[n]
 
-                mod = importlib.import_module(pkg_name)
-                missing_attrs = [
-                    attr for attr in ("goal", "nodes", "edges") if getattr(mod, attr, None) is None
-                ]
-                if missing_attrs:
+                    mod = importlib.import_module(pkg_name)
+                    missing_attrs = [
+                        attr
+                        for attr in ("goal", "nodes", "edges")
+                        if getattr(mod, attr, None) is None
+                    ]
+                    if missing_attrs:
+                        return json.dumps(
+                            {
+                                "error": (
+                                    f"Agent module '{pkg_name}' is missing module-level "
+                                    f"attributes: {', '.join(missing_attrs)}. "
+                                    f"Fix: in {pkg_name}/__init__.py, add "
+                                    f"'from .agent import {', '.join(missing_attrs)}' "
+                                    f"so that 'import {pkg_name}' exposes them at "
+                                    f"package level."
+                                )
+                            }
+                        )
+                except Exception as pre_err:
                     return json.dumps(
                         {
                             "error": (
-                                f"Agent module '{pkg_name}' is missing module-level "
-                                f"attributes: {', '.join(missing_attrs)}. "
-                                f"Fix: in {pkg_name}/__init__.py, add "
-                                f"'from .agent import {', '.join(missing_attrs)}' "
-                                f"so that 'import {pkg_name}' exposes them at package level."
+                                f"Failed to import agent module "
+                                f"'{resolved_path.name}': {pre_err}. "
+                                f"Fix: ensure {resolved_path.name}/__init__.py "
+                                f"exists and can be imported without errors "
+                                f"(check syntax, missing dependencies, and "
+                                f"relative imports)."
                             )
                         }
                     )
-            except Exception as pre_err:
-                return json.dumps(
-                    {
-                        "error": (
-                            f"Failed to import agent module '{resolved_path.name}': {pre_err}. "
-                            f"Fix: ensure {resolved_path.name}/__init__.py exists and can be "
-                            f"imported without errors (check syntax, missing dependencies, "
-                            f"and relative imports)."
-                        )
-                    }
-                )
 
             try:
-                updated_session = await session_manager.load_graph(
+                updated_session = await session_manager.load_colony(
                     manager_session_id,
                     str(resolved_path),
                 )
                 info = updated_session.worker_info
 
-                # Validate that all tools declared by nodes are registered
+                # Tools declared but not registered in the loaded runtime are
+                # stripped with a warning so the worker still starts. Forked
+                # workers often snapshot the queen's tool list which includes
+                # MCP tools the worker's runtime doesn't load; blocking on
+                # that would leave the queen stranded.
                 loaded_runtime = _get_runtime()
                 if loaded_runtime is not None:
                     available_tool_names = {t.name for t in loaded_runtime._tools}
-                    missing_by_node: dict[str, list[str]] = {}
                     for node in loaded_runtime.graph.nodes:
                         if node.tools:
-                            missing = set(node.tools) - available_tool_names
+                            declared = list(node.tools)
+                            kept = [t for t in declared if t in available_tool_names]
+                            missing = [t for t in declared if t not in available_tool_names]
                             if missing:
-                                missing_by_node[f"{node.name} (id={node.id})"] = sorted(missing)
-                    if missing_by_node:
-                        # Unload the broken graph
-                        try:
-                            await session_manager.unload_graph(manager_session_id)
-                        except Exception:
-                            pass
-                        details = "; ".join(
-                            f"Node '{k}' missing {v}" for k, v in missing_by_node.items()
-                        )
-                        return json.dumps(
-                            {
-                                "error": (
-                                    f"Tool validation failed: {details}. "
-                                    "Fix node tool declarations or add the missing "
-                                    "tools, then try loading again."
+                                logger.warning(
+                                    "Node '%s' (id=%s) declares %d tools not in the "
+                                    "loaded runtime; stripping and continuing: %s",
+                                    node.name,
+                                    node.id,
+                                    len(missing),
+                                    sorted(missing),
                                 )
-                            }
-                        )
+                                node.tools = kept
 
                 # Ensure we have a flowchart for this agent — try in order:
                 # 1. Already in phase_state (from planning workflow)
@@ -3563,14 +3734,14 @@ def register_queen_lifecycle_tools(
                 if phase_state is not None:
                     if phase_state.original_draft_graph is None:
                         # Try loading from file
-                        file_draft, file_map = _load_flowchart_file(resolved_path)
+                        file_draft, file_map = load_flowchart_file(resolved_path)
                         if file_draft is not None:
                             phase_state.original_draft_graph = file_draft
                             phase_state.flowchart_map = file_map
                         elif loaded_runtime is not None:
                             # Synthesize from runtime graph
                             goal = loaded_runtime.goal
-                            synth_draft, synth_map = _synthesize_draft_from_runtime(
+                            synth_draft, synth_map = synthesize_draft_from_runtime(
                                 list(loaded_runtime.graph.nodes),
                                 list(loaded_runtime.graph.edges),
                                 agent_name=resolved_path.name,
@@ -3580,7 +3751,7 @@ def register_queen_lifecycle_tools(
                             phase_state.flowchart_map = synth_map
                             # Persist the synthesized flowchart so it's
                             # available on next load without re-synthesis
-                            _save_flowchart_file(resolved_path, synth_draft, synth_map)
+                            save_flowchart_file(resolved_path, synth_draft, synth_map)
 
                     # Emit to frontend
                     if (
@@ -3592,9 +3763,10 @@ def register_queen_lifecycle_tools(
                             try:
                                 await bus.publish(
                                     AgentEvent(
-                                        type=EventType.FLOWCHART_MAP_UPDATED,
+                                        type=EventType.CUSTOM,
                                         stream_id="queen",
                                         data={
+                                            "event": "flowchart_updated",
                                             "map": phase_state.flowchart_map,
                                             "original_draft": phase_state.original_draft_graph,
                                         },
@@ -3609,7 +3781,7 @@ def register_queen_lifecycle_tools(
                     await phase_state.switch_to_staging()
                     _update_meta_json(session_manager, manager_session_id, {"phase": "staging"})
 
-                graph_name = info.name if info else updated_session.graph_id
+                graph_name = info.name if info else updated_session.colony_id
                 return json.dumps(
                     {
                         "status": "loaded",
@@ -3618,9 +3790,9 @@ def register_queen_lifecycle_tools(
                             f"Successfully loaded '{graph_name}'. "
                             "You are now in STAGING phase. "
                             "Call run_agent_with_input(task) to start the graph, "
-                            "or stop_graph_and_edit() to go back to building."
+                            "or stop_worker_and_review() to go back to building."
                         ),
-                        "graph_id": updated_session.graph_id,
+                        "colony_id": updated_session.colony_id,
                         "graph_name": graph_name,
                         "goal": info.goal_name if info else "",
                         "node_count": info.node_count if info else 0,
@@ -3635,7 +3807,7 @@ def register_queen_lifecycle_tools(
             description=(
                 "Load a newly built agent as the worker in this session. "
                 "After building and validating an agent, call this with the agent's "
-                "path (e.g. 'exports/my_agent') to make it available immediately. "
+                "path (e.g. '~/.hive/colonies/my_agent') to make it available immediately. "
                 "The user will see the agent's graph and can interact with it."
             ),
             parameters={
@@ -3643,7 +3815,9 @@ def register_queen_lifecycle_tools(
                 "properties": {
                     "agent_path": {
                         "type": "string",
-                        "description": ("Path to the agent directory (e.g. 'exports/my_agent')"),
+                        "description": (
+                            "Path to the agent directory (e.g. '~/.hive/colonies/my_agent')"
+                        ),
                     },
                 },
                 "required": ["agent_path"],
@@ -3661,30 +3835,103 @@ def register_queen_lifecycle_tools(
     async def run_agent_with_input(task: str) -> str:
         """Run the loaded worker agent with the given task input.
 
-        Performs preflight checks (credentials, MCP resync), triggers the
-        worker's default entry point, and switches to running phase.
+        Phase 4 unified path: spawns the loaded worker through
+        ``session.colony.spawn(...)`` (a real ColonyRuntime) instead of
+        the deprecated ``AgentHost.trigger`` → ``Orchestrator`` flow.
+        The new path passes ``input_data={"user_request": task}``
+        straight into ``AgentLoop._build_initial_message`` which
+        renders ALL keys to the worker's first user message — no
+        buffer filter, no dropped task string, no orchestrator
+        graph-execution machinery.
+
+        We still read the legacy ``session.colony_runtime`` (the
+        AgentHost loaded by ``load_built_agent``) to pull the worker's
+        tool list, tool executor, and entry-node system prompt — those
+        are the loaded honeycomb / custom worker's actual identity and
+        we want the spawned worker to BE that, not the queen's generic
+        colony spec.
         """
-        runtime = _get_runtime()
-        if runtime is None:
+        legacy = _get_runtime()  # the loaded AgentHost from load_built_agent
+        if legacy is None:
             return json.dumps({"error": "No worker loaded in this session."})
 
+        colony = getattr(session, "colony", None)
+        if colony is None:
+            return json.dumps(
+                {
+                    "error": (
+                        "Session has no unified ColonyRuntime — "
+                        "_start_unified_colony_runtime did not run. "
+                        "Cannot spawn worker."
+                    )
+                }
+            )
+
+        # Diagnostic: log the exact task arg the queen passed so we can
+        # spot generic / context-free task strings before they reach
+        # the worker. The worker has no chat context, so a vague task
+        # is the #1 cause of useless worker runs.
+        logger.info(
+            "run_agent_with_input: queen passing task to worker (len=%d): %r",
+            len(task),
+            task[:500] if isinstance(task, str) else task,
+        )
+        if isinstance(task, str) and len(task) < 60:
+            logger.warning(
+                "run_agent_with_input: SHORT TASK STRING (%d chars). "
+                "The worker has zero context from the queen's chat — "
+                "tasks shorter than ~60 chars usually fail because "
+                "they lack the specific instructions the worker needs. "
+                "Task: %r",
+                len(task),
+                task,
+            )
+
         try:
-            # Pre-flight: validate credentials and resync MCP servers.
+            # Pre-flight: compute the set of tools whose credentials are
+            # NOT currently available, and resync MCP servers. We do NOT
+            # hard-fail on missing credentials anymore — instead we drop
+            # the affected tools from the worker's spawn_tools list a
+            # few lines below. Hard-failing here caused unrelated tools
+            # (e.g. GitHub tools leaking into a LinkedIn worker config)
+            # to block the whole spawn with a CredentialError; the fix
+            # is to treat unset credentials as "drop these tools" rather
+            # than "abort the worker".
+            #
+            # Note: the MCP admission gate (_build_mcp_admission_gate in
+            # tool_registry.py) already filters MCP tools at registration
+            # time. This preflight covers the non-MCP path — tools.py
+            # discoveries via discover_from_module — which has no
+            # credential gate of its own.
             loop = asyncio.get_running_loop()
+            unavailable_tools: set[str] = set()
 
             async def _preflight():
-                cred_error: CredentialError | None = None
+                nonlocal unavailable_tools
                 try:
-                    await loop.run_in_executor(
+                    from framework.credentials.validation import compute_unavailable_tools
+
+                    drop, messages = await loop.run_in_executor(
                         None,
-                        lambda: validate_credentials(
-                            runtime.graph.nodes,
-                            interactive=False,
-                            skip=False,
-                        ),
+                        lambda: compute_unavailable_tools(legacy.graph.nodes),
                     )
-                except CredentialError as e:
-                    cred_error = e
+                    unavailable_tools = drop
+                    if drop:
+                        logger.warning(
+                            "run_agent_with_input: dropping %d tool(s) with "
+                            "unavailable credentials from worker spawn: %s",
+                            len(drop),
+                            "; ".join(messages),
+                        )
+                except Exception as exc:
+                    # Validation itself failing (not a credential failure —
+                    # a code error in the validator) should not block the
+                    # spawn. Log and proceed as if nothing was dropped.
+                    logger.warning(
+                        "compute_unavailable_tools raised, proceeding without "
+                        "credential-based tool filtering: %s",
+                        exc,
+                    )
 
                 runner = getattr(session, "runner", None)
                 if runner:
@@ -3696,9 +3943,6 @@ def register_queen_lifecycle_tools(
                     except Exception as e:
                         logger.warning("MCP resync failed: %s", e)
 
-                if cred_error is not None:
-                    raise cred_error
-
             try:
                 await asyncio.wait_for(_preflight(), timeout=_START_PREFLIGHT_TIMEOUT)
             except TimeoutError:
@@ -3706,23 +3950,107 @@ def register_queen_lifecycle_tools(
                     "run_agent_with_input preflight timed out after %ds — proceeding",
                     _START_PREFLIGHT_TIMEOUT,
                 )
-            except CredentialError:
-                raise  # handled below
 
-            # Resume timers in case they were paused by a previous stop
-            runtime.resume_timers()
+            # Build a per-spawn AgentSpec that mirrors the loaded
+            # worker's entry-node identity. This is what makes the
+            # spawned ColonyRuntime worker run the loaded honeycomb /
+            # custom worker's code instead of the queen's generic
+            # colony default.
+            from framework.agent_loop.types import AgentSpec
 
-            # Get session state from any prior execution for memory continuity
-            session_state = runtime._get_primary_session_state("default") or {}
+            graph = getattr(legacy, "graph", None)
+            entry_node = None
+            if graph is not None and hasattr(graph, "get_node"):
+                try:
+                    entry_node = graph.get_node(graph.entry_node)
+                except Exception:
+                    entry_node = None
 
-            if session_id:
-                session_state["resume_session_id"] = session_id
+            worker_system_prompt = (
+                getattr(entry_node, "system_prompt", None)
+                if entry_node is not None
+                else None
+            ) or ""
 
-            exec_id = await runtime.trigger(
-                entry_point_id="default",
-                input_data={"user_request": task},
-                session_state=session_state,
+            worker_tool_names = (
+                list(getattr(entry_node, "tools", []) or [])
+                if entry_node is not None
+                else []
             )
+
+            # Drop any tool whose credential isn't available (GitHub
+            # tools when GITHUB_TOKEN is unset, etc). The preflight
+            # above populated ``unavailable_tools``; apply the filter
+            # HERE — before the AgentSpec is built — so the worker
+            # only sees tools it can actually run.
+            dropped_from_names: list[str] = []
+            if unavailable_tools:
+                original = worker_tool_names
+                worker_tool_names = [t for t in original if t not in unavailable_tools]
+                dropped_from_names = [t for t in original if t in unavailable_tools]
+                if dropped_from_names:
+                    logger.warning(
+                        "run_agent_with_input: dropped %d tool(s) from worker "
+                        "AgentSpec due to unavailable credentials: %s",
+                        len(dropped_from_names),
+                        ", ".join(dropped_from_names),
+                    )
+
+            spawn_spec = AgentSpec(
+                id=f"loaded_worker:{getattr(graph, 'id', 'unknown')}",
+                name=getattr(graph, "id", "loaded_worker"),
+                description=(
+                    "Loaded worker agent spawned via run_agent_with_input "
+                    "through the unified ColonyRuntime path."
+                ),
+                system_prompt=worker_system_prompt,
+                tools=worker_tool_names,
+                tool_access_policy="all",
+            )
+
+            # Pull the live tool objects + executor straight from the
+            # loaded AgentHost so the spawned worker uses its actual
+            # MCP-loaded tools (browser, hubspot, honeycomb, etc.).
+            spawn_tools = list(getattr(legacy, "_tools", []) or [])
+            spawn_tool_executor = getattr(legacy, "_tool_executor", None)
+
+            # Same credential-based filter on the live Tool objects
+            # passed to the worker. Without this the worker would still
+            # receive the GitHub tool definitions in its registry —
+            # it just wouldn't see them in its AgentSpec, so the LLM
+            # wouldn't know to use them. Dropping from both lists
+            # makes the filter complete.
+            if unavailable_tools:
+                before = len(spawn_tools)
+                spawn_tools = [
+                    t for t in spawn_tools
+                    if getattr(t, "name", None) not in unavailable_tools
+                ]
+                dropped_count = before - len(spawn_tools)
+                if dropped_count:
+                    logger.info(
+                        "run_agent_with_input: dropped %d tool object(s) from "
+                        "spawn_tools (unavailable credentials)",
+                        dropped_count,
+                    )
+
+            worker_ids = await colony.spawn(
+                task=task,
+                count=1,
+                input_data={"user_request": task},
+                agent_spec=spawn_spec,
+                tools=spawn_tools,
+                tool_executor=spawn_tool_executor,
+                # Use the legacy single-worker stream tag so events flow
+                # through the SSE filter into the queen DM chat. The
+                # default "worker:{uuid}" tag is reserved for parallel
+                # fan-out via run_parallel_workers and is filtered out
+                # of the queen DM by routes_events.py to keep the chat
+                # clean. The loaded primary worker is the user's
+                # main visible workstream and must NOT be filtered.
+                stream_id="worker",
+            )
+            new_worker_id = worker_ids[0] if worker_ids else ""
 
             # Switch to running phase
             if phase_state is not None:
@@ -3733,8 +4061,10 @@ def register_queen_lifecycle_tools(
                 {
                     "status": "started",
                     "phase": "running",
-                    "execution_id": exec_id,
+                    "worker_id": new_worker_id,
                     "task": task,
+                    "tool_count": len(spawn_tools),
+                    "system_prompt_chars": len(worker_system_prompt),
                 }
             )
         except CredentialError as e:
@@ -3752,21 +4082,44 @@ def register_queen_lifecycle_tools(
                 )
             return json.dumps(error_payload)
         except Exception as e:
+            logger.exception("run_agent_with_input: spawn failed")
             return json.dumps({"error": f"Failed to start worker: {e}"})
 
     _run_input_tool = Tool(
         name="run_agent_with_input",
         description=(
-            "Run the loaded worker agent with the given task. Validates credentials, "
-            "triggers the worker's default entry point, and switches to running phase. "
-            "Use this after loading an agent (staging phase) to start execution."
+            "Run the loaded worker agent with the given task.\n\n"
+            "CRITICAL: the worker is a FRESH process. It has NO memory of "
+            "your conversation with the user, NO knowledge of what was "
+            "discussed, and NO access to your context. It only sees the "
+            "single 'task' string you pass here. If the user asked you "
+            "to fetch '125 tickers and build a market report with "
+            "gainers, losers, and category breakdowns', that ENTIRE "
+            "specification must be in the task arg verbatim — not "
+            "'continue our work', not 'do what we discussed', not "
+            "'finish the analysis'. Bad task: 'Continue the work from "
+            "the queen's current session'. Good task: 'Fetch all 125 "
+            "tickers from the honeycomb API (paginate past the default "
+            "50 page limit), then build a full market report including: "
+            "(1) top 10 gainers by % change, (2) top 10 losers, (3) top "
+            "10 by volume, (4) breakdown by category, (5) any unusual "
+            "patterns. Return as a structured summary.' Validates "
+            "credentials and switches to running phase. Use this after "
+            "loading an agent (staging phase) to start execution."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "The task or input for the worker agent to execute",
+                    "description": (
+                        "FULL self-contained task specification for the "
+                        "worker. Must include every requirement, "
+                        "constraint, and detail the worker needs — the "
+                        "worker has zero context from your conversation. "
+                        "Write it as if you're handing the task to a "
+                        "stranger who has never seen the user's request."
+                    ),
                 },
             },
             "required": ["task"],
@@ -3774,6 +4127,125 @@ def register_queen_lifecycle_tools(
     )
     registry.register(
         "run_agent_with_input", _run_input_tool, lambda inputs: run_agent_with_input(**inputs)
+    )
+    tools_registered += 1
+
+    # --- list_worker_questions / reply_to_worker ------------------------------
+    #
+    # Workers escalate via the framework-level ``escalate`` tool, which emits
+    # ESCALATION_REQUESTED events stamped with a fresh request_id. The queen's
+    # colony-scoped subscription (see queen_orchestrator._on_worker_escalation)
+    # records each pending escalation on ``session.pending_escalations``,
+    # keyed by request_id, so multiple concurrent waiters stay addressable.
+    # These tools read and drain that inbox.
+
+    async def list_worker_questions() -> str:
+        """List pending worker escalations awaiting a queen reply."""
+        pending = getattr(session, "pending_escalations", None) or {}
+        # Copy values and trim context to keep the tool return compact.
+        entries = []
+        now = time.time()
+        for entry in pending.values():
+            entries.append(
+                {
+                    "request_id": entry.get("request_id"),
+                    "worker_id": entry.get("worker_id"),
+                    "colony_id": entry.get("colony_id"),
+                    "node_id": entry.get("node_id"),
+                    "reason": entry.get("reason"),
+                    "context_preview": (entry.get("context") or "")[:300],
+                    "waiting_seconds": round(now - float(entry.get("opened_at") or now), 1),
+                }
+            )
+        return json.dumps({"count": len(entries), "pending": entries})
+
+    _list_questions_tool = Tool(
+        name="list_worker_questions",
+        description=(
+            "List all worker escalations currently awaiting your reply. "
+            "Each entry has a request_id that you pass to reply_to_worker() "
+            "to unblock the specific worker that asked."
+        ),
+        parameters={"type": "object", "properties": {}},
+    )
+    registry.register(
+        "list_worker_questions",
+        _list_questions_tool,
+        lambda inputs: list_worker_questions(),
+    )
+    tools_registered += 1
+
+    async def reply_to_worker(request_id: str, reply: str) -> str:
+        """Reply to a specific worker escalation by request_id."""
+        runtime = _get_runtime()
+        if runtime is None:
+            return json.dumps({"error": "No colony running in this session."})
+
+        pending = getattr(session, "pending_escalations", None)
+        if pending is None:
+            return json.dumps({"error": "Session has no escalation inbox."})
+
+        entry = pending.get(request_id)
+        if entry is None:
+            return json.dumps(
+                {
+                    "error": "Unknown request_id. Call list_worker_questions() "
+                    "to see currently pending escalations.",
+                    "request_id": request_id,
+                }
+            )
+
+        worker_id = entry.get("worker_id")
+        if not worker_id:
+            return json.dumps(
+                {"error": "Escalation entry is missing worker_id.", "request_id": request_id}
+            )
+
+        # Format the reply so the waiting worker's conversation shows
+        # it as a queen handoff rather than a raw user message.
+        reply_text = f"[QUEEN_REPLY] request_id={request_id}\n{reply}"
+        try:
+            delivered = await runtime.inject_input(worker_id, reply_text)
+        except Exception as e:
+            return json.dumps({"error": f"Failed to inject reply: {e}"})
+
+        # Drop the entry regardless of delivery — a failed delivery
+        # usually means the worker already terminated, in which case
+        # it cannot be unblocked and the entry should not linger.
+        pending.pop(request_id, None)
+
+        return json.dumps(
+            {
+                "status": "delivered" if delivered else "worker_not_active",
+                "worker_id": worker_id,
+                "request_id": request_id,
+            }
+        )
+
+    _reply_tool = Tool(
+        name="reply_to_worker",
+        description=(
+            "Reply to a specific worker escalation. The reply is injected "
+            "into the identified worker's conversation so it can resume. "
+            "Use list_worker_questions() to discover pending request_ids."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "request_id": {
+                    "type": "string",
+                    "description": "The escalation request_id from list_worker_questions.",
+                },
+                "reply": {
+                    "type": "string",
+                    "description": "Guidance or answer text to hand back to the worker.",
+                },
+            },
+            "required": ["request_id", "reply"],
+        },
+    )
+    registry.register(
+        "reply_to_worker", _reply_tool, lambda inputs: reply_to_worker(**inputs)
     )
     tools_registered += 1
 
@@ -3795,7 +4267,7 @@ def register_queen_lifecycle_tools(
 
         if tdef is None:
             if trigger_type and trigger_config:
-                from framework.runtime.triggers import TriggerDefinition
+                from framework.host.triggers import TriggerDefinition
 
                 tdef = TriggerDefinition(
                     id=trigger_id,

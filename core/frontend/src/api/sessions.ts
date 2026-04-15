@@ -1,6 +1,7 @@
 import { api } from "./client";
 import type {
   AgentEvent,
+  HistorySession,
   LiveSession,
   LiveSessionDetail,
   EntryPoint,
@@ -9,20 +10,22 @@ import type {
 export const sessionsApi = {
   // --- Session lifecycle ---
 
-  /** Create a session. If agentPath is provided, loads a graph in one step. */
-  create: (agentPath?: string, agentId?: string, model?: string, initialPrompt?: string, queenResumeFrom?: string) =>
+  /** Create a session. If agentPath is provided, loads a colony in one step. */
+  create: (agentPath?: string, agentId?: string, model?: string, initialPrompt?: string, queenResumeFrom?: string, initialPhase?: string, workerName?: string) =>
     api.post<LiveSession>("/sessions", {
       agent_path: agentPath,
       agent_id: agentId,
       model,
       initial_prompt: initialPrompt,
       queen_resume_from: queenResumeFrom || undefined,
+      initial_phase: initialPhase || undefined,
+      worker_name: workerName || undefined,
     }),
 
   /** List all active sessions. */
   list: () => api.get<{ sessions: LiveSession[] }>("/sessions"),
 
-  /** Get session detail (includes entry_points, graphs when a graph is loaded). */
+  /** Get session detail (includes entry_points, colonies when a worker is loaded). */
   get: (sessionId: string) =>
     api.get<LiveSessionDetail>(`/sessions/${sessionId}`),
 
@@ -32,23 +35,23 @@ export const sessionsApi = {
       `/sessions/${sessionId}`,
     ),
 
-  // --- Graph lifecycle ---
+  // --- Colony lifecycle ---
 
-  loadGraph: (
+  loadColony: (
     sessionId: string,
     agentPath: string,
-    graphId?: string,
+    colonyId?: string,
     model?: string,
   ) =>
-    api.post<LiveSession>(`/sessions/${sessionId}/graph`, {
+    api.post<LiveSession>(`/sessions/${sessionId}/colony`, {
       agent_path: agentPath,
-      graph_id: graphId,
+      colony_id: colonyId,
       model,
     }),
 
-  unloadGraph: (sessionId: string) =>
-    api.delete<{ session_id: string; graph_unloaded: boolean }>(
-      `/sessions/${sessionId}/graph`,
+  unloadColony: (sessionId: string) =>
+    api.delete<{ session_id: string; colony_unloaded: boolean }>(
+      `/sessions/${sessionId}/colony`,
     ),
 
   // --- Session info ---
@@ -71,8 +74,18 @@ export const sessionsApi = {
       patch,
     ),
 
-  graphs: (sessionId: string) =>
-    api.get<{ graphs: string[] }>(`/sessions/${sessionId}/graphs`),
+  activateTrigger: (sessionId: string, triggerId: string) =>
+    api.post<{ status: string; trigger_id: string }>(
+      `/sessions/${sessionId}/triggers/${triggerId}/activate`,
+    ),
+
+  deactivateTrigger: (sessionId: string, triggerId: string) =>
+    api.post<{ status: string; trigger_id: string }>(
+      `/sessions/${sessionId}/triggers/${triggerId}/deactivate`,
+    ),
+
+  colonies: (sessionId: string) =>
+    api.get<{ colonies: string[] }>(`/sessions/${sessionId}/colonies`),
 
   /** Get persisted eventbus log for a session (works for cold sessions — used for full UI replay). */
   eventsHistory: (sessionId: string) =>
@@ -84,7 +97,7 @@ export const sessionsApi = {
 
   /** List all queen sessions on disk — live + cold (post-restart). */
   history: () =>
-    api.get<{ sessions: Array<{ session_id: string; cold: boolean; live: boolean; has_messages: boolean; created_at: number; agent_name?: string | null; agent_path?: string | null }> }>("/sessions/history"),
+    api.get<{ sessions: HistorySession[] }>("/sessions/history"),
 
   /** Permanently delete a history session (stops live session + removes disk files). */
   deleteHistory: (sessionId: string) =>

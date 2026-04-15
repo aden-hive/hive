@@ -1,5 +1,5 @@
 {
-    "hive-tools": {
+    "hive_tools": {
         "transport": "stdio",
         "command": "uv",
         "args": [
@@ -9,6 +9,6 @@
             "--stdio"
         ],
         "cwd": "../../../tools",
-        "description": "Hive tools MCP server providing web_search, web_scrape, github tools, and file utilities"
+        "description": "hive_tools MCP server providing web_search, web_scrape, github tools, and file utilities"
     }
 }

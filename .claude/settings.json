@@ -1,4 +1,52 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"_is_context_too_large_error\" core/framework/agent_loop/agent_loop.py core/framework/agent_loop/internals/*.py)",
+      "Read(//^class/ {cls=$3} /def test_/**)",
+      "Read(//^    @pytest.mark.asyncio/{getline n; print NR\": \"n} /^    def test_/**)",
+      "Bash(python3)",
+      "Bash(grep -nE 'Tool\\\\\\(\\\\s*$|name=\"[a-z_]+\",' core/framework/tools/queen_lifecycle_tools.py)",
+      "Bash(awk -F'\"' '{print $2}')",
+      "Bash(grep -n \"create_colony\\\\|colony-spawn\\\\|colony_spawn\" /home/timothy/aden/hive/core/framework/agents/queen/nodes/__init__.py /home/timothy/aden/hive/core/framework/tools/*.py)",
+      "Bash(git stash:*)",
+      "Bash(python3 -c \"import sys,json; d=json.loads\\(sys.stdin.read\\(\\)\\); print\\('keys:', list\\(d.keys\\(\\)\\)[:10]\\)\")",
+      "Bash(python3 -c ':*)",
+      "Bash(uv run:*)",
+      "Read(//tmp/**)",
+      "Bash(grep -n \"useColony\\\\|const { queens, queenProfiles\" /home/timothy/aden/hive/core/frontend/src/pages/queen-dm.tsx)",
+      "Bash(awk 'NR==385,/\\\\}, \\\\[/' /home/timothy/aden/hive/core/frontend/src/pages/queen-dm.tsx)",
+      "Bash(xargs -I{} sh -c 'if ! grep -q \"^import base64\\\\|^from base64\" \"{}\"; then echo \"MISSING: {}\"; fi')",
+      "Bash(find /home/timothy/aden/hive/core/framework -name \"*.py\" -type f -exec grep -l \"FileConversationStore\\\\|class.*ConversationStore\" {} \\\\;)",
+      "Bash(find /home/timothy/aden/hive/core/framework -name \"*.py\" -exec grep -l \"run_parallel_workers\\\\|create_colony\" {} \\\\;)",
+      "Bash(awk '/^    async def execute\\\\\\(self, ctx: AgentContext\\\\\\)/,/^    async def [a-z_]+/ {print NR\": \"$0}' /home/timothy/aden/hive/core/framework/agent_loop/agent_loop.py)",
+      "Bash(grep -r \"max_concurrent_workers\\\\|max_depth\\\\|recursion\\\\|spawn.*bomb\" /home/timothy/aden/hive/core/framework/host/*.py)",
+      "Bash(wc -l /home/timothy/aden/hive/tools/src/gcu/browser/*.py /home/timothy/aden/hive/tools/src/gcu/browser/tools/*.py)",
+      "Bash(file /tmp/gcu_verify/*.png)",
+      "Bash(ps -eo pid,cmd)",
+      "Bash(ps -o pid,lstart,cmd -p 746640)",
+      "Bash(kill 746636)",
+      "Bash(ps -eo pid,lstart,cmd)",
+      "Bash(grep -E \"^d|\\\\.py$\")",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "Bash(xargs cat:*)",
+      "Bash(find /home/timothy/aden/hive -path \"*/.venv\" -prune -o -name \"*.py\" -type f -exec grep -l \"frontend\\\\|UI\\\\|terminal\\\\|interactive\\\\|TUI\" {} \\\\;)",
+      "Bash(wc -l /home/timothy/.hive/backup/*/SKILL.md)",
+      "Bash(awk -F'::' '{print $1}')",
+      "Bash(wait)",
+      "Bash(pkill -f \"pytest.*test_event_loop_node\")",
+      "Bash(pkill -f \"pytest.*TestToolConcurrency\")",
+      "Bash(grep -n \"def.*discover\\\\|/api/agents\\\\|agents_discover\" /home/timothy/aden/hive/core/framework/server/*.py)",
+      "Bash(bun run:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npm run:*)",
+      "Bash(npm test:*)"
+    ],
+    "additionalDirectories": [
+      "/home/timothy/.hive/skills/writing-hive-skills",
+      "/tmp",
+      "/home/timothy/.hive/skills"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {

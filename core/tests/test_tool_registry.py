@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from framework.llm.provider import Tool, ToolUse
-from framework.runner.tool_registry import ToolRegistry
+from framework.loader.tool_registry import ToolRegistry
 
 
 def _write_tool_module(tmp_path: Path, content: str) -> Path:
@@ -136,7 +136,7 @@ def test_register_mcp_server_uses_connection_manager_when_enabled(monkeypatch):
             manager_calls.append(("release", server_name))
 
     monkeypatch.setattr(
-        "framework.runner.mcp_connection_manager.MCPConnectionManager.get_instance",
+        "framework.loader.mcp_connection_manager.MCPConnectionManager.get_instance",
         lambda: FakeManager(),
     )
 
@@ -172,7 +172,7 @@ def test_register_mcp_server_defaults_to_connection_manager(monkeypatch):
             pass
 
     monkeypatch.setattr(
-        "framework.runner.mcp_connection_manager.MCPConnectionManager.get_instance",
+        "framework.loader.mcp_connection_manager.MCPConnectionManager.get_instance",
         lambda: FakeManager(),
     )
 
@@ -194,7 +194,7 @@ def test_register_mcp_server_direct_client_when_manager_disabled(monkeypatch):
         created_clients.append(client)
         return client
 
-    monkeypatch.setattr("framework.runner.mcp_client.MCPClient", fake_client_factory)
+    monkeypatch.setattr("framework.loader.mcp_client.MCPClient", fake_client_factory)
 
     count = registry.register_mcp_server(
         {"name": "direct", "transport": "stdio", "command": "echo"},
@@ -264,7 +264,7 @@ def test_load_registry_servers_emits_structured_log_fields(monkeypatch):
 
     monkeypatch.setattr(registry, "register_mcp_server", lambda *args, **kwargs: 2)
     monkeypatch.setattr(
-        "framework.runner.tool_registry.logger.info",
+        "framework.loader.tool_registry.logger.info",
         lambda message, *args, **kwargs: captured_logs.append((message, kwargs.get("extra"))),
     )
 
@@ -488,7 +488,7 @@ def test_register_function_executor_calls_function():
 def test_discover_from_module_finds_tool_decorated_functions(tmp_path):
     """discover_from_module should pick up functions decorated with @tool."""
     module_src = """
-        from framework.runner.tool_registry import tool
+        from framework.loader.tool_registry import tool
 
         @tool(description="Say hello")
         def greet(name: str) -> str:
@@ -602,7 +602,7 @@ def test_session_context_is_injected_into_mcp_tool_call(monkeypatch):
             received.append(dict(arguments))
             return {"result": "ok"}
 
-    monkeypatch.setattr("framework.runner.mcp_client.MCPClient", FakeClient)
+    monkeypatch.setattr("framework.loader.mcp_client.MCPClient", FakeClient)
 
     registry.register_mcp_server(
         {"name": "ctx-server", "transport": "stdio", "command": "echo"},
@@ -656,7 +656,7 @@ def test_execution_context_overrides_session_context(monkeypatch):
             received.append(dict(arguments))
             return {"result": "ok"}
 
-    monkeypatch.setattr("framework.runner.mcp_client.MCPClient", FakeClient)
+    monkeypatch.setattr("framework.loader.mcp_client.MCPClient", FakeClient)
     registry.register_mcp_server(
         {"name": "exec-server", "transport": "stdio", "command": "echo"},
         use_connection_manager=False,
@@ -797,3 +797,109 @@ def test_resync_returns_false_when_credentials_unchanged(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "_snapshot_credentials", lambda: set())
 
     assert registry.resync_mcp_servers_if_needed() is False
+
+
+class TestMcpToolProducesImageFlag:
+    """Verify _convert_mcp_tool_to_framework_tool sets produces_image from the name.
+
+    This is the detection step that the filter in AgentLoop depends on —
+    if the regex regresses, text-only models will start seeing screenshot
+    tools they can't use.
+    """
+
+    @staticmethod
+    def _mcp_tool(name: str):
+        return SimpleNamespace(
+            name=name,
+            description=f"{name} description",
+            input_schema={"type": "object", "properties": {}, "required": []},
+            server_name="test",
+        )
+
+    def test_screenshot_flagged(self):
+        registry = ToolRegistry()
+        mcp = self._mcp_tool("browser_screenshot")
+        tool = registry._convert_mcp_tool_to_framework_tool(mcp)  # noqa: SLF001
+        assert tool.produces_image is True
+
+    def test_snapshot_not_flagged(self):
+        """browser_snapshot returns a DOM tree, not an image — must not match."""
+        registry = ToolRegistry()
+        mcp = self._mcp_tool("browser_snapshot")
+        tool = registry._convert_mcp_tool_to_framework_tool(mcp)  # noqa: SLF001
+        assert tool.produces_image is False
+
+    def test_case_insensitive_match(self):
+        registry = ToolRegistry()
+        mcp = self._mcp_tool("TakeScreenshot")
+        tool = registry._convert_mcp_tool_to_framework_tool(mcp)  # noqa: SLF001
+        assert tool.produces_image is True
+
+    def test_plain_tool_not_flagged(self):
+        registry = ToolRegistry()
+        mcp = self._mcp_tool("read_file")
+        tool = registry._convert_mcp_tool_to_framework_tool(mcp)  # noqa: SLF001
+        assert tool.produces_image is False
+
+    def test_image_suffix_variants_flagged(self):
+        registry = ToolRegistry()
+        for name in ("capture_image", "render_image", "get_image", "snapshot_image"):
+            tool = registry._convert_mcp_tool_to_framework_tool(self._mcp_tool(name))  # noqa: SLF001
+            assert tool.produces_image is True, f"{name} should be flagged"
+
+
+# ---------------------------------------------------------------------------
+# Concurrency-safe flag propagation
+# ---------------------------------------------------------------------------
+
+
+def test_mcp_tool_conversion_marks_known_safe_tools():
+    """MCP tools whose names are in CONCURRENCY_SAFE_TOOLS become concurrency_safe."""
+    from framework.loader.mcp_client import MCPTool
+    registry = ToolRegistry()
+
+    safe_mcp = MCPTool(
+        name="read_file",
+        description="",
+        input_schema={"type": "object", "properties": {}, "required": []},
+        server_name="stub",
+    )
+    unsafe_mcp = MCPTool(
+        name="execute_command",
+        description="",
+        input_schema={"type": "object", "properties": {}, "required": []},
+        server_name="stub",
+    )
+
+    safe_tool = registry._convert_mcp_tool_to_framework_tool(safe_mcp)  # noqa: SLF001
+    unsafe_tool = registry._convert_mcp_tool_to_framework_tool(unsafe_mcp)  # noqa: SLF001
+
+    assert safe_tool.concurrency_safe is True
+    assert unsafe_tool.concurrency_safe is False
+
+
+def test_concurrency_safe_allowlist_is_conservative():
+    """Every listed name must denote a read-only operation.
+
+    This test is a guard against someone casually adding a write-capable
+    tool to the allowlist. If a new name is added here, justify it in the
+    comment above the set in tool_registry.py.
+    """
+    from framework.loader.tool_registry import ToolRegistry
+
+    allowlist = ToolRegistry.CONCURRENCY_SAFE_TOOLS
+
+    # Positive assertions: known-safe read operations are present.
+    for name in ("read_file", "grep", "glob", "list_directory", "web_search"):
+        assert name in allowlist, f"{name} should be concurrency-safe"
+
+    # Negative assertions: nothing that mutates state is allowed in.
+    for forbidden in (
+        "execute_command",
+        "write_file",
+        "hashline_edit",
+        "browser_click",
+        "browser_type",
+        "browser_navigate",
+    ):
+        assert forbidden not in allowlist, f"{forbidden} must not be concurrency-safe"

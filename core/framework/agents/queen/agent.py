@@ -1,14 +1,12 @@
-"""Queen graph definition."""
+"""Queen agent definition.
 
-from framework.graph import Goal
-from framework.graph.edge import GraphSpec
+The queen is a single AgentLoop — no orchestrator dependency.
+Loaded by queen_orchestrator.create_queen().
+"""
+
+from framework.schemas.goal import Goal
 
 from .nodes import queen_node
-
-# ---------------------------------------------------------------------------
-# Queen graph — the primary persistent conversation.
-# Loaded by queen_orchestrator.create_queen(), NOT by AgentRunner.
-# ---------------------------------------------------------------------------
 
 queen_goal = Goal(
     id="queen-manager",
@@ -20,19 +18,11 @@ queen_goal = Goal(
     constraints=[],
 )
 
-queen_graph = GraphSpec(
-    id="queen-graph",
-    goal_id=queen_goal.id,
-    version="1.0.0",
-    entry_node="queen",
-    entry_points={"start": "queen"},
-    terminal_nodes=[],
-    pause_nodes=[],
-    nodes=[queen_node],
-    edges=[],
-    conversation_mode="continuous",
-    loop_config={
-        "max_iterations": 999_999,
-        "max_tool_calls_per_turn": 30,
-    },
-)
+# Loop config -- used by queen_orchestrator to build LoopConfig
+queen_loop_config = {
+    "max_iterations": 999_999,
+    "max_tool_calls_per_turn": 30,
+    "max_context_tokens": 180_000,
+}
+
+__all__ = ["queen_goal", "queen_loop_config", "queen_node"]

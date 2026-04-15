@@ -27,6 +27,15 @@ class Tool:
     name: str
     description: str
     parameters: dict[str, Any] = field(default_factory=dict)
+    # If True, the tool may return ImageContent in its result. Text-only models
+    # (e.g. glm-5, deepseek-chat) have this hidden from their schema entirely.
+    produces_image: bool = False
+    # If True, this tool performs no filesystem/process/network writes and is
+    # safe to run concurrently with other safe-flagged tools inside the same
+    # assistant turn. Unsafe tools (writes, shell, browser actions) are always
+    # serialized after the safe batch. Default False - the conservative choice
+    # when a tool's behavior isn't explicitly vetted.
+    concurrency_safe: bool = False
 
 
 @dataclass

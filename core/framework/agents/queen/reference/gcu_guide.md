@@ -1,158 +1,80 @@
-# GCU Browser Automation Guide
+# Browser Automation Guide
 
-## When to Use GCU Nodes
+## When to Use Browser Nodes
 
-Use `node_type="gcu"` when:
-- The user's workflow requires **navigating real websites** (scraping, form-filling, social media interaction, testing web UIs)
-- The task involves **dynamic/JS-rendered pages** that `web_scrape` cannot handle (SPAs, infinite scroll, login-gated content)
-- The agent needs to **interact with a website** — clicking, typing, scrolling, selecting, uploading files
+Use browser nodes (with `tools: {policy: "all"}`) when:
+- The task requires interacting with web pages (clicking, typing, navigating)
+- No API is available for the target service
+- The user is already logged in to the target site
 
-Do NOT use GCU for:
-- Static content that `web_scrape` handles fine
-- API-accessible data (use the API directly)
-- PDF/file processing
-- Anything that doesn't require a browser UI
+## What Browser Nodes Are
 
-## What GCU Nodes Are
+- Regular `event_loop` nodes with browser tools from gcu-tools MCP server
+- Set `tools: {policy: "all"}` to give access to all browser tools
+- Wire into the graph with edges like any other node
+- No special node_type needed
 
-- `node_type="gcu"` — a declarative enhancement over `event_loop`
-- Framework auto-prepends browser best-practices system prompt
-- Framework auto-includes all 31 browser tools from `gcu-tools` MCP server
-- Same underlying `EventLoopNode` class — no new imports needed
-- `tools=[]` is correct — tools are auto-populated at runtime
+## Available Browser Tools
 
-## GCU Architecture Pattern  
+All tools are prefixed with `browser_`:
+- `browser_start`, `browser_open`, `browser_navigate` — launch/navigate
+- `browser_click`, `browser_click_coordinate`, `browser_fill`, `browser_type` — interact
+- `browser_press` (with optional `modifiers=["ctrl"]` etc.) — keyboard shortcuts
+- `browser_snapshot` — compact accessibility-tree read (structured)
+<!-- vision-only -->
+- `browser_screenshot` — visual capture (annotated PNG)
+<!-- /vision-only -->
+- `browser_shadow_query`, `browser_get_rect` — locate elements (shadow-piercing via `>>>`)
+- `browser_coords` — convert image pixels to CSS pixels (always use `css_x/y`, never `physical_x/y`)
+- `browser_scroll`, `browser_wait` — navigation helpers
+- `browser_evaluate` — run JavaScript
+- `browser_close`, `browser_close_finished` — tab cleanup
 
-GCU nodes are **subagents** — invoked via `delegate_to_sub_agent()`, not connected via edges.
+## Pick the right reading tool
 
-- Primary nodes (`event_loop`, client-facing) orchestrate; GCU nodes do browser work
-- Parent node declares `sub_agents=["gcu-node-id"]` and calls `delegate_to_sub_agent(agent_id="gcu-node-id", task="...")`
-- GCU nodes set `max_node_visits=1` (single execution per delegation), `client_facing=False`
-- GCU nodes use `output_keys=["result"]` and return structured JSON via `set_output("result", ...)`
+**`browser_snapshot`** — compact accessibility tree of interactive elements. Fast, cheap, good for static or form-heavy pages where the DOM matches what's visually rendered (documentation, simple dashboards, search results, settings pages).
 
-## GCU Node Definition Template
+**`browser_screenshot`** — visual capture + metadata (`cssWidth`, `devicePixelRatio`, scale fields). **Use this on any complex SPA** — LinkedIn, Twitter/X, Reddit, Gmail, Notion, Slack, Discord, any site using shadow DOM, virtual scrolling, React reconciliation, or dynamic layout. On these pages, snapshot refs go stale in seconds, shadow contents aren't in the AX tree, and virtual-scrolled elements disappear from the tree entirely. Screenshot is the **only** reliable way to orient yourself.
 
-```python
-gcu_browser_node = NodeSpec(
-    id="gcu-browser-worker",
-    name="Browser Worker",
-    description="Browser subagent that does X.",
-    node_type="gcu",
-    client_facing=False,
-    max_node_visits=1,
-    input_keys=[],
-    output_keys=["result"],
-    tools=[],  # Auto-populated with all browser tools
-    system_prompt="""\
-You are a browser agent. Your job: [specific task].
+Neither tool is "preferred" universally — they're for different jobs. Default to snapshot on text-heavy static pages, screenshot on SPAs and anything shadow-DOM-heavy. Activate the `browser-automation` skill for the full decision tree.
 
-## Workflow
-1. browser_start (only if no browser is running yet)
-2. browser_open(url=TARGET_URL) — note the returned targetId
-3. browser_snapshot to read the page
-4. [task-specific steps]
-5. set_output("result", JSON)
+## Coordinate rule: always CSS pixels
 
-## Output format
-set_output("result", JSON) with:
-- [field]: [type and description]
-""",
-)
+Chrome DevTools Protocol `Input.dispatchMouseEvent` takes **CSS pixels**, not physical pixels. After a screenshot, use `browser_coords(image_x, image_y)` and feed the returned `css_x/y` (NOT `physical_x/y`) to `browser_click_coordinate`, `browser_hover_coordinate`, `browser_press_at`. Feeding physical pixels on a HiDPI display (DPR=1.6, 2, or 3) overshoots by `DPR×` and clicks land in the wrong place. `getBoundingClientRect()` already returns CSS pixels — pass through unchanged, no DPR multiplication.
+
+## System prompt tips for browser nodes
+
+```
+1. On LinkedIn / X / Reddit / Gmail / any SPA — use browser_screenshot to orient,
+   not browser_snapshot. Shadow DOM and virtual scrolling make snapshots unreliable.
+2. For static pages (docs, forms, search results), browser_snapshot is fine.
+3. Before typing into a rich-text editor (X compose, LinkedIn DM, Gmail, Reddit),
+   click the input area first with browser_click_coordinate so React / Draft.js /
+   Lexical register a native focus event. Otherwise the send button stays disabled.
+4. Use browser_wait(seconds=2-3) after navigation for SPA hydration.
+5. If you hit an auth wall, call set_output with an error and move on.
+6. Keep tool calls per turn <= 10 for reliability.
 ```
 
-## Parent Node Template (orchestrating GCU subagents)
-
-```python
-orchestrator_node = NodeSpec(
-    id="orchestrator",
-    ...
-    node_type="event_loop",
-    sub_agents=["gcu-browser-worker"],
-    system_prompt="""\
-...
-delegate_to_sub_agent(
-    agent_id="gcu-browser-worker",
-    task="Navigate to [URL]. Do [specific task]. Return JSON with [fields]."
-)
-...
-""",
-    tools=[],  # Orchestrator doesn't need browser tools
-)
-```
-
-## mcp_servers.json with GCU
+## Example
 
 ```json
 {
-  "hive-tools": { ... },
-  "gcu-tools": {
-    "transport": "stdio",
-    "command": "uv",
-    "args": ["run", "python", "-m", "gcu.server", "--stdio"],
-    "cwd": "../../tools",
-    "description": "GCU tools for browser automation"
-  }
+  "id": "scan-profiles",
+  "name": "Scan LinkedIn Profiles",
+  "description": "Navigate LinkedIn search results and collect profile data",
+  "tools": {"policy": "all"},
+  "input_keys": ["search_url"],
+  "output_keys": ["profiles"],
+  "system_prompt": "Navigate to the search URL via browser_navigate(wait_until='load', timeout_ms=20000). Wait 3s for SPA hydration. On LinkedIn, use browser_screenshot to see the page — browser_snapshot misses shadow-DOM and virtual-scrolled content. Paginate through results by scrolling and screenshotting; extract each profile card by reading its visible layout..."
 }
 ```
 
-Note: `gcu-tools` is auto-added if any node uses `node_type="gcu"`, but including it explicitly is fine.
-
-## GCU System Prompt Best Practices
-
-Key rules to bake into GCU node prompts:
-
-- Prefer `browser_snapshot` over `browser_get_text("body")` — compact accessibility tree vs 100KB+ raw HTML
-- Always `browser_wait` after navigation
-- Use large scroll amounts (~2000-5000) for lazy-loaded content
-- For spillover files, use `run_command` with grep, not `read_file`
-- If auth wall detected, report immediately — don't attempt login
-- Keep tool calls per turn ≤10
-- Tab isolation: when browser is already running, use `browser_open(background=true)` and pass `target_id` to every call
-
-## Multiple Concurrent GCU Subagents
-
-When a task can be parallelized across multiple sites or profiles, declare a distinct GCU
-node for each and invoke them all in the same LLM turn.  The framework batches all
-`delegate_to_sub_agent` calls made in one turn and runs them with `asyncio.gather`, so
-they execute concurrently — not sequentially.
-
-**Each GCU subagent automatically gets its own isolated browser context** — no `profile=`
-argument is needed in tool calls.  The framework derives a unique profile from the subagent's
-node ID and instance counter and injects it via an asyncio `ContextVar` before the subagent
-runs.
-
-### Example: three sites in parallel
-
-```python
-# Three distinct GCU nodes
-gcu_site_a = NodeSpec(id="gcu-site-a", node_type="gcu", ...)
-gcu_site_b = NodeSpec(id="gcu-site-b", node_type="gcu", ...)
-gcu_site_c = NodeSpec(id="gcu-site-c", node_type="gcu", ...)
-
-orchestrator = NodeSpec(
-    id="orchestrator",
-    node_type="event_loop",
-    sub_agents=["gcu-site-a", "gcu-site-b", "gcu-site-c"],
-    system_prompt="""\
-Call all three subagents in a single response to run them in parallel:
-  delegate_to_sub_agent(agent_id="gcu-site-a", task="Scrape prices from site A")
-  delegate_to_sub_agent(agent_id="gcu-site-b", task="Scrape prices from site B")
-  delegate_to_sub_agent(agent_id="gcu-site-c", task="Scrape prices from site C")
-""",
-)
+Connected via regular edges:
+```
+search-setup -> scan-profiles -> process-results
 ```
 
-**Rules:**
-- Use distinct node IDs for each concurrent task — sharing an ID shares the browser context.
-- The GCU node prompts do not need to mention `profile=`; isolation is automatic.
-- Cleanup is automatic at session end, but GCU nodes can call `browser_stop()` explicitly
-  if they want to release resources mid-run.
+## Further detail
 
-## GCU Anti-Patterns
-
-- Using `browser_screenshot` to read text (use `browser_snapshot` instead; screenshots are for visual context only)
-- Re-navigating after scrolling (resets scroll position)
-- Attempting login on auth walls
-- Forgetting `target_id` in multi-tab scenarios
-- Putting browser tools directly on `event_loop` nodes instead of using GCU subagent pattern
-- Making GCU nodes `client_facing=True` (they should be autonomous subagents)
+For rich-text editor quirks (Lexical, Draft.js, ProseMirror), shadow-DOM shortcuts, `beforeunload` dialog neutralization, Trusted Types CSP on LinkedIn, keyboard shortcut dispatch, and per-site selector tables — **activate the `browser-automation` skill**. That skill has the full verified guidance and is refreshed against real production sites.

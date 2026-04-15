@@ -1,71 +1,20 @@
-"""
-Aden Hive Framework: A goal-driven agent runtime optimized for Builder observability.
+"""Hive Agent Framework.
 
-The runtime is designed around DECISIONS, not just actions. Every significant
-choice the agent makes is captured with:
-- What it was trying to do (intent)
-- What options it considered
-- What it chose and why
-- What happened as a result
-- Whether that was good or bad (evaluated post-hoc)
-
-This gives the Builder LLM the information it needs to improve agent behavior.
-
-## Testing Framework
-
-The framework includes a Goal-Based Testing system (Goal → Agent → Eval):
-- Generate tests from Goal success_criteria and constraints
-- Mandatory user approval before tests are stored
-- Parallel test execution with error categorization
-- Debug tools with fix suggestions
-
-See `framework.testing` for details.
+Core classes:
+    ColonyRuntime -- orchestrates parallel worker clones in a colony
+    AgentLoop      -- the LLM + tool execution loop (one per worker)
+    AgentLoader    -- loads agent config from disk, builds pipeline
+    DecisionTracker -- records decisions for post-hoc analysis
 """
 
-from framework.llm import LLMProvider
-
-try:
-    from framework.llm import AnthropicProvider  # noqa: F401
-except ImportError:
-    pass
-from framework.runner import AgentRunner
-from framework.runtime.core import Runtime
-from framework.schemas.decision import Decision, DecisionEvaluation, Option, Outcome
-from framework.schemas.run import Problem, Run, RunSummary
-
-# Testing framework
-from framework.testing import (
-    ApprovalStatus,
-    DebugTool,
-    ErrorCategory,
-    Test,
-    TestResult,
-    TestStorage,
-    TestSuiteResult,
-)
+from framework.agent_loop import AgentLoop
+from framework.host import ColonyRuntime
+from framework.loader import AgentLoader
+from framework.tracker import DecisionTracker
 
 __all__ = [
-    # Schemas
-    "Decision",
-    "Option",
-    "Outcome",
-    "DecisionEvaluation",
-    "Run",
-    "RunSummary",
-    "Problem",
-    # Runtime
-    "Runtime",
-    # LLM
-    "LLMProvider",
-    "AnthropicProvider",
-    # Runner
-    "AgentRunner",
-    # Testing
-    "Test",
-    "TestResult",
-    "TestSuiteResult",
-    "TestStorage",
-    "ApprovalStatus",
-    "ErrorCategory",
-    "DebugTool",
+    "ColonyRuntime",
+    "AgentLoader",
+    "AgentLoop",
+    "DecisionTracker",
 ]

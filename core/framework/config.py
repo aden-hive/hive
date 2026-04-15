@@ -12,13 +12,47 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from framework.graph.edge import DEFAULT_MAX_TOKENS
+DEFAULT_MAX_TOKENS = 8192
+
+# ---------------------------------------------------------------------------
+# Hive home directory structure
+# ---------------------------------------------------------------------------
+
+HIVE_HOME = Path.home() / ".hive"
+QUEENS_DIR = HIVE_HOME / "agents" / "queens"
+COLONIES_DIR = HIVE_HOME / "colonies"
+MEMORIES_DIR = HIVE_HOME / "memories"
+
+
+def queen_dir(queen_name: str = "default") -> Path:
+    """Return the storage directory for a named queen agent."""
+    return QUEENS_DIR / queen_name
+
+
+def colony_dir(colony_name: str) -> Path:
+    """Return the directory for a named colony."""
+    return COLONIES_DIR / colony_name
+
+
+def memory_dir(scope: str, name: str | None = None) -> Path:
+    """Return memory dir for a scope.
+
+    Examples::
+
+        memory_dir("global")                  -> ~/.hive/memories/global
+        memory_dir("colonies", "my_agent")    -> ~/.hive/memories/colonies/my_agent
+        memory_dir("agents/queens", "default")-> ~/.hive/memories/agents/queens/default
+        memory_dir("agents", "worker_name")   -> ~/.hive/memories/agents/worker_name
+    """
+    base = MEMORIES_DIR / scope
+    return base / name if name else base
+
 
 # ---------------------------------------------------------------------------
 # Low-level config file access
 # ---------------------------------------------------------------------------
 
-HIVE_CONFIG_FILE = Path.home() / ".hive" / "configuration.json"
+HIVE_CONFIG_FILE = HIVE_HOME / "configuration.json"
 
 # Hive LLM router endpoint (Anthropic-compatible).
 # litellm's Anthropic handler appends /v1/messages, so this is just the base host.
@@ -40,6 +74,48 @@ def get_hive_config() -> dict[str, Any]:
             e,
         )
         return {}
+
+
+# ---------------------------------------------------------------------------
+# Credential store helpers (for BYOK keys)
+# ---------------------------------------------------------------------------
+
+# Provider name → credential store ID mapping
+_PROVIDER_CRED_MAP: dict[str, str] = {
+    "anthropic": "anthropic",
+    "openai": "openai",
+    "gemini": "gemini",
+    "google": "gemini",
+    "minimax": "minimax",
+    "groq": "groq",
+    "cerebras": "cerebras",
+    "openrouter": "openrouter",
+    "mistral": "mistral",
+    "together": "together",
+    "together_ai": "together",
+    "deepseek": "deepseek",
+    "kimi": "kimi",
+    "hive": "hive",
+}
+
+
+def _get_api_key_from_credential_store(provider: str) -> str | None:
+    """Look up a BYOK API key from the encrypted credential store.
+
+    Returns None if no key is found or the credential store is unavailable.
+    """
+    if not os.environ.get("HIVE_CREDENTIAL_KEY"):
+        return None
+    cred_id = _PROVIDER_CRED_MAP.get(provider.lower())
+    if not cred_id:
+        return None
+    try:
+        from framework.credentials import CredentialStore
+
+        store = CredentialStore.with_encrypted_storage()
+        return store.get(cred_id)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +164,7 @@ def get_worker_api_key() -> str | None:
     # Worker-specific subscription / env var
     if worker_llm.get("use_claude_code_subscription"):
         try:
-            from framework.runner.runner import get_claude_code_token
+            from framework.loader.agent_loader import get_claude_code_token
 
             token = get_claude_code_token()
             if token:
@@ -98,7 +174,7 @@ def get_worker_api_key() -> str | None:
 
     if worker_llm.get("use_codex_subscription"):
         try:
-            from framework.runner.runner import get_codex_token
+            from framework.loader.agent_loader import get_codex_token
 
             token = get_codex_token()
             if token:
@@ -108,7 +184,7 @@ def get_worker_api_key() -> str | None:
 
     if worker_llm.get("use_kimi_code_subscription"):
         try:
-            from framework.runner.runner import get_kimi_code_token
+            from framework.loader.agent_loader import get_kimi_code_token
 
             token = get_kimi_code_token()
             if token:
@@ -118,7 +194,7 @@ def get_worker_api_key() -> str | None:
 
     if worker_llm.get("use_antigravity_subscription"):
         try:
-            from framework.runner.runner import get_antigravity_token
+            from framework.loader.agent_loader import get_antigravity_token
 
             token = get_antigravity_token()
             if token:
@@ -174,7 +250,7 @@ def get_worker_llm_extra_kwargs() -> dict[str, Any]:
                 "User-Agent": "CodexBar",
             }
             try:
-                from framework.runner.runner import get_codex_account_id
+                from framework.loader.agent_loader import get_codex_account_id
 
                 account_id = get_codex_account_id()
                 if account_id:
@@ -221,22 +297,43 @@ def get_max_context_tokens() -> int:
     return get_hive_config().get("llm", {}).get("max_context_tokens", DEFAULT_MAX_CONTEXT_TOKENS)
 
 
+def get_api_keys() -> list[str] | None:
+    """Return a list of API keys if ``api_keys`` is configured, else ``None``.
+
+    This supports key-pool rotation: configure multiple keys in
+    ``~/.hive/configuration.json`` under ``llm.api_keys`` and the
+    :class:`~framework.llm.key_pool.KeyPool` will rotate through them.
+    """
+    llm = get_hive_config().get("llm", {})
+    keys = llm.get("api_keys")
+    if keys and isinstance(keys, list) and len(keys) > 0:
+        return [k for k in keys if k]  # filter empties
+    return None
+
+
 def get_api_key() -> str | None:
     """Return the API key, supporting env var, Claude Code subscription, Codex, and ZAI Code.
 
     Priority:
+    0. Explicit key pool (``api_keys`` list) -- returns first key for
+       single-key callers; full pool available via :func:`get_api_keys`.
     1. Claude Code subscription (``use_claude_code_subscription: true``)
        reads the OAuth token from ``~/.claude/.credentials.json``.
     2. Codex subscription (``use_codex_subscription: true``)
        reads the OAuth token from macOS Keychain or ``~/.codex/auth.json``.
     3. Environment variable named in ``api_key_env_var``.
     """
+    # If an explicit key pool is configured, use the first key.
+    pool_keys = get_api_keys()
+    if pool_keys:
+        return pool_keys[0]
+
     llm = get_hive_config().get("llm", {})
 
     # Claude Code subscription: read OAuth token directly
     if llm.get("use_claude_code_subscription"):
         try:
-            from framework.runner.runner import get_claude_code_token
+            from framework.loader.agent_loader import get_claude_code_token
 
             token = get_claude_code_token()
             if token:
@@ -247,7 +344,7 @@ def get_api_key() -> str | None:
     # Codex subscription: read OAuth token from Keychain / auth.json
     if llm.get("use_codex_subscription"):
         try:
-            from framework.runner.runner import get_codex_token
+            from framework.loader.agent_loader import get_codex_token
 
             token = get_codex_token()
             if token:
@@ -258,7 +355,7 @@ def get_api_key() -> str | None:
     # Kimi Code subscription: read API key from ~/.kimi/config.toml
     if llm.get("use_kimi_code_subscription"):
         try:
-            from framework.runner.runner import get_kimi_code_token
+            from framework.loader.agent_loader import get_kimi_code_token
 
             token = get_kimi_code_token()
             if token:
@@ -269,7 +366,7 @@ def get_api_key() -> str | None:
     # Antigravity subscription: read OAuth token from accounts JSON
     if llm.get("use_antigravity_subscription"):
         try:
-            from framework.runner.runner import get_antigravity_token
+            from framework.loader.agent_loader import get_antigravity_token
 
             token = get_antigravity_token()
             if token:
@@ -280,8 +377,12 @@ def get_api_key() -> str | None:
     # Standard env-var path (covers ZAI Code and all API-key providers)
     api_key_env_var = llm.get("api_key_env_var")
     if api_key_env_var:
-        return os.environ.get(api_key_env_var)
-    return None
+        key = os.environ.get(api_key_env_var)
+        if key:
+            return key
+
+    # Credential store fallback — BYOK keys stored via the UI
+    return _get_api_key_from_credential_store(llm.get("provider", ""))
 
 
 # OAuth credentials for Antigravity are fetched from the opencode-antigravity-auth project.
@@ -422,7 +523,7 @@ def get_llm_extra_kwargs() -> dict[str, Any]:
                 "User-Agent": "CodexBar",
             }
             try:
-                from framework.runner.runner import get_codex_account_id
+                from framework.loader.agent_loader import get_codex_account_id
 
                 account_id = get_codex_account_id()
                 if account_id:

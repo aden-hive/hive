@@ -7,8 +7,8 @@ string content, not just the first 500 characters.
 
 import pytest
 
-from framework.graph.node import DataBuffer, DataBufferWriteError
-from framework.graph.validator import OutputValidator, ValidationResult
+from framework.orchestrator.node import DataBuffer, DataBufferWriteError
+from framework.orchestrator.validator import OutputValidator, ValidationResult
 
 
 class TestDataBufferHallucinationDetection:

@@ -26,6 +26,7 @@ from framework.llm.litellm import (
     _compute_retry_delay,
     _ensure_ollama_chat_prefix,
     _is_ollama_model,
+    _summarize_request_for_log,
 )
 from framework.llm.provider import LLMProvider, LLMResponse, Tool
 
@@ -99,6 +100,25 @@ class TestLiteLLMProviderInit:
             # Should not raise; ollama/ is normalised to ollama_chat/ for tool-call support.
             provider = LiteLLMProvider(model="ollama/llama3")
             assert provider.model == "ollama_chat/llama3"
+
+    def test_summarize_request_flags_system_only_payload(self):
+        """Request summaries should make system-only payloads obvious in logs."""
+        summary = _summarize_request_for_log(
+            {
+                "model": "openai/glm-5",
+                "api_base": "https://api.z.ai/api/coding/paas/v4",
+                "messages": [{"role": "system", "content": "You are helpful."}],
+                "tools": [{"type": "function", "function": {"name": "read_file"}}],
+                "stream": True,
+                "max_tokens": 8192,
+            }
+        )
+
+        assert summary["message_count"] == 1
+        assert summary["non_system_message_count"] == 0
+        assert summary["first_non_system_role"] is None
+        assert summary["last_non_system_role"] is None
+        assert summary["system_only"] is True
 
 
 class TestLiteLLMProviderComplete:
@@ -1063,9 +1083,9 @@ class TestIsLocalModel:
     )
     def test_local_models_return_true(self, model):
         """Local model prefixes should be recognized."""
-        from framework.runner.runner import AgentRunner
+        from framework.loader.agent_loader import AgentLoader
 
-        assert AgentRunner._is_local_model(model) is True
+        assert AgentLoader._is_local_model(model) is True
 
     @pytest.mark.parametrize(
         "model",
@@ -1084,9 +1104,9 @@ class TestIsLocalModel:
     )
     def test_cloud_models_return_false(self, model):
         """Cloud model prefixes should not be treated as local."""
-        from framework.runner.runner import AgentRunner
+        from framework.loader.agent_loader import AgentLoader
 
-        assert AgentRunner._is_local_model(model) is False
+        assert AgentLoader._is_local_model(model) is False
 
 
 # ---------------------------------------------------------------------------

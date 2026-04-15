@@ -11,6 +11,22 @@ from fastmcp import FastMCP
 from aden_tools.hashline import compute_line_hash
 
 
+@pytest.fixture(autouse=True)
+def _bypass_stale_edit_guard():
+    """These tests exercise edit logic directly without a prior read_file,
+    so the Gap 4 file-state cache would reject every single call. Patch
+    the imported ``check_fresh`` symbol to always return FRESH here; the
+    cache itself is covered by ``tests/test_file_state_cache.py``.
+    """
+    from aden_tools.file_state_cache import FreshResult, Freshness
+    with patch(
+        "aden_tools.tools.file_system_toolkits.hashline_edit."
+        "hashline_edit.check_fresh",
+        return_value=FreshResult(Freshness.FRESH),
+    ):
+        yield
+
+
 @pytest.fixture
 def mcp():
     """Create a FastMCP instance."""

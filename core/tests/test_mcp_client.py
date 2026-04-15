@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from framework.runner import mcp_client as mcp_client_module
-from framework.runner.mcp_client import MCPClient, MCPServerConfig, MCPTool
+from framework.loader import mcp_client as mcp_client_module
+from framework.loader.mcp_client import MCPClient, MCPServerConfig, MCPTool
 
 
 class _FakeResponse:

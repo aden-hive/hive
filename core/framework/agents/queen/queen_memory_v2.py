@@ -1,9 +1,15 @@
 """Queen global memory helpers.
 
-Global memory lives in ``~/.hive/queen/global_memory/`` and stores durable
-cross-session knowledge about the user (profile, preferences, environment,
-feedback).  Each memory is an individual ``.md`` file with optional YAML
-frontmatter (name, type, description).
+Memory hierarchy::
+
+    ~/.hive/memories/
+        global/              # shared across all queens and colonies
+        colonies/{name}/     # colony-scoped memories
+        agents/queens/{name}/ # queen-specific memories
+        agents/{name}/       # per-worker-agent memories
+
+Each memory is an individual ``.md`` file with optional YAML frontmatter
+(name, type, description).
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 GLOBAL_MEMORY_CATEGORIES: tuple[str, ...] = ("profile", "preference", "environment", "feedback")
 
-_HIVE_QUEEN_DIR = Path.home() / ".hive" / "queen"
+from framework.config import MEMORIES_DIR
 
 MAX_FILES: int = 200
 MAX_FILE_SIZE_BYTES: int = 4096  # 4 KB hard limit per memory file
@@ -31,8 +37,23 @@ _HEADER_LINE_LIMIT: int = 30
 
 
 def global_memory_dir() -> Path:
-    """Return the queen-global memory directory."""
-    return _HIVE_QUEEN_DIR / "global_memory"
+    """Return the global memory directory (shared across all queens/colonies)."""
+    return MEMORIES_DIR / "global"
+
+
+def colony_memory_dir(colony_name: str) -> Path:
+    """Return the memory directory for a named colony."""
+    return MEMORIES_DIR / "colonies" / colony_name
+
+
+def queen_memory_dir(queen_name: str = "default") -> Path:
+    """Return the memory directory for a named queen."""
+    return MEMORIES_DIR / "agents" / "queens" / queen_name
+
+
+def agent_memory_dir(agent_name: str) -> Path:
+    """Return the memory directory for a worker agent."""
+    return MEMORIES_DIR / "agents" / agent_name
 
 
 # ---------------------------------------------------------------------------

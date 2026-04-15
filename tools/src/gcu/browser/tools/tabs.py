@@ -128,9 +128,13 @@ def register_tab_tools(mcp: FastMCP) -> None:
             return result
 
         try:
-            # Create tab in the group
-            result = await bridge.create_tab(url=url, group_id=ctx.get("groupId"))
-            tab_id = result.get("tabId")
+            # Reuse the seed about:blank tab from context.create on first open
+            seed_tab = ctx.pop("_seedTabId", None)
+            if seed_tab is not None:
+                tab_id = seed_tab
+            else:
+                result = await bridge.create_tab(url=url, group_id=ctx.get("groupId"))
+                tab_id = result.get("tabId")
 
             # Update active tab if not background
             if not background and tab_id is not None:

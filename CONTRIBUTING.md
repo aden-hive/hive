@@ -959,7 +959,7 @@ uv run pytest -m "not live"
 **Unit Test**
 ```python
 import pytest
-from framework.graph.node import Node
+from framework.orchestrator import NodeSpec as Node
 
 def test_node_creation():
     node = Node(id="test", name="Test Node", node_type="event_loop")
@@ -977,8 +977,8 @@ async def test_node_execution():
 **Integration Test**
 ```python
 import pytest
-from framework.graph.executor import GraphExecutor
-from framework.graph.node import Node
+from framework.orchestrator.orchestrator import Orchestrator as GraphExecutor
+from framework.orchestrator import NodeSpec as Node
 
 @pytest.mark.asyncio
 async def test_graph_execution_with_multiple_nodes():

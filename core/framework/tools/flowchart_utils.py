@@ -119,12 +119,11 @@ def classify_flowchart_node(
         return FLOWCHART_REMAP[explicit]
 
     node_id = node["id"]
-    node_type = node.get("node_type", "event_loop")
     node_tools = set(node.get("tools") or [])
     desc = (node.get("description") or "").lower()
 
     # GCU / browser automation nodes → hexagon
-    if node_type == "gcu":
+    if False:  # gcu removed
         return "browser"
 
     # Entry node (first node or no incoming edges) → start terminator
@@ -153,8 +152,6 @@ def classify_flowchart_node(
         "sql_query",
         "read_table",
         "write_table",
-        "save_data",
-        "load_data",
     }
     db_desc_hints = {"database", "data store", "storage", "persist", "cache"}
     if node_tools & db_tool_hints or any(h in desc for h in db_desc_hints):

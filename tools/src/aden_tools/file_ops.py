@@ -31,6 +31,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
+from aden_tools.file_state_cache import Freshness, check_fresh, record_read
 from aden_tools.hashline import (
     HASHLINE_MAX_FILE_BYTES,
     compute_line_hash,
@@ -377,8 +378,16 @@ def register_file_tools(
             return f"Binary file: {path} ({size:,} bytes). Cannot display binary content."
 
         try:
-            with open(resolved, encoding="utf-8", errors="replace") as f:
-                content = f.read()
+            # Read raw bytes once; use them both for the line-formatted
+            # return value and to hash into the file-state cache so a
+            # later edit can detect external writes without a second
+            # open. Hash is computed even on partial/offset reads so the
+            # guard still fires when the model only read the start of a
+            # large file before editing deeper into it.
+            with open(resolved, "rb") as fb:
+                raw_bytes = fb.read()
+            content = raw_bytes.decode("utf-8", errors="replace")
+            record_read(None, resolved, content_bytes=raw_bytes)
 
             # Use splitlines() for consistent line splitting with hashline module
             all_lines = content.splitlines()
@@ -434,6 +443,27 @@ def register_file_tools(
         resolved = _resolve(path)
         resolved_path = Path(resolved)
 
+        # Stale-edit guard: an existing file must have been read recently
+        # and still match the on-disk content. Writing over a file the
+        # model has never seen (or that changed since it last saw it)
+        # risks clobbering the user's work.  Brand-new files are allowed
+        # without a prior read - there's nothing to clobber.
+        if resolved_path.is_file():
+            _fresh = check_fresh(None, resolved)
+            if _fresh.status is Freshness.UNREAD:
+                return (
+                    f"Refusing to overwrite '{path}': call read_file('{path}') "
+                    f"first so the harness can track its state before you "
+                    f"replace it. If you intend to discard the current "
+                    f"contents, read it first to acknowledge what you are "
+                    f"overwriting."
+                )
+            if _fresh.status is Freshness.STALE:
+                return (
+                    f"Refusing to overwrite '{path}': {_fresh.detail}. "
+                    f"Re-read the file with read_file before writing."
+                )
+
         try:
             # Create parent dirs first (before git snapshot) so structure exists
             resolved_path.parent.mkdir(parents=True, exist_ok=True)
@@ -451,6 +481,14 @@ def register_file_tools(
                 f.write(content_str)
                 f.flush()
                 os.fsync(f.fileno())
+
+            # Record the post-write state so a later edit in the same
+            # turn doesn't trip the stale-edit guard against the file
+            # this call just created or overwrote.
+            try:
+                record_read(None, resolved, content_bytes=content_str.encode("utf-8"))
+            except Exception:
+                pass
 
             line_count = content_str.count("\n") + (
                 1 if content_str and not content_str.endswith("\n") else 0
@@ -477,6 +515,23 @@ def register_file_tools(
         resolved = _resolve(path)
         if not os.path.isfile(resolved):
             return f"Error: File not found: {path}"
+
+        # Stale-edit guard: refuse unless a recent read is on record and
+        # the file on disk still matches it. Prevents the model from
+        # overwriting changes the user made in their editor between
+        # calling read_file and edit_file.
+        _fresh = check_fresh(None, resolved)
+        if _fresh.status is Freshness.UNREAD:
+            return (
+                f"Refusing to edit '{path}': call read_file('{path}') "
+                f"first so the harness can track its state before you "
+                f"edit it."
+            )
+        if _fresh.status is Freshness.STALE:
+            return (
+                f"Refusing to edit '{path}': {_fresh.detail}. Re-read "
+                f"the file with read_file before editing."
+            )
 
         try:
             with open(resolved, encoding="utf-8") as f:
@@ -531,6 +586,13 @@ def register_file_tools(
 
             with open(resolved, "w", encoding="utf-8") as f:
                 f.write(new_content)
+
+            # Re-record post-write state so a second edit in the same
+            # turn doesn't trip its own stale guard.
+            try:
+                record_read(None, resolved, content_bytes=new_content.encode("utf-8"))
+            except Exception:
+                pass
 
             diff = _compute_diff(content, new_content, path)
             match_info = f" (matched via {strategy_used})" if strategy_used != "exact" else ""
@@ -770,6 +832,25 @@ def register_file_tools(
         resolved = _resolve(path)
         if not os.path.isfile(resolved):
             return f"Error: File not found: {path}"
+
+        # Stale-edit guard: require a prior read_file that still matches
+        # disk. hashline_edit already rehashes anchors, but anchor hashes
+        # only protect the exact lines touched - content drift around
+        # those lines (e.g. new imports the user added) would still slip
+        # through silently. This guard closes that gap.
+        _fresh = check_fresh(None, resolved)
+        if _fresh.status is Freshness.UNREAD:
+            return (
+                f"Error: Refusing to edit '{path}': call read_file"
+                f"('{path}', hashline=True) first so the harness can "
+                f"track its state before you edit it."
+            )
+        if _fresh.status is Freshness.STALE:
+            return (
+                f"Error: Refusing to edit '{path}': {_fresh.detail}. "
+                f"Re-read the file with read_file(hashline=True) before "
+                f"editing."
+            )
 
         try:
             with open(resolved, "rb") as f:
@@ -1073,6 +1154,14 @@ def register_file_tools(
                 raise
         except Exception as e:
             return f"Error: Failed to write file: {e}"
+
+        # Refresh the file-state cache so chained edits in the same turn
+        # see the new hash instead of tripping the stale guard against
+        # the post-write disk state.
+        try:
+            record_read(None, resolved, content_bytes=joined.encode(encoding))
+        except Exception:
+            pass
 
         # 10. Build response
         updated_lines = joined.splitlines()

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from framework.graph.conversation import (
+from framework.agent_loop.conversation import (
     Message,
     NodeConversation,
     extract_tool_call_history,
@@ -241,6 +241,61 @@ class TestNodeConversation:
     async def test_needs_compaction(self):
         conv = NodeConversation(max_context_tokens=100, compaction_threshold=0.8)
         await conv.add_user_message("x" * 320)
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
+    async def test_needs_compaction_uses_buffer_when_set(self):
+        """Gap 7: a compaction_buffer_tokens overrides the multiplicative
+        threshold - compaction triggers when estimate + buffer would
+        cross the hard context limit, not at a fractional threshold."""
+        conv = NodeConversation(
+            max_context_tokens=1000,
+            compaction_threshold=0.9,  # would normally trigger at 900
+            compaction_buffer_tokens=300,  # buffer wants 700 hard cap
+        )
+        # 650 tokens is below the 700 budget - no compaction yet.
+        conv.update_token_count(650)
+        assert conv.needs_compaction() is False
+        # 700+ crosses the budget - compaction fires BEFORE reaching
+        # the hard 1000 limit, so the next turn's input has headroom.
+        conv.update_token_count(700)
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
+    async def test_compaction_warning_fires_before_hard_trigger(self):
+        """Gap 7: the warning threshold is meant to surface early signal
+        to telemetry without actually triggering compaction."""
+        conv = NodeConversation(
+            max_context_tokens=1000,
+            compaction_buffer_tokens=200,
+            compaction_warning_buffer_tokens=400,
+        )
+        conv.update_token_count(500)
+        assert conv.compaction_warning() is False
+        assert conv.needs_compaction() is False
+
+        # Cross 600 tokens: warning fires (1000 - 400) but compaction
+        # doesn't yet (1000 - 200 = 800 budget).
+        conv.update_token_count(650)
+        assert conv.compaction_warning() is True
+        assert conv.needs_compaction() is False
+
+        # Cross 800: both fire.
+        conv.update_token_count(820)
+        assert conv.compaction_warning() is True
+        assert conv.needs_compaction() is True
+
+    @pytest.mark.asyncio
+    async def test_legacy_threshold_rule_still_works_without_buffer(self):
+        """Without compaction_buffer_tokens, the old multiplicative rule
+        applies so existing callers keep behaving identically."""
+        conv = NodeConversation(
+            max_context_tokens=1000,
+            compaction_threshold=0.75,
+        )
+        conv.update_token_count(700)
+        assert conv.needs_compaction() is False
+        conv.update_token_count(800)
         assert conv.needs_compaction() is True
 
     @pytest.mark.asyncio
@@ -497,6 +552,35 @@ class TestPersistence:
         assert restored is not None
         assert [m.content for m in restored.messages] == ["run-a"]
         assert restored.next_seq == 3
+
+    @pytest.mark.asyncio
+    async def test_restore_phase_filter_falls_back_for_legacy_unphased_parts(self):
+        """Legacy stores without phase_id should still restore in isolated mode."""
+        store = MockConversationStore()
+        await store.write_meta({"system_prompt": "hello"})
+        await store.write_part(0, {"seq": 0, "role": "assistant", "content": "restored"})
+        await store.write_cursor({"next_seq": 1})
+
+        restored = await NodeConversation.restore(store, phase_id="queen")
+        assert restored is not None
+        assert [m.content for m in restored.messages] == ["restored"]
+        assert restored.next_seq == 1
+
+    @pytest.mark.asyncio
+    async def test_restore_phase_filter_does_not_fall_back_for_mismatched_phased_parts(self):
+        """Phase filtering should still exclude stores that use explicit phase ids."""
+        store = MockConversationStore()
+        await store.write_meta({"system_prompt": "hello"})
+        await store.write_part(
+            0,
+            {"seq": 0, "role": "assistant", "content": "node-a only", "phase_id": "node-a"},
+        )
+        await store.write_cursor({"next_seq": 1})
+
+        restored = await NodeConversation.restore(store, phase_id="queen")
+        assert restored is not None
+        assert restored.message_count == 0
+        assert restored.next_seq == 1
 
     @pytest.mark.asyncio
     async def test_clear_deletes_all_parts(self):
@@ -1236,17 +1320,16 @@ class TestExtractToolCallHistory:
                 role="assistant",
                 content="",
                 tool_calls=[
-                    _make_tool_call(
-                        "c2", "save_data", {"filename": "output.txt", "content": "data"}
-                    ),
+                    _make_tool_call("c2", "read_file", {"path": "/tmp/output.txt"}),
                 ],
             ),
-            Message(seq=3, role="tool", content="saved", tool_use_id="c2"),
+            Message(seq=3, role="tool", content="contents", tool_use_id="c2"),
         ]
         result = extract_tool_call_history(msgs)
         assert "web_search (1x)" in result
-        assert "save_data (1x)" in result
-        assert "FILES SAVED: output.txt" in result
+        assert "read_file (1x)" in result
+        # read_file paths are tracked under FILES SAVED in production
+        assert "FILES SAVED: /tmp/output.txt" in result
 
     def test_errors_included(self):
         msgs = [
@@ -1273,7 +1356,7 @@ class TestExtractToolCallHistory:
 
 class TestIsContextTooLargeError:
     def test_context_window_class_name(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         class ContextWindowExceededError(Exception):
             pass
@@ -1281,25 +1364,25 @@ class TestIsContextTooLargeError:
         assert _is_context_too_large_error(ContextWindowExceededError("x"))
 
     def test_openai_context_length(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         err = RuntimeError("This model's maximum context length is 128000 tokens")
         assert _is_context_too_large_error(err)
 
     def test_anthropic_too_long(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         err = RuntimeError("prompt is too long: 150000 tokens > 100000")
         assert _is_context_too_large_error(err)
 
     def test_generic_exceeds_limit(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         err = ValueError("Request exceeds token limit")
         assert _is_context_too_large_error(err)
 
     def test_unrelated_error(self):
-        from framework.graph.event_loop_node import _is_context_too_large_error
+        from framework.agent_loop.agent_loop import _is_context_too_large_error
 
         assert not _is_context_too_large_error(ValueError("connection refused"))
         assert not _is_context_too_large_error(RuntimeError("timeout"))
@@ -1312,7 +1395,7 @@ class TestIsContextTooLargeError:
 
 class TestFormatMessagesForSummary:
     def test_user_assistant_messages(self):
-        from framework.graph.event_loop_node import EventLoopNode
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
 
         msgs = [
             Message(seq=0, role="user", content="Hello world"),
@@ -1323,7 +1406,7 @@ class TestFormatMessagesForSummary:
         assert "[assistant]: Hi there" in result
 
     def test_tool_result_truncated(self):
-        from framework.graph.event_loop_node import EventLoopNode
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
 
         msgs = [
             Message(seq=0, role="tool", content="x" * 1000, tool_use_id="c1"),
@@ -1335,7 +1418,7 @@ class TestFormatMessagesForSummary:
         assert len(result) < 600
 
     def test_assistant_with_tool_calls(self):
-        from framework.graph.event_loop_node import EventLoopNode
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
 
         tc = [_make_tool_call("c1", "web_search", {"query": "test"})]
         msgs = [
@@ -1356,7 +1439,8 @@ class TestLlmCompact:
 
     def _make_node(self):
         """Create a minimal EventLoopNode for testing."""
-        from framework.graph.event_loop_node import EventLoopNode, LoopConfig
+        from framework.agent_loop.agent_loop import AgentLoop as EventLoopNode
+        from framework.agent_loop.internals.types import LoopConfig
 
         config = LoopConfig(max_context_tokens=32000)
         node = EventLoopNode.__new__(EventLoopNode)
@@ -1373,7 +1457,7 @@ class TestLlmCompact:
         """Create a mock NodeContext with controllable LLM."""
         from unittest.mock import AsyncMock, MagicMock
 
-        from framework.graph.node import NodeSpec
+        from framework.orchestrator.node import NodeSpec
 
         spec = NodeSpec(
             id="test",

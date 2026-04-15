@@ -50,18 +50,55 @@ def _resize_and_annotate(
     """
     try:
         from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        raw = base64.b64decode(data) if data else b""
+        orig_w = 0
+        if len(raw) >= 24 and raw[:8] == b"\x89PNG\r\n\x1a\n":
+            import struct
 
+            orig_w = struct.unpack(">I", raw[16:20])[0]
+        raw_size_bytes = len(raw)
+        physical_scale = orig_w / width if orig_w and width else 1.0
+        css_scale = (css_width / width) if css_width else (physical_scale / max(dpr, 1.0))
+        logger.warning(
+            "PIL not available — screenshot resize SKIPPED (cannot downscale image). "
+            "raw_size=%d bytes, png_width=%d, css_width=%s, dpr=%s, target_width=%d. "
+            "Returning ORIGINAL image with computed scales: physicalScale=%.4f, cssScale=%.4f. "
+            "Agent must use browser_coords() to convert image positions before clicking.",
+            raw_size_bytes,
+            orig_w,
+            css_width,
+            dpr,
+            width,
+            physical_scale,
+            css_scale,
+        )
+        return data, round(physical_scale, 4), round(css_scale, 4)
+
+    try:
         raw = base64.b64decode(data)
         img = Image.open(io.BytesIO(raw)).convert("RGBA")
         orig_w, orig_h = img.size
+
+        physical_scale = orig_w / width
+        css_scale = (css_width / width) if css_width else (physical_scale / max(dpr, 1.0))
+
+        logger.info(
+            "Screenshot resize: orig=%dx%d → target=%dx%d, "
+            "css_width=%s, dpr=%s, physicalScale=%.4f, cssScale=%.4f",
+            orig_w,
+            orig_h,
+            width,
+            round(orig_h * width / orig_w),
+            css_width,
+            dpr,
+            physical_scale,
+            css_scale,
+        )
+
         new_w = width
         new_h = round(orig_h * new_w / orig_w)
         img = img.resize((new_w, new_h), Image.LANCZOS)
-
-        # Physical scale: how many native/physical pixels per image pixel
-        physical_scale = orig_w / width
-        # CSS scale: physical_scale / DPR
-        css_scale = (css_width / width) if css_width else (physical_scale / max(dpr, 1.0))
 
         if highlights:
             overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -129,7 +166,14 @@ def _resize_and_annotate(
             round(css_scale, 4),
         )
     except Exception:
-        logger.debug("Screenshot resize/annotate failed, using original", exc_info=True)
+        logger.warning(
+            "Screenshot resize/annotate FAILED — returning original image with scale=1.0. "
+            "css_width=%s, dpr=%s, target_width=%d. Clicks will be misaligned.",
+            css_width,
+            dpr,
+            width,
+            exc_info=True,
+        )
         return data, 1.0, 1.0
 
 
@@ -254,11 +298,13 @@ def register_inspection_tools(mcp: FastMCP) -> None:
                     "cssScale": css_scale,
                     "annotated": bool(highlights),
                     "scaleHint": (
-                        f"image_coord × {physical_scale} = physical px "
-                        f"(for browser_click_coordinate/"
-                        f"hover_coordinate); "
                         f"image_coord × {css_scale} = CSS px "
-                        f"(for getBoundingClientRect)"
+                        f"→ feed to browser_click_coordinate, "
+                        f"browser_hover_coordinate, browser_press_at "
+                        f"(CDP Input events use CSS pixels). "
+                        f"image_coord × {physical_scale} = physical px "
+                        f"is debug-only on HiDPI displays and must NOT "
+                        f"be used for clicks — it overshoots by DPR×."
                     ),
                 }
             )
@@ -272,6 +318,8 @@ def register_inspection_tools(mcp: FastMCP) -> None:
                     "url": screenshot_result.get("url", ""),
                     "physicalScale": physical_scale,
                     "cssScale": css_scale,
+                    "debug_cssWidth": css_width,
+                    "debug_dpr": dpr,
                 },
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
@@ -297,24 +345,33 @@ def register_inspection_tools(mcp: FastMCP) -> None:
         profile: str | None = None,
     ) -> dict:
         """
-        Convert screenshot image coordinates to browser coordinates.
+        Convert screenshot image coordinates to browser click coordinates.
 
-        After browser_screenshot returns an 800px-wide image, use this to translate
-        pixel positions you see in the image into the two coordinate spaces used by
-        browser tools:
+        After browser_screenshot returns a downscaled image, use this to
+        translate pixel positions you see in the image into the CSS pixel
+        coordinates that Chrome DevTools Protocol expects.
 
-        - physical_x/y → use with browser_click_coordinate, browser_hover_coordinate,
-          browser_press_at (CDP Input events work in physical pixels)
-        - css_x/y → use with getBoundingClientRect comparisons and DOM APIs
+        **CDP Input.dispatchMouseEvent uses CSS pixels**, so you want
+        ``css_x`` / ``css_y`` for every click/hover tool. ``physical_x/y``
+        is kept in the return for debugging on HiDPI displays — do NOT
+        feed it to clicks; on a DPR=2 screen it lands 2× too far.
+
+        Edge case: pages using ``zoom`` or ``transform: scale()`` (e.g.
+        LinkedIn's ``#interop-outlet`` shadow DOM) render in a scaled
+        local coordinate space. For those, ``getBoundingClientRect()``
+        reports pre-zoom coordinates and you may still need to multiply
+        by the element's effective zoom. Use browser_shadow_query to
+        get the zoomed rect directly.
 
         Args:
-            x: X pixel position in the 800px screenshot image
-            y: Y pixel position in the 800px screenshot image
+            x: X pixel position in the screenshot image
+            y: Y pixel position in the screenshot image
             tab_id: Chrome tab ID (default: active tab for profile)
             profile: Browser profile name (default: "default")
 
         Returns:
-            Dict with physical_x, physical_y, css_x, css_y, and scale factors
+            Dict with css_x, css_y (primary — use these), physical_x,
+            physical_y (debug only), and scale factors.
         """
         ctx = _get_context(profile)
         target_tab = tab_id or (ctx.get("activeTabId") if ctx else None)
@@ -327,18 +384,25 @@ def register_inspection_tools(mcp: FastMCP) -> None:
 
         return {
             "ok": True,
-            "physical_x": round(x * physical_scale, 1),
-            "physical_y": round(y * physical_scale, 1),
+            # Primary output: CSS pixels. Feed these to click/hover/press.
             "css_x": round(x * css_scale, 1),
             "css_y": round(y * css_scale, 1),
+            # Debug output: raw physical pixels. DO NOT feed to clicks on
+            # HiDPI displays — CDP Input events use CSS pixels, so sending
+            # physical coordinates lands the click at roughly DPR× the
+            # intended position.
+            "physical_x": round(x * physical_scale, 1),
+            "physical_y": round(y * physical_scale, 1),
             "physicalScale": physical_scale,
             "cssScale": css_scale,
             "tabId": target_tab,
             "note": (
-                "Use physical_x/y with browser_click_coordinate,"
-                " browser_hover_coordinate, browser_press_at."
-                " Use css_x/y with getBoundingClientRect"
-                " and DOM APIs."
+                "Use css_x/css_y with browser_click_coordinate, "
+                "browser_hover_coordinate, browser_press_at — "
+                "Chrome DevTools Protocol Input.dispatchMouseEvent "
+                "operates in CSS pixels. physical_x/y is for debugging "
+                "on HiDPI displays only; feeding it to clicks lands "
+                "them at DPR× the intended coordinate."
             ),
         }
 
@@ -404,11 +468,11 @@ def register_inspection_tools(mcp: FastMCP) -> None:
                 "cy": round(rect["cy"] * dpr, 1),
             },
             "note": (
-                "Use physical.cx/cy with"
-                " browser_click_coordinate or"
-                " browser_hover_coordinate."
-                " Use css.cx/cy with"
-                " getBoundingClientRect comparisons."
+                "Use css.cx/cy with browser_click_coordinate, "
+                "browser_hover_coordinate, browser_press_at — "
+                "CDP Input events operate in CSS pixels. "
+                "physical.* is debug-only; feeding it to clicks "
+                "lands them DPR× too far on HiDPI displays."
             ),
         }
 
@@ -422,8 +486,10 @@ def register_inspection_tools(mcp: FastMCP) -> None:
         Get the bounding rect of an element by CSS selector.
 
         Supports '>>>' shadow-piercing selectors for overlay/shadow DOM content.
-        Returns coordinates in both CSS pixels (for DOM APIs) and physical pixels
-        (for browser_click_coordinate, browser_hover_coordinate, browser_press_at).
+        Returns coordinates in CSS pixels (for clicks and DOM APIs); the
+        physical-pixel variant is returned for debugging on HiDPI displays
+        only — it must not be fed to click/hover/press tools, which use
+        CSS pixels.
 
         Args:
             selector: CSS selector, optionally with ' >>> ' to pierce shadow roots.
@@ -473,7 +539,13 @@ def register_inspection_tools(mcp: FastMCP) -> None:
                 "cx": round(rect["cx"] * dpr, 1),
                 "cy": round(rect["cy"] * dpr, 1),
             },
-            "note": "Use physical.cx/cy with browser_click_coordinate or browser_hover_coordinate.",
+            "note": (
+                "Use css.cx/cy with browser_click_coordinate, "
+                "browser_hover_coordinate, browser_press_at — "
+                "CDP Input events operate in CSS pixels. "
+                "physical.* is debug-only; feeding it to clicks "
+                "lands them DPR× too far on HiDPI displays."
+            ),
         }
 
     @mcp.tool()

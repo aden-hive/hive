@@ -2,7 +2,7 @@
 
 import pytest
 
-from framework.graph.conversation import Message, NodeConversation
+from framework.agent_loop.conversation import Message, NodeConversation
 
 
 def _make_conversation() -> NodeConversation:

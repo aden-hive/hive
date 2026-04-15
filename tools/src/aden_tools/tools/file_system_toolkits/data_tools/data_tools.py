@@ -15,6 +15,8 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from aden_tools.file_state_cache import record_read
+
 # ~/.hive/ is always allowed for cross-agent file access
 HIVE_DIR = os.path.expanduser("~/.hive")
 
@@ -71,6 +73,7 @@ def register_tools(mcp: FastMCP) -> None:
         offset: int = 1,
         limit: int = 0,
         data_dir: str = "",
+        agent_id: str = "",
     ) -> str:
         """Read file contents with line numbers.
 
@@ -83,6 +86,8 @@ def register_tools(mcp: FastMCP) -> None:
             offset: Starting line number, 1-indexed (default: 1).
             limit: Max lines to return, 0 = up to 2000 (default: 0).
             data_dir: Auto-injected - the session's data directory.
+            agent_id: Auto-injected - the calling agent id, used to scope
+                the file-state cache that powers stale-edit detection.
         """
         try:
             resolved = _resolve_path(path, data_dir)
@@ -112,8 +117,17 @@ def register_tools(mcp: FastMCP) -> None:
             pass
 
         try:
-            with open(resolved, encoding="utf-8", errors="replace") as f:
-                content = f.read()
+            # Read as bytes first so we can hash them for the state cache
+            # without a second open, then decode for the line-formatted
+            # return value the model sees.
+            with open(resolved, "rb") as f:
+                raw_bytes = f.read()
+            content = raw_bytes.decode("utf-8", errors="replace")
+            # Record this read in the per-agent state cache so a later
+            # hashline_edit/write_file call can detect external writes
+            # that happened between now and then. Scoped to agent_id so
+            # two agents sharing the MCP server can't see each other.
+            record_read(agent_id or None, resolved, content_bytes=raw_bytes)
 
             all_lines = content.splitlines()
             total_lines = len(all_lines)

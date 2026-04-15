@@ -68,6 +68,9 @@ class SkillsManager:
         self._protocols_prompt: str = ""
         self._allowlisted_dirs: list[str] = []
         self._default_mgr: object = None  # DefaultSkillManager, set after load()
+        # Hot-reload state
+        self._watched_dirs: list[str] = []
+        self._watcher_task: object = None  # asyncio.Task, set by start_watching()
 
     # ------------------------------------------------------------------
     # Factory for backwards-compat bridge
@@ -117,61 +120,147 @@ class SkillsManager:
 
         skills_config = self._config.skills_config
 
-        # 1. Community skill discovery (when project_root is available)
-        catalog_prompt = ""
+        # 1. Skill discovery -- always run to pick up framework skills;
+        # community/project skills only when project_root is available.
+        discovery = SkillDiscovery(
+            DiscoveryConfig(
+                project_root=self._config.project_root,
+                skip_framework_scope=False,
+            )
+        )
+        discovered = discovery.discover()
+        self._watched_dirs = discovery.scanned_directories
+
+        # Trust-gate project-scope skills (AS-13)
         if self._config.project_root is not None and not self._config.skip_community_discovery:
             from framework.skills.trust import TrustGate
 
-            discovery = SkillDiscovery(DiscoveryConfig(project_root=self._config.project_root))
-            discovered = discovery.discover()
-
-            # Trust-gate project-scope skills (AS-13)
             discovered = TrustGate(interactive=self._config.interactive).filter_and_gate(
                 discovered, project_dir=self._config.project_root
             )
 
-            catalog = SkillCatalog(discovered)
-            self._allowlisted_dirs = catalog.allowlisted_dirs
-            catalog_prompt = catalog.to_prompt()
+        catalog = SkillCatalog(discovered)
+        self._allowlisted_dirs = catalog.allowlisted_dirs
+        catalog_prompt = catalog.to_prompt()
 
-            # Pre-activated community skills
-            if skills_config.skills:
-                pre_activated = catalog.build_pre_activated_prompt(skills_config.skills)
-                if pre_activated:
-                    if catalog_prompt:
-                        catalog_prompt = f"{catalog_prompt}\n\n{pre_activated}"
-                    else:
-                        catalog_prompt = pre_activated
+        # Pre-activated community skills
+        if skills_config.skills:
+            pre_activated = catalog.build_pre_activated_prompt(skills_config.skills)
+            if pre_activated:
+                if catalog_prompt:
+                    catalog_prompt = f"{catalog_prompt}\n\n{pre_activated}"
+                else:
+                    catalog_prompt = pre_activated
 
-        # 2. Default skills (always loaded unless explicitly disabled)
+        # 2. Default skills -- discovered via _default_skills/ and included
+        # in the catalog for progressive disclosure (no longer force-injected
+        # as protocols_prompt).  DefaultSkillManager still handles config,
+        # logging, and metadata.
         default_mgr = DefaultSkillManager(config=skills_config)
         default_mgr.load()
         default_mgr.log_active_skills()
-        protocols_prompt = default_mgr.build_protocols_prompt()
         self._default_mgr = default_mgr
-        # DX-3: Community skill startup summary
-        if self._config.project_root is not None and not self._config.skip_community_discovery:
-            community_count = len(catalog._skills) if catalog_prompt else 0
-            pre_activated_count = len(skills_config.skills) if skills_config.skills else 0
-            logger.info(
-                "Skills: %d community (%d catalog, %d pre-activated)",
-                community_count,
-                community_count,
-                pre_activated_count,
-            )
 
         # 3. Cache
         self._catalog_prompt = catalog_prompt
-        self._protocols_prompt = protocols_prompt
+        self._protocols_prompt = ""  # all skills use progressive disclosure now
 
-        if protocols_prompt:
+        if catalog_prompt:
             logger.info(
-                "Skill system ready: protocols=%d chars, catalog=%d chars",
-                len(protocols_prompt),
+                "Skill system ready: catalog=%d chars",
                 len(catalog_prompt),
             )
-        else:
-            logger.warning("Skill system produced empty protocols_prompt")
+
+    # ------------------------------------------------------------------
+    # Hot-reload: watch skill directories for SKILL.md changes.
+    # ------------------------------------------------------------------
+
+    async def start_watching(self) -> None:
+        """Start a background task watching skill directories for changes.
+
+        When a ``SKILL.md`` file is added/modified/removed, the cached
+        ``skills_catalog_prompt`` is rebuilt.  The next node iteration picks
+        up the new prompt automatically via the ``dynamic_prompt_provider``.
+
+        Silently no-ops when ``watchfiles`` is not installed or when no
+        directories are being watched (e.g. bare mode, no project_root).
+        """
+        import asyncio
+
+        try:
+            import watchfiles  # noqa: F401 -- optional dep check
+        except ImportError:
+            logger.debug("watchfiles not installed; skill hot-reload disabled")
+            return
+
+        if not self._watched_dirs:
+            logger.debug("No skill directories to watch; hot-reload skipped")
+            return
+
+        if self._watcher_task is not None:
+            return  # already watching
+
+        self._watcher_task = asyncio.create_task(
+            self._watch_loop(),
+            name="skills-hot-reload",
+        )
+        logger.info(
+            "Skill hot-reload enabled (watching %d directories)",
+            len(self._watched_dirs),
+        )
+
+    async def stop_watching(self) -> None:
+        """Cancel the background watcher task (if running)."""
+        import asyncio
+
+        task = self._watcher_task
+        if task is None:
+            return
+        self._watcher_task = None
+        if not task.done():  # type: ignore[attr-defined]
+            task.cancel()  # type: ignore[attr-defined]
+            try:
+                await task  # type: ignore[misc]
+            except asyncio.CancelledError:
+                pass
+
+    async def _watch_loop(self) -> None:
+        """Background coroutine that watches SKILL.md files and triggers reload."""
+        import asyncio
+
+        import watchfiles
+
+        def _filter(_change: object, path: str) -> bool:
+            return path.endswith("SKILL.md")
+
+        try:
+            async for changes in watchfiles.awatch(
+                *self._watched_dirs,
+                watch_filter=_filter,
+                debounce=1000,
+            ):
+                paths = [p for _, p in changes]
+                logger.info("SKILL.md changes detected: %s", paths)
+                try:
+                    self._reload()
+                except Exception:
+                    logger.exception("Skill reload failed; keeping previous prompts")
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Skill watcher crashed; hot-reload disabled for this session")
+
+    def _reload(self) -> None:
+        """Re-run discovery and rebuild cached prompts."""
+        # Reset loaded flag so _do_load actually re-runs.
+        self._loaded = False
+        self._do_load()
+        self._loaded = True
+        logger.info(
+            "Skills reloaded: protocols=%d chars, catalog=%d chars",
+            len(self._protocols_prompt),
+            len(self._catalog_prompt),
+        )
 
     # ------------------------------------------------------------------
     # Prompt accessors (consumed by downstream layers)

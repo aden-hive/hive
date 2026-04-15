@@ -17,11 +17,35 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from framework.runtime.triggers import TriggerDefinition
+from framework.config import QUEENS_DIR
+from framework.host.triggers import TriggerDefinition
 
 logger = logging.getLogger(__name__)
+
+
+def _generate_session_id() -> str:
+    """Generate a unique session ID."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"session_{ts}_{uuid.uuid4().hex[:8]}"
+
+
+def _queen_session_dir(session_id: str, queen_name: str = "default") -> Path:
+    """Return the on-disk directory for a queen session."""
+    return QUEENS_DIR / queen_name / "sessions" / session_id
+
+
+def _find_queen_session_dir(session_id: str) -> Path:
+    """Search all queen directories for a session. Falls back to default."""
+    if QUEENS_DIR.exists():
+        for queen_dir in QUEENS_DIR.iterdir():
+            if not queen_dir.is_dir():
+                continue
+            candidate = queen_dir / "sessions" / session_id
+            if candidate.exists():
+                return candidate
+    return _queen_session_dir(session_id)
 
 
 @dataclass
@@ -35,16 +59,25 @@ class Session:
     # Queen (always present once started)
     queen_executor: Any = None  # GraphExecutor for queen input injection
     queen_task: asyncio.Task | None = None
-    # Loaded graph (optional)
-    graph_id: str | None = None
+    # Loaded colony (optional)
+    colony_id: str | None = None
     worker_path: Path | None = None
     runner: Any | None = None  # AgentRunner
-    graph_runtime: Any | None = None  # AgentRuntime
+    colony_runtime: Any | None = None  # legacy worker AgentRuntime (Phase 2 deprecation pending)
+    # Phase 2 unified runtime: a real ColonyRuntime hosting the queen as
+    # overseer and (in colony sessions) parallel workers spawned via
+    # run_parallel_workers. Always set once _start_queen has run.
+    colony: Any | None = None  # ColonyRuntime
     worker_info: Any | None = None  # AgentInfo
-    # Queen phase state (building/staging/running)
+    # Queen phase state (working/reviewing)
     phase_state: Any = None  # QueenPhaseState
-    # Worker handoff subscription
+    # Worker handoff subscription (colony-scoped escalation receiver)
     worker_handoff_sub: str | None = None
+    # Pending worker escalations awaiting queen reply.
+    # Keyed by request_id -> {worker_id, colony_id, reason, context, opened_at}.
+    # Populated by queen_orchestrator._on_worker_escalation and drained by
+    # the reply_to_worker tool.
+    pending_escalations: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Memory reflection + recall subscriptions (global memory)
     memory_reflection_subs: list = field(default_factory=list)  # list[str]
     # Trigger definitions loaded from agent's triggers.json (available but inactive)
@@ -67,6 +100,17 @@ class Session:
     queen_resume_from: str | None = None
     # Queen session directory (set during _start_queen, used for shutdown reflection)
     queen_dir: Path | None = None
+    # Multi-queen support: which queen profile this session uses
+    queen_name: str = "default"
+    # Colony name: set when a worker is loaded from a colony
+    colony_name: str | None = None
+    # Session mode discriminator. "dm" = queen DM session under
+    # ~/.hive/agents/queens/{queen_id}/sessions/. "colony" = forked colony
+    # session under ~/.hive/colonies/{colony_name}/sessions/, with the
+    # queen running as the colony's overseer and the run_parallel_workers
+    # tool unlocked. The mode is the canonical discriminator for storage
+    # path, tool exposure, and SSE filtering — see the Phase 2 plan.
+    mode: Literal["dm", "colony"] = "dm"
 
 
 class SessionManager:
@@ -76,15 +120,46 @@ class SessionManager:
     (blocking I/O) then started on the event loop.
     """
 
-    def __init__(self, model: str | None = None, credential_store=None) -> None:
+    def __init__(
+        self, model: str | None = None, credential_store=None, queen_tool_registry=None
+    ) -> None:
         self._sessions: dict[str, Session] = {}
         self._loading: set[str] = set()
         self._model = model
         self._credential_store = credential_store
+        self._queen_tool_registry = queen_tool_registry
         self._lock = asyncio.Lock()
         # Strong references for fire-and-forget background tasks (e.g. shutdown
         # reflections) so they aren't garbage-collected before completion.
         self._background_tasks: set[asyncio.Task] = set()
+
+        # Run one-time v2 directory structure migration
+        from framework.storage.migrate_v2 import run_migration
+
+        try:
+            run_migration()
+        except Exception:
+            logger.warning("v2 migration failed (non-fatal)", exc_info=True)
+
+    def build_llm(self, model: str | None = None):
+        """Construct an LLM provider using the server's configured defaults."""
+        from framework.config import RuntimeConfig, get_hive_config
+
+        rc = RuntimeConfig(model=model or self._model or RuntimeConfig().model)
+        llm_config = get_hive_config().get("llm", {})
+        if llm_config.get("use_antigravity_subscription"):
+            from framework.llm.antigravity import AntigravityProvider
+
+            return AntigravityProvider(model=rc.model)
+
+        from framework.llm.litellm import LiteLLMProvider
+
+        return LiteLLMProvider(
+            model=rc.model,
+            api_key=rc.api_key,
+            api_base=rc.api_base,
+            **rc.extra_kwargs,
+        )
 
     # ------------------------------------------------------------------
     # Session lifecycle
@@ -97,10 +172,9 @@ class SessionManager:
     ) -> Session:
         """Create session infrastructure (EventBus, LLM) without starting queen.
 
-        Internal helper — use create_session() or create_session_with_worker_graph().
+        Internal helper — use create_session() or create_session_with_worker_colony().
         """
-        from framework.config import RuntimeConfig, get_hive_config
-        from framework.runtime.event_bus import EventBus
+        from framework.host.event_bus import EventBus
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         resolved_id = session_id or f"session_{ts}_{uuid.uuid4().hex[:8]}"
@@ -109,24 +183,8 @@ class SessionManager:
             if resolved_id in self._sessions:
                 raise ValueError(f"Session '{resolved_id}' already exists")
 
-        # Load LLM config from ~/.hive/configuration.json
-        rc = RuntimeConfig(model=model or self._model or RuntimeConfig().model)
-
         # Session owns these — shared with queen and worker
-        llm_config = get_hive_config().get("llm", {})
-        if llm_config.get("use_antigravity_subscription"):
-            from framework.llm.antigravity import AntigravityProvider
-
-            llm = AntigravityProvider(model=rc.model)
-        else:
-            from framework.llm.litellm import LiteLLMProvider
-
-            llm = LiteLLMProvider(
-                model=rc.model,
-                api_key=rc.api_key,
-                api_base=rc.api_base,
-                **rc.extra_kwargs,
-            )
+        llm = self.build_llm(model=model)
         event_bus = EventBus()
 
         session = Session(
@@ -141,26 +199,103 @@ class SessionManager:
 
         return session
 
+    def _resume_queen_name(self, session_id: str) -> str | None:
+        """Best-effort queen identity lookup for a persisted session."""
+        session_dir = _find_queen_session_dir(session_id)
+        if not session_dir.exists():
+            return None
+
+        meta_path = session_dir / "meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                meta = {}
+            queen_id = meta.get("queen_id")
+            if isinstance(queen_id, str) and queen_id.strip():
+                return queen_id.strip()
+
+        if session_dir.parent.name == "sessions":
+            queen_id = session_dir.parent.parent.name
+            if queen_id:
+                return queen_id
+        return None
+
+    async def _ensure_session_queen_identity(
+        self,
+        session: Session,
+        initial_prompt: str | None = None,
+    ) -> dict:
+        """Resolve the queen identity and return the loaded profile.
+
+        Sets ``session.queen_name`` and returns the validated profile dict.
+        The caller can pass the profile directly to the orchestrator without
+        re-loading from disk.
+        """
+        from framework.agents.queen.queen_profiles import (
+            ensure_default_queens,
+            load_queen_profile,
+            select_queen,
+        )
+
+        ensure_default_queens()
+
+        candidates: list[str] = []
+        current_queen = (session.queen_name or "").strip()
+        if current_queen and current_queen != "default":
+            candidates.append(current_queen)
+
+        if session.queen_resume_from:
+            resumed_queen = self._resume_queen_name(session.queen_resume_from)
+            if resumed_queen and resumed_queen not in candidates:
+                candidates.append(resumed_queen)
+
+        for queen_id in candidates:
+            try:
+                profile = load_queen_profile(queen_id)
+            except FileNotFoundError:
+                logger.warning("Session '%s': queen profile '%s' not found", session.id, queen_id)
+                continue
+            session.queen_name = queen_id
+            return profile
+
+        selector_input = initial_prompt or ""
+        queen_id = await select_queen(selector_input, session.llm)
+        session.queen_name = queen_id
+        return load_queen_profile(queen_id)
+
     async def create_session(
         self,
         session_id: str | None = None,
         model: str | None = None,
         initial_prompt: str | None = None,
         queen_resume_from: str | None = None,
+        queen_name: str | None = None,
+        initial_phase: str | None = None,
     ) -> Session:
         """Create a new session with a queen but no worker.
 
         When ``queen_resume_from`` is set the queen writes conversation messages
         to that existing session's directory instead of creating a new one.
         This preserves full conversation history across server restarts.
+
+        When ``queen_name`` is set the session is pre-bound to that queen
+        identity, skipping LLM auto-selection in the identity hook.
         """
         # Reuse the original session ID when cold-restoring
         resolved_session_id = queen_resume_from or session_id
         session = await self._create_session_core(session_id=resolved_session_id, model=model)
         session.queen_resume_from = queen_resume_from
+        if queen_name:
+            session.queen_name = queen_name
 
         # Start queen immediately (queen-only, no worker tools yet)
-        await self._start_queen(session, worker_identity=None, initial_prompt=initial_prompt)
+        await self._start_queen(
+            session,
+            worker_identity=None,
+            initial_prompt=initial_prompt,
+            initial_phase=initial_phase,
+        )
 
         logger.info(
             "Session '%s' created (queen-only, resume_from=%s)",
@@ -169,7 +304,7 @@ class SessionManager:
         )
         return session
 
-    async def create_session_with_worker_graph(
+    async def create_session_with_worker_colony(
         self,
         agent_path: str | Path,
         agent_id: str | None = None,
@@ -177,30 +312,75 @@ class SessionManager:
         model: str | None = None,
         initial_prompt: str | None = None,
         queen_resume_from: str | None = None,
+        queen_name: str | None = None,
+        initial_phase: str | None = None,
+        worker_name: str | None = None,
     ) -> Session:
         """Create a session and load a worker in one step.
 
-        When ``queen_resume_from`` is set the session reuses the original session
-        ID so the frontend sees a single continuous session.  The queen writes
-        conversation messages to that existing directory, preserving full history.
+        When ``worker_name`` is provided, creates a worker-only session
+        (no queen) — the worker runs as the primary interactive loop.
+        Otherwise, creates a queen+worker session (legacy path).
         """
+        agent_path = Path(agent_path)
+        resolved_colony_id = agent_id or agent_path.name
+
+        if worker_name:
+            return await self._create_worker_only_session(
+                agent_path=agent_path,
+                worker_name=worker_name,
+                colony_id=resolved_colony_id,
+                session_id=session_id,
+                model=model,
+                initial_prompt=initial_prompt,
+                queen_resume_from=queen_resume_from,
+                queen_name=queen_name,
+            )
+
         from framework.tools.queen_lifecycle_tools import build_worker_profile
 
         agent_path = Path(agent_path)
-        resolved_graph_id = agent_id or agent_path.name
+        resolved_colony_id = agent_id or agent_path.name
+
+        # Read colony metadata.json for queen provenance (queen_name,
+        # queen_session_id) so we can restore the correct queen identity
+        # and resume from the originating session when no explicit
+        # queen_resume_from was provided.
+        _colony_metadata: dict = {}
+        _colony_metadata_path = agent_path / "metadata.json"
+        if _colony_metadata_path.exists():
+            try:
+                _colony_metadata = json.loads(
+                    _colony_metadata_path.read_text(encoding="utf-8")
+                )
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        if not queen_name:
+            queen_name = _colony_metadata.get("queen_name") or None
+
+        # Colony metadata's queen_session_id is the authoritative session
+        # for this colony (the forked session).  It takes priority over
+        # whatever the frontend found via history scan, which may be the
+        # source session instead of the fork.
+        _colony_session_id = _colony_metadata.get("queen_session_id")
+        if _colony_session_id:
+            queen_resume_from = _colony_session_id
+        elif not queen_resume_from:
+            queen_resume_from = None
 
         # When cold-restoring, check meta.json for the phase — if the agent
         # was still being built we must NOT try to load the worker (the code
         # is incomplete and will fail to import).
+        _resume_queen_id: str | None = None
         if queen_resume_from:
             _resume_phase = None
-            _meta_path = (
-                Path.home() / ".hive" / "queen" / "session" / queen_resume_from / "meta.json"
-            )
+            _meta_path = _find_queen_session_dir(queen_resume_from) / "meta.json"
             if _meta_path.exists():
                 try:
                     _meta = json.loads(_meta_path.read_text(encoding="utf-8"))
                     _resume_phase = _meta.get("phase")
+                    _resume_queen_id = _meta.get("queen_id")
                 except (json.JSONDecodeError, OSError):
                     pass
             if _resume_phase in ("building", "planning"):
@@ -212,21 +392,32 @@ class SessionManager:
                     model=model,
                     initial_prompt=initial_prompt,
                     queen_resume_from=queen_resume_from,
+                    queen_name=queen_name or _resume_queen_id,
                 )
 
-        # Reuse the original session ID when cold-restoring so the frontend
-        # sees one continuous session instead of a new one each time.
+        # Use the colony's forked session ID as the live session ID.
+        # If it's already live (user navigated back), return it directly
+        # -- but only if it belongs to this colony.
+        if queen_resume_from and queen_resume_from in self._sessions:
+            existing = self._sessions[queen_resume_from]
+            if existing.worker_path and str(existing.worker_path) == str(agent_path):
+                return existing
+
         session = await self._create_session_core(
-            session_id=queen_resume_from,
+            session_id=_colony_session_id or queen_resume_from,
             model=model,
         )
         session.queen_resume_from = queen_resume_from
+        if queen_name:
+            session.queen_name = queen_name
+        elif _resume_queen_id:
+            session.queen_name = _resume_queen_id
         try:
-            # Load the graph FIRST (before queen) so queen gets full tools
+            # Load the colony FIRST (before queen) so queen gets full tools
             await self._load_worker_core(
                 session,
                 agent_path,
-                graph_id=resolved_graph_id,
+                colony_id=resolved_colony_id,
                 model=model,
             )
 
@@ -235,19 +426,25 @@ class SessionManager:
 
             # Start queen with worker profile + lifecycle + monitoring tools
             worker_identity = (
-                build_worker_profile(session.graph_runtime, agent_path=agent_path)
-                if session.graph_runtime
+                build_worker_profile(session.colony_runtime, agent_path=agent_path)
+                if session.colony_runtime
                 else None
             )
             await self._start_queen(
-                session, worker_identity=worker_identity, initial_prompt=initial_prompt
+                session,
+                worker_identity=worker_identity,
+                initial_prompt=initial_prompt,
+                initial_phase=initial_phase,
             )
 
         except Exception:
             if queen_resume_from:
                 # Cold restore: worker load failed (e.g. incomplete code from a
-                # building session).  Fall back to queen-only so the user can
-                # continue the conversation and fix / rebuild the agent.
+                # building session, or the colony directory was deleted). Fall
+                # back to queen-only so the user can continue the conversation.
+                # Forward queen_name so the recovered session is stored under
+                # the correct queen identity -- otherwise it lands in default/
+                # and the frontend routes the user to the wrong dir.
                 logger.warning(
                     "Cold restore: worker load failed for '%s', falling back to queen-only",
                     agent_path,
@@ -259,10 +456,249 @@ class SessionManager:
                     model=model,
                     initial_prompt=initial_prompt,
                     queen_resume_from=queen_resume_from,
+                    queen_name=queen_name or _resume_queen_id,
                 )
             # If anything fails (non-cold-restore), tear down the session
             await self.stop_session(session.id)
             raise
+        return session
+
+    async def _create_worker_only_session(
+        self,
+        agent_path: Path,
+        worker_name: str,
+        colony_id: str,
+        session_id: str | None = None,
+        model: str | None = None,
+        initial_prompt: str | None = None,
+        queen_resume_from: str | None = None,
+        queen_name: str | None = None,
+    ) -> Session:
+        """Create a worker-only session (no queen).
+
+        Loads the worker's {worker_name}.json config, creates an AgentLoop,
+        and sets it as the primary interactive executor so chat/SSE work
+        through the existing infrastructure.
+        """
+        import json as _json
+        import shutil
+
+        from framework.agent_loop.agent_loop import AgentLoop, LoopConfig
+        from framework.agent_loop.types import AgentContext, AgentSpec
+        from framework.orchestrator.graph_executor import GraphExecutor
+        from framework.schemas.goal import Goal
+        from framework.storage.conversation_store import FileConversationStore
+        from framework.tracker.decision_tracker import DecisionTracker
+
+        worker_config_path = agent_path / f"{worker_name}.json"
+        if not worker_config_path.exists():
+            raise FileNotFoundError(f"Worker config not found: {worker_config_path}")
+
+        worker_data = _json.loads(worker_config_path.read_text(encoding="utf-8"))
+
+        session = await self._create_session_core(
+            session_id=queen_resume_from,
+            model=model,
+        )
+        session.queen_resume_from = queen_resume_from
+        if queen_name:
+            session.queen_name = queen_name
+
+        session.colony_id = colony_id
+        session.colony_name = colony_id
+        session.worker_path = agent_path
+
+        # Worker storage: ~/.hive/agents/{colony_name}/{worker_name}/
+        worker_storage = Path.home() / ".hive" / "agents" / colony_id / worker_name
+        worker_storage.mkdir(parents=True, exist_ok=True)
+
+        # Copy conversations from colony if fresh
+        worker_conv_dir = worker_storage / "conversations"
+        if not worker_conv_dir.exists():
+            colony_conv = agent_path / "conversations"
+            if colony_conv.exists():
+                shutil.copytree(colony_conv, worker_conv_dir)
+        conversation_store = FileConversationStore(worker_conv_dir)
+
+        # Build AgentSpec from worker config
+        spec = AgentSpec(
+            id=worker_name,
+            name=worker_data.get("name", worker_name),
+            description=worker_data.get("description", ""),
+            system_prompt=worker_data.get("system_prompt", ""),
+            tools=worker_data.get("tools", []),
+            tool_access_policy="all",
+            identity_prompt=worker_data.get("identity_prompt", ""),
+        )
+
+        # Build loop config
+        lc_data = worker_data.get("loop_config", {})
+        loop_config = LoopConfig(
+            max_iterations=lc_data.get("max_iterations", 999_999),
+            max_tool_calls_per_turn=lc_data.get("max_tool_calls_per_turn", 30),
+            max_context_tokens=lc_data.get("max_context_tokens", 180_000),
+            spillover_dir=str(agent_path / "data"),
+        )
+
+        # Build goal
+        goal_data = worker_data.get("goal", {})
+        goal = Goal(
+            id=f"{colony_id}-{worker_name}",
+            name=goal_data.get("description", worker_name)[:60],
+            description=goal_data.get("description", ""),
+        )
+
+        # Queen dir for SSE/session metadata (reuse queen session storage)
+        storage_session_id = queen_resume_from or session.id
+        queen_dir = _queen_session_dir(storage_session_id, session.queen_name)
+        queen_dir.mkdir(parents=True, exist_ok=True)
+        session.queen_dir = queen_dir
+
+        # Write meta
+        _meta_path = queen_dir / "meta.json"
+        _existing_meta: dict = {}
+        if _meta_path.exists():
+            try:
+                _existing_meta = _json.loads(_meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        _existing_meta.update(
+            {
+                "created_at": time.time(),
+                "queen_id": session.queen_name,
+                "agent_name": worker_name,
+                "agent_path": str(agent_path),
+                "worker_name": worker_name,
+            }
+        )
+        _meta_path.write_text(_json.dumps(_existing_meta), encoding="utf-8")
+
+        # Set up event log
+        iteration_offset = 0
+        events_path = queen_dir / "events.jsonl"
+        if events_path.exists():
+            max_iter = -1
+            with open(events_path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        evt = _json.loads(line)
+                        i = evt.get("iteration", 0)
+                        if i > max_iter:
+                            max_iter = i
+                    except Exception:
+                        pass
+            if max_iter >= 0:
+                iteration_offset = max_iter + 1
+
+        # Load the worker via AgentLoader to get the full pipeline (MCP, skills, creds)
+        from framework.loader import AgentLoader
+
+        loop = asyncio.get_running_loop()
+        runner = await loop.run_in_executor(
+            None,
+            lambda: AgentLoader.load(
+                agent_path,
+                model=model or self._model,
+                interactive=False,
+                skip_credential_validation=True,
+                credential_store=self._credential_store,
+            ),
+        )
+        if runner._agent_runtime is None:
+            await loop.run_in_executor(
+                None,
+                lambda: runner._setup(event_bus=session.event_bus),
+            )
+
+        session.colony_runtime = runner._agent_runtime
+        session.runner = runner
+
+        # Start the AgentHost
+        runtime = runner._agent_runtime
+        if runtime and not runtime.is_running:
+            await runtime.start()
+
+        # Register entry point so we can trigger execution
+        from framework.host.execution_manager import EntryPointSpec
+
+        if not runtime._streams:
+            runtime.register_entry_point(
+                EntryPointSpec(
+                    id="default",
+                    name="Default",
+                    entry_node=worker_name,
+                    trigger_type="manual",
+                    isolation_level="shared",
+                ),
+            )
+
+        # Create a queen-like executor for the worker so chat injection works
+        # We reuse the queen_executor field even though it's a worker
+        queen_registry = runner._tool_registry
+
+        # Start with queen's default tools if available
+        queen_llm = runner._llm or session.llm
+        all_tools = list(queen_registry.get_tools().values())
+        tool_executor = queen_registry.get_executor()
+
+        agent_loop = AgentLoop(
+            event_bus=session.event_bus,
+            config=loop_config,
+            tool_executor=tool_executor,
+            conversation_store=conversation_store,
+        )
+
+        worker_ctx = AgentContext(
+            runtime=DecisionTracker(worker_storage),
+            agent_id=worker_name,
+            agent_spec=spec,
+            input_data={"task": goal_data.get("description", "")},
+            llm=queen_llm,
+            available_tools=all_tools,
+            goal_context=goal.to_prompt_context(),
+            goal=goal,
+            max_tokens=8192,
+            stream_id=worker_name,
+            execution_id=worker_name,
+            identity_prompt=worker_data.get("identity_prompt", ""),
+            memory_prompt=worker_data.get("memory_prompt", ""),
+            skills_catalog_prompt=worker_data.get("skills_catalog_prompt", ""),
+            protocols_prompt=worker_data.get("protocols_prompt", ""),
+            skill_dirs=worker_data.get("skill_dirs", []),
+        )
+
+        session.queen_executor = GraphExecutor(
+            node_id=worker_name,
+            agent_loop=agent_loop,
+            context=worker_ctx,
+            event_bus=session.event_bus,
+        )
+
+        # Start the worker's agent loop in the background
+        session.queen_task = asyncio.create_task(
+            session.queen_executor.run(initial_message=initial_prompt)
+        )
+
+        # Set up event persistence
+        if session.event_bus and queen_dir:
+            from framework.host.event_bus import EventBus
+
+            session.event_bus.start_persistence(queen_dir, iteration_offset=iteration_offset)
+
+        logger.info(
+            "Worker-only session '%s' started: colony=%s worker=%s tools=%d",
+            session.id,
+            colony_id,
+            worker_name,
+            len(all_tools),
+        )
+
+        async with self._lock:
+            self._loading.discard(session.id)
+
         return session
 
     # ------------------------------------------------------------------
@@ -273,25 +709,25 @@ class SessionManager:
         self,
         session: Session,
         agent_path: str | Path,
-        graph_id: str | None = None,
+        colony_id: str | None = None,
         model: str | None = None,
     ) -> None:
-        """Load a graph into a session (core logic).
+        """Load a worker into a session (core logic).
 
         Sets up the runner, runtime, and session fields. Does NOT notify
         the queen — callers handle that step.
         """
-        from framework.runner import AgentRunner
+        from framework.loader import AgentLoader
 
         agent_path = Path(agent_path)
-        resolved_graph_id = graph_id or agent_path.name
+        resolved_colony_id = colony_id or agent_path.name
 
-        if session.graph_runtime is not None:
-            raise ValueError(f"Session '{session.id}' already has graph '{session.graph_id}'")
+        if session.colony_runtime is not None:
+            raise ValueError(f"Session '{session.id}' already has colony '{session.colony_id}'")
 
         async with self._lock:
             if session.id in self._loading:
-                raise ValueError(f"Session '{session.id}' is currently loading a graph")
+                raise ValueError(f"Session '{session.id}' is currently loading a colony")
             self._loading.add(session.id)
 
         try:
@@ -303,7 +739,7 @@ class SessionManager:
             resolved_model = model or session_model or self._model
             runner = await loop.run_in_executor(
                 None,
-                lambda: AgentRunner.load(
+                lambda: AgentLoader.load(
                     agent_path,
                     model=resolved_model,
                     interactive=False,
@@ -325,8 +761,20 @@ class SessionManager:
             runtime = runner._agent_runtime
 
             # Load triggers from the agent's triggers.json definition file.
-            from framework.tools.queen_lifecycle_tools import _read_agent_triggers_json
+            # triggers.json is written exclusively by set_trigger, so the
+            # presence of an entry means the user explicitly activated this
+            # trigger in a previous session. We treat the file as the
+            # source of truth and auto-start each trigger on colony load
+            # so the user doesn't have to re-activate after every restart.
+            # The per-session active_triggers tracking still functions, but
+            # is no longer the only path to "running" status.
+            from framework.tools.queen_lifecycle_tools import (
+                _read_agent_triggers_json,
+                _start_trigger_timer,
+                _start_trigger_webhook,
+            )
 
+            triggers_to_autostart: list[str] = []
             for tdata in _read_agent_triggers_json(agent_path):
                 tid = tdata.get("id", "")
                 ttype = tdata.get("trigger_type", "")
@@ -338,10 +786,55 @@ class SessionManager:
                         description=tdata.get("name", tid),
                         task=tdata.get("task", ""),
                     )
+                    triggers_to_autostart.append(tid)
                     logger.info("Loaded trigger '%s' (%s) from triggers.json", tid, ttype)
 
+            # Auto-start every trigger discovered in triggers.json. The
+            # frontend listens for TRIGGER_ACTIVATED to render the active
+            # state; per-session active_triggers tracking still happens
+            # via _persist_active_triggers below.
+            for tid in triggers_to_autostart:
+                tdef = session.available_triggers[tid]
+                try:
+                    if tdef.trigger_type == "timer":
+                        await _start_trigger_timer(session, tid, tdef)
+                    elif tdef.trigger_type == "webhook":
+                        await _start_trigger_webhook(session, tid, tdef)
+                    tdef.active = True
+                    session.active_trigger_ids.add(tid)
+                    logger.info("Auto-started trigger '%s' on colony load", tid)
+                except Exception:
+                    logger.warning(
+                        "Failed to auto-start trigger '%s' on colony load",
+                        tid,
+                        exc_info=True,
+                    )
+
+            if session.active_trigger_ids:
+                # Persist the auto-started set so a subsequent restart
+                # finds them in state.active_triggers and the existing
+                # _restore_active_triggers path also keeps working.
+                from framework.tools.queen_lifecycle_tools import (
+                    _persist_active_triggers,
+                )
+
+                await _persist_active_triggers(session, session.id)
+
             if session.available_triggers:
+                # Emit AVAILABLE for every trigger (so the UI knows the
+                # definition exists) and ACTIVATED for the ones we just
+                # auto-started. The frontend handler treats them as the
+                # same case and uses the latter to flip the card to
+                # active.
                 await self._emit_trigger_events(session, "available", session.available_triggers)
+                if session.active_trigger_ids:
+                    activated = {
+                        tid: session.available_triggers[tid]
+                        for tid in session.active_trigger_ids
+                        if tid in session.available_triggers
+                    }
+                    if activated:
+                        await self._emit_trigger_events(session, "activated", activated)
 
             # Start runtime on event loop
             if runtime and not runtime.is_running:
@@ -353,10 +846,10 @@ class SessionManager:
             info = runner.info()
 
             # Update session
-            session.graph_id = resolved_graph_id
+            session.colony_id = resolved_colony_id
             session.worker_path = agent_path
             session.runner = runner
-            session.graph_runtime = runtime
+            session.colony_runtime = runtime
             session.worker_info = info
 
             async with self._lock:
@@ -364,7 +857,7 @@ class SessionManager:
 
             logger.info(
                 "Worker '%s' loaded into session '%s'",
-                resolved_graph_id,
+                resolved_colony_id,
                 session.id,
             )
 
@@ -467,10 +960,10 @@ class SessionManager:
         Called after worker loading to restart any timer/webhook triggers
         that were active before a server restart.
         """
-        if not session.available_triggers or not session.graph_runtime:
+        if not session.available_triggers or not session.colony_runtime:
             return
         try:
-            store = session.graph_runtime._session_store
+            store = session.colony_runtime._session_store
             state = await store.read_state(session_id)
             if state and state.active_triggers:
                 from framework.tools.queen_lifecycle_tools import (
@@ -478,6 +971,10 @@ class SessionManager:
                     _start_trigger_webhook,
                 )
 
+                from framework.host.event_bus import AgentEvent, EventType
+
+                runner = getattr(session, "runner", None)
+                colony_entry = runner.graph.entry_node if runner else None
                 saved_tasks = getattr(state, "trigger_tasks", {}) or {}
                 for tid in state.active_triggers:
                     tdef = session.available_triggers.get(tid)
@@ -494,6 +991,29 @@ class SessionManager:
                         elif tdef.trigger_type == "webhook":
                             await _start_trigger_webhook(session, tid, tdef)
                             logger.info("Restored webhook trigger '%s'", tid)
+                        # Emit TRIGGER_ACTIVATED so the frontend knows this
+                        # trigger is running after a server restart. Without
+                        # this, the previously-available event is the only
+                        # signal the UI ever gets, and the trigger appears
+                        # inactive forever.
+                        if session.event_bus:
+                            await session.event_bus.publish(
+                                AgentEvent(
+                                    type=EventType.TRIGGER_ACTIVATED,
+                                    stream_id="queen",
+                                    data={
+                                        "trigger_id": tdef.id,
+                                        "trigger_type": tdef.trigger_type,
+                                        "trigger_config": tdef.trigger_config,
+                                        "name": tdef.description or tdef.id,
+                                        **(
+                                            {"entry_node": colony_entry}
+                                            if colony_entry
+                                            else {}
+                                        ),
+                                    },
+                                )
+                            )
                     else:
                         logger.warning(
                             "Saved trigger '%s' not found in worker entry points, skipping",
@@ -506,16 +1026,16 @@ class SessionManager:
         except Exception as e:
             logger.warning("Failed to restore active triggers: %s", e)
 
-    async def load_graph(
+    async def load_colony(
         self,
         session_id: str,
         agent_path: str | Path,
-        graph_id: str | None = None,
+        colony_id: str | None = None,
         model: str | None = None,
     ) -> Session:
-        """Load a graph into an existing session (with running queen).
+        """Load a worker colony into an existing session (with running queen).
 
-        Starts the graph runtime and notifies the queen.
+        Starts the colony runtime and notifies the queen.
         """
         agent_path = Path(agent_path)
 
@@ -526,17 +1046,17 @@ class SessionManager:
         await self._load_worker_core(
             session,
             agent_path,
-            graph_id=graph_id,
+            colony_id=colony_id,
             model=model,
         )
 
         # Notify queen about the loaded worker (skip for queen itself).
-        if agent_path.name != "queen" and session.graph_runtime:
-            await self._notify_queen_graph_loaded(session)
+        if agent_path.name != "queen" and session.colony_runtime:
+            await self._notify_queen_colony_loaded(session)
 
         # Update meta.json so cold-restore can discover this session by agent_path
         storage_session_id = session.queen_resume_from or session.id
-        meta_path = Path.home() / ".hive" / "queen" / "session" / storage_session_id / "meta.json"
+        meta_path = _queen_session_dir(storage_session_id, session.queen_name) / "meta.json"
         try:
             _agent_name = (
                 session.worker_info.name
@@ -557,16 +1077,16 @@ class SessionManager:
         await self._restore_active_triggers(session, session_id)
 
         # Emit SSE event so the frontend can update UI
-        await self._emit_graph_loaded(session)
+        await self._emit_colony_loaded(session)
 
         return session
 
-    async def unload_graph(self, session_id: str) -> bool:
-        """Unload the worker from a session. Queen stays alive."""
+    async def unload_colony(self, session_id: str) -> bool:
+        """Unload the worker colony from a session. Queen stays alive."""
         session = self._sessions.get(session_id)
         if session is None:
             return False
-        if session.graph_runtime is None:
+        if session.colony_runtime is None:
             return False
 
         # Cleanup worker
@@ -574,7 +1094,7 @@ class SessionManager:
             try:
                 await session.runner.cleanup_async()
             except Exception as e:
-                logger.error("Error cleaning up graph '%s': %s", session.graph_id, e)
+                logger.error("Error cleaning up colony '%s': %s", session.colony_id, e)
 
         # Cancel active trigger timers
         for tid, task in session.active_timer_tasks.items():
@@ -596,17 +1116,17 @@ class SessionManager:
             await self._emit_trigger_events(session, "removed", session.available_triggers)
             session.available_triggers.clear()
 
-        graph_id = session.graph_id
-        session.graph_id = None
+        colony_id = session.colony_id
+        session.colony_id = None
         session.worker_path = None
         session.runner = None
-        session.graph_runtime = None
+        session.colony_runtime = None
         session.worker_info = None
 
         # Notify queen
         await self._notify_queen_worker_unloaded(session)
 
-        logger.info("Graph '%s' unloaded from session '%s'", graph_id, session_id)
+        logger.info("Colony '%s' unloaded from session '%s'", colony_id, session_id)
         return True
 
     # ------------------------------------------------------------------
@@ -640,14 +1160,33 @@ class SessionManager:
         # are persisted before the session is destroyed (fire-and-forget).
         if session.queen_dir is not None:
             try:
+                from framework.agents.queen.queen_memory_v2 import (
+                    global_memory_dir,
+                    queen_memory_dir,
+                )
                 from framework.agents.queen.reflection_agent import run_shutdown_reflection
 
+                global_mem_dir = global_memory_dir()
+                queen_mem_dir = queen_memory_dir(session.queen_name)
+                if session.phase_state is not None:
+                    global_mem_dir = session.phase_state.global_memory_dir or global_mem_dir
+                    queen_mem_dir = session.phase_state.queen_memory_dir or queen_mem_dir
+
                 task = asyncio.create_task(
-                    asyncio.shield(run_shutdown_reflection(session.queen_dir, session.llm)),
+                    asyncio.shield(
+                        run_shutdown_reflection(
+                            session.queen_dir,
+                            session.llm,
+                            global_memory_dir_override=global_mem_dir,
+                            queen_memory_dir=queen_mem_dir,
+                            queen_id=session.queen_name,
+                        )
+                    ),
+                    name=f"shutdown-reflect-{session_id}",
                 )
+                logger.info("Session '%s': shutdown reflection spawned", session_id)
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
-                logger.info("Session '%s': shutdown reflection spawned", session_id)
             except Exception:
                 logger.warning(
                     "Session '%s': failed to spawn shutdown reflection", session_id, exc_info=True
@@ -684,6 +1223,18 @@ class SessionManager:
             except Exception as e:
                 logger.error("Error cleaning up worker: %s", e)
 
+        # Stop the unified ColonyRuntime (Phase 2 wiring) if it was started
+        if session.colony is not None:
+            try:
+                await session.colony.stop()
+            except Exception:
+                logger.warning(
+                    "Session '%s': error stopping unified ColonyRuntime",
+                    session_id,
+                    exc_info=True,
+                )
+            session.colony = None
+
         # Close per-session event log
         session.event_bus.close_session_log()
 
@@ -694,52 +1245,23 @@ class SessionManager:
     # Queen startup
     # ------------------------------------------------------------------
 
-    async def _handle_worker_handoff(self, session: Session, executor: Any, event: Any) -> None:
-        """Route worker escalation events into the queen conversation."""
-        if event.stream_id == "queen":
-            return
-
-        reason = str(event.data.get("reason", "")).strip()
-        context = str(event.data.get("context", "")).strip()
-        node_label = event.node_id or "unknown_node"
-        stream_label = event.stream_id or "unknown_stream"
-
-        handoff = (
-            "[WORKER_ESCALATION_REQUEST]\n"
-            f"stream_id: {stream_label}\n"
-            f"node_id: {node_label}\n"
-            f"reason: {reason or 'unspecified'}\n"
-        )
-        if context:
-            handoff += f"context:\n{context}\n"
-
-        node = executor.node_registry.get("queen")
-        if node is not None and hasattr(node, "inject_event"):
-            await node.inject_event(handoff, is_client_input=False)
-        else:
-            logger.warning("Worker handoff received but queen node not ready")
-
     def _subscribe_worker_handoffs(self, session: Session, executor: Any) -> None:
-        """Subscribe queen to worker/subagent escalation handoff events."""
-        from framework.runtime.event_bus import EventType as _ET
+        """Deprecated — colony-scoped escalation routing lives in queen_orchestrator.
 
-        if session.worker_handoff_sub is not None:
-            session.event_bus.unsubscribe(session.worker_handoff_sub)
-            session.worker_handoff_sub = None
-
-        async def _on_worker_handoff(event):
-            await self._handle_worker_handoff(session, executor, event)
-
-        session.worker_handoff_sub = session.event_bus.subscribe(
-            event_types=[_ET.ESCALATION_REQUESTED],
-            handler=_on_worker_handoff,
-        )
+        Kept as a shim so any legacy caller is a no-op. The real subscription
+        is installed by ``queen_orchestrator.create_queen`` via
+        ``colony_runtime.subscribe_to_events(..., filter_colony=...)`` so that
+        cross-colony leakage is impossible and every handoff carries the
+        worker_id + request_id the queen needs to reply with addressed intent.
+        """
+        return None
 
     async def _start_queen(
         self,
         session: Session,
         worker_identity: str | None,
         initial_prompt: str | None = None,
+        initial_phase: str | None = None,
     ) -> None:
         """Start the queen executor for a session.
 
@@ -755,13 +1277,13 @@ class SessionManager:
             session.queen_executor,
         )
 
-        hive_home = Path.home() / ".hive"
+        queen_profile = await self._ensure_session_queen_identity(session, initial_prompt)
 
         # Determine which session directory to use for queen storage.
         # When queen_resume_from is set we write to the ORIGINAL session's
         # directory so that all messages accumulate in one place.
         storage_session_id = session.queen_resume_from or session.id
-        queen_dir = hive_home / "queen" / "session" / storage_session_id
+        queen_dir = _queen_session_dir(storage_session_id, session.queen_name)
         queen_dir.mkdir(parents=True, exist_ok=True)
         session.queen_dir = queen_dir
 
@@ -787,7 +1309,10 @@ class SessionManager:
                     _existing_meta = json.loads(_meta_path.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, OSError):
                     pass
-            _new_meta: dict = {"created_at": time.time()}
+            _new_meta: dict = {
+                "created_at": time.time(),
+                "queen_id": session.queen_name,
+            }
             if _agent_name is not None:
                 _new_meta["agent_name"] = _agent_name
             if session.worker_path is not None:
@@ -845,7 +1370,10 @@ class SessionManager:
             session_manager=self,
             worker_identity=worker_identity,
             queen_dir=queen_dir,
+            queen_profile=queen_profile,
             initial_prompt=initial_prompt,
+            initial_phase=initial_phase,
+            tool_registry=self._queen_tool_registry,
         )
         logger.debug(
             "[_start_queen] create_queen returned, queen_task=%s, queen_executor=%s",
@@ -853,9 +1381,25 @@ class SessionManager:
             session.queen_executor,
         )
 
+        # Phase 2 wiring: stand up a real ColonyRuntime that shares the
+        # queen's llm, tools, event bus, and storage path. In a DM session
+        # it has no parallel workers (the queen runs in queen_task), but
+        # the run_parallel_workers tool (Phase 4) will use this runtime
+        # as the spawn surface, and worker SUBAGENT_REPORT events flow
+        # back through the shared event_bus to the existing SSE.
+        try:
+            await self._start_unified_colony_runtime(session, queen_dir)
+        except Exception:
+            # ColonyRuntime is dormant infrastructure today — never let
+            # its construction abort queen startup. Phase 4 will harden.
+            logger.warning(
+                "_start_queen: unified ColonyRuntime construction failed",
+                exc_info=True,
+            )
+
         # Auto-load worker on cold restore — the queen's conversation expects
         # the agent to be loaded, but the new session has no worker.
-        if session.queen_resume_from and not session.graph_runtime:
+        if session.queen_resume_from and not session.colony_runtime:
             meta_path = queen_dir / "meta.json"
             if meta_path.exists():
                 try:
@@ -866,11 +1410,9 @@ class SessionManager:
                     if _agent_path and Path(_agent_path).exists():
                         if _phase in ("staging", "running", None):
                             # Agent fully built — load worker and resume
-                            await self.load_graph(session.id, _agent_path)
+                            await self.load_colony(session.id, _agent_path)
                             if session.phase_state:
                                 await session.phase_state.switch_to_staging(source="auto")
-                            # Emit flowchart overlay so frontend can display it
-                            await self._emit_flowchart_on_restore(session, _agent_path)
                             logger.info("Cold restore: auto-loaded worker from %s", _agent_path)
                         elif _phase == "building":
                             # Agent folder exists but incomplete — resume building
@@ -886,11 +1428,87 @@ class SessionManager:
                     logger.warning("Cold restore: failed to auto-load worker", exc_info=True)
 
     # ------------------------------------------------------------------
+    # Phase 2: unified ColonyRuntime construction
+    # ------------------------------------------------------------------
+
+    async def _start_unified_colony_runtime(
+        self,
+        session: Session,
+        queen_dir: Path,
+    ) -> None:
+        """Build a real ColonyRuntime sharing the queen's resources.
+
+        This is the Phase 2 wiring. The ColonyRuntime is created with:
+
+        - ``llm``  → ``session.llm``
+        - ``event_bus`` → ``session.event_bus`` (so worker SUBAGENT_REPORT
+          and lifecycle events flow through the same bus the SSE handler
+          already subscribes to)
+        - ``tools`` → the queen's resolved tool list (stashed by
+          ``create_queen`` on ``session._queen_tools``)
+        - ``storage_path`` → ``queen_dir``  (parallel workers will land
+          under ``{queen_dir}/workers/{worker_id}/`` thanks to
+          ``ColonyRuntime.spawn``)
+        - ``colony_id`` → ``session.id``
+
+        The runtime is started but no overseer is attached — the queen
+        still runs as ``session.queen_task`` from ``create_queen``. This
+        is dormant fan-out infrastructure: ``run_parallel_workers``
+        (Phase 4) is what activates it.
+        """
+        from framework.agent_loop.types import AgentSpec
+        from framework.host.colony_runtime import ColonyRuntime
+        from framework.schemas.goal import Goal
+
+        queen_tools = getattr(session, "_queen_tools", None) or []
+        queen_tool_executor = getattr(session, "_queen_tool_executor", None)
+
+        colony_spec = AgentSpec(
+            id="queen_colony",
+            name="Queen Colony",
+            description=(
+                "Unified colony runtime hosting the queen overseer and "
+                "any parallel workers spawned via run_parallel_workers."
+            ),
+            system_prompt="",
+            tools=[t.name for t in queen_tools],
+            tool_access_policy="all",
+        )
+
+        colony_goal = Goal(
+            id=f"colony_goal_{session.id}",
+            name=f"Session {session.id}",
+            description="Default goal for the session-level ColonyRuntime.",
+        )
+
+        colony = ColonyRuntime(
+            agent_spec=colony_spec,
+            goal=colony_goal,
+            storage_path=queen_dir,
+            llm=session.llm,
+            tools=queen_tools,
+            tool_executor=queen_tool_executor,
+            event_bus=session.event_bus,
+            colony_id=session.id,
+            pipeline_stages=[],  # queen pipeline runs in queen_orchestrator, not here
+        )
+        await colony.start()
+        session.colony = colony
+
+        logger.info(
+            "_start_queen: unified ColonyRuntime ready for session %s "
+            "(%d tools, storage=%s)",
+            session.id,
+            len(queen_tools),
+            queen_dir,
+        )
+
+    # ------------------------------------------------------------------
     # Queen notifications
     # ------------------------------------------------------------------
 
-    async def _notify_queen_graph_loaded(self, session: Session) -> None:
-        """Inject a system message into the queen about the loaded graph."""
+    async def _notify_queen_colony_loaded(self, session: Session) -> None:
+        """Inject a system message into the queen about the loaded colony."""
         from framework.tools.queen_lifecycle_tools import build_worker_profile
 
         executor = session.queen_executor
@@ -900,7 +1518,7 @@ class SessionManager:
         if node is None or not hasattr(node, "inject_event"):
             return
 
-        profile = build_worker_profile(session.graph_runtime, agent_path=session.worker_path)
+        profile = build_worker_profile(session.colony_runtime, agent_path=session.worker_path)
 
         # Append available trigger info so the queen knows what's schedulable
         trigger_lines = ""
@@ -916,46 +1534,23 @@ class SessionManager:
                 + "\n".join(parts)
             )
 
-        await node.inject_event(f"[SYSTEM] Graph loaded.{profile}{trigger_lines}")
+        await node.inject_event(f"[SYSTEM] Colony loaded.{profile}{trigger_lines}")
 
-    async def _emit_graph_loaded(self, session: Session) -> None:
-        """Publish a WORKER_GRAPH_LOADED event so the frontend can update."""
-        from framework.runtime.event_bus import AgentEvent, EventType
+    async def _emit_colony_loaded(self, session: Session) -> None:
+        """Publish a WORKER_COLONY_LOADED event so the frontend can update."""
+        from framework.host.event_bus import AgentEvent, EventType
 
         info = session.worker_info
         await session.event_bus.publish(
             AgentEvent(
-                type=EventType.WORKER_GRAPH_LOADED,
+                type=EventType.WORKER_COLONY_LOADED,
                 stream_id="queen",
                 data={
-                    "graph_id": session.graph_id,
-                    "graph_name": info.name if info else session.graph_id,
+                    "colony_id": session.colony_id,
+                    "colony_name": info.name if info else session.colony_id,
                     "agent_path": str(session.worker_path) if session.worker_path else "",
                     "goal": info.goal_name if info else "",
                     "node_count": info.node_count if info else 0,
-                },
-            )
-        )
-
-    async def _emit_flowchart_on_restore(self, session: Session, agent_path: str | Path) -> None:
-        """Emit FLOWCHART_MAP_UPDATED from persisted flowchart file on cold restore."""
-        from framework.runtime.event_bus import AgentEvent, EventType
-        from framework.tools.flowchart_utils import load_flowchart_file
-
-        original_draft, flowchart_map = load_flowchart_file(agent_path)
-        if original_draft is None:
-            return
-        # Cache in phase_state so the REST endpoint also returns it
-        if session.phase_state:
-            session.phase_state.original_draft_graph = original_draft
-            session.phase_state.flowchart_map = flowchart_map
-        await session.event_bus.publish(
-            AgentEvent(
-                type=EventType.FLOWCHART_MAP_UPDATED,
-                stream_id="queen",
-                data={
-                    "map": flowchart_map,
-                    "original_draft": original_draft,
                 },
             )
         )
@@ -981,15 +1576,18 @@ class SessionManager:
         kind: str,
         triggers: dict[str, TriggerDefinition],
     ) -> None:
-        """Emit TRIGGER_AVAILABLE or TRIGGER_REMOVED events for each trigger."""
-        from framework.runtime.event_bus import AgentEvent, EventType
+        """Emit TRIGGER_AVAILABLE / ACTIVATED / REMOVED events for each trigger."""
+        from framework.host.event_bus import AgentEvent, EventType
 
-        event_type = (
-            EventType.TRIGGER_AVAILABLE if kind == "available" else EventType.TRIGGER_REMOVED
-        )
-        # Resolve graph entry node for trigger target
+        if kind == "activated":
+            event_type = EventType.TRIGGER_ACTIVATED
+        elif kind == "removed":
+            event_type = EventType.TRIGGER_REMOVED
+        else:
+            event_type = EventType.TRIGGER_AVAILABLE
+        # Resolve entry node for trigger target
         runner = getattr(session, "runner", None)
-        graph_entry = runner.graph.entry_node if runner else None
+        colony_entry = runner.graph.entry_node if runner else None
 
         for t in triggers.values():
             await session.event_bus.publish(
@@ -1001,7 +1599,7 @@ class SessionManager:
                         "trigger_type": t.trigger_type,
                         "trigger_config": t.trigger_config,
                         "name": t.description or t.id,
-                        **({"entry_node": graph_entry} if graph_entry else {}),
+                        **({"entry_node": colony_entry} if colony_entry else {}),
                     },
                 )
             )
@@ -1021,8 +1619,8 @@ class SessionManager:
 
         # Build worker identity if worker is loaded
         worker_identity = (
-            build_worker_profile(session.graph_runtime, agent_path=session.worker_path)
-            if session.graph_runtime
+            build_worker_profile(session.colony_runtime, agent_path=session.worker_path)
+            if session.colony_runtime
             else None
         )
         logger.debug("[revive_queen] worker_identity=%s", "present" if worker_identity else "None")
@@ -1044,22 +1642,22 @@ class SessionManager:
     def get_session(self, session_id: str) -> Session | None:
         return self._sessions.get(session_id)
 
-    def get_session_by_graph_id(self, graph_id: str) -> Session | None:
-        """Find a session by its loaded graph's ID."""
+    def get_session_by_colony_id(self, colony_id: str) -> Session | None:
+        """Find a session by its loaded colony's ID."""
         for s in self._sessions.values():
-            if s.graph_id == graph_id:
+            if s.colony_id == colony_id:
                 return s
         return None
 
     def get_session_for_agent(self, agent_id: str) -> Session | None:
         """Resolve an agent_id to a session (backward compat).
 
-        Checks session.id first, then session.graph_id.
+        Checks session.id first, then session.colony_id.
         """
         s = self._sessions.get(agent_id)
         if s:
             return s
-        return self.get_session_by_graph_id(agent_id)
+        return self.get_session_by_colony_id(agent_id)
 
     def is_loading(self, session_id: str) -> bool:
         return session_id in self._loading
@@ -1076,10 +1674,10 @@ class SessionManager:
         """Return disk metadata for a session that is no longer live in memory.
 
         Checks whether queen conversation files exist at
-        ~/.hive/queen/session/{session_id}/conversations/.  Returns None when
+        ~/.hive/agents/queens/{name}/sessions/{session_id}/conversations/.  Returns None when
         no data is found so callers can fall through to a 404.
         """
-        queen_dir = Path.home() / ".hive" / "queen" / "session" / session_id
+        queen_dir = _find_queen_session_dir(session_id)
         convs_dir = queen_dir / "conversations"
         if not convs_dir.exists():
             return None
@@ -1134,21 +1732,28 @@ class SessionManager:
     @staticmethod
     def list_cold_sessions() -> list[dict]:
         """Return metadata for every queen session directory on disk, newest first."""
-        queen_sessions_dir = Path.home() / ".hive" / "queen" / "session"
-        if not queen_sessions_dir.exists():
+        if not QUEENS_DIR.exists():
             return []
 
-        results: list[dict] = []
+        # Collect session dirs from all queen identities
+        all_session_dirs: list[Path] = []
         try:
-            entries = sorted(
-                queen_sessions_dir.iterdir(),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
+            for queen_dir in QUEENS_DIR.iterdir():
+                if not queen_dir.is_dir():
+                    continue
+                sessions_dir = queen_dir / "sessions"
+                if sessions_dir.exists():
+                    for d in sessions_dir.iterdir():
+                        if d.is_dir():
+                            all_session_dirs.append(d)
         except OSError:
             return []
 
-        for d in entries:
+        # Sort all sessions by mtime, newest first
+        all_session_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+        results: list[dict] = []
+        for d in all_session_dirs:
             if not d.is_dir():
                 continue
             try:
@@ -1158,6 +1763,7 @@ class SessionManager:
             agent_name: str | None = None
             agent_path: str | None = None
             meta_path = d / "meta.json"
+            meta: dict = {}
             if meta_path.exists():
                 try:
                     meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -1166,6 +1772,11 @@ class SessionManager:
                     created_at = meta.get("created_at") or created_at
                 except (json.JSONDecodeError, OSError):
                     pass
+
+            # Skip colony-forked sessions -- these belong to colonies,
+            # not to the queen DM history.
+            if meta.get("colony_fork"):
+                continue
 
             # Build a quick preview of the last human/assistant exchange.
             # We read all conversation parts, filter to client-facing messages,
@@ -1223,6 +1834,9 @@ class SessionManager:
                 except OSError:
                     pass
 
+            # Derive queen_id from directory structure: queens/{queen_id}/sessions/{session_id}
+            queen_id = d.parent.parent.name if d.parent.name == "sessions" else None
+
             results.append(
                 {
                     "session_id": d.name,
@@ -1234,6 +1848,7 @@ class SessionManager:
                     "agent_path": agent_path,
                     "last_message": last_message,
                     "message_count": message_count,
+                    "queen_id": queen_id,
                 }
             )
 

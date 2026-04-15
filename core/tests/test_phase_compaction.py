@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from framework.graph.conversation import Message, NodeConversation
+from framework.agent_loop.conversation import Message, NodeConversation
 
 
 class TestPhaseMetadata:

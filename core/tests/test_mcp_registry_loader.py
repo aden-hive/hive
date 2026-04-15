@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from framework.runner.mcp_client import MCPTool
-from framework.runner.tool_registry import ToolRegistry
+from framework.loader.mcp_client import MCPTool
+from framework.loader.tool_registry import ToolRegistry
 
 
 def _patch_connection_manager_for_fake_stdio(monkeypatch, tool_map: dict[str, list[str]]) -> None:
@@ -34,7 +34,7 @@ def _patch_connection_manager_for_fake_stdio(monkeypatch, tool_map: dict[str, li
             return
 
     monkeypatch.setattr(
-        "framework.runner.mcp_connection_manager.MCPConnectionManager.get_instance",
+        "framework.loader.mcp_connection_manager.MCPConnectionManager.get_instance",
         lambda: FakeManager(),
     )
 

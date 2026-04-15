@@ -18,9 +18,9 @@ def _load_coder_tools_server():
 
 def _install_fake_framework(monkeypatch, tools_by_server: dict[str, list[dict]]) -> None:
     framework_mod = types.ModuleType("framework")
-    runner_mod = types.ModuleType("framework.runner")
-    mcp_client_mod = types.ModuleType("framework.runner.mcp_client")
-    tool_registry_mod = types.ModuleType("framework.runner.tool_registry")
+    loader_mod = types.ModuleType("framework.loader")
+    mcp_client_mod = types.ModuleType("framework.loader.mcp_client")
+    tool_registry_mod = types.ModuleType("framework.loader.tool_registry")
 
     class FakeMCPServerConfig:
         def __init__(self, **kwargs):
@@ -62,14 +62,14 @@ def _install_fake_framework(monkeypatch, tools_by_server: dict[str, list[dict]])
     mcp_client_mod.MCPServerConfig = FakeMCPServerConfig
     tool_registry_mod.ToolRegistry = FakeToolRegistry
 
-    framework_mod.runner = runner_mod
-    runner_mod.mcp_client = mcp_client_mod
-    runner_mod.tool_registry = tool_registry_mod
+    framework_mod.loader = loader_mod
+    loader_mod.mcp_client = mcp_client_mod
+    loader_mod.tool_registry = tool_registry_mod
 
     monkeypatch.setitem(sys.modules, "framework", framework_mod)
-    monkeypatch.setitem(sys.modules, "framework.runner", runner_mod)
-    monkeypatch.setitem(sys.modules, "framework.runner.mcp_client", mcp_client_mod)
-    monkeypatch.setitem(sys.modules, "framework.runner.tool_registry", tool_registry_mod)
+    monkeypatch.setitem(sys.modules, "framework.loader", loader_mod)
+    monkeypatch.setitem(sys.modules, "framework.loader.mcp_client", mcp_client_mod)
+    monkeypatch.setitem(sys.modules, "framework.loader.tool_registry", tool_registry_mod)
 
 
 def _call_list_agent_tools(mod, **kwargs) -> str:

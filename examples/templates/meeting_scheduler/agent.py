@@ -2,14 +2,14 @@
 
 from pathlib import Path
 
-from framework.graph import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
-from framework.graph.edge import GraphSpec
-from framework.graph.executor import ExecutionResult
-from framework.graph.checkpoint_config import CheckpointConfig
+from framework.orchestrator import EdgeSpec, EdgeCondition, Goal, SuccessCriterion, Constraint
+from framework.orchestrator.edge import GraphSpec
+from framework.orchestrator.orchestrator import ExecutionResult
+from framework.orchestrator.checkpoint_config import CheckpointConfig
 from framework.llm import LiteLLMProvider
-from framework.runner.tool_registry import ToolRegistry
-from framework.runtime.agent_runtime import create_agent_runtime
-from framework.runtime.execution_stream import EntryPointSpec
+from framework.loader.tool_registry import ToolRegistry
+from framework.host.agent_host import AgentHost
+from framework.host.execution_manager import EntryPointSpec
 
 from .config import default_config, metadata
 from .nodes import intake_node, schedule_node, confirm_node
@@ -107,7 +107,7 @@ entry_points = {"start": "intake"}
 pause_nodes = []
 terminal_nodes = []  # Forever-alive
 
-# Module-level vars read by AgentRunner.load()
+# Module-level vars read by AgentLoader.load()
 conversation_mode = "continuous"
 identity_prompt = "You are a helpful meeting scheduler assistant that manages calendar availability and sends confirmations."
 loop_config = {
@@ -165,7 +165,7 @@ class MeetingScheduler:
         tools = list(self._tool_registry.get_tools().values())
         tool_executor = self._tool_registry.get_executor()
         self._graph = self._build_graph()
-        self._agent_runtime = create_agent_runtime(
+        self._agent_runtime = AgentHost(
             graph=self._graph,
             goal=self.goal,
             storage_path=self._storage_path,

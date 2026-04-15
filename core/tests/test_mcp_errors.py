@@ -2,7 +2,7 @@
 
 import pytest
 
-from framework.runner.mcp_errors import (
+from framework.loader.mcp_errors import (
     MCPAuthError,
     MCPError,
     MCPErrorCode,
@@ -50,7 +50,7 @@ def test_mcp_auth_error():
 
 
 def test_mcp_client_raises_structured_error_for_missing_tool():
-    from framework.runner.mcp_client import MCPClient, MCPServerConfig
+    from framework.loader.mcp_client import MCPClient, MCPServerConfig
 
     config = MCPServerConfig(name="test-server", transport="stdio")
     client = MCPClient(config)

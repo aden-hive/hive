@@ -245,6 +245,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
             _contexts[profile_name] = {
                 "groupId": group_id,
                 "activeTabId": tab_id,
+                "_seedTabId": tab_id,  # reused by first browser_open call
             }
 
             logger.info(
