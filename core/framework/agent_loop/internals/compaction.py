@@ -102,12 +102,14 @@ def microcompact(
         orig_len = len(msg.content)
         if spillover:
             placeholder = (
-                f"[Old tool result cleared: {orig_len} chars. "
-                f"Full data in '{spillover}'. "
-                f"Use read_file('{spillover}') to retrieve.]"
+                f"Old tool result ({orig_len:,} chars) cleared from context. "
+                f"Full data saved at: {spillover}\n"
+                f"Read the complete data with read_file(path='{spillover}')."
             )
         else:
-            placeholder = f"[Old tool result cleared: {orig_len} chars.]"
+            placeholder = (
+                f"Old tool result ({orig_len:,} chars) cleared from context."
+            )
 
         # Mutate in-place (microcompact is synchronous, no store writes)
         conversation._messages[i] = Message(
@@ -142,7 +144,14 @@ def _find_tool_name_for_result(messages: list[Message], tool_msg: Message) -> st
 
 
 def _extract_spillover_filename_inline(content: str) -> str | None:
-    """Quick inline check for spillover filename in tool result content."""
+    """Quick inline check for spillover filename in tool result content.
+
+    Matches both the new prose format ("saved at: /path") and the
+    legacy bracketed trailer ("saved to '/path'").
+    """
+    match = re.search(r"saved at:\s*(\S+)", content, re.IGNORECASE)
+    if match:
+        return match.group(1)
     match = re.search(r"saved to '([^']+)'", content, re.IGNORECASE)
     return match.group(1) if match else None
 

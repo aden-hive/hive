@@ -39,7 +39,12 @@
       "Bash(bun run:*)",
       "Bash(npx eslint:*)",
       "Bash(npm run:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(grep -n \"PIL\\\\|Image\\\\|to_thread\\\\|run_in_executor\" /home/timothy/aden/hive/tools/src/gcu/browser/*.py /home/timothy/aden/hive/tools/src/gcu/browser/tools/*.py)",
+      "WebFetch(domain:docs.litellm.ai)",
+      "Bash(cat /home/timothy/aden/hive/.venv/lib/python3.11/site-packages/litellm-*.dist-info/METADATA)",
+      "Bash(find \"/home/timothy/.hive/agents/queens/queen_brand_design/sessions/session_20260415_100751_d49f4c28/\" -type f -name \"*.json*\" -exec grep -l \"协日\" {} \\\\;)",
+      "Bash(grep -v ':0$')"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",

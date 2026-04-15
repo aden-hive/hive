@@ -28,7 +28,7 @@ def register_advanced_tools(mcp: FastMCP) -> None:
         text: str | None = None,
         tab_id: int | None = None,
         profile: str | None = None,
-        timeout_ms: int = 30000,
+        timeout_ms: int = 5000,
     ) -> dict:
         """
         Wait for a condition.
@@ -39,7 +39,13 @@ def register_advanced_tools(mcp: FastMCP) -> None:
             text: Wait for text to appear on page (optional)
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
-            timeout_ms: Max wait time in ms (default: 30000)
+            timeout_ms: Max wait time in ms for the selector/text poll.
+                Default 5000ms (fast-fail). If the condition isn't met
+                within 5s the call returns {"ok": False, "error": ...}
+                and the agent can try a different approach instead of
+                burning 30s per miss. Pass a larger value (e.g. 15000)
+                only when you genuinely expect the element to take
+                longer than 5s to render.
 
         Returns:
             Dict with wait result

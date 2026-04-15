@@ -30,7 +30,7 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         profile: str | None = None,
         button: Literal["left", "right", "middle"] = "left",
         double_click: bool = False,
-        timeout_ms: int = 30000,
+        timeout_ms: int = 5000,
     ) -> dict:
         """
         Click an element on the page.
@@ -41,7 +41,13 @@ def register_interaction_tools(mcp: FastMCP) -> None:
             profile: Browser profile name (default: "default")
             button: Mouse button to click (left, right, middle)
             double_click: Perform double-click (default: False)
-            timeout_ms: Timeout waiting for element (default: 30000)
+            timeout_ms: How long to poll for the element to appear in the
+                DOM before giving up. Default 5000ms (fast-fail). A missing
+                or hallucinated selector returns "Element not found" in
+                <=5s so the agent can try a different approach quickly.
+                Pass a larger value (e.g. 15000) ONLY when you know the
+                element will take longer than 5s to render — for example
+                right after a navigation that triggers slow hydration.
 
         Returns:
             Dict with click result and coordinates

@@ -215,14 +215,30 @@ def truncate_tool_result(
     """Persist tool result to file and optionally truncate for context.
 
     When *spillover_dir* is configured, EVERY non-error tool result is
-    saved to a file (short filename like ``web_search_1.txt``).  A
-    ``[Saved to '...']`` annotation is appended so the reference
-    survives pruning and compaction.
+    written to disk for debugging. The LLM-visible content is then
+    shaped to avoid a **poison pattern** that we traced on 2026-04-15
+    through a gemini-3.1-pro-preview queen session: the prior format
+    appended ``\\n\\n[Saved to '/abs/path/file.txt']`` after every
+    small result, and frontier pattern-matching models (gemini 3.x in
+    particular) learned to autocomplete the `[Saved to '...']` trailer
+    in their own assistant turns, eventually degenerating into echoing
+    the whole tool result instead of deciding what to do next. See
+    ``session_20260415_100751_d49f4c28/conversations/parts/0000000056.json``
+    for the terminal case where the model's "text" output was the full
+    tool_result JSON.
 
-    - Small results (≤ limit): full content kept + file annotation
-    - Large results (> limit): preview + file reference
-    - Errors: pass through unchanged
-    - read_file results: truncate with pagination hint (no re-spill)
+    Rules after the fix:
+    - **Small results (≤ limit):** pass content through unchanged. No
+      trailer. No annotation. The full content is already in the
+      message; the disk copy is for debugging only.
+    - **Large results (> limit):** preview + file reference, but
+      formatted as plain prose instead of a bracketed ``[...]``
+      pattern. Structured JSON metadata ("_saved_to") is embedded
+      inside the JSON body when the preview is JSON-shaped so the
+      model can locate the full file without seeing a mimicry-prone
+      bracket token outside the body.
+    - **Errors:** pass through unchanged.
+    - **read_file results:** truncate with pagination hint (no re-spill).
     """
     limit = max_tool_result_chars
 
@@ -252,18 +268,20 @@ def truncate_tool_result(
         else:
             preview_block = result.content[:PREVIEW_CAP] + "…"
 
+        # Prose header (no brackets).
         header = (
-            f"[{tool_name} result: {len(result.content):,} chars — "
-            f"too large for context. Use offset_bytes/limit_bytes "
-            f"parameters to read smaller chunks.]"
+            f"Tool `{tool_name}` returned {len(result.content):,} characters "
+            f"(too large for context). Use offset_bytes / limit_bytes "
+            f"parameters to paginate smaller chunks."
         )
         if metadata_str:
             header += f"\n\nData structure:\n{metadata_str}"
         header += (
-            "\n\nWARNING: This is an INCOMPLETE preview. Do NOT draw conclusions or counts from it."
+            "\n\nWARNING: the preview below is a SAMPLE only — do NOT "
+            "draw counts, totals, or conclusions from it."
         )
 
-        truncated = f"{header}\n\nPreview (small sample only):\n{preview_block}"
+        truncated = f"{header}\n\nPreview (truncated):\n{preview_block}"
         logger.info(
             "%s result truncated: %d → %d chars (use offset/limit to paginate)",
             tool_name,
@@ -301,7 +319,10 @@ def truncate_tool_result(
 
         if limit > 0 and len(result.content) > limit:
             # Large result: build a small, metadata-rich preview so the
-            # LLM cannot mistake it for the complete dataset.
+            # LLM cannot mistake it for the complete dataset. The
+            # preview is introduced as plain prose (no bracketed
+            # ``[Result from …]`` token) so it doesn't prime the model
+            # to autocomplete the same pattern in its next turn.
             PREVIEW_CAP = 5000
 
             # Extract structural metadata (array lengths, key names)
@@ -316,21 +337,22 @@ def truncate_tool_result(
             else:
                 preview_block = result.content[:PREVIEW_CAP] + "…"
 
-            # Assemble header with structural info + warning
+            # Prose header (no brackets). Absolute path still surfaced
+            # so the agent can read the full file, but it's framed as
+            # a sentence, not a bracketed trailer.
             header = (
-                f"[Result from {tool_name}: {len(result.content):,} chars — "
-                f"too large for context, saved to '{abs_path}'.]\n"
+                f"Tool `{tool_name}` returned {len(result.content):,} characters "
+                f"(too large for context). Full result saved at: {abs_path}\n"
+                f"Read the complete data with read_file(path='{abs_path}').\n"
             )
             if metadata_str:
-                header += f"\nData structure:\n{metadata_str}"
+                header += f"\nData structure:\n{metadata_str}\n"
             header += (
-                f"\n\nWARNING: The preview below is INCOMPLETE. "
-                f"Do NOT draw conclusions or counts from it. "
-                f"Use read_file(path='{abs_path}') to read the "
-                f"full data before analysis."
+                "\nWARNING: the preview below is a SAMPLE only — do NOT "
+                "draw counts, totals, or conclusions from it."
             )
 
-            content = f"{header}\n\nPreview (small sample only):\n{preview_block}"
+            content = f"{header}\n\nPreview (truncated):\n{preview_block}"
             logger.info(
                 "Tool result spilled to file: %s (%d chars → %s)",
                 tool_name,
@@ -338,10 +360,22 @@ def truncate_tool_result(
                 abs_path,
             )
         else:
-            # Small result: keep full content + annotation with absolute path
-            content = f"{result.content}\n\n[Saved to '{abs_path}']"
+            # Small result: pass content through UNCHANGED.
+            #
+            # The prior design appended `\n\n[Saved to '/abs/path']`
+            # after every small result so the agent could re-read the
+            # file later. But (a) the full content is already in the
+            # message, so there's nothing to re-read; (b) the
+            # `[Saved to '…']` trailer is a repeating token pattern
+            # that frontier pattern-matching models autocomplete into
+            # their own assistant turns, eventually echoing whole tool
+            # results as "text" instead of making decisions. Dropping
+            # the trailer entirely kills the poison pattern. Spilled
+            # files on disk still exist for debugging — they just
+            # aren't advertised in the LLM-visible message.
+            content = result.content
             logger.info(
-                "Tool result saved to file: %s (%d chars → %s)",
+                "Tool result saved to file: %s (%d chars → %s, no trailer)",
                 tool_name,
                 len(result.content),
                 filename,
@@ -373,15 +407,17 @@ def truncate_tool_result(
         else:
             preview_block = result.content[:PREVIEW_CAP] + "…"
 
+        # Prose header (no brackets) — see docstring for the poison
+        # pattern that the bracket format triggered.
         header = (
-            f"[Result from {tool_name}: {len(result.content):,} chars — "
-            f"truncated to fit context budget.]"
+            f"Tool `{tool_name}` returned {len(result.content):,} characters "
+            f"(truncated to fit context budget — no spillover dir configured)."
         )
         if metadata_str:
             header += f"\n\nData structure:\n{metadata_str}"
         header += (
-            "\n\nWARNING: This is an INCOMPLETE preview. "
-            "Do NOT draw conclusions or counts from the preview alone."
+            "\n\nWARNING: the preview below is a SAMPLE only — do NOT "
+            "draw counts, totals, or conclusions from it."
         )
 
         truncated = f"{header}\n\n{preview_block}"

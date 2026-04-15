@@ -246,6 +246,60 @@ if state['found'] and not state['disabled']:
     browser_click("button.share-actions__primary-action")
 ```
 
+## Posting WITH an image attached
+
+**Do NOT click the "Add media" / image icon inside the feed post composer to pick a file.** LinkedIn renders a styled button that opens Chrome's native OS file picker when clicked, and that dialog is unreachable via CDP — the automation will hang on an invisible modal. Use `browser_upload` directly against the hidden `<input type='file'>`:
+
+```python
+# After the post modal is open and the editor has text:
+# (A) First, click "Add media" to surface the file input
+#     (clicking THIS button reveals the input but does NOT itself open
+#     the OS picker on current LinkedIn — the picker only opens if
+#     you click the inner "Choose from your device" entry).
+media_btn = browser_get_rect("button[aria-label*='image'], button[aria-label*='photo']")
+browser_click_coordinate(media_btn.cx, media_btn.cy)
+sleep(0.8)
+
+# (B) Enumerate file inputs to find the right one
+inputs = browser_evaluate("""
+  (function(){
+    return Array.from(document.querySelectorAll('input[type="file"]'))
+      .map((el, i) => ({
+        idx: i,
+        accept: el.accept || '',
+        name: el.name || '',
+      }));
+  })();
+""")
+# Expect to see one with accept='image/*' or accept containing 'image/jpeg'
+
+# (C) Set the file programmatically — no dialog
+browser_upload(
+    selector="input[type='file'][accept*='image']",
+    file_paths=["/absolute/path/to/logo.png"],
+)
+sleep(3)  # LinkedIn shows an upload-progress bar + preview
+
+# (D) Verify the image preview rendered before clicking Post
+preview_ok = browser_evaluate("""
+  (function(){
+    // LinkedIn shows the preview as an <img> inside
+    // .share-creation-state__image-preview or similar.
+    return !!document.querySelector(
+      '.share-creation-state__preview img, .image-preview-container img'
+    );
+  })();
+""")
+if not preview_ok:
+    raise Exception("LinkedIn image upload did not render — do NOT click Post")
+
+# (E) Now click Post as usual
+browser_click("button.share-actions__primary-action")
+sleep(4)  # media post takes longer to commit than text-only
+```
+
+If the image isn't already on disk, write it first with `write_file(absolute_path, bytes)`. `browser_upload` only accepts absolute paths.
+
 ## Rate limits and safety
 
 LinkedIn's abuse detection is aggressive. Respect these limits:
