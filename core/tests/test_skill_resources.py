@@ -1,9 +1,14 @@
 """Tests for AS-6 skill resource loading support.
 
 Covers:
-- <base_dir> element in catalog XML
 - allowlisted_dirs property reflects trusted skill base directories
 - skill_dirs propagation to NodeContext
+
+The catalog XML previously emitted a redundant <base_dir> element next to
+each <location>. That was dropped when the mandatory header took over the
+"resolve relative paths against the parent of SKILL.md" instruction, so
+there is no longer an XML-emission test for base_dir. Programmatic access
+via ``catalog.allowlisted_dirs`` is still covered below.
 """
 
 from framework.skills.catalog import SkillCatalog
@@ -26,31 +31,6 @@ def _make_skill(
 
 
 class TestSkillResourceBaseDir:
-    def test_base_dir_in_xml(self):
-        """Each community skill entry should expose its base_dir in the catalog XML."""
-        skill = _make_skill("deploy", "/project/.hive/skills/deploy")
-        catalog = SkillCatalog([skill])
-        prompt = catalog.to_prompt()
-
-        assert "<base_dir>/project/.hive/skills/deploy</base_dir>" in prompt
-
-    def test_base_dir_xml_escaped(self):
-        """base_dir with XML-special chars should be escaped."""
-        skill = _make_skill("s", "/path/with <&> chars")
-        catalog = SkillCatalog([skill])
-        prompt = catalog.to_prompt()
-
-        assert "<base_dir>/path/with &lt;&amp;&gt; chars</base_dir>" in prompt
-
-    def test_base_dir_present_for_framework_skills(self):
-        """Framework-scope skills now appear in the catalog like any other scope,
-        and their base_dir is included in the XML."""
-        skill = _make_skill("fw", "/hive/_default_skills/fw", source_scope="framework")
-        catalog = SkillCatalog([skill])
-        prompt = catalog.to_prompt()
-        assert "<name>fw</name>" in prompt
-        assert "<base_dir>/hive/_default_skills/fw</base_dir>" in prompt
-
     def test_allowlisted_dirs_matches_skills(self):
         """allowlisted_dirs returns all skill base_dirs including framework ones."""
         skills = [

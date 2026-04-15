@@ -94,7 +94,10 @@ class TestSkillCatalog:
         assert "<name>beta</name>" in prompt
         assert "<description>Alpha skill</description>" in prompt
         assert "<location>/p/alpha/SKILL.md</location>" in prompt
-        assert "<base_dir>/p/alpha</base_dir>" in prompt
+        # <base_dir> is intentionally not emitted — the mandatory header
+        # tells the model to resolve relative paths against the parent of
+        # SKILL.md, so the redundant element was dropped.
+        assert "<base_dir>" not in prompt
 
     def test_to_prompt_sorted_by_name(self):
         skills = [
@@ -130,12 +133,43 @@ class TestSkillCatalog:
         assert "<name>usr</name>" in prompt
         assert "<name>fw</name>" in prompt
 
-    def test_to_prompt_contains_behavioral_instruction(self):
+    def test_to_prompt_contains_mandatory_header(self):
+        """The rendered catalog must carry the mandatory pre-reply checklist
+        so soft guidance turns into a required step."""
         catalog = SkillCatalog([_make_skill(source_scope="project")])
         prompt = catalog.to_prompt()
 
-        assert "When a task matches a skill's description" in prompt
+        assert "## Skills (mandatory)" in prompt
+        assert "Before replying: scan <available_skills>" in prompt
+        assert "never read more than one skill up front" in prompt
+        assert "`read_file`" in prompt
         assert "SKILL.md" in prompt
+
+    def test_to_prompt_compact_fallback_drops_descriptions(self):
+        """When the full XML body exceeds the char threshold, the compact
+        variant drops <description> but keeps every skill's <name>."""
+        # Each skill contributes ~100+ chars with a long description.
+        # 60 skills easily pushes the body past the threshold.
+        skills = [
+            _make_skill(
+                name=f"skill-{i:03d}",
+                description="A reasonably long description " * 4,
+                location=f"/s/skill-{i:03d}/SKILL.md",
+                base_dir=f"/s/skill-{i:03d}",
+            )
+            for i in range(60)
+        ]
+        catalog = SkillCatalog(skills)
+        prompt = catalog.to_prompt()
+
+        # Mandatory header still present but uses the compact variant wording.
+        assert "## Skills (mandatory)" in prompt
+        assert "scan <available_skills> <name>" in prompt
+        # Every skill's name survives …
+        for i in range(60):
+            assert f"<name>skill-{i:03d}</name>" in prompt
+        # … but no descriptions were rendered.
+        assert "<description>" not in prompt
 
     def test_build_pre_activated_prompt(self):
         skill = _make_skill("research", body="## Deep Research\nDo thorough research.")
