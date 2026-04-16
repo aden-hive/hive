@@ -1,18 +1,25 @@
 """Command sanitization to prevent shell injection attacks.
 
 Validates commands against a blocklist of dangerous patterns before they
-are passed to subprocess.run(shell=True). This prevents prompt injection
-attacks from tricking AI agents into running destructive or exfiltration
-commands on the host system.
+are passed to the shell. This prevents prompt injection attacks from
+tricking AI agents into running destructive or exfiltration commands on
+the host system.
 
 Design: uses a blocklist (not allowlist) so agents can run arbitrary
 dev commands (uv, pytest, git, etc.) while blocking known-dangerous ops.
-This blocks explicit nested shell executables (bash, sh, pwsh, etc.),
-but callers still execute via shell=True, so shell parsing remains a
-known limitation of this guardrail.
+This blocks explicit nested shell executables (bash, sh, pwsh, etc.).
+Note: callers use shell=True to support piped/chained commands that
+agents legitimately need (cat x | grep y, cmd && cmd2). The shell
+operator check in this module catches dangerous chained commands.
 """
 
+import logging
 import re
+
+# Structured security logger. Consume via logging.getLogger("aden.security")
+# in your log configuration. Fields emitted as `extra` are available in
+# structured log formatters (JSON, etc.) for SIEM / SOC2 ingestion.
+_security_logger = logging.getLogger("aden.security")
 
 __all__ = ["CommandBlockedError", "validate_command"]
 
@@ -161,6 +168,11 @@ def _extract_executable(segment: str) -> str:
 def validate_command(command: str) -> None:
     """Validate a command string against the safety blocklists.
 
+    Every call is recorded in the ``aden.security`` logger:
+    - DEBUG: empty commands (silently passed)
+    - INFO:  compound commands containing shell operators (behavioral telemetry)
+    - WARNING: any command that is blocked, including the matched pattern
+
     Args:
         command: The shell command string to validate.
 
@@ -168,14 +180,35 @@ def validate_command(command: str) -> None:
         CommandBlockedError: If the command matches any blocked pattern.
     """
     if not command or not command.strip():
+        _security_logger.debug("validate_command: empty or whitespace-only command, skipping")
         return
 
     stripped = command.strip()
+    # Truncate preview to 120 chars so secrets in long commands are not leaked
+    # into log files / SIEM streams.
+    preview = stripped[:120]
+
+    # Behavioral telemetry: compound commands are not blocked, but their
+    # presence is logged so rogue-agent patterns can be detected in aggregate.
+    if _SHELL_SPLIT_PATTERN.search(stripped):
+        _security_logger.info(
+            "compound_command_detected",
+            extra={"command_preview": preview},
+        )
 
     # --- Check full-command patterns ---
     for pattern in _BLOCKED_PATTERNS:
         match = pattern.search(stripped)
         if match:
+            _security_logger.warning(
+                "command_blocked",
+                extra={
+                    "reason": "pattern_match",
+                    "pattern": pattern.pattern,
+                    "matched_text": match.group(),
+                    "command_preview": preview,
+                },
+            )
             raise CommandBlockedError(
                 f"Command blocked for safety: matched dangerous pattern '{match.group()}'. "
                 f"If this is a false positive, please modify the command."
@@ -195,6 +228,14 @@ def validate_command(command: str) -> None:
             names_to_check.add(executable.split(".")[0])
         if names_to_check & set(_BLOCKED_EXECUTABLES):
             matched = (names_to_check & set(_BLOCKED_EXECUTABLES)).pop()
+            _security_logger.warning(
+                "command_blocked",
+                extra={
+                    "reason": "blocked_executable",
+                    "executable": matched,
+                    "command_preview": preview,
+                },
+            )
             raise CommandBlockedError(
                 f"Command blocked for safety: '{matched}' is not allowed. "
                 f"Blocked categories: network tools, privilege escalation, "

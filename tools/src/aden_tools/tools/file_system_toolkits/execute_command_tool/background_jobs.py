@@ -21,6 +21,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from uuid import uuid4
 
+from ..command_sanitizer import CommandBlockedError, validate_command  # noqa: F401
+
 # 64 KB rolling window per stream. Large enough for long build logs,
 # small enough that a bash infinite loop can't OOM the MCP process.
 _MAX_BUFFER_BYTES = 64 * 1024
@@ -137,7 +139,15 @@ async def _pump(job: BackgroundJob) -> None:
 async def spawn(command: str, cwd: str, agent_id: str) -> BackgroundJob:
     """Start a subprocess in the background and register it. The caller
     holds the job id returned from here and can poll via ``get()``.
+
+    Defense-in-depth: ``validate_command`` is called here even though the
+    public entrypoint (``execute_command_tool``) already validates before
+    calling ``spawn``. This makes the function self-defending so future
+    callers, test fixtures, or internal refactors cannot bypass the
+    safety guardrail by invoking ``spawn`` directly.
     """
+    validate_command(command)
+
     proc = await asyncio.create_subprocess_shell(
         command,
         cwd=cwd,

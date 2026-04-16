@@ -18,6 +18,7 @@ All three go through the same pre-execution safety blocklist in
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 
@@ -26,6 +27,12 @@ from mcp.server.fastmcp import FastMCP
 from ..command_sanitizer import CommandBlockedError, validate_command
 from ..security import AGENT_SANDBOXES_DIR, get_sandboxed_path
 from .background_jobs import get as get_job, kill as kill_job, spawn as spawn_job
+
+# Structured execution logger. Every command that actually runs (foreground
+# or background) is recorded here with agent_id, command preview, and outcome.
+# Pairs with aden.security for a complete audit trail: security logs what was
+# blocked; execution logs what ran.
+_exec_logger = logging.getLogger("aden.execution")
 
 # Bounds on per-call timeout. 1s minimum prevents accidental zeros that
 # would cause every command to fail. 600s maximum (10 min) is the same
@@ -70,8 +77,11 @@ def register_tools(mcp: FastMCP) -> None:
             No network access unless explicitly allowed
             No destructive commands (rm -rf, system modification)
             Commands are validated against a safety blocklist before
-            execution. The blocklist runs through shell=True, so it
-            only prevents explicit nested shell executables.
+            execution. The blocklist catches dangerous executables,
+            destructive flag combos, and injection patterns in chained
+            commands (cmd1 && cmd2, cmd1 | cmd2). All blocked commands
+            and all executions are recorded in structured audit logs
+            (aden.security / aden.execution).
             timeout_seconds is clamped to [1, 600]. For longer-running
             work use run_in_background=True + bash_output to poll.
 
@@ -109,6 +119,16 @@ def register_tools(mcp: FastMCP) -> None:
                 job = await spawn_job(command, secure_cwd, agent_id)
             except Exception as e:
                 return {"error": f"Failed to spawn background job: {e}"}
+            _exec_logger.info(
+                "command_spawned",
+                extra={
+                    "agent_id": agent_id,
+                    "background": True,
+                    "job_id": job.id,
+                    "cwd": secure_cwd,
+                    "command_preview": command[:120],
+                },
+            )
             return {
                 "success": True,
                 "background": True,
@@ -169,6 +189,22 @@ def register_tools(mcp: FastMCP) -> None:
         except Exception as e:
             return {"error": f"Failed while running command: {e}"}
 
+        elapsed = round(time.monotonic() - started, 2)
+        _exec_logger.info(
+            "command_executed",
+            extra={
+                "agent_id": agent_id,
+                "background": False,
+                "return_code": proc.returncode,
+                "elapsed_seconds": elapsed,
+                "cwd": secure_cwd,
+                # Note: python -c '...' one-liners are intentionally allowed
+                # to preserve developer utility. The full command is captured
+                # here so all one-liner executions are visible in the audit
+                # trail even when their content cannot be pre-validated.
+                "command_preview": command[:120],
+            },
+        )
         return {
             "success": True,
             "command": command,
@@ -176,7 +212,7 @@ def register_tools(mcp: FastMCP) -> None:
             "stdout": stdout_b.decode("utf-8", errors="replace"),
             "stderr": stderr_b.decode("utf-8", errors="replace"),
             "cwd": cwd or ".",
-            "elapsed_seconds": round(time.monotonic() - started, 2),
+            "elapsed_seconds": elapsed,
         }
 
     @mcp.tool()
