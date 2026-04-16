@@ -708,6 +708,10 @@ async def handle_session_colonies(request: web.Request) -> web.Response:
     return web.json_response({"colonies": colonies})
 
 
+_EVENTS_HISTORY_DEFAULT_LIMIT = 2000
+_EVENTS_HISTORY_MAX_LIMIT = 10000
+
+
 async def handle_session_events_history(request: web.Request) -> web.Response:
     """GET /api/sessions/{session_id}/events/history — persisted eventbus log.
 
@@ -715,17 +719,58 @@ async def handle_session_events_history(request: web.Request) -> web.Response:
     both live sessions and cold (post-server-restart) sessions.  The frontend
     replays these events through ``sseEventToChatMessage`` to fully reconstruct
     the UI state on resume.
+
+    Query params:
+        limit: maximum number of events to return (default 2000, max 10000).
+            The TAIL of the file is returned — i.e. the most recent N events.
+            Older events are dropped and ``truncated`` is set to True.
+
+    Response shape::
+
+        {
+            "events": [...],          # up to ``limit`` events, oldest-first
+            "session_id": "...",
+            "total": 12345,           # total events in the file
+            "returned": 2000,         # len(events)
+            "truncated": true,        # total > returned
+            "limit": 2000,            # the effective limit used
+        }
+
+    ``events.jsonl`` is append-only chronological, so "last N lines" == "most
+    recent N events". Long-running colonies have produced files with 50k+
+    events; before this cap, restoring on page-mount shipped the whole thing
+    down the wire and blocked the UI for seconds.
     """
     session_id = request.match_info["session_id"]
+
+    try:
+        limit = int(request.query.get("limit", str(_EVENTS_HISTORY_DEFAULT_LIMIT)))
+    except ValueError:
+        limit = _EVENTS_HISTORY_DEFAULT_LIMIT
+    limit = max(1, min(limit, _EVENTS_HISTORY_MAX_LIMIT))
 
     from framework.server.session_manager import _find_queen_session_dir
 
     queen_dir = _find_queen_session_dir(session_id)
     events_path = queen_dir / "events.jsonl"
     if not events_path.exists():
-        return web.json_response({"events": [], "session_id": session_id})
+        return web.json_response(
+            {
+                "events": [],
+                "session_id": session_id,
+                "total": 0,
+                "returned": 0,
+                "truncated": False,
+                "limit": limit,
+            }
+        )
 
-    events: list[dict] = []
+    # Tail the file using a bounded deque — O(limit) memory regardless
+    # of file size. No need to materialize the whole list only to slice it.
+    from collections import deque
+
+    tail: deque[dict] = deque(maxlen=limit)
+    total = 0
     try:
         with open(events_path, encoding="utf-8") as f:
             for line in f:
@@ -733,13 +778,34 @@ async def handle_session_events_history(request: web.Request) -> web.Response:
                 if not line:
                     continue
                 try:
-                    events.append(json.loads(line))
+                    evt = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+                total += 1
+                tail.append(evt)
     except OSError:
-        return web.json_response({"events": [], "session_id": session_id})
+        return web.json_response(
+            {
+                "events": [],
+                "session_id": session_id,
+                "total": 0,
+                "returned": 0,
+                "truncated": False,
+                "limit": limit,
+            }
+        )
 
-    return web.json_response({"events": events, "session_id": session_id})
+    events = list(tail)
+    return web.json_response(
+        {
+            "events": events,
+            "session_id": session_id,
+            "total": total,
+            "returned": len(events),
+            "truncated": total > len(events),
+            "limit": limit,
+        }
+    )
 
 
 async def handle_session_history(request: web.Request) -> web.Response:

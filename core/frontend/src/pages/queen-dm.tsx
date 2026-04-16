@@ -90,7 +90,8 @@ export default function QueenDM() {
   const restoreMessages = useCallback(
     async (sid: string, cancelled: () => boolean) => {
       try {
-        const { events } = await sessionsApi.eventsHistory(sid);
+        const { events, truncated, total, returned } =
+          await sessionsApi.eventsHistory(sid);
         if (cancelled()) return;
         const restored: ChatMessage[] = [];
         for (const evt of events) {
@@ -98,6 +99,24 @@ export default function QueenDM() {
           if (!msg) continue;
           if (evt.stream_id === "queen") msg.role = "queen";
           restored.push(msg);
+        }
+        // Show a banner if the server truncated older events.
+        const droppedCount = Math.max(0, total - returned);
+        if (truncated && droppedCount > 0) {
+          const firstTs = events[0]?.timestamp;
+          const bannerCreatedAt = firstTs
+            ? new Date(firstTs).getTime() - 1
+            : 0;
+          restored.unshift({
+            id: `restore-truncated-${sid}`,
+            agent: "System",
+            agentColor: "",
+            type: "run_divider",
+            content: `${droppedCount.toLocaleString()} older event${droppedCount === 1 ? "" : "s"} not shown (showing last ${returned.toLocaleString()})`,
+            timestamp: firstTs ?? new Date().toISOString(),
+            thread: "queen-dm",
+            createdAt: bannerCreatedAt,
+          });
         }
         if (restored.length > 0 && !cancelled()) {
           restored.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));

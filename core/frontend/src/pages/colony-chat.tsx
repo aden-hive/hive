@@ -41,6 +41,8 @@ function truncate(s: string, max: number): string {
 type SessionRestoreResult = {
   messages: ChatMessage[];
   restoredPhase: "planning" | "building" | "staging" | "running" | "independent" | null;
+  truncated: boolean;
+  droppedCount: number;
 };
 
 async function restoreSessionMessages(
@@ -49,7 +51,8 @@ async function restoreSessionMessages(
   agentDisplayName: string,
 ): Promise<SessionRestoreResult> {
   try {
-    const { events } = await sessionsApi.eventsHistory(sessionId);
+    const { events, truncated, total, returned } =
+      await sessionsApi.eventsHistory(sessionId);
     if (events.length > 0) {
       const messages: ChatMessage[] = [];
       let runningPhase: ChatMessage["phase"] = undefined;
@@ -71,12 +74,35 @@ async function restoreSessionMessages(
         }
         messages.push(msg);
       }
-      return { messages, restoredPhase: runningPhase ?? null };
+      // Prepend a run_divider banner so the user knows how many older
+      // events were dropped. Keeps the chronology readable without
+      // injecting a load-more button (we can add pagination later).
+      const droppedCount = Math.max(0, total - returned);
+      if (truncated && droppedCount > 0) {
+        const firstTs = events[0]?.timestamp;
+        const bannerCreatedAt = firstTs ? new Date(firstTs).getTime() - 1 : 0;
+        messages.unshift({
+          id: `restore-truncated-${sessionId}`,
+          agent: "System",
+          agentColor: "",
+          type: "run_divider",
+          content: `${droppedCount.toLocaleString()} older event${droppedCount === 1 ? "" : "s"} not shown (showing last ${returned.toLocaleString()})`,
+          timestamp: firstTs ?? new Date().toISOString(),
+          thread,
+          createdAt: bannerCreatedAt,
+        });
+      }
+      return {
+        messages,
+        restoredPhase: runningPhase ?? null,
+        truncated,
+        droppedCount,
+      };
     }
   } catch {
     // Event log not available
   }
-  return { messages: [], restoredPhase: null };
+  return { messages: [], restoredPhase: null, truncated: false, droppedCount: 0 };
 }
 
 // ── Agent backend state ──────────────────────────────────────────────────────

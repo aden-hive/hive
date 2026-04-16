@@ -1,6 +1,7 @@
 import { memo, useState, useRef, useEffect } from "react";
 import { ChevronDown, ChevronUp, Cpu } from "lucide-react";
 import type { ChatMessage } from "@/components/ChatPanel";
+import { ToolActivityRow } from "@/components/ChatPanel";
 import MarkdownContent from "@/components/MarkdownContent";
 
 const workerColor = "hsl(220,60%,55%)";
@@ -197,41 +198,77 @@ const WorkerRunBubble = memo(
               </div>
             )}
 
-            {/* Expanded: full scrollable message stream */}
+            {/* Expanded: chronological stream with tool bursts
+                coalesced into a single ToolActivityRow each.
+                Consecutive tool_status messages (no text between)
+                collapse to the LATEST snapshot — each snapshot is
+                cumulative within its turn, so the latest one tells
+                the whole story for that burst. Text messages break
+                the burst and render as markdown. */}
             {expanded && (
               <div
                 ref={bodyRef}
-                className="max-h-[400px] overflow-y-auto px-4 py-3 space-y-2"
+                className="max-h-[400px] overflow-y-auto px-4 py-3 space-y-3"
               >
-                {group.messages.map((m, i) => {
-                  if (m.type === "tool_status") {
-                    const tools = parseToolStatus(m.content);
-                    if (tools.length === 0) return null;
+                {(() => {
+                  type RenderRow =
+                    | { kind: "tools"; content: string; key: string }
+                    | { kind: "text"; msg: ChatMessage; key: string };
+                  const rows: RenderRow[] = [];
+                  let pendingTool: { content: string; id: string } | null = null;
+                  const flushTool = () => {
+                    if (pendingTool) {
+                      rows.push({
+                        kind: "tools",
+                        content: pendingTool.content,
+                        key: `tools-${pendingTool.id}`,
+                      });
+                      pendingTool = null;
+                    }
+                  };
+                  for (let i = 0; i < group.messages.length; i++) {
+                    const m = group.messages[i];
+                    if (m.type === "tool_status") {
+                      // Overwrite — latest snapshot in the burst wins
+                      pendingTool = {
+                        content: m.content,
+                        id: m.id || `ts-${i}`,
+                      };
+                      continue;
+                    }
+                    if (m.content?.trim()) {
+                      flushTool();
+                      rows.push({
+                        kind: "text",
+                        msg: m,
+                        key: m.id || `txt-${i}`,
+                      });
+                    }
+                  }
+                  flushTool();
+
+                  return rows.map((row) => {
+                    if (row.kind === "tools") {
+                      // ToolActivityRow groups by tool name (×N), shows
+                      // running pills (spinner) before done pills (check),
+                      // and uses the per-tool color hash that matches
+                      // the rest of the chat.
+                      return (
+                        <div key={row.key} className="-ml-10">
+                          <ToolActivityRow content={row.content} />
+                        </div>
+                      );
+                    }
                     return (
-                      <div key={m.id || i} className="flex flex-wrap gap-1.5">
-                        {tools.map((t, ti) => (
-                          <span
-                            key={ti}
-                            className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md border ${
-                              t.done
-                                ? "bg-green-50 border-green-200 text-green-700 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400"
-                                : "bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-400"
-                            }`}
-                          >
-                            <span>{t.done ? "\u2713" : "\u25cf"}</span>
-                            <span className="font-mono">{t.name}</span>
-                          </span>
-                        ))}
+                      <div
+                        key={row.key}
+                        className="text-sm leading-relaxed"
+                      >
+                        <MarkdownContent content={row.msg.content} />
                       </div>
                     );
-                  }
-                  if (!m.content?.trim()) return null;
-                  return (
-                    <div key={m.id || i} className="text-sm leading-relaxed">
-                      <MarkdownContent content={m.content} />
-                    </div>
-                  );
-                })}
+                  });
+                })()}
               </div>
             )}
           </div>

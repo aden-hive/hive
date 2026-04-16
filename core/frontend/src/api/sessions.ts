@@ -87,9 +87,25 @@ export const sessionsApi = {
   colonies: (sessionId: string) =>
     api.get<{ colonies: string[] }>(`/sessions/${sessionId}/colonies`),
 
-  /** Get persisted eventbus log for a session (works for cold sessions — used for full UI replay). */
-  eventsHistory: (sessionId: string) =>
-    api.get<{ events: AgentEvent[]; session_id: string }>(`/sessions/${sessionId}/events/history`),
+  /** Get persisted eventbus log for a session (works for cold sessions — used for full UI replay).
+   *
+   * Returns the TAIL of the event log. Default limit 2000 (server
+   * clamps to [1, 10000]); older events get dropped and
+   * ``truncated: true`` is set so the UI can show an indicator.
+   */
+  eventsHistory: (sessionId: string, limit?: number) =>
+    api.get<{
+      events: AgentEvent[];
+      session_id: string;
+      total: number;
+      returned: number;
+      truncated: boolean;
+      limit: number;
+    }>(
+      `/sessions/${sessionId}/events/history${
+        limit ? `?limit=${limit}` : ""
+      }`,
+    ),
 
   /** Open the session's data folder in the OS file manager. */
   revealFolder: (sessionId: string) =>

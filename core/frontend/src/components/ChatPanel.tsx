@@ -122,14 +122,14 @@ const TOOL_HEX = [
   "#e5a820", // sunflower
 ];
 
-function toolHex(name: string): string {
+export function toolHex(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++)
     hash = (hash * 31 + name.charCodeAt(i)) | 0;
   return TOOL_HEX[Math.abs(hash) % TOOL_HEX.length];
 }
 
-function ToolActivityRow({ content }: { content: string }) {
+export function ToolActivityRow({ content }: { content: string }) {
   let tools: { name: string; done: boolean }[] = [];
   try {
     const parsed = JSON.parse(content);
