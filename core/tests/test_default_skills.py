@@ -22,7 +22,7 @@ class TestDefaultSkillFiles:
     """Verify all built-in SKILL.md files parse correctly."""
 
     def test_all_skills_exist(self):
-        assert len(SKILL_REGISTRY) == 8
+        assert len(SKILL_REGISTRY) == 6
 
     @pytest.mark.parametrize("skill_name,dir_name", list(SKILL_REGISTRY.items()))
     def test_skill_parses(self, skill_name, dir_name):
@@ -68,7 +68,7 @@ class TestDefaultSkillManager:
         manager = DefaultSkillManager()
         manager.load()
 
-        assert len(manager.active_skill_names) == 8
+        assert len(manager.active_skill_names) == 6
         for name in SKILL_REGISTRY:
             assert name in manager.active_skill_names
 
@@ -148,7 +148,7 @@ class TestSkillsConfig:
             default_skills={"hive.note-taking": DefaultSkillConfig(enabled=False)}
         )
         assert config.is_default_enabled("hive.note-taking") is False
-        assert config.is_default_enabled("hive.batch-ledger") is True
+        assert config.is_default_enabled("hive.quality-monitor") is True
 
     def test_all_disabled_flag(self):
         config = SkillsConfig(all_defaults_disabled=True)
@@ -178,11 +178,11 @@ class TestSkillsConfig:
     def test_get_default_overrides(self):
         config = SkillsConfig.from_agent_vars(
             default_skills={
-                "hive.batch-ledger": {"enabled": True, "checkpoint_every_n": 10},
+                "hive.quality-monitor": {"enabled": True, "assessment_interval": 10},
             }
         )
-        overrides = config.get_default_overrides("hive.batch-ledger")
-        assert overrides == {"checkpoint_every_n": 10}
+        overrides = config.get_default_overrides("hive.quality-monitor")
+        assert overrides == {"assessment_interval": 10}
 
     def test_get_default_overrides_empty(self):
         config = SkillsConfig()
@@ -254,43 +254,19 @@ class TestConfigOverrideSubstitution:
         assert "{{" not in prompt
 
 
-class TestBatchAutoDetection:
-    """DS-12: is_batch_scenario() and batch_init_nudge property."""
+class TestBatchDeprecatedNoOps:
+    """batch-ledger skill was removed; is_batch_scenario() and batch_init_nudge
+    are deprecated no-ops that return False / None unconditionally. They are
+    kept in-tree to avoid touching every orchestrator/execution_manager call
+    site that still reads the nudge through the config plumbing."""
 
-    def test_detects_list_of(self):
-        assert is_batch_scenario("process a list of 100 leads") is True
+    def test_is_batch_scenario_always_false(self):
+        assert is_batch_scenario("process a list of 100 leads") is False
+        assert is_batch_scenario("for each record, send an email") is False
+        assert is_batch_scenario("write a summary") is False
 
-    def test_detects_collection_of(self):
-        assert is_batch_scenario("a collection of invoices") is True
-
-    def test_detects_items(self):
-        assert is_batch_scenario("go through all items in the spreadsheet") is True
-
-    def test_detects_for_each(self):
-        assert is_batch_scenario("for each record, send an email") is True
-
-    def test_no_match_single_task(self):
-        assert is_batch_scenario("write a summary of the quarterly report") is False
-
-    def test_batch_nudge_active_by_default(self):
+    def test_batch_init_nudge_always_none(self):
         manager = DefaultSkillManager()
-        manager.load()
-        assert manager.batch_init_nudge is not None
-        assert "_batch_ledger" in manager.batch_init_nudge
-
-    def test_batch_nudge_none_when_skill_disabled(self):
-        config = SkillsConfig.from_agent_vars(
-            default_skills={"hive.batch-ledger": {"enabled": False}}
-        )
-        manager = DefaultSkillManager(config)
-        manager.load()
-        assert manager.batch_init_nudge is None
-
-    def test_batch_nudge_none_when_auto_detect_disabled(self):
-        config = SkillsConfig.from_agent_vars(
-            default_skills={"hive.batch-ledger": {"auto_detect_batch": False}}
-        )
-        manager = DefaultSkillManager(config)
         manager.load()
         assert manager.batch_init_nudge is None
 

@@ -24,34 +24,21 @@ _SKILL_DEFAULTS: dict[str, dict[str, Any]] = {
     "hive.quality-monitor": {"assessment_interval": 5},
     "hive.error-recovery": {"max_retries_per_tool": 3},
     "hive.context-preservation": {"warn_at_usage_ratio_pct": 45},
-    "hive.batch-ledger": {"checkpoint_every_n": 5},
 }
-
-# Keywords that indicate a batch processing scenario (DS-12)
-_BATCH_KEYWORDS: tuple[str, ...] = (
-    "list of",
-    "collection of",
-    "set of",
-    "batch of",
-    "each item",
-    "for each",
-    "process all",
-    "records",
-    "entries",
-    "rows",
-    "items",
-)
-
-_BATCH_INIT_NUDGE = (
-    "Note: your input appears to describe a batch operation. "
-    "Initialize `_batch_ledger` with the total item count before processing."
-)
 
 
 def is_batch_scenario(text: str) -> bool:
-    """Return True if *text* contains batch-processing indicators (DS-12)."""
-    lower = text.lower()
-    return any(kw in lower for kw in _BATCH_KEYWORDS)
+    """Deprecated: batch auto-detection is no longer used.
+
+    Kept as a no-op so the agent_loop call site (which wraps it in an
+    ``if ctx.default_skill_batch_nudge:`` guard that's also now always
+    empty) can stay unchanged until a broader cleanup.  The old
+    ``_batch_ledger`` shared-buffer feature was replaced by the
+    per-colony SQLite task queue (``hive.colony-progress-tracker``),
+    which lives in ``progress.db`` and is authoritative for batch
+    state across workers and runs.
+    """
+    return False
 
 
 def _apply_overrides(skill_name: str, body: str, overrides: dict[str, Any]) -> str:
@@ -69,41 +56,37 @@ def _apply_overrides(skill_name: str, body: str, overrides: dict[str, Any]) -> s
     return body
 
 
-# Ordered list of default skills (name → directory)
+# Ordered list of default skills (name → directory).
+#
+# Removed on 2026-04-15 as part of the colony-progress-tracker rollout:
+#   - hive.task-decomposition — steps table in progress.db supersedes
+#     in-memory ``_working_notes → Current Plan`` decomposition.
+#   - hive.batch-ledger       — tasks table in progress.db supersedes
+#     the ``_batch_ledger`` dict-shaped queue with its pending →
+#     in_progress → completed/failed/skipped state machine.
+# Both were duplicating state that belongs in SQLite.
 SKILL_REGISTRY: dict[str, str] = {
     "hive.note-taking": "note-taking",
-    "hive.batch-ledger": "batch-ledger",
     "hive.context-preservation": "context-preservation",
     "hive.quality-monitor": "quality-monitor",
     "hive.error-recovery": "error-recovery",
-    "hive.task-decomposition": "task-decomposition",
     "hive.colony-progress-tracker": "colony-progress-tracker",
     "hive.writing-hive-skills": "writing-hive-skills",
 }
 
-# All shared buffer keys used by default skills (for permission auto-inclusion)
+# Shared buffer keys referenced by the remaining default skills (used
+# for permission auto-inclusion). The dead keys for batch-ledger,
+# task-decomposition, the handoff buffer, and the error-log buffers
+# were removed when those features migrated to progress.db.
 DATA_BUFFER_KEYS: list[str] = [
     # note-taking
     "_working_notes",
     "_notes_updated_at",
-    # batch-ledger
-    "_batch_ledger",
-    "_batch_total",
-    "_batch_completed",
-    "_batch_failed",
     # context-preservation
-    "_handoff_context",
     "_preserved_data",
     # quality-monitor
     "_quality_log",
     "_quality_degradation_count",
-    # error-recovery
-    "_error_log",
-    "_failed_tools",
-    "_escalation_needed",
-    # task-decomposition
-    "_subtasks",
-    "_iteration_budget_remaining",
 ]
 
 
@@ -256,16 +239,15 @@ class DefaultSkillManager:
 
     @property
     def batch_init_nudge(self) -> str | None:
-        """Nudge text to prepend to system prompt when batch input detected (DS-12).
+        """Deprecated: always returns None.
 
-        Returns None if ``hive.batch-ledger`` is disabled or auto_detect_batch is False.
+        The ``hive.batch-ledger`` default skill was removed when batch
+        tracking moved into ``progress.db`` (``hive.colony-progress-
+        tracker``). Callers in agent_host, colony_runtime, and
+        orchestrator still read this property; returning None keeps
+        them functional with no system-prompt nudge.
         """
-        if "hive.batch-ledger" not in self._skills:
-            return None
-        overrides = self._config.get_default_overrides("hive.batch-ledger")
-        if overrides.get("auto_detect_batch") is False:
-            return None
-        return _BATCH_INIT_NUDGE
+        return None
 
     @property
     def context_warn_ratio(self) -> float | None:

@@ -36,8 +36,8 @@ class SkillsConfig:
         # Default skill configuration
         default_skills = {
             "hive.note-taking": {"enabled": True},
-            "hive.batch-ledger": {"enabled": True, "checkpoint_every_n": 10},
-            "hive.quality-monitor": {"enabled": False},
+            "hive.quality-monitor": {"enabled": False, "assessment_interval": 10},
+            "hive.error-recovery": {"max_retries_per_tool": 5},
         }
     """
 

@@ -1170,6 +1170,25 @@ def register_queen_lifecycle_tools(
                     }
                 )
 
+        # Colony progress tracker wiring: if the session's loaded
+        # worker points at a colony directory that has a progress.db,
+        # inject db_path + colony_id into every per-task ``data``
+        # dict so each spawned worker sees them in its first user
+        # message and can claim rows from the queue. ColonyRuntime.
+        # spawn() detects db_path in input_data and pre-activates
+        # hive.colony-progress-tracker into the catalog prompt.
+        _colony_db_path: str | None = None
+        _colony_id: str | None = None
+        _worker_path = getattr(session, "worker_path", None)
+        if _worker_path:
+            from pathlib import Path as _Path
+
+            _wp = _Path(_worker_path)
+            _pdb = _wp / "data" / "progress.db"
+            if _pdb.exists():
+                _colony_db_path = str(_pdb.resolve())
+                _colony_id = _wp.name
+
         # Normalise: each entry must have a non-empty "task" string.
         normalised: list[dict] = []
         for i, spec in enumerate(tasks):
@@ -1180,11 +1199,26 @@ def register_queen_lifecycle_tools(
             task_text = str(spec.get("task", "")).strip()
             if not task_text:
                 return json.dumps({"error": f"tasks[{i}].task is empty"})
+            spec_data = spec.get("data") if isinstance(spec.get("data"), dict) else {}
+            if _colony_db_path:
+                spec_data = {
+                    **spec_data,
+                    "db_path": _colony_db_path,
+                    "colony_id": _colony_id,
+                }
             normalised.append(
                 {
                     "task": task_text,
-                    "data": spec.get("data") if isinstance(spec.get("data"), dict) else None,
+                    "data": spec_data or None,
                 }
+            )
+
+        if _colony_db_path:
+            logger.info(
+                "run_parallel_workers: attached progress_db context to "
+                "%d spawn(s) (colony_id=%s)",
+                len(normalised),
+                _colony_id,
             )
 
         try:

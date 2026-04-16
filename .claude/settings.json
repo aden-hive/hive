@@ -44,7 +44,19 @@
       "WebFetch(domain:docs.litellm.ai)",
       "Bash(cat /home/timothy/aden/hive/.venv/lib/python3.11/site-packages/litellm-*.dist-info/METADATA)",
       "Bash(find \"/home/timothy/.hive/agents/queens/queen_brand_design/sessions/session_20260415_100751_d49f4c28/\" -type f -name \"*.json*\" -exec grep -l \"协日\" {} \\\\;)",
-      "Bash(grep -v ':0$')"
+      "Bash(grep -v ':0$')",
+      "Bash(find /home/timothy/aden/hive/core/framework/skills/_default_skills -name \"SKILL.md\" -exec grep -l \"curl\\\\|jq\\\\|bash\\\\|sh\\\\|CLI\\\\|command\" {} \\\\;)",
+      "Bash(python3 -c \"import sys, json; [print\\(json.loads\\(line\\).get\\('data', {}\\).get\\('iteration'\\)\\) for line in sys.stdin]\")",
+      "Bash(grep -l \"shell\\\\|bash\\\\|exec\\\\|subprocess\" /home/timothy/aden/hive/tools/src/gcu/files/*.py)",
+      "Bash(python3 -c \"import aden_tools.file_ops; print\\(aden_tools.file_ops.__file__\\)\")",
+      "Bash(find / -path /proc -prune -o -name \"file_ops*\" -print)",
+      "Bash(grep -l \"sqlite\\\\|sqlite3\" /home/timothy/aden/hive/tools/src/aden_tools/tools/*/*.py)",
+      "Bash(grep -iv \"_tool$\")",
+      "Bash(grep -n \"add_post.*sessions\\\\|add_post.*colonies\\\\|add_get.*sessions\" /home/timothy/aden/hive/core/framework/server/*.py)",
+      "Bash(python -c 'import json; d=json.load\\(open\\('\\\\''__TRACKED_VAR__/.hive/colonies/__TRACKED_VAR__/worker.json'\\\\''\\)\\); print\\('\\\\''input_data:'\\\\'', d.get\\('\\\\''input_data'\\\\'', '\\\\''MISSING'\\\\''\\)\\)')",
+      "Bash(python -c 'import json; d=json.load\\(open\\('\\\\''__TRACKED_VAR__/.hive/colonies/__TRACKED_VAR__/worker.json'\\\\''\\)\\); print\\('\\\\''  __TRACKED_VAR__:'\\\\'', '\\\\''input_data='\\\\'', d.get\\('\\\\''input_data'\\\\'', '\\\\''MISSING'\\\\''\\)\\)')",
+      "Bash(python -c 'import json; d=json.load\\(open\\('\\\\''__TRACKED_VAR__/.hive/colonies/__TRACKED_VAR__/worker.json'\\\\''\\)\\); print\\('\\\\''  __TRACKED_VAR__: input_data ='\\\\'', d.get\\('\\\\''input_data'\\\\''\\)\\)')",
+      "Bash(kill 2466637 2466632)"
     ],
     "additionalDirectories": [
       "/home/timothy/.hive/skills/writing-hive-skills",
