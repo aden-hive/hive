@@ -23,9 +23,9 @@ TOOL_SCHEMAS: dict[str, dict] = {
         },
     },
     "browser_type": {
-        "description": "Type text into an input element. Omit selector to type into the already-focused element (e.g. after browser_click_coordinate).",
+        "description": "Type text into an input element.",
         "params": {
-            "selector": {"type": "string"},
+            "selector": {"type": "string", "required": True},
             "text": {"type": "string", "required": True},
             "tab_id": {"type": "integer"},
             "profile": {"type": "string"},
@@ -43,6 +43,17 @@ TOOL_SCHEMAS: dict[str, dict] = {
             "tab_id": {"type": "integer"},
             "profile": {"type": "string"},
             "timeout_ms": {"type": "integer", "default": 30000},
+        },
+    },
+    "browser_type_focused": {
+        "description": "Type text into the already-focused element. Use after browser_click_coordinate has focused the target. Faster than browser_press for multi-character input.",
+        "params": {
+            "text": {"type": "string", "required": True},
+            "tab_id": {"type": "integer"},
+            "profile": {"type": "string"},
+            "delay_ms": {"type": "integer", "default": 0},
+            "clear_first": {"type": "boolean", "default": True},
+            "use_insert_text": {"type": "boolean", "default": True},
         },
     },
     "browser_press": {
