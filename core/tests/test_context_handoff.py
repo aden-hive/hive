@@ -33,6 +33,8 @@ class SpyLLMProvider(MockLLMProvider):
 class FailingLLMProvider(LLMProvider):
     """LLM provider that always raises."""
 
+    model: str = "mock"
+
     def complete(self, messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
         raise RuntimeError("LLM unavailable")
 

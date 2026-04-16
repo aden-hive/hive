@@ -37,6 +37,8 @@ from framework.tools.queen_lifecycle_tools import register_queen_lifecycle_tools
 
 
 class _ByTaskMockLLM(LLMProvider):
+    model: str = "mock"
+
     def __init__(self, by_task: dict[str, list]):
         self.by_task = by_task
 

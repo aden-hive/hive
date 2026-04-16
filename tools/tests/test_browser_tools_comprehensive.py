@@ -778,8 +778,9 @@ class TestIFWrapping:
             ):
                 result = await browser_evaluate(script="return 42;")
 
-        # Tool passes script through unchanged — wrapping is bridge's job
-        assert call_args == ["return 42;"]
+        # Tool may issue a toast call then the actual script call
+        assert len(call_args) >= 1
+        assert any("return 42;" in arg for arg in call_args)
         # Tool returns bridge's raw result
         assert result == {"result": {"value": 42}}
 

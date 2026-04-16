@@ -44,6 +44,8 @@ class MockStreamingLLM(LLMProvider):
       consumption. Each worker gets the scenario matching its task.
     """
 
+    model: str = "mock"
+
     def __init__(
         self,
         scenarios: list[list] | None = None,
@@ -293,6 +295,7 @@ class TestReportToParent:
         """
 
         class CrashingLLM(LLMProvider):
+            model: str = "mock"
             stream_calls: list[dict] = []
 
             async def stream(self, messages, system="", tools=None, max_tokens=4096):

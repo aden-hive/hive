@@ -40,6 +40,8 @@ class MockStreamingLLM(LLMProvider):
     Cycles back to the beginning if more calls are made than scenarios.
     """
 
+    model: str = "mock"
+
     def __init__(self, scenarios: list[list] | None = None):
         self.scenarios = scenarios or []
         self._call_index = 0
@@ -1048,6 +1050,8 @@ class ErrorThenSuccessLLM(LLMProvider):
     Used to test the retry-with-backoff wrapper around _run_single_turn().
     """
 
+    model: str = "mock"
+
     def __init__(self, error: Exception, fail_count: int, success_scenario: list):
         self.error = error
         self.fail_count = fail_count
@@ -1174,6 +1178,8 @@ class TestTransientErrorRetry:
         call_index = 0
 
         class StreamErrorThenSuccessLLM(LLMProvider):
+            model: str = "mock"
+
             async def stream(self, messages, system="", tools=None, max_tokens=4096):
                 nonlocal call_index
                 idx = call_index
@@ -1343,10 +1349,12 @@ class TestIsToolDoomLoop:
 class ToolRepeatLLM(LLMProvider):
     """LLM that produces identical tool calls across outer iterations.
 
-    Alternates: even calls → tool call, odd calls → text (exits inner loop).
+    Alternates: even calls -> tool call, odd calls -> text (exits inner loop).
     This ensures each outer iteration = 2 LLM calls with 1 tool executed.
     After tool_turns outer iterations, always returns text.
     """
+
+    model: str = "mock"
 
     def __init__(
         self,
@@ -1590,6 +1598,8 @@ class TestToolDoomLoopIntegration:
         call_idx = 0
 
         class DiffArgsLLM(LLMProvider):
+            model: str = "mock"
+
             async def stream(self, messages, **kwargs):
                 nonlocal call_idx
                 idx = call_idx
@@ -1963,6 +1973,8 @@ class TestToolConcurrencyPartition:
         delay = 0.25
 
         class SlowStreamLLM(LLMProvider):
+            model: str = "mock"
+
             def __init__(self):
                 self._calls = 0
 
