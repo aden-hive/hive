@@ -110,9 +110,7 @@ class TestVercelListProjectDomains:
         assert "error" in result
 
     def test_successful_list(self, tool_fns):
-        mock_resp = {
-            "domains": [{"name": "example.com", "redirect": "", "gitBranch": "", "verified": True}]
-        }
+        mock_resp = {"domains": [{"name": "example.com", "redirect": "", "gitBranch": "", "verified": True}]}
         with (
             patch.dict("os.environ", ENV),
             patch("aden_tools.tools.vercel_tool.vercel_tool.httpx.get") as mock_get,
@@ -126,11 +124,7 @@ class TestVercelListProjectDomains:
 
 class TestVercelEnvVars:
     def test_list_env_vars(self, tool_fns):
-        mock_resp = {
-            "envs": [
-                {"id": "env_1", "key": "API_KEY", "target": ["production"], "type": "encrypted"}
-            ]
-        }
+        mock_resp = {"envs": [{"id": "env_1", "key": "API_KEY", "target": ["production"], "type": "encrypted"}]}
         with (
             patch.dict("os.environ", ENV),
             patch("aden_tools.tools.vercel_tool.vercel_tool.httpx.get") as mock_get,
@@ -154,9 +148,7 @@ class TestVercelEnvVars:
         ):
             mock_post.return_value.status_code = 200
             mock_post.return_value.json.return_value = {"id": "env_2", "key": "DB_URL"}
-            result = tool_fns["vercel_create_env_var"](
-                project_id="prj_1", key="DB_URL", value="postgres://..."
-            )
+            result = tool_fns["vercel_create_env_var"](project_id="prj_1", key="DB_URL", value="postgres://...")
 
         assert result["status"] == "created"
         assert result["key"] == "DB_URL"

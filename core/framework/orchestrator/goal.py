@@ -41,13 +41,9 @@ class SuccessCriterion(BaseModel):
 
     id: str
     description: str = Field(description="Human-readable description of what success looks like")
-    metric: str = Field(
-        description="How to measure: 'output_contains', 'output_equals', 'llm_judge', 'custom'"
-    )
+    metric: str = Field(description="How to measure: 'output_contains', 'output_equals', 'llm_judge', 'custom'")
     # NEW: runtime evaluation type (separate from metric)
-    type: str = Field(
-        default="success_rate", description="Runtime evaluation type, e.g. 'success_rate'"
-    )
+    type: str = Field(default="success_rate", description="Runtime evaluation type, e.g. 'success_rate'")
 
     target: Any = Field(description="The target value or condition")
     weight: float = Field(default=1.0, ge=0.0, le=1.0, description="Relative importance (0-1)")
@@ -67,15 +63,9 @@ class Constraint(BaseModel):
 
     id: str
     description: str
-    constraint_type: str = Field(
-        description="Type: 'hard' (must not violate) or 'soft' (prefer not to violate)"
-    )
-    category: str = Field(
-        default="general", description="Category: 'time', 'cost', 'safety', 'scope', 'quality'"
-    )
-    check: str = Field(
-        default="", description="How to check: expression, function name, or 'llm_judge'"
-    )
+    constraint_type: str = Field(description="Type: 'hard' (must not violate) or 'soft' (prefer not to violate)")
+    category: str = Field(default="general", description="Category: 'time', 'cost', 'safety', 'scope', 'quality'")
+    check: str = Field(default="", description="How to check: expression, function name, or 'llm_judge'")
 
     model_config = {"extra": "allow"}
 
@@ -142,9 +132,7 @@ class Goal(BaseModel):
 
     # Input/output schema
     input_schema: dict[str, Any] = Field(default_factory=dict, description="Expected input format")
-    output_schema: dict[str, Any] = Field(
-        default_factory=dict, description="Expected output format"
-    )
+    output_schema: dict[str, Any] = Field(default_factory=dict, description="Expected output format")
 
     # Versioning for evolution
     version: str = "1.0.0"

@@ -132,9 +132,7 @@ class TestZohoCRMClient:
         mock_response.json.return_value = {"data": [{"details": {"id": "1192161000000586001"}}]}
         mock_put.return_value = mock_response
 
-        result = self.client.update_record(
-            "Leads", "1192161000000586001", {"Description": "Updated"}
-        )
+        result = self.client.update_record("Leads", "1192161000000586001", {"Description": "Updated"})
 
         mock_put.assert_called_once_with(
             f"{self.client._api_base}/Leads/1192161000000586001",
@@ -322,9 +320,7 @@ class TestZohoCRMTools:
             status_code=200,
             json=MagicMock(return_value={"data": [{"details": {"id": "123"}}]}),
         )
-        result = self._fn("zoho_crm_update_record")(
-            module="Leads", id="123", data={"Description": "Updated"}
-        )
+        result = self._fn("zoho_crm_update_record")(module="Leads", id="123", data={"Description": "Updated"})
         assert result["success"] is True
         assert result["id"] == "123"
 

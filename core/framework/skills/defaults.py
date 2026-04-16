@@ -60,9 +60,7 @@ def _apply_overrides(skill_name: str, body: str, overrides: dict[str, Any]) -> s
     # Convert float warn_at_usage_ratio → warn_at_usage_ratio_pct for the placeholder
     if "warn_at_usage_ratio" in overrides:
         overrides = dict(overrides)
-        overrides.setdefault(
-            "warn_at_usage_ratio_pct", int(float(overrides["warn_at_usage_ratio"]) * 100)
-        )
+        overrides.setdefault("warn_at_usage_ratio_pct", int(float(overrides["warn_at_usage_ratio"]) * 100))
     values = {**defaults, **overrides}
     for key, val in values.items():
         body = body.replace(f"{{{{{key}}}}}", str(val))
@@ -189,8 +187,7 @@ class DefaultSkillManager:
         approx_tokens = len(combined) // 4
         if approx_tokens > 2000:
             logger.warning(
-                "Default skill protocols exceed 2000 token budget "
-                "(~%d tokens, %d chars). Consider trimming.",
+                "Default skill protocols exceed 2000 token budget (~%d tokens, %d chars). Consider trimming.",
                 approx_tokens,
                 len(combined),
             )

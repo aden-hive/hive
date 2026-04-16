@@ -99,9 +99,7 @@ def register_worker_monitoring_tools(
             if default_session_id and (sessions_dir / default_session_id).is_dir():
                 session_id = default_session_id
             else:
-                candidates = [
-                    d for d in sessions_dir.iterdir() if d.is_dir() and (d / "state.json").exists()
-                ]
+                candidates = [d for d in sessions_dir.iterdir() if d.is_dir() and (d / "state.json").exists()]
                 if not candidates:
                     return json.dumps({"error": "No sessions found — worker has not started yet"})
 
@@ -210,15 +208,12 @@ def register_worker_monitoring_tools(
                 "session_id": {
                     "type": "string",
                     "description": (
-                        "The worker's active session ID. Omit or pass 'auto' to "
-                        "auto-discover the most recent session."
+                        "The worker's active session ID. Omit or pass 'auto' to auto-discover the most recent session."
                     ),
                 },
                 "last_n_steps": {
                     "type": "integer",
-                    "description": (
-                        f"How many recent log steps to include (default {_DEFAULT_LAST_N_STEPS})"
-                    ),
+                    "description": (f"How many recent log steps to include (default {_DEFAULT_LAST_N_STEPS})"),
                 },
             },
             "required": [],

@@ -52,7 +52,7 @@ _MAX_ENTRIES_PER_SCOPE = 256
 
 # scope -> ordered dict of absolute_path -> FileReadRecord.
 # Ordered so we can evict least-recently-read entries.
-_cache: dict[str, "OrderedDict[str, FileReadRecord]"] = {}
+_cache: dict[str, OrderedDict[str, FileReadRecord]] = {}
 _lock = threading.Lock()
 
 

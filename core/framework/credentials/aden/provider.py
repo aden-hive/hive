@@ -192,9 +192,7 @@ class AdenSyncProvider(CredentialProvider):
                     f"Visit: {e.reauthorization_url or 'your Aden dashboard'}"
                 ) from e
 
-            raise CredentialRefreshError(
-                f"Failed to refresh credential '{credential.id}': {e}"
-            ) from e
+            raise CredentialRefreshError(f"Failed to refresh credential '{credential.id}': {e}") from e
 
         except AdenClientError as e:
             logger.error(f"Aden client error for '{credential.id}': {e}")
@@ -206,9 +204,7 @@ class AdenSyncProvider(CredentialProvider):
                     logger.warning(f"Aden unavailable, using cached token for '{credential.id}'")
                     return credential
 
-            raise CredentialRefreshError(
-                f"Aden server unavailable and token expired for '{credential.id}'"
-            ) from e
+            raise CredentialRefreshError(f"Aden server unavailable and token expired for '{credential.id}'") from e
 
     def validate(self, credential: CredentialObject) -> bool:
         """

@@ -28,8 +28,7 @@ def resolve_safe_path(path: str) -> str:
             return resolved
 
     raise ValueError(
-        f"Access denied: '{path}' is outside allowed directories. "
-        f"Use absolute paths under ~/.hive/ or exports/."
+        f"Access denied: '{path}' is outside allowed directories. Use absolute paths under ~/.hive/ or exports/."
     )
 
 

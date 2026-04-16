@@ -39,9 +39,7 @@ def _auth_header(account_sid: str, auth_token: str) -> str:
     return f"Basic {encoded}"
 
 
-def _request(
-    method: str, url: str, account_sid: str, auth_token: str, **kwargs: Any
-) -> dict[str, Any]:
+def _request(method: str, url: str, account_sid: str, auth_token: str, **kwargs: Any) -> dict[str, Any]:
     """Make a request to the Twilio API."""
     headers = kwargs.pop("headers", {})
     headers["Authorization"] = _auth_header(account_sid, auth_token)

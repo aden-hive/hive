@@ -98,9 +98,7 @@ class TestSearchPapers:
 
     @patch("aden_tools.tools.arxiv_tool.arxiv_tool._SHARED_ARXIV_CLIENT")
     def test_search_success_with_results(self, mock_client):
-        mock_client.results.return_value = iter(
-            [_make_arxiv_result(short_id=f"000{i}.0000{i}") for i in range(3)]
-        )
+        mock_client.results.return_value = iter([_make_arxiv_result(short_id=f"000{i}.0000{i}") for i in range(3)])
         result = self.search_papers(query="multi-agent systems", max_results=3)
         assert result["success"] is True
         assert result["total"] == 3
@@ -124,9 +122,7 @@ class TestSearchPapers:
 
     @patch("aden_tools.tools.arxiv_tool.arxiv_tool._SHARED_ARXIV_CLIENT")
     def test_arxiv_error_handling(self, mock_client):
-        mock_client.results.side_effect = arxiv.ArxivError(
-            message="arXiv is down", url="", retry=False
-        )
+        mock_client.results.side_effect = arxiv.ArxivError(message="arXiv is down", url="", retry=False)
         result = self.search_papers(query="test")
         assert result["success"] is False
         assert "arXiv" in result["error"]

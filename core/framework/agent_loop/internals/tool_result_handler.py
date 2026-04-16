@@ -277,8 +277,7 @@ def truncate_tool_result(
         if metadata_str:
             header += f"\n\nData structure:\n{metadata_str}"
         header += (
-            "\n\nWARNING: the preview below is a SAMPLE only — do NOT "
-            "draw counts, totals, or conclusions from it."
+            "\n\nWARNING: the preview below is a SAMPLE only — do NOT draw counts, totals, or conclusions from it."
         )
 
         truncated = f"{header}\n\nPreview (truncated):\n{preview_block}"
@@ -348,8 +347,7 @@ def truncate_tool_result(
             if metadata_str:
                 header += f"\nData structure:\n{metadata_str}\n"
             header += (
-                "\nWARNING: the preview below is a SAMPLE only — do NOT "
-                "draw counts, totals, or conclusions from it."
+                "\nWARNING: the preview below is a SAMPLE only — do NOT draw counts, totals, or conclusions from it."
             )
 
             content = f"{header}\n\nPreview (truncated):\n{preview_block}"
@@ -416,8 +414,7 @@ def truncate_tool_result(
         if metadata_str:
             header += f"\n\nData structure:\n{metadata_str}"
         header += (
-            "\n\nWARNING: the preview below is a SAMPLE only — do NOT "
-            "draw counts, totals, or conclusions from it."
+            "\n\nWARNING: the preview below is a SAMPLE only — do NOT draw counts, totals, or conclusions from it."
         )
 
         truncated = f"{header}\n\n{preview_block}"

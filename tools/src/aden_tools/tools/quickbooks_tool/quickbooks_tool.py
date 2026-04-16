@@ -251,9 +251,7 @@ def register_tools(mcp: FastMCP, credentials: Any = None) -> None:
             "company_name": info.get("CompanyName"),
             "legal_name": info.get("LegalName"),
             "country": info.get("Country"),
-            "email": info.get("Email", {}).get("Address")
-            if isinstance(info.get("Email"), dict)
-            else None,
+            "email": info.get("Email", {}).get("Address") if isinstance(info.get("Email"), dict) else None,
             "fiscal_year_start": info.get("FiscalYearStartMonth"),
         }
 

@@ -42,9 +42,7 @@ def run(attendee, duration, title, verbose):
             }
         )
     )
-    click.echo(
-        json.dumps({"success": result.success, "output": result.output}, indent=2, default=str)
-    )
+    click.echo(json.dumps({"success": result.success, "output": result.output}, indent=2, default=str))
     sys.exit(0 if result.success else 1)
 
 
@@ -102,12 +100,8 @@ def tui():
 def info():
     """Show agent info."""
     data = default_agent.info()
-    click.echo(
-        f"Agent: {data['name']}\nVersion: {data['version']}\nDescription: {data['description']}"
-    )
-    click.echo(
-        f"Nodes: {', '.join(data['nodes'])}\nClient-facing: {', '.join(data['client_facing_nodes'])}"
-    )
+    click.echo(f"Agent: {data['name']}\nVersion: {data['version']}\nDescription: {data['description']}")
+    click.echo(f"Nodes: {', '.join(data['nodes'])}\nClient-facing: {', '.join(data['client_facing_nodes'])}")
 
 
 @cli.command()

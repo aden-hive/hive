@@ -274,12 +274,8 @@ class TestEventFiltering:
             filter_node="node_x",
         )
 
-        await bus.publish(
-            AgentEvent(type=EventType.NODE_LOOP_STARTED, stream_id="s", node_id="node_x")
-        )
-        await bus.publish(
-            AgentEvent(type=EventType.NODE_LOOP_STARTED, stream_id="s", node_id="node_y")
-        )
+        await bus.publish(AgentEvent(type=EventType.NODE_LOOP_STARTED, stream_id="s", node_id="node_x"))
+        await bus.publish(AgentEvent(type=EventType.NODE_LOOP_STARTED, stream_id="s", node_id="node_y"))
 
         assert received == ["node_x"]
 
@@ -298,12 +294,8 @@ class TestEventFiltering:
             filter_execution="exec_1",
         )
 
-        await bus.publish(
-            AgentEvent(type=EventType.EXECUTION_COMPLETED, stream_id="s", execution_id="exec_1")
-        )
-        await bus.publish(
-            AgentEvent(type=EventType.EXECUTION_COMPLETED, stream_id="s", execution_id="exec_2")
-        )
+        await bus.publish(AgentEvent(type=EventType.EXECUTION_COMPLETED, stream_id="s", execution_id="exec_1"))
+        await bus.publish(AgentEvent(type=EventType.EXECUTION_COMPLETED, stream_id="s", execution_id="exec_2"))
 
         assert received == ["exec_1"]
 
@@ -365,12 +357,8 @@ class TestEventFiltering:
             filter_colony="colony_a",
         )
 
-        await bus.publish(
-            AgentEvent(type=EventType.EXECUTION_STARTED, stream_id="s", colony_id="colony_a")
-        )
-        await bus.publish(
-            AgentEvent(type=EventType.EXECUTION_STARTED, stream_id="s", colony_id="colony_b")
-        )
+        await bus.publish(AgentEvent(type=EventType.EXECUTION_STARTED, stream_id="s", colony_id="colony_a"))
+        await bus.publish(AgentEvent(type=EventType.EXECUTION_STARTED, stream_id="s", colony_id="colony_b"))
 
         assert received == ["colony_a"]
 
@@ -856,9 +844,7 @@ class TestConveniencePublishers:
 
         assert len(received) == 1
         assert received[0].type == EventType.NODE_ACTION_PLAN
-        assert (
-            received[0].data["plan"] == "1. Search for data\n2. Analyze results\n3. Generate report"
-        )
+        assert received[0].data["plan"] == "1. Search for data\n2. Analyze results\n3. Generate report"
 
     @pytest.mark.asyncio
     async def test_emit_subagent_report(self):

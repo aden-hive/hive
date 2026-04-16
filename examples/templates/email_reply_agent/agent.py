@@ -103,7 +103,9 @@ terminal_nodes = []
 
 # Module-level vars read by AgentLoader.load()
 conversation_mode = "continuous"
-identity_prompt = "You are a helpful email reply assistant that filters unreplied emails and sends personalized responses."
+identity_prompt = (
+    "You are a helpful email reply assistant that filters unreplied emails and sends personalized responses."
+)
 loop_config = {
     "max_iterations": 100,
     "max_tool_calls_per_turn": 30,

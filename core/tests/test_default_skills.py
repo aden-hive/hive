@@ -13,9 +13,7 @@ from framework.skills.defaults import (
 )
 from framework.skills.parser import parse_skill_md
 
-_DEFAULT_SKILLS_DIR = (
-    Path(__file__).resolve().parent.parent / "framework" / "skills" / "_default_skills"
-)
+_DEFAULT_SKILLS_DIR = Path(__file__).resolve().parent.parent / "framework" / "skills" / "_default_skills"
 
 
 class TestDefaultSkillFiles:
@@ -94,9 +92,7 @@ class TestDefaultSkillManager:
         assert manager.active_skill_names == []
 
     def test_disable_single_skill(self):
-        config = SkillsConfig.from_agent_vars(
-            default_skills={"hive.quality-monitor": {"enabled": False}}
-        )
+        config = SkillsConfig.from_agent_vars(default_skills={"hive.quality-monitor": {"enabled": False}})
         manager = DefaultSkillManager(config)
         manager.load()
 
@@ -138,9 +134,7 @@ class TestSkillsConfig:
         assert config.is_default_enabled("hive.note-taking") is True
 
     def test_explicit_disable(self):
-        config = SkillsConfig(
-            default_skills={"hive.note-taking": DefaultSkillConfig(enabled=False)}
-        )
+        config = SkillsConfig(default_skills={"hive.note-taking": DefaultSkillConfig(enabled=False)})
         assert config.is_default_enabled("hive.note-taking") is False
         assert config.is_default_enabled("hive.batch-ledger") is True
 
@@ -199,9 +193,7 @@ class TestConfigOverrideSubstitution:
         assert "Every 5 iterations" in prompt
 
     def test_quality_monitor_override_interval(self):
-        config = SkillsConfig.from_agent_vars(
-            default_skills={"hive.quality-monitor": {"assessment_interval": 10}}
-        )
+        config = SkillsConfig.from_agent_vars(default_skills={"hive.quality-monitor": {"assessment_interval": 10}})
         manager = DefaultSkillManager(config)
         manager.load()
         prompt = manager.build_protocols_prompt()
@@ -215,9 +207,7 @@ class TestConfigOverrideSubstitution:
         assert "3+ times" in prompt
 
     def test_error_recovery_override_retries(self):
-        config = SkillsConfig.from_agent_vars(
-            default_skills={"hive.error-recovery": {"max_retries_per_tool": 5}}
-        )
+        config = SkillsConfig.from_agent_vars(default_skills={"hive.error-recovery": {"max_retries_per_tool": 5}})
         manager = DefaultSkillManager(config)
         manager.load()
         prompt = manager.build_protocols_prompt()
@@ -273,17 +263,13 @@ class TestBatchAutoDetection:
         assert "_batch_ledger" in manager.batch_init_nudge
 
     def test_batch_nudge_none_when_skill_disabled(self):
-        config = SkillsConfig.from_agent_vars(
-            default_skills={"hive.batch-ledger": {"enabled": False}}
-        )
+        config = SkillsConfig.from_agent_vars(default_skills={"hive.batch-ledger": {"enabled": False}})
         manager = DefaultSkillManager(config)
         manager.load()
         assert manager.batch_init_nudge is None
 
     def test_batch_nudge_none_when_auto_detect_disabled(self):
-        config = SkillsConfig.from_agent_vars(
-            default_skills={"hive.batch-ledger": {"auto_detect_batch": False}}
-        )
+        config = SkillsConfig.from_agent_vars(default_skills={"hive.batch-ledger": {"auto_detect_batch": False}})
         manager = DefaultSkillManager(config)
         manager.load()
         assert manager.batch_init_nudge is None
@@ -306,9 +292,7 @@ class TestContextWarnRatio:
         assert manager.context_warn_ratio == pytest.approx(0.3)
 
     def test_ratio_none_when_skill_disabled(self):
-        config = SkillsConfig.from_agent_vars(
-            default_skills={"hive.context-preservation": {"enabled": False}}
-        )
+        config = SkillsConfig.from_agent_vars(default_skills={"hive.context-preservation": {"enabled": False}})
         manager = DefaultSkillManager(config)
         manager.load()
         assert manager.context_warn_ratio is None

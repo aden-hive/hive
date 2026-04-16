@@ -129,15 +129,13 @@ class NodeSpec(BaseModel):
     input_schema: dict[str, dict] = Field(
         default_factory=dict,
         description=(
-            "Optional schema for input validation. "
-            "Format: {key: {type: 'string', required: True, description: '...'}}"
+            "Optional schema for input validation. Format: {key: {type: 'string', required: True, description: '...'}}"
         ),
     )
     output_schema: dict[str, dict] = Field(
         default_factory=dict,
         description=(
-            "Optional schema for output validation. "
-            "Format: {key: {type: 'dict', required: True, description: '...'}}"
+            "Optional schema for output validation. Format: {key: {type: 'dict', required: True, description: '...'}}"
         ),
     )
 
@@ -153,19 +151,13 @@ class NodeSpec(BaseModel):
             "'none' = no tools at all."
         ),
     )
-    model: str | None = Field(
-        default=None, description="Specific model to use (defaults to graph default)"
-    )
+    model: str | None = Field(default=None, description="Specific model to use (defaults to graph default)")
 
     # For function nodes
-    function: str | None = Field(
-        default=None, description="Function name or path for function nodes"
-    )
+    function: str | None = Field(default=None, description="Function name or path for function nodes")
 
     # For router nodes
-    routes: dict[str, str] = Field(
-        default_factory=dict, description="Condition -> target_node_id mapping for routers"
-    )
+    routes: dict[str, str] = Field(default_factory=dict, description="Condition -> target_node_id mapping for routers")
 
     # Retry behavior
     max_retries: int = Field(default=3)

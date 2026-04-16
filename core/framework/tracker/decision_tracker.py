@@ -252,9 +252,7 @@ class DecisionTracker:
         if self._current_run is None:
             # Gracefully handle case where run ended during exception handling
             # This can happen in cascading error scenarios
-            logger.warning(
-                f"record_outcome called but no run in progress (decision_id={decision_id})"
-            )
+            logger.warning(f"record_outcome called but no run in progress (decision_id={decision_id})")
             return
 
         outcome = Outcome(
@@ -298,9 +296,7 @@ class DecisionTracker:
         if self._current_run is None:
             # Gracefully handle case where run ended during exception handling
             # Log the problem since we can't store it, then return empty ID
-            logger.warning(
-                f"report_problem called but no run in progress: [{severity}] {description}"
-            )
+            logger.warning(f"report_problem called but no run in progress: [{severity}] {description}")
             return ""
 
         return self._current_run.add_problem(

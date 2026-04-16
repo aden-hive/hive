@@ -133,9 +133,7 @@ def _is_test_session(execution_id: str, records: list[dict[str, Any]]) -> bool:
     if execution_id.startswith("<MagicMock"):
         return True
     models = {
-        str(r.get("token_counts", {}).get("model", ""))
-        for r in records
-        if isinstance(r.get("token_counts"), dict)
+        str(r.get("token_counts", {}).get("model", "")) for r in records if isinstance(r.get("token_counts"), dict)
     }
     models.discard("")
     # Sessions that only used the mock LLM provider.
@@ -159,9 +157,7 @@ def _group_sessions(
             by_session[execution_id].append(record)
 
     if not include_tests:
-        by_session = {
-            eid: recs for eid, recs in by_session.items() if not _is_test_session(eid, recs)
-        }
+        by_session = {eid: recs for eid, recs in by_session.items() if not _is_test_session(eid, recs)}
 
     summaries: list[SessionSummary] = []
     for execution_id, session_records in by_session.items():
@@ -180,18 +176,13 @@ def _group_sessions(
                 start_timestamp=str(first.get("timestamp", "")),
                 end_timestamp=str(last.get("timestamp", "")),
                 turn_count=len(session_records),
-                streams=sorted(
-                    {str(r.get("stream_id", "")) for r in session_records if r.get("stream_id")}
-                ),
-                nodes=sorted(
-                    {str(r.get("node_id", "")) for r in session_records if r.get("node_id")}
-                ),
+                streams=sorted({str(r.get("stream_id", "")) for r in session_records if r.get("stream_id")}),
+                nodes=sorted({str(r.get("node_id", "")) for r in session_records if r.get("node_id")}),
                 models=sorted(
                     {
                         str(r.get("token_counts", {}).get("model", ""))
                         for r in session_records
-                        if isinstance(r.get("token_counts"), dict)
-                        and r.get("token_counts", {}).get("model")
+                        if isinstance(r.get("token_counts"), dict) and r.get("token_counts", {}).get("model")
                     }
                 ),
             )
@@ -599,9 +590,7 @@ placeholder="Filter by text, tool, role, model, or prompt">
     </main>
   </div>
 
-  <script id="session-summaries" type="application/json">{
-        json.dumps(summaries_data, ensure_ascii=False)
-    }</script>
+  <script id="session-summaries" type="application/json">{json.dumps(summaries_data, ensure_ascii=False)}</script>
   <script>
     const summaries = JSON.parse(document.getElementById("session-summaries").textContent);
     const recordCache = {{}};
@@ -878,9 +867,7 @@ def _sort_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-def _load_session_data(
-    logs_dir: Path, session_id: str, limit_files: int
-) -> list[dict[str, Any]] | None:
+def _load_session_data(logs_dir: Path, session_id: str, limit_files: int) -> list[dict[str, Any]] | None:
     """Load records for a specific session on demand."""
     if not logs_dir.exists():
         return None
@@ -976,9 +963,7 @@ def _run_server(
         server.server_close()
 
 
-def _discover_session_summaries(
-    logs_dir: Path, limit_files: int, include_tests: bool
-) -> list[SessionSummary]:
+def _discover_session_summaries(logs_dir: Path, limit_files: int, include_tests: bool) -> list[SessionSummary]:
     """Discover only session summaries without loading full record data."""
     if not logs_dir.exists():
         raise FileNotFoundError(f"log directory not found: {logs_dir}")
@@ -1019,9 +1004,7 @@ def _discover_session_summaries(
 
     # Filter out test sessions if needed
     if not include_tests:
-        by_session = {
-            eid: recs for eid, recs in by_session.items() if not _is_test_session(eid, recs)
-        }
+        by_session = {eid: recs for eid, recs in by_session.items() if not _is_test_session(eid, recs)}
 
     summaries: list[SessionSummary] = []
     for execution_id, session_records in by_session.items():
@@ -1040,18 +1023,13 @@ def _discover_session_summaries(
                 start_timestamp=str(first.get("timestamp", "")),
                 end_timestamp=str(last.get("timestamp", "")),
                 turn_count=len(session_records),
-                streams=sorted(
-                    {str(r.get("stream_id", "")) for r in session_records if r.get("stream_id")}
-                ),
-                nodes=sorted(
-                    {str(r.get("node_id", "")) for r in session_records if r.get("node_id")}
-                ),
+                streams=sorted({str(r.get("stream_id", "")) for r in session_records if r.get("stream_id")}),
+                nodes=sorted({str(r.get("node_id", "")) for r in session_records if r.get("node_id")}),
                 models=sorted(
                     {
                         str(r.get("token_counts", {}).get("model", ""))
                         for r in session_records
-                        if isinstance(r.get("token_counts"), dict)
-                        and r.get("token_counts", {}).get("model")
+                        if isinstance(r.get("token_counts"), dict) and r.get("token_counts", {}).get("model")
                     }
                 ),
             )

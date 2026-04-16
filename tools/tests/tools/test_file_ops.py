@@ -58,9 +58,7 @@ class TestSearchFilesPathRelativization:
         search_fn = _get_tool_fn(file_ops_mcp, "search_files")
 
         with patch("aden_tools.file_ops.subprocess.run") as mock_run:
-            mock_run.return_value = type(
-                "Result", (), {"returncode": 0, "stdout": rg_output, "stderr": ""}
-            )()
+            mock_run.return_value = type("Result", (), {"returncode": 0, "stdout": rg_output, "stderr": ""})()
 
             result = search_fn(
                 pattern="needle",
@@ -68,9 +66,7 @@ class TestSearchFilesPathRelativization:
             )
 
         # Output should be relativized (no full project_root in the line)
-        assert project_root not in result, (
-            f"Output should not contain full project_root. Got: {result!r}"
-        )
+        assert project_root not in result, f"Output should not contain full project_root. Got: {result!r}"
         # Should contain the relative path part
         assert "foo.py" in result
         assert "1:" in result or ":1:" in result
@@ -87,9 +83,7 @@ class TestSearchFilesPathRelativization:
         search_fn = _get_tool_fn(file_ops_mcp, "search_files")
 
         with patch("aden_tools.file_ops.subprocess.run") as mock_run:
-            mock_run.return_value = type(
-                "Result", (), {"returncode": 0, "stdout": rg_output, "stderr": ""}
-            )()
+            mock_run.return_value = type("Result", (), {"returncode": 0, "stdout": rg_output, "stderr": ""})()
 
             result = search_fn(
                 pattern="pattern_match",

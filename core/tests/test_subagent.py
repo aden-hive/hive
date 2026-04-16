@@ -63,12 +63,8 @@ class TestSubagentJudge:
         """The judge returns a JudgeVerdict, not a plain dict."""
         judge = SubagentJudge(task="task")
 
-        accept = await judge.evaluate(
-            {"missing_keys": [], "tool_results": [], "iteration": 0}
-        )
-        retry = await judge.evaluate(
-            {"missing_keys": ["x"], "tool_results": [], "iteration": 0}
-        )
+        accept = await judge.evaluate({"missing_keys": [], "tool_results": [], "iteration": 0})
+        retry = await judge.evaluate({"missing_keys": ["x"], "tool_results": [], "iteration": 0})
 
         assert isinstance(accept, JudgeVerdict)
         assert isinstance(retry, JudgeVerdict)

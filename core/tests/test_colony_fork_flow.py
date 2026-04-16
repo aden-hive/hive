@@ -21,10 +21,8 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from framework.agent_loop.internals.types import LoopConfig
-from framework.host.event_bus import EventBus
 from framework.server.app import create_app
 from framework.server.session_manager import Session, _queen_session_dir
-
 
 # Modules that import HIVE_HOME / QUEENS_DIR / COLONIES_DIR / MEMORIES_DIR /
 # HIVE_CONFIG_FILE at import time and need their bindings rewritten when we
@@ -327,9 +325,7 @@ async def test_colony_spawn_creates_correct_artifacts(tmp_path, monkeypatch):
 
     # ── duplicated queen session dir ──────────────────────────────
     dest_queen_dir = _queen_session_dir(colony_session_id, queen_name)
-    assert dest_queen_dir.is_dir(), (
-        f"Forked session dir not under {queen_name}/, got {dest_queen_dir}"
-    )
+    assert dest_queen_dir.is_dir(), f"Forked session dir not under {queen_name}/, got {dest_queen_dir}"
 
     # Conversations were copied
     assert (dest_queen_dir / "conversations" / "parts" / "0000000000.json").is_file()
@@ -344,9 +340,7 @@ async def test_colony_spawn_creates_correct_artifacts(tmp_path, monkeypatch):
     assert dest_meta["agent_name"] == "Honeycomb"
 
     # ── worker storage receives queen conversations ───────────────
-    worker_storage_convs = (
-        tmp_path / ".hive" / "agents" / "honeycomb" / "worker" / "conversations"
-    )
+    worker_storage_convs = tmp_path / ".hive" / "agents" / "honeycomb" / "worker" / "conversations"
     assert worker_storage_convs.is_dir()
     assert (worker_storage_convs / "parts" / "0000000000.json").is_file()
 
@@ -363,9 +357,7 @@ async def test_colony_spawn_creates_correct_artifacts(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_session_with_worker_colony_uses_forked_session_id(
-    tmp_path, monkeypatch
-):
+async def test_create_session_with_worker_colony_uses_forked_session_id(tmp_path, monkeypatch):
     """When a colony is loaded, its metadata.json's queen_session_id wins.
 
     Regression: returning to a colony was loading the SOURCE queen session
@@ -439,9 +431,7 @@ async def test_create_session_with_worker_colony_uses_forked_session_id(
 
     monkeypatch.setattr(SessionManager, "_load_worker_core", fake_load_worker_core)
     monkeypatch.setattr(SessionManager, "_start_queen", fake_start_queen)
-    monkeypatch.setattr(
-        SessionManager, "_restore_active_triggers", fake_restore_active_triggers
-    )
+    monkeypatch.setattr(SessionManager, "_restore_active_triggers", fake_restore_active_triggers)
 
     # Caller passes the SOURCE session id (mimicking the frontend's history scan)
     session = await manager.create_session_with_worker_colony(
@@ -453,7 +443,5 @@ async def test_create_session_with_worker_colony_uses_forked_session_id(
     assert captured["queen_resume_from"] == forked_id, (
         f"Expected forked id {forked_id}, got {captured['queen_resume_from']}"
     )
-    assert session.id == forked_id, (
-        f"Live session ID should match forked session, got {session.id}"
-    )
+    assert session.id == forked_id, f"Live session ID should match forked session, got {session.id}"
     assert captured["queen_name"] == queen_name

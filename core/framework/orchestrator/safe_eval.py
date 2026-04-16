@@ -169,11 +169,7 @@ class SafeEvalVisitor(ast.NodeVisitor):
         return tuple(self.visit(elt) for elt in node.elts)
 
     def visit_Dict(self, node: ast.Dict) -> dict:
-        return {
-            self.visit(k): self.visit(v)
-            for k, v in zip(node.keys, node.values, strict=False)
-            if k is not None
-        }
+        return {self.visit(k): self.visit(v) for k, v in zip(node.keys, node.values, strict=False) if k is not None}
 
     # --- Operations ---
     def visit_BinOp(self, node: ast.BinOp) -> Any:

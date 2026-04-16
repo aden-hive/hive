@@ -11,18 +11,14 @@ from unittest.mock import patch
 
 import pytest
 
-Image = pytest.importorskip(
-    "PIL.Image", reason="Pillow not installed (install with: pip install pillow)"
-)
+Image = pytest.importorskip("PIL.Image", reason="Pillow not installed (install with: pip install pillow)")
 
 from gcu.browser.tools.inspection import _normalize_screenshot  # noqa: E402
 
 
 def _make_png(width: int, height: int, *, mode: str = "RGB") -> bytes:
     """Create a solid-color PNG image of the given size."""
-    img = Image.new(
-        mode, (width, height), color=(100, 150, 200) if mode == "RGB" else (100, 150, 200, 128)
-    )
+    img = Image.new(mode, (width, height), color=(100, 150, 200) if mode == "RGB" else (100, 150, 200, 128))
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
@@ -128,9 +124,7 @@ class TestGracefulDegradation:
         raw = _make_png(4000, 3000)
         with patch.dict("sys.modules", {"PIL": None, "PIL.Image": None}):
             # Need to force reimport failure — patch builtins.__import__
-            original_import = (
-                __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
-            )
+            original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
 
             def mock_import(name, *args, **kwargs):
                 if name == "PIL" or name.startswith("PIL."):

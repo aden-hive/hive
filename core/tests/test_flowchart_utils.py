@@ -49,9 +49,7 @@ def _make_edge(source, target, condition="on_success", description=""):
     )
 
 
-def _make_goal(
-    name="Test Goal", description="A test goal", success_criteria=None, constraints=None
-):
+def _make_goal(name="Test Goal", description="A test goal", success_criteria=None, constraints=None):
     """Create a minimal goal-like object matching Goal interface."""
     return SimpleNamespace(
         name=name,
@@ -127,9 +125,7 @@ class TestSynthesizeDraftFromRuntime:
             _make_edge("intake", "process"),
             _make_edge("process", "deliver"),
         ]
-        draft, fmap = synthesize_draft_from_runtime(
-            nodes, edges, agent_name="test_agent", goal_name="Test"
-        )
+        draft, fmap = synthesize_draft_from_runtime(nodes, edges, agent_name="test_agent", goal_name="Test")
 
         assert draft["agent_name"] == "test_agent"
         assert draft["goal"] == "Test"

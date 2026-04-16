@@ -208,9 +208,7 @@ class TestWandbTool:
             patch.dict("os.environ", ENV),
             patch(_PATCH_POST, return_value=_gql_ok(gql_data)),
         ):
-            result = tool_fns["wandb_get_run_metrics"](
-                entity="e", project="p", run_id="r1", metric_keys="loss"
-            )
+            result = tool_fns["wandb_get_run_metrics"](entity="e", project="p", run_id="r1", metric_keys="loss")
 
         assert result["run_id"] == "r1"
         assert result["metric_keys"] == ["loss"]
@@ -271,9 +269,7 @@ class TestWandbTool:
 
     def test_wandb_get_summary_success(self, tool_fns: dict[str, Any]) -> None:
         """wandb_get_summary returns summary filtering out _-prefixed keys."""
-        gql_data = {
-            "project": {"run": {"summaryMetrics": '{"accuracy": 0.9, "loss": 0.1, "_step": 5}'}}
-        }
+        gql_data = {"project": {"run": {"summaryMetrics": '{"accuracy": 0.9, "loss": 0.1, "_step": 5}'}}}
         with (
             patch.dict("os.environ", ENV),
             patch(_PATCH_POST, return_value=_gql_ok(gql_data)),

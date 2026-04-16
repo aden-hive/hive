@@ -41,9 +41,7 @@ def _get_env() -> str:
     return os.getenv("PLAID_ENV", DEFAULT_ENV)
 
 
-def _post(
-    path: str, client_id: str, secret: str, body: dict[str, Any] | None = None
-) -> dict[str, Any]:
+def _post(path: str, client_id: str, secret: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
     """Make a POST request to the Plaid API."""
     env = _get_env()
     base = BASE_URLS.get(env, BASE_URLS["sandbox"])

@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import Any
 from urllib import error as urlerror, parse as urlparse, request as urlrequest
 
-
 # ---------------------------------------------------------------------------
 # Public registration
 # ---------------------------------------------------------------------------
@@ -127,10 +126,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         def _request_shutdown(signame: str) -> None:
             signal_count["n"] += 1
             if signal_count["n"] == 1:
-                print(
-                    f"\nReceived {signame}, shutting down gracefully… "
-                    "(press Ctrl+C again to force quit)"
-                )
+                print(f"\nReceived {signame}, shutting down gracefully… (press Ctrl+C again to force quit)")
                 shutdown_event.set()
             else:
                 # Second Ctrl+C (or SIGTERM) — the user is done waiting.
@@ -171,9 +167,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 print(f"Colony not found: {colony_arg}")
                 continue
             try:
-                session = await manager.create_session_with_worker_colony(
-                    str(colony_path), model=model
-                )
+                session = await manager.create_session_with_worker_colony(str(colony_path), model=model)
                 info = session.worker_info
                 name = info.name if info else session.colony_id
                 print(f"Loaded colony: {session.colony_id} ({name}) → session {session.id}")
@@ -319,12 +313,14 @@ def cmd_queen_sessions(args: argparse.Namespace) -> int:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
             except Exception:
                 meta = {}
-        rows.append({
-            "session_id": session_dir.name,
-            "phase": meta.get("phase", "?"),
-            "agent_path": meta.get("agent_path", ""),
-            "colony_fork": bool(meta.get("colony_fork")),
-        })
+        rows.append(
+            {
+                "session_id": session_dir.name,
+                "phase": meta.get("phase", "?"),
+                "agent_path": meta.get("agent_path", ""),
+                "colony_fork": bool(meta.get("colony_fork")),
+            }
+        )
 
     if args.json:
         print(json.dumps(rows, indent=2))
@@ -398,18 +394,18 @@ def cmd_colony_list(args: argparse.Namespace) -> int:
             except Exception:
                 meta = {}
         worker_count = sum(
-            1
-            for f in path.iterdir()
-            if f.is_file() and f.suffix == ".json" and f.stem not in _RESERVED_JSON_STEMS
+            1 for f in path.iterdir() if f.is_file() and f.suffix == ".json" and f.stem not in _RESERVED_JSON_STEMS
         )
-        rows.append({
-            "name": path.name,
-            "queen_name": meta.get("queen_name", ""),
-            "queen_session_id": meta.get("queen_session_id", ""),
-            "workers": worker_count,
-            "created_at": meta.get("created_at", ""),
-            "path": str(path),
-        })
+        rows.append(
+            {
+                "name": path.name,
+                "queen_name": meta.get("queen_name", ""),
+                "queen_session_id": meta.get("queen_session_id", ""),
+                "workers": worker_count,
+                "created_at": meta.get("created_at", ""),
+                "path": str(path),
+            }
+        )
 
     if args.json:
         print(json.dumps(rows, indent=2))
@@ -422,9 +418,7 @@ def cmd_colony_list(args: argparse.Namespace) -> int:
     print(f"{'NAME':<24}  {'QUEEN':<28}  {'WORKERS':<8}  CREATED")
     print("-" * 90)
     for r in rows:
-        print(
-            f"{r['name']:<24}  {r['queen_name']:<28}  {r['workers']:<8}  {r['created_at'][:19]}"
-        )
+        print(f"{r['name']:<24}  {r['queen_name']:<28}  {r['workers']:<8}  {r['created_at'][:19]}")
     return 0
 
 
@@ -651,9 +645,7 @@ def _http_get(url: str, timeout: float = 10.0) -> dict:
 
 def _http_post(url: str, body: dict, timeout: float = 30.0) -> dict:
     data = json.dumps(body).encode("utf-8")
-    req = urlrequest.Request(
-        url, data=data, method="POST", headers={"Content-Type": "application/json"}
-    )
+    req = urlrequest.Request(url, data=data, method="POST", headers={"Content-Type": "application/json"})
     with urlrequest.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -709,9 +701,7 @@ def _open_browser(url: str) -> None:
 
     try:
         if sys.platform == "darwin":
-            subprocess.Popen(
-                ["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
+            subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         elif sys.platform == "win32":
             subprocess.Popen(
                 ["cmd", "/c", "start", "", url],
@@ -719,9 +709,7 @@ def _open_browser(url: str) -> None:
                 stderr=subprocess.DEVNULL,
             )
         elif sys.platform == "linux":
-            subprocess.Popen(
-                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
+            subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass
 

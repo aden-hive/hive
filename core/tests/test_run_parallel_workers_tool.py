@@ -31,7 +31,6 @@ from framework.loader.tool_registry import ToolRegistry
 from framework.schemas.goal import Goal
 from framework.tools.queen_lifecycle_tools import register_queen_lifecycle_tools
 
-
 # ---------------------------------------------------------------------------
 # Mock LLM that routes scenarios by task text in the first user message
 # ---------------------------------------------------------------------------
@@ -249,9 +248,7 @@ async def test_run_parallel_workers_validates_tasks_input() -> None:
     executor = registry.get_executor()
 
     async def _call(payload: dict) -> dict:
-        r = executor(
-            ToolUse(id="tu", name="run_parallel_workers", input=payload)
-        )
+        r = executor(ToolUse(id="tu", name="run_parallel_workers", input=payload))
         if asyncio.iscoroutine(r):
             r = await r
         return json.loads(r.content)

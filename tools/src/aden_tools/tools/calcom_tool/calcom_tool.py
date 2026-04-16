@@ -257,9 +257,7 @@ def register_tools(
         if not api_key:
             return {
                 "error": "Cal.com API key not configured",
-                "help": (
-                    "Set CALCOM_API_KEY environment variable or configure via credential store"
-                ),
+                "help": ("Set CALCOM_API_KEY environment variable or configure via credential store"),
             }
         return _CalcomClient(api_key)
 

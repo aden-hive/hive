@@ -205,9 +205,7 @@ class AgentHost:
                 DeprecationWarning,
                 stacklevel=2,
             )
-            self._skills_manager = SkillsManager.from_precomputed(
-                skills_catalog_prompt, protocols_prompt
-            )
+            self._skills_manager = SkillsManager.from_precomputed(skills_catalog_prompt, protocols_prompt)
         else:
             # Bare constructor: auto-load defaults
             self._skills_manager = SkillsManager()
@@ -248,9 +246,7 @@ class AgentHost:
         self._tools = tools or []
         self._tool_executor = tool_executor
         self._accounts_prompt = accounts_prompt
-        self._dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = (
-            None
-        )
+        self._dynamic_memory_provider_factory: Callable[[str], Callable[[], str] | None] | None = None
         self._accounts_data = accounts_data
         self._tool_provider_map = tool_provider_map
 
@@ -419,8 +415,7 @@ class AgentHost:
                 event_types = [_ET(et) for et in tc.get("event_types", [])]
                 if not event_types:
                     logger.warning(
-                        f"Entry point '{ep_id}' has trigger_type='event' "
-                        "but no event_types in trigger_config"
+                        f"Entry point '{ep_id}' has trigger_type='event' but no event_types in trigger_config"
                     )
                     continue
 
@@ -450,9 +445,7 @@ class AgentHost:
                             # Run in the same session as the primary entry
                             # point so memory (e.g. user-defined rules) is
                             # shared and logs land in one session directory.
-                            session_state = self._get_primary_session_state(
-                                exclude_entry_point=entry_point_id
-                            )
+                            session_state = self._get_primary_session_state(exclude_entry_point=entry_point_id)
                         exec_id = await self.trigger(
                             entry_point_id,
                             {"event": event.to_dict()},
@@ -505,8 +498,7 @@ class AgentHost:
                     from croniter import croniter
                 except ImportError as e:
                     raise RuntimeError(
-                        "croniter is required for cron-based entry points. "
-                        "Install it with: uv pip install croniter"
+                        "croniter is required for cron-based entry points. Install it with: uv pip install croniter"
                     ) from e
 
                 try:
@@ -548,9 +540,7 @@ class AgentHost:
                                     "Cron '%s': paused, skipping tick",
                                     entry_point_id,
                                 )
-                                self._timer_next_fire[entry_point_id] = (
-                                    time.monotonic() + sleep_secs
-                                )
+                                self._timer_next_fire[entry_point_id] = time.monotonic() + sleep_secs
                                 await asyncio.sleep(max(0, sleep_secs))
                                 continue
 
@@ -578,9 +568,7 @@ class AgentHost:
                                     "Cron '%s': agent actively working, skipping tick",
                                     entry_point_id,
                                 )
-                                self._timer_next_fire[entry_point_id] = (
-                                    time.monotonic() + sleep_secs
-                                )
+                                self._timer_next_fire[entry_point_id] = time.monotonic() + sleep_secs
                                 await asyncio.sleep(max(0, sleep_secs))
                                 continue
 
@@ -590,24 +578,18 @@ class AgentHost:
                                 is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
                                 if is_isolated:
                                     if _persistent_session_id:
-                                        session_state = {
-                                            "resume_session_id": _persistent_session_id
-                                        }
+                                        session_state = {"resume_session_id": _persistent_session_id}
                                     else:
                                         session_state = None
                                 else:
-                                    session_state = self._get_primary_session_state(
-                                        exclude_entry_point=entry_point_id
-                                    )
+                                    session_state = self._get_primary_session_state(exclude_entry_point=entry_point_id)
                                     # Gate: skip tick if no active session
                                     if session_state is None:
                                         logger.debug(
                                             "Cron '%s': no active session, skipping",
                                             entry_point_id,
                                         )
-                                        self._timer_next_fire[entry_point_id] = (
-                                            time.monotonic() + sleep_secs
-                                        )
+                                        self._timer_next_fire[entry_point_id] = time.monotonic() + sleep_secs
                                         await asyncio.sleep(max(0, sleep_secs))
                                         continue
 
@@ -680,9 +662,7 @@ class AgentHost:
                                     "Timer '%s': paused, skipping tick",
                                     entry_point_id,
                                 )
-                                self._timer_next_fire[entry_point_id] = (
-                                    time.monotonic() + interval_secs
-                                )
+                                self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
                                 await asyncio.sleep(interval_secs)
                                 continue
 
@@ -708,9 +688,7 @@ class AgentHost:
                                     "Timer '%s': agent actively working, skipping tick",
                                     entry_point_id,
                                 )
-                                self._timer_next_fire[entry_point_id] = (
-                                    time.monotonic() + interval_secs
-                                )
+                                self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
                                 await asyncio.sleep(interval_secs)
                                 continue
 
@@ -720,24 +698,18 @@ class AgentHost:
                                 is_isolated = ep_spec and ep_spec.isolation_level == "isolated"
                                 if is_isolated:
                                     if _persistent_session_id:
-                                        session_state = {
-                                            "resume_session_id": _persistent_session_id
-                                        }
+                                        session_state = {"resume_session_id": _persistent_session_id}
                                     else:
                                         session_state = None
                                 else:
-                                    session_state = self._get_primary_session_state(
-                                        exclude_entry_point=entry_point_id
-                                    )
+                                    session_state = self._get_primary_session_state(exclude_entry_point=entry_point_id)
                                     # Gate: skip tick if no active session
                                     if session_state is None:
                                         logger.debug(
                                             "Timer '%s': no active session, skipping",
                                             entry_point_id,
                                         )
-                                        self._timer_next_fire[entry_point_id] = (
-                                            time.monotonic() + interval_secs
-                                        )
+                                        self._timer_next_fire[entry_point_id] = time.monotonic() + interval_secs
                                         await asyncio.sleep(interval_secs)
                                         continue
 
@@ -1152,8 +1124,7 @@ class AgentHost:
             event_types = [_ET(et) for et in tc.get("event_types", [])]
             if not event_types:
                 logger.warning(
-                    "Entry point '%s::%s' has trigger_type='event' "
-                    "but no event_types in trigger_config",
+                    "Entry point '%s::%s' has trigger_type='event' but no event_types in trigger_config",
                     graph_id,
                     ep_id,
                 )
@@ -1301,24 +1272,18 @@ class AgentHost:
                                     break
                                 stream = reg.streams.get(local_ep)
                                 if not stream:
-                                    logger.warning(
-                                        "Timer: no stream '%s' in '%s', stopping", local_ep, gid
-                                    )
+                                    logger.warning("Timer: no stream '%s' in '%s', stopping", local_ep, gid)
                                     break
                                 # Isolated entry points get their own session;
                                 # shared ones join the primary session.
                                 ep_spec = reg.entry_points.get(local_ep)
                                 if ep_spec and ep_spec.isolation_level == "isolated":
                                     if _persistent_session_id:
-                                        session_state = {
-                                            "resume_session_id": _persistent_session_id
-                                        }
+                                        session_state = {"resume_session_id": _persistent_session_id}
                                     else:
                                         session_state = None
                                 else:
-                                    session_state = self._get_primary_session_state(
-                                        local_ep, source_graph_id=gid
-                                    )
+                                    session_state = self._get_primary_session_state(local_ep, source_graph_id=gid)
                                     # Gate: skip tick if no active session
                                     if session_state is None:
                                         logger.debug(
@@ -1335,11 +1300,7 @@ class AgentHost:
                                     session_state=session_state,
                                 )
                                 # Remember session ID for reuse on next tick
-                                if (
-                                    not _persistent_session_id
-                                    and ep_spec
-                                    and ep_spec.isolation_level == "isolated"
-                                ):
+                                if not _persistent_session_id and ep_spec and ep_spec.isolation_level == "isolated":
                                     _persistent_session_id = exec_id
                             except Exception:
                                 logger.error(
@@ -1597,9 +1558,7 @@ class AgentHost:
         src_graph_id = source_graph_id or self._graph_id
         src_reg = self._graphs.get(src_graph_id)
         ep_spec = (
-            src_reg.entry_points.get(exclude_entry_point)
-            if src_reg
-            else self._entry_points.get(exclude_entry_point)
+            src_reg.entry_points.get(exclude_entry_point) if src_reg else self._entry_points.get(exclude_entry_point)
         )
         if ep_spec:
             graph = src_reg.graph if src_reg else self.graph
@@ -1633,9 +1592,7 @@ class AgentHost:
                         # Filter to only input keys so stale outputs
                         # from previous triggers don't leak through.
                         if allowed_keys is not None:
-                            buffer_data = {
-                                k: v for k, v in full_buffer.items() if k in allowed_keys
-                            }
+                            buffer_data = {k: v for k, v in full_buffer.items() if k in allowed_keys}
                         else:
                             buffer_data = full_buffer
                         if buffer_data:

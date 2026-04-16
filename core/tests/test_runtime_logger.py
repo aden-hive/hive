@@ -282,9 +282,7 @@ class TestRuntimeLogStore:
 
         store.append_node_detail(
             _sid("testsync0"),
-            NodeDetail(
-                node_id="n1", node_name="A", success=True, input_tokens=100, output_tokens=50
-            ),
+            NodeDetail(node_id="n1", node_name="A", success=True, input_tokens=100, output_tokens=50),
         )
         store.append_node_detail(
             _sid("testsync0"),
@@ -353,9 +351,7 @@ class TestRuntimeLogger:
         # Verify the file exists and has one line
         jsonl_path = tmp_path / "logs" / "sessions" / run_id / "logs" / "tool_logs.jsonl"
         assert jsonl_path.exists()
-        lines = [
-            line for line in jsonl_path.read_text(encoding="utf-8").strip().split("\n") if line
-        ]
+        lines = [line for line in jsonl_path.read_text(encoding="utf-8").strip().split("\n") if line]
         assert len(lines) == 1
 
         data = json.loads(lines[0])
@@ -709,9 +705,7 @@ class TestRuntimeLogger:
         summary = await store.load_summary(run_id)
         assert summary is not None
         assert summary.needs_attention is True
-        assert any(
-            "failed" in r.lower() or "escalat" in r.lower() for r in summary.attention_reasons
-        )
+        assert any("failed" in r.lower() or "escalat" in r.lower() for r in summary.attention_reasons)
 
     @pytest.mark.asyncio
     async def test_ensure_node_logged_no_op_if_already_logged(self, tmp_path: Path):
@@ -920,11 +914,7 @@ class TestRuntimeLogger:
             node_type="event_loop",
             step_index=0,
             error="LLM call failed: Connection timeout",
-            stacktrace=(
-                "Traceback (most recent call last):\n"
-                "  File test.py line 10\n"
-                "    raise TimeoutError()"
-            ),
+            stacktrace=("Traceback (most recent call last):\n  File test.py line 10\n    raise TimeoutError()"),
             is_partial=True,
         )
 
@@ -951,11 +941,7 @@ class TestRuntimeLogger:
             node_type="event_loop",
             success=False,
             error="Node crashed",
-            stacktrace=(
-                "Traceback (most recent call last):\n"
-                "  File node.py line 42\n"
-                "    raise RuntimeError('crash')"
-            ),
+            stacktrace=("Traceback (most recent call last):\n  File node.py line 42\n    raise RuntimeError('crash')"),
         )
 
         # Verify the detail was logged with stacktrace

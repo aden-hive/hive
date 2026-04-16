@@ -309,9 +309,7 @@ def register_tools(
             token = credentials.get("intercom")
             # Defensive check: ensure we get a string, not a complex object
             if token is not None and not isinstance(token, str):
-                raise TypeError(
-                    f"Expected string from credentials.get('intercom'), got {type(token).__name__}"
-                )
+                raise TypeError(f"Expected string from credentials.get('intercom'), got {type(token).__name__}")
             return token
         return os.getenv("INTERCOM_ACCESS_TOKEN")
 
@@ -321,10 +319,7 @@ def register_tools(
         if not token:
             return {
                 "error": "Intercom credentials not configured",
-                "help": (
-                    "Set INTERCOM_ACCESS_TOKEN environment variable "
-                    "or configure via credential store"
-                ),
+                "help": ("Set INTERCOM_ACCESS_TOKEN environment variable or configure via credential store"),
             }
         return _IntercomClient(token)
 
@@ -394,11 +389,7 @@ def register_tools(
                         dt = dt.replace(tzinfo=UTC)
                     ts = int(dt.timestamp())
                 except ValueError:
-                    return {
-                        "error": (
-                            "created_after must be a valid ISO date string (e.g., '2026-01-15')"
-                        )
-                    }
+                    return {"error": ("created_after must be a valid ISO date string (e.g., '2026-01-15')")}
                 filters.append({"field": "created_at", "operator": ">", "value": ts})
 
             # Build query from filters
@@ -601,9 +592,7 @@ def register_tools(
         if assignee_type not in ("admin", "team"):
             return {"error": "assignee_type must be 'admin' or 'team'"}
         try:
-            return client.assign_conversation(
-                conversation_id, assignee_id, assignee_type=assignee_type, body=body
-            )
+            return client.assign_conversation(conversation_id, assignee_id, assignee_type=assignee_type, body=body)
         except httpx.TimeoutException:
             return {"error": "Request timed out"}
         except httpx.RequestError as e:

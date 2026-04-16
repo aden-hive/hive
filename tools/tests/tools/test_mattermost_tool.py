@@ -196,9 +196,7 @@ class TestMattermostClient:
 
     @patch("aden_tools.tools.mattermost_tool.mattermost_tool.httpx.request")
     def test_delete_post(self, mock_request):
-        mock_request.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"status": "ok"})
-        )
+        mock_request.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"status": "ok"}))
         self.client.delete_post("p123")
         assert mock_request.call_args[0][0] == "DELETE"
         assert "posts/p123" in mock_request.call_args[0][1]
@@ -384,9 +382,7 @@ class TestMattermostSendMessageTool:
 
     def test_send_message_exactly_at_limit(self):
         content = "x" * MAX_MESSAGE_LENGTH
-        with patch(
-            "aden_tools.tools.mattermost_tool.mattermost_tool.httpx.request"
-        ) as mock_request:
+        with patch("aden_tools.tools.mattermost_tool.mattermost_tool.httpx.request") as mock_request:
             mock_request.return_value = MagicMock(
                 status_code=201,
                 json=MagicMock(return_value={"id": "p1", "channel_id": "c1", "message": content}),
@@ -506,9 +502,7 @@ class TestMattermostDeletePostTool:
 
     @patch("aden_tools.tools.mattermost_tool.mattermost_tool.httpx.request")
     def test_delete_post_success(self, mock_request):
-        mock_request.return_value = MagicMock(
-            status_code=200, json=MagicMock(return_value={"status": "ok"})
-        )
+        mock_request.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"status": "ok"}))
         result = self._fn("mattermost_delete_post")("p123")
         assert result["success"] is True
         assert result["deleted_post_id"] == "p123"

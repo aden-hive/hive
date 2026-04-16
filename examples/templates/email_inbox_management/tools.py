@@ -46,8 +46,7 @@ TOOLS = {
                 "page_token": {
                     "type": "string",
                     "description": (
-                        "Gmail API page token from a previous call's next_page_token. "
-                        "Omit for the first page."
+                        "Gmail API page token from a previous call's next_page_token. Omit for the first page."
                     ),
                 },
                 "after_timestamp": {
@@ -101,9 +100,7 @@ def _get_data_dir() -> str:
     """Get the session-scoped data_dir from ToolRegistry execution context."""
     ctx = _execution_context.get()
     if not ctx or "data_dir" not in ctx:
-        raise RuntimeError(
-            "data_dir not set in execution context. Is the tool running inside a Orchestrator?"
-        )
+        raise RuntimeError("data_dir not set in execution context. Is the tool running inside a Orchestrator?")
     return ctx["data_dir"]
 
 
@@ -138,8 +135,7 @@ def _get_access_token(account: str = "") -> str:
         return token
 
     raise RuntimeError(
-        "Gmail credentials not configured. "
-        "Connect Gmail via hive.adenhq.com or set GOOGLE_ACCESS_TOKEN."
+        "Gmail credentials not configured. Connect Gmail via hive.adenhq.com or set GOOGLE_ACCESS_TOKEN."
     )
 
 
@@ -285,8 +281,7 @@ def _bulk_fetch_emails(
     dropped = len(message_ids) - len(emails)
     if dropped > 0:
         logger.warning(
-            f"Dropped {dropped}/{len(message_ids)} emails during metadata fetch "
-            f"(wrote {len(emails)} to emails.jsonl)"
+            f"Dropped {dropped}/{len(message_ids)} emails during metadata fetch (wrote {len(emails)} to emails.jsonl)"
         )
 
     # Phase 3: Append JSONL (append so pagination accumulates across pages)

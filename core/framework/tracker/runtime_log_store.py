@@ -233,8 +233,7 @@ class RuntimeLogStore:
                 import warnings
 
                 warnings.warn(
-                    f"Found {len(old_ids)} runs in deprecated location. "
-                    "Consider migrating to unified session storage.",
+                    f"Found {len(old_ids)} runs in deprecated location. Consider migrating to unified session storage.",
                     DeprecationWarning,
                     stacklevel=3,
                 )

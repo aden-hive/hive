@@ -97,15 +97,12 @@ def build_transition_marker(
             file_path = data_path / filename
             try:
                 write_content = (
-                    json.dumps(value, indent=2, ensure_ascii=False)
-                    if isinstance(value, (dict, list))
-                    else str(value)
+                    json.dumps(value, indent=2, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
                 )
                 file_path.write_text(write_content, encoding="utf-8")
                 file_size = file_path.stat().st_size
                 buffer_items[key] = (
-                    f"[Saved to '{filename}' ({file_size:,} bytes). "
-                    f"Use read_file(path='{filename}') to access.]"
+                    f"[Saved to '{filename}' ({file_size:,} bytes). Use read_file(path='{filename}') to access.]"
                 )
             except Exception:
                 buffer_items[key] = val_str[:300] + "..."

@@ -85,8 +85,7 @@ def _resize_and_annotate(
         css_scale = (css_width / width) if css_width else (physical_scale / max(dpr, 1.0))
 
         logger.info(
-            "Screenshot resize: orig=%dx%d → target=%dx%d, "
-            "css_width=%s, dpr=%s, physicalScale=%.4f, cssScale=%.4f",
+            "Screenshot resize: orig=%dx%d → target=%dx%d, css_width=%s, dpr=%s, physicalScale=%.4f, cssScale=%.4f",
             orig_w,
             orig_h,
             width,
@@ -105,9 +104,7 @@ def _resize_and_annotate(
             overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
             draw = ImageDraw.Draw(overlay)
             try:
-                font = ImageFont.truetype(
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11
-                )
+                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 11)
             except Exception:
                 font = ImageFont.load_default()
 
@@ -128,12 +125,8 @@ def _resize_and_annotate(
                         outline=(239, 68, 68, 220),
                         width=2,
                     )
-                    draw.line(
-                        [(cx - r - 4, cy), (cx + r + 4, cy)], fill=(239, 68, 68, 220), width=2
-                    )
-                    draw.line(
-                        [(cx, cy - r - 4), (cx, cy + r + 4)], fill=(239, 68, 68, 220), width=2
-                    )
+                    draw.line([(cx - r - 4, cy), (cx + r + 4, cy)], fill=(239, 68, 68, 220), width=2)
+                    draw.line([(cx, cy - r - 4), (cx, cy + r + 4)], fill=(239, 68, 68, 220), width=2)
                 else:
                     draw.rectangle(
                         [(ix, iy), (ix + iw, iy + ih)],
@@ -237,25 +230,17 @@ def register_inspection_tools(mcp: FastMCP) -> None:
         ctx = _get_context(profile)
         if not ctx:
             err_msg = json.dumps({"ok": False, "error": "Browser not started"})
-            log_tool_call(
-                "browser_screenshot", params, result={"ok": False, "error": "Browser not started"}
-            )
+            log_tool_call("browser_screenshot", params, result={"ok": False, "error": "Browser not started"})
             return [TextContent(type="text", text=err_msg)]
 
         target_tab = tab_id or ctx.get("activeTabId")
         if target_tab is None:
-            result = [
-                TextContent(type="text", text=json.dumps({"ok": False, "error": "No active tab"}))
-            ]
-            log_tool_call(
-                "browser_screenshot", params, result={"ok": False, "error": "No active tab"}
-            )
+            result = [TextContent(type="text", text=json.dumps({"ok": False, "error": "No active tab"}))]
+            log_tool_call("browser_screenshot", params, result={"ok": False, "error": "No active tab"})
             return result
 
         try:
-            screenshot_result = await bridge.screenshot(
-                target_tab, full_page=full_page, selector=selector
-            )
+            screenshot_result = await bridge.screenshot(target_tab, full_page=full_page, selector=selector)
 
             if not screenshot_result.get("ok"):
                 log_tool_call(
@@ -390,9 +375,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
 
         physical_scale = _screenshot_scales.get(target_tab, 1.0) if target_tab else 1.0
         # css_scale stored in second slot via _screenshot_css_scales
-        css_scale = (
-            _screenshot_css_scales.get(target_tab, physical_scale) if target_tab else physical_scale
-        )
+        css_scale = _screenshot_css_scales.get(target_tab, physical_scale) if target_tab else physical_scale
 
         return {
             "ok": True,
@@ -651,9 +634,7 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             "message": "Console capture not yet implemented",
             "suggestion": "Use browser_evaluate to check specific values or errors",
         }
-        log_tool_call(
-            "browser_console", {"tab_id": tab_id, "profile": profile, "level": level}, result=result
-        )
+        log_tool_call("browser_console", {"tab_id": tab_id, "profile": profile, "level": level}, result=result)
         return result
 
     @mcp.tool()
@@ -735,7 +716,5 @@ def register_inspection_tools(mcp: FastMCP) -> None:
             return eval_result
         except Exception as e:
             result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_html", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
-            )
+            log_tool_call("browser_html", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
             return result

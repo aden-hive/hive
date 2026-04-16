@@ -14,23 +14,16 @@ from fastmcp import FastMCP
 SECURITY_HEADERS = {
     "Strict-Transport-Security": {
         "severity": "high",
-        "description": (
-            "No HSTS header. Browsers may connect over plain HTTP, "
-            "enabling man-in-the-middle attacks."
-        ),
-        "remediation": (
-            "Add the header: Strict-Transport-Security: max-age=31536000; includeSubDomains"
-        ),
+        "description": ("No HSTS header. Browsers may connect over plain HTTP, enabling man-in-the-middle attacks."),
+        "remediation": ("Add the header: Strict-Transport-Security: max-age=31536000; includeSubDomains"),
     },
     "Content-Security-Policy": {
         "severity": "high",
         "description": (
-            "No CSP header. The site is more vulnerable to XSS attacks "
-            "from inline scripts and untrusted sources."
+            "No CSP header. The site is more vulnerable to XSS attacks from inline scripts and untrusted sources."
         ),
         "remediation": (
-            "Add a Content-Security-Policy header. "
-            "Start restrictive: default-src 'self'; script-src 'self'"
+            "Add a Content-Security-Policy header. Start restrictive: default-src 'self'; script-src 'self'"
         ),
     },
     "X-Frame-Options": {
@@ -60,9 +53,7 @@ SECURITY_HEADERS = {
             "No Permissions-Policy header. Browser features like camera, microphone, "
             "and geolocation are not explicitly restricted."
         ),
-        "remediation": (
-            "Add the header: Permissions-Policy: camera=(), microphone=(), geolocation=()"
-        ),
+        "remediation": ("Add the header: Permissions-Policy: camera=(), microphone=(), geolocation=()"),
     },
 }
 

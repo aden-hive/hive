@@ -32,9 +32,7 @@ def _resolve_profile(profile: str | None) -> str:
 
 
 # Resolve extension path relative to this file: tools/browser-extension/
-_EXTENSION_PATH = (
-    Path(__file__).parent.parent.parent.parent.parent / "browser-extension"
-).resolve()
+_EXTENSION_PATH = (Path(__file__).parent.parent.parent.parent.parent / "browser-extension").resolve()
 
 
 async def shutdown_all_contexts() -> None:
@@ -47,9 +45,7 @@ async def shutdown_all_contexts() -> None:
         if group_id is not None and bridge and bridge.is_connected:
             try:
                 await bridge.destroy_context(group_id)
-                logger.info(
-                    "Shutdown: closed browser context '%s' (groupId=%s)", profile_name, group_id
-                )
+                logger.info("Shutdown: closed browser context '%s' (groupId=%s)", profile_name, group_id)
             except Exception as e:
                 logger.warning("Shutdown: failed to close context '%s': %s", profile_name, e)
     _contexts.clear()
@@ -92,9 +88,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                 "step_2": "Enable 'Developer mode' (toggle in the top-right corner)",
                 "step_3": "Click 'Load unpacked'",
                 "step_4": f"Select this directory: {ext_path}",
-                "step_5": (
-                    "Click the extension icon in the Chrome toolbar to confirm it says 'Connected'"
-                ),
+                "step_5": ("Click the extension icon in the Chrome toolbar to confirm it says 'Connected'"),
                 "step_6": "Return here and call browser_start",
             },
             "extensionPath": ext_path,
@@ -123,11 +117,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         if not bridge or not bridge.is_connected:
             result = {
                 "ok": False,
-                "error": (
-                    "Browser extension not connected."
-                    " Call browser_setup for"
-                    " installation instructions."
-                ),
+                "error": ("Browser extension not connected. Call browser_setup for installation instructions."),
                 "connected": False,
             }
             log_tool_call("browser_status", params, result=result)
@@ -208,11 +198,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         if not bridge or not bridge.is_connected:
             result = {
                 "ok": False,
-                "error": (
-                    "Browser extension not connected."
-                    " Call browser_setup for"
-                    " installation instructions."
-                ),
+                "error": ("Browser extension not connected. Call browser_setup for installation instructions."),
             }
             log_tool_call("browser_start", params, result=result)
             return result
@@ -274,9 +260,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         except Exception as e:
             logger.exception("Failed to start browser context")
             result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_start", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
-            )
+            log_tool_call("browser_start", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
             return result
 
     @mcp.tool()
@@ -324,9 +308,7 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
                     closed_tabs,
                 )
 
-            log_context_event(
-                "stop", profile_name, group_id=group_id, details={"closed_tabs": closed_tabs}
-            )
+            log_context_event("stop", profile_name, group_id=group_id, details={"closed_tabs": closed_tabs})
 
             result = {
                 "ok": True,
@@ -344,7 +326,5 @@ def register_lifecycle_tools(mcp: FastMCP) -> None:
         except Exception as e:
             logger.exception("Failed to stop browser context")
             result = {"ok": False, "error": str(e)}
-            log_tool_call(
-                "browser_stop", params, error=e, duration_ms=(time.perf_counter() - start) * 1000
-            )
+            log_tool_call("browser_stop", params, error=e, duration_ms=(time.perf_counter() - start) * 1000)
             return result

@@ -9,7 +9,7 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any
 
-from framework.config import get_hive_config, get_max_context_tokens, get_preferred_model
+from framework.config import get_hive_config, get_preferred_model
 from framework.credentials.validation import (
     ensure_credential_key_env as _ensure_credential_key_env,
 )
@@ -20,14 +20,12 @@ from framework.loader.preload_validation import run_preload_validation
 from framework.loader.tool_registry import ToolRegistry
 from framework.orchestrator import Goal
 from framework.orchestrator.edge import (
-    DEFAULT_MAX_TOKENS,
     EdgeCondition,
     EdgeSpec,
     GraphSpec,
 )
 from framework.orchestrator.node import NodeSpec
 from framework.orchestrator.orchestrator import ExecutionResult
-from framework.tools.flowchart_utils import generate_fallback_flowchart
 
 logger = logging.getLogger(__name__)
 
@@ -555,18 +553,10 @@ def get_kimi_code_token() -> str | None:
 # VSCode-style SQLite state database under the key
 # "antigravityUnifiedStateSync.oauthToken" as a base64-encoded protobuf blob.
 ANTIGRAVITY_IDE_STATE_DB = (
-    Path.home()
-    / "Library"
-    / "Application Support"
-    / "Antigravity"
-    / "User"
-    / "globalStorage"
-    / "state.vscdb"
+    Path.home() / "Library" / "Application Support" / "Antigravity" / "User" / "globalStorage" / "state.vscdb"
 )
 # Linux fallback for the IDE state DB
-ANTIGRAVITY_IDE_STATE_DB_LINUX = (
-    Path.home() / ".config" / "Antigravity" / "User" / "globalStorage" / "state.vscdb"
-)
+ANTIGRAVITY_IDE_STATE_DB_LINUX = Path.home() / ".config" / "Antigravity" / "User" / "globalStorage" / "state.vscdb"
 # Antigravity credentials stored by native OAuth implementation
 ANTIGRAVITY_AUTH_FILE = Path.home() / ".hive" / "antigravity-accounts.json"
 
@@ -710,9 +700,7 @@ def _is_antigravity_token_expired(auth_data: dict) -> bool:
             return True
     elif isinstance(last_refresh_val, str):
         try:
-            last_refresh_val = datetime.fromisoformat(
-                last_refresh_val.replace("Z", "+00:00")
-            ).timestamp()
+            last_refresh_val = datetime.fromisoformat(last_refresh_val.replace("Z", "+00:00")).timestamp()
         except (ValueError, TypeError):
             return True
 
@@ -843,8 +831,7 @@ def get_antigravity_token() -> str | None:
         return token_data["access_token"]
 
     logger.warning(
-        "Antigravity token refresh failed. "
-        "Re-open the Antigravity IDE or run 'antigravity-auth accounts add'."
+        "Antigravity token refresh failed. Re-open the Antigravity IDE or run 'antigravity-auth accounts add'."
     )
     return access_token
 
@@ -1297,11 +1284,7 @@ class AgentLoader:
         # Evict cached submodules first (e.g. deep_research_agent.nodes,
         # deep_research_agent.agent) so the top-level reload picks up
         # changes in the entire package — not just __init__.py.
-        stale = [
-            name
-            for name in sys.modules
-            if name == package_name or name.startswith(f"{package_name}.")
-        ]
+        stale = [name for name in sys.modules if name == package_name or name.startswith(f"{package_name}.")]
         for name in stale:
             del sys.modules[name]
 
@@ -1350,7 +1333,7 @@ class AgentLoader:
         if not worker_jsons:
             raise FileNotFoundError(f"No worker config found in {agent_path}")
 
-        from framework.orchestrator.edge import EdgeSpec, GraphSpec
+        from framework.orchestrator.edge import GraphSpec
         from framework.orchestrator.goal import Constraint, Goal as GoalModel, SuccessCriterion
         from framework.orchestrator.node import NodeSpec
 
@@ -1555,7 +1538,6 @@ class AgentLoader:
         ]
 
         # Merge user-configured stages from ~/.hive/configuration.json
-        from framework.config import get_hive_config
         from framework.pipeline.registry import build_pipeline_from_config
 
         hive_config = get_hive_config()
@@ -1568,9 +1550,7 @@ class AgentLoader:
         if agent_json.exists():
             try:
                 agent_pipeline = (
-                    _json.loads(agent_json.read_text(encoding="utf-8"))
-                    .get("pipeline", {})
-                    .get("stages", [])
+                    _json.loads(agent_json.read_text(encoding="utf-8")).get("pipeline", {}).get("stages", [])
                 )
                 if agent_pipeline:
                     agent_stages = build_pipeline_from_config(agent_pipeline)
@@ -1986,8 +1966,7 @@ class AgentLoader:
                 for sc in self.goal.success_criteria
             ],
             constraints=[
-                {"id": c.id, "description": c.description, "type": c.constraint_type}
-                for c in self.goal.constraints
+                {"id": c.id, "description": c.description, "type": c.constraint_type} for c in self.goal.constraints
             ],
             required_tools=sorted(required_tools),
             has_tools_module=(self.agent_path / "tools.py").exists(),
@@ -2058,9 +2037,7 @@ class AgentLoader:
                 if api_key_env and not os.environ.get(api_key_env):
                     if api_key_env not in missing_credentials:
                         missing_credentials.append(api_key_env)
-                    warnings.append(
-                        f"Agent has LLM nodes but {api_key_env} not set (model: {self.model})"
-                    )
+                    warnings.append(f"Agent has LLM nodes but {api_key_env} not set (model: {self.model})")
 
         return ValidationResult(
             valid=len(errors) == 0,

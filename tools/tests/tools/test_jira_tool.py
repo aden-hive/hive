@@ -80,9 +80,7 @@ class TestJiraGetIssue:
                 "description": {
                     "type": "doc",
                     "version": 1,
-                    "content": [
-                        {"type": "paragraph", "content": [{"type": "text", "text": "Login fails"}]}
-                    ],
+                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Login fails"}]}],
                 },
                 "status": {"name": "In Progress"},
                 "assignee": {"displayName": "John"},
@@ -137,11 +135,7 @@ class TestJiraListProjects:
         assert "error" in result
 
     def test_successful_list(self, tool_fns):
-        data = {
-            "values": [
-                {"key": "TEST", "name": "Test Project", "id": "10000", "projectTypeKey": "software"}
-            ]
-        }
+        data = {"values": [{"key": "TEST", "name": "Test Project", "id": "10000", "projectTypeKey": "software"}]}
         with (
             patch.dict("os.environ", ENV),
             patch("aden_tools.tools.jira_tool.jira_tool.httpx.get", return_value=_mock_resp(data)),

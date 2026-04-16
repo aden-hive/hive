@@ -57,8 +57,7 @@ async def test_twitter_lazy_scroll():
         # Count initial tweets
         initial_count = await bridge.evaluate(
             tab_id,
-            "(function() { return document.querySelectorAll("
-            "'[data-testid=\"tweet\"]').length; })()",
+            "(function() { return document.querySelectorAll('[data-testid=\"tweet\"]').length; })()",
         )
         print(f"Initial tweet count: {initial_count.get('result', 0)}")
 
@@ -78,8 +77,7 @@ async def test_twitter_lazy_scroll():
             # Count tweets after scroll
             count_result = await bridge.evaluate(
                 tab_id,
-                "(function() { return document.querySelectorAll("
-                "'[data-testid=\"tweet\"]').length; })()",
+                "(function() { return document.querySelectorAll('[data-testid=\"tweet\"]').length; })()",
             )
             count = count_result.get("result", 0)
             print(f"  Tweet count after scroll: {count}")
@@ -87,8 +85,7 @@ async def test_twitter_lazy_scroll():
         # Final count
         final_count = await bridge.evaluate(
             tab_id,
-            "(function() { return document.querySelectorAll("
-            "'[data-testid=\"tweet\"]').length; })()",
+            "(function() { return document.querySelectorAll('[data-testid=\"tweet\"]').length; })()",
         )
         final = final_count.get("result", 0)
         initial = initial_count.get("result", 0)

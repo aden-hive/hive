@@ -267,9 +267,7 @@ class MCPClient:
         try:
             response = self._http_client.get("/health")
             response.raise_for_status()
-            logger.info(
-                f"Connected to MCP server '{self.config.name}' via HTTP at {self.config.url}"
-            )
+            logger.info(f"Connected to MCP server '{self.config.name}' via HTTP at {self.config.url}")
         except Exception as e:
             logger.warning(f"Health check failed for MCP server '{self.config.name}': {e}")
             # Continue anyway, server might not have health endpoint
@@ -377,12 +375,8 @@ class MCPClient:
                 self._tools[tool.name] = tool
 
             tool_names = list(self._tools.keys())
-            logger.info(
-                f"Discovered {len(self._tools)} tools from '{self.config.name}'"
-            )
-            logger.debug(
-                f"Discovered tools from '{self.config.name}': {tool_names}"
-            )
+            logger.info(f"Discovered {len(self._tools)} tools from '{self.config.name}'")
+            logger.debug(f"Discovered tools from '{self.config.name}': {tool_names}")
         except Exception as e:
             logger.error(f"Failed to discover tools from '{self.config.name}': {e}")
             raise
@@ -467,6 +461,7 @@ class MCPClient:
             )
 
         if self.config.transport == "stdio":
+
             def _stdio_call() -> Any:
                 with self._stdio_call_lock:
                     return self._run_async(self._call_tool_stdio_async(tool_name, arguments))
@@ -669,9 +664,7 @@ class MCPClient:
             if self._session:
                 await self._session.__aexit__(None, None, None)
         except asyncio.CancelledError:
-            logger.warning(
-                "MCP session cleanup was cancelled; proceeding with best-effort shutdown"
-            )
+            logger.warning("MCP session cleanup was cancelled; proceeding with best-effort shutdown")
         except Exception as e:
             logger.warning(f"Error closing MCP session: {e}")
         finally:
@@ -682,9 +675,7 @@ class MCPClient:
             if self._stdio_context:
                 await self._stdio_context.__aexit__(None, None, None)
         except asyncio.CancelledError:
-            logger.debug(
-                "STDIO context cleanup was cancelled; proceeding with best-effort shutdown"
-            )
+            logger.debug("STDIO context cleanup was cancelled; proceeding with best-effort shutdown")
         except Exception as e:
             msg = str(e).lower()
             if "cancel scope" in msg or "different task" in msg:
@@ -725,9 +716,7 @@ class MCPClient:
             # any exceptions that may occur if the loop stops between these calls.
             if self._loop.is_running():
                 try:
-                    cleanup_future = asyncio.run_coroutine_threadsafe(
-                        self._cleanup_stdio_async(), self._loop
-                    )
+                    cleanup_future = asyncio.run_coroutine_threadsafe(self._cleanup_stdio_async(), self._loop)
                     cleanup_future.result(timeout=self._CLEANUP_TIMEOUT)
                     cleanup_attempted = True
                 except TimeoutError:

@@ -257,10 +257,7 @@ class ToolRegistry:
                                         str(e),
                                     )
                                     return {
-                                        "error": (
-                                            f"Invalid JSON response from tool '{tool_name}': "
-                                            f"{str(e)}"
-                                        ),
+                                        "error": (f"Invalid JSON response from tool '{tool_name}': {str(e)}"),
                                         "raw_content": result.content,
                                     }
                             return result
@@ -435,9 +432,7 @@ class ToolRegistry:
         registry = ToolRegistry()
         return registry._resolve_mcp_server_config(server_config, base_dir)
 
-    def _resolve_mcp_server_config(
-        self, server_config: dict[str, Any], base_dir: Path
-    ) -> dict[str, Any]:
+    def _resolve_mcp_server_config(self, server_config: dict[str, Any], base_dir: Path) -> dict[str, Any]:
         """Resolve cwd and script paths for MCP stdio servers (Windows compatibility).
 
         On Windows, passing cwd to subprocess can cause WinError 267. We use cwd=None
@@ -552,8 +547,7 @@ class ToolRegistry:
             server_list = [{"name": name, **cfg} for name, cfg in config.items()]
 
         resolved_server_list = [
-            self._resolve_mcp_server_config(server_config, base_dir)
-            for server_config in server_list
+            self._resolve_mcp_server_config(server_config, base_dir) for server_config in server_list
         ]
         # Ordered first-wins for duplicate tool names across servers; keep tools.py tools.
         self.load_registry_servers(
@@ -757,9 +751,7 @@ class ToolRegistry:
 
                 if preserve_existing_tools and mcp_tool.name in self._tools:
                     if log_collisions:
-                        origin_server = (
-                            self._find_mcp_origin_server_for_tool(mcp_tool.name) or "<existing>"
-                        )
+                        origin_server = self._find_mcp_origin_server_for_tool(mcp_tool.name) or "<existing>"
                         logger.warning(
                             "MCP tool '%s' from '%s' shadowed by '%s' (loaded first)",
                             mcp_tool.name,
@@ -788,17 +780,11 @@ class ToolRegistry:
                                 base_context.update(exec_ctx)
 
                             # Only inject context params the tool accepts
-                            filtered_context = {
-                                k: v for k, v in base_context.items() if k in tool_params
-                            }
+                            filtered_context = {k: v for k, v in base_context.items() if k in tool_params}
                             # Strip context params from LLM inputs — the framework
                             # values are authoritative (prevents the LLM from passing
                             # e.g. data_dir="/data" and overriding the real path).
-                            clean_inputs = {
-                                k: v
-                                for k, v in inputs.items()
-                                if k not in registry_ref.CONTEXT_PARAMS
-                            }
+                            clean_inputs = {k: v for k, v in inputs.items() if k not in registry_ref.CONTEXT_PARAMS}
                             merged_inputs = {**clean_inputs, **filtered_context}
                             result = client_ref.call_tool(tool_name, merged_inputs)
                             # MCP client already extracts content (returns str
@@ -885,9 +871,7 @@ class ToolRegistry:
         contents are already logged by `register_mcp_server`; this is just the
         rollup so the resync path also gets a single anchor line.
         """
-        per_server_counts = {
-            server: len(names) for server, names in self._mcp_server_tools.items()
-        }
+        per_server_counts = {server: len(names) for server, names in self._mcp_server_tools.items()}
         non_mcp_count = len(self._tools) - len(self._mcp_tool_names)
         logger.info(
             "ToolRegistry snapshot (%s): total=%d, mcp=%d, non_mcp=%d, per_server=%s",
@@ -958,11 +942,7 @@ class ToolRegistry:
 
             adapter = CredentialStoreAdapter.default()
             tool_provider_map = adapter.get_tool_provider_map()
-            live_providers = {
-                a.get("provider", "")
-                for a in adapter.get_all_account_info()
-                if a.get("provider")
-            }
+            live_providers = {a.get("provider", "") for a in adapter.get_all_account_info() if a.get("provider")}
         except Exception:
             logger.debug("Credential snapshot unavailable for MCP gate", exc_info=True)
 

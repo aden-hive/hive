@@ -121,9 +121,7 @@ class TestAttioClient:
         mock_request.return_value = mock_response
 
         params = {"matching_attribute": "email_addresses"}
-        _result = self.client._request(
-            "PUT", "/objects/people/records", json_body={}, params=params
-        )
+        _result = self.client._request("PUT", "/objects/people/records", json_body={}, params=params)
 
         call_kwargs = mock_request.call_args.kwargs
         assert call_kwargs["params"] == params

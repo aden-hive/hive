@@ -43,10 +43,7 @@ goal = Goal(
         ),
         SuccessCriterion(
             id="scam-filter-effectiveness",
-            description=(
-                "Suspicious profiles (risk_score >= 7) are correctly identified "
-                "and excluded from outreach"
-            ),
+            description=("Suspicious profiles (risk_score >= 7) are correctly identified and excluded from outreach"),
             metric="filter_precision",
             target=">=95%",
             weight=0.25,
@@ -193,7 +190,7 @@ class SDRAgent:
         self.entry_points = entry_points
         self.pause_nodes = pause_nodes
         self.terminal_nodes = terminal_nodes
-        self._agent_runtime: AgentRuntime | None = None
+        self._agent_runtime: AgentHost | None = None
         self._graph: GraphSpec | None = None
         self._tool_registry: ToolRegistry | None = None
 

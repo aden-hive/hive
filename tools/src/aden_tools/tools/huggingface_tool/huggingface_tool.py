@@ -35,9 +35,7 @@ def _get_token(credentials: CredentialStoreAdapter | None) -> str | None:
     return os.getenv("HUGGINGFACE_TOKEN")
 
 
-def _get(
-    path: str, token: str | None, params: dict[str, Any] | None = None
-) -> dict[str, Any] | list:
+def _get(path: str, token: str | None, params: dict[str, Any] | None = None) -> dict[str, Any] | list:
     """Make a GET request to the HuggingFace Hub API."""
     headers: dict[str, str] = {}
     if token:
@@ -84,11 +82,7 @@ def _post(
         if resp.status_code == 404:
             return {"error": f"Model not found: {url}"}
         if resp.status_code == 503:
-            body = (
-                resp.json()
-                if resp.headers.get("content-type", "").startswith("application/json")
-                else {}
-            )
+            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
             estimated = body.get("estimated_time", "unknown")
             return {
                 "error": "Model is loading",
@@ -96,9 +90,7 @@ def _post(
                 "help": "The model is being loaded. Retry after the estimated time.",
             }
         if resp.status_code != 200:
-            return {
-                "error": (f"HuggingFace Inference API error {resp.status_code}: {resp.text[:500]}")
-            }
+            return {"error": (f"HuggingFace Inference API error {resp.status_code}: {resp.text[:500]}")}
         return resp.json()
     except httpx.TimeoutException:
         return {"error": "Inference request timed out. Try a smaller input or a faster model."}
@@ -361,9 +353,7 @@ def register_tools(
             return data
 
         u = data if isinstance(data, dict) else {}
-        orgs = [
-            {"name": o.get("name", ""), "role": o.get("roleInOrg", "")} for o in u.get("orgs", [])
-        ]
+        orgs = [{"name": o.get("name", ""), "role": o.get("roleInOrg", "")} for o in u.get("orgs", [])]
         return {
             "name": u.get("name", ""),
             "fullname": u.get("fullname", ""),
@@ -510,11 +500,7 @@ def register_tools(
             if resp.status_code == 401:
                 return {"error": "Unauthorized. Check your HUGGINGFACE_TOKEN."}
             if resp.status_code != 200:
-                return {
-                    "error": (
-                        f"Failed to list endpoints (HTTP {resp.status_code}): {resp.text[:500]}"
-                    )
-                }
+                return {"error": (f"Failed to list endpoints (HTTP {resp.status_code}): {resp.text[:500]}")}
             data = resp.json()
         except httpx.TimeoutException:
             return {"error": "Request to HuggingFace Endpoints API timed out"}
@@ -537,21 +523,13 @@ def register_tools(
                         if isinstance(ep.get("status"), dict)
                         else ep.get("status", "")
                     ),
-                    "url": (
-                        ep.get("status", {}).get("url", "")
-                        if isinstance(ep.get("status"), dict)
-                        else ""
-                    ),
+                    "url": (ep.get("status", {}).get("url", "") if isinstance(ep.get("status"), dict) else ""),
                     "type": ep.get("type", ""),
                     "provider": (
-                        ep.get("provider", {}).get("vendor", "")
-                        if isinstance(ep.get("provider"), dict)
-                        else ""
+                        ep.get("provider", {}).get("vendor", "") if isinstance(ep.get("provider"), dict) else ""
                     ),
                     "region": (
-                        ep.get("provider", {}).get("region", "")
-                        if isinstance(ep.get("provider"), dict)
-                        else ""
+                        ep.get("provider", {}).get("region", "") if isinstance(ep.get("provider"), dict) else ""
                     ),
                 }
             )

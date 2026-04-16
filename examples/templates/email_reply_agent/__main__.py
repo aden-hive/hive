@@ -99,9 +99,7 @@ def tui():
 def info():
     """Show agent info."""
     data = default_agent.info()
-    click.echo(
-        f"Agent: {data['name']}\nVersion: {data['version']}\nDescription: {data['description']}"
-    )
+    click.echo(f"Agent: {data['name']}\nVersion: {data['version']}\nDescription: {data['description']}")
     click.echo(f"Nodes: {', '.join(data['nodes'])}")
     click.echo(f"Client-facing: {', '.join(data['client_facing_nodes'])}")
 

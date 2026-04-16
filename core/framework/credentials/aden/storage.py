@@ -168,9 +168,7 @@ class AdenCachedStorage(CredentialStorage):
                 if rid != credential_id:
                     result = self._load_by_id(rid)
                     if result is not None:
-                        logger.info(
-                            f"Loaded credential '{credential_id}' via provider index (id='{rid}')"
-                        )
+                        logger.info(f"Loaded credential '{credential_id}' via provider index (id='{rid}')")
                         return result
 
         # Direct lookup (exact credential_id match)

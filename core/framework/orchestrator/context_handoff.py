@@ -169,11 +169,7 @@ class ContextHandoff:
 
         key_hint = ""
         if output_keys:
-            key_hint = (
-                "\nThe following output keys are especially important: "
-                + ", ".join(output_keys)
-                + ".\n"
-            )
+            key_hint = "\nThe following output keys are especially important: " + ", ".join(output_keys) + ".\n"
 
         system_prompt = (
             "You are a concise summarizer. Given the conversation below, "

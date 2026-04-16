@@ -102,9 +102,7 @@ class TestSalesforceGetRecord:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["salesforce_get_record"](
-                object_type="Contact", record_id="003xx000001"
-            )
+            result = tool_fns["salesforce_get_record"](object_type="Contact", record_id="003xx000001")
 
         assert result["Id"] == "003xx000001"
         assert result["Email"] == "jane@example.com"
@@ -140,9 +138,7 @@ class TestSalesforceUpdateRecord:
         resp.status_code = 204
         with (
             patch.dict("os.environ", ENV),
-            patch(
-                "aden_tools.tools.salesforce_tool.salesforce_tool.httpx.patch", return_value=resp
-            ),
+            patch("aden_tools.tools.salesforce_tool.salesforce_tool.httpx.patch", return_value=resp),
         ):
             result = tool_fns["salesforce_update_record"](
                 object_type="Lead",

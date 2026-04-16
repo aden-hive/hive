@@ -132,9 +132,7 @@ class TestS3PutObject:
             patch.dict("os.environ", ENV),
             patch("aden_tools.tools.aws_s3_tool.aws_s3_tool.httpx.put", return_value=resp),
         ):
-            result = tool_fns["s3_put_object"](
-                bucket="my-bucket", key="new-file.txt", content="Hello!"
-            )
+            result = tool_fns["s3_put_object"](bucket="my-bucket", key="new-file.txt", content="Hello!")
 
         assert result["result"] == "uploaded"
         assert result["key"] == "new-file.txt"

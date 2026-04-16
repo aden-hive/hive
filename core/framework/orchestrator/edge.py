@@ -186,8 +186,7 @@ class EdgeSpec(BaseModel):
             expr_vars = {
                 k: repr(context[k])
                 for k in context
-                if k not in ("output", "buffer", "result", "true", "false")
-                and k in self.condition_expr
+                if k not in ("output", "buffer", "result", "true", "false") and k in self.condition_expr
             }
             logger.info(
                 "  Edge %s: condition '%s' → %s  (vars: %s)",
@@ -333,12 +332,8 @@ class GraphSpec(BaseModel):
         default_factory=dict,
         description="Named entry points for resuming execution. Format: {name: node_id}",
     )
-    terminal_nodes: list[str] = Field(
-        default_factory=list, description="IDs of nodes that end execution"
-    )
-    pause_nodes: list[str] = Field(
-        default_factory=list, description="IDs of nodes that pause execution for HITL input"
-    )
+    terminal_nodes: list[str] = Field(default_factory=list, description="IDs of nodes that end execution")
+    pause_nodes: list[str] = Field(default_factory=list, description="IDs of nodes that pause execution for HITL input")
 
     # Components
     nodes: list[Any] = Field(  # NodeSpec, but avoiding circular import
@@ -347,9 +342,7 @@ class GraphSpec(BaseModel):
     edges: list[EdgeSpec] = Field(default_factory=list, description="All edge specifications")
 
     # Data buffer keys
-    buffer_keys: list[str] = Field(
-        default_factory=list, description="Keys available in data buffer"
-    )
+    buffer_keys: list[str] = Field(default_factory=list, description="Keys available in data buffer")
 
     # Default LLM settings
     default_model: str = "claude-haiku-4-5-20251001"
@@ -557,9 +550,7 @@ class GraphSpec(BaseModel):
         fan_outs = self.detect_fan_out_nodes()
         for source_id, targets in fan_outs.items():
             event_loop_targets = [
-                t
-                for t in targets
-                if self.get_node(t) and getattr(self.get_node(t), "node_type", "") == "event_loop"
+                t for t in targets if self.get_node(t) and getattr(self.get_node(t), "node_type", "") == "event_loop"
             ]
             if len(event_loop_targets) > 1:
                 seen_keys: dict[str, str] = {}

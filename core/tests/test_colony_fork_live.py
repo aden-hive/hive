@@ -19,13 +19,11 @@ import importlib
 import json
 import os
 import shutil
-import sys
 import time
 from pathlib import Path
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
-
 
 # ---------------------------------------------------------------------------
 # Skip if no live LLM credentials are available
@@ -202,9 +200,7 @@ async def test_live_queen_fork_to_colony(isolated_hive_home):
 
         # ── 2. Wait for queen identity hook to fire ────────────────
         queen_name = await _wait_for_queen_identity(client, session_id)
-        assert queen_name != "default", (
-            f"Identity hook didn't pick a real queen, got {queen_name!r}"
-        )
+        assert queen_name != "default", f"Identity hook didn't pick a real queen, got {queen_name!r}"
 
         # ── 3. Fork to a colony ────────────────────────────────────
         colony_name = "live_test_honeycomb"
@@ -249,10 +245,7 @@ async def test_live_queen_fork_to_colony(isolated_hive_home):
         # ── 5. Validate the forked queen session dir ──────────────
         # It must live under the SELECTED queen identity, not "default".
         dest_queen_dir = _queen_session_dir(colony_session_id, queen_name)
-        assert dest_queen_dir.is_dir(), (
-            f"Forked session dir not under {queen_name}/, expected "
-            f"{dest_queen_dir}"
-        )
+        assert dest_queen_dir.is_dir(), f"Forked session dir not under {queen_name}/, expected {dest_queen_dir}"
         # Conversations from the original queen session were copied
         assert (dest_queen_dir / "conversations").is_dir()
 
@@ -267,22 +260,16 @@ async def test_live_queen_fork_to_colony(isolated_hive_home):
 
         cold = SessionManager.list_cold_sessions()
         forked_in_history = [s for s in cold if s.get("session_id") == colony_session_id]
-        assert not forked_in_history, (
-            f"Forked colony session leaked into queen DM history: {forked_in_history}"
-        )
+        assert not forked_in_history, f"Forked colony session leaked into queen DM history: {forked_in_history}"
 
         # ── 7. Worker storage received the conversations ──────────
-        worker_storage_convs = (
-            isolated_hive_home / "agents" / colony_name / "worker" / "conversations"
-        )
+        worker_storage_convs = isolated_hive_home / "agents" / colony_name / "worker" / "conversations"
         assert worker_storage_convs.is_dir()
         # The queen has had at least one turn (the initial_prompt acknowledgment),
         # so there should be conversation parts.
         parts_dir = worker_storage_convs / "parts"
         if parts_dir.exists():
-            assert any(parts_dir.iterdir()), (
-                "worker storage has conversations dir but no parts"
-            )
+            assert any(parts_dir.iterdir()), "worker storage has conversations dir but no parts"
 
         # ── 8. Stop the live session cleanly ──────────────────────
         resp = await client.delete(f"/api/sessions/{session_id}")

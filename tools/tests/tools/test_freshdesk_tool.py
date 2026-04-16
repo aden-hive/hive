@@ -168,9 +168,7 @@ class TestHealthCheckCredentialVerification:
         assert "FRESHDESK_API_KEY" in result["error"]
 
     def test_empty_api_key_from_adapter(self, mcp: FastMCP):
-        creds = CredentialStoreAdapter.for_testing(
-            {"freshdesk": "", "freshdesk_domain": "acme.freshdesk.com"}
-        )
+        creds = CredentialStoreAdapter.for_testing({"freshdesk": "", "freshdesk_domain": "acme.freshdesk.com"})
         register_tools(mcp, credentials=creds)
         fn = mcp._tool_manager._tools["freshdesk_list_tickets"].fn
         result = fn()
@@ -210,9 +208,7 @@ class TestHealthCheckCredentialVerification:
         assert result["count"] == 1
 
     def test_domain_whitespace_stripped_from_adapter(self, mcp: FastMCP):
-        creds = CredentialStoreAdapter.for_testing(
-            {"freshdesk": "key", "freshdesk_domain": "  acme.freshdesk.com  "}
-        )
+        creds = CredentialStoreAdapter.for_testing({"freshdesk": "key", "freshdesk_domain": "  acme.freshdesk.com  "})
         register_tools(mcp, credentials=creds)
         fn = mcp._tool_manager._tools["freshdesk_list_tickets"].fn
         with patch(
@@ -437,9 +433,7 @@ class TestFreshdeskCreateTicket:
     """Exhaustive tests for freshdesk_create_ticket (3.14 Create ticket)."""
 
     def test_missing_api_key(self, tool_fns_no_key):
-        result = tool_fns_no_key["freshdesk_create_ticket"](
-            email="a@b.com", subject="S", description="D"
-        )
+        result = tool_fns_no_key["freshdesk_create_ticket"](email="a@b.com", subject="S", description="D")
         assert "error" in result
         assert "FRESHDESK_API_KEY" in result["error"]
 
@@ -503,9 +497,7 @@ class TestFreshdeskCreateTicket:
             "aden_tools.tools.freshdesk_tool.freshdesk_tool.httpx.post",
             return_value=resp,
         ):
-            result = tool_fns["freshdesk_create_ticket"](
-                email="a@b.com", subject="S", description="D"
-            )
+            result = tool_fns["freshdesk_create_ticket"](email="a@b.com", subject="S", description="D")
         assert "error" in result
 
 
@@ -682,9 +674,7 @@ class TestFreshdeskAddTicketReply:
         assert post_mock.call_args[1]["json"] == {"body": "Thanks for reaching out"}
 
     def test_success_public_reply_with_from_email(self, tool_fns):
-        post_mock = MagicMock(
-            return_value=_mock_resp({"id": 1, "body": "x", "body_text": "x", "created_at": ""}, 201)
-        )
+        post_mock = MagicMock(return_value=_mock_resp({"id": 1, "body": "x", "body_text": "x", "created_at": ""}, 201))
         with patch(
             "aden_tools.tools.freshdesk_tool.freshdesk_tool.httpx.post",
             post_mock,

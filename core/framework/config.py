@@ -405,9 +405,7 @@ def _fetch_antigravity_credentials() -> tuple[str | None, str | None]:
     import urllib.request
 
     try:
-        req = urllib.request.Request(
-            _ANTIGRAVITY_CREDENTIALS_URL, headers={"User-Agent": "Hive/1.0"}
-        )
+        req = urllib.request.Request(_ANTIGRAVITY_CREDENTIALS_URL, headers={"User-Agent": "Hive/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             content = resp.read().decode("utf-8")
             id_match = re.search(r'ANTIGRAVITY_CLIENT_ID\s*=\s*"([^"]+)"', content)

@@ -74,8 +74,7 @@ class MCPConnectionManager:
             if not should_connect:
                 if not transition_event.wait(timeout=_TRANSITION_TIMEOUT):
                     logger.warning(
-                        "Timed out waiting for transition on MCP server '%s', "
-                        "forcing cleanup and retrying",
+                        "Timed out waiting for transition on MCP server '%s', forcing cleanup and retrying",
                         server_name,
                     )
                     with self._pool_lock:
@@ -99,10 +98,7 @@ class MCPConnectionManager:
                     current = self._transitions.get(server_name)
                     if current is transition_event:
                         self._transitions.pop(server_name, None)
-                        if (
-                            server_name not in self._pool
-                            and self._refcounts.get(server_name, 0) <= 0
-                        ):
+                        if server_name not in self._pool and self._refcounts.get(server_name, 0) <= 0:
                             self._configs.pop(server_name, None)
                         transition_event.set()
                 raise
@@ -324,8 +320,7 @@ class MCPConnectionManager:
                     self._transitions.pop(server_name, None)
                     transition_event.set()
                     logger.info(
-                        "Reconnected MCP server '%s' but refcount dropped to 0, "
-                        "discarding new client",
+                        "Reconnected MCP server '%s' but refcount dropped to 0, discarding new client",
                         server_name,
                     )
                     try:
@@ -336,9 +331,7 @@ class MCPConnectionManager:
                             server_name,
                             exc_info=True,
                         )
-                    raise KeyError(
-                        f"MCP server '{server_name}' was fully released during reconnect"
-                    )
+                    raise KeyError(f"MCP server '{server_name}' was fully released during reconnect")
 
                 self._pool[server_name] = new_client
                 self._configs[server_name] = config
@@ -380,8 +373,7 @@ class MCPConnectionManager:
             all_resolved = all(event.wait(timeout=_TRANSITION_TIMEOUT) for event in pending)
             if not all_resolved:
                 logger.warning(
-                    "Timed out waiting for pending transitions during cleanup, "
-                    "forcing cleanup of stuck transitions",
+                    "Timed out waiting for pending transitions during cleanup, forcing cleanup of stuck transitions",
                 )
                 with self._pool_lock:
                     for sn, evt in list(self._transitions.items()):

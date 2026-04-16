@@ -27,8 +27,6 @@ class CostGuardStage(PipelineStage):
         if estimated > self._budget:
             return PipelineResult(
                 action="reject",
-                rejection_reason=(
-                    f"Estimated cost ${estimated:.4f} exceeds budget ${self._budget:.4f}"
-                ),
+                rejection_reason=(f"Estimated cost ${estimated:.4f} exceeds budget ${self._budget:.4f}"),
             )
         return PipelineResult(action="continue")

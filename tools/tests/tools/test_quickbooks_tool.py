@@ -111,9 +111,7 @@ class TestQuickbooksCreateCustomer:
                 return_value=_mock_resp(data),
             ),
         ):
-            result = tool_fns["quickbooks_create_customer"](
-                display_name="New Customer", email="new@example.com"
-            )
+            result = tool_fns["quickbooks_create_customer"](display_name="New Customer", email="new@example.com")
 
         assert result["result"] == "created"
         assert result["id"] == "59"
