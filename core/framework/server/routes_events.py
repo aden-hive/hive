@@ -51,13 +51,18 @@ DEFAULT_EVENT_TYPES = [
 # Keepalive interval in seconds
 KEEPALIVE_INTERVAL = 15.0
 
-# Phase 5 SSE filter: parallel-worker streams (stream_id="worker:{uuid}")
-# publish high-frequency LLM deltas / tool calls that would flood the
-# user's queen DM chat. We let only this small allowlist of worker
-# events through to the queen-chat SSE so the frontend can render
-# fan-out lifecycle and structured fan-in reports without seeing the
-# raw worker chatter. Per-worker SSE panels (Phase 5b) bypass this
-# filter via a dedicated /workers/{worker_id}/events route.
+# Session-SSE worker filter: workers run outside the queen's DM
+# chat. Worker activity is observable via the dedicated
+# ``/api/workers/{worker_id}/events`` per-worker SSE route, not via
+# the session chat. This keeps the queen↔user conversation clean of
+# tool-call chatter regardless of whether the worker was spawned by
+# ``run_agent_with_input`` (stream_id="worker") or
+# ``run_parallel_workers`` (stream_id="worker:{uuid}").
+#
+# Lifecycle events the frontend needs for fan-in summaries
+# (SUBAGENT_REPORT, EXECUTION_COMPLETED, EXECUTION_FAILED) are still
+# allowed through so the queen can show "N workers done" surfaces
+# without exposing the per-turn chatter.
 _WORKER_EVENT_ALLOWLIST = {
     EventType.SUBAGENT_REPORT.value,
     EventType.EXECUTION_COMPLETED.value,
@@ -66,9 +71,17 @@ _WORKER_EVENT_ALLOWLIST = {
 
 
 def _is_worker_noise(evt_dict: dict) -> bool:
-    """True if the event is a parallel-worker event we should drop."""
+    """True if the event belongs to a worker stream and should not
+    surface in the queen DM chat.
+
+    Matches any stream starting with ``worker`` — both the bare
+    ``"worker"`` tag used by single-worker spawns and the
+    ``"worker:{uuid}"`` tag used by parallel fan-outs. The allowlist
+    carves out the three terminal/lifecycle events the UI still
+    needs to render fan-in summaries.
+    """
     stream_id = evt_dict.get("stream_id") or ""
-    if not stream_id.startswith("worker:"):
+    if not stream_id.startswith("worker"):
         return False
     return evt_dict.get("type") not in _WORKER_EVENT_ALLOWLIST
 

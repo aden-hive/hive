@@ -757,6 +757,8 @@ class ColonyRuntime:
     async def spawn_batch(
         self,
         tasks: list[dict[str, Any]],
+        *,
+        tools_override: list[Any] | None = None,
     ) -> list[str]:
         """Spawn a batch of parallel workers, one per task spec.
 
@@ -769,6 +771,12 @@ class ColonyRuntime:
         The overseer's ``run_parallel_workers`` tool is the usual
         caller; it pairs ``spawn_batch`` + ``wait_for_worker_reports``
         into a single fan-out/fan-in primitive.
+
+        When ``tools_override`` is supplied, every spawned worker
+        receives that tool list instead of the colony's default.  Used
+        by ``run_parallel_workers`` to drop tools whose credentials
+        failed the pre-flight check (so the spawned workers don't
+        waste a startup trying to use them).
         """
         worker_ids: list[str] = []
         for spec in tasks:
@@ -780,6 +788,7 @@ class ColonyRuntime:
                 task=task_text,
                 count=1,
                 input_data=task_data or {"task": task_text},
+                tools=tools_override,
             )
             worker_ids.extend(ids)
         return worker_ids

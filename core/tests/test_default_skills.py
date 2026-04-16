@@ -66,7 +66,7 @@ class TestDefaultSkillManager:
         manager = DefaultSkillManager()
         manager.load()
 
-        assert len(manager.active_skill_names) == 7
+        assert len(manager.active_skill_names) == len(SKILL_REGISTRY)
         for name in SKILL_REGISTRY:
             assert name in manager.active_skill_names
 

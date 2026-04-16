@@ -13,6 +13,11 @@ export interface WorkerRunGroup {
 interface WorkerRunBubbleProps {
   runId: string;
   group: WorkerRunGroup;
+  /** Short identifier shown next to the "Worker" badge. Populated
+   *  only when the parent grouping has multiple parallel workers
+   *  in the same run span, so N stacked bubbles can be told apart
+   *  at a glance. Omitted for single-worker runs. */
+  label?: string;
 }
 
 /** Parse a tool_status JSON blob into a list of tool entries. */
@@ -60,7 +65,7 @@ function stripMarkdownToPreview(s: string, maxLen = 160): string {
  * Expanded: scrollable list of every message and tool status in order.
  */
 const WorkerRunBubble = memo(
-  function WorkerRunBubble({ group }: WorkerRunBubbleProps) {
+  function WorkerRunBubble({ group, label }: WorkerRunBubbleProps) {
     const [expanded, setExpanded] = useState(false);
     const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -138,6 +143,11 @@ const WorkerRunBubble = memo(
             <span className="font-medium text-xs" style={{ color: workerColor }}>
               Worker
             </span>
+            {label && (
+              <span className="text-[10px] font-mono text-muted-foreground/80 tabular-nums">
+                {label}
+              </span>
+            )}
             <span
               className={`text-[10px] font-medium px-1.5 py-0.5 rounded-md ${
                 isFinished
@@ -278,6 +288,7 @@ const WorkerRunBubble = memo(
   },
   (prev, next) =>
     prev.runId === next.runId &&
+    prev.label === next.label &&
     prev.group.messages.length === next.group.messages.length &&
     prev.group.messages[prev.group.messages.length - 1]?.content ===
       next.group.messages[next.group.messages.length - 1]?.content

@@ -903,9 +903,75 @@ def register_queen_lifecycle_tools(
     # ``start_worker`` was removed in the Phase 4 unification — its
     # bare-bones spawn duplicated ``run_agent_with_input`` (which has
     # credential preflight, concurrency guard, and phase tracking on
-    # top). The shared preflight timeout below is still used by
-    # ``run_agent_with_input``.
+    # top). The shared preflight timeout below is used by both
+    # ``run_agent_with_input`` and ``run_parallel_workers``.
     _START_PREFLIGHT_TIMEOUT = 15  # seconds
+
+    async def _preflight_credentials(
+        legacy: Any,
+        *,
+        tool_label: str,
+    ) -> set[str]:
+        """Compute tools whose credentials are missing and resync MCP servers.
+
+        Shared between ``run_agent_with_input`` (single spawn) and
+        ``run_parallel_workers`` (batch spawn). Returns the set of
+        tool names whose credentials failed validation; the caller
+        filters these out of the spawn's tool lists.
+
+        Exceptions (including validator bugs) are logged and treated
+        as "no tools dropped" so a broken validator can't block a
+        spawn. Wall-clock bound at ``_START_PREFLIGHT_TIMEOUT`` —
+        slow credential HTTP health checks can't stall the LLM turn.
+        """
+        unavailable: set[str] = set()
+
+        async def _run() -> None:
+            nonlocal unavailable
+            try:
+                from framework.credentials.validation import compute_unavailable_tools
+
+                loop = asyncio.get_running_loop()
+                drop, messages = await loop.run_in_executor(
+                    None,
+                    lambda: compute_unavailable_tools(legacy.graph.nodes),
+                )
+                unavailable = drop
+                if drop:
+                    logger.warning(
+                        "%s: dropping %d tool(s) with unavailable credentials: %s",
+                        tool_label,
+                        len(drop),
+                        "; ".join(messages),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "%s: compute_unavailable_tools raised, proceeding without "
+                    "credential-based tool filtering: %s",
+                    tool_label,
+                    exc,
+                )
+
+            runner = getattr(session, "runner", None)
+            if runner is not None:
+                try:
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(
+                        None,
+                        lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
+                    )
+                except Exception as exc:
+                    logger.warning("%s: MCP resync failed: %s", tool_label, exc)
+
+        try:
+            await asyncio.wait_for(_run(), timeout=_START_PREFLIGHT_TIMEOUT)
+        except TimeoutError:
+            logger.warning(
+                "%s: credential preflight timed out after %ds — proceeding",
+                tool_label,
+                _START_PREFLIGHT_TIMEOUT,
+            )
+        return unavailable
 
     # --- stop_worker -----------------------------------------------------------
 
@@ -1078,6 +1144,51 @@ def register_queen_lifecycle_tools(
                     }
                 )
 
+        # Credential preflight — mirrors the one run_agent_with_input
+        # performs. Without this, missing credentials (e.g. stale
+        # GITHUB_TOKEN) fail once PER spawned worker, yielding N
+        # duplicate error reports for a single fixable issue. Catch
+        # once upfront, build a filtered tool list, and pass it to
+        # every spawn via tools_override.
+        legacy_for_preflight = _get_runtime()
+        unavailable_tools_parallel: set[str] = set()
+        tools_override_parallel: list[Any] | None = None
+        if legacy_for_preflight is not None:
+            try:
+                unavailable_tools_parallel = await _preflight_credentials(
+                    legacy_for_preflight, tool_label="run_parallel_workers"
+                )
+            except CredentialError as e:
+                # Structured credential failure: publish the
+                # CREDENTIALS_REQUIRED event so the frontend's modal
+                # can fire, and return the same shape the single-path
+                # tool returns on the same failure.
+                error_payload = credential_errors_to_json(e)
+                error_payload["agent_path"] = str(getattr(session, "worker_path", "") or "")
+                bus = getattr(session, "event_bus", None)
+                if bus is not None:
+                    await bus.publish(
+                        AgentEvent(
+                            type=EventType.CREDENTIALS_REQUIRED,
+                            stream_id="queen",
+                            data=error_payload,
+                        )
+                    )
+                return json.dumps(error_payload)
+
+            if unavailable_tools_parallel:
+                colony_tools = list(getattr(colony, "_tools", []) or [])
+                before = len(colony_tools)
+                tools_override_parallel = [
+                    t
+                    for t in colony_tools
+                    if getattr(t, "name", None) not in unavailable_tools_parallel
+                ]
+                logger.info(
+                    "run_parallel_workers: dropped %d tool object(s) from spawn_tools (unavailable credentials)",
+                    before - len(tools_override_parallel),
+                )
+
         # Colony progress tracker wiring: if the session's loaded
         # worker points at a colony directory that has a progress.db,
         # inject db_path + colony_id into every per-task ``data``
@@ -1167,9 +1278,30 @@ def register_queen_lifecycle_tools(
             )
 
         try:
-            worker_ids = await colony.spawn_batch(normalised)
+            worker_ids = await colony.spawn_batch(
+                normalised,
+                tools_override=tools_override_parallel,
+            )
         except Exception as e:
             return json.dumps({"error": f"spawn_batch failed: {e}"})
+
+        # Phase transition — mirrors run_agent_with_input. With the
+        # batch now spawned, the queen is semantically "running" until
+        # wait_for_worker_reports returns, so phase-gated running
+        # tools (inject_message, reply_to_worker, ...) should be
+        # available. Without this change run_parallel_workers left
+        # the queen in whatever phase she was in (typically staging).
+        if phase_state is not None:
+            try:
+                await phase_state.switch_to_running()
+                _update_meta_json(
+                    session_manager, manager_session_id, {"phase": "running"}
+                )
+            except Exception as exc:
+                logger.warning(
+                    "run_parallel_workers: phase transition to 'running' failed (non-fatal): %s",
+                    exc,
+                )
 
         try:
             reports = await colony.wait_for_worker_reports(
@@ -4030,6 +4162,33 @@ def register_queen_lifecycle_tools(
                 task,
             )
 
+        # Concurrency budget check — mirrors run_parallel_workers so a
+        # queen in a loop can't silently exceed max_concurrent_workers
+        # by hammering run_agent_with_input. Per-call count is 1, so
+        # the check is ``active + 1 > max_concurrent``.
+        colony_cfg = getattr(colony, "_config", None) or getattr(colony, "config", None)
+        max_concurrent = getattr(colony_cfg, "max_concurrent_workers", None)
+        if max_concurrent and max_concurrent > 0:
+            active = 0
+            try:
+                workers = getattr(colony, "_workers", {}) or {}
+                for w in workers.values():
+                    handle = getattr(w, "_task_handle", None)
+                    if handle is not None and not handle.done():
+                        active += 1
+            except Exception:
+                active = 0
+            if active + 1 > max_concurrent:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"run_agent_with_input would exceed max_concurrent_workers "
+                            f"({active} active + 1 new > {max_concurrent}). "
+                            "Wait for an existing worker to finish or stop one."
+                        )
+                    }
+                )
+
         try:
             # Pre-flight: compute the set of tools whose credentials are
             # NOT currently available, and resync MCP servers. We do NOT
@@ -4040,58 +4199,9 @@ def register_queen_lifecycle_tools(
             # to block the whole spawn with a CredentialError; the fix
             # is to treat unset credentials as "drop these tools" rather
             # than "abort the worker".
-            #
-            # Note: the MCP admission gate (_build_mcp_admission_gate in
-            # tool_registry.py) already filters MCP tools at registration
-            # time. This preflight covers the non-MCP path — tools.py
-            # discoveries via discover_from_module — which has no
-            # credential gate of its own.
-            loop = asyncio.get_running_loop()
-            unavailable_tools: set[str] = set()
-
-            async def _preflight():
-                nonlocal unavailable_tools
-                try:
-                    from framework.credentials.validation import compute_unavailable_tools
-
-                    drop, messages = await loop.run_in_executor(
-                        None,
-                        lambda: compute_unavailable_tools(legacy.graph.nodes),
-                    )
-                    unavailable_tools = drop
-                    if drop:
-                        logger.warning(
-                            "run_agent_with_input: dropping %d tool(s) with "
-                            "unavailable credentials from worker spawn: %s",
-                            len(drop),
-                            "; ".join(messages),
-                        )
-                except Exception as exc:
-                    # Validation itself failing (not a credential failure —
-                    # a code error in the validator) should not block the
-                    # spawn. Log and proceed as if nothing was dropped.
-                    logger.warning(
-                        "compute_unavailable_tools raised, proceeding without credential-based tool filtering: %s",
-                        exc,
-                    )
-
-                runner = getattr(session, "runner", None)
-                if runner:
-                    try:
-                        await loop.run_in_executor(
-                            None,
-                            lambda: runner._tool_registry.resync_mcp_servers_if_needed(),
-                        )
-                    except Exception as e:
-                        logger.warning("MCP resync failed: %s", e)
-
-            try:
-                await asyncio.wait_for(_preflight(), timeout=_START_PREFLIGHT_TIMEOUT)
-            except TimeoutError:
-                logger.warning(
-                    "run_agent_with_input preflight timed out after %ds — proceeding",
-                    _START_PREFLIGHT_TIMEOUT,
-                )
+            unavailable_tools = await _preflight_credentials(
+                legacy, tool_label="run_agent_with_input"
+            )
 
             # Build a per-spawn AgentSpec that mirrors the loaded
             # worker's entry-node identity. This is what makes the

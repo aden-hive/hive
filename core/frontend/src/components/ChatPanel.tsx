@@ -64,6 +64,12 @@ export interface ChatMessage {
   nodeId?: string;
   /** Backend execution_id for this message */
   executionId?: string;
+  /** Backend stream_id — the per-worker identity used for grouping
+   *  parallel-spawn workers into their own stacked WorkerRunBubble.
+   *  "queen" for queen messages, "worker" for the single loaded
+   *  worker (run_agent_with_input), or "worker:{uuid}" for each
+   *  parallel worker spawned via run_parallel_workers. */
+  streamId?: string;
   /** True when the message was sent while the queen was still processing */
   queued?: boolean;
 }
@@ -695,8 +701,35 @@ export default function ChatPanel({
   type RenderItem =
     | { kind: "message"; msg: ChatMessage }
     | { kind: "parallel"; groupId: string; groups: SubagentGroup[] }
-    | { kind: "worker_run"; runId: string; group: WorkerRunGroup }
+    | {
+        kind: "worker_run";
+        runId: string;
+        group: WorkerRunGroup;
+        /** Optional short label shown next to the "Worker" badge.
+         *  Only set when there are multiple parallel workers in the
+         *  same run span (so users can tell them apart). */
+        label?: string;
+      }
     | { kind: "day_divider"; key: string; createdAt: number };
+
+  /** Derive a short label from a parallel-worker stream id.
+   *  `worker:abcdef12-3456-...` → `abcdef12` (first 8 chars of the
+   *  uuid after the `worker:` prefix). Falls back to the first
+   *  message's nodeId when the streamId isn't the expected shape. */
+  function deriveWorkerLabel(
+    streamKey: string,
+    msgs: ChatMessage[],
+  ): string {
+    if (streamKey.startsWith("worker:")) {
+      const suffix = streamKey.slice("worker:".length);
+      // sessions are `session_YYYYMMDD_HHMMSS_<8-hex>` — show the
+      // trailing hex if present, else first 8 chars of the suffix.
+      const tail = suffix.match(/_[0-9a-f]{6,}$/i)?.[0]?.slice(1);
+      return tail ? tail.slice(0, 8) : suffix.slice(0, 8);
+    }
+    const nid = msgs.find((m) => m.nodeId)?.nodeId;
+    return nid || streamKey;
+  }
 
   const renderItems = useMemo<RenderItem[]>(() => {
     const items: RenderItem[] = [];
@@ -744,11 +777,63 @@ export default function ChatPanel({
         }
 
         if (workerMsgs.length > 0) {
-          items.push({
-            kind: "worker_run",
-            runId: `wrun-${firstWorkerMsg.id}`,
-            group: { messages: workerMsgs },
-          });
+          // Parallel fan-out detection: if any message in this span
+          // is tagged with a parallel-worker streamId (``worker:{uuid}``),
+          // split the span by streamId and emit one ``worker_run``
+          // per worker — they render as stacked independent
+          // ``WorkerRunBubble``s. Un-tagged legacy messages and the
+          // single-worker ``streamId="worker"`` case fall through to
+          // the existing single-bubble behavior.
+          const hasParallel = workerMsgs.some(
+            (m) => !!m.streamId && /^worker:./.test(m.streamId),
+          );
+
+          if (hasParallel) {
+            const buckets = new Map<
+              string,
+              { messages: ChatMessage[]; firstAt: number }
+            >();
+            // Messages with no streamId (system notes, orphans from
+            // old restore) attach to the most-recent keyed message's
+            // bucket so chronology is preserved.
+            let currentKey: string | null = null;
+            for (const m of workerMsgs) {
+              const key =
+                m.streamId && m.streamId.length > 0
+                  ? m.streamId
+                  : currentKey;
+              if (!key) continue;
+              if (m.streamId && m.streamId.length > 0) currentKey = m.streamId;
+              let bucket = buckets.get(key);
+              if (!bucket) {
+                bucket = { messages: [], firstAt: m.createdAt ?? 0 };
+                buckets.set(key, bucket);
+              }
+              bucket.messages.push(m);
+              bucket.firstAt = Math.min(
+                bucket.firstAt,
+                m.createdAt ?? Number.POSITIVE_INFINITY,
+              );
+            }
+
+            const sorted = Array.from(buckets.entries()).sort(
+              ([, a], [, b]) => a.firstAt - b.firstAt,
+            );
+            for (const [streamKey, { messages: bucketMsgs }] of sorted) {
+              items.push({
+                kind: "worker_run",
+                runId: `wrun-${firstWorkerMsg.id}-${streamKey}`,
+                group: { messages: bucketMsgs },
+                label: deriveWorkerLabel(streamKey, bucketMsgs),
+              });
+            }
+          } else {
+            items.push({
+              kind: "worker_run",
+              runId: `wrun-${firstWorkerMsg.id}`,
+              group: { messages: workerMsgs },
+            });
+          }
         }
         continue;
       }
@@ -958,6 +1043,7 @@ export default function ChatPanel({
                 <WorkerRunBubble
                   runId={item.runId}
                   group={item.group}
+                  label={item.label}
                 />
               </div>
             );

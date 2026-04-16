@@ -855,6 +855,7 @@ export default function ColonyChat() {
                 createdAt: eventCreatedAt,
                 nodeId: event.node_id || undefined,
                 executionId: event.execution_id || undefined,
+                streamId: sid || undefined,
               });
               return { ...prev, isStreaming: false, activeToolCalls: newActive };
             });

@@ -119,6 +119,7 @@ export function sseEventToChatMessage(
         createdAt,
         nodeId: event.node_id || undefined,
         executionId: event.execution_id || undefined,
+        streamId: event.stream_id || undefined,
       };
     }
 
@@ -138,6 +139,7 @@ export function sseEventToChatMessage(
         type: "user",
         thread,
         createdAt,
+        streamId: event.stream_id || undefined,
       };
     }
 
@@ -158,6 +160,7 @@ export function sseEventToChatMessage(
         createdAt,
         nodeId: event.node_id || undefined,
         executionId: event.execution_id || undefined,
+        streamId: event.stream_id || undefined,
       };
     }
 
@@ -172,6 +175,7 @@ export function sseEventToChatMessage(
         type: "system",
         thread,
         createdAt,
+        streamId: event.stream_id || undefined,
       };
     }
 
@@ -186,6 +190,7 @@ export function sseEventToChatMessage(
         type: "system",
         thread,
         createdAt,
+        streamId: event.stream_id || undefined,
       };
     }
 
@@ -301,6 +306,7 @@ export function replayEvent(
         createdAt: eventCreatedAt,
         nodeId: event.node_id || undefined,
         executionId: event.execution_id || undefined,
+        streamId: streamId || undefined,
       });
       break;
     }
@@ -331,6 +337,7 @@ export function replayEvent(
         createdAt: eventCreatedAt,
         nodeId: event.node_id || undefined,
         executionId: event.execution_id || undefined,
+        streamId: streamId || undefined,
       });
       break;
     }

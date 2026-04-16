@@ -621,6 +621,7 @@ export default function QueenDM() {
               createdAt: eventCreatedAt,
               nodeId: event.node_id || undefined,
               executionId: event.execution_id || undefined,
+              streamId: sid || undefined,
             };
             setMessages((prevMsgs) => {
               const idx = prevMsgs.findIndex((m) => m.id === msgId);
