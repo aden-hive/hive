@@ -3430,7 +3430,8 @@ def register_queen_lifecycle_tools(
         if preamble.get("pending_question"):
             result["pending_question"] = preamble["pending_question"]
 
-        result["agent_idle_seconds"] = round(runtime.agent_idle_seconds, 1)
+        _idle = runtime.agent_idle_seconds
+        result["agent_idle_seconds"] = round(_idle, 1) if _idle != float("inf") else -1
 
         for key in ("current_node", "current_iteration"):
             if key in preamble:
