@@ -11,7 +11,10 @@ import { sessionsApi } from "@/api/sessions";
 import { queensApi } from "@/api/queens";
 import { useMultiSSE } from "@/hooks/use-sse";
 import type { AgentEvent, HistorySession } from "@/api/types";
-import { sseEventToChatMessage } from "@/lib/chat-helpers";
+import {
+  sseEventToChatMessage,
+  replayEventsToMessages,
+} from "@/lib/chat-helpers";
 import { useColony } from "@/context/ColonyContext";
 import { useHeaderActions } from "@/context/HeaderActionsContext";
 import { getQueenForAgent, slugToColonyId } from "@/lib/colony-registry";
@@ -90,17 +93,34 @@ export default function QueenDM() {
   const restoreMessages = useCallback(
     async (sid: string, cancelled: () => boolean) => {
       try {
-        const { events } = await sessionsApi.eventsHistory(sid);
+        const { events, truncated, total, returned } =
+          await sessionsApi.eventsHistory(sid);
         if (cancelled()) return;
-        const restored: ChatMessage[] = [];
-        for (const evt of events) {
-          const msg = sseEventToChatMessage(evt, "queen-dm", queenName);
-          if (!msg) continue;
-          if (evt.stream_id === "queen") msg.role = "queen";
-          restored.push(msg);
+
+        // Use the stateful replay so tool_status pills are synthesized
+        // the same way the live SSE handler does — without this the
+        // refreshed queen DM shows zero tool activity.
+        const restored = replayEventsToMessages(events, "queen-dm", queenName);
+
+        // Show a banner if the server truncated older events.
+        const droppedCount = Math.max(0, total - returned);
+        if (truncated && droppedCount > 0) {
+          const firstTs = events[0]?.timestamp;
+          const bannerCreatedAt = firstTs
+            ? new Date(firstTs).getTime() - 1
+            : 0;
+          restored.unshift({
+            id: `restore-truncated-${sid}`,
+            agent: "System",
+            agentColor: "",
+            type: "run_divider",
+            content: `${droppedCount.toLocaleString()} older event${droppedCount === 1 ? "" : "s"} not shown (showing last ${returned.toLocaleString()})`,
+            timestamp: firstTs ?? new Date().toISOString(),
+            thread: "queen-dm",
+            createdAt: bannerCreatedAt,
+          });
         }
         if (restored.length > 0 && !cancelled()) {
-          restored.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
           setMessages(restored);
           // Only clear typing if the history contains a completed execution;
           // during bootstrap the queen is still processing.
