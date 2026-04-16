@@ -12,6 +12,21 @@ metadata:
 
 All GCU browser tools drive a real Chrome instance through the Beeline extension and Chrome DevTools Protocol (CDP). That means clicks, keystrokes, and screenshots are processed by the actual browser's native hit testing, focus, and layout engines — **not** a synthetic event layer. Understanding this unlocks strategies that make hard sites easy.
 
+## Rule #0: screenshot + coordinates beats selectors
+
+When in doubt, the most reliable browser-automation primitive is **`browser_screenshot` → identify visually → `browser_click_coordinate` → `browser_type`** (with `use_insert_text=True` for rich-text editors).
+
+This path works on every site regardless of:
+- React class-name obfuscation (LinkedIn, X, most SPAs)
+- Shadow-DOM boundaries (Reddit, LinkedIn `#interop-outlet`)
+- Nested iframes (LinkedIn invitation-manager inline message, embedded composers)
+- Trusted Types CSP (LinkedIn, GitHub)
+- Lexical / Draft.js / contenteditable composers
+
+If you catch yourself writing `document.querySelectorAll(...)` inside `browser_evaluate` and it returns `[]`, **stop immediately**. Do not try a different selector. Take a screenshot and use coordinates. This single rule would have prevented dozens of empty-selector probing loops in past sessions.
+
+**`browser_evaluate` is an escape hatch, not a default.** See the "When to reach for `browser_evaluate`" section near the end — most browser automation should not need it.
+
 ## Coordinates: always CSS pixels
 
 **Chrome DevTools Protocol `Input.dispatchMouseEvent` operates in CSS pixels, not physical pixels.**
@@ -410,17 +425,35 @@ If Chrome detaches the debugger for its own reasons (tab closed, user opened Dev
 
 If reattach also fails, you'll get the underlying CDP error string — that's a real problem, usually the tab is gone.
 
-## When to reach for `browser_evaluate`
+## `browser_evaluate` is a last-resort escape hatch
 
-Use it when:
-- You need to read state from inside a shadow root that `browser_get_rect` doesn't handle
-- You need a one-shot JS snippet to trigger a site-specific action (scroll a specific container, open a menu, set a form field value directly)
-- You need to walk an AX tree or measure layout that the standard tools don't expose
+**Before using `browser_evaluate`, try these first — in this order:**
 
-Avoid it when:
-- A standard tool (`browser_click_coordinate`, `browser_type`, `browser_press`) already does what you need. Those go through CDP's native event pipeline, which real sites trust more than synthetic JS dispatch.
-- You're on a strict-CSP site and want to inject DOM — stick to `createElement` + `appendChild`, never `innerHTML`.
-- You need to trigger React / Vue / framework state changes — those frameworks watch for real browser events (`input`, `change`, `click`), not scripted `dispatchEvent` calls. Native-event tools are more reliable.
+1. **`browser_screenshot` + `browser_click_coordinate`** — works on every site regardless of shadow DOM, iframes, obfuscated classes. This is the default path for "click a thing you can see."
+2. **`browser_type(use_insert_text=True, text=...)`** — for typing into ANY input/contenteditable, including Lexical and Draft.js. Handles click-focus-insert with built-in retries. Do **not** call `document.execCommand('insertText')` via evaluate; this tool already does it correctly.
+3. **`browser_shadow_query`** or **`browser_get_rect(selector)`** with the `>>>` shadow-piercing syntax — for selector-based lookups across shadow roots.
+4. **`browser_get_text` / `browser_get_attribute`** — for reading element state by selector.
+5. **`browser_snapshot`** — for dumping the accessibility tree of the page.
+
+If all five of those fit your goal, **do not use `browser_evaluate`.** Each evaluate call is a small LLM round-trip of ~30-100 tokens of JS plus a JSON response; five of them burn more context than a single screenshot-and-coordinate does, with less reliability.
+
+### Anti-patterns — stop immediately if you catch yourself doing these
+
+- **Trying multiple `querySelectorAll` variants when the first returned `[]`.** Different selectors on the same page rarely work if the first guess failed — modern SPAs obfuscate class names at build time. After one empty result, switch to `browser_screenshot` + `browser_click_coordinate`. Do not write `.artdeco-list__item`, then `[data-test-incoming-invitation-card]`, then `[class*="invitation"]` — you are already on the wrong path.
+- **Writing `walk(root)` recursive shadow-DOM traversal functions.** Use `browser_shadow_query` — it traverses at the CDP level (native C++), not by re-running a recursive JS function every call.
+- **Calling `document.execCommand('insertText', ...)` to type into a contenteditable.** Use `browser_type(use_insert_text=True, text='...')`. The high-level tool handles the exact same Lexical/Draft.js case but with click-focus-retry logic built in.
+- **Accessing `iframe.contentDocument`.** Rarely works (cross-origin, late hydration) and when it does, the code is brittle. Use `browser_screenshot` to see the iframe, then `browser_click_coordinate` to interact.
+- **Using `innerHTML = "<...>"` on a Trusted Types site (LinkedIn, GitHub).** The assignment is silently dropped. Use `createElement` + `appendChild` if you must inject DOM — but first, ask whether you really need to.
+- **Triggering React/Vue state via synthetic `dispatchEvent`.** Frameworks watch for real browser events. Use `browser_click_coordinate`, `browser_press`, or `browser_type` — all go through CDP's native event pipeline.
+
+### Legitimate uses (when nothing semantic fits)
+
+- Reading a computed style, `window.innerWidth/Height`, `document.scrollingElement.scrollTop`, or other layout values the tools don't expose.
+- Firing a one-shot site-specific API call (analytics beacon, feature-flag toggle).
+- Stripping `onbeforeunload` before navigating away from a page with an unsent draft (LinkedIn, Gmail).
+- Detecting whether a specific shadow-root host exists before a follow-up screenshot.
+
+In all of these cases the script is SHORT (< 10 lines) and the result is CONSUMED (read, then acted on), not further probed.
 
 ## Login & auth walls
 

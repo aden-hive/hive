@@ -96,15 +96,59 @@ def register_advanced_tools(mcp: FastMCP) -> None:
         profile: str | None = None,
     ) -> dict:
         """
-        Execute JavaScript in the browser context.
+        ESCAPE HATCH — execute raw JavaScript. USE ONLY as a last
+        resort. 99% of browser automation does NOT need this tool.
+        Before reaching for it, try a semantic tool first:
+
+          - browser_click / browser_click_coordinate  → for clicks
+          - browser_type(use_insert_text=True)        → for text input
+          - browser_screenshot + browser_get_rect     → for locating elements
+          - browser_shadow_query                      → for shadow-DOM selectors
+          - browser_get_text / browser_get_attribute  → for reading state
+
+        ANTI-PATTERNS — stop and switch tools if you notice yourself:
+
+          1. Calling browser_evaluate 2+ times in a row to guess at
+             selectors. Each attempt costs ~30 tokens of JS + a full
+             LLM round-trip. After 2 empty results, the selector
+             strategy is wrong — pivot to browser_screenshot +
+             browser_click_coordinate. The screenshot + coord path
+             works on shadow DOM, iframes, and React-obfuscated
+             class names indifferently.
+
+          2. Writing a walk(root) recursive shadow-DOM traversal
+             function. Use browser_shadow_query — it does the
+             traversal in C++ via CDP's querySelector, not in JS.
+
+          3. Calling document.execCommand('insertText', ...) to type
+             into Lexical / contenteditable. Use
+             browser_type(use_insert_text=True, text='...') instead.
+             It handles the click-then-focus-then-insert sequence
+             with built-in retries.
+
+          4. Trying to read a nested iframe's contentDocument. That
+             usually fails (cross-origin or late hydration). Use
+             browser_screenshot to see it, then browser_click_coordinate.
+
+        LEGITIMATE uses (when nothing semantic fits):
+
+          - Reading a computed style, window size, or scroll position
+            that no tool exposes.
+          - Firing a one-shot site-specific API call (e.g. an analytics
+            beacon the test needs).
+          - Stripping an onbeforeunload handler that blocks navigation.
+          - Probing for shadow roots whose existence is conditional.
 
         Args:
-            script: JavaScript code to execute
+            script: JavaScript code to execute. Keep it small. If you
+                need to traverse the DOM, prefer browser_shadow_query.
             tab_id: Chrome tab ID (default: active tab)
             profile: Browser profile name (default: "default")
 
         Returns:
-            Dict with evaluation result
+            Dict with evaluation result. On a "find X" script that
+            returns [] or null: do NOT retry with a different
+            selector — take a screenshot and switch to coordinates.
         """
         bridge = get_bridge()
         if not bridge or not bridge.is_connected:
