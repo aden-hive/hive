@@ -185,42 +185,59 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         use_insert_text: bool = True,
     ) -> dict:
         """
-        Type text into an input element.
+        Insert text into the currently focused element via CDP Input.insertText.
 
-        Automatically routes through a real CDP pointer click on the
-        element before inserting text — so that rich-text editors like
-        Lexical (Gmail, LinkedIn DMs), Draft.js (X compose), and
-        ProseMirror (Reddit) see a native focus event and enable their
-        submit buttons. See the gcu-browser skill for the full "click-
-        then-type" pattern.
+        CANONICAL PATTERN — PREFER THIS:
+            browser_click_coordinate(x, y)  # click inspects focused_element
+            browser_type(text="...")        # NO selector — targets activeElement
 
-        When ``selector`` is omitted (None), types into the currently
-        focused element — useful after ``browser_click_coordinate``
-        has already focused the target.
+        The click focuses the element (including through shadow roots and
+        across iframes), and Input.insertText dispatches to
+        document.activeElement regardless of DOM structure. This is the
+        ONLY reliable way to type into:
+          - LinkedIn's #interop-outlet Lexical composer
+          - X/Twitter's Draft.js compose box
+          - Reddit's ProseMirror comment box
+          - Any site wrapped in Trusted Types CSP (innerHTML silently dropped)
+          - Any nested-iframe message overlay (LinkedIn invitation manager)
 
-        By default uses CDP Input.insertText which is the most reliable
-        way to insert text into rich editors. Set
-        ``use_insert_text=False`` to fall back to per-character
-        keyDown/keyUp events (needed only for code editors that fire
-        on specific keystrokes, or when ``delay_ms`` typing animation
-        is required).
+        CDP's Input.insertText takes no target parameter — it operates
+        implicitly on the focused editable. That is why the no-selector
+        path is shadow-agnostic and iframe-agnostic. DO NOT reach for
+        browser_evaluate with document.execCommand('insertText', ...) or
+        walk(root) shadow traversals; they reinvent this method with
+        more escaping bugs.
+
+        When to pass ``selector`` (rare):
+          - You want to type into a DIFFERENT element than the one
+            currently focused, without a prior click.
+          - The target is a plain <input> in the light DOM and you want
+            a single-call shortcut (selector-based click is performed
+            first, then insertText dispatches to the now-focused field).
+
+        By default uses CDP Input.insertText (``use_insert_text=True``).
+        Set ``use_insert_text=False`` only for code editors that watch
+        specific keystrokes, or when ``delay_ms`` typing animation is
+        required.
 
         Args:
-            selector: CSS selector for the input element (None to type
-                      into the already-focused element)
-            text: Text to type
-            tab_id: Chrome tab ID (default: active tab)
-            profile: Browser profile name (default: "default")
+            text: Text to insert at the current cursor position.
+            selector: CSS selector (OPTIONAL — prefer omitting). When
+                omitted, dispatches Input.insertText to
+                document.activeElement. When provided, performs a CDP
+                click on the selector first, then inserts.
+            tab_id: Chrome tab ID (default: active tab).
+            profile: Browser profile name (default: "default").
             delay_ms: Delay between keystrokes in ms (default: 0).
-                      Forces the per-keystroke fallback when > 0.
-            clear_first: Clear existing text before typing (default: True)
-            timeout_ms: Timeout waiting for element (default: 30000)
+                Forces the per-keystroke fallback when > 0.
+            clear_first: Clear existing text before typing (default: True).
+            timeout_ms: Timeout waiting for element (default: 30000).
             use_insert_text: Use CDP Input.insertText (default: True) for
-                             reliable insertion into rich-text editors.
-                             Set False for per-keystroke dispatch.
+                reliable insertion into rich-text editors. Set False for
+                per-keystroke dispatch.
 
         Returns:
-            Dict with type result
+            Dict with type result.
         """
         start = time.perf_counter()
         params = {"selector": selector, "text": text, "tab_id": tab_id, "profile": profile}

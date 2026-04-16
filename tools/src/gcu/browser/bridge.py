@@ -80,6 +80,37 @@ async def _adaptive_poll_sleep(elapsed_s: float) -> None:
 _interaction_highlights: dict[int, dict] = {}
 
 
+# Compact descriptor of document.activeElement. Returned by both click()
+# and click_coordinate() so the agent can verify it focused what it
+# intended, then decide whether to follow up with browser_type(text=...,
+# no selector). Keeping this as a single shared string avoids drift
+# between the two click paths.
+_FOCUSED_ELEMENT_JS = """
+(function() {
+    var el = document.activeElement;
+    if (!el || el === document.body) return null;
+    var rect = el.getBoundingClientRect();
+    var attrs = {};
+    for (var i = 0; i < el.attributes.length && i < 10; i++) {
+        attrs[el.attributes[i].name] = el.attributes[i].value.substring(0, 200);
+    }
+    return {
+        tag: el.tagName.toLowerCase(),
+        id: el.id || null,
+        className: el.className || null,
+        name: el.getAttribute('name') || null,
+        type: el.getAttribute('type') || null,
+        role: el.getAttribute('role') || null,
+        contenteditable: el.getAttribute('contenteditable') || null,
+        text: (el.innerText || '').substring(0, 200),
+        value: (el.value !== undefined ? String(el.value).substring(0, 200) : null),
+        attributes: attrs,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    };
+})()
+"""
+
+
 def _get_active_profile() -> str:
     """Get the current active profile from context variable."""
     try:
@@ -763,7 +794,8 @@ class BeelineBridge:
                 rx = value.get("x", 0) - value.get("width", 0) / 2
                 ry = value.get("y", 0) - value.get("height", 0) / 2
                 await self.highlight_rect(tab_id, rx, ry, value.get("width", 0), value.get("height", 0), label=selector)
-                return {
+                focused_info = await self._read_focused_element(tab_id)
+                resp = {
                     "ok": True,
                     "action": "click",
                     "selector": selector,
@@ -771,6 +803,9 @@ class BeelineBridge:
                     "y": value.get("y", 0),
                     "method": "javascript",
                 }
+                if focused_info:
+                    resp["focused_element"] = focused_info
+                return resp
 
             # If JavaScript click failed, try CDP approach
             if isinstance(value, dict) and value.get("error"):
@@ -883,7 +918,8 @@ class BeelineBridge:
             w = bounds_value.get("width", 0)
             h = bounds_value.get("height", 0)
             await self.highlight_rect(tab_id, x - w / 2, y - h / 2, w, h, label=selector)
-            return {
+            focused_info = await self._read_focused_element(tab_id)
+            resp = {
                 "ok": True,
                 "action": "click",
                 "selector": selector,
@@ -891,9 +927,28 @@ class BeelineBridge:
                 "y": y,
                 "method": "cdp",
             }
+            if focused_info:
+                resp["focused_element"] = focused_info
+            return resp
 
         except Exception as e:
             return {"ok": False, "error": f"Click failed: {e}"}
+
+    async def _read_focused_element(self, tab_id: int) -> dict | None:
+        """Read document.activeElement and return a compact descriptor.
+
+        Returns None on any failure — never raises. Used by both click
+        paths (selector-based click() and click_coordinate()) so the
+        agent gets the same response shape regardless of which one was
+        called. The descriptor lets the agent answer "did my click land
+        on an editable?" without a second round-trip.
+        """
+        try:
+            await self._try_enable_domain(tab_id, "Runtime")
+            result = await self.evaluate(tab_id, _FOCUSED_ELEMENT_JS)
+            return (result or {}).get("result")
+        except Exception:
+            return None
 
     async def click_coordinate(self, tab_id: int, x: float, y: float, button: str = "left") -> dict:
         """Click at specific coordinates."""
@@ -931,40 +986,7 @@ class BeelineBridge:
 
         await self.highlight_point(tab_id, x, y, label=f"click ({x},{y})")
 
-        # Query the focused element after the click
-        focused_info = None
-        try:
-            await self._try_enable_domain(tab_id, "Runtime")
-            result = await self.evaluate(
-                tab_id,
-                """
-                (function() {
-                    var el = document.activeElement;
-                    if (!el || el === document.body) return null;
-                    var rect = el.getBoundingClientRect();
-                    var attrs = {};
-                    for (var i = 0; i < el.attributes.length && i < 10; i++) {
-                        attrs[el.attributes[i].name] = el.attributes[i].value.substring(0, 200);
-                    }
-                    return {
-                        tag: el.tagName.toLowerCase(),
-                        id: el.id || null,
-                        className: el.className || null,
-                        name: el.getAttribute('name') || null,
-                        type: el.getAttribute('type') || null,
-                        role: el.getAttribute('role') || null,
-                        text: (el.innerText || '').substring(0, 200),
-                        value: (el.value !== undefined ? String(el.value).substring(0, 200) : null),
-                        attributes: attrs,
-                        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-                    };
-                })()
-                """,
-            )
-            focused_info = (result or {}).get("result")
-        except Exception:
-            pass
-
+        focused_info = await self._read_focused_element(tab_id)
         resp = {"ok": True, "action": "click_coordinate", "x": x, "y": y}
         if focused_info:
             resp["focused_element"] = focused_info
