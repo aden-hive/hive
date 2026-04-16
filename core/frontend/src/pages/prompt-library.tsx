@@ -1,20 +1,24 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Copy, Check, Sparkles, MessageSquarePlus } from "lucide-react";
+import { Search, Copy, Check, Sparkles, MessageSquarePlus, AlertCircle } from "lucide-react";
 import { prompts, promptCategories, categoryToQueen, queenNames } from "@/data/prompts";
 
 function PromptCard({ prompt, onUse }: { prompt: typeof prompts[0]; onUse: (content: string, category: string) => void }) {
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState(false);
   const queenId = categoryToQueen[prompt.category];
   const queenName = queenNames[queenId] || "Queen";
 
   const handleCopy = async () => {
     try {
+      setError(false);
       await navigator.clipboard.writeText(prompt.content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error("Clipboard copy failed:", err);
+      setError(true);
+      setTimeout(() => setError(false), 3000);
     }
   };
 
@@ -28,9 +32,15 @@ function PromptCard({ prompt, onUse }: { prompt: typeof prompts[0]; onUse: (cont
           <button
             onClick={handleCopy}
             className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-            title="Copy prompt"
+            title={error ? "Copy failed" : "Copy prompt"}
           >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+            {error ? (
+              <AlertCircle className="w-3.5 h-3.5 text-destructive" />
+            ) : copied ? (
+              <Check className="w-3.5 h-3.5 text-emerald-500" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" />
+            )}
           </button>
         </div>
       </div>
