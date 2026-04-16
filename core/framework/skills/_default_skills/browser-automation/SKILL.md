@@ -49,11 +49,26 @@ Whereas `wait_for_selector`, `browser_click(selector=...)`, `browser_type(select
 1. `browser_screenshot()` → visual image
 2. Identify the target visually → image pixel `(x, y)` (eyeball from the screenshot)
 3. `browser_coords(x, y)` → convert to CSS px
-4. `browser_click_coordinate(css_x, css_y)` → lands on the element via native hit testing; inputs get focused
-5. For typing:
-   - If the element was reachable via a selector → `browser_type(selector, text)`
-   - Otherwise → `browser_press(key)` per character (dispatches to focused element, no selector needed)
-6. Verify by reading element state via a targeted `browser_evaluate` that walks the shadow tree
+4. `browser_click_coordinate(css_x, css_y)` → lands on the element via native hit testing; inputs get focused. **The response now includes `focused_element: {tag, id, role, contenteditable, rect, ...}`** — use it to verify you actually focused what you intended.
+5. `browser_type(text="...")` with **NO selector** → dispatches CDP `Input.insertText` to `document.activeElement`. Shadow roots, iframes, Lexical, Draft.js, ProseMirror all just work. Only pass a selector if you want a DIFFERENT element than the one you just focused (rare).
+6. Verify via `browser_screenshot` OR `browser_get_attribute` on a known-reachable marker (e.g. check that the Send button's `aria-disabled` flipped to `false`).
+
+### The click→type loop (canonical pattern)
+
+```
+resp = browser_click_coordinate(x, y)
+fe = resp.get("focused_element")
+if fe and (fe.get("contenteditable") or fe["tag"] in ("textarea", "input")):
+    browser_type(text="...")                # no selector — insertText to activeElement
+else:
+    # you clicked something that isn't editable — refine coords and retry
+    # do NOT reach for browser_evaluate + execCommand('insertText', ...)
+    # or a walk(root) shadow traversal. The problem is your click, not
+    # the typing method.
+    ...
+```
+
+`browser_click` (selector-based) also returns `focused_element` now, so the same check works whether you clicked by selector or coordinate.
 
 ### Empirically verified (2026-04-11)
 
