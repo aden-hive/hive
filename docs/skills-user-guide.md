@@ -116,6 +116,41 @@ Use this skill when the user needs to extract text from PDFs or merge documents.
 | `metadata` | No | Arbitrary key-value pairs (author, version, etc.). |
 | `allowed-tools` | No | Space-delimited list of pre-approved tools. |
 
+### allowed-tools
+
+The `allowed-tools` field defines a list of tools that an agent is explicitly permitted to use during execution.
+<!-- updated -->
+### Example
+
+```yaml
+
+allowed-tools: bash read_file write_file
+```
+#### What counts as a tool?
+
+Tools refer to executable capabilities available to the agent, including:
+- Built-in Hive tools (e.g., `read_file`, `write_file`)
+- System-level tools (e.g., `bash`, if enabled)
+- External integrations exposed via MCP
+
+#### What does "pre-approved" mean?
+
+Tools listed under `allowed-tools` are explicitly permitted without additional approval during execution.
+
+#### What happens to tools not listed?
+
+Tools not included may be:
+- Blocked, or
+- Subject to additional validation depending on configuration
+
+#### Security implications
+
+This field acts as a permission control layer, restricting the agent to a defined set of tools and helping ensure safe execution.
+
+
+
+
+
 ### Writing good descriptions
 
 The description is critical — it's what the agent uses to decide whether to activate a skill. Be specific:
