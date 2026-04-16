@@ -1495,6 +1495,35 @@ def register_queen_lifecycle_tools(
         except OSError as e:
             return None, f"failed to install skill into {target}: {e}"
 
+        # Cleanup the source directory after a successful install so
+        # the authored skill doesn't linger as debris in the agent
+        # workspace (or — pre-sandbox-split — in the hive git
+        # checkout). Only removes paths that are OUTSIDE
+        # ``~/.hive/skills/`` so we never nuke the canonical install
+        # target or user-owned skill dirs.
+        try:
+            src_resolved = src.resolve()
+            skills_root_resolved = target_root.resolve()
+            try:
+                src_resolved.relative_to(skills_root_resolved)
+                _under_skills_root = True
+            except ValueError:
+                _under_skills_root = False
+            if not _under_skills_root:
+                _shutil.rmtree(src_resolved)
+                logger.info(
+                    "create_colony: cleaned up authored skill source at %s "
+                    "(installed to %s)",
+                    src_resolved,
+                    target,
+                )
+        except OSError as e:
+            logger.warning(
+                "create_colony: failed to clean up skill source at %s (non-fatal): %s",
+                src,
+                e,
+            )
+
         return target, None
 
     async def create_colony(

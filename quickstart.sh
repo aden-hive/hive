@@ -271,6 +271,48 @@ else
     exit 1
 fi
 
+# Check for sqlite3 CLI (required for colony progress tracking)
+echo -n "  Checking for sqlite3... "
+if command -v sqlite3 &> /dev/null; then
+    echo -e "${GREEN}ok${NC}"
+else
+    echo -e "${YELLOW}not found${NC}"
+    # Attempt auto-install on common package managers
+    SQLITE_INSTALLED=false
+    if command -v apt-get &> /dev/null; then
+        echo -n "  Installing sqlite3 via apt... "
+        if sudo apt-get install -y sqlite3 > /dev/null 2>&1; then
+            SQLITE_INSTALLED=true
+        fi
+    elif command -v brew &> /dev/null; then
+        echo -n "  Installing sqlite3 via brew... "
+        if brew install sqlite > /dev/null 2>&1; then
+            SQLITE_INSTALLED=true
+        fi
+    elif command -v apk &> /dev/null; then
+        echo -n "  Installing sqlite3 via apk... "
+        if apk add sqlite > /dev/null 2>&1; then
+            SQLITE_INSTALLED=true
+        fi
+    elif command -v dnf &> /dev/null; then
+        echo -n "  Installing sqlite3 via dnf... "
+        if sudo dnf install -y sqlite > /dev/null 2>&1; then
+            SQLITE_INSTALLED=true
+        fi
+    elif command -v pacman &> /dev/null; then
+        echo -n "  Installing sqlite3 via pacman... "
+        if sudo pacman -S --noconfirm sqlite > /dev/null 2>&1; then
+            SQLITE_INSTALLED=true
+        fi
+    fi
+    if [ "$SQLITE_INSTALLED" = true ]; then
+        echo -e "${GREEN}ok${NC}"
+    else
+        echo -e "${YELLOW}  ⚠ Could not install sqlite3 automatically${NC}"
+        echo -e "${DIM}    Install manually: apt install sqlite3 / brew install sqlite / apk add sqlite${NC}"
+    fi
+fi
+
 # Check for Chrome/Edge (required for GCU browser tools)
 echo -n "  Checking for Chrome/Edge browser... "
 # Check common browser locations

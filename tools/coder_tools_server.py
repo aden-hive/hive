@@ -82,10 +82,29 @@ def _find_project_root() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def _resolve_path(path: str) -> str:
-    """Resolve path relative to PROJECT_ROOT. Raises ValueError if outside.
+# When ``--write-root`` is passed on the CLI, ``WRITE_ROOT`` diverges
+# from ``PROJECT_ROOT``: reads stay permissive (so the queen can
+# reference framework skills, docs, and the hive repo), but writes
+# are confined to the write root plus the ``~/.hive/`` escape hatch.
+# Without this split, the coder-tools sandbox IS the hive git
+# checkout — every queen-authored skill/ledger/script lands there as
+# untracked debris, which was the 2026-04-15 incident
+# (``~/aden/hive/x-rapid-reply/`` and siblings).
+WRITE_ROOT: str = ""
 
-    Also allows access to ~/.hive/ directory for agent session data files.
+
+def _resolve_read_path(path: str) -> str:
+    """Resolve path for READ operations.
+
+    Allowlist (in order):
+    1. Paths under ``~/.hive/`` — agent session data, colonies, skills.
+    2. Paths under ``PROJECT_ROOT`` — hive repo, for reading framework
+       defaults, docs, examples, etc.
+    3. Relative paths — joined against ``PROJECT_ROOT`` (read-side
+       default; writes use ``WRITE_ROOT`` instead).
+
+    Raises ``ValueError`` when the resolved path falls outside all
+    allowed roots.
     """
     # Normalize slashes for cross-platform (e.g. exports/hi_agent from LLM)
     path = path.replace("/", os.sep)
@@ -153,6 +172,88 @@ def _resolve_path(path: str) -> str:
     if common != PROJECT_ROOT:
         raise ValueError(f"Access denied: '{path}' is outside the project root.")
     return resolved
+
+
+def _resolve_write_path(path: str) -> str:
+    """Resolve path for WRITE operations.
+
+    Stricter than the read resolver: only allows writes under:
+    1. ``WRITE_ROOT`` — the agent workspace (default: ``~/.hive/workspace/``
+       when ``--write-root`` is passed).
+    2. ``~/.hive/`` — agent session data.
+
+    Writes to the hive repo (``PROJECT_ROOT``) are REJECTED to keep
+    the git checkout clean of queen-authored debris. Relative paths
+    resolve against ``WRITE_ROOT``, not ``PROJECT_ROOT``.
+
+    When ``WRITE_ROOT`` equals ``PROJECT_ROOT`` (no split configured),
+    this function is semantically identical to ``_resolve_read_path``.
+    """
+    # Normalize slashes + expand ~
+    path = path.replace("/", os.sep)
+    if path.startswith("~"):
+        path = os.path.expanduser(path)
+
+    hive_dir = os.path.expanduser("~/.hive")
+
+    if os.path.isabs(path):
+        resolved = os.path.abspath(path)
+
+        # Always allow writes under ~/.hive/
+        try:
+            if os.path.commonpath([resolved, hive_dir]) == hive_dir:
+                return resolved
+        except ValueError:
+            pass
+
+        # Writes are ALSO allowed under WRITE_ROOT (the agent workspace).
+        try:
+            if os.path.commonpath([resolved, WRITE_ROOT]) == WRITE_ROOT:
+                return resolved
+        except ValueError:
+            pass
+
+        # If WRITE_ROOT == PROJECT_ROOT (legacy behavior: no split),
+        # fall through to the read-side resolver so existing callers
+        # keep working unchanged.
+        if WRITE_ROOT == PROJECT_ROOT:
+            return _resolve_read_path(path)
+
+        # Split configured AND the path isn't under WRITE_ROOT or
+        # ~/.hive/. Reject — this is the whole point of the split.
+        raise ValueError(
+            f"Access denied: writes must be under '{WRITE_ROOT}' or "
+            f"'{hive_dir}'. Path '{path}' is outside both "
+            "(use an absolute path under one of those roots, or a "
+            "relative path which will resolve under the write root)."
+        )
+    else:
+        # Relative path: resolve against WRITE_ROOT, not PROJECT_ROOT.
+        resolved = os.path.abspath(os.path.join(WRITE_ROOT, path))
+
+    # Double-check the resolved absolute path is inside WRITE_ROOT or
+    # ~/.hive/ (covers edge cases like "../../etc/passwd" that escape).
+    try:
+        wr_common = os.path.commonpath([resolved, WRITE_ROOT])
+    except ValueError:
+        wr_common = ""
+    try:
+        hv_common = os.path.commonpath([resolved, hive_dir])
+    except ValueError:
+        hv_common = ""
+    if wr_common != WRITE_ROOT and hv_common != hive_dir:
+        raise ValueError(
+            f"Access denied: resolved write path '{resolved}' escaped the "
+            f"allowed roots ('{WRITE_ROOT}', '{hive_dir}')."
+        )
+    return resolved
+
+
+# Back-compat alias: existing call sites in this module call
+# ``_resolve_path`` directly (e.g. for snapshot dirs, agent tool
+# introspection). Those are all non-user-driven paths; route them
+# through the read resolver.
+_resolve_path = _resolve_read_path
 
 
 # ── Git snapshot system (ported from opencode's shadow git) ───────────────
@@ -1689,32 +1790,45 @@ def validate_agent_package(agent_name: str) -> str:
 
 
 def main() -> None:
-    global PROJECT_ROOT, SNAPSHOT_DIR
+    global PROJECT_ROOT, SNAPSHOT_DIR, WRITE_ROOT
 
     from aden_tools.file_ops import register_file_tools
 
     parser = argparse.ArgumentParser(description="Coder Tools MCP Server")
     parser.add_argument("--project-root", default="")
+    # ``--write-root`` isolates file writes from the project root so
+    # queen-authored skills, ledgers, and scripts don't land in the
+    # hive git checkout. Reads remain permissive under PROJECT_ROOT
+    # so framework skills, docs, and examples stay accessible.
+    # Defaults to PROJECT_ROOT when empty (legacy behavior).
+    parser.add_argument("--write-root", default="")
     parser.add_argument("--port", type=int, default=int(os.getenv("CODER_TOOLS_PORT", "4002")))
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--stdio", action="store_true")
     args = parser.parse_args()
 
     PROJECT_ROOT = os.path.abspath(args.project_root) if args.project_root else _find_project_root()
+    if args.write_root:
+        WRITE_ROOT = os.path.abspath(os.path.expanduser(args.write_root))
+        os.makedirs(WRITE_ROOT, exist_ok=True)
+    else:
+        WRITE_ROOT = PROJECT_ROOT  # legacy: no split
     SNAPSHOT_DIR = os.path.join(
         os.path.expanduser("~"),
         ".hive",
         "snapshots",
         os.path.basename(PROJECT_ROOT),
     )
-    logger.info(f"Project root: {PROJECT_ROOT}")
+    logger.info(f"Project root (reads): {PROJECT_ROOT}")
+    logger.info(f"Write root (writes): {WRITE_ROOT}")
     logger.info(f"Snapshot dir: {SNAPSHOT_DIR}")
 
     register_file_tools(
         mcp,
-        resolve_path=_resolve_path,
+        resolve_path=_resolve_read_path,
+        resolve_path_write=_resolve_write_path,
         before_write=None,  # Git snapshot causes stdio deadlock on Windows; undo_changes limited
-        project_root=PROJECT_ROOT,
+        project_root=WRITE_ROOT,
     )
 
     if args.stdio:
