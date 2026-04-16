@@ -1838,7 +1838,7 @@ if ($SubscriptionMode -eq "hive_llm") {
             # Health check the new key
             Write-Host "  Verifying Hive API key... " -NoNewline
             try {
-                $hcOutput = & $PythonCmd scripts/check_llm_key.py hive $apiKey "$HiveLlmEndpoint" 2>&1
+                $hcOutput = & $UvCmd run python (Join-Path $ScriptDir "scripts/check_llm_key.py") hive $apiKey "$HiveLlmEndpoint" 2>$null
                 $hcJson = $hcOutput | ConvertFrom-Json
                 if ($hcJson.valid -eq $true) {
                     Write-Color -Text "ok" -Color Green
