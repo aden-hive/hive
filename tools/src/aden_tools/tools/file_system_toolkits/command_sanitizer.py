@@ -23,13 +23,32 @@ import re
 # structured log formatters (JSON, etc.) for SIEM / SOC2 ingestion.
 _security_logger = logging.getLogger("aden.security")
 
-__all__ = ["CommandBlockedError", "validate_command"]
+__all__ = ["CommandBlockedError", "validate_command", "sanitize_for_log"]
 
 
 class CommandBlockedError(Exception):
     """Raised when a command is blocked by the safety filter."""
 
     pass
+
+
+def sanitize_for_log(command: str, length: int = 120) -> str:
+    """
+    Normalizes whitespace and redacts potential secrets (API keys, passwords).
+    Ensures logs are safe for SOC2/SIEM environments.
+    """
+    if not command:
+        return ""
+    
+    # Normalize: Remove newlines and tabs that break log parsers
+    normalized = " ".join(command.split())
+    
+    # Redact: Simple but effective regex for high-entropy assignments
+    # Matches 'KEY=value', 'token: value', etc.
+    secret_patterns = r"(?i)(token|key|auth|pass|secret|bearer|pwd)([=:\s]+)([^\s]{4,})"
+    redacted = re.sub(secret_patterns, r"\1\2********", normalized)
+    
+    return redacted[:length]
 
 
 # ---------------------------------------------------------------------------
@@ -188,9 +207,9 @@ def validate_command(command: str) -> None:
         return
 
     stripped = command.strip()
-    # Truncate preview to 120 chars so secrets in long commands are not leaked
+    # Truncate preview and redact secrets so they are not leaked
     # into log files / SIEM streams.
-    preview = stripped[:120]
+    preview = sanitize_for_log(command)
 
     # Behavioral telemetry: compound commands are not blocked, but their
     # presence is logged so rogue-agent patterns can be detected in aggregate.

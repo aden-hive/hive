@@ -24,7 +24,7 @@ import time
 
 from mcp.server.fastmcp import FastMCP
 
-from ..command_sanitizer import CommandBlockedError, validate_command
+from ..command_sanitizer import CommandBlockedError, validate_command, sanitize_for_log
 from ..security import AGENT_SANDBOXES_DIR, get_sandboxed_path
 from .background_jobs import get as get_job, kill as kill_job, spawn as spawn_job
 
@@ -126,7 +126,7 @@ def register_tools(mcp: FastMCP) -> None:
                     "background": True,
                     "job_id": job.id,
                     "cwd": secure_cwd,
-                    "command_preview": command[:120],
+                    "command_preview": sanitize_for_log(command),
                 },
             )
             return {
@@ -169,7 +169,7 @@ def register_tools(mcp: FastMCP) -> None:
                 "command_executed",
                 extra={
                     "agent_id": agent_id,
-                    "command_preview": command.strip()[:120],
+                    "command_preview": sanitize_for_log(command),
                     "cwd": secure_cwd,
                     "background": False,
                     "return_code": -1,  # -1 represents timeout/killed
@@ -214,7 +214,7 @@ def register_tools(mcp: FastMCP) -> None:
                 # to preserve developer utility. The full command is captured
                 # here so all one-liner executions are visible in the audit
                 # trail even when their content cannot be pre-validated.
-                "command_preview": command[:120],
+                "command_preview": sanitize_for_log(command),
             },
         )
         return {
