@@ -126,7 +126,10 @@ Currently, Hive parses and validates this metadata and may emit warnings
 
 ```yaml
 
-allowed-tools: bash read_file write_file
+allowed-tools:
+  - bash
+  - read_file
+  - write_file
 ```
 #### What counts as a tool?
 
