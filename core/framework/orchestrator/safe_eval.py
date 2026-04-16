@@ -12,7 +12,9 @@ MAX_POWER_ABS_EXPONENT = 1_000
 MAX_POWER_RESULT_BITS = 4_096
 # Typical edge-condition evaluations in this repo complete well under 1ms.
 # 100ms leaves ample headroom for legitimate checks while failing fast on abuse.
-DEFAULT_TIMEOUT_MS = 100
+# On Windows (where SIGALRM is unavailable) the fallback relies on periodic
+# perf_counter polling which is less precise, so we use a wider margin.
+DEFAULT_TIMEOUT_MS = 100 if hasattr(signal, "SIGALRM") else 500
 
 
 def _safe_pow(base: Any, exp: Any) -> Any:

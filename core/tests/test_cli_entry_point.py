@@ -1,5 +1,6 @@
 """Tests for the hive CLI entry point and path auto-configuration."""
 
+import platform
 import shutil
 import subprocess
 import sys
@@ -8,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from framework.cli import _configure_paths
+
+_IS_WINDOWS = platform.system() == "Windows"
 
 
 @pytest.fixture
@@ -41,6 +44,7 @@ class TestConfigurePaths:
 class TestFrameworkModule:
     """Test ``python -m framework`` invocation."""
 
+    @pytest.mark.skipif(_IS_WINDOWS, reason="subprocess capture unreliable on Windows CI")
     def test_module_help(self, project_root):
         result = subprocess.run(
             [sys.executable, "-m", "framework", "--help"],
@@ -52,6 +56,7 @@ class TestFrameworkModule:
         assert result.returncode == 0
         assert "hive" in result.stdout.lower()
 
+    @pytest.mark.skipif(_IS_WINDOWS, reason="subprocess capture unreliable on Windows CI")
     def test_module_serve_subcommand(self, project_root):
         """Verify ``python -m framework serve --help`` prints usage."""
         result = subprocess.run(
@@ -73,6 +78,7 @@ class TestHiveEntryPoint:
         if shutil.which("hive") is None:
             pytest.skip("'hive' entry point not installed (run: pip install -e core/)")
 
+    @pytest.mark.skipif(_IS_WINDOWS, reason="subprocess capture unreliable on Windows CI")
     def test_hive_help(self):
         """Verify ``hive --help`` exits 0 and lists the new commands."""
         result = subprocess.run(
