@@ -118,7 +118,9 @@ Use this skill when the user needs to extract text from PDFs or merge documents.
 
 ### allowed-tools
 
-The `allowed-tools` field defines a list of tools that an agent is explicitly permitted to use during execution.
+The `allowed-tools` field declares an intended list of tools for the skill.
+Currently, Hive parses and validates this metadata and may emit warnings
+(for example, malformed values or missing tools on PATH).
 <!-- updated -->
 ### Example
 
@@ -135,17 +137,17 @@ Tools refer to executable capabilities available to the agent, including:
 
 #### What does "pre-approved" mean?
 
-Tools listed under `allowed-tools` are explicitly permitted without additional approval during execution.
+Tools listed under `allowed-tools` are declared by the skill author as expected tools.
+This metadata does not currently enforce runtime allow/deny behavior by itself..
 
 #### What happens to tools not listed?
 
-Tools not included may be:
-- Blocked, or
-- Subject to additional validation depending on configuration
+Tools not included are not automatically blocked solely by this field.
+Any enforcement depends on separate runtime policy/configuration layers.
 
 #### Security implications
 
-This field acts as a permission control layer, restricting the agent to a defined set of tools and helping ensure safe execution.
+This field improves transparency and can support policy tooling, but should not be treated as a standalone runtime security boundary., restricting the agent to a defined set of tools and helping ensure safe execution.
 
 
 
