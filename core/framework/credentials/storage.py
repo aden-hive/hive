@@ -616,13 +616,21 @@ class AWSSecretsManagerStorage(CredentialStorage):
                 "AWS storage requires 'boto3'. Install with: pip install boto3"
             ) from e
 
-        self.region_name = region_name or os.environ.get("AWS_REGION") or "us-east-1"
+        self.region_name = (
+            region_name or os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
+        )
         self.prefix = prefix or os.environ.get("HIVE_SECRET_PREFIX", "")
 
+        if not self.prefix:
+            raise ValueError(
+                "AWS Secrets Manager storage requires a non-empty prefix for security. "
+                "Set HIVE_SECRET_PREFIX or pass prefix to __init__."
+            )
+
         # Initialize client
-        session_kwargs = {
-            "region_name": self.region_name,
-        }
+        session_kwargs: dict[str, Any] = {}
+        if self.region_name is not None:
+            session_kwargs["region_name"] = self.region_name
         if aws_access_key_id:
             session_kwargs["aws_access_key_id"] = aws_access_key_id
         if aws_secret_access_key:
@@ -660,6 +668,8 @@ class AWSSecretsManagerStorage(CredentialStorage):
 
     def load(self, credential_id: str) -> CredentialObject | None:
         """Load credential from AWS Secrets Manager."""
+        from botocore.exceptions import ClientError
+
         secret_name = self._get_secret_name(credential_id)
 
         try:
@@ -671,12 +681,55 @@ class AWSSecretsManagerStorage(CredentialStorage):
             return self._deserialize_credential(data)
         except self._client.exceptions.ResourceNotFoundException:
             return None
-        except Exception as e:
+        except ClientError as e:
             logger.error(f"Failed to load AWS secret '{secret_name}': {e}")
-            return None
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error loading AWS secret '{secret_name}': {e}")
+            raise
+
+    def load_all_for_provider(self, provider_id: str) -> list[CredentialObject]:
+        """
+        Load all credentials for a specific provider.
+
+        Args:
+            provider_id: The ID of the provider (e.g., 'google', 'slack')
+
+        Returns:
+            List of matching CredentialObject instances
+        """
+        results = []
+        for cid in self.list_all():
+            cred = self.load(cid)
+            if cred and cred.provider_id == provider_id:
+                results.append(cred)
+        return results
+
+    def load_by_alias(self, provider_id: str, alias: str) -> CredentialObject | None:
+        """
+        Load a credential by provider and alias.
+
+        Args:
+            provider_id: The provider ID (e.g., 'google')
+            alias: The user-defined alias for the account
+
+        Returns:
+            CredentialObject if found, None otherwise
+        """
+        for cred in self.load_all_for_provider(provider_id):
+            # Check for alias in tags or metadata
+            if alias in cred.tags:
+                return cred
+            # Check for special '_alias' key
+            alias_key = cred.keys.get("_alias")
+            if alias_key and alias_key.get_secret_value() == alias:
+                return cred
+        return None
 
     def delete(self, credential_id: str) -> bool:
         """Delete credential from AWS Secrets Manager."""
+        from botocore.exceptions import ClientError
+
         secret_name = self._get_secret_name(credential_id)
 
         try:
@@ -687,35 +740,47 @@ class AWSSecretsManagerStorage(CredentialStorage):
             return True
         except self._client.exceptions.ResourceNotFoundException:
             return False
-        except Exception as e:
+        except ClientError as e:
             logger.error(f"Failed to delete AWS secret '{secret_name}': {e}")
-            return False
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error deleting AWS secret '{secret_name}': {e}")
+            raise
 
     def list_all(self) -> list[str]:
         """List all credential IDs in AWS Secrets Manager (matching prefix)."""
+        from botocore.exceptions import ClientError
+
         secret_ids = []
         try:
             paginator = self._client.get_paginator("list_secrets")
-            # We filter by prefix if it's set
             for page in paginator.paginate():
                 for secret in page.get("SecretList", []):
                     name = secret.get("Name", "")
                     if name.startswith(self.prefix):
                         # Strip prefix to get credential_id
                         secret_ids.append(name[len(self.prefix) :])
-        except Exception as e:
+        except ClientError as e:
             logger.error(f"Failed to list AWS secrets: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error listing AWS secrets: {e}")
+            raise
 
         return secret_ids
 
     def exists(self, credential_id: str) -> bool:
         """Check if credential exists in AWS Secrets Manager."""
+        from botocore.exceptions import ClientError
+
         secret_name = self._get_secret_name(credential_id)
         try:
             self._client.describe_secret(SecretId=secret_name)
             return True
         except self._client.exceptions.ResourceNotFoundException:
             return False
+        except ClientError:
+            raise
         except Exception:
             return False
 
