@@ -3,3 +3,20 @@ members = ["core", "tools"]
 
 [tool.ruff]
 line-length = 120
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hive"
+version = "0.1.0"
+description = "Hive agent platform"
+readme = "README.md"
+requires-python = ">=3.8"
+# Only include runtime modules; 'skills' is experimental and not part of distribution
+[tool.setuptools]
+packages = ["core", "tools"]
+
+[project.scripts]
+hive-auth = "core.antigravity_auth:main"
