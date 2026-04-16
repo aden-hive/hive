@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
@@ -18,6 +18,38 @@ export default function Sidebar() {
   const { colonies, queenProfiles, sidebarCollapsed, setSidebarCollapsed } = useColony();
   const [coloniesExpanded, setColoniesExpanded] = useState(true);
   const [queensExpanded, setQueensExpanded] = useState(true);
+
+  // ── Resizable width ──────────────────────────────────────────────────
+  const MIN_WIDTH = 180;
+  const MAX_WIDTH = 400;
+  const [width, setWidth] = useState(240);
+  const dragging = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    startX.current = e.clientX;
+    startWidth.current = width;
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging.current) return;
+      const delta = ev.clientX - startX.current;
+      setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth.current + delta)));
+    };
+    const onUp = () => {
+      dragging.current = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [width]);
 
   if (sidebarCollapsed) {
     return (
@@ -47,7 +79,15 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-[240px] flex-shrink-0 flex flex-col bg-sidebar-bg border-r border-sidebar-border h-full">
+    <aside
+      className="flex-shrink-0 flex flex-col bg-sidebar-bg border-r border-sidebar-border h-full relative"
+      style={{ width }}
+    >
+      {/* Drag handle on right edge */}
+      <div
+        onMouseDown={onDragStart}
+        className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors z-10"
+      />
       {/* Header */}
       <div className="h-12 flex items-center justify-between px-4 border-b border-border/60">
         <button
