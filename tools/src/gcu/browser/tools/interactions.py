@@ -179,36 +179,25 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         text: str,
         tab_id: int | None = None,
         profile: str | None = None,
-        delay_ms: int = 0,
+        delay_ms: int = 1,
         clear_first: bool = True,
         timeout_ms: int = 30000,
         use_insert_text: bool = True,
     ) -> dict:
         """
-        Type text into an element identified by CSS selector.
+        Click a selector to focus it, then type text into it.
 
-        Performs a CDP click on the selector first (to focus it), then
-        inserts text via CDP Input.insertText. This handles plain
-        <input>/<textarea> as well as rich-text editors (Lexical,
-        Draft.js, ProseMirror) that require a real pointer-sourced
-        focus event.
-
-        For the click-coordinate-then-type pattern (shadow DOM, iframes,
-        or when you don't have a reliable selector), use
-        ``browser_type_focused`` instead — it types into
-        document.activeElement without needing a selector.
-
-        By default uses CDP Input.insertText (``use_insert_text=True``).
-        Set ``use_insert_text=False`` only for code editors that watch
-        specific keystrokes, or when ``delay_ms`` typing animation is
-        required.
+        Uses CDP ``Input.insertText`` by default, which works for both
+        standard inputs and many rich-text editors. Use
+        ``browser_type_focused`` when the target is already focused or
+        you cannot reliably address it with a selector.
 
         Args:
             selector: CSS selector for the input element.
             text: Text to type.
             tab_id: Chrome tab ID (default: active tab).
             profile: Browser profile name (default: "default").
-            delay_ms: Delay between keystrokes in ms (default: 0).
+            delay_ms: Delay between keystrokes in ms (default: 1).
                 Forces the per-keystroke fallback when > 0.
             clear_first: Clear existing text before typing (default: True).
             timeout_ms: Timeout waiting for element (default: 30000).
@@ -300,34 +289,23 @@ def register_interaction_tools(mcp: FastMCP) -> None:
         text: str,
         tab_id: int | None = None,
         profile: str | None = None,
-        delay_ms: int = 0,
+        delay_ms: int = 1,
         clear_first: bool = True,
         use_insert_text: bool = True,
     ) -> dict:
         """
-        Type text into the already-focused element (document.activeElement).
+        Type text into the already-focused element.
 
-        CANONICAL PATTERN:
-            browser_click_coordinate(x, y)   # focus the target
-            browser_type_focused(text="...")  # type into it
-
-        CDP's Input.insertText takes no target parameter — it operates
-        implicitly on the focused editable. This makes it shadow-agnostic
-        and iframe-agnostic, and the ONLY reliable way to type into:
-          - LinkedIn's #interop-outlet Lexical composer
-          - X/Twitter's Draft.js compose box
-          - Reddit's ProseMirror comment box
-          - Any site wrapped in Trusted Types CSP
-          - Any nested-iframe message overlay
-
-        Much faster than repeated browser_press calls for multi-character
-        input.
+        Targets ``document.activeElement`` and is ideal after a
+        coordinate click, or when the editable cannot be reached
+        reliably with a selector. Faster than repeated
+        ``browser_press`` calls for multi-character input.
 
         Args:
             text: Text to insert at the current cursor position.
             tab_id: Chrome tab ID (default: active tab).
             profile: Browser profile name (default: "default").
-            delay_ms: Delay between keystrokes in ms (default: 0).
+            delay_ms: Delay between keystrokes in ms (default: 1).
                       Forces per-keystroke dispatch when > 0.
             clear_first: Clear existing text before typing (default: True).
             use_insert_text: Use CDP Input.insertText (default: True).

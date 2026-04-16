@@ -90,8 +90,8 @@ reach shadow elements transparently.
 3. `browser_coords(x, y)` → CSS px
 4. `browser_click_coordinate(css_x, css_y)` → lands via native hit
    test; inputs get focused regardless of shadow depth
-5. Type via `browser_type` or, if the selector path can't reach the
-   element, dispatch keys to the focused element
+5. Type via `browser_type_focused` (no selector needed — types into the
+   already-focused element), or `browser_type` if you have a selector
 
 For selector-style access when you know the shadow path:
 `browser_shadow_query("#interop-outlet >>> #msg-overlay >>> p")` —

@@ -998,7 +998,7 @@ class BeelineBridge:
         selector: str | None,
         text: str,
         clear_first: bool = True,
-        delay_ms: int = 0,
+        delay_ms: int = 1,
         timeout_ms: int = 30000,
         use_insert_text: bool = True,
     ) -> dict:

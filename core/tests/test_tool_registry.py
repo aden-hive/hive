@@ -899,6 +899,7 @@ def test_concurrency_safe_allowlist_is_conservative():
         "hashline_edit",
         "browser_click",
         "browser_type",
+        "browser_type_focused",
         "browser_navigate",
     ):
         assert forbidden not in allowlist, f"{forbidden} must not be concurrency-safe"
