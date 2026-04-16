@@ -1,27 +1,27 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any
+from typing import Any
 
 class GrafanaDashboard(BaseModel):
     uid: str
     title: str
     uri: str
-    tags: List[str] = []
+    tags: list[str] = []
     isStarred: bool = False
 
 class GrafanaAnnotation(BaseModel):
-    id: Optional[int] = None
+    id: int | None = None
     dashboardUID: str
     time: int
     text: str
-    tags: List[str] = []
+    tags: list[str] = []
 
 class GrafanaAlert(BaseModel):
     uid: str
     title: str
     state: str
-    lastEvaluation: Optional[str] = None
+    lastEvaluation: str | None = None
 
 class PanelQueryRequest(BaseModel):
     dashboard_uid: str

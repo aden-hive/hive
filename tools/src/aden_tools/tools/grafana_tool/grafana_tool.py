@@ -64,6 +64,9 @@ class GrafanaClient:
         return response.json()
 
 
+# Module-level cache to ensure TRUE connection pooling
+_client_cache: dict[tuple[str, str], GrafanaClient] = {}
+
 def register_tools(
     mcp: FastMCP,
     credentials: CredentialStoreAdapter | None = None,
@@ -98,8 +101,15 @@ def register_tools(
         auth = _get_auth()
         if isinstance(auth, dict):
             return auth
+            
         url, token = auth
-        return GrafanaClient(url, token)
+        cache_key = (url, token)
+        
+        # ✅ Reuse the existing client if we already have one for these credentials
+        if cache_key not in _client_cache:
+            _client_cache[cache_key] = GrafanaClient(url, token)
+            
+        return _client_cache[cache_key]
 
     @mcp.tool()
     async def grafana_list_dashboards() -> List[Dict[str, Any]] | dict[str, Any]:
@@ -186,28 +196,33 @@ def register_tools(
     async def grafana_create_annotation(
         dashboard_uid: str,
         text: str,
-        tags: List[str] | None = None,
-    ) -> Dict[str, Any]:
-        """Creates an annotation on a specific Grafana dashboard."""
-        if tags is None:
-            tags = []
-            
+        tags: list[str] = [],
+    ) -> dict[str, Any]:
+        """Create a new annotation (event marker) on a Grafana dashboard."""
         client = _get_client()
         if isinstance(client, dict):
             return client
 
-        sanitized_text = sanitize_for_log(text)
+        # 🛡️ ONLY redact for the internal log, NOT the payload sent to Grafana
+        _logger.info(
+            "creating_annotation", 
+            extra={
+                "dashboard": sanitize_for_log(dashboard_uid),
+                "text_preview": sanitize_for_log(text) 
+            }
+        )
+
         payload = {
             "dashboardUID": dashboard_uid,
             "time": int(time.time() * 1000),
-            "text": sanitized_text,
-            "tags": tags + ["hive-agent", "execution-log"],
+            "text": text, # ✅ Use the raw 'text' here so Grafana shows the real message
+            "tags": tags + ["hive-agent"]
         }
-        _logger.info("creating_annotation", extra={"dashboard": sanitize_for_log(dashboard_uid)})
+        
         try:
             return await client.request("POST", "annotations", json=payload)
         except GrafanaToolError as e:
-             return {"error": str(e)}
+            return {"error": str(e)}
 
     @mcp.tool()
     async def grafana_list_alerts() -> List[Dict[str, Any]] | Dict[str, Any]:
