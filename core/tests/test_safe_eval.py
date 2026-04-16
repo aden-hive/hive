@@ -113,7 +113,10 @@ class TestArithmetic:
 
 class TestExecutionTimeout:
     def test_default_timeout(self):
-        assert safe_eval_module.DEFAULT_TIMEOUT_MS == 100
+        import signal
+
+        expected = 100 if hasattr(signal, "SIGALRM") else 500
+        assert safe_eval_module.DEFAULT_TIMEOUT_MS == expected
 
     def test_timeout_must_be_positive(self):
         with pytest.raises(ValueError, match="timeout_ms"):

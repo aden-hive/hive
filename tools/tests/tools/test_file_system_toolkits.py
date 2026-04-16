@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -438,13 +439,16 @@ class TestExecuteCommandTool:
     ):
         """A run_in_background job can be started, polled, and reports
         its exit status once the command finishes."""
+        # Use sys.executable and double-quoted -c argument so this works
+        # on Windows (cmd.exe does not support single-quoted arguments).
+        py_script = (
+            "import time,sys;"
+            "print('one');sys.stdout.flush();time.sleep(0.1);"
+            "print('two');sys.stdout.flush();time.sleep(0.1);"
+            "print('three')"
+        )
         start_result = await execute_command_fn(
-            command=(
-                "python -c 'import time,sys;"
-                'print("one");sys.stdout.flush();time.sleep(0.1);'
-                'print("two");sys.stdout.flush();time.sleep(0.1);'
-                'print("three")\''
-            ),
+            command=f'"{sys.executable}" -c "{py_script}"',
             run_in_background=True,
             **mock_workspace,
         )
