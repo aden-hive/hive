@@ -1312,6 +1312,23 @@ class CloudflareHealthChecker(BaseHttpHealthChecker):
     SERVICE_NAME = "Cloudflare"
 
 
+class MailchimpHealthChecker(BaseHttpHealthChecker):
+    """Health checker for Mailchimp API key."""
+
+    SERVICE_NAME = "Mailchimp"
+    AUTH_TYPE = BaseHttpHealthChecker.AUTH_BASIC
+
+    def _build_url(self, credential_value: str) -> str:
+        dc = "us1"
+        if "-" in credential_value:
+            dc = credential_value.split("-")[-1]
+        return f"https://{dc}.api.mailchimp.com/3.0/ping"
+
+    def _build_auth(self, credential_value: str) -> tuple[str, str] | None:
+        # Mailchimp accepts any string as the username with the API key as password
+        return ("anystring", credential_value)
+
+
 # Registry of health checkers
 HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "apify": ApifyHealthChecker(),
@@ -1339,6 +1356,7 @@ HEALTH_CHECKERS: dict[str, CredentialHealthChecker] = {
     "intercom": IntercomHealthChecker(),
     "linear": LinearHealthChecker(),
     "lusha_api_key": LushaHealthChecker(),
+    "mailchimp": MailchimpHealthChecker(),
     "microsoft_graph": MicrosoftGraphHealthChecker(),
     "newsdata": NewsdataHealthChecker(),
     "notion_token": NotionHealthChecker(),
