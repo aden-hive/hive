@@ -581,6 +581,166 @@ class InMemoryStorage(CredentialStorage):
         self._data.clear()
 
 
+class AWSSecretsManagerStorage(CredentialStorage):
+    """
+    AWS Secrets Manager-based credential storage.
+
+    Stores credentials as JSON strings in AWS Secrets Manager.
+    Maps credential IDs to AWS secret names.
+
+    Requires boto3 and properly configured AWS credentials.
+    """
+
+    def __init__(
+        self,
+        region_name: str | None = None,
+        prefix: str | None = None,
+        aws_access_key_id: str | None = None,
+        aws_secret_access_key: str | None = None,
+        aws_session_token: str | None = None,
+    ):
+        """
+        Initialize AWS Secrets Manager storage.
+
+        Args:
+            region_name: AWS region name (e.g., 'us-east-1')
+            prefix: Optional prefix for secret names (e.g., 'hive/')
+            aws_access_key_id: Optional AWS access key ID
+            aws_secret_access_key: Optional AWS secret access key
+            aws_session_token: Optional AWS session token
+        """
+        try:
+            import boto3
+        except ImportError as e:
+            raise ImportError(
+                "AWS storage requires 'boto3'. Install with: pip install boto3"
+            ) from e
+
+        self.region_name = region_name or os.environ.get("AWS_REGION") or "us-east-1"
+        self.prefix = prefix or os.environ.get("HIVE_SECRET_PREFIX", "")
+
+        # Initialize client
+        session_kwargs = {
+            "region_name": self.region_name,
+        }
+        if aws_access_key_id:
+            session_kwargs["aws_access_key_id"] = aws_access_key_id
+        if aws_secret_access_key:
+            session_kwargs["aws_secret_access_key"] = aws_secret_access_key
+        if aws_session_token:
+            session_kwargs["aws_session_token"] = aws_session_token
+
+        self._client = boto3.client("secretsmanager", **session_kwargs)
+
+    def _get_secret_name(self, credential_id: str) -> str:
+        """Get the full AWS secret name for a credential ID."""
+        return f"{self.prefix}{credential_id}"
+
+    def save(self, credential: CredentialObject) -> None:
+        """Save credential to AWS Secrets Manager."""
+        secret_name = self._get_secret_name(credential.id)
+
+        # Serialize credential
+        data = self._serialize_credential(credential)
+        secret_string = json.dumps(data, default=str)
+
+        try:
+            # Try to create the secret
+            self._client.create_secret(
+                Name=secret_name,
+                Description=credential.description or f"Hive credential: {credential.id}",
+                SecretString=secret_string,
+                Tags=[{"Key": "ManagedBy", "Value": "Hive"}],
+            )
+            logger.debug(f"Created new AWS secret '{secret_name}'")
+        except self._client.exceptions.ResourceExistsException:
+            # Secret already exists, update it
+            self._client.put_secret_value(SecretId=secret_name, SecretString=secret_string)
+            logger.debug(f"Updated existing AWS secret '{secret_name}'")
+
+    def load(self, credential_id: str) -> CredentialObject | None:
+        """Load credential from AWS Secrets Manager."""
+        secret_name = self._get_secret_name(credential_id)
+
+        try:
+            response = self._client.get_secret_value(SecretId=secret_name)
+            if "SecretString" not in response:
+                return None
+
+            data = json.loads(response["SecretString"])
+            return self._deserialize_credential(data)
+        except self._client.exceptions.ResourceNotFoundException:
+            return None
+        except Exception as e:
+            logger.error(f"Failed to load AWS secret '{secret_name}': {e}")
+            return None
+
+    def delete(self, credential_id: str) -> bool:
+        """Delete credential from AWS Secrets Manager."""
+        secret_name = self._get_secret_name(credential_id)
+
+        try:
+            # Note: delete_secret in AWS by default has a recovery window
+            # We use RecoveryWindowInDays=7 to allow for accidental deletion recovery
+            self._client.delete_secret(SecretId=secret_name, RecoveryWindowInDays=7)
+            logger.debug(f"Deleted AWS secret '{secret_name}' (queued for deletion)")
+            return True
+        except self._client.exceptions.ResourceNotFoundException:
+            return False
+        except Exception as e:
+            logger.error(f"Failed to delete AWS secret '{secret_name}': {e}")
+            return False
+
+    def list_all(self) -> list[str]:
+        """List all credential IDs in AWS Secrets Manager (matching prefix)."""
+        secret_ids = []
+        try:
+            paginator = self._client.get_paginator("list_secrets")
+            # We filter by prefix if it's set
+            for page in paginator.paginate():
+                for secret in page.get("SecretList", []):
+                    name = secret.get("Name", "")
+                    if name.startswith(self.prefix):
+                        # Strip prefix to get credential_id
+                        secret_ids.append(name[len(self.prefix) :])
+        except Exception as e:
+            logger.error(f"Failed to list AWS secrets: {e}")
+
+        return secret_ids
+
+    def exists(self, credential_id: str) -> bool:
+        """Check if credential exists in AWS Secrets Manager."""
+        secret_name = self._get_secret_name(credential_id)
+        try:
+            self._client.describe_secret(SecretId=secret_name)
+            return True
+        except self._client.exceptions.ResourceNotFoundException:
+            return False
+        except Exception:
+            return False
+
+    def _serialize_credential(self, credential: CredentialObject) -> dict[str, Any]:
+        """Convert credential to JSON-serializable dict, extracting secret values."""
+        data = credential.model_dump(mode="json")
+
+        # Extract actual secret values from SecretStr
+        for key_name, key_data in data.get("keys", {}).items():
+            if "value" in key_data:
+                actual_key = credential.keys.get(key_name)
+                if actual_key:
+                    key_data["value"] = actual_key.get_secret_value()
+
+        return data
+
+    def _deserialize_credential(self, data: dict[str, Any]) -> CredentialObject:
+        """Reconstruct credential from dict, wrapping values in SecretStr."""
+        for key_data in data.get("keys", {}).values():
+            if "value" in key_data and isinstance(key_data["value"], str):
+                key_data["value"] = SecretStr(key_data["value"])
+
+        return CredentialObject.model_validate(data)
+
+
 class CompositeStorage(CredentialStorage):
     """
     Composite storage that reads from multiple backends.

@@ -722,6 +722,34 @@ class CredentialStore:
         )
 
     @classmethod
+    def with_aws_storage(
+        cls,
+        region_name: str | None = None,
+        prefix: str | None = None,
+        providers: list[CredentialProvider] | None = None,
+        **kwargs: Any,
+    ) -> CredentialStore:
+        """
+        Create a credential store with AWS Secrets Manager storage.
+
+        Args:
+            region_name: AWS region name
+            prefix: Optional prefix for secret names
+            providers: List of credential providers
+            **kwargs: Additional arguments passed to CredentialStore
+
+        Returns:
+            CredentialStore with AWSSecretsManagerStorage
+        """
+        from .storage import AWSSecretsManagerStorage
+
+        return cls(
+            storage=AWSSecretsManagerStorage(region_name=region_name, prefix=prefix),
+            providers=providers,
+            **kwargs,
+        )
+
+    @classmethod
     def with_aden_sync(
         cls,
         base_url: str = "https://api.adenhq.com",
